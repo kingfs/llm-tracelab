@@ -1,0 +1,35 @@
+server:
+  port: "8080" # llm proxy port, 设置openai_api_base=http://localhost:8080/v1
+
+monitor:
+  port: "8081" # 访问 http://localhost:8081 查看看板
+
+upstream:
+  base_url: "http://localhost:30080" 
+  api_key: "sk-test"
+
+debug:
+  output_dir: "./logs"
+  mask_key: false # 调试模式建议 false，方便看原始请求
+
+chaos:
+  enabled: false
+  rules:
+    - model: "qwen3-14b"
+      rate: 1.0
+      action: "error"
+      status_code: 503
+      message: "Simulated Upstream Overload"
+
+    # # 场景1: 模拟 deepseek-chat 有 20% 概率超时 (延迟 10s)
+    # - model: "deepseek-chat"
+    #   rate: 0.2
+    #   action: "delay"
+    #   delay: 10s
+
+    # # 场景2: 模拟 gpt-4 有 50% 概率过载 (503)
+    # - model: "gpt-4"
+    #   rate: 0.5
+    #   action: "error"
+    #   status_code: 503
+    #   message: "Simulated Upstream Overload"

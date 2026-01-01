@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LLM Traffic Intelligence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <meta http-equiv="refresh" content="60" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+      }
+      .font-mono {
+        font-family: "JetBrains Mono", monospace;
+      }
+      /* 隐藏滚动条但保留功能 */
+      .no-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+      /* 呼吸灯效果 */
+      @keyframes pulse-soft {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.7;
+        }
+      }
+      .animate-pulse-soft {
+        animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased">
+    <nav class="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-sm">
+      <div
+        class="max-w-[1400px] mx-auto px-6 h-16 flex items-center justify-between"
+      >
+        <div class="flex items-center gap-3">
+          <div class="bg-indigo-600 p-1.5 rounded-lg">
+            <svg
+              class="w-6 h-6 text-white"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              />
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight text-slate-800">
+              LLM Traffic <span class="text-indigo-600">Monitor</span>
+            </h1>
+            <p
+              class="text-[10px] text-slate-500 font-medium uppercase tracking-[0.2em]"
+            >
+              Real-time Intelligence
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div
+            class="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 border border-emerald-100 rounded-full"
+          >
+            <span
+              class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse-soft"
+            ></span>
+            <span
+              class="text-xs font-semibold text-emerald-700 uppercase tracking-wider"
+              >Live System</span
+            >
+          </div>
+          <span class="text-xs text-slate-400 font-mono">Refreshes in 60s</span>
+        </div>
+      </div>
+    </nav>
+
+    <main class="max-w-[1400px] mx-auto px-6 py-8">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <p
+            class="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1"
+          >
+            Total Requests
+          </p>
+          <p class="text-2xl font-bold text-slate-800">
+            {{.Stats.TotalRequest}}
+          </p>
+        </div>
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <p
+            class="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1"
+          >
+            Avg TTFT
+          </p>
+          <div class="flex items-baseline gap-1">
+            <p class="text-2xl font-bold text-slate-800">
+              {{.Stats.AvgTTFT}}
+            </p>
+            <span class="text-xs font-medium text-slate-400">ms</span>
+          </div>
+        </div>
+        <div
+          class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm border-l-4 border-l-indigo-500"
+        >
+          <p
+            class="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1"
+          >
+            Tokens Today
+          </p>
+          <p class="text-2xl font-bold text-slate-800 font-mono">
+            {{.Stats.TotalTokens}}
+          </p>
+        </div>
+        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <p
+            class="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1"
+          >
+            Success Rate
+          </p>
+          <p class="text-2xl font-bold text-emerald-600">
+            {{ printf "%.2f" .Stats.SuccessRate }}%
+          </p>
+        </div>
+      </div>
+
+      <div
+        class="bg-white rounded-2xl shadow-xl shadow-slate-200/50 border border-slate-200 overflow-hidden"
+      >
+        <div class="overflow-x-auto no-scrollbar">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="bg-slate-50/50 border-b border-slate-200">
+                <th
+                  class="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-[0.1em]"
+                >
+                  Timestamp
+                </th>
+                <th
+                  class="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-[0.1em]"
+                >
+                  Model Identity
+                </th>
+                <th
+                  class="px-6 py-4 text-center text-[11px] font-bold text-slate-500 uppercase tracking-[0.1em]"
+                >
+                  Status
+                </th>
+                <th
+                  class="px-6 py-4 text-right text-[11px] font-bold text-slate-500 uppercase tracking-[0.1em]"
+                >
+                  Performance
+                </th>
+                <th
+                  class="px-6 py-4 text-right text-[11px] font-bold text-slate-500 uppercase tracking-[0.1em]"
+                >
+                  Token Consumption
+                </th>
+                <th
+                  class="px-6 py-4 text-center text-[11px] font-bold text-slate-500 uppercase tracking-[0.1em]"
+                >
+                  Management
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              {{range .Logs}}
+              <tr class="hover:bg-slate-50/80 transition-all group">
+                <td class="px-6 py-4">
+                  <div class="flex flex-col">
+                    <span class="text-sm font-semibold text-slate-700"
+                      >{{.Meta.Time.Format "15:04:05"}}</span
+                    >
+                    <span class="text-[10px] text-slate-400 font-medium"
+                      >{{.Meta.Time.Format "Jan 02, 2006"}}</span
+                    >
+                  </div>
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex flex-col gap-1.5">
+                    <span
+                      class="font-mono text-[13px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 self-start"
+                    >
+                      {{.Meta.Model}}
+                    </span>
+                    {{if .Layout.IsStream}}
+                    <div
+                      class="flex items-center text-[9px] font-bold text-indigo-500 uppercase tracking-[0.15em]"
+                    >
+                      <span
+                        class="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5 animate-pulse"
+                      ></span>
+                      Streaming
+                    </div>
+                    {{else}}
+                    <div
+                      class="flex items-center text-[9px] font-bold text-slate-400 uppercase tracking-[0.15em]"
+                    >
+                      <span
+                        class="w-1.5 h-1.5 rounded-full bg-slate-300 mr-1.5"
+                      ></span>
+                      Non-Stream
+                    </div>
+                    {{end}}
+                  </div>
+                </td>
+                <td class="px-6 py-4 text-center">
+                  {{if eq .Meta.StatusCode 200}}
+                  <span
+                    class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100"
+                  >
+                    <svg
+                      class="w-3 h-3 mr-1"
+                      fill="currentColor"
+                      viewBox="0 0 20 20"
+                    >
+                      <path
+                        fill-rule="evenodd"
+                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                        clip-rule="evenodd"
+                      ></path>
+                    </svg>
+                    200 OK
+                  </span>
+                  {{else}}
+                  <span
+                    class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-100"
+                  >
+                    {{.Meta.StatusCode}} ERROR
+                  </span>
+                  {{end}}
+                </td>
+                <td class="px-6 py-4 text-right">
+                  <div class="flex flex-col items-end gap-1">
+                    <div class="flex items-center gap-2">
+                      <span
+                        class="text-[10px] font-bold text-slate-400 uppercase"
+                        >TTFT</span
+                      >
+                      <span class="font-mono text-sm text-slate-700"
+                        >{{if gt .Meta.TTFTMs 0}}{{ .Meta.TTFTMs
+                        }}ms{{else}}-{{end}}</span
+                      >
+                    </div>
+                    <div class="flex items-center gap-2 text-slate-400">
+                      <span class="text-[10px] font-bold uppercase">Total</span>
+                      <span class="font-mono text-[13px]"
+                        >{{.Meta.DurationMs}}ms</span
+                      >
+                    </div>
+                  </div>
+                </td>
+                <td class="px-6 py-4">
+                  <div class="flex items-center justify-end gap-2">
+                    <div
+                      class="flex items-center bg-blue-50/50 text-blue-700 px-2 py-1.5 rounded-lg border border-blue-100/50 transition-colors group-hover:bg-blue-50"
+                      title="Input Tokens"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3.5 w-3.5 mr-1"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"
+                        />
+                      </svg>
+                      <span class="font-mono font-bold"
+                        >{{.Usage.PromptTokens}}</span
+                      >
+                    </div>
+
+                    <div
+                      class="flex items-center bg-emerald-50/50 text-emerald-700 px-2 py-1.5 rounded-lg border border-emerald-100/50 transition-colors group-hover:bg-emerald-50"
+                      title="Output Tokens"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3.5 w-3.5 mr-1"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M13 10V3L4 14h7v7l9-11h-7z"
+                        />
+                      </svg>
+                      <span class="font-mono font-bold"
+                        >{{.Usage.CompletionTokens}}</span
+                      >
+                    </div>
+
+                    <div
+                      class="hidden xl:flex items-center text-slate-500 border-l pl-2 border-slate-200"
+                      title="Total Tokens"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3.5 w-3.5 mr-1"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                        />
+                      </svg>
+                      <span class="font-mono text-xs font-semibold"
+                        >{{.Usage.TotalTokens}}</span
+                      >
+                    </div>
+
+                    <div
+                      class="flex items-center bg-indigo-50/50 text-indigo-700 px-2 py-1.5 rounded-lg border border-indigo-100/50 border-l-2 ml-1 transition-colors group-hover:bg-indigo-50"
+                      title="Cached Tokens"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3.5 w-3.5 mr-1"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M4 7v10c0 1.1.9 2 2 2h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2zm0 5h16"
+                        />
+                      </svg>
+                      <span class="font-mono font-bold">
+                        {{if and .Usage.PromptTokenDetails
+                        .Usage.PromptTokenDetails.CachedTokens}}
+                        {{.Usage.PromptTokenDetails.CachedTokens}} {{else if and
+                        .Usage.PromptTokenDetails (eq
+                        .Usage.PromptTokenDetails.CachedTokens 0)}} 0 {{else}} -
+                        {{end}}
+                      </span>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-6 py-4 text-center">
+                  <div
+                    class="flex items-center justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity"
+                  >
+                    <a
+                      href="/view?path={{.LogPath}}"
+                      class="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                      title="View Details"
+                    >
+                      <svg
+                        class="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                        />
+                      </svg>
+                    </a>
+                    <a
+                      href="/download?path={{.LogPath}}"
+                      class="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-all"
+                      title="Download"
+                    >
+                      <svg
+                        class="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                        />
+                      </svg>
+                    </a>
+                  </div>
+                </td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        <div class="bg-slate-50 px-6 py-3 border-t border-slate-200">
+          <p
+            class="text-[10px] text-slate-400 uppercase font-bold tracking-widest text-center"
+          >
+            End of stream • Monitoring Active
+          </p>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

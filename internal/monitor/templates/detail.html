@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Trace Detail - {{.Header.Meta.Model}}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/http.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.min.css">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+
+        /* 气泡样式恢复 */
+        .bubble-user { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.25rem 1.25rem 0 1.25rem; }
+        .bubble-assistant { background: white; border: 1px solid #f1f5f9; border-radius: 0 1.25rem 1.25rem 1.25rem; }
+        .bubble-tool { background: #fffbeb; border: 1px solid #fef3c7; border-radius: 0.5rem; }
+
+        /* 自动换行控制 */
+        .wrap-text pre { white-space: pre-wrap !important; word-break: break-all !important; }
+
+        /* 代码窗口样式 */
+        .code-window { display: flex; flex-direction: column; background: #ffffff; border-radius: 1rem; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+        .split-view { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; height: calc(100% - 3.5rem); }
+
+        /* Tab 样式 */
+        .tab-btn { position: relative; color: #64748b; font-weight: 500; font-size: 0.875rem; padding: 1rem 0; transition: all 0.2s; }
+        .tab-btn.active { color: #4f46e5; }
+        .tab-btn.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #4f46e5; }
+
+        .markdown-body { background-color: transparent !important; font-size: 14px; line-height: 1.6; }
+        .reasoning-box { background: #f8fafc; border-left: 4px solid #cbd5e1; color: #64748b; font-size: 0.875rem; padding: 1rem; border-radius: 0.5rem; }
+        
+        /* Tool Call Card */
+        .tool-call-card { margin-top: 0.75rem; background: #1e293b; border-radius: 0.5rem; overflow: hidden; border: 1px solid #334155; }
+        .tool-call-header { background: #0f172a; color: #94a3b8; padding: 0.5rem 0.75rem; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; border-bottom: 1px solid #334155; }
+    </style>
+</head>
+<body class="bg-[#fcfcfd] h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex justify-between items-center z-30 shrink-0">
+        <div class="flex items-center gap-5">
+            <a href="/" class="p-2 hover:bg-slate-100 rounded-full transition-all">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+            </a>
+            <div>
+                <div class="flex items-center gap-3">
+                    <h1 class="text-lg font-bold tracking-tight text-slate-800">{{.Header.Meta.Model}}</h1>
+                    <span class="px-2 py-0.5 rounded text-[10px] font-bold border {{if eq .Header.Meta.StatusCode 200}}bg-emerald-50 text-emerald-700 border-emerald-200{{else}}bg-rose-50 text-rose-700 border-rose-200{{end}} uppercase tracking-wider">
+                        HTTP {{.Header.Meta.StatusCode}}
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-4 px-4 py-1.5 bg-slate-100/50 rounded-xl border border-slate-200 shadow-sm font-mono text-xs">
+            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Latency</p><p class="text-slate-700 font-bold">{{.Header.Meta.DurationMs}}ms</p></div>
+            <div class="w-[1px] h-6 bg-slate-200"></div>
+            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Prompt</p><p class="text-blue-600 font-bold">{{.Header.Usage.PromptTokens}}</p></div>
+            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Completion</p><p class="text-emerald-600 font-bold">{{.Header.Usage.CompletionTokens}}</p></div>
+            <div class="w-[1px] h-6 bg-slate-200"></div>
+            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Total</p><p class="text-indigo-600 font-bold">{{.Header.Usage.TotalTokens}}</p></div>
+        </div>
+    </header>
+
+    <nav class="bg-white border-b border-slate-200 px-8 flex justify-center gap-10 z-20 shrink-0">
+        <button onclick="switchTab('chat')" id="tab-chat" class="tab-btn active">Conversation Context</button>
+        <button onclick="switchTab('raw')" id="tab-raw" class="tab-btn">Raw Protocol</button>
+        <button onclick="switchTab('meta')" id="tab-meta" class="tab-btn">Header Metadata</button>
+    </nav>
+
+    <main class="flex-1 overflow-hidden relative">
+        <div id="panel-chat" class="absolute inset-0 overflow-y-auto p-8 bg-[#fcfcfd]">
+            <div class="max-w-4xl mx-auto space-y-8 pb-20">
+                {{range $index, $msg := .ChatMessages}}
+                <div class="flex flex-col {{if eq .Role "user"}}items-end{{else}}items-start{{end}} group">
+                    <div class="flex items-center gap-2 mb-2 px-1">
+                        <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">{{.Role}}</span>
+                        {{if .ToolCallID}}<span class="text-[9px] font-mono bg-slate-200 text-slate-500 px-1 rounded">ID: {{.ToolCallID}}</span>{{end}}
+                    </div>
+
+                    {{if eq .Role "tool"}}
+                        <div class="bubble-tool px-5 py-4 shadow-sm w-[90%]">
+                            <div class="flex items-center gap-2 mb-2 text-amber-700 font-bold text-xs uppercase tracking-tight border-b border-amber-100 pb-1">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" stroke-width="2"/></svg>
+                                Tool Output
+                            </div>
+                            <div class="font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all text-amber-900">{{.Content}}</div>
+                        </div>
+                    {{else}}
+                        <div class="bubble-{{.Role}} px-5 py-4 shadow-sm max-w-[90%] markdown-body" id="msg-{{$index}}"></div>
+                        <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
+                        
+                        {{if .ToolCalls}}
+                            <div class="w-full max-w-[90%]">
+                                {{range .ToolCalls}}
+                                <div class="tool-call-card">
+                                    <div class="tool-call-header">
+                                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>{{.Function.Name}}</span>
+                                        <span class="opacity-50 font-mono">{{.ID}}</span>
+                                    </div>
+                                    <div class="p-3 text-[12px] font-mono text-blue-100 overflow-x-auto"><pre><code class="language-json">{{prettyJsonString .Function.Arguments}}</code></pre></div>
+                                </div>
+                                {{end}}
+                            </div>
+                        {{end}}
+                    {{end}}
+                </div>
+                {{end}}
+
+                {{if or .AIContent .AIReasoning}}
+                <div class="pt-6 border-t border-slate-100">
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+                        <span class="text-xs font-bold uppercase tracking-widest text-emerald-600">Response (Current)</span>
+                    </div>
+
+                    <div class="bubble-assistant p-8 shadow-xl shadow-slate-200/40 border border-slate-200/60 ring-1 ring-slate-900/5">
+                        {{if .AIReasoning}}
+                        <details open class="mb-6">
+                            <summary class="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest list-none flex items-center gap-2 cursor-pointer">Thinking Process</summary>
+                            <div class="reasoning-box mt-3 font-mono leading-relaxed markdown-body" id="md-reasoning"></div>
+                            <textarea id="raw-reasoning" class="hidden">{{.AIReasoning}}</textarea>
+                        </details>
+                        <div class="h-[1px] bg-slate-100 mb-6"></div>
+                        {{end}}
+
+                        <div class="markdown-body" id="md-response"></div>
+                        <textarea id="raw-ai" class="hidden">{{.AIContent}}</textarea>
+                    </div>
+                </div>
+                {{end}}
+            </div>
+        </div>
+
+        <div id="panel-raw" class="absolute inset-0 p-6 hidden bg-slate-50">
+            <div class="flex justify-end mb-3">
+                <button onclick="toggleWordWrap()" id="btn-wrap" class="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-indigo-200 transition-all shadow-sm">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h16" /></svg>
+                    <span id="wrap-text-label">开启自动换行</span>
+                </button>
+            </div>
+            <div id="raw-container" class="split-view">
+                <div class="code-window">
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-[10px] text-slate-500 uppercase tracking-widest">Request Protocol</div>
+                    <div class="flex-1 overflow-auto p-4"><pre><code class="language-http text-xs">{{.ReqFull}}</code></pre></div>
+                </div>
+                <div class="code-window">
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-[10px] text-slate-500 uppercase tracking-widest">Response Protocol</div>
+                    <div class="flex-1 overflow-auto p-4"><pre><code class="language-http text-xs">{{.ResFull}}</code></pre></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="panel-meta" class="absolute inset-0 p-10 hidden overflow-y-auto bg-slate-50">
+            <div class="max-w-4xl mx-auto">
+                <div class="code-window shadow-sm">
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-500 uppercase">Header JSON</div>
+                    <div class="p-6 overflow-x-auto font-mono text-xs"><pre><code class="language-json">{{json .Header}}</code></pre></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        marked.setOptions({
+            breaks: true,
+            highlight: function(code, lang) {
+                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                return hljs.highlight(code, { language }).value;
+            },
+            langPrefix: 'hljs language-'
+        });
+
+        function renderAllContent() {
+            // 渲染所有历史消息 Markdown
+            document.querySelectorAll('[id^="raw-msg-"]').forEach(rawEl => {
+                const index = rawEl.id.replace('raw-msg-', '');
+                const targetEl = document.getElementById('msg-' + index);
+                if (targetEl && rawEl.value) {
+                    targetEl.innerHTML = marked.parse(rawEl.value);
+                }
+            });
+
+            // 渲染思考过程和最后一条回复
+            const rawReasoning = document.getElementById('raw-reasoning');
+            if (rawReasoning) document.getElementById('md-reasoning').innerHTML = marked.parse(rawReasoning.value);
+
+            const aiRaw = document.getElementById('raw-ai');
+            if (aiRaw) document.getElementById('md-response').innerHTML = marked.parse(aiRaw.value);
+
+            hljs.highlightAll();
+        }
+
+        function switchTab(name) {
+            ['chat', 'raw', 'meta'].forEach(t => {
+                document.getElementById('panel-'+t).classList.add('hidden');
+                document.getElementById('tab-'+t).classList.remove('active');
+            });
+            document.getElementById('panel-'+name).classList.remove('hidden');
+            document.getElementById('tab-'+name).classList.add('active');
+        }
+
+        function toggleWordWrap() {
+            const container = document.getElementById('raw-container');
+            const label = document.getElementById('wrap-text-label');
+            const btn = document.getElementById('btn-wrap');
+            const isWrapped = container.classList.toggle('wrap-text');
+            
+            label.innerText = isWrapped ? '关闭自动换行' : '开启自动换行';
+            if (isWrapped) {
+                btn.classList.add('bg-indigo-50', 'border-indigo-200', 'text-indigo-600');
+            } else {
+                btn.classList.remove('bg-indigo-50', 'border-indigo-200', 'text-indigo-600');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', renderAllContent);
+    </script>
+</body>
+</html>
