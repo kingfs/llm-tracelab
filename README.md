@@ -1,4 +1,4 @@
-# llm-recorder
+# llm-tracelab
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
@@ -6,7 +6,7 @@
 
 [English Version](./README_EN.md) | **中文说明**
 
-`llm-recorder` 是一个专为大语言模型（LLM）API 设计的记录与回放工具。它的初衷是将会话请求录制为本地 `.http` 文件，并将其作为单元测试的输入，同时提供了一个简单的 Web UI 用于可视化查看。
+`llm-tracelab` 是一个专为大语言模型（LLM）API 设计的记录与回放工具。它的初衷是将会话请求录制为本地 `.http` 文件，并将其作为单元测试的输入，同时提供了一个简单的 Web UI 用于可视化查看。
 
 ---
 
@@ -22,7 +22,7 @@
 
 ```mermaid
 graph LR
-    User([用户/SDK]) --> Proxy[llm-recorder Proxy]
+    User([用户/SDK]) --> Proxy[llm-tracelab Proxy]
     Proxy -->|记录| Disk[(.http 日志文件)]
     Proxy -->|转发| Upstream[LLM Upstream API]
     Disk -->|解析| Monitor[Monitor UI]
@@ -33,14 +33,14 @@ graph LR
 
 ### 1. 安装 (二进制)
 ```bash
-go build -o llm-recorder ./cmd/server
+go build -o llm-tracelab ./cmd/server
 ```
 
 ### 2. Docker
 你可以直接使用 Docker 镜像：
 ```bash
-docker pull your-dockerhub-username/llm-recorder:latest
-docker run -d -p 8080:8080 -p 8081:8081 -v ./config:/app/config your-dockerhub-username/llm-recorder:latest
+docker pull your-dockerhub-username/llm-tracelab:latest
+docker run -d -p 8080:8080 -p 8081:8081 -v ./config:/app/config your-dockerhub-username/llm-tracelab:latest
 ```
 
 ### 3. 配置
@@ -57,7 +57,7 @@ upstream:
 
 ### 3. 运行
 ```bash
-./llm-recorder -c config/config.yaml
+./llm-tracelab -c config/config.yaml
 ```
 
 将你的 SDK BaseURL 指向 `http://localhost:8080` 即可开始记录。

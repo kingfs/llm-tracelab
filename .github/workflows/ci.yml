@@ -22,7 +22,7 @@ jobs:
       run: go mod download
 
     - name: Build
-      run: go build -v -o llm-recorder ./cmd/server
+      run: go build -v -o llm-tracelab ./cmd/server
 
     - name: Test
       run: go test -v ./...
@@ -30,8 +30,8 @@ jobs:
     - name: Upload Binary
       uses: actions/upload-artifact@v4
       with:
-        name: llm-recorder-linux-amd64
-        path: llm-recorder
+        name: llm-tracelab-linux-amd64
+        path: llm-tracelab
 
   docker:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
         context: .
         push: true
         tags: |
-          ${{ secrets.DOCKERHUB_USERNAME }}/llm-recorder:latest
-          ${{ secrets.DOCKERHUB_USERNAME }}/llm-recorder:${{ github.sha }}
+          ${{ secrets.DOCKERHUB_USERNAME }}/llm-tracelab:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/llm-tracelab:${{ github.sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
