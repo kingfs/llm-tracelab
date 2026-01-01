@@ -39,8 +39,8 @@ go build -o llm-tracelab ./cmd/server
 ### 2. Docker
 你可以直接使用 Docker 镜像：
 ```bash
-docker pull your-dockerhub-username/llm-tracelab:latest
-docker run -d -p 8080:8080 -p 8081:8081 -v ./config:/app/config your-dockerhub-username/llm-tracelab:latest
+docker pull kingfs/llm-tracelab:latest
+docker run -d -p 8080:8080 -p 8081:8081 -v ./config:/app/config kingfs/llm-tracelab:latest
 ```
 
 ### 3. 配置
