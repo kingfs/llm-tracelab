@@ -152,6 +152,83 @@ func (r *LLMRequest) ToGemini() GeminiGenerateContentRequest {
 	}
 }
 
+// ---- GeminiGenerateContentRequest -> LLMRequest ----
+
+func FromGeminiRequest(req GeminiGenerateContentRequest) LLMRequest {
+	llmReq := LLMRequest{
+		Model: "", // Gemini model name is usually in URL, not body
+	}
+
+	// ---- System ----
+	if req.SystemInstruction != nil {
+		sys := req.SystemInstruction
+		llmReq.System = make([]LLMContent, 0, len(sys.Parts))
+		for i := range sys.Parts {
+			p := &sys.Parts[i]
+			llmReq.System = append(llmReq.System, LLMContent{
+				Type: "text",
+				Text: p.Text,
+			})
+		}
+	}
+
+	// ---- Messages ----
+	llmReq.Messages = make([]LLMMessage, 0, len(req.Contents))
+	for i := range req.Contents {
+		c := &req.Contents[i]
+
+		contents := make([]LLMContent, 0, len(c.Parts))
+		for j := range c.Parts {
+			p := &c.Parts[j]
+			contents = append(contents, LLMContent{
+				Type: "text",
+				Text: p.Text,
+			})
+		}
+
+		llmReq.Messages = append(llmReq.Messages, LLMMessage{
+			Role:    c.Role,
+			Content: contents,
+		})
+	}
+
+	// ---- GenerationConfig ----
+	if req.GenerationConfig != nil {
+		cfg := req.GenerationConfig
+		llmReq.Temperature = cfg.Temperature
+		llmReq.TopP = cfg.TopP
+		llmReq.TopK = cfg.TopK
+		llmReq.MaxTokens = cfg.MaxOutputTokens
+		llmReq.StopSeq = cfg.StopSequences
+	}
+
+	// ---- Safety ----
+	llmReq.SafetySettings = make([]LLMSafetyConfig, 0, len(req.SafetySettings))
+	for i := range req.SafetySettings {
+		s := &req.SafetySettings[i]
+		llmReq.SafetySettings = append(llmReq.SafetySettings, LLMSafetyConfig{
+			Category:  s.Category,
+			Threshold: s.Threshold,
+		})
+	}
+
+	// ---- Tools ----
+	llmReq.Tools = make([]LLMTool, 0, len(req.Tools))
+	for i := range req.Tools {
+		t := &req.Tools[i]
+		for j := range t.FunctionDeclarations {
+			fd := &t.FunctionDeclarations[j]
+			llmReq.Tools = append(llmReq.Tools, LLMTool{
+				Name:        fd.Name,
+				Description: fd.Description,
+				Parameters:  fd.Parameters,
+			})
+		}
+	}
+
+	return llmReq
+}
+
 // ---- GeminiResponse -> LLMResponse ----
 
 func GeminiToLLM(resp GeminiResponse) LLMResponse {
@@ -210,5 +287,42 @@ func GeminiToLLM(resp GeminiResponse) LLMResponse {
 		Extensions: map[string]any{
 			"prompt_feedback": resp.PromptFeedback,
 		},
+	}
+}
+
+// ---- LLMResponse -> OpenAIChatResponse ----
+
+func (r *LLMResponse) ToGeminiResponse() GeminiResponse {
+	cands := make([]GeminiCandidate, 0, len(r.Candidates))
+
+	for _, c := range r.Candidates {
+		parts := make([]GeminiPart, 0, len(c.Content))
+		for _, cc := range c.Content {
+			if cc.Type == "text" {
+				parts = append(parts, GeminiPart{Text: cc.Text})
+			}
+		}
+
+		cands = append(cands, GeminiCandidate{
+			Content: GeminiContent{
+				Role:  c.Role,
+				Parts: parts,
+			},
+			FinishReason: c.FinishReason,
+		})
+	}
+
+	var usage *GeminiUsageMetadata
+	if r.Usage != nil {
+		usage = &GeminiUsageMetadata{
+			PromptTokenCount:     r.Usage.InputTokens,
+			CandidatesTokenCount: r.Usage.OutputTokens,
+			TotalTokenCount:      r.Usage.TotalTokens,
+		}
+	}
+
+	return GeminiResponse{
+		Candidates:    cands,
+		UsageMetadata: usage,
 	}
 }

@@ -130,6 +130,79 @@ func (r *LLMRequest) ToAnthropic() AnthropicRequest {
 	}
 }
 
+// ---- AnthropicRequest -> LLMRequest ----
+
+func FromAnthropicRequest(req AnthropicRequest) LLMRequest {
+	llmReq := LLMRequest{
+		Model:          req.Model,
+		ToolChoice:     req.ToolChoice,
+		Temperature:    req.Temperature,
+		TopP:           req.TopP,
+		TopK:           req.TopK,
+		MaxTokens:      req.MaxTokens,
+		StopSeq:        req.StopSequences,
+		SafetySettings: nil, // Anthropic doesn't expose safety in request
+	}
+
+	// ---- Metadata ----
+	if req.Metadata != nil {
+		if uid, ok := req.Metadata["user_id"]; ok {
+			llmReq.UserID = uid
+		}
+	}
+
+	// ---- System ----
+	switch v := req.System.(type) {
+	case string:
+		llmReq.System = []LLMContent{{Type: "text", Text: v}}
+	case []AnthropicContentBlock:
+		llmReq.System = make([]LLMContent, 0, len(v))
+		for i := range v {
+			if v[i].Type == "text" {
+				llmReq.System = append(llmReq.System, LLMContent{
+					Type: "text",
+					Text: v[i].Text,
+				})
+			}
+		}
+	}
+
+	// ---- Messages ----
+	llmReq.Messages = make([]LLMMessage, 0, len(req.Messages))
+	for i := range req.Messages {
+		m := &req.Messages[i]
+
+		contents := make([]LLMContent, 0, len(m.Content))
+		for j := range m.Content {
+			b := &m.Content[j]
+			if b.Type == "text" {
+				contents = append(contents, LLMContent{
+					Type: "text",
+					Text: b.Text,
+				})
+			}
+		}
+
+		llmReq.Messages = append(llmReq.Messages, LLMMessage{
+			Role:    m.Role,
+			Content: contents,
+		})
+	}
+
+	// ---- Tools ----
+	llmReq.Tools = make([]LLMTool, 0, len(req.Tools))
+	for i := range req.Tools {
+		t := &req.Tools[i]
+		llmReq.Tools = append(llmReq.Tools, LLMTool{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
+		})
+	}
+
+	return llmReq
+}
+
 // ---- AnthropicResponse -> LLMResponse ----
 
 func AnthropicToLLM(resp AnthropicResponse) LLMResponse {
@@ -170,6 +243,45 @@ func AnthropicToLLM(resp AnthropicResponse) LLMResponse {
 		ID:         resp.ID,
 		Model:      resp.Model,
 		Candidates: cands,
+		Usage:      usage,
+	}
+}
+
+// ---- LLMResponse -> OpenAIChatResponse ----
+func (r *LLMResponse) ToAnthropicResponse() AnthropicResponse {
+	// Claude 只支持单候选
+	var c LLMCandidate
+	if len(r.Candidates) > 0 {
+		c = r.Candidates[0]
+	}
+
+	blocks := make([]AnthropicContentBlock, 0, len(c.Content))
+	for _, cc := range c.Content {
+		if cc.Type == "text" {
+			blocks = append(blocks, AnthropicContentBlock{
+				Type: "text",
+				Text: cc.Text,
+			})
+		}
+	}
+
+	var usage *AnthropicUsage
+	if r.Usage != nil {
+		usage = &AnthropicUsage{
+			InputTokens:              r.Usage.InputTokens,
+			OutputTokens:             r.Usage.OutputTokens,
+			CacheCreationInputTokens: r.Usage.CacheCreationInputTokens,
+			CacheReadInputTokens:     r.Usage.CacheReadInputTokens,
+		}
+	}
+
+	return AnthropicResponse{
+		ID:         r.ID,
+		Type:       "message",
+		Role:       c.Role,
+		Model:      r.Model,
+		Content:    blocks,
+		StopReason: c.FinishReason,
 		Usage:      usage,
 	}
 }

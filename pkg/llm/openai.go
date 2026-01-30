@@ -118,6 +118,58 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 	}
 }
 
+// ---- OpenAIChatRequest -> LLMRequest ----
+
+func FromOpenAIRequest(req OpenAIChatRequest) LLMRequest {
+	llmReq := LLMRequest{
+		Model:       req.Model,
+		ToolChoice:  req.ToolChoice,
+		Temperature: req.Temperature,
+		TopP:        req.TopP,
+		MaxTokens:   req.MaxTokens,
+		StopSeq:     req.Stop,
+		UserID:      req.User,
+	}
+
+	// ---- System + Messages ----
+	llmReq.System = make([]LLMContent, 0, 1)
+	llmReq.Messages = make([]LLMMessage, 0, len(req.Messages))
+
+	for i := range req.Messages {
+		m := &req.Messages[i]
+
+		// system message
+		if m.Role == "system" {
+			llmReq.System = append(llmReq.System, LLMContent{
+				Type: "text",
+				Text: m.Content,
+			})
+			continue
+		}
+
+		// normal message
+		llmReq.Messages = append(llmReq.Messages, LLMMessage{
+			Role: m.Role,
+			Content: []LLMContent{
+				{Type: "text", Text: m.Content},
+			},
+		})
+	}
+
+	// ---- Tools ----
+	llmReq.Tools = make([]LLMTool, 0, len(req.Tools))
+	for i := range req.Tools {
+		t := &req.Tools[i]
+		llmReq.Tools = append(llmReq.Tools, LLMTool{
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			Parameters:  t.Function.Parameters,
+		})
+	}
+
+	return llmReq
+}
+
 // ---- OpenAIChatResponse -> LLMResponse ----
 
 func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
@@ -156,5 +208,45 @@ func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
 		CreatedAt:  resp.Created,
 		Candidates: cands,
 		Usage:      usage,
+	}
+}
+
+// ---- LLMResponse -> OpenAIChatResponse ----
+
+func (r *LLMResponse) ToOpenAIResponse() OpenAIChatResponse {
+	choices := make([]OpenAIChatChoice, 0, len(r.Candidates))
+
+	for _, c := range r.Candidates {
+		// 只处理 text（基准场景）
+		text := ""
+		if len(c.Content) > 0 && c.Content[0].Type == "text" {
+			text = c.Content[0].Text
+		}
+
+		choices = append(choices, OpenAIChatChoice{
+			Index: c.Index,
+			Message: OpenAIChatMessage{
+				Role:    c.Role,
+				Content: text,
+			},
+			FinishReason: c.FinishReason,
+		})
+	}
+
+	var usage *OpenAIUsage
+	if r.Usage != nil {
+		usage = &OpenAIUsage{
+			PromptTokens:     r.Usage.InputTokens,
+			CompletionTokens: r.Usage.OutputTokens,
+			TotalTokens:      r.Usage.TotalTokens,
+		}
+	}
+
+	return OpenAIChatResponse{
+		ID:      r.ID,
+		Model:   r.Model,
+		Created: r.CreatedAt,
+		Choices: choices,
+		Usage:   usage,
 	}
 }

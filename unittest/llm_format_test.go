@@ -101,9 +101,11 @@ func TestReplayLLMRequestResponse(t *testing.T) {
 	// vendor := detectVendor(req)
 	// assert.NotEqual(t, "unknown", vendor)
 
+	var llmReq llm.LLMRequest
 	var llmResp llm.LLMResponse
 	var oreq llm.OpenAIChatRequest
 	json.Unmarshal(reqBody, &oreq)
+	llmReq = llm.FromOpenAIRequest(oreq)
 
 	var ores llm.OpenAIChatResponse
 	json.Unmarshal(respBody, &ores)
@@ -139,8 +141,10 @@ func TestReplayLLMRequestResponse(t *testing.T) {
 	// }
 
 	// ---- Assertions ----
-	assert.NotEmpty(t, oreq.Model)
-	assert.NotEmpty(t, oreq.Messages)
+	assert.NotEmpty(t, llmReq.Model)
+	if len(llmReq.System) < 1 && len(llmReq.Messages) < 1 {
+		t.Error("no message")
+	}
 	assert.NotEmpty(t, llmResp.Candidates)
 	assert.NotEmpty(t, llmResp.Candidates[0].Content)
 }
