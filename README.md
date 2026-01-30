@@ -80,6 +80,20 @@ func TestChat(t *testing.T) {
 }
 ```
 
+## 运行截图
+
+* 简易监控页面
+![](./images/traffic_monitor.png)
+
+* 消息内容
+![](./images/message_detail.png)
+
+* 原始SSE消息
+![](./images/sse_message_raw.png)
+
+* 非流式消息
+![](./images/message_raw.png)
+
 ## 🛠️ 开发进度
 
 - [x] 核心代理逻辑
