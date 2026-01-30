@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +10,8 @@ import (
 func TestLLMRequest_ToOpenAI(t *testing.T) {
 	temp := 0.7
 	maxTokens := 128
+
+	schema := json.RawMessage(`{"type":"object"}`)
 
 	req := LLMRequest{
 		Model: "gpt-4.1",
@@ -29,14 +32,10 @@ func TestLLMRequest_ToOpenAI(t *testing.T) {
 			{
 				Name:        "search",
 				Description: "Search something",
-				Parameters: map[string]any{
-					"type": "object",
-				},
+				Parameters:  schema,
 			},
 		},
-		Metadata: map[string]any{
-			"user_id": "u123",
-		},
+		UserID: "u123",
 	}
 
 	openaiReq := req.ToOpenAI()

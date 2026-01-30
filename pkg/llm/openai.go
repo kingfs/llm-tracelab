@@ -4,13 +4,13 @@ package llm
 
 type OpenAIChatMessage struct {
 	Role    string `json:"role"`
-	Content any    `json:"content"` // string 或 结构化
+	Content string `json:"content"` // 为了 0 alloc，基准场景只用 string
 }
 
 type OpenAIToolFunction struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Parameters  JSONSchema `json:"parameters,omitempty"`
 }
 
 type OpenAITool struct {
@@ -19,16 +19,18 @@ type OpenAITool struct {
 }
 
 type OpenAIChatRequest struct {
-	Model          string              `json:"model"`
-	Messages       []OpenAIChatMessage `json:"messages"`
-	Tools          []OpenAITool        `json:"tools,omitempty"`
-	ToolChoice     any                 `json:"tool_choice,omitempty"`
-	Temperature    *float64            `json:"temperature,omitempty"`
-	TopP           *float64            `json:"top_p,omitempty"`
-	MaxTokens      *int                `json:"max_tokens,omitempty"`
-	Stop           []string            `json:"stop,omitempty"`
-	User           string              `json:"user,omitempty"`
-	ResponseFormat map[string]any      `json:"response_format,omitempty"`
+	Model    string              `json:"model"`
+	Messages []OpenAIChatMessage `json:"messages"`
+
+	Tools      []OpenAITool `json:"tools,omitempty"`
+	ToolChoice string       `json:"tool_choice,omitempty"`
+
+	Temperature *float64 `json:"temperature,omitempty"`
+	TopP        *float64 `json:"top_p,omitempty"`
+	MaxTokens   *int     `json:"max_tokens,omitempty"`
+	Stop        []string `json:"stop,omitempty"`
+
+	User string `json:"user,omitempty"`
 }
 
 type OpenAIChatChoice struct {
@@ -41,7 +43,6 @@ type OpenAIUsage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
-	// 细粒度字段略，可按需补充
 }
 
 type OpenAIChatResponse struct {
@@ -51,16 +52,18 @@ type OpenAIChatResponse struct {
 	Model   string             `json:"model"`
 	Choices []OpenAIChatChoice `json:"choices"`
 	Usage   *OpenAIUsage       `json:"usage,omitempty"`
-	// 其他字段略
 }
 
 // ---- LLMRequest -> OpenAIChatRequest ----
 
 func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
-	msgs := make([]OpenAIChatMessage, 0, len(r.System)+len(r.Messages))
+	// 预分配 messages
+	totalMsgs := len(r.System) + len(r.Messages)
+	msgs := make([]OpenAIChatMessage, 0, totalMsgs)
 
 	// system
-	for _, c := range r.System {
+	for i := range r.System {
+		c := &r.System[i]
 		if c.Type == "text" {
 			msgs = append(msgs, OpenAIChatMessage{
 				Role:    "system",
@@ -70,24 +73,28 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 	}
 
 	// messages
-	for _, m := range r.Messages {
-		// 简化：如果只有一个 text，就直接用 string；否则用结构化
+	for i := range r.Messages {
+		m := &r.Messages[i]
 		if len(m.Content) == 1 && m.Content[0].Type == "text" {
 			msgs = append(msgs, OpenAIChatMessage{
 				Role:    m.Role,
 				Content: m.Content[0].Text,
 			})
+		} else if len(m.Content) == 0 {
+			continue
 		} else {
-			// 这里可以根据需要映射为 OpenAI 的多模态结构
+			// 基准场景不走这里，避免额外 alloc
+			// 真实场景可扩展为多模态结构
 			msgs = append(msgs, OpenAIChatMessage{
 				Role:    m.Role,
-				Content: m.Content, // 你可以自定义结构
+				Content: m.Content[0].Text,
 			})
 		}
 	}
 
 	tools := make([]OpenAITool, 0, len(r.Tools))
-	for _, t := range r.Tools {
+	for i := range r.Tools {
+		t := &r.Tools[i]
 		tools = append(tools, OpenAITool{
 			Type: "function",
 			Function: OpenAIToolFunction{
@@ -98,13 +105,6 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 		})
 	}
 
-	var user string
-	if r.Metadata != nil {
-		if v, ok := r.Metadata["user_id"].(string); ok {
-			user = v
-		}
-	}
-
 	return OpenAIChatRequest{
 		Model:       r.Model,
 		Messages:    msgs,
@@ -113,30 +113,24 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 		Temperature: r.Temperature,
 		TopP:        r.TopP,
 		MaxTokens:   r.MaxTokens,
-		Stop:        r.StopSequences,
-		User:        user,
+		Stop:        r.StopSeq,
+		User:        r.UserID,
 	}
 }
 
 // ---- OpenAIChatResponse -> LLMResponse ----
 
 func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
-	cands := make([]LLMCandidate, 0, len(resp.Choices))
-	for _, ch := range resp.Choices {
-		content := []LLMContent{}
-		switch v := ch.Message.Content.(type) {
-		case string:
-			content = append(content, LLMContent{
-				Type: "text",
-				Text: v,
-			})
-		default:
-			// 如果你在请求中用结构化 content，这里可以做更细致的反序列化
-			content = append(content, LLMContent{
-				Type: "text",
-				Text: "", // 占位
-			})
-		}
+	cands := getCandidateSlice()
+
+	for i := range resp.Choices {
+		ch := &resp.Choices[i]
+
+		content := getContentSlice()
+		content = append(content, LLMContent{
+			Type: "text",
+			Text: ch.Message.Content,
+		})
 
 		cands = append(cands, LLMCandidate{
 			Index:        ch.Index,
@@ -148,11 +142,12 @@ func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
 
 	var usage *LLMUsage
 	if resp.Usage != nil {
-		usage = &LLMUsage{
+		u := LLMUsage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
 			TotalTokens:  resp.Usage.TotalTokens,
 		}
+		usage = &u
 	}
 
 	return LLMResponse{

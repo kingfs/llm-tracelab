@@ -4,7 +4,6 @@ package llm
 
 type GeminiPart struct {
 	Text string `json:"text,omitempty"`
-	// 多模态字段略：inlineData, fileData 等
 }
 
 type GeminiContent struct {
@@ -26,9 +25,9 @@ type GeminiGenerationConfig struct {
 }
 
 type GeminiToolFunctionDeclaration struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Parameters  JSONSchema `json:"parameters,omitempty"`
 }
 
 type GeminiTool struct {
@@ -72,9 +71,11 @@ type GeminiResponse struct {
 func (r *LLMRequest) ToGemini() GeminiGenerateContentRequest {
 	contents := make([]GeminiContent, 0, len(r.Messages))
 
-	for _, m := range r.Messages {
+	for i := range r.Messages {
+		m := &r.Messages[i]
 		parts := make([]GeminiPart, 0, len(m.Content))
-		for _, c := range m.Content {
+		for j := range m.Content {
+			c := &m.Content[j]
 			if c.Type == "text" {
 				parts = append(parts, GeminiPart{
 					Text: c.Text,
@@ -82,7 +83,7 @@ func (r *LLMRequest) ToGemini() GeminiGenerateContentRequest {
 			}
 		}
 		contents = append(contents, GeminiContent{
-			Role:  m.Role, // user / model
+			Role:  m.Role,
 			Parts: parts,
 		})
 	}
@@ -90,42 +91,47 @@ func (r *LLMRequest) ToGemini() GeminiGenerateContentRequest {
 	var sys *GeminiContent
 	if len(r.System) > 0 {
 		parts := make([]GeminiPart, 0, len(r.System))
-		for _, c := range r.System {
+		for i := range r.System {
+			c := &r.System[i]
 			if c.Type == "text" {
 				parts = append(parts, GeminiPart{
 					Text: c.Text,
 				})
 			}
 		}
-		sys = &GeminiContent{
+		tmp := GeminiContent{
 			Role:  "system",
 			Parts: parts,
 		}
+		sys = &tmp
 	}
 
 	var genCfg *GeminiGenerationConfig
-	if r.Temperature != nil || r.TopP != nil || r.TopK != nil || r.MaxTokens != nil || len(r.StopSequences) > 0 {
-		genCfg = &GeminiGenerationConfig{
+	if r.Temperature != nil || r.TopP != nil || r.TopK != nil || r.MaxTokens != nil || len(r.StopSeq) > 0 {
+		cfg := GeminiGenerationConfig{
 			Temperature:     r.Temperature,
 			TopP:            r.TopP,
 			TopK:            r.TopK,
 			MaxOutputTokens: r.MaxTokens,
-			StopSequences:   r.StopSequences,
+			StopSequences:   r.StopSeq,
 		}
+		genCfg = &cfg
 	}
 
 	safety := make([]GeminiSafetySetting, 0, len(r.SafetySettings))
-	for _, s := range r.SafetySettings {
+	for i := range r.SafetySettings {
+		s := &r.SafetySettings[i]
 		safety = append(safety, GeminiSafetySetting{
 			Category:  s.Category,
 			Threshold: s.Threshold,
 		})
 	}
 
-	tools := make([]GeminiTool, 0)
+	tools := make([]GeminiTool, 0, 1)
 	if len(r.Tools) > 0 {
 		fd := make([]GeminiToolFunctionDeclaration, 0, len(r.Tools))
-		for _, t := range r.Tools {
+		for i := range r.Tools {
+			t := &r.Tools[i]
 			fd = append(fd, GeminiToolFunctionDeclaration{
 				Name:        t.Name,
 				Description: t.Description,
@@ -149,12 +155,15 @@ func (r *LLMRequest) ToGemini() GeminiGenerateContentRequest {
 // ---- GeminiResponse -> LLMResponse ----
 
 func GeminiToLLM(resp GeminiResponse) LLMResponse {
-	cands := make([]LLMCandidate, 0, len(resp.Candidates))
-	safetyAll := make([]LLMSafetyRating, 0)
+	cands := getCandidateSlice()
+	safetyAll := make([]LLMSafetyRating, 0, len(resp.Candidates))
 
-	for i, c := range resp.Candidates {
-		content := make([]LLMContent, 0, len(c.Content.Parts))
-		for _, p := range c.Content.Parts {
+	for i := range resp.Candidates {
+		c := &resp.Candidates[i]
+
+		content := getContentSlice()
+		for j := range c.Content.Parts {
+			p := &c.Content.Parts[j]
 			content = append(content, LLMContent{
 				Type: "text",
 				Text: p.Text,
@@ -162,7 +171,8 @@ func GeminiToLLM(resp GeminiResponse) LLMResponse {
 		}
 
 		safety := make([]LLMSafetyRating, 0, len(c.SafetyRatings))
-		for _, s := range c.SafetyRatings {
+		for j := range c.SafetyRatings {
+			s := &c.SafetyRatings[j]
 			sr := LLMSafetyRating{
 				Category:    s.Category,
 				Probability: s.Probability,
@@ -185,11 +195,12 @@ func GeminiToLLM(resp GeminiResponse) LLMResponse {
 
 	var usage *LLMUsage
 	if resp.UsageMetadata != nil {
-		usage = &LLMUsage{
+		u := LLMUsage{
 			InputTokens:  resp.UsageMetadata.PromptTokenCount,
 			OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
 			TotalTokens:  resp.UsageMetadata.TotalTokenCount,
 		}
+		usage = &u
 	}
 
 	return LLMResponse{

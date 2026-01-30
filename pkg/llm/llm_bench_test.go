@@ -1,12 +1,15 @@
 package llm
 
 import (
+	"encoding/json"
 	"testing"
 )
 
 //
 // Shared test data
 //
+
+var testSchema = json.RawMessage(`{"type":"object"}`)
 
 var testReq = LLMRequest{
 	Model: "test-model",
@@ -25,14 +28,10 @@ var testReq = LLMRequest{
 		{
 			Name:        "search",
 			Description: "Search something",
-			Parameters: map[string]any{
-				"type": "object",
-			},
+			Parameters:  testSchema,
 		},
 	},
-	Metadata: map[string]any{
-		"user_id": "u123",
-	},
+	UserID: "u123",
 }
 
 var openaiResp = OpenAIChatResponse{
