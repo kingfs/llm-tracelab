@@ -13,7 +13,7 @@
             "program": "${workspaceFolder}/cmd/server",
             "args": [
                 "-c",
-                "${workspaceFolder}/config/config.yaml"
+                "${workspaceFolder}/config/config.dev.yaml"
             ]
         }
 
