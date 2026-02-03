@@ -1,3 +1,5 @@
 config/config.dev.yaml
 __debug*
 logs/
+temp/
+curl.*

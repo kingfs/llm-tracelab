@@ -7,6 +7,10 @@ monitor:
 upstream:
   base_url: "http://localhost:30080" 
   api_key: "sk-test"
+  # 回放模式：不请求真实 LLM，从 .http 文件返回录制响应。设为 replay 时需设置 replay_dir。
+  # mode: "proxy"   # 默认，转发到 base_url
+  # mode: "replay"
+  # replay_dir: "./testdata/load"  # 回放根目录，约定：replay_dir/<model>/*.http 或 replay_dir/*.http
 
 debug:
   output_dir: "./logs"

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,23 +109,9 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 		}
 	}
 
-	// 2. 解析 Site Host
-	u, _ := url.Parse(siteURL)
-	siteHost := "unknown"
-	if u != nil {
-		siteHost = u.Host
-	}
-
-	// 3. 创建目录和文件
+	// 2. 创建目录和文件（与回放约定一致：output_dir/<model>/*.http，便于同一目录既录制又回放）
 	now := time.Now()
-	dirPath := filepath.Join(
-		r.OutputDir,
-		siteHost,
-		modelName,
-		now.Format("2006"),
-		now.Format("01"),
-		now.Format("02"),
-	)
+	dirPath := filepath.Join(r.OutputDir, modelName)
 	if err := os.MkdirAll(dirPath, 0755); err != nil {
 		return nil, err
 	}

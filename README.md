@@ -62,6 +62,16 @@ upstream:
 
 将你的 SDK BaseURL 指向 `http://localhost:8080` 即可开始记录。
 
+### 回放模式（不调真实 LLM）
+
+配置 `upstream.mode: replay` 且 `upstream.replay_dir` 指向含 `.http` 的目录时，服务以回放模式运行：不请求真实上游，按请求的 path 与 body 中的 model 选择对应录制的 `.http` 文件并返回其响应，便于压测或联调。目录约定：优先 `replay_dir/<model>/*.http`（与录制目录按 model 分目录一致），若无则 `replay_dir/*.http`（扁平）。
+
+```yaml
+upstream:
+  mode: "replay"
+  replay_dir: "./testdata/load"
+```
+
 ## 🧪 单元测试回放
 
 你可以使用录制好的 `.http` 文件在没有网络的情况下运行测试：
