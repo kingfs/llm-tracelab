@@ -6,9 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 const (
 	// HeaderLen 必须与 Recorder 中定义的长度保持一致 (2KB)
@@ -86,16 +93,24 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// 6. 接管 Body 关闭逻辑
-	// 当调用者关闭 resp.Body 时，我们需要同时关闭底层的 os.File
-	resp.Body = &fileCloser{
+	// 恢复使用普通 fileCloser
+	fc := &fileCloser{
 		ReadCloser: resp.Body,
 		File:       f,
+	}
+	resp.Body = fc
+
+	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		resp.Body = &delayedSSEReader{
+			reader:   fc,
+			minDelay: 10 * time.Millisecond,
+			maxDelay: 30 * time.Millisecond, // 降低最大延迟，避免太慢
+		}
 	}
 
 	return resp, nil
 }
 
-// fileCloser 包装器，确保 Body 关闭时文件句柄也被释放
 type fileCloser struct {
 	io.ReadCloser
 	File *os.File
@@ -111,4 +126,73 @@ func (fc *fileCloser) Close() error {
 		return err1
 	}
 	return err2
+}
+
+type delayedSSEReader struct {
+	reader   io.ReadCloser
+	minDelay time.Duration
+	maxDelay time.Duration
+	buf      []byte
+}
+
+func (r *delayedSSEReader) Read(p []byte) (n int, err error) {
+	if len(r.buf) == 0 {
+		tmp := make([]byte, 4096)
+		n, err := r.reader.Read(tmp)
+		if n > 0 {
+			r.buf = append(r.buf, tmp[:n]...)
+		}
+		if err != nil && err != io.EOF {
+			return 0, err
+		}
+		if n == 0 && err == io.EOF {
+			return 0, io.EOF
+		}
+	}
+
+	if len(r.buf) == 0 {
+		return 0, io.EOF
+	}
+
+	idx := bytes.IndexByte(r.buf, '\n')
+	if idx >= 0 {
+		toCopy := idx + 1
+		shouldSleep := true
+		if toCopy > len(p) {
+			toCopy = len(p)
+			shouldSleep = false
+		}
+		copy(p, r.buf[:toCopy])
+		r.buf = r.buf[toCopy:]
+
+		if shouldSleep {
+			// 跳过空行或非 data 行的延迟，避免无效等待
+			if toCopy > 1 && len(r.buf) > 0 { // 简单的启发式：如果刚读完一行且还有数据，且刚读完的不是空行
+				trimmed := bytes.TrimSpace(p[:toCopy])
+				if len(trimmed) > 0 {
+					// Random delay between minDelay and maxDelay
+					delta := int64(r.maxDelay - r.minDelay)
+					if delta > 0 {
+						sleepTime := r.minDelay + time.Duration(rand.Int63n(delta))
+						time.Sleep(sleepTime)
+					} else {
+						time.Sleep(r.minDelay)
+					}
+				}
+			}
+		}
+		return toCopy, nil
+	}
+
+	toCopy := len(r.buf)
+	if toCopy > len(p) {
+		toCopy = len(p)
+	}
+	copy(p, r.buf[:toCopy])
+	r.buf = r.buf[toCopy:]
+	return toCopy, nil
+}
+
+func (r *delayedSSEReader) Close() error {
+	return r.reader.Close()
 }

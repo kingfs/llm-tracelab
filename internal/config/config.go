@@ -17,8 +17,10 @@ type Config struct {
 	} `yaml:"monitor"`
 
 	Upstream struct {
-		BaseURL string `yaml:"base_url"`
-		ApiKey  string `yaml:"api_key"`
+		BaseURL   string `yaml:"base_url"`    // 真实上游地址，proxy 模式必填
+		ApiKey    string `yaml:"api_key"`      // 真实上游 API Key
+		Mode      string `yaml:"mode"`         // "proxy"（默认）或 "replay"
+		ReplayDir string `yaml:"replay_dir"`  // 回放根目录，仅 mode=replay 时必填
 	} `yaml:"upstream"`
 
 	Debug struct {

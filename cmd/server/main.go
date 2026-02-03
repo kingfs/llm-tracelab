@@ -30,10 +30,26 @@ func main() {
 
 	slog.Info("Starting LLM Proxy...", "version", "1.0.0", "go_version", "1.23+")
 
-	// 2. 启动自检 (Fail Fast)
-	if err := upstream.CheckConnectivity(cfg.Upstream.BaseURL, cfg.Upstream.ApiKey); err != nil {
-		slog.Error("Startup self-check failed! Exiting.", "error", err)
-		os.Exit(1)
+	// 2. 启动自检 (Fail Fast)：replay 模式跳过上游连通性检查
+	mode := cfg.Upstream.Mode
+	if mode == "" {
+		mode = "proxy"
+	}
+	if mode == "replay" {
+		if cfg.Upstream.ReplayDir == "" {
+			slog.Error("Replay mode requires replay_dir to be set. Exiting.")
+			os.Exit(1)
+		}
+		if st, err := os.Stat(cfg.Upstream.ReplayDir); err != nil || !st.IsDir() {
+			slog.Error("replay_dir is not a valid directory", "replay_dir", cfg.Upstream.ReplayDir, "error", err)
+			os.Exit(1)
+		}
+		slog.Info("Replay mode enabled, skipping upstream connectivity check", "replay_dir", cfg.Upstream.ReplayDir)
+	} else {
+		if err := upstream.CheckConnectivity(cfg.Upstream.BaseURL, cfg.Upstream.ApiKey); err != nil {
+			slog.Error("Startup self-check failed! Exiting.", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	// --- 启动 Monitor (新增) ---

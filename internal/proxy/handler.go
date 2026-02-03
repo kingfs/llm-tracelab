@@ -17,6 +17,8 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/chaos"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/replayselector"
+	"github.com/kingfs/llm-tracelab/pkg/replay"
 )
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
@@ -246,6 +248,7 @@ func (rw *InstrumentedResponseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.w.WriteHeader(code)
 }
+
 func (rw *InstrumentedResponseWriter) Write(b []byte) (int, error) {
 	if rw.firstByte {
 		rw.ttft = time.Since(rw.startTime).Milliseconds()
@@ -255,11 +258,13 @@ func (rw *InstrumentedResponseWriter) Write(b []byte) (int, error) {
 	rw.bytesWritten += int64(n)
 	return n, err
 }
+
 func (rw *InstrumentedResponseWriter) Flush() {
 	if f, ok := rw.w.(http.Flusher); ok {
 		f.Flush()
 	}
 }
+
 func (rw *InstrumentedResponseWriter) GetMetrics() (int, int64, int64) {
 	return rw.statusCode, rw.bytesWritten, rw.ttft
 }
@@ -269,9 +274,24 @@ type Handler struct {
 	recorder     *recorder.Recorder
 	chaosManager *chaos.Manager
 	cfg          *config.Config
+	replayDir    string // 非空时表示回放模式
 }
 
 func NewHandler(cfg *config.Config) (*Handler, error) {
+	mode := cfg.Upstream.Mode
+	if mode == "" {
+		mode = "proxy"
+	}
+	if mode == "replay" {
+		return &Handler{
+			proxy:        nil,
+			recorder:     nil,
+			chaosManager: chaos.New(cfg),
+			cfg:          cfg,
+			replayDir:    cfg.Upstream.ReplayDir,
+		}, nil
+	}
+
 	targetURL, err := url.Parse(cfg.Upstream.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid upstream url: %w", err)
@@ -343,7 +363,70 @@ func NewHandler(cfg *config.Config) (*Handler, error) {
 		recorder:     rec,
 		chaosManager: cm,
 		cfg:          cfg,
+		replayDir:    "",
 	}, nil
+}
+
+// writeResponse 将 *http.Response 写入 http.ResponseWriter，并关闭 resp.Body。
+func writeResponse(w http.ResponseWriter, resp *http.Response) {
+	if resp == nil {
+		return
+	}
+	defer resp.Body.Close()
+	for k, v := range resp.Header {
+		for _, vv := range v {
+			w.Header().Add(k, vv)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+
+	// 如果是流式响应，需要逐块 Flush
+	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		// 禁用 Nginx 等代理的缓冲
+		w.Header().Set("X-Accel-Buffering", "no")
+		// SSE 响应不应设置 Content-Length，否则可能导致客户端等待完整响应
+		w.Header().Del("Content-Length")
+
+		// 使用较小的 buffer 以配合 Transport 层的 delayedBody
+		buf := make([]byte, 4096)
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				w.Write(buf[:n])
+				if f, ok := w.(http.Flusher); ok {
+					f.Flush()
+				}
+			}
+			if err != nil {
+				// EOF 也是 error
+				break
+			}
+		}
+	} else {
+		io.Copy(w, resp.Body)
+	}
+}
+
+// parseModelFromRequest 从请求 body 解析 model，与 recorder.PrepareLogFile 逻辑一致；会重置 req.Body。
+func parseModelFromRequest(r *http.Request) string {
+	var bodyBytes []byte
+	if r.Body != nil {
+		bodyBytes, _ = io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+	}
+	modelName := "unknown-model"
+	if len(bodyBytes) > 0 {
+		var pb struct {
+			Model string `json:"model"`
+		}
+		if json.Unmarshal(bodyBytes, &pb) == nil && pb.Model != "" {
+			modelName = pb.Model
+		}
+	}
+	if modelName == "unknown-model" && strings.HasSuffix(r.URL.Path, "/models") {
+		modelName = "list_models"
+	}
+	return modelName
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -351,6 +434,45 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// [Step 1] 自动注入 stream_options
 	ensureStreamOptions(r)
+
+	// 回放模式：按请求选 .http，回放响应，不写录制文件
+	if h.replayDir != "" {
+		model := parseModelFromRequest(r)
+		selectedPath, err := replayselector.SelectFile(h.replayDir, r.URL.Path, model)
+		if err != nil {
+			slog.Error("Replay select file failed", "replay_dir", h.replayDir, "model", model, "err", err)
+			http.Error(w, "Replay: no matching .http file", http.StatusBadGateway)
+			return
+		}
+		chaosRes := h.chaosManager.Evaluate(model)
+		if chaosRes.ShouldInject {
+			if chaosRes.Action == "delay" {
+				time.Sleep(chaosRes.Delay)
+			} else if chaosRes.Action == "error" {
+				// 返回chaos注入的错误
+				errorBody := fmt.Sprintf(`{"error":{"message":"%s","type":"chaos_injection"}}`, chaosRes.Message)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(chaosRes.StatusCode)
+				w.Write([]byte(errorBody))
+				slog.Info("Chaos injection: error response sent (replay mode)",
+					"model", model,
+					"status_code", chaosRes.StatusCode,
+					"message", chaosRes.Message)
+				return
+			}
+		}
+		tr := replay.NewTransport(selectedPath)
+		resp, err := tr.RoundTrip(r)
+		if err != nil {
+			slog.Error("Replay roundtrip failed", "path", selectedPath, "err", err)
+			http.Error(w, "Replay: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+
+		writeResponse(w, resp)
+		slog.Info("Replay completed", "model", model, "file", selectedPath, "duration_ms", time.Since(start).Milliseconds())
+		return
+	}
 
 	// [Step 2] 准备日志 (此时 r.Body 已经包含 injected options，Log 里会记录下来)
 	logInfo, err := h.recorder.PrepareLogFile(r, h.cfg.Upstream.BaseURL)
@@ -383,17 +505,46 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		)
 	}()
 
-	// Chaos Logic ... (略，与之前一致，可保留)
+	// Chaos Logic
 	chaosRes := h.chaosManager.Evaluate(logInfo.Header.Meta.Model)
 	if chaosRes.ShouldInject {
-		// ... 保持之前的 chaos 逻辑 ...
-		// 为节省篇幅这里简写，请保留你现有的代码
 		if chaosRes.Action == "delay" {
 			time.Sleep(chaosRes.Delay)
+		} else if chaosRes.Action == "error" {
+			// Record chaos error response
+			recordChaosResponse(h, irw, logInfo, chaosRes, start)
+			return
 		}
-		// ...
 	}
 
 	ctx := context.WithValue(r.Context(), "LogInfo", logInfo)
 	h.proxy.ServeHTTP(irw, r.WithContext(ctx))
+}
+
+// recordChaosResponse 记录并返回chaos注入的错误响应
+func recordChaosResponse(h *Handler, irw *InstrumentedResponseWriter, logInfo *recorder.LogInfo, chaosRes chaos.Result, startTime time.Time) {
+	// 构造错误响应JSON
+	errorBody := fmt.Sprintf(`{"error":{"message":"%s","type":"chaos_injection"}}`, chaosRes.Message)
+
+	// 写入响应头
+	irw.Header().Set("Content-Type", "application/json")
+	irw.WriteHeader(chaosRes.StatusCode)
+	irw.Write([]byte(errorBody))
+
+	// 更新日志信息
+	logInfo.Header.Meta.StatusCode = chaosRes.StatusCode
+	logInfo.Header.Meta.DurationMs = time.Since(startTime).Milliseconds()
+	logInfo.Header.Meta.TTFTMs = logInfo.Header.Meta.DurationMs // 对于错误响应，TTFT等于总耗时
+
+	// 写入录制文件
+	if h.recorder != nil {
+		if uErr := h.recorder.UpdateLogFile(logInfo); uErr != nil {
+			slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
+		}
+	}
+
+	slog.Info("Chaos injection: error response sent",
+		"model", logInfo.Header.Meta.Model,
+		"status_code", chaosRes.StatusCode,
+		"message", chaosRes.Message)
 }
