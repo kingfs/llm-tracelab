@@ -8,6 +8,13 @@
 
 `llm-tracelab` 是一个专为大语言模型（LLM）API 设计的记录与回放工具。它的初衷是将会话请求录制为本地 `.http` 文件，并将其作为单元测试的输入，同时提供了一个简单的 Web UI 用于可视化查看。
 
+延伸阅读：
+- [基于 Harness Engineering 的项目分析与演进建议](./docs/harness-engineering-analysis.md)
+- [AGENTS.md](./AGENTS.md)
+- [ARCHITECTURE.md](./ARCHITECTURE.md)
+- [HARNESS 设计文档](./docs/HARNESS.md)
+- [TRACE 格式规范](./docs/TRACE_FORMAT.md)
+
 ---
 
 ## 📖 核心特性
@@ -107,4 +114,3 @@ func TestChat(t *testing.T) {
 ## 📄 开源协议
 
 基于 [MIT License](./LICENSE) 开源。
-
