@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -124,9 +125,9 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 				t.Fatalf("recorded IsStream = %v, want %v", parsed.Header.Layout.IsStream, tt.wantIsStream)
 			}
 
-			entries, err := st.ListRecent(1)
+			entries, err := waitForRecentEntries(st, 1, time.Second)
 			if err != nil {
-				t.Fatalf("ListRecent() error = %v", err)
+				t.Fatalf("waitForRecentEntries() error = %v", err)
 			}
 			if len(entries) != 1 {
 				t.Fatalf("ListRecent() len = %d, want 1", len(entries))
@@ -135,6 +136,26 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 				t.Fatalf("indexed total tokens = %d, want %d", entries[0].Header.Usage.TotalTokens, tt.wantTotalTokens)
 			}
 		})
+	}
+}
+
+func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]store.LogEntry, error) {
+	deadline := time.Now().Add(timeout)
+	var lastEntries []store.LogEntry
+	var lastErr error
+
+	for {
+		lastEntries, lastErr = st.ListRecent(limit)
+		if lastErr == nil && len(lastEntries) >= limit {
+			return lastEntries, nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return lastEntries, nil
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
