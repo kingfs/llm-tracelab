@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
@@ -143,14 +144,8 @@ func (s *UsageSniffer) sniffStream(chunk []byte) {
 		// 处理 data: 前缀
 		if strings.HasPrefix(lineStr, "data:") {
 			jsonStr := strings.TrimSpace(strings.TrimPrefix(lineStr, "data:"))
-			// 尝试解析
-			var chunkObj struct {
-				Usage *recorder.UsageInfo `json:"usage"`
-			}
-			if json.Unmarshal([]byte(jsonStr), &chunkObj) == nil {
-				if chunkObj.Usage != nil && chunkObj.Usage.TotalTokens > 0 {
-					*s.Usage = *chunkObj.Usage
-				}
+			if usage, ok := extractUsageFromJSON([]byte(jsonStr)); ok {
+				*s.Usage = usage
 			}
 		}
 	}
@@ -214,13 +209,81 @@ func extractUsageFromTail(data []byte, target *recorder.UsageInfo) {
 
 	if endBrace != -1 {
 		jsonStr := jsonPart[:endBrace]
-		var u recorder.UsageInfo
-		if json.Unmarshal([]byte(jsonStr), &u) == nil {
-			if u.TotalTokens > 0 {
-				*target = u
-			}
+		if usage, ok := extractUsageFromJSON([]byte(jsonStr)); ok {
+			*target = usage
 		}
 	}
+}
+
+type compatibleUsage struct {
+	PromptTokens       int                            `json:"prompt_tokens"`
+	CompletionTokens   int                            `json:"completion_tokens"`
+	TotalTokens        int                            `json:"total_tokens"`
+	InputTokens        int                            `json:"input_tokens"`
+	OutputTokens       int                            `json:"output_tokens"`
+	InputTokenDetails  *recordfile.PromptTokenDetails `json:"input_tokens_details,omitempty"`
+	PromptTokenDetails *recordfile.PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+func (u compatibleUsage) toRecordUsage() (recorder.UsageInfo, bool) {
+	promptTokens := u.PromptTokens
+	completionTokens := u.CompletionTokens
+	promptDetails := u.PromptTokenDetails
+
+	if promptTokens == 0 && completionTokens == 0 && (u.InputTokens > 0 || u.OutputTokens > 0) {
+		promptTokens = u.InputTokens
+		completionTokens = u.OutputTokens
+		if promptDetails == nil {
+			promptDetails = u.InputTokenDetails
+		}
+	}
+
+	totalTokens := u.TotalTokens
+	if totalTokens == 0 && (promptTokens > 0 || completionTokens > 0) {
+		totalTokens = promptTokens + completionTokens
+	}
+
+	if totalTokens == 0 && promptTokens == 0 && completionTokens == 0 {
+		return recorder.UsageInfo{}, false
+	}
+
+	return recorder.UsageInfo{
+		PromptTokens:       promptTokens,
+		CompletionTokens:   completionTokens,
+		TotalTokens:        totalTokens,
+		PromptTokenDetails: promptDetails,
+	}, true
+}
+
+func extractUsageFromJSON(data []byte) (recorder.UsageInfo, bool) {
+	var direct compatibleUsage
+	if err := json.Unmarshal(data, &direct); err == nil {
+		if usage, ok := direct.toRecordUsage(); ok {
+			return usage, true
+		}
+	}
+
+	var payload struct {
+		Usage    *compatibleUsage `json:"usage"`
+		Response *struct {
+			Usage *compatibleUsage `json:"usage"`
+		} `json:"response"`
+	}
+
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return recorder.UsageInfo{}, false
+	}
+	if payload.Usage != nil {
+		if usage, ok := payload.Usage.toRecordUsage(); ok {
+			return usage, true
+		}
+	}
+	if payload.Response != nil && payload.Response.Usage != nil {
+		if usage, ok := payload.Response.Usage.toRecordUsage(); ok {
+			return usage, true
+		}
+	}
+	return recorder.UsageInfo{}, false
 }
 
 // InstrumentedResponseWriter 保持不变
