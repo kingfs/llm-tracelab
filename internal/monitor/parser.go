@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -22,17 +23,30 @@ type ParsedData struct {
 	ChatMessages      []ChatMessage
 	AIContent         string
 	AIReasoning       string
+	AIBlocks          []ContentBlock
 	ResponseToolCalls []ToolCall
 }
 
 type ChatMessage struct {
-	Role          string     `json:"role"`
-	MessageType   string     `json:"message_type,omitempty"`
-	Content       string     `json:"content"`
-	ContentFormat string     `json:"content_format,omitempty"`
-	ToolCalls     []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID    string     `json:"tool_call_id,omitempty"` // 当 role=tool 时存在
-	Name          string     `json:"name,omitempty"`         // 当 role=tool 时可能是函数名
+	Role          string         `json:"role"`
+	MessageType   string         `json:"message_type,omitempty"`
+	Content       string         `json:"content"`
+	ContentFormat string         `json:"content_format,omitempty"`
+	Blocks        []ContentBlock `json:"blocks,omitempty"`
+	ToolCalls     []ToolCall     `json:"tool_calls,omitempty"`
+	ToolCallID    string         `json:"tool_call_id,omitempty"` // 当 role=tool 时存在
+	Name          string         `json:"name,omitempty"`         // 当 role=tool 时可能是函数名
+	IsError       bool           `json:"is_error,omitempty"`
+}
+
+type ContentBlock struct {
+	Kind   string `json:"kind"`
+	Title  string `json:"title,omitempty"`
+	Text   string `json:"text,omitempty"`
+	Format string `json:"format,omitempty"`
+	Meta   string `json:"meta,omitempty"`
+	URL    string `json:"url,omitempty"`
+	FileID string `json:"file_id,omitempty"`
 }
 type ToolCall struct {
 	ID       string `json:"id"`
@@ -52,6 +66,51 @@ type chatRequest struct {
 
 type responsesRequest struct {
 	Input interface{} `json:"input"`
+}
+
+type anthropicRequest struct {
+	System   interface{}               `json:"system"`
+	Messages []anthropicRequestMessage `json:"messages"`
+}
+
+type anthropicRequestMessage struct {
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+type anthropicContentBlock struct {
+	Type      string      `json:"type"`
+	Text      string      `json:"text"`
+	Thinking  string      `json:"thinking"`
+	Data      string      `json:"data"`
+	ID        string      `json:"id"`
+	Name      string      `json:"name"`
+	Input     interface{} `json:"input"`
+	ToolUseID string      `json:"tool_use_id"`
+	Content   interface{} `json:"content"`
+	IsError   bool        `json:"is_error"`
+}
+
+type anthropicDelta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text"`
+	Thinking    string `json:"thinking"`
+	PartialJSON string `json:"partial_json"`
+}
+
+type anthropicStreamChunk struct {
+	Type         string                `json:"type"`
+	Index        int                   `json:"index"`
+	Delta        anthropicDelta        `json:"delta"`
+	ContentBlock anthropicContentBlock `json:"content_block"`
+}
+
+type anthropicStreamBlock struct {
+	Type  string
+	ID    string
+	Name  string
+	Text  strings.Builder
+	Input strings.Builder
 }
 
 type responsesInputItem struct {
@@ -101,7 +160,7 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 	messages := parseRequestMessages(header.Meta.URL, reqBodyBytes)
 
 	// 5. 解析 AI Content & Reasoning
-	contentStr, reasoningStr, toolCalls := parseAIContent(header.Meta.URL, resBodyBytes, header.Layout.IsStream)
+	contentStr, reasoningStr, aiBlocks, toolCalls := parseAIContent(header.Meta.URL, resBodyBytes, header.Layout.IsStream)
 
 	return &ParsedData{
 		Header:            header,
@@ -111,6 +170,7 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 		ChatMessages:      messages,
 		AIContent:         contentStr,
 		AIReasoning:       reasoningStr,
+		AIBlocks:          aiBlocks,
 		ResponseToolCalls: toolCalls,
 		// ReqBody:      string(reqBodyBytes), // 也可以加上
 		// ResBody:      string(resBodyBytes), // 也可以加上
@@ -120,6 +180,11 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
 	if strings.Contains(url, "/v1/responses") {
 		if messages := parseResponsesRequest(reqBodyBytes); len(messages) > 0 {
+			return messages
+		}
+	}
+	if strings.Contains(url, "/v1/messages") {
+		if messages := parseAnthropicRequest(reqBodyBytes); len(messages) > 0 {
 			return messages
 		}
 	}
@@ -147,6 +212,160 @@ func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
 		}
 	}
 
+	return messages
+}
+
+func parseAnthropicRequest(data []byte) []ChatMessage {
+	var req anthropicRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return nil
+	}
+
+	toolNames := map[string]string{}
+	var messages []ChatMessage
+	messages = append(messages, parseAnthropicSystem(req.System)...)
+	for _, message := range req.Messages {
+		messages = append(messages, parseAnthropicRequestMessage(message, toolNames)...)
+	}
+	return messages
+}
+
+func parseAnthropicSystem(raw interface{}) []ChatMessage {
+	content, blocks := renderAnthropicRichContent(raw)
+	if content == "" {
+		if len(blocks) == 0 {
+			return nil
+		}
+	}
+	return []ChatMessage{{
+		Role:          "system",
+		MessageType:   "message",
+		Content:       content,
+		ContentFormat: detectContentFormat(content),
+		Blocks:        blocks,
+	}}
+}
+
+func parseAnthropicRequestMessage(message anthropicRequestMessage, toolNames map[string]string) []ChatMessage {
+	role := firstNonEmpty(message.Role, "user")
+
+	switch content := message.Content.(type) {
+	case string:
+		if strings.TrimSpace(content) == "" {
+			return nil
+		}
+		return []ChatMessage{{
+			Role:          role,
+			MessageType:   "message",
+			Content:       content,
+			ContentFormat: detectContentFormat(content),
+		}}
+	case []interface{}:
+		return parseAnthropicBlocks(role, content, toolNames)
+	default:
+		rendered, blocks := renderAnthropicRichContent(content)
+		if rendered == "" && len(blocks) == 0 {
+			return nil
+		}
+		return []ChatMessage{{
+			Role:          role,
+			MessageType:   "message",
+			Content:       rendered,
+			ContentFormat: detectContentFormat(rendered),
+			Blocks:        blocks,
+		}}
+	}
+}
+
+func parseAnthropicBlocks(role string, rawBlocks []interface{}, toolNames map[string]string) []ChatMessage {
+	var (
+		messages  []ChatMessage
+		textParts []string
+		blocks    []ContentBlock
+		toolCalls []ToolCall
+	)
+
+	flush := func() {
+		content := strings.Join(textParts, "\n\n")
+		if content == "" && len(toolCalls) == 0 && len(blocks) == 0 {
+			return
+		}
+		msgType := "message"
+		if len(toolCalls) > 0 {
+			msgType = "tool_use"
+		}
+		messages = append(messages, ChatMessage{
+			Role:          role,
+			MessageType:   msgType,
+			Content:       content,
+			ContentFormat: detectContentFormat(content),
+			Blocks:        append([]ContentBlock(nil), blocks...),
+			ToolCalls:     append([]ToolCall(nil), toolCalls...),
+		})
+		textParts = nil
+		blocks = nil
+		toolCalls = nil
+	}
+
+	for _, raw := range rawBlocks {
+		blockBytes, err := json.Marshal(raw)
+		if err != nil {
+			continue
+		}
+
+		var block anthropicContentBlock
+		if err := json.Unmarshal(blockBytes, &block); err != nil {
+			continue
+		}
+
+		switch block.Type {
+		case "text":
+			if text := strings.TrimSpace(block.Text); text != "" {
+				textParts = append(textParts, text)
+			}
+		case "thinking":
+			if thinking := strings.TrimSpace(firstNonEmpty(block.Thinking, block.Text)); thinking != "" {
+				blocks = append(blocks, ContentBlock{
+					Kind:   "thinking",
+					Title:  "Thinking",
+					Text:   thinking,
+					Format: detectContentFormat(thinking),
+				})
+			}
+		case "tool_use":
+			if block.ID != "" && block.Name != "" {
+				toolNames[block.ID] = block.Name
+			}
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      block.Name,
+					Arguments: marshalCompact(block.Input),
+				},
+			})
+		case "tool_result":
+			flush()
+			content, resultBlocks := renderAnthropicToolResult(block)
+			messages = append(messages, ChatMessage{
+				Role:          "tool",
+				MessageType:   "tool_result",
+				ToolCallID:    block.ToolUseID,
+				Name:          toolNames[block.ToolUseID],
+				Content:       content,
+				ContentFormat: detectContentFormat(content),
+				Blocks:        resultBlocks,
+				IsError:       block.IsError,
+			})
+		default:
+			appendAnthropicBlock(&textParts, &blocks, block)
+		}
+	}
+
+	flush()
 	return messages
 }
 
@@ -243,11 +462,167 @@ func parseResponsesInputMessage(raw interface{}) (ChatMessage, bool) {
 	}
 }
 
-func parseAIContent(url string, data []byte, isStream bool) (string, string, []ToolCall) {
+func parseAIContent(url string, data []byte, isStream bool) (string, string, []ContentBlock, []ToolCall) {
 	if strings.Contains(url, "/v1/responses") {
 		return parseResponsesOutput(data, isStream)
 	}
-	return parseChatCompletionsOutput(data, isStream)
+	if strings.Contains(url, "/v1/messages") {
+		return parseAnthropicOutput(data, isStream)
+	}
+	content, reasoning, toolCalls := parseChatCompletionsOutput(data, isStream)
+	return content, reasoning, nil, toolCalls
+}
+
+func parseAnthropicOutput(data []byte, isStream bool) (string, string, []ContentBlock, []ToolCall) {
+	if len(data) == 0 {
+		return "", "", nil, nil
+	}
+	if !isStream {
+		return parseAnthropicJSONOutput(data)
+	}
+	return parseAnthropicStreamOutput(data)
+}
+
+func parseAnthropicJSONOutput(data []byte) (string, string, []ContentBlock, []ToolCall) {
+	var resp struct {
+		Content []anthropicContentBlock `json:"content"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return "", "", nil, nil
+	}
+
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		blocks           []ContentBlock
+		toolCalls        []ToolCall
+	)
+	for _, block := range resp.Content {
+		switch block.Type {
+		case "text":
+			contentBuilder.WriteString(block.Text)
+		case "thinking":
+			thinking := firstNonEmpty(block.Thinking, block.Text)
+			reasoningBuilder.WriteString(thinking)
+		case "tool_use":
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      block.Name,
+					Arguments: marshalCompact(block.Input),
+				},
+			})
+		default:
+			appendAnthropicBlock(nil, &blocks, block)
+		}
+	}
+	return contentBuilder.String(), reasoningBuilder.String(), blocks, toolCalls
+}
+
+func parseAnthropicStreamOutput(data []byte) (string, string, []ContentBlock, []ToolCall) {
+	var (
+		blockMap   = map[int]*anthropicStreamBlock{}
+		blockOrder []int
+	)
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+
+		var chunk anthropicStreamChunk
+		if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
+			continue
+		}
+
+		block := ensureAnthropicStreamBlock(blockMap, &blockOrder, chunk.Index)
+		switch chunk.Type {
+		case "content_block_start":
+			block.Type = chunk.ContentBlock.Type
+			block.ID = chunk.ContentBlock.ID
+			block.Name = chunk.ContentBlock.Name
+			if chunk.ContentBlock.Text != "" {
+				block.Text.WriteString(chunk.ContentBlock.Text)
+			}
+			if chunk.ContentBlock.Thinking != "" {
+				block.Text.WriteString(chunk.ContentBlock.Thinking)
+			}
+			if chunk.ContentBlock.Input != nil {
+				block.Input.WriteString(marshalCompact(chunk.ContentBlock.Input))
+			}
+		case "content_block_delta":
+			switch chunk.Delta.Type {
+			case "text_delta":
+				block.Text.WriteString(chunk.Delta.Text)
+			case "thinking_delta":
+				block.Text.WriteString(firstNonEmpty(chunk.Delta.Thinking, chunk.Delta.Text))
+			case "input_json_delta":
+				if block.Input.String() == "{}" {
+					block.Input.Reset()
+				}
+				block.Input.WriteString(chunk.Delta.PartialJSON)
+			}
+		}
+	}
+
+	sort.Ints(blockOrder)
+
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		blocks           []ContentBlock
+		toolCalls        []ToolCall
+	)
+	for _, idx := range blockOrder {
+		block := blockMap[idx]
+		if block == nil {
+			continue
+		}
+		switch block.Type {
+		case "text":
+			contentBuilder.WriteString(block.Text.String())
+		case "thinking":
+			reasoning := block.Text.String()
+			reasoningBuilder.WriteString(reasoning)
+		case "tool_use":
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      block.Name,
+					Arguments: block.Input.String(),
+				},
+			})
+		}
+	}
+	return contentBuilder.String(), reasoningBuilder.String(), blocks, toolCalls
+}
+
+func ensureAnthropicStreamBlock(blockMap map[int]*anthropicStreamBlock, order *[]int, idx int) *anthropicStreamBlock {
+	if block, ok := blockMap[idx]; ok {
+		return block
+	}
+	block := &anthropicStreamBlock{}
+	blockMap[idx] = block
+	*order = append(*order, idx)
+	return block
 }
 
 func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []ToolCall) {
@@ -308,9 +683,9 @@ func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []T
 	return contentBuilder.String(), reasoningBuilder.String(), nil
 }
 
-func parseResponsesOutput(data []byte, isStream bool) (string, string, []ToolCall) {
+func parseResponsesOutput(data []byte, isStream bool) (string, string, []ContentBlock, []ToolCall) {
 	if len(data) == 0 {
-		return "", "", nil
+		return "", "", nil, nil
 	}
 	if !isStream {
 		return parseResponsesJSONOutput(data)
@@ -318,12 +693,12 @@ func parseResponsesOutput(data []byte, isStream bool) (string, string, []ToolCal
 	return parseResponsesStreamOutput(data)
 }
 
-func parseResponsesJSONOutput(data []byte) (string, string, []ToolCall) {
+func parseResponsesJSONOutput(data []byte) (string, string, []ContentBlock, []ToolCall) {
 	var resp struct {
 		Output []responsesOutputItem `json:"output"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return "", "", nil
+		return "", "", nil, nil
 	}
 
 	var (
@@ -357,10 +732,10 @@ func parseResponsesJSONOutput(data []byte) (string, string, []ToolCall) {
 			})
 		}
 	}
-	return contentBuilder.String(), reasoningBuilder.String(), toolCalls
+	return contentBuilder.String(), reasoningBuilder.String(), nil, toolCalls
 }
 
-func parseResponsesStreamOutput(data []byte) (string, string, []ToolCall) {
+func parseResponsesStreamOutput(data []byte) (string, string, []ContentBlock, []ToolCall) {
 	var (
 		contentBuilder   strings.Builder
 		reasoningBuilder strings.Builder
@@ -435,7 +810,7 @@ func parseResponsesStreamOutput(data []byte) (string, string, []ToolCall) {
 			toolCalls = append(toolCalls, *tc)
 		}
 	}
-	return contentBuilder.String(), reasoningBuilder.String(), toolCalls
+	return contentBuilder.String(), reasoningBuilder.String(), nil, toolCalls
 }
 
 func ensureToolCall(toolCallMap map[string]*ToolCall, order *[]string, itemID string) *ToolCall {
@@ -498,6 +873,141 @@ func renderResponseOutput(v interface{}) string {
 	}
 }
 
+func appendAnthropicBlock(textParts *[]string, blocks *[]ContentBlock, block anthropicContentBlock) {
+	switch block.Type {
+	case "text":
+		if textParts != nil {
+			if text := strings.TrimSpace(block.Text); text != "" {
+				*textParts = append(*textParts, text)
+			}
+		}
+	case "thinking":
+		thinking := strings.TrimSpace(firstNonEmpty(block.Thinking, block.Text))
+		if thinking != "" && blocks != nil {
+			*blocks = append(*blocks, ContentBlock{
+				Kind:   "thinking",
+				Title:  "Thinking",
+				Text:   thinking,
+				Format: detectContentFormat(thinking),
+			})
+		}
+	case "input_image", "output_image", "image":
+		if blocks != nil {
+			*blocks = append(*blocks, ContentBlock{
+				Kind:   "image",
+				Title:  anthropicBlockTitle(block.Type),
+				URL:    strings.TrimSpace(block.Data),
+				FileID: block.ID,
+				Meta:   marshalNonEmptyAnthropicMeta(block),
+			})
+		}
+	case "document", "input_file", "output_file", "file":
+		if blocks != nil {
+			*blocks = append(*blocks, ContentBlock{
+				Kind:   "attachment",
+				Title:  anthropicBlockTitle(block.Type),
+				Meta:   marshalNonEmptyAnthropicMeta(block),
+				Format: "json",
+			})
+		}
+	case "tool_result":
+		// handled by caller
+	default:
+		renderedText, renderedBlocks := renderAnthropicRichContent(block.Content)
+		if textParts != nil && strings.TrimSpace(renderedText) != "" {
+			*textParts = append(*textParts, renderedText)
+		}
+		if blocks != nil && len(renderedBlocks) > 0 {
+			*blocks = append(*blocks, renderedBlocks...)
+		}
+		if blocks != nil && strings.TrimSpace(renderedText) == "" && len(renderedBlocks) == 0 {
+			if meta := marshalNonEmptyAnthropicMeta(block); meta != "" {
+				*blocks = append(*blocks, ContentBlock{
+					Kind:   "attachment",
+					Title:  anthropicBlockTitle(block.Type),
+					Meta:   meta,
+					Format: "json",
+				})
+			}
+		}
+	}
+}
+
+func renderAnthropicToolResult(block anthropicContentBlock) (string, []ContentBlock) {
+	body, blocks := renderAnthropicRichContent(block.Content)
+	if body == "" {
+		body = strings.TrimSpace(block.Data)
+	}
+	if !block.IsError {
+		return body, blocks
+	}
+	if body == "" {
+		return "Tool result returned an error.", blocks
+	}
+	return body, blocks
+}
+
+func renderAnthropicRichContent(raw interface{}) (string, []ContentBlock) {
+	switch v := raw.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return strings.TrimSpace(v), nil
+	case []interface{}:
+		var (
+			parts  []string
+			blocks []ContentBlock
+		)
+		for _, item := range v {
+			itemBytes, err := json.Marshal(item)
+			if err != nil {
+				continue
+			}
+			var block anthropicContentBlock
+			if err := json.Unmarshal(itemBytes, &block); err != nil {
+				continue
+			}
+			appendAnthropicBlock(&parts, &blocks, block)
+		}
+		return strings.Join(parts, "\n\n"), blocks
+	default:
+		return "", []ContentBlock{{
+			Kind:   "attachment",
+			Title:  "Structured Content",
+			Meta:   marshalPretty(v),
+			Format: "json",
+		}}
+	}
+}
+
+func anthropicBlockTitle(blockType string) string {
+	switch blockType {
+	case "input_image":
+		return "Input Image"
+	case "output_image":
+		return "Output Image"
+	case "image":
+		return "Image"
+	case "document", "input_file", "output_file", "file":
+		return "Attachment"
+	case "thinking":
+		return "Thinking"
+	default:
+		return "Structured Block"
+	}
+}
+
+func marshalNonEmptyAnthropicMeta(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	raw := marshalPretty(v)
+	if raw == "null" || raw == "{}" || raw == "[]" || strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	return raw
+}
+
 func detectContentFormat(content string) string {
 	trimmed := strings.TrimSpace(content)
 	if trimmed == "" {
@@ -515,6 +1025,14 @@ func detectContentFormat(content string) string {
 
 func marshalPretty(v interface{}) string {
 	b, _ := json.MarshalIndent(v, "", "  ")
+	return string(b)
+}
+
+func marshalCompact(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	b, _ := json.Marshal(v)
 	return string(b)
 }
 

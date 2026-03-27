@@ -82,6 +82,101 @@ func TestParseLogFileResponsesRequestFallbackDoesNotLookLikeEmbedding(t *testing
 	}
 }
 
+func TestParseLogFileAnthropicMessagesRendersConversationAndStreamOutput(t *testing.T) {
+	reqBody := `{"system":"You are helpful.","messages":[{"role":"user","content":[{"type":"text","text":"inspect this repo"}]},{"role":"assistant","content":[{"type":"text","text":"Reading files."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/tmp/README.md"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"# read ok"}]}]}`
+	resBody := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[]}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"final "}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer"}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"thinking","thinking":""}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"inspect logs"}}`,
+		"",
+		"event: content_block_start",
+		`data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_live","name":"Bash","input":{}}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"pwd\"}"}}`,
+		"",
+	}, "\n")
+
+	content := buildRecordFixture(t, "/v1/messages?beta=true", true, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+
+	if len(parsed.ChatMessages) != 4 {
+		t.Fatalf("len(ChatMessages) = %d, want 4", len(parsed.ChatMessages))
+	}
+	if parsed.ChatMessages[0].Role != "system" || parsed.ChatMessages[0].Content != "You are helpful." {
+		t.Fatalf("system message = %+v", parsed.ChatMessages[0])
+	}
+	if parsed.ChatMessages[1].Role != "user" || parsed.ChatMessages[1].Content != "inspect this repo" {
+		t.Fatalf("user message = %+v", parsed.ChatMessages[1])
+	}
+	if parsed.ChatMessages[2].Role != "assistant" || parsed.ChatMessages[2].Content != "Reading files." || len(parsed.ChatMessages[2].ToolCalls) != 1 {
+		t.Fatalf("assistant message = %+v", parsed.ChatMessages[2])
+	}
+	if parsed.ChatMessages[2].ToolCalls[0].Function.Name != "Read" || parsed.ChatMessages[2].ToolCalls[0].Function.Arguments != `{"file_path":"/tmp/README.md"}` {
+		t.Fatalf("assistant tool call = %+v", parsed.ChatMessages[2].ToolCalls[0])
+	}
+	if parsed.ChatMessages[3].Role != "tool" || parsed.ChatMessages[3].ToolCallID != "toolu_1" || parsed.ChatMessages[3].Content != "# read ok" {
+		t.Fatalf("tool result = %+v", parsed.ChatMessages[3])
+	}
+	if parsed.ChatMessages[2].MessageType != "tool_use" {
+		t.Fatalf("assistant message type = %q, want tool_use", parsed.ChatMessages[2].MessageType)
+	}
+	if parsed.AIContent != "final answer" {
+		t.Fatalf("AIContent = %q, want final answer", parsed.AIContent)
+	}
+	if parsed.AIReasoning != "inspect logs" {
+		t.Fatalf("AIReasoning = %q, want inspect logs", parsed.AIReasoning)
+	}
+	if len(parsed.ResponseToolCalls) != 1 {
+		t.Fatalf("len(ResponseToolCalls) = %d, want 1", len(parsed.ResponseToolCalls))
+	}
+	if parsed.ResponseToolCalls[0].ID != "toolu_live" || parsed.ResponseToolCalls[0].Function.Name != "Bash" || parsed.ResponseToolCalls[0].Function.Arguments != `{"command":"pwd"}` {
+		t.Fatalf("ResponseToolCalls[0] = %+v", parsed.ResponseToolCalls[0])
+	}
+}
+
+func TestParseLogFileAnthropicDecoratesThinkingAndToolErrors(t *testing.T) {
+	reqBody := `{"messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"step through the stack"},{"type":"tool_use","id":"toolu_err","name":"Bash","input":{"command":"exit 1"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_err","is_error":true,"content":[{"type":"document","source":{"type":"text","media_type":"text/plain","data":"stacktrace"}}]}]}]}`
+	content := buildRecordFixture(t, "/v1/messages", false, reqBody, `{"content":[{"type":"text","text":"done"}]}`)
+
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if len(parsed.ChatMessages) != 2 {
+		t.Fatalf("len(ChatMessages) = %d, want 2", len(parsed.ChatMessages))
+	}
+	if len(parsed.ChatMessages[0].Blocks) != 1 || parsed.ChatMessages[0].Blocks[0].Kind != "thinking" {
+		t.Fatalf("assistant thinking blocks = %+v", parsed.ChatMessages[0].Blocks)
+	}
+	if !parsed.ChatMessages[1].IsError {
+		t.Fatalf("tool result should be marked as error: %+v", parsed.ChatMessages[1])
+	}
+	if parsed.ChatMessages[1].Name != "Bash" {
+		t.Fatalf("tool result name = %q, want Bash", parsed.ChatMessages[1].Name)
+	}
+	if len(parsed.ChatMessages[1].Blocks) == 0 || parsed.ChatMessages[1].Blocks[0].Kind != "attachment" {
+		t.Fatalf("tool result blocks = %+v", parsed.ChatMessages[1].Blocks)
+	}
+}
+
 func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string, resBody string) []byte {
 	t.Helper()
 

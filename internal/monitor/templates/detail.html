@@ -39,6 +39,7 @@
         .bubble-user { background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%); border: 1px solid #d9e6ef; border-radius: 1.25rem 1.25rem 0 1.25rem; }
         .bubble-assistant { background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.94) 100%); border: 1px solid #e8eef5; border-radius: 0 1.25rem 1.25rem 1.25rem; backdrop-filter: blur(16px); }
         .bubble-tool { background: linear-gradient(180deg, #fffdf7 0%, #fff7e6 100%); border: 1px solid #f7dba4; border-radius: 1rem; }
+        .bubble-tool-error { background: linear-gradient(180deg, #fff8f7 0%, #fff1ef 100%); border: 1px solid #f3b6ad; border-radius: 1rem; }
         .bubble-system { background: linear-gradient(180deg, #f4f7fb 0%, #eef4f8 100%); border: 1px solid #d7e1ea; border-radius: 1rem; }
 
         /* 自动换行控制 */
@@ -70,8 +71,20 @@
         .type-chip { display: inline-flex; align-items: center; padding: 0.16rem 0.42rem; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; background: rgba(15,23,42,0.05); color: #64748b; }
         .assistant-action { border: 1px dashed #b6c6d7; background: linear-gradient(180deg, rgba(250,252,253,0.95) 0%, rgba(245,249,252,0.96) 100%); border-radius: 1rem; padding: 0.95rem 1rem; }
         .tool-output-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-bottom: 0.55rem; margin-bottom: 0.8rem; border-bottom: 1px solid rgba(217,119,6,0.14); }
+        .tool-output-head.error { border-bottom-color: rgba(225,29,72,0.16); }
         .json-panel { background: #101827; color: #dbe7f5; border-radius: 0.85rem; border: 1px solid #26364f; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
         .json-panel pre { margin: 0; padding: 1rem; overflow-x: auto; font-size: 12px; line-height: 1.55; }
+        .claude-block-stack { display: grid; gap: 0.8rem; margin-top: 0.85rem; }
+        .claude-block { position: relative; overflow: hidden; border-radius: 0.95rem; border: 1px solid #d7e1ea; background: linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(247,250,252,0.96) 100%); box-shadow: 0 12px 28px -24px rgba(15,23,42,0.45); }
+        .claude-block::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: linear-gradient(180deg, rgba(14,116,144,0.85), rgba(16,185,129,0.55)); }
+        .claude-block-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.72rem 0.95rem; border-bottom: 1px solid rgba(148,163,184,0.15); background: rgba(248,250,252,0.8); }
+        .claude-block-body { padding: 0.95rem; }
+        .claude-block-thinking::before { background: linear-gradient(180deg, rgba(79,70,229,0.88), rgba(59,130,246,0.58)); }
+        .claude-block-image::before { background: linear-gradient(180deg, rgba(2,132,199,0.88), rgba(6,182,212,0.58)); }
+        .claude-block-attachment::before { background: linear-gradient(180deg, rgba(15,118,110,0.88), rgba(34,197,94,0.55)); }
+        .claude-error-banner { display: inline-flex; align-items: center; gap: 0.45rem; margin-bottom: 0.8rem; padding: 0.38rem 0.6rem; border-radius: 999px; background: rgba(225,29,72,0.08); color: #be123c; border: 1px solid rgba(225,29,72,0.15); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+        .media-link { display: inline-flex; align-items: center; gap: 0.45rem; color: #0369a1; font-size: 12px; font-weight: 600; }
+        .meta-note { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.18rem 0.45rem; border-radius: 999px; font-size: 10px; font-weight: 700; color: #64748b; background: rgba(148,163,184,0.12); }
         .response-stack { position: relative; }
         .response-stack::before { content: ''; position: absolute; left: 12px; top: 22px; bottom: 22px; width: 1px; background: linear-gradient(180deg, rgba(16,185,129,0.35), rgba(15,118,110,0.06)); }
         .response-step { position: relative; padding-left: 2.4rem; }
@@ -124,18 +137,50 @@
                     </div>
 
                     {{if eq .Role "tool"}}
-                        <div class="bubble-tool px-5 py-4 shadow-sm w-[90%]">
-                            <div class="tool-output-head">
-                                <div class="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase tracking-tight">
+                        <div class="{{if .IsError}}bubble-tool-error{{else}}bubble-tool{{end}} px-5 py-4 shadow-sm w-[90%]">
+                            <div class="tool-output-head {{if .IsError}}error{{end}}">
+                                <div class="flex items-center gap-2 {{if .IsError}}text-rose-700{{else}}text-amber-700{{end}} font-bold text-xs uppercase tracking-tight">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" stroke-width="2"/></svg>
-                                    Tool Output
+                                    {{if .IsError}}Tool Error{{else}}Tool Output{{end}}
                                 </div>
-                                {{if .Name}}<span class="text-[11px] font-mono text-amber-800/80">{{.Name}}</span>{{end}}
+                                {{if .Name}}<span class="text-[11px] font-mono {{if .IsError}}text-rose-800/80{{else}}text-amber-800/80{{end}}">{{.Name}}</span>{{end}}
                             </div>
+                            {{if .IsError}}
+                            <div class="claude-error-banner">
+                                <span>Failure</span>
+                                <span class="opacity-70 font-mono">{{.ToolCallID}}</span>
+                            </div>
+                            {{end}}
                             {{if eq .ContentFormat "json"}}
                             <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
-                            {{else}}
+                            {{else if .Content}}
                             <div class="font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all text-amber-900">{{.Content}}</div>
+                            {{end}}
+                            {{if .Blocks}}
+                            <div class="claude-block-stack">
+                                {{range $bIndex, $block := .Blocks}}
+                                <div class="claude-block claude-block-{{$block.Kind}}">
+                                    <div class="claude-block-header">
+                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
+                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
+                                    </div>
+                                    <div class="claude-block-body">
+                                        {{if $block.URL}}
+                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
+                                        {{end}}
+                                        {{if eq $block.Format "json"}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{else if $block.Text}}
+                                        <div class="markdown-body" id="msg-block-{{$index}}-{{$bIndex}}"></div>
+                                        <textarea class="hidden" id="raw-msg-block-{{$index}}-{{$bIndex}}">{{$block.Text}}</textarea>
+                                        {{end}}
+                                        {{if and $block.Meta (ne $block.Format "json")}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{end}}
+                                    </div>
+                                </div>
+                                {{end}}
+                            </div>
                             {{end}}
                         </div>
                     {{else if .ToolCalls}}
@@ -147,6 +192,32 @@
                             {{if .Content}}
                             <div class="bubble-{{.Role}} px-5 py-4 shadow-sm markdown-body mb-3" id="msg-{{$index}}"></div>
                             <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
+                            {{end}}
+                            {{if .Blocks}}
+                            <div class="claude-block-stack {{if .Content}}mb-3{{end}}">
+                                {{range $bIndex, $block := .Blocks}}
+                                <div class="claude-block claude-block-{{$block.Kind}}">
+                                    <div class="claude-block-header">
+                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
+                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
+                                    </div>
+                                    <div class="claude-block-body">
+                                        {{if $block.URL}}
+                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
+                                        {{end}}
+                                        {{if eq $block.Format "json"}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{else if $block.Text}}
+                                        <div class="markdown-body" id="msg-block-{{$index}}-{{$bIndex}}"></div>
+                                        <textarea class="hidden" id="raw-msg-block-{{$index}}-{{$bIndex}}">{{$block.Text}}</textarea>
+                                        {{end}}
+                                        {{if and $block.Meta (ne $block.Format "json")}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{end}}
+                                    </div>
+                                </div>
+                                {{end}}
+                            </div>
                             {{end}}
                             <div class="w-full">
                                 {{range .ToolCalls}}
@@ -164,8 +235,34 @@
                         <div class="bubble-{{if eq .Role "system"}}system{{else}}{{.Role}}{{end}} px-5 py-4 shadow-sm max-w-[90%] {{if eq .ContentFormat "json"}}font-mono{{else}}markdown-body{{end}}">
                             {{if eq .ContentFormat "json"}}
                             <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
-                            {{else}}
+                            {{else if .Content}}
                             <div id="msg-{{$index}}"></div>
+                            {{end}}
+                            {{if .Blocks}}
+                            <div class="claude-block-stack {{if .Content}}mt-4{{end}}">
+                                {{range $bIndex, $block := .Blocks}}
+                                <div class="claude-block claude-block-{{$block.Kind}}">
+                                    <div class="claude-block-header">
+                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
+                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
+                                    </div>
+                                    <div class="claude-block-body">
+                                        {{if $block.URL}}
+                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
+                                        {{end}}
+                                        {{if eq $block.Format "json"}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{else if $block.Text}}
+                                        <div class="markdown-body" id="msg-block-{{$index}}-{{$bIndex}}"></div>
+                                        <textarea class="hidden" id="raw-msg-block-{{$index}}-{{$bIndex}}">{{$block.Text}}</textarea>
+                                        {{end}}
+                                        {{if and $block.Meta (ne $block.Format "json")}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{end}}
+                                    </div>
+                                </div>
+                                {{end}}
+                            </div>
                             {{end}}
                         </div>
                         <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
@@ -207,8 +304,39 @@
                         </div>
                         {{end}}
 
-                        <div class="response-step">
+                        {{if .AIBlocks}}
+                        <div class="mb-6 space-y-3 response-step">
                             <span class="response-dot">{{if .AIReasoning}}{{if .ResponseToolCalls}}3{{else}}2{{end}}{{else}}{{if .ResponseToolCalls}}2{{else}}1{{end}}{{end}}</span>
+                            <div class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Artifacts</div>
+                            <div class="claude-block-stack">
+                                {{range $bIndex, $block := .AIBlocks}}
+                                <div class="claude-block claude-block-{{$block.Kind}}">
+                                    <div class="claude-block-header">
+                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
+                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
+                                    </div>
+                                    <div class="claude-block-body">
+                                        {{if $block.URL}}
+                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
+                                        {{end}}
+                                        {{if eq $block.Format "json"}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{else if $block.Text}}
+                                        <div class="markdown-body" id="ai-block-{{$bIndex}}"></div>
+                                        <textarea class="hidden" id="raw-ai-block-{{$bIndex}}">{{$block.Text}}</textarea>
+                                        {{end}}
+                                        {{if and $block.Meta (ne $block.Format "json")}}
+                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{end}}
+                                    </div>
+                                </div>
+                                {{end}}
+                            </div>
+                        </div>
+                        {{end}}
+
+                        <div class="response-step">
+                            <span class="response-dot">{{if .AIReasoning}}{{if .ResponseToolCalls}}{{if .AIBlocks}}4{{else}}3{{end}}{{else}}{{if .AIBlocks}}3{{else}}2{{end}}{{end}}{{else}}{{if .ResponseToolCalls}}{{if .AIBlocks}}3{{else}}2{{end}}{{else}}{{if .AIBlocks}}2{{else}}1{{end}}{{end}}{{end}}</span>
                             <div class="markdown-body" id="md-response"></div>
                         </div>
                         <textarea id="raw-ai" class="hidden">{{.AIContent}}</textarea>
@@ -266,8 +394,17 @@
         function renderAllContent() {
             // 渲染所有历史消息 Markdown
             document.querySelectorAll('[id^="raw-msg-"]').forEach(rawEl => {
+                if (rawEl.id.startsWith('raw-msg-block-')) return;
                 const index = rawEl.id.replace('raw-msg-', '');
                 const targetEl = document.getElementById('msg-' + index);
+                if (targetEl && rawEl.value) {
+                    targetEl.innerHTML = marked.parse(rawEl.value);
+                }
+            });
+
+            document.querySelectorAll('[id^="raw-msg-block-"]').forEach(rawEl => {
+                const index = rawEl.id.replace('raw-msg-block-', '');
+                const targetEl = document.getElementById('msg-block-' + index);
                 if (targetEl && rawEl.value) {
                     targetEl.innerHTML = marked.parse(rawEl.value);
                 }
@@ -279,6 +416,14 @@
 
             const aiRaw = document.getElementById('raw-ai');
             if (aiRaw) document.getElementById('md-response').innerHTML = marked.parse(aiRaw.value);
+
+            document.querySelectorAll('[id^="raw-ai-block-"]').forEach(rawEl => {
+                const index = rawEl.id.replace('raw-ai-block-', '');
+                const targetEl = document.getElementById('ai-block-' + index);
+                if (targetEl && rawEl.value) {
+                    targetEl.innerHTML = marked.parse(rawEl.value);
+                }
+            });
 
             hljs.highlightAll();
         }
