@@ -1,3 +1,4 @@
 config/config.dev.yaml
 __debug*
 logs/
+llm-tracelab

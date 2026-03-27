@@ -179,10 +179,10 @@
                 <td class="px-6 py-4">
                   <div class="flex flex-col">
                     <span class="text-sm font-semibold text-slate-700"
-                      >{{.Meta.Time.Format "15:04:05"}}</span
+                      >{{.Header.Meta.Time.Format "15:04:05"}}</span
                     >
                     <span class="text-[10px] text-slate-400 font-medium"
-                      >{{.Meta.Time.Format "Jan 02, 2006"}}</span
+                      >{{.Header.Meta.Time.Format "Jan 02, 2006"}}</span
                     >
                   </div>
                 </td>
@@ -191,9 +191,9 @@
                     <span
                       class="font-mono text-[13px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 self-start"
                     >
-                      {{.Meta.Model}}
+                      {{.Header.Meta.Model}}
                     </span>
-                    {{if .Layout.IsStream}}
+                    {{if .Header.Layout.IsStream}}
                     <div
                       class="flex items-center text-[9px] font-bold text-indigo-500 uppercase tracking-[0.15em]"
                     >
@@ -215,7 +215,7 @@
                   </div>
                 </td>
                 <td class="px-6 py-4 text-center">
-                  {{if eq .Meta.StatusCode 200}}
+                  {{if eq .Header.Meta.StatusCode 200}}
                   <span
                     class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100"
                   >
@@ -236,7 +236,7 @@
                   <span
                     class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-100"
                   >
-                    {{.Meta.StatusCode}} ERROR
+                    {{.Header.Meta.StatusCode}} ERROR
                   </span>
                   {{end}}
                 </td>
@@ -248,14 +248,14 @@
                         >TTFT</span
                       >
                       <span class="font-mono text-sm text-slate-700"
-                        >{{if gt .Meta.TTFTMs 0}}{{ .Meta.TTFTMs
+                        >{{if gt .Header.Meta.TTFTMs 0}}{{ .Header.Meta.TTFTMs
                         }}ms{{else}}-{{end}}</span
                       >
                     </div>
                     <div class="flex items-center gap-2 text-slate-400">
                       <span class="text-[10px] font-bold uppercase">Total</span>
                       <span class="font-mono text-[13px]"
-                        >{{.Meta.DurationMs}}ms</span
+                        >{{.Header.Meta.DurationMs}}ms</span
                       >
                     </div>
                   </div>
@@ -281,7 +281,7 @@
                         />
                       </svg>
                       <span class="font-mono font-bold"
-                        >{{.Usage.PromptTokens}}</span
+                        >{{.Header.Usage.PromptTokens}}</span
                       >
                     </div>
 
@@ -304,7 +304,7 @@
                         />
                       </svg>
                       <span class="font-mono font-bold"
-                        >{{.Usage.CompletionTokens}}</span
+                        >{{.Header.Usage.CompletionTokens}}</span
                       >
                     </div>
 
@@ -327,7 +327,7 @@
                         />
                       </svg>
                       <span class="font-mono text-xs font-semibold"
-                        >{{.Usage.TotalTokens}}</span
+                        >{{.Header.Usage.TotalTokens}}</span
                       >
                     </div>
 
@@ -350,11 +350,11 @@
                         />
                       </svg>
                       <span class="font-mono font-bold">
-                        {{if and .Usage.PromptTokenDetails
-                        .Usage.PromptTokenDetails.CachedTokens}}
-                        {{.Usage.PromptTokenDetails.CachedTokens}} {{else if and
-                        .Usage.PromptTokenDetails (eq
-                        .Usage.PromptTokenDetails.CachedTokens 0)}} 0 {{else}} -
+                        {{if and .Header.Usage.PromptTokenDetails
+                        .Header.Usage.PromptTokenDetails.CachedTokens}}
+                        {{.Header.Usage.PromptTokenDetails.CachedTokens}} {{else if and
+                        .Header.Usage.PromptTokenDetails (eq
+                        .Header.Usage.PromptTokenDetails.CachedTokens 0)}} 0 {{else}} -
                         {{end}}
                       </span>
                     </div>

@@ -170,6 +170,12 @@
                     <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-500 uppercase">Header JSON</div>
                     <div class="p-6 overflow-x-auto font-mono text-xs"><pre><code class="language-json">{{json .Header}}</code></pre></div>
                 </div>
+                {{if .Events}}
+                <div class="code-window shadow-sm mt-6">
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-500 uppercase">Prelude Events</div>
+                    <div class="p-6 overflow-x-auto font-mono text-xs"><pre><code class="language-json">{{json .Events}}</code></pre></div>
+                </div>
+                {{end}}
             </div>
         </div>
     </main>

@@ -2,109 +2,216 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)](https://golang.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
-[![Go CI](https://github.com/kingfs/llm-tracelab/actions/workflows/ci.yml/badge.svg)](https://github.com/kingfs/llm-tracelab/actions/workflows/ci.yml)
 
-[English Version](./README_EN.md) | **中文说明**
+**中文说明** | [English](./README_EN.md)
 
-`llm-tracelab` 是一个专为大语言模型（LLM）API 设计的记录与回放工具。它的初衷是将会话请求录制为本地 `.http` 文件，并将其作为单元测试的输入，同时提供了一个简单的 Web UI 用于可视化查看。
+`llm-tracelab` 是一个面向 OpenAI Compatible API 的 LLM 录制与回放代理。它的核心目标很直接：
 
----
+- 开发时把真实大模型 HTTP 请求录下来
+- 单元测试时直接回放，不再依赖外网和真实模型
+- 让测试更稳定、更快、更省钱
 
-## 📖 核心特性
+项目定位接近 `http record/replay`，但针对 LLM 场景补了流式响应、Token usage、可视化查看和故障注入能力。
 
-- 🚀 **零侵入记录**：作为代理运行，透明拦截并记录所有 LLM API 请求。
-- 📦 **标准格式**：记录为带有元数据的准 HTTP 报文格式（`.http`），方便二次处理。
-- 🧪 **单元测试友好**：参考 `httprr` 思路，提供 `replay.Transport`，可轻松将录制的文件作为测试 Mock 输入。
-- 🖥️ **内置可视化**：内置简单的 Monitor Dashboard，直观展示请求详情、Token 消耗、TTFT 等指标。
-- 🎭 **混沌工程**：支持按概率注入延迟或错误，用于测试生产环境的异常处理。
+## 适合什么场景
 
-## 🏗️ 项目架构
+- 给 SDK 或业务代码做高可靠单元测试
+- 复现线上 prompt / tool call / stream 问题
+- 统计模型调用耗时、TTFT、Token 消耗
+- 在本地做 LLM API 代理调试和混沌测试
 
-```mermaid
-graph LR
-    User([用户/SDK]) --> Proxy[llm-tracelab Proxy]
-    Proxy -->|记录| Disk[(.http 日志文件)]
-    Proxy -->|转发| Upstream[LLM Upstream API]
-    Disk -->|解析| Monitor[Monitor UI]
-    Disk -->|回放| Unittest[Go Unit Test]
+## 核心能力
+
+- 透明代理 OpenAI compatible 请求
+- 将一次请求/响应保存为本地 `.http` cassette
+- 使用 `pkg/replay.Transport` 在测试中直接回放
+- Monitor 页面查看请求详情、原始协议和 Token 消耗
+- 使用 SQLite 维护 metadata 索引，避免统计页每次全量读文件
+- 支持对旧版 V2 记录文件兼容读取
+
+## 项目结构
+
+```text
+cmd/server            服务入口
+internal/proxy        代理转发、stream 注入、响应拦截
+internal/recorder     .http 录制与落盘
+internal/store        SQLite 元数据索引
+internal/monitor      Monitor UI 与详情解析
+pkg/recordfile        录制文件格式 V2/V3 解析与 V3 写入
+pkg/replay            单元测试回放 Transport
+pkg/llm               多厂商请求/响应归一化
 ```
 
-## 🚀 快速开始
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)。
 
-### 1. 安装 (二进制)
-```bash
-go build -o llm-tracelab ./cmd/server
+## 录制文件与索引
+
+当前写入格式是 `LLM_PROXY_V3`：
+
+1. 文件前导包含紧凑元数据行，而不是固定 2KB 占位行
+2. 原始 HTTP request/response 仍然完整保留，方便人工排查
+3. 请求摘要、耗时、Token、文件路径等会同步索引到 `trace_index.sqlite3`
+
+默认存储布局：
+
+```text
+logs/
+  trace_index.sqlite3
+  <upstream-host>/<model>/<yyyy>/<mm>/<dd>/*.http
 ```
 
-### 2. Docker
-你可以直接使用 Docker 镜像：
-```bash
-docker pull kingfs/llm-tracelab:latest
-docker run -d -p 8080:8080 -p 8081:8081 -v ./config:/app/config kingfs/llm-tracelab:latest
-```
+## 快速开始
 
-### 3. 配置
-编辑 `config/config.yaml`：
+### 1. 配置
+
+编辑 [config/config.yaml](./config/config.yaml)：
+
 ```yaml
 server:
-  port: "8080"      # 代理端口
+  port: "8080"
+
 monitor:
-  port: "8081"      # 看板端口
+  port: "8081"
+
 upstream:
   base_url: "https://api.openai.com"
-  api_key: "your-api-key"
+  api_key: "sk-xxx"
+
+debug:
+  output_dir: "./logs"
+  mask_key: false
 ```
 
-### 3. 运行
+支持的环境变量覆盖：
+
+- `LLM_TRACELAB_SERVER_PORT`
+- `LLM_TRACELAB_MONITOR_PORT`
+- `LLM_TRACELAB_UPSTREAM_BASE_URL`
+- `LLM_TRACELAB_UPSTREAM_API_KEY`
+- `LLM_TRACELAB_OUTPUT_DIR`
+- `LLM_TRACELAB_MASK_KEY`
+
+### 2. 构建和运行
+
+推荐使用 `go-task`：
+
 ```bash
-./llm-tracelab -c config/config.yaml
+task build
+task run
+task migrate
 ```
 
-将你的 SDK BaseURL 指向 `http://localhost:8080` 即可开始记录。
+如果只想直接运行：
 
-## 🧪 单元测试回放
+```bash
+go run ./cmd/server -c config/config.yaml
+```
 
-你可以使用录制好的 `.http` 文件在没有网络的情况下运行测试：
+把你的 SDK `base_url` 指向 `http://localhost:8080/v1` 后，请求就会被代理并录制。
+
+### 3. 打开 Monitor
+
+访问 `http://localhost:8081`。
+
+## 老日志迁移与索引重建
+
+显式迁移命令：
+
+```bash
+go run ./cmd/server migrate -c config/config.yaml
+```
+
+这个命令默认会做两件事：
+
+- 将旧的 `LLM_PROXY_V2` `.http` 文件原地改写成 `LLM_PROXY_V3`
+- 清空并重建 `trace_index.sqlite3`
+
+如果只想做其中一部分：
+
+```bash
+go run ./cmd/server migrate -c config/config.yaml -rewrite-v2=false
+go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
+```
+
+适合老日志目录批量升级，或者 SQLite 索引损坏/丢失后的全量恢复。
+
+## Docker / Compose
+
+容器内约定的标准路径：
+
+- 配置文件：`/etc/llm-tracelab/config.yaml`
+- 数据目录：`/var/lib/llm-tracelab/traces`
+- SQLite 索引：`/var/lib/llm-tracelab/traces/trace_index.sqlite3`
+
+默认提供：
+
+- [Dockerfile](./Dockerfile)
+- [docker-compose.yml](./docker-compose.yml)
+- [config/config.docker.yaml](./config/config.docker.yaml)
+
+启动方式：
+
+```bash
+export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
+docker compose up --build
+```
+
+默认挂载：
+
+- `./config/config.docker.yaml -> /etc/llm-tracelab/config.yaml:ro`
+- `./docker-data -> /var/lib/llm-tracelab`
+
+如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖 `upstream`、端口、输出目录；`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
+
+## 开发命令
+
+```bash
+task fmt
+task lint
+task test
+task build
+task run
+task migrate
+task check
+task docker:build
+task docker:up
+```
+
+## 在单元测试中回放
 
 ```go
 func TestChat(t *testing.T) {
-    // 使用录制的文件初始化回放 Transport
     tr := replay.NewTransport("testdata/chat.http")
-    
-    config := openai.DefaultConfig("fake-key")
-    config.HTTPClient = &http.Client{Transport: tr}
-    client := openai.NewClientWithConfig(config)
 
-    resp, err := client.CreateChatCompletion(context.Background(), ...)
-    // ... 验证结果
+    cfg := openai.DefaultConfig("fake-key")
+    cfg.BaseURL = "http://localhost/v1"
+    cfg.HTTPClient = &http.Client{Transport: tr}
+
+    client := openai.NewClientWithConfig(cfg)
+    resp, err := client.CreateChatCompletion(context.Background(), req)
+    _ = resp
+    _ = err
 }
 ```
 
-## 运行截图
+## 当前设计原则
 
-* 简易监控页面
-![](./images/traffic_monitor.png)
+- `.http` cassette 是回放的事实来源
+- SQLite 只做 metadata 索引，不替代原始文件
+- 新文件写 V3，旧文件继续兼容读取
+- 尽量保持文件可读、测试离线、实现本地优先
 
-* 消息内容
-![](./images/message_detail.png)
+## 截图
 
-* 原始SSE消息
-![](./images/sse_message_raw.png)
+- Monitor 总览
+  ![](./images/traffic_monitor.png)
+- 对话详情
+  ![](./images/message_detail.png)
+- SSE 原始流
+  ![](./images/sse_message_raw.png)
+- 非流式响应
+  ![](./images/message_raw.png)
 
-* 非流式消息
-![](./images/message_raw.png)
+## License
 
-## 🛠️ 开发进度
-
-- [x] 核心代理逻辑
-- [x] SSE 流式解析与 Token 嗅探
-- [x] HTTP V2 增强格式录制
-- [x] Monitor Dashboard (List & Detail)
-- [x] Replay Transport (用于单元测试)
-- [x] GitHub Actions CI & Templates
-- [ ] 更多模型的适配 (Claude, Gemini 等)
-
-## 📄 开源协议
-
-基于 [MIT License](./LICENSE) 开源。
-
+[MIT](./LICENSE)

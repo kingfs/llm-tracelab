@@ -1,17 +1,14 @@
 package unittest
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -22,57 +19,13 @@ func loadRecordedHTTP(path string) (req string, resp string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	reader := bytes.NewReader(content)
-	bufReader := bufio.NewReader(reader)
-
-	// 1. 读取第一行 Header JSON
-	line1, err := bufReader.ReadString('\n')
+	parsed, err := recordfile.ParsePrelude(content)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to read header line: %w", err)
+		return "", "", err
 	}
-
-	var header recorder.RecordHeader
-	if err := json.Unmarshal([]byte(line1), &header); err != nil {
-		return "", "", fmt.Errorf("invalid header json: %w", err)
-	}
-
-	// 2. 提取 Full Request (Header + Body)
-	// Base Offset = 2048
-	baseOffset := int64(recorder.HeaderLen)
-
-	reqEndOffset := baseOffset + header.Layout.ReqHeaderLen + header.Layout.ReqBodyLen
-	if reqEndOffset > int64(len(content)) {
-		reqEndOffset = int64(len(content))
-	}
-
-	// reqFullBytes := content[baseOffset:reqEndOffset]
-
-	// 提取 Request Body 用于解析 Messages
-	// Body Start = Base + ReqHeaderLen
-	reqBodyStart := baseOffset + header.Layout.ReqHeaderLen
-	reqBodyBytes := content[reqBodyStart:reqEndOffset]
+	_, reqBodyBytes, _, resBodyBytes := recordfile.ExtractSections(content, parsed)
 	req = string(reqBodyBytes)
-
-	// 3. 提取 Full Response (Header + Body)
-	// Base = ReqEnd + 1 (\n)
-	resStartOffset := reqEndOffset + 1
-
-	// var resFullBytes []byte
-	var resBodyBytes []byte
-
-	if resStartOffset < int64(len(content)) {
-		// Response Header + Body
-		// resFullBytes = content[resStartOffset:]
-
-		// Response Body Only (for AI content parsing)
-		// Body Start = ResStart + ResHeaderLen
-		resBodyStart := resStartOffset + header.Layout.ResHeaderLen
-		if resBodyStart < int64(len(content)) {
-			resBodyBytes = content[resBodyStart:]
-		}
-	}
 	resp = string(resBodyBytes)
-
 	return req, resp, nil
 }
 

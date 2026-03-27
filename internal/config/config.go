@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -51,5 +52,29 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	applyEnvOverrides(&cfg)
 	return &cfg, nil
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("LLM_TRACELAB_SERVER_PORT"); v != "" {
+		cfg.Server.Port = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_MONITOR_PORT"); v != "" {
+		cfg.Monitor.Port = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
+		cfg.Upstream.BaseURL = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_KEY"); v != "" {
+		cfg.Upstream.ApiKey = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
+		cfg.Debug.OutputDir = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_MASK_KEY"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Debug.MaskKey = parsed
+		}
+	}
 }

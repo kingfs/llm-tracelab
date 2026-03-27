@@ -1,0 +1,62 @@
+version: "3"
+
+vars:
+  BIN: llm-tracelab
+  CONFIG: config/config.yaml
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - gofmt -w ./cmd ./internal ./pkg ./unittest
+
+  lint:
+    desc: Run lightweight static checks
+    cmds:
+      - go vet ./...
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  build:
+    desc: Build server binary
+    cmds:
+      - go build -o {{.BIN}} ./cmd/server
+
+  migrate:
+    desc: Rewrite legacy V2 cassettes to V3 and rebuild SQLite index
+    cmds:
+      - go run ./cmd/server migrate -c {{.CONFIG}}
+
+  run:
+    desc: Start proxy and monitor with local config
+    cmds:
+      - go run ./cmd/server -c {{.CONFIG}}
+
+  docker:build:
+    desc: Build Docker image
+    cmds:
+      - docker build -t llm-tracelab:local .
+
+  docker:up:
+    desc: Start llm-tracelab with docker compose
+    cmds:
+      - docker compose up --build
+
+  check:
+    desc: Run formatting, lint, and tests
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+
+  clean:
+    desc: Remove local build artifact
+    cmds:
+      - rm -f {{.BIN}}

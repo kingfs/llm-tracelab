@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
 // ParsedData 提供给 UI 的完整数据结构
 type ParsedData struct {
-	Header recorder.RecordHeader
+	Header recordfile.RecordHeader
+	Events []recordfile.RecordEvent
 	// Raw Full Content (Header + Body)
 	ReqFull string
 	ResFull string
@@ -46,56 +47,14 @@ type chatRequest struct {
 	Documents []string    `json:"documents"` // Reranker
 }
 
-// ParseLogFile 解析 V2 格式的日志文件
+// ParseLogFile 解析 V2/V3 格式的日志文件
 func ParseLogFile(content []byte) (*ParsedData, error) {
-	reader := bytes.NewReader(content)
-	bufReader := bufio.NewReader(reader)
-
-	// 1. 读取第一行 Header JSON
-	line1, err := bufReader.ReadString('\n')
+	parsed, err := recordfile.ParsePrelude(content)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read header line: %w", err)
+		return nil, fmt.Errorf("invalid header: %w", err)
 	}
-
-	var header recorder.RecordHeader
-	if err := json.Unmarshal([]byte(line1), &header); err != nil {
-		return nil, fmt.Errorf("invalid header json: %w", err)
-	}
-
-	// 2. 提取 Full Request (Header + Body)
-	// Base Offset = 2048
-	baseOffset := int64(recorder.HeaderLen)
-
-	reqEndOffset := baseOffset + header.Layout.ReqHeaderLen + header.Layout.ReqBodyLen
-	if reqEndOffset > int64(len(content)) {
-		reqEndOffset = int64(len(content))
-	}
-
-	// reqFullBytes := content[baseOffset:reqEndOffset]
-
-	// 提取 Request Body 用于解析 Messages
-	// Body Start = Base + ReqHeaderLen
-	reqBodyStart := baseOffset + header.Layout.ReqHeaderLen
-	reqBodyBytes := content[reqBodyStart:reqEndOffset]
-
-	// 3. 提取 Full Response (Header + Body)
-	// Base = ReqEnd + 1 (\n)
-	resStartOffset := reqEndOffset + 1
-
-	// var resFullBytes []byte
-	var resBodyBytes []byte
-
-	if resStartOffset < int64(len(content)) {
-		// Response Header + Body
-		// resFullBytes = content[resStartOffset:]
-
-		// Response Body Only (for AI content parsing)
-		// Body Start = ResStart + ResHeaderLen
-		resBodyStart := resStartOffset + header.Layout.ResHeaderLen
-		if resBodyStart < int64(len(content)) {
-			resBodyBytes = content[resBodyStart:]
-		}
-	}
+	header := parsed.Header
+	reqFullBytes, reqBodyBytes, resFullBytes, resBodyBytes := recordfile.ExtractSections(content, parsed)
 
 	// 4. 解析 Request (自适应 Chat / Embedding / Reranker)
 	var reqRaw chatRequest
@@ -129,8 +88,9 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 
 	return &ParsedData{
 		Header:       header,
-		ReqFull:      string(content[:reqEndOffset]), // 简化处理，为了展示
-		ResFull:      string(content[resStartOffset:]),
+		Events:       parsed.Events,
+		ReqFull:      string(reqFullBytes),
+		ResFull:      string(resFullBytes),
 		ChatMessages: messages,
 		AIContent:    contentStr,
 		AIReasoning:  reasoningStr,

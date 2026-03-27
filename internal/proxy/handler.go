@@ -17,6 +17,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/chaos"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/store"
 )
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
@@ -271,13 +272,13 @@ type Handler struct {
 	cfg          *config.Config
 }
 
-func NewHandler(cfg *config.Config) (*Handler, error) {
+func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 	targetURL, err := url.Parse(cfg.Upstream.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid upstream url: %w", err)
 	}
 
-	rec := recorder.New(cfg.Debug.OutputDir, cfg.Debug.MaskKey)
+	rec := recorder.New(cfg.Debug.OutputDir, cfg.Debug.MaskKey, st)
 	cm := chaos.New(cfg)
 
 	rp := httputil.NewSingleHostReverseProxy(targetURL)
@@ -333,7 +334,7 @@ func NewHandler(cfg *config.Config) (*Handler, error) {
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error("Proxy error", "err", err)
 		if logInfo, ok := r.Context().Value("LogInfo").(*recorder.LogInfo); ok && logInfo != nil {
-			logInfo.File.Close()
+			logInfo.Header.Meta.Error = err.Error()
 		}
 		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
 	}
