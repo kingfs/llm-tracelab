@@ -216,13 +216,15 @@ func extractUsageFromTail(data []byte, target *recorder.UsageInfo) {
 }
 
 type compatibleUsage struct {
-	PromptTokens       int                            `json:"prompt_tokens"`
-	CompletionTokens   int                            `json:"completion_tokens"`
-	TotalTokens        int                            `json:"total_tokens"`
-	InputTokens        int                            `json:"input_tokens"`
-	OutputTokens       int                            `json:"output_tokens"`
-	InputTokenDetails  *recordfile.PromptTokenDetails `json:"input_tokens_details,omitempty"`
-	PromptTokenDetails *recordfile.PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
+	PromptTokens             int                            `json:"prompt_tokens"`
+	CompletionTokens         int                            `json:"completion_tokens"`
+	TotalTokens              int                            `json:"total_tokens"`
+	InputTokens              int                            `json:"input_tokens"`
+	OutputTokens             int                            `json:"output_tokens"`
+	CacheCreationInputTokens int                            `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                            `json:"cache_read_input_tokens"`
+	InputTokenDetails        *recordfile.PromptTokenDetails `json:"input_tokens_details,omitempty"`
+	PromptTokenDetails       *recordfile.PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
 }
 
 func (u compatibleUsage) toRecordUsage() (recorder.UsageInfo, bool) {
@@ -231,10 +233,18 @@ func (u compatibleUsage) toRecordUsage() (recorder.UsageInfo, bool) {
 	promptDetails := u.PromptTokenDetails
 
 	if promptTokens == 0 && completionTokens == 0 && (u.InputTokens > 0 || u.OutputTokens > 0) {
-		promptTokens = u.InputTokens
+		// Normalize Anthropic/OpenAI Responses style usage into the shared
+		// prompt/completion layout. For Anthropic, cached prompt tokens are
+		// reported separately and need to be folded back into prompt_tokens.
+		promptTokens = u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 		completionTokens = u.OutputTokens
 		if promptDetails == nil {
 			promptDetails = u.InputTokenDetails
+		}
+		if promptDetails == nil && (u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0) {
+			promptDetails = &recordfile.PromptTokenDetails{
+				CachedTokens: u.CacheReadInputTokens,
+			}
 		}
 	}
 

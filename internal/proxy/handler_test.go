@@ -33,6 +33,21 @@ func TestExtractUsageFromJSONResponsesCompletedEvent(t *testing.T) {
 	}
 }
 
+func TestExtractUsageFromJSONAnthropicMessageDelta(t *testing.T) {
+	data := []byte(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":17430,"output_tokens":194,"cache_read_input_tokens":18560}}`)
+
+	usage, ok := extractUsageFromJSON(data)
+	if !ok {
+		t.Fatal("extractUsageFromJSON() ok = false, want true")
+	}
+	if usage.PromptTokens != 35990 || usage.CompletionTokens != 194 || usage.TotalTokens != 36184 {
+		t.Fatalf("usage = %+v, want prompt=35990 completion=194 total=36184", usage)
+	}
+	if usage.PromptTokenDetails == nil || usage.PromptTokenDetails.CachedTokens != 18560 {
+		t.Fatalf("PromptTokenDetails = %+v, want cached_tokens=18560", usage.PromptTokenDetails)
+	}
+}
+
 func TestUsageSnifferStreamResponsesCompletedEvent(t *testing.T) {
 	var usage recorder.UsageInfo
 	sniffer := UsageSniffer{
@@ -45,6 +60,23 @@ func TestUsageSnifferStreamResponsesCompletedEvent(t *testing.T) {
 
 	if usage.PromptTokens != 7048 || usage.CompletionTokens != 28 || usage.TotalTokens != 7076 {
 		t.Fatalf("usage = %+v, want prompt=7048 completion=28 total=7076", usage)
+	}
+}
+
+func TestUsageSnifferStreamAnthropicMessageDelta(t *testing.T) {
+	var usage recorder.UsageInfo
+	sniffer := UsageSniffer{
+		Usage:    &usage,
+		IsStream: true,
+	}
+
+	sniffer.sniffStream([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":17430,"output_tokens":194,"cache_read_input_tokens":18560}}` + "\n"))
+
+	if usage.PromptTokens != 35990 || usage.CompletionTokens != 194 || usage.TotalTokens != 36184 {
+		t.Fatalf("usage = %+v, want prompt=35990 completion=194 total=36184", usage)
+	}
+	if usage.PromptTokenDetails == nil || usage.PromptTokenDetails.CachedTokens != 18560 {
+		t.Fatalf("PromptTokenDetails = %+v, want cached_tokens=18560", usage.PromptTokenDetails)
 	}
 }
 

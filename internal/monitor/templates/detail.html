@@ -89,6 +89,13 @@
         .response-stack::before { content: ''; position: absolute; left: 12px; top: 22px; bottom: 22px; width: 1px; background: linear-gradient(180deg, rgba(16,185,129,0.35), rgba(15,118,110,0.06)); }
         .response-step { position: relative; padding-left: 2.4rem; }
         .response-dot { position: absolute; left: 0; top: 0.3rem; width: 1.2rem; height: 1.2rem; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: white; border: 1px solid #cbd5e1; color: #64748b; font-size: 11px; font-weight: 700; box-shadow: 0 8px 18px -16px rgba(15,23,42,0.8); }
+        .chat-shell { width: min(96vw, 1440px); margin: 0 auto; }
+        .message-card { width: min(100%, 1120px); }
+
+        @media (max-width: 768px) {
+            .chat-shell { width: 100%; }
+            .message-card { width: 100%; }
+        }
     </style>
 </head>
 <body class="bg-[#fcfcfd] h-screen flex flex-col overflow-hidden">
@@ -126,7 +133,7 @@
 
     <main class="flex-1 overflow-hidden relative">
         <div id="panel-chat" class="absolute inset-0 overflow-y-auto p-8 bg-[#fcfcfd]">
-            <div class="max-w-4xl mx-auto space-y-8 pb-20">
+            <div class="chat-shell space-y-8 pb-20">
                 {{range $index, $msg := .ChatMessages}}
                 <div class="message-shell flex flex-col {{if eq .Role "user"}}items-end{{else}}items-start{{end}} group">
                     <div class="flex items-center gap-2 mb-2 px-1 flex-wrap">
@@ -137,7 +144,7 @@
                     </div>
 
                     {{if eq .Role "tool"}}
-                        <div class="{{if .IsError}}bubble-tool-error{{else}}bubble-tool{{end}} px-5 py-4 shadow-sm w-[90%]">
+                        <div class="message-card {{if .IsError}}bubble-tool-error{{else}}bubble-tool{{end}} px-5 py-4 shadow-sm">
                             <div class="tool-output-head {{if .IsError}}error{{end}}">
                                 <div class="flex items-center gap-2 {{if .IsError}}text-rose-700{{else}}text-amber-700{{end}} font-bold text-xs uppercase tracking-tight">
                                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" stroke-width="2"/></svg>
@@ -184,7 +191,7 @@
                             {{end}}
                         </div>
                     {{else if .ToolCalls}}
-                        <div class="assistant-action shadow-sm max-w-[90%] w-full">
+                        <div class="message-card assistant-action shadow-sm">
                             <div class="flex items-center gap-2 mb-2">
                                 <span class="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Assistant Action</span>
                                 <span class="h-px flex-1 bg-slate-200"></span>
@@ -232,7 +239,7 @@
                             </div>
                         </div>
                     {{else}}
-                        <div class="bubble-{{if eq .Role "system"}}system{{else}}{{.Role}}{{end}} px-5 py-4 shadow-sm max-w-[90%] {{if eq .ContentFormat "json"}}font-mono{{else}}markdown-body{{end}}">
+                        <div class="message-card bubble-{{if eq .Role "system"}}system{{else}}{{.Role}}{{end}} px-5 py-4 shadow-sm {{if eq .ContentFormat "json"}}font-mono{{else}}markdown-body{{end}}">
                             {{if eq .ContentFormat "json"}}
                             <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
                             {{else if .Content}}
@@ -277,7 +284,7 @@
                         <span class="text-xs font-bold uppercase tracking-widest text-emerald-600">Response (Current)</span>
                     </div>
 
-                    <div class="bubble-assistant p-8 shadow-xl shadow-slate-200/40 border border-slate-200/60 ring-1 ring-slate-900/5 response-stack">
+                    <div class="message-card bubble-assistant p-8 shadow-xl shadow-slate-200/40 border border-slate-200/60 ring-1 ring-slate-900/5 response-stack">
                         {{if .AIReasoning}}
                         <details open class="mb-6 response-step">
                             <summary class="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest list-none flex items-center gap-2 cursor-pointer">Thinking Process</summary>
