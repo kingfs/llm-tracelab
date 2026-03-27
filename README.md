@@ -139,9 +139,10 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 
 容器内约定的标准路径：
 
-- 配置文件：`/etc/llm-tracelab/config.yaml`
-- 数据目录：`/var/lib/llm-tracelab/traces`
-- SQLite 索引：`/var/lib/llm-tracelab/traces/trace_index.sqlite3`
+- 可执行文件：`/app/bin/llm-tracelab`
+- 配置文件：`/app/config/config.yaml`
+- 数据目录：`/app/data/traces`
+- SQLite 索引：`/app/data/traces/trace_index.sqlite3`
 
 默认提供：
 
@@ -156,10 +157,18 @@ export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
 ```
 
+如果本机访问 Go 官方模块代理较慢，可以在构建时直接传入 `GOPROXY`：
+
+```bash
+GOPROXY=https://goproxy.cn,direct docker compose build
+```
+
 默认挂载：
 
-- `./config/config.docker.yaml -> /etc/llm-tracelab/config.yaml:ro`
-- `./docker-data -> /var/lib/llm-tracelab`
+- `./config/config.docker.yaml -> /app/config/config.yaml:ro`
+- `./docker-data -> /app/data`
+
+运行镜像默认使用 `root` 用户启动。这是为了兼容最常见的 bind mount 场景，避免宿主机目录属主与容器内固定 UID/GID 不一致时出现 `permission denied`，例如无法创建 `/app/data/traces`。
 
 如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖 `upstream`、端口、输出目录；`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
 

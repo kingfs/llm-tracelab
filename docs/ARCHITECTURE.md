@@ -17,7 +17,7 @@
 
 - Raw cassette: `<output_dir>/<host>/<model>/<yyyy>/<mm>/<dd>/*.http`
 - Metadata index: `<output_dir>/trace_index.sqlite3`
-- Container convention: `/etc/llm-tracelab/config.yaml` + `/var/lib/llm-tracelab/traces`
+- Container convention: `/app/config/config.yaml` + `/app/data/traces`
 
 The cassette remains the canonical replay artifact.
 SQLite exists to avoid expensive aggregate rescans and to support fast monitor queries.

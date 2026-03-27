@@ -4,10 +4,12 @@ WORKDIR /src
 
 ENV CGO_ENABLED=0
 
+ARG GOPROXY=https://proxy.golang.org,direct
+
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY go.mod go.sum ./
-RUN go env -w GOPROXY='https://goproxy.io,direct' && \
+RUN go env -w GOPROXY="${GOPROXY}" && \
 	go mod download
 
 COPY . .
@@ -18,24 +20,22 @@ FROM alpine:3.22 AS runtime
 
 RUN apk add --no-cache ca-certificates tzdata
 
+ENV APP_HOME=/app \
+	LLM_TRACELAB_CONFIG=/app/config/config.yaml
+
 ENV TZ=UTC \
-	LLM_TRACELAB_OUTPUT_DIR=/var/lib/llm-tracelab/traces
+	LLM_TRACELAB_OUTPUT_DIR=/app/data/traces
 
-RUN addgroup -S llmtracelab \
-	&& adduser -S llmtracelab -G llmtracelab -h /home/llmtracelab \
-	&& mkdir -p /etc/llm-tracelab /var/lib/llm-tracelab/traces \
-	&& chown -R llmtracelab:llmtracelab /etc/llm-tracelab /var/lib/llm-tracelab
+RUN mkdir -p /app/bin /app/config /app/data/traces
 
-WORKDIR /home/llmtracelab
+WORKDIR /app
 
-COPY --from=builder /out/llm-tracelab /usr/local/bin/llm-tracelab
-COPY config/config.docker.yaml /etc/llm-tracelab/config.yaml
+COPY --from=builder /out/llm-tracelab /app/bin/llm-tracelab
+COPY config/config.docker.yaml /app/config/config.yaml
 
-USER llmtracelab
-
-VOLUME ["/etc/llm-tracelab", "/var/lib/llm-tracelab"]
+VOLUME ["/app/config", "/app/data"]
 
 EXPOSE 8080 8081
 
-ENTRYPOINT ["/usr/local/bin/llm-tracelab"]
-CMD ["serve", "-c", "/etc/llm-tracelab/config.yaml"]
+ENTRYPOINT ["/app/bin/llm-tracelab"]
+CMD ["serve", "-c", "/app/config/config.yaml"]

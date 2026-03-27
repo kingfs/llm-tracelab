@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     image: llm-tracelab:local
     ports:
       - "8080:8080"
@@ -10,10 +12,10 @@ services:
     environment:
       LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com
       LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY:-sk-test}
-      LLM_TRACELAB_OUTPUT_DIR: /var/lib/llm-tracelab/traces
+      LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"
       LLM_TRACELAB_MONITOR_PORT: "8081"
     volumes:
-      - ./config/config.docker.yaml:/etc/llm-tracelab/config.yaml:ro
-      - ./docker-data:/var/lib/llm-tracelab
-    command: ["serve", "-c", "/etc/llm-tracelab/config.yaml"]
+      - ./config/config.docker.yaml:/app/config/config.yaml:ro
+      - ./docker-data:/app/data
+    command: ["serve", "-c", "/app/config/config.yaml"]

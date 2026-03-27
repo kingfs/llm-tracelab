@@ -9,7 +9,7 @@ upstream:
   api_key: "sk-placeholder"
 
 debug:
-  output_dir: "/var/lib/llm-tracelab/traces"
+  output_dir: "/app/data/traces"
   mask_key: true
 
 chaos:

@@ -140,9 +140,10 @@ This is intended for bulk upgrades of old cassette directories and for full SQLi
 
 The standardized in-container paths are:
 
-- config file: `/etc/llm-tracelab/config.yaml`
-- trace directory: `/var/lib/llm-tracelab/traces`
-- SQLite index: `/var/lib/llm-tracelab/traces/trace_index.sqlite3`
+- binary: `/app/bin/llm-tracelab`
+- config file: `/app/config/config.yaml`
+- trace directory: `/app/data/traces`
+- SQLite index: `/app/data/traces/trace_index.sqlite3`
 
 The repo now includes:
 
@@ -157,10 +158,18 @@ export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
 ```
 
+If the default Go module proxy is slow or blocked in your network, pass `GOPROXY` at build time:
+
+```bash
+GOPROXY=https://goproxy.cn,direct docker compose build
+```
+
 Default mounts:
 
-- `./config/config.docker.yaml -> /etc/llm-tracelab/config.yaml:ro`
-- `./docker-data -> /var/lib/llm-tracelab`
+- `./config/config.docker.yaml -> /app/config/config.yaml:ro`
+- `./docker-data -> /app/data`
+
+The runtime image starts as `root` by default. This avoids common bind-mount permission failures when the host directory owner does not match a fixed in-container UID/GID, such as failing to create `/app/data/traces`.
 
 For external configuration, prefer mounting a config file and overriding runtime values through environment variables. Keep `debug.output_dir` on a stable path inside the mounted data volume.
 
