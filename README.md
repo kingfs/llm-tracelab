@@ -157,6 +157,42 @@ export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
 ```
 
+如果只想直接使用已经发布到 Docker Hub 的镜像，可以不克隆仓库，直接运行：
+
+```bash
+docker run --rm \
+  -p 8080:8080 \
+  -p 8081:8081 \
+  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com \
+  -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
+  -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
+  -e LLM_TRACELAB_SERVER_PORT=8080 \
+  -e LLM_TRACELAB_MONITOR_PORT=8081 \
+  -v "$(pwd)/docker-data:/app/data" \
+  kingfs/llm-tracelab:latest serve -c /app/config/config.yaml
+```
+
+如果你更习惯 `docker compose`，也可以直接引用 Docker Hub 镜像：
+
+```yaml
+services:
+  llm-tracelab:
+    image: kingfs/llm-tracelab:latest
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com
+      LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
+      LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
+      LLM_TRACELAB_SERVER_PORT: "8080"
+      LLM_TRACELAB_MONITOR_PORT: "8081"
+    volumes:
+      - ./config/config.docker.yaml:/app/config/config.yaml:ro
+      - ./docker-data:/app/data
+    command: ["serve", "-c", "/app/config/config.yaml"]
+```
+
 如果本机访问 Go 官方模块代理较慢，可以在构建时直接传入 `GOPROXY`：
 
 ```bash

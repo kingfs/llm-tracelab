@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,6 +283,7 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 
 func (s *Store) Stats() (Stats, error) {
 	var stats Stats
+	var avgTTFT float64
 	var successRate float64
 	err := s.db.QueryRow(`
 		SELECT
@@ -296,7 +298,7 @@ func (s *Store) Stats() (Stats, error) {
 		FROM logs
 	`).Scan(
 		&stats.TotalRequest,
-		&stats.AvgTTFT,
+		&avgTTFT,
 		&stats.TotalTokens,
 		&stats.SuccessRequest,
 		&stats.FailedRequest,
@@ -306,6 +308,7 @@ func (s *Store) Stats() (Stats, error) {
 		return Stats{}, err
 	}
 
+	stats.AvgTTFT = int(math.Round(avgTTFT))
 	stats.SuccessRate = successRate
 	return stats, nil
 }
