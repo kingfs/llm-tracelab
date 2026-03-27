@@ -15,7 +15,19 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.min.css">
     
     <style>
-        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        :root {
+            --ink: #102033;
+            --panel: rgba(255,255,255,0.84);
+            --line: rgba(148,163,184,0.22);
+            --accent: #0f766e;
+            --accent-soft: rgba(15,118,110,0.12);
+            --tool: #a16207;
+            --tool-soft: rgba(245,158,11,0.12);
+        }
+        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; background:
+            radial-gradient(circle at top left, rgba(14,165,233,0.08), transparent 32%),
+            radial-gradient(circle at top right, rgba(20,184,166,0.10), transparent 28%),
+            linear-gradient(180deg, #f8fbfd 0%, #f5f7fb 100%); }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         
         /* 滚动条美化 */
@@ -24,9 +36,10 @@
         ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
 
         /* 气泡样式恢复 */
-        .bubble-user { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 1.25rem 1.25rem 0 1.25rem; }
-        .bubble-assistant { background: white; border: 1px solid #f1f5f9; border-radius: 0 1.25rem 1.25rem 1.25rem; }
-        .bubble-tool { background: #fffbeb; border: 1px solid #fef3c7; border-radius: 0.5rem; }
+        .bubble-user { background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%); border: 1px solid #d9e6ef; border-radius: 1.25rem 1.25rem 0 1.25rem; }
+        .bubble-assistant { background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.94) 100%); border: 1px solid #e8eef5; border-radius: 0 1.25rem 1.25rem 1.25rem; backdrop-filter: blur(16px); }
+        .bubble-tool { background: linear-gradient(180deg, #fffdf7 0%, #fff7e6 100%); border: 1px solid #f7dba4; border-radius: 1rem; }
+        .bubble-system { background: linear-gradient(180deg, #f4f7fb 0%, #eef4f8 100%); border: 1px solid #d7e1ea; border-radius: 1rem; }
 
         /* 自动换行控制 */
         .wrap-text pre { white-space: pre-wrap !important; word-break: break-all !important; }
@@ -41,11 +54,28 @@
         .tab-btn.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #4f46e5; }
 
         .markdown-body { background-color: transparent !important; font-size: 14px; line-height: 1.6; }
-        .reasoning-box { background: #f8fafc; border-left: 4px solid #cbd5e1; color: #64748b; font-size: 0.875rem; padding: 1rem; border-radius: 0.5rem; }
+        .reasoning-box { background: linear-gradient(180deg, #f7fbfd 0%, #f3f8fb 100%); border: 1px solid #d8e5ee; color: #526171; font-size: 0.875rem; padding: 1rem; border-radius: 0.85rem; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7); }
         
         /* Tool Call Card */
-        .tool-call-card { margin-top: 0.75rem; background: #1e293b; border-radius: 0.5rem; overflow: hidden; border: 1px solid #334155; }
-        .tool-call-header { background: #0f172a; color: #94a3b8; padding: 0.5rem 0.75rem; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; border-bottom: 1px solid #334155; }
+        .tool-call-card { margin-top: 0.75rem; background: linear-gradient(180deg, #172133 0%, #101827 100%); border-radius: 0.9rem; overflow: hidden; border: 1px solid #2b3b52; box-shadow: 0 14px 28px -20px rgba(15,23,42,0.9); }
+        .tool-call-header { background: rgba(9,14,24,0.92); color: #9fb0c8; padding: 0.6rem 0.85rem; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; border-bottom: 1px solid #26364f; }
+        .message-shell { position: relative; }
+        .message-shell::before { content: ''; position: absolute; left: -20px; top: 26px; bottom: -26px; width: 1px; background: linear-gradient(180deg, rgba(148,163,184,0.22), rgba(148,163,184,0)); }
+        .message-shell:last-child::before { display: none; }
+        .meta-pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.18rem 0.45rem; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+        .meta-pill.role-user { background: rgba(59,130,246,0.08); color: #2563eb; border: 1px solid rgba(59,130,246,0.14); }
+        .meta-pill.role-assistant { background: rgba(15,118,110,0.10); color: #0f766e; border: 1px solid rgba(15,118,110,0.16); }
+        .meta-pill.role-tool { background: rgba(245,158,11,0.12); color: #a16207; border: 1px solid rgba(217,119,6,0.2); }
+        .meta-pill.role-system { background: rgba(100,116,139,0.12); color: #475569; border: 1px solid rgba(100,116,139,0.18); }
+        .type-chip { display: inline-flex; align-items: center; padding: 0.16rem 0.42rem; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; background: rgba(15,23,42,0.05); color: #64748b; }
+        .assistant-action { border: 1px dashed #b6c6d7; background: linear-gradient(180deg, rgba(250,252,253,0.95) 0%, rgba(245,249,252,0.96) 100%); border-radius: 1rem; padding: 0.95rem 1rem; }
+        .tool-output-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-bottom: 0.55rem; margin-bottom: 0.8rem; border-bottom: 1px solid rgba(217,119,6,0.14); }
+        .json-panel { background: #101827; color: #dbe7f5; border-radius: 0.85rem; border: 1px solid #26364f; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
+        .json-panel pre { margin: 0; padding: 1rem; overflow-x: auto; font-size: 12px; line-height: 1.55; }
+        .response-stack { position: relative; }
+        .response-stack::before { content: ''; position: absolute; left: 12px; top: 22px; bottom: 22px; width: 1px; background: linear-gradient(180deg, rgba(16,185,129,0.35), rgba(15,118,110,0.06)); }
+        .response-step { position: relative; padding-left: 2.4rem; }
+        .response-dot { position: absolute; left: 0; top: 0.3rem; width: 1.2rem; height: 1.2rem; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: white; border: 1px solid #cbd5e1; color: #64748b; font-size: 11px; font-weight: 700; box-shadow: 0 8px 18px -16px rgba(15,23,42,0.8); }
     </style>
 </head>
 <body class="bg-[#fcfcfd] h-screen flex flex-col overflow-hidden">
@@ -85,26 +115,40 @@
         <div id="panel-chat" class="absolute inset-0 overflow-y-auto p-8 bg-[#fcfcfd]">
             <div class="max-w-4xl mx-auto space-y-8 pb-20">
                 {{range $index, $msg := .ChatMessages}}
-                <div class="flex flex-col {{if eq .Role "user"}}items-end{{else}}items-start{{end}} group">
-                    <div class="flex items-center gap-2 mb-2 px-1">
-                        <span class="text-[10px] font-bold uppercase tracking-widest text-slate-400">{{.Role}}</span>
+                <div class="message-shell flex flex-col {{if eq .Role "user"}}items-end{{else}}items-start{{end}} group">
+                    <div class="flex items-center gap-2 mb-2 px-1 flex-wrap">
+                        <span class="meta-pill role-{{.Role}}">{{.Role}}</span>
+                        {{if .MessageType}}<span class="type-chip">{{.MessageType}}</span>{{end}}
+                        {{if .Name}}<span class="text-[10px] font-semibold tracking-wide text-slate-500">{{.Name}}</span>{{end}}
                         {{if .ToolCallID}}<span class="text-[9px] font-mono bg-slate-200 text-slate-500 px-1 rounded">ID: {{.ToolCallID}}</span>{{end}}
                     </div>
 
                     {{if eq .Role "tool"}}
                         <div class="bubble-tool px-5 py-4 shadow-sm w-[90%]">
-                            <div class="flex items-center gap-2 mb-2 text-amber-700 font-bold text-xs uppercase tracking-tight border-b border-amber-100 pb-1">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" stroke-width="2"/></svg>
-                                Tool Output
+                            <div class="tool-output-head">
+                                <div class="flex items-center gap-2 text-amber-700 font-bold text-xs uppercase tracking-tight">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" stroke-width="2"/></svg>
+                                    Tool Output
+                                </div>
+                                {{if .Name}}<span class="text-[11px] font-mono text-amber-800/80">{{.Name}}</span>{{end}}
                             </div>
+                            {{if eq .ContentFormat "json"}}
+                            <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
+                            {{else}}
                             <div class="font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all text-amber-900">{{.Content}}</div>
+                            {{end}}
                         </div>
-                    {{else}}
-                        <div class="bubble-{{.Role}} px-5 py-4 shadow-sm max-w-[90%] markdown-body" id="msg-{{$index}}"></div>
-                        <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
-                        
-                        {{if .ToolCalls}}
-                            <div class="w-full max-w-[90%]">
+                    {{else if .ToolCalls}}
+                        <div class="assistant-action shadow-sm max-w-[90%] w-full">
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Assistant Action</span>
+                                <span class="h-px flex-1 bg-slate-200"></span>
+                            </div>
+                            {{if .Content}}
+                            <div class="bubble-{{.Role}} px-5 py-4 shadow-sm markdown-body mb-3" id="msg-{{$index}}"></div>
+                            <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
+                            {{end}}
+                            <div class="w-full">
                                 {{range .ToolCalls}}
                                 <div class="tool-call-card">
                                     <div class="tool-call-header">
@@ -115,7 +159,16 @@
                                 </div>
                                 {{end}}
                             </div>
-                        {{end}}
+                        </div>
+                    {{else}}
+                        <div class="bubble-{{if eq .Role "system"}}system{{else}}{{.Role}}{{end}} px-5 py-4 shadow-sm max-w-[90%] {{if eq .ContentFormat "json"}}font-mono{{else}}markdown-body{{end}}">
+                            {{if eq .ContentFormat "json"}}
+                            <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
+                            {{else}}
+                            <div id="msg-{{$index}}"></div>
+                            {{end}}
+                        </div>
+                        <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
                     {{end}}
                 </div>
                 {{end}}
@@ -127,17 +180,37 @@
                         <span class="text-xs font-bold uppercase tracking-widest text-emerald-600">Response (Current)</span>
                     </div>
 
-                    <div class="bubble-assistant p-8 shadow-xl shadow-slate-200/40 border border-slate-200/60 ring-1 ring-slate-900/5">
+                    <div class="bubble-assistant p-8 shadow-xl shadow-slate-200/40 border border-slate-200/60 ring-1 ring-slate-900/5 response-stack">
                         {{if .AIReasoning}}
-                        <details open class="mb-6">
+                        <details open class="mb-6 response-step">
                             <summary class="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest list-none flex items-center gap-2 cursor-pointer">Thinking Process</summary>
+                            <span class="response-dot">1</span>
                             <div class="reasoning-box mt-3 font-mono leading-relaxed markdown-body" id="md-reasoning"></div>
                             <textarea id="raw-reasoning" class="hidden">{{.AIReasoning}}</textarea>
                         </details>
                         <div class="h-[1px] bg-slate-100 mb-6"></div>
                         {{end}}
 
-                        <div class="markdown-body" id="md-response"></div>
+                        {{if .ResponseToolCalls}}
+                        <div class="mb-6 space-y-3 response-step">
+                            <span class="response-dot">{{if .AIReasoning}}2{{else}}1{{end}}</span>
+                            <div class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Tool Calls</div>
+                            {{range .ResponseToolCalls}}
+                            <div class="tool-call-card">
+                                <div class="tool-call-header">
+                                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>{{.Function.Name}}</span>
+                                    <span class="opacity-50 font-mono">{{.ID}}</span>
+                                </div>
+                                <div class="p-3 text-[12px] font-mono text-blue-100 overflow-x-auto"><pre><code class="language-json">{{prettyJsonString .Function.Arguments}}</code></pre></div>
+                            </div>
+                            {{end}}
+                        </div>
+                        {{end}}
+
+                        <div class="response-step">
+                            <span class="response-dot">{{if .AIReasoning}}{{if .ResponseToolCalls}}3{{else}}2{{end}}{{else}}{{if .ResponseToolCalls}}2{{else}}1{{end}}{{end}}</span>
+                            <div class="markdown-body" id="md-response"></div>
+                        </div>
                         <textarea id="raw-ai" class="hidden">{{.AIContent}}</textarea>
                     </div>
                 </div>

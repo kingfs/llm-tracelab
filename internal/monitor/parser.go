@@ -19,17 +19,20 @@ type ParsedData struct {
 	ResFull string
 
 	// Parsed Info
-	ChatMessages []ChatMessage
-	AIContent    string
-	AIReasoning  string
+	ChatMessages      []ChatMessage
+	AIContent         string
+	AIReasoning       string
+	ResponseToolCalls []ToolCall
 }
 
 type ChatMessage struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"` // 当 role=tool 时存在
-	Name       string     `json:"name,omitempty"`         // 当 role=tool 时可能是函数名
+	Role          string     `json:"role"`
+	MessageType   string     `json:"message_type,omitempty"`
+	Content       string     `json:"content"`
+	ContentFormat string     `json:"content_format,omitempty"`
+	ToolCalls     []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID    string     `json:"tool_call_id,omitempty"` // 当 role=tool 时存在
+	Name          string     `json:"name,omitempty"`         // 当 role=tool 时可能是函数名
 }
 type ToolCall struct {
 	ID       string `json:"id"`
@@ -47,6 +50,44 @@ type chatRequest struct {
 	Documents []string    `json:"documents"` // Reranker
 }
 
+type responsesRequest struct {
+	Input interface{} `json:"input"`
+}
+
+type responsesInputItem struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Role      string                 `json:"role"`
+	Content   []responsesContentPart `json:"content"`
+	Arguments string                 `json:"arguments"`
+	CallID    string                 `json:"call_id"`
+	Name      string                 `json:"name"`
+	Output    interface{}            `json:"output"`
+}
+
+type responsesContentPart struct {
+	Type     string      `json:"type"`
+	Text     string      `json:"text"`
+	Input    string      `json:"input_text"`
+	Output   string      `json:"output_text"`
+	Refusal  string      `json:"refusal"`
+	ImageURL string      `json:"image_url"`
+	FileID   string      `json:"file_id"`
+	Data     interface{} `json:"data"`
+}
+
+type responsesOutputItem struct {
+	ID        string                 `json:"id"`
+	Type      string                 `json:"type"`
+	Role      string                 `json:"role"`
+	Content   []responsesContentPart `json:"content"`
+	Arguments string                 `json:"arguments"`
+	CallID    string                 `json:"call_id"`
+	Name      string                 `json:"name"`
+	Output    interface{}            `json:"output"`
+	Status    string                 `json:"status"`
+}
+
 // ParseLogFile 解析 V2/V3 格式的日志文件
 func ParseLogFile(content []byte) (*ParsedData, error) {
 	parsed, err := recordfile.ParsePrelude(content)
@@ -57,51 +98,161 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 	reqFullBytes, reqBodyBytes, resFullBytes, resBodyBytes := recordfile.ExtractSections(content, parsed)
 
 	// 4. 解析 Request (自适应 Chat / Embedding / Reranker)
-	var reqRaw chatRequest
-	var messages []ChatMessage
-	// 尝试解析 JSON
-	if json.Unmarshal(reqBodyBytes, &reqRaw) == nil {
-		if len(reqRaw.Messages) > 0 {
-			// Case A: 标准 Chat 请求
-			messages = reqRaw.Messages
-		} else if reqRaw.Input != nil {
-			// Case B: Embedding 请求 (转换成伪造的 User Message 以便展示)
-			contentStr := formatInput(reqRaw.Input)
-			messages = append(messages, ChatMessage{
-				Role:    "user",
-				Content: fmt.Sprintf("🧮 **Embedding Input**:\n%s", contentStr),
-			})
-		} else if reqRaw.Query != "" {
-			// Case C: Reranker 请求
-			docList := strings.Join(reqRaw.Documents, "\n- ")
-			content := fmt.Sprintf("🔍 **Rerank Query**: %s\n\n📄 **Documents**:\n- %s", reqRaw.Query, docList)
-			messages = append(messages, ChatMessage{
-				Role:    "user",
-				Content: content,
-			})
-		}
-	}
-	// ================= 修改点结束 =================
+	messages := parseRequestMessages(header.Meta.URL, reqBodyBytes)
 
 	// 5. 解析 AI Content & Reasoning
-	contentStr, reasoningStr := parseAIContent(resBodyBytes, header.Layout.IsStream)
+	contentStr, reasoningStr, toolCalls := parseAIContent(header.Meta.URL, resBodyBytes, header.Layout.IsStream)
 
 	return &ParsedData{
-		Header:       header,
-		Events:       parsed.Events,
-		ReqFull:      string(reqFullBytes),
-		ResFull:      string(resFullBytes),
-		ChatMessages: messages,
-		AIContent:    contentStr,
-		AIReasoning:  reasoningStr,
+		Header:            header,
+		Events:            parsed.Events,
+		ReqFull:           string(reqFullBytes),
+		ResFull:           string(resFullBytes),
+		ChatMessages:      messages,
+		AIContent:         contentStr,
+		AIReasoning:       reasoningStr,
+		ResponseToolCalls: toolCalls,
 		// ReqBody:      string(reqBodyBytes), // 也可以加上
 		// ResBody:      string(resBodyBytes), // 也可以加上
 	}, nil
 }
 
-func parseAIContent(data []byte, isStream bool) (string, string) {
+func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
+	if strings.Contains(url, "/v1/responses") {
+		if messages := parseResponsesRequest(reqBodyBytes); len(messages) > 0 {
+			return messages
+		}
+	}
+
+	var reqRaw chatRequest
+	var messages []ChatMessage
+	if json.Unmarshal(reqBodyBytes, &reqRaw) == nil {
+		if len(reqRaw.Messages) > 0 {
+			return reqRaw.Messages
+		}
+		if reqRaw.Input != nil {
+			contentStr := formatInput(reqRaw.Input)
+			return []ChatMessage{{
+				Role:    "user",
+				Content: fmt.Sprintf("🧮 **Embedding Input**:\n%s", contentStr),
+			}}
+		}
+		if reqRaw.Query != "" {
+			docList := strings.Join(reqRaw.Documents, "\n- ")
+			content := fmt.Sprintf("🔍 **Rerank Query**: %s\n\n📄 **Documents**:\n- %s", reqRaw.Query, docList)
+			return []ChatMessage{{
+				Role:    "user",
+				Content: content,
+			}}
+		}
+	}
+
+	return messages
+}
+
+func parseResponsesRequest(data []byte) []ChatMessage {
+	var req responsesRequest
+	if err := json.Unmarshal(data, &req); err != nil || req.Input == nil {
+		return nil
+	}
+
+	switch v := req.Input.(type) {
+	case string:
+		return []ChatMessage{{Role: "user", Content: v}}
+	case []interface{}:
+		var messages []ChatMessage
+		for _, item := range v {
+			msg, ok := parseResponsesInputMessage(item)
+			if ok {
+				messages = append(messages, msg)
+			}
+		}
+		return messages
+	default:
+		return []ChatMessage{{
+			Role:    "user",
+			Content: formatInput(req.Input),
+		}}
+	}
+}
+
+func parseResponsesInputMessage(raw interface{}) (ChatMessage, bool) {
+	itemBytes, err := json.Marshal(raw)
+	if err != nil {
+		return ChatMessage{}, false
+	}
+
+	var item responsesInputItem
+	if err := json.Unmarshal(itemBytes, &item); err != nil {
+		return ChatMessage{}, false
+	}
+
+	switch item.Type {
+	case "", "message":
+		content := renderResponsesContent(item.Content)
+		if content == "" {
+			return ChatMessage{}, false
+		}
+		role := item.Role
+		if role == "" {
+			role = "user"
+		}
+		return ChatMessage{
+			Role:          role,
+			MessageType:   "message",
+			Content:       content,
+			ContentFormat: detectContentFormat(content),
+		}, true
+	case "function_call":
+		return ChatMessage{
+			Role:        "assistant",
+			MessageType: "function_call",
+			ToolCalls: []ToolCall{{
+				ID:   firstNonEmpty(item.CallID, item.ID),
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      item.Name,
+					Arguments: item.Arguments,
+				},
+			}},
+		}, true
+	case "function_call_output":
+		output := renderResponseOutput(item.Output)
+		return ChatMessage{
+			Role:          "tool",
+			MessageType:   "function_call_output",
+			ToolCallID:    item.CallID,
+			Name:          item.Name,
+			Content:       output,
+			ContentFormat: detectContentFormat(output),
+		}, true
+	default:
+		content := renderResponseOutput(raw)
+		if content == "" {
+			return ChatMessage{}, false
+		}
+		return ChatMessage{
+			Role:          firstNonEmpty(item.Role, "user"),
+			MessageType:   firstNonEmpty(item.Type, "message"),
+			Content:       content,
+			ContentFormat: detectContentFormat(content),
+		}, true
+	}
+}
+
+func parseAIContent(url string, data []byte, isStream bool) (string, string, []ToolCall) {
+	if strings.Contains(url, "/v1/responses") {
+		return parseResponsesOutput(data, isStream)
+	}
+	return parseChatCompletionsOutput(data, isStream)
+}
+
+func parseChatCompletionsOutput(data []byte, isStream bool) (string, string, []ToolCall) {
 	if len(data) == 0 {
-		return "", ""
+		return "", "", nil
 	}
 
 	if !isStream {
@@ -114,9 +265,9 @@ func parseAIContent(data []byte, isStream bool) (string, string) {
 			} `json:"choices"`
 		}
 		if json.Unmarshal(data, &resp) == nil && len(resp.Choices) > 0 {
-			return resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent
+			return resp.Choices[0].Message.Content, resp.Choices[0].Message.ReasoningContent, nil
 		}
-		return "", ""
+		return "", "", nil
 	}
 
 	// Stream Logic
@@ -154,24 +305,245 @@ func parseAIContent(data []byte, isStream bool) (string, string) {
 			}
 		}
 	}
-	return contentBuilder.String(), reasoningBuilder.String()
+	return contentBuilder.String(), reasoningBuilder.String(), nil
 }
 
-// 辅助函数：格式化 Embedding Input (支持 string 和 []string)
+func parseResponsesOutput(data []byte, isStream bool) (string, string, []ToolCall) {
+	if len(data) == 0 {
+		return "", "", nil
+	}
+	if !isStream {
+		return parseResponsesJSONOutput(data)
+	}
+	return parseResponsesStreamOutput(data)
+}
+
+func parseResponsesJSONOutput(data []byte) (string, string, []ToolCall) {
+	var resp struct {
+		Output []responsesOutputItem `json:"output"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return "", "", nil
+	}
+
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		toolCalls        []ToolCall
+	)
+	for _, item := range resp.Output {
+		switch item.Type {
+		case "message":
+			text := renderResponsesContent(item.Content)
+			if text != "" {
+				contentBuilder.WriteString(text)
+			}
+		case "reasoning":
+			text := renderResponsesContent(item.Content)
+			if text != "" {
+				reasoningBuilder.WriteString(text)
+			}
+		case "function_call":
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   firstNonEmpty(item.CallID, item.ID),
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      item.Name,
+					Arguments: item.Arguments,
+				},
+			})
+		}
+	}
+	return contentBuilder.String(), reasoningBuilder.String(), toolCalls
+}
+
+func parseResponsesStreamOutput(data []byte) (string, string, []ToolCall) {
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		toolCallMap      = map[string]*ToolCall{}
+		toolCallOrder    []string
+	)
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+
+		var envelope struct {
+			Type      string              `json:"type"`
+			Delta     string              `json:"delta"`
+			Arguments string              `json:"arguments"`
+			ItemID    string              `json:"item_id"`
+			Item      responsesOutputItem `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(jsonStr), &envelope); err != nil {
+			continue
+		}
+
+		switch envelope.Type {
+		case "response.output_text.delta":
+			contentBuilder.WriteString(envelope.Delta)
+		case "response.reasoning_summary_text.delta":
+			reasoningBuilder.WriteString(envelope.Delta)
+		case "response.function_call_arguments.delta":
+			tc := ensureToolCall(toolCallMap, &toolCallOrder, envelope.ItemID)
+			tc.Function.Arguments += envelope.Delta
+		case "response.function_call_arguments.done":
+			tc := ensureToolCall(toolCallMap, &toolCallOrder, envelope.ItemID)
+			tc.Function.Arguments = envelope.Arguments
+		case "response.output_item.added", "response.output_item.done":
+			switch envelope.Item.Type {
+			case "function_call":
+				tc := ensureToolCall(toolCallMap, &toolCallOrder, envelope.Item.ID)
+				tc.ID = firstNonEmpty(envelope.Item.CallID, envelope.Item.ID)
+				tc.Type = "function"
+				tc.Function.Name = envelope.Item.Name
+				if envelope.Item.Arguments != "" {
+					tc.Function.Arguments = envelope.Item.Arguments
+				}
+			case "message":
+				text := renderResponsesContent(envelope.Item.Content)
+				if text != "" && contentBuilder.Len() == 0 {
+					contentBuilder.WriteString(text)
+				}
+			case "reasoning":
+				text := renderResponsesContent(envelope.Item.Content)
+				if text != "" && reasoningBuilder.Len() == 0 {
+					reasoningBuilder.WriteString(text)
+				}
+			}
+		}
+	}
+
+	toolCalls := make([]ToolCall, 0, len(toolCallOrder))
+	for _, id := range toolCallOrder {
+		if tc := toolCallMap[id]; tc != nil {
+			toolCalls = append(toolCalls, *tc)
+		}
+	}
+	return contentBuilder.String(), reasoningBuilder.String(), toolCalls
+}
+
+func ensureToolCall(toolCallMap map[string]*ToolCall, order *[]string, itemID string) *ToolCall {
+	id := itemID
+	if id == "" {
+		id = fmt.Sprintf("toolcall-%d", len(toolCallMap)+1)
+	}
+	if tc, ok := toolCallMap[id]; ok {
+		return tc
+	}
+	tc := &ToolCall{ID: id, Type: "function"}
+	toolCallMap[id] = tc
+	*order = append(*order, id)
+	return tc
+}
+
+func renderResponsesContent(parts []responsesContentPart) string {
+	if len(parts) == 0 {
+		return ""
+	}
+
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		text := strings.TrimSpace(firstNonEmpty(part.Text, part.Input, part.Output, part.Refusal))
+		if text != "" {
+			segments = append(segments, text)
+			continue
+		}
+
+		switch part.Type {
+		case "input_image", "output_image":
+			meta := map[string]string{}
+			if part.ImageURL != "" {
+				meta["image_url"] = part.ImageURL
+			}
+			if part.FileID != "" {
+				meta["file_id"] = part.FileID
+			}
+			if len(meta) > 0 {
+				segments = append(segments, "```json\n"+marshalPretty(meta)+"\n```")
+			}
+		default:
+			if part.Data != nil {
+				segments = append(segments, "```json\n"+marshalPretty(part.Data)+"\n```")
+			}
+		}
+	}
+
+	return strings.Join(segments, "\n\n")
+}
+
+func renderResponseOutput(v interface{}) string {
+	switch out := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return out
+	default:
+		return marshalPretty(out)
+	}
+}
+
+func detectContentFormat(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" {
+		return ""
+	}
+	if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
+		(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
+		var payload interface{}
+		if json.Unmarshal([]byte(trimmed), &payload) == nil {
+			return "json"
+		}
+	}
+	return "markdown"
+}
+
+func marshalPretty(v interface{}) string {
+	b, _ := json.MarshalIndent(v, "", "  ")
+	return string(b)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func formatInput(input interface{}) string {
 	switch v := input.(type) {
 	case string:
 		return v
 	case []interface{}:
-		var parts []string
+		stringParts := make([]string, 0, len(v))
+		otherParts := make([]string, 0)
 		for _, item := range v {
 			if s, ok := item.(string); ok {
-				parts = append(parts, "- "+s)
+				stringParts = append(stringParts, "- "+s)
+				continue
 			}
+			otherParts = append(otherParts, marshalPretty(item))
 		}
+		parts := append(stringParts, otherParts...)
 		return strings.Join(parts, "\n")
 	default:
-		b, _ := json.MarshalIndent(input, "", "  ")
-		return string(b)
+		return marshalPretty(input)
 	}
 }

@@ -75,3 +75,70 @@ func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 		t.Fatalf("AvgTTFT = %d, want 807", stats.AvgTTFT)
 	}
 }
+
+func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	incompletePath := filepath.Join(dir, "in-progress.http")
+	if err := os.WriteFile(incompletePath, []byte("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", incompletePath, err)
+	}
+
+	validPath := filepath.Join(dir, "complete.http")
+	validHeader := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "complete",
+			Time:          time.Date(2026, 3, 27, 12, 0, 0, 0, time.UTC),
+			Model:         "gpt-test",
+			URL:           "/v1/chat/completions",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    20,
+			TTFTMs:        10,
+			ClientIP:      "127.0.0.1",
+			ContentLength: 2,
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64("POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\n\r\n"),
+			ReqBodyLen:   len64(`{"x":1}`),
+			ResHeaderLen: len64("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"),
+			ResBodyLen:   len64(`{}`),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(validHeader, recordfile.BuildEvents(validHeader))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	validContent := string(prelude) +
+		"POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\n\r\n" +
+		`{"x":1}` + "\n" +
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"
+	if err := os.WriteFile(validPath, []byte(validContent), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", validPath, err)
+	}
+
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	entries, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].LogPath != validPath {
+		t.Fatalf("entries[0].LogPath = %q, want %q", entries[0].LogPath, validPath)
+	}
+}
+
+func len64(v string) int64 {
+	return int64(len(v))
+}

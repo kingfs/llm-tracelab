@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"database/sql"
 	"fmt"
 	"math"
@@ -209,11 +210,49 @@ func (s *Store) Sync() error {
 
 		parsed, err := recordfile.ParsePrelude(content)
 		if err != nil {
+			if shouldSkipIncompleteRecord(content, err) {
+				return nil
+			}
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
 
 		return s.UpsertLog(path, parsed.Header)
 	})
+}
+
+func shouldSkipIncompleteRecord(content []byte, err error) bool {
+	if err == nil {
+		return false
+	}
+
+	trimmed := bytes.TrimSpace(content)
+	if len(trimmed) == 0 {
+		return true
+	}
+
+	if bytes.HasPrefix(trimmed, []byte(recordfile.FileMagic)) {
+		errText := err.Error()
+		return strings.Contains(errText, "failed to read prelude") ||
+			strings.Contains(errText, "missing v3 meta line") ||
+			strings.Contains(errText, "invalid v3")
+	}
+
+	httpMethods := [][]byte{
+		[]byte("GET "),
+		[]byte("POST "),
+		[]byte("PUT "),
+		[]byte("PATCH "),
+		[]byte("DELETE "),
+		[]byte("HEAD "),
+		[]byte("OPTIONS "),
+	}
+	for _, method := range httpMethods {
+		if bytes.HasPrefix(trimmed, method) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (s *Store) Reset() error {
