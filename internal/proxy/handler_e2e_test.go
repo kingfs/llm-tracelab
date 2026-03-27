@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,14 +105,9 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 			}
 
 			recordPath := findRecordedHTTP(t, outputDir)
-			content, err := os.ReadFile(recordPath)
+			parsed, err := waitForRecordedPrelude(recordPath, time.Second)
 			if err != nil {
-				t.Fatalf("ReadFile(%q) error = %v", recordPath, err)
-			}
-
-			parsed, err := recordfile.ParsePrelude(content)
-			if err != nil {
-				t.Fatalf("ParsePrelude() error = %v", err)
+				t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
 			}
 
 			got := parsed.Header.Usage
@@ -155,6 +151,33 @@ func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]
 			}
 			return lastEntries, nil
 		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForRecordedPrelude(path string, timeout time.Duration) (*recordfile.ParsedPrelude, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+
+	for {
+		content, err := os.ReadFile(path)
+		if err == nil {
+			parsed, parseErr := recordfile.ParsePrelude(content)
+			if parseErr == nil {
+				return parsed, nil
+			}
+			lastErr = parseErr
+		} else {
+			lastErr = err
+		}
+
+		if time.Now().After(deadline) {
+			if lastErr == nil {
+				lastErr = errors.New("timed out waiting for parsable recorded prelude")
+			}
+			return nil, lastErr
+		}
+
 		time.Sleep(10 * time.Millisecond)
 	}
 }
