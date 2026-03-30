@@ -80,6 +80,7 @@ func runServe(args []string) int {
 			mux := http.NewServeMux()
 			mux.HandleFunc("/", monitor.ListHandler(cfg.Debug.OutputDir, traceStore))
 			mux.HandleFunc("/view", monitor.DetailHandler(cfg.Debug.OutputDir))
+			mux.HandleFunc("/api/detail/raw", monitor.DetailRawHandler(cfg.Debug.OutputDir))
 			mux.HandleFunc("/download", monitor.DownloadHandler(cfg.Debug.OutputDir))
 
 			addr := ":" + cfg.Monitor.Port

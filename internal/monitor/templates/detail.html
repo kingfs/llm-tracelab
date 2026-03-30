@@ -2,408 +2,732 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Trace Detail - {{.Header.Meta.Model}}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/http.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
-    
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.min.css">
-    
     <style>
         :root {
-            --ink: #102033;
-            --panel: rgba(255,255,255,0.84);
-            --line: rgba(148,163,184,0.22);
-            --accent: #0f766e;
-            --accent-soft: rgba(15,118,110,0.12);
-            --tool: #a16207;
-            --tool-soft: rgba(245,158,11,0.12);
+            --bg: #f4f7fb;
+            --panel: rgba(255, 255, 255, 0.92);
+            --line: #dbe4ee;
+            --line-strong: #cbd5e1;
+            --text: #0f172a;
+            --muted: #64748b;
+            --muted-soft: #94a3b8;
+            --primary: #0f766e;
+            --primary-soft: rgba(15, 118, 110, 0.12);
+            --tool: #b45309;
+            --tool-soft: rgba(245, 158, 11, 0.16);
+            --danger: #be123c;
+            --danger-soft: rgba(225, 29, 72, 0.1);
+            --shadow: 0 24px 64px -44px rgba(15, 23, 42, 0.45);
         }
-        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; background:
-            radial-gradient(circle at top left, rgba(14,165,233,0.08), transparent 32%),
-            radial-gradient(circle at top right, rgba(20,184,166,0.10), transparent 28%),
-            linear-gradient(180deg, #f8fbfd 0%, #f5f7fb 100%); }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
-        
-        /* 滚动条美化 */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
-
-        /* 气泡样式恢复 */
-        .bubble-user { background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%); border: 1px solid #d9e6ef; border-radius: 1.25rem 1.25rem 0 1.25rem; }
-        .bubble-assistant { background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(248,250,252,0.94) 100%); border: 1px solid #e8eef5; border-radius: 0 1.25rem 1.25rem 1.25rem; backdrop-filter: blur(16px); }
-        .bubble-tool { background: linear-gradient(180deg, #fffdf7 0%, #fff7e6 100%); border: 1px solid #f7dba4; border-radius: 1rem; }
-        .bubble-tool-error { background: linear-gradient(180deg, #fff8f7 0%, #fff1ef 100%); border: 1px solid #f3b6ad; border-radius: 1rem; }
-        .bubble-system { background: linear-gradient(180deg, #f4f7fb 0%, #eef4f8 100%); border: 1px solid #d7e1ea; border-radius: 1rem; }
-
-        /* 自动换行控制 */
-        .wrap-text pre { white-space: pre-wrap !important; word-break: break-all !important; }
-
-        /* 代码窗口样式 */
-        .code-window { display: flex; flex-direction: column; background: #ffffff; border-radius: 1rem; border: 1px solid #e2e8f0; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-        .split-view { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; height: calc(100% - 3.5rem); }
-
-        /* Tab 样式 */
-        .tab-btn { position: relative; color: #64748b; font-weight: 500; font-size: 0.875rem; padding: 1rem 0; transition: all 0.2s; }
-        .tab-btn.active { color: #4f46e5; }
-        .tab-btn.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #4f46e5; }
-
-        .markdown-body { background-color: transparent !important; font-size: 14px; line-height: 1.6; }
-        .reasoning-box { background: linear-gradient(180deg, #f7fbfd 0%, #f3f8fb 100%); border: 1px solid #d8e5ee; color: #526171; font-size: 0.875rem; padding: 1rem; border-radius: 0.85rem; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7); }
-        
-        /* Tool Call Card */
-        .tool-call-card { margin-top: 0.75rem; background: linear-gradient(180deg, #172133 0%, #101827 100%); border-radius: 0.9rem; overflow: hidden; border: 1px solid #2b3b52; box-shadow: 0 14px 28px -20px rgba(15,23,42,0.9); }
-        .tool-call-header { background: rgba(9,14,24,0.92); color: #9fb0c8; padding: 0.6rem 0.85rem; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; border-bottom: 1px solid #26364f; }
-        .request-tools-card { border: 1px solid #d7e1ea; background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,249,252,0.98) 100%); border-radius: 1.1rem; padding: 1.1rem 1.2rem; box-shadow: 0 16px 32px -28px rgba(15,23,42,0.32); }
-        .request-tool-item { border: 1px solid rgba(148,163,184,0.18); background: rgba(255,255,255,0.82); border-radius: 0.95rem; overflow: hidden; }
-        .request-tool-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.8rem 0.95rem; border-bottom: 1px solid rgba(148,163,184,0.14); background: rgba(248,250,252,0.88); }
-        .request-tool-body { padding: 0.95rem; display: grid; gap: 0.85rem; }
-        .request-tool-desc { font-size: 13px; line-height: 1.65; color: #334155; }
-        .message-shell { position: relative; }
-        .message-shell::before { content: ''; position: absolute; left: -20px; top: 26px; bottom: -26px; width: 1px; background: linear-gradient(180deg, rgba(148,163,184,0.22), rgba(148,163,184,0)); }
-        .message-shell:last-child::before { display: none; }
-        .meta-pill { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.18rem 0.45rem; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-        .meta-pill.role-user { background: rgba(59,130,246,0.08); color: #2563eb; border: 1px solid rgba(59,130,246,0.14); }
-        .meta-pill.role-assistant { background: rgba(15,118,110,0.10); color: #0f766e; border: 1px solid rgba(15,118,110,0.16); }
-        .meta-pill.role-tool { background: rgba(245,158,11,0.12); color: #a16207; border: 1px solid rgba(217,119,6,0.2); }
-        .meta-pill.role-system { background: rgba(100,116,139,0.12); color: #475569; border: 1px solid rgba(100,116,139,0.18); }
-        .type-chip { display: inline-flex; align-items: center; padding: 0.16rem 0.42rem; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; background: rgba(15,23,42,0.05); color: #64748b; }
-        .assistant-action { border: 1px dashed #b6c6d7; background: linear-gradient(180deg, rgba(250,252,253,0.95) 0%, rgba(245,249,252,0.96) 100%); border-radius: 1rem; padding: 0.95rem 1rem; }
-        .tool-output-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding-bottom: 0.55rem; margin-bottom: 0.8rem; border-bottom: 1px solid rgba(217,119,6,0.14); }
-        .tool-output-head.error { border-bottom-color: rgba(225,29,72,0.16); }
-        .json-panel { background: #101827; color: #dbe7f5; border-radius: 0.85rem; border: 1px solid #26364f; overflow: hidden; box-shadow: inset 0 1px 0 rgba(255,255,255,0.02); }
-        .json-panel pre { margin: 0; padding: 1rem; overflow-x: auto; font-size: 12px; line-height: 1.55; }
-        .claude-block-stack { display: grid; gap: 0.8rem; margin-top: 0.85rem; }
-        .claude-block { position: relative; overflow: hidden; border-radius: 0.95rem; border: 1px solid #d7e1ea; background: linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(247,250,252,0.96) 100%); box-shadow: 0 12px 28px -24px rgba(15,23,42,0.45); }
-        .claude-block::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 3px; background: linear-gradient(180deg, rgba(14,116,144,0.85), rgba(16,185,129,0.55)); }
-        .claude-block-header { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.72rem 0.95rem; border-bottom: 1px solid rgba(148,163,184,0.15); background: rgba(248,250,252,0.8); }
-        .claude-block-body { padding: 0.95rem; }
-        .claude-block-thinking::before { background: linear-gradient(180deg, rgba(79,70,229,0.88), rgba(59,130,246,0.58)); }
-        .claude-block-image::before { background: linear-gradient(180deg, rgba(2,132,199,0.88), rgba(6,182,212,0.58)); }
-        .claude-block-attachment::before { background: linear-gradient(180deg, rgba(15,118,110,0.88), rgba(34,197,94,0.55)); }
-        .claude-error-banner { display: inline-flex; align-items: center; gap: 0.45rem; margin-bottom: 0.8rem; padding: 0.38rem 0.6rem; border-radius: 999px; background: rgba(225,29,72,0.08); color: #be123c; border: 1px solid rgba(225,29,72,0.15); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
-        .media-link { display: inline-flex; align-items: center; gap: 0.45rem; color: #0369a1; font-size: 12px; font-weight: 600; }
-        .meta-note { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.18rem 0.45rem; border-radius: 999px; font-size: 10px; font-weight: 700; color: #64748b; background: rgba(148,163,184,0.12); }
-        .response-stack { position: relative; }
-        .response-stack::before { content: ''; position: absolute; left: 12px; top: 22px; bottom: 22px; width: 1px; background: linear-gradient(180deg, rgba(16,185,129,0.35), rgba(15,118,110,0.06)); }
-        .response-step { position: relative; padding-left: 2.4rem; }
-        .response-dot { position: absolute; left: 0; top: 0.3rem; width: 1.2rem; height: 1.2rem; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: white; border: 1px solid #cbd5e1; color: #64748b; font-size: 11px; font-weight: 700; box-shadow: 0 8px 18px -16px rgba(15,23,42,0.8); }
-        .chat-shell { width: min(96vw, 1440px); margin: 0 auto; }
-        .message-card { width: min(100%, 1120px); }
-
-        @media (max-width: 768px) {
-            .chat-shell { width: 100%; }
-            .message-card { width: 100%; }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Inter", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.08), transparent 28%),
+                radial-gradient(circle at top right, rgba(20, 184, 166, 0.10), transparent 24%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--bg) 100%);
+            -webkit-font-smoothing: antialiased;
+        }
+        a { color: inherit; }
+        button { font: inherit; }
+        pre, code { font-family: "JetBrains Mono", monospace; }
+        pre { margin: 0; }
+        .page { min-height: 100vh; display: flex; flex-direction: column; }
+        .header {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            backdrop-filter: blur(18px);
+            background: rgba(248, 250, 252, 0.88);
+            border-bottom: 1px solid rgba(203, 213, 225, 0.85);
+        }
+        .header-inner, .tabs, .panel-shell {
+            width: min(1440px, calc(100vw - 32px));
+            margin: 0 auto;
+        }
+        .header-inner {
+            display: flex;
+            gap: 16px;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0 16px;
+        }
+        .title-wrap {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            min-width: 0;
+        }
+        .icon-shell {
+            width: 46px;
+            height: 46px;
+            border-radius: 14px;
+            display: grid;
+            place-items: center;
+            color: white;
+            background: linear-gradient(135deg, #0f766e, #0ea5e9);
+            box-shadow: 0 20px 32px -24px rgba(14, 116, 144, 0.65);
+            flex: 0 0 auto;
+        }
+        .eyebrow {
+            margin: 0 0 4px;
+            font-size: 11px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 700;
+        }
+        .title {
+            margin: 0;
+            font-size: 24px;
+            line-height: 1.15;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .mono-badge, .meta-chip, .small-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            border-radius: 999px;
+            font-size: 12px;
+            line-height: 1;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .mono-badge {
+            padding: 7px 10px;
+            background: #e2e8f0;
+            color: #334155;
+            font-family: "JetBrains Mono", monospace;
+        }
+        .meta-chip {
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid var(--line);
+            color: var(--muted);
+        }
+        .meta-chip.ok {
+            color: #047857;
+            background: rgba(236, 253, 245, 0.96);
+            border-color: rgba(16, 185, 129, 0.22);
+        }
+        .meta-chip.err {
+            color: var(--danger);
+            background: rgba(255, 241, 242, 0.96);
+            border-color: rgba(244, 63, 94, 0.18);
+        }
+        .metrics {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .metric {
+            min-width: 92px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px solid var(--line);
+            text-align: center;
+            box-shadow: var(--shadow);
+        }
+        .metric-label {
+            display: block;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--muted-soft);
+            margin-bottom: 6px;
+            font-weight: 700;
+        }
+        .metric-value {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text);
+            font-family: "JetBrains Mono", monospace;
+        }
+        .tabs {
+            display: flex;
+            gap: 26px;
+            border-top: 1px solid rgba(203, 213, 225, 0.55);
+        }
+        .tab-btn {
+            position: relative;
+            padding: 14px 0;
+            color: var(--muted);
+            background: none;
+            border: 0;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .tab-btn.active {
+            color: #0f172a;
+        }
+        .tab-btn.active::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -1px;
+            height: 2px;
+            background: linear-gradient(90deg, #0f766e, #0ea5e9);
+            border-radius: 999px;
+        }
+        .main {
+            flex: 1;
+            padding: 24px 0 40px;
+        }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .panel-shell { min-height: 400px; }
+        .chat-shell { width: min(1120px, 100%); margin: 0 auto; display: grid; gap: 24px; }
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            box-shadow: var(--shadow);
+        }
+        .tools-card, .message-card, .response-card, .raw-card, .meta-card {
+            padding: 22px;
+        }
+        .section-head, .message-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .section-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #0ea5e9, #0f766e);
+            box-shadow: 0 0 12px rgba(14, 165, 233, 0.5);
+        }
+        .section-title {
+            font-size: 12px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: #0f766e;
+            font-weight: 800;
+        }
+        .meta-note {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.12);
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .tool-groups { display: grid; gap: 16px; }
+        .tool-group { display: grid; gap: 12px; }
+        .tool-item {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.8);
+            overflow: hidden;
+        }
+        .tool-item-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 16px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+            background: rgba(248, 250, 252, 0.9);
+        }
+        .tool-item-body { padding: 16px; display: grid; gap: 12px; }
+        .message-shell { display: flex; flex-direction: column; gap: 10px; }
+        .message-shell.align-right { align-items: flex-end; }
+        .message-shell.align-left { align-items: flex-start; }
+        .message-head { margin-bottom: 0; }
+        .role-chip {
+            padding: 5px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-weight: 800;
+        }
+        .role-user { color: #2563eb; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.15); }
+        .role-assistant { color: #0f766e; background: rgba(15, 118, 110, 0.1); border: 1px solid rgba(15, 118, 110, 0.16); }
+        .role-tool { color: #a16207; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(217, 119, 6, 0.18); }
+        .role-system { color: #475569; background: rgba(100, 116, 139, 0.12); border: 1px solid rgba(100, 116, 139, 0.18); }
+        .small-chip {
+            padding: 5px 8px;
+            background: rgba(15, 23, 42, 0.05);
+            color: var(--muted);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+        }
+        .message-card {
+            width: min(1120px, 100%);
+            display: grid;
+            gap: 14px;
+        }
+        .bubble-user { background: linear-gradient(180deg, #fbfdff 0%, #f5f9fc 100%); }
+        .bubble-assistant { background: linear-gradient(180deg, rgba(255,255,255,0.97) 0%, rgba(248,250,252,0.96) 100%); }
+        .bubble-system { background: linear-gradient(180deg, #f4f7fb 0%, #eef4f8 100%); }
+        .bubble-tool { background: linear-gradient(180deg, #fffdf7 0%, #fff7e6 100%); border-color: rgba(245, 158, 11, 0.25); }
+        .bubble-tool-error { background: linear-gradient(180deg, #fff8f7 0%, #fff1ef 100%); border-color: rgba(244, 63, 94, 0.22); }
+        .text-block {
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.72;
+            color: #1e293b;
+            font-size: 14px;
+        }
+        .text-block.mono {
+            font-family: "JetBrains Mono", monospace;
+            font-size: 12px;
+            line-height: 1.66;
+        }
+        .code-block {
+            background: #0f172a;
+            color: #dbeafe;
+            border-radius: 16px;
+            border: 1px solid #1e293b;
+            overflow: auto;
+            padding: 16px;
+            font-size: 12px;
+            line-height: 1.62;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .content-details {
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 14px;
+            background: rgba(248, 250, 252, 0.72);
+            overflow: hidden;
+        }
+        .content-details summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 12px 14px;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--muted);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+        }
+        .content-details[open] summary {
+            background: rgba(255, 255, 255, 0.72);
+        }
+        .content-inner { padding: 14px; }
+        .block-stack { display: grid; gap: 12px; }
+        .structured-block {
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.82);
+        }
+        .structured-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+            background: rgba(248, 250, 252, 0.9);
+        }
+        .structured-title {
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+        .structured-body { padding: 14px; display: grid; gap: 12px; }
+        .tool-call-card {
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #243247;
+            background: linear-gradient(180deg, #172133 0%, #101827 100%);
+        }
+        .tool-call-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-bottom: 1px solid #26364f;
+            color: #c3d4ea;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .tool-call-body {
+            padding: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #dbeafe;
+            font-size: 12px;
+            line-height: 1.62;
+        }
+        .error-banner {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: var(--danger-soft);
+            color: var(--danger);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-weight: 800;
+        }
+        .response-card { display: grid; gap: 16px; }
+        .response-step { display: grid; gap: 10px; }
+        .step-title {
+            font-size: 11px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 800;
+        }
+        .raw-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 12px;
+        }
+        .secondary-btn {
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.88);
+            color: var(--muted);
+            border-radius: 12px;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .secondary-btn.active {
+            color: #2563eb;
+            border-color: rgba(59, 130, 246, 0.25);
+            background: rgba(239, 246, 255, 0.94);
+        }
+        .raw-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .raw-card, .meta-card { display: grid; gap: 12px; }
+        .panel-title {
+            margin: 0;
+            font-size: 12px;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+            font-weight: 800;
+        }
+        .loading, .empty-state {
+            padding: 48px 24px;
+            text-align: center;
+            color: var(--muted);
+            border: 1px dashed var(--line-strong);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.72);
+        }
+        .empty-state strong { display: block; margin-bottom: 6px; color: var(--text); }
+        .hidden { display: none; }
+        .wrap .code-block { white-space: pre-wrap; }
+        .no-wrap .code-block { white-space: pre; word-break: normal; }
+        @media (max-width: 980px) {
+            .header-inner { flex-direction: column; align-items: flex-start; }
+            .metrics { justify-content: flex-start; }
+            .raw-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 720px) {
+            .header-inner, .tabs, .panel-shell { width: min(100vw - 24px, 100%); }
+            .main { padding-top: 18px; }
+            .tools-card, .message-card, .response-card, .raw-card, .meta-card { padding: 18px; }
+            .tabs { gap: 18px; overflow-x: auto; }
+            .title { font-size: 20px; }
         }
     </style>
 </head>
-<body class="bg-[#fcfcfd] h-screen flex flex-col overflow-hidden">
+<body>
+<div class="page">
+    <header class="header">
+        <div class="header-inner">
+            <div class="title-wrap">
+                <div class="icon-shell">
+                    <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <p class="eyebrow">Trace Detail</p>
+                    <h1 class="title">
+                        <span>{{.Header.Meta.Model}}</span>
+                        <span class="mono-badge">{{.Header.Meta.Method}} {{.Header.Meta.URL}}</span>
+                        {{if eq .Header.Meta.StatusCode 200}}
+                        <span class="meta-chip ok">200 OK</span>
+                        {{else}}
+                        <span class="meta-chip err">{{.Header.Meta.StatusCode}} Error</span>
+                        {{end}}
+                        {{if .Header.Layout.IsStream}}
+                        <span class="meta-chip">Streaming</span>
+                        {{else}}
+                        <span class="meta-chip">Non-Stream</span>
+                        {{end}}
+                    </h1>
+                </div>
+            </div>
 
-    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200 px-8 py-4 flex justify-between items-center z-30 shrink-0">
-        <div class="flex items-center gap-5">
-            <a href="/" class="p-2 hover:bg-slate-100 rounded-full transition-all">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-            </a>
-            <div>
-                <div class="flex items-center gap-3">
-                    <h1 class="text-lg font-bold tracking-tight text-slate-800">{{.Header.Meta.Model}}</h1>
-                    <span class="px-2 py-0.5 rounded text-[10px] font-bold border {{if eq .Header.Meta.StatusCode 200}}bg-emerald-50 text-emerald-700 border-emerald-200{{else}}bg-rose-50 text-rose-700 border-rose-200{{end}} uppercase tracking-wider">
-                        HTTP {{.Header.Meta.StatusCode}}
-                    </span>
+            <div class="metrics">
+                <div class="metric">
+                    <span class="metric-label">Latency</span>
+                    <span class="metric-value">{{.Header.Meta.DurationMs}}ms</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">TTFT</span>
+                    <span class="metric-value">{{if gt .Header.Meta.TTFTMs 0}}{{.Header.Meta.TTFTMs}}ms{{else}}-{{end}}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Prompt</span>
+                    <span class="metric-value">{{.Header.Usage.PromptTokens}}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Completion</span>
+                    <span class="metric-value">{{.Header.Usage.CompletionTokens}}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Total</span>
+                    <span class="metric-value">{{.Header.Usage.TotalTokens}}</span>
                 </div>
             </div>
         </div>
-        
-        <div class="flex items-center gap-4 px-4 py-1.5 bg-slate-100/50 rounded-xl border border-slate-200 shadow-sm font-mono text-xs">
-            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Latency</p><p class="text-slate-700 font-bold">{{.Header.Meta.DurationMs}}ms</p></div>
-            <div class="w-[1px] h-6 bg-slate-200"></div>
-            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Prompt</p><p class="text-blue-600 font-bold">{{.Header.Usage.PromptTokens}}</p></div>
-            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Completion</p><p class="text-emerald-600 font-bold">{{.Header.Usage.CompletionTokens}}</p></div>
-            <div class="w-[1px] h-6 bg-slate-200"></div>
-            <div class="text-center"><p class="text-[9px] text-slate-400 font-bold uppercase">Total</p><p class="text-indigo-600 font-bold">{{.Header.Usage.TotalTokens}}</p></div>
-        </div>
+
+        <nav class="tabs" aria-label="Trace panels">
+            <button type="button" class="tab-btn active" id="tab-chat" data-panel="chat">Conversation Context</button>
+            <button type="button" class="tab-btn" id="tab-raw" data-panel="raw">Raw Protocol</button>
+            <button type="button" class="tab-btn" id="tab-meta" data-panel="meta">Header Metadata</button>
+        </nav>
     </header>
 
-    <nav class="bg-white border-b border-slate-200 px-8 flex justify-center gap-10 z-20 shrink-0">
-        <button onclick="switchTab('chat')" id="tab-chat" class="tab-btn active">Conversation Context</button>
-        <button onclick="switchTab('raw')" id="tab-raw" class="tab-btn">Raw Protocol</button>
-        <button onclick="switchTab('meta')" id="tab-meta" class="tab-btn">Header Metadata</button>
-    </nav>
+    <main class="main">
+        <div class="panel-shell">
+            <section class="panel active" id="panel-chat">
+                <div class="chat-shell">
+                    {{if or .OpenAITools .AnthropicTools}}
+                    <div class="card tools-card">
+                        <div class="section-head">
+                            <span class="section-dot"></span>
+                            <span class="section-title">Tool Definitions</span>
+                            <span class="meta-note">{{len .RequestTools}} tools</span>
+                        </div>
 
-    <main class="flex-1 overflow-hidden relative">
-        <div id="panel-chat" class="absolute inset-0 overflow-y-auto p-8 bg-[#fcfcfd]">
-            <div class="chat-shell space-y-8 pb-20">
-                {{if or .OpenAITools .AnthropicTools}}
-                <section class="request-tools-card">
-                    <div class="flex items-center gap-2 mb-4">
-                        <div class="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.45)]"></div>
-                        <span class="text-xs font-bold uppercase tracking-widest text-sky-700">Tool Definitions</span>
-                        <span class="meta-note">{{len .RequestTools}} tools</span>
-                    </div>
-                    <div class="space-y-5">
-                        {{if .OpenAITools}}
-                        <div class="space-y-3">
-                            <div class="flex items-center gap-2">
-                                <span class="type-chip">OpenAI Tools</span>
-                                <span class="meta-note">{{len .OpenAITools}}</span>
-                            </div>
-                            {{range .OpenAITools}}
-                            <div class="request-tool-item">
-                                <div class="request-tool-head">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <span class="meta-pill role-assistant">{{.Name}}</span>
-                                        <span class="type-chip">{{.Type}}</span>
+                        <div class="tool-groups">
+                            {{if .OpenAITools}}
+                            <div class="tool-group">
+                                <div class="section-head">
+                                    <span class="small-chip">OpenAI Tools</span>
+                                    <span class="meta-note">{{len .OpenAITools}}</span>
+                                </div>
+                                {{range .OpenAITools}}
+                                <div class="tool-item">
+                                    <div class="tool-item-head">
+                                        <div class="section-head" style="margin-bottom:0;">
+                                            <span class="role-chip role-assistant">{{.Name}}</span>
+                                            <span class="small-chip">{{.Type}}</span>
+                                        </div>
+                                    </div>
+                                    <div class="tool-item-body">
+                                        {{if .Description}}
+                                        <pre class="text-block">{{.Description}}</pre>
+                                        {{end}}
+                                        {{if .Parameters}}
+                                        <pre class="code-block">{{prettyJsonString .Parameters}}</pre>
+                                        {{end}}
                                     </div>
                                 </div>
-                                <div class="request-tool-body">
-                                    {{if .Description}}
-                                    <div class="request-tool-desc">{{.Description}}</div>
-                                    {{end}}
-                                    {{if .Parameters}}
-                                    <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Parameters}}</code></pre></div>
-                                    {{end}}
+                                {{end}}
+                            </div>
+                            {{end}}
+
+                            {{if .AnthropicTools}}
+                            <div class="tool-group">
+                                <div class="section-head">
+                                    <span class="small-chip">Anthropic Tools</span>
+                                    <span class="meta-note">{{len .AnthropicTools}}</span>
                                 </div>
+                                {{range .AnthropicTools}}
+                                <div class="tool-item">
+                                    <div class="tool-item-head">
+                                        <div class="section-head" style="margin-bottom:0;">
+                                            <span class="role-chip role-assistant">{{.Name}}</span>
+                                            <span class="small-chip">{{.Type}}</span>
+                                        </div>
+                                    </div>
+                                    <div class="tool-item-body">
+                                        {{if .Description}}
+                                        <pre class="text-block">{{.Description}}</pre>
+                                        {{end}}
+                                        {{if .Parameters}}
+                                        <pre class="code-block">{{prettyJsonString .Parameters}}</pre>
+                                        {{end}}
+                                    </div>
+                                </div>
+                                {{end}}
                             </div>
                             {{end}}
                         </div>
-                        {{end}}
+                    </div>
+                    {{end}}
 
-                        {{if .AnthropicTools}}
-                        <div class="space-y-3">
-                            <div class="flex items-center gap-2">
-                                <span class="type-chip">Anthropic Tools</span>
-                                <span class="meta-note">{{len .AnthropicTools}}</span>
-                            </div>
-                            {{range .AnthropicTools}}
-                            <div class="request-tool-item">
-                                <div class="request-tool-head">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <span class="meta-pill role-assistant">{{.Name}}</span>
-                                        <span class="type-chip">{{.Type}}</span>
-                                    </div>
-                                </div>
-                                <div class="request-tool-body">
-                                    {{if .Description}}
-                                    <div class="request-tool-desc">{{.Description}}</div>
-                                    {{end}}
-                                    {{if .Parameters}}
-                                    <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Parameters}}</code></pre></div>
-                                    {{end}}
-                                </div>
-                            </div>
-                            {{end}}
+                    {{range $index, $msg := .ChatMessages}}
+                    <div class="message-shell {{if eq .Role "user"}}align-right{{else}}align-left{{end}}">
+                        <div class="message-head">
+                            <span class="role-chip role-{{if eq .Role "system"}}system{{else}}{{.Role}}{{end}}">{{.Role}}</span>
+                            {{if .MessageType}}<span class="small-chip">{{.MessageType}}</span>{{end}}
+                            {{if .Name}}<span class="small-chip">{{.Name}}</span>{{end}}
+                            {{if .ToolCallID}}<span class="meta-note">{{.ToolCallID}}</span>{{end}}
                         </div>
-                        {{end}}
-                    </div>
-                </section>
-                {{end}}
 
-                {{range $index, $msg := .ChatMessages}}
-                <div class="message-shell flex flex-col {{if eq .Role "user"}}items-end{{else}}items-start{{end}} group">
-                    <div class="flex items-center gap-2 mb-2 px-1 flex-wrap">
-                        <span class="meta-pill role-{{.Role}}">{{.Role}}</span>
-                        {{if .MessageType}}<span class="type-chip">{{.MessageType}}</span>{{end}}
-                        {{if .Name}}<span class="text-[10px] font-semibold tracking-wide text-slate-500">{{.Name}}</span>{{end}}
-                        {{if .ToolCallID}}<span class="text-[9px] font-mono bg-slate-200 text-slate-500 px-1 rounded">ID: {{.ToolCallID}}</span>{{end}}
-                    </div>
-
-                    {{if eq .Role "tool"}}
-                        <div class="message-card {{if .IsError}}bubble-tool-error{{else}}bubble-tool{{end}} px-5 py-4 shadow-sm">
-                            <div class="tool-output-head {{if .IsError}}error{{end}}">
-                                <div class="flex items-center gap-2 {{if .IsError}}text-rose-700{{else}}text-amber-700{{end}} font-bold text-xs uppercase tracking-tight">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 011-1h1a2 2 0 100-4H7a1 1 0 01-1-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" stroke-width="2"/></svg>
-                                    {{if .IsError}}Tool Error{{else}}Tool Output{{end}}
-                                </div>
-                                {{if .Name}}<span class="text-[11px] font-mono {{if .IsError}}text-rose-800/80{{else}}text-amber-800/80{{end}}">{{.Name}}</span>{{end}}
-                            </div>
+                        <div class="card message-card bubble-{{if eq .Role "system"}}system{{else if and (eq .Role "tool") .IsError}}tool-error{{else}}{{.Role}}{{end}}">
                             {{if .IsError}}
-                            <div class="claude-error-banner">
-                                <span>Failure</span>
-                                <span class="opacity-70 font-mono">{{.ToolCallID}}</span>
-                            </div>
+                            <div class="error-banner">Tool Failure</div>
                             {{end}}
+
                             {{if eq .ContentFormat "json"}}
-                            <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
+                            <pre class="code-block">{{prettyJsonString .Content}}</pre>
                             {{else if .Content}}
-                            <div class="font-mono text-[13px] leading-relaxed whitespace-pre-wrap break-all text-amber-900">{{.Content}}</div>
-                            {{end}}
-                            {{if .Blocks}}
-                            <div class="claude-block-stack">
-                                {{range $bIndex, $block := .Blocks}}
-                                <div class="claude-block claude-block-{{$block.Kind}}">
-                                    <div class="claude-block-header">
-                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
-                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
+                                {{if gt (len .Content) 4000}}
+                                <details class="content-details">
+                                    <summary>Large content, click to expand ({{len .Content}} chars)</summary>
+                                    <div class="content-inner">
+                                        <pre class="text-block {{if eq .Role "tool"}}mono{{end}}">{{.Content}}</pre>
                                     </div>
-                                    <div class="claude-block-body">
-                                        {{if $block.URL}}
-                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
+                                </details>
+                                {{else}}
+                                <pre class="text-block {{if eq .Role "tool"}}mono{{end}}">{{.Content}}</pre>
+                                {{end}}
+                            {{end}}
+
+                            {{if .Blocks}}
+                            <div class="block-stack">
+                                {{range .Blocks}}
+                                <div class="structured-block">
+                                    <div class="structured-head">
+                                        <span class="structured-title">{{.Title}}</span>
+                                        {{if .FileID}}<span class="meta-note">{{.FileID}}</span>{{end}}
+                                    </div>
+                                    <div class="structured-body">
+                                        {{if .URL}}
+                                        <a href="{{.URL}}" target="_blank" rel="noreferrer">Open media source</a>
                                         {{end}}
-                                        {{if eq $block.Format "json"}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
-                                        {{else if $block.Text}}
-                                        <div class="markdown-body" id="msg-block-{{$index}}-{{$bIndex}}"></div>
-                                        <textarea class="hidden" id="raw-msg-block-{{$index}}-{{$bIndex}}">{{$block.Text}}</textarea>
+                                        {{if eq .Format "json"}}
+                                        <pre class="code-block">{{prettyJsonString .Meta}}</pre>
+                                        {{else if .Text}}
+                                        {{if gt (len .Text) 4000}}
+                                        <details class="content-details">
+                                            <summary>Large block, click to expand ({{len .Text}} chars)</summary>
+                                            <div class="content-inner"><pre class="text-block">{{.Text}}</pre></div>
+                                        </details>
+                                        {{else}}
+                                        <pre class="text-block">{{.Text}}</pre>
                                         {{end}}
-                                        {{if and $block.Meta (ne $block.Format "json")}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{end}}
+                                        {{if and .Meta (ne .Format "json")}}
+                                        <pre class="code-block">{{prettyJsonString .Meta}}</pre>
                                         {{end}}
                                     </div>
                                 </div>
                                 {{end}}
                             </div>
                             {{end}}
-                        </div>
-                    {{else if .ToolCalls}}
-                        <div class="message-card assistant-action shadow-sm">
-                            <div class="flex items-center gap-2 mb-2">
-                                <span class="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">Assistant Action</span>
-                                <span class="h-px flex-1 bg-slate-200"></span>
-                            </div>
-                            {{if .Content}}
-                            <div class="bubble-{{.Role}} px-5 py-4 shadow-sm markdown-body mb-3" id="msg-{{$index}}"></div>
-                            <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
-                            {{end}}
-                            {{if .Blocks}}
-                            <div class="claude-block-stack {{if .Content}}mb-3{{end}}">
-                                {{range $bIndex, $block := .Blocks}}
-                                <div class="claude-block claude-block-{{$block.Kind}}">
-                                    <div class="claude-block-header">
-                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
-                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
-                                    </div>
-                                    <div class="claude-block-body">
-                                        {{if $block.URL}}
-                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
-                                        {{end}}
-                                        {{if eq $block.Format "json"}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
-                                        {{else if $block.Text}}
-                                        <div class="markdown-body" id="msg-block-{{$index}}-{{$bIndex}}"></div>
-                                        <textarea class="hidden" id="raw-msg-block-{{$index}}-{{$bIndex}}">{{$block.Text}}</textarea>
-                                        {{end}}
-                                        {{if and $block.Meta (ne $block.Format "json")}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
-                                        {{end}}
-                                    </div>
-                                </div>
-                                {{end}}
-                            </div>
-                            {{end}}
-                            <div class="w-full">
+
+                            {{if .ToolCalls}}
+                            <div class="block-stack">
                                 {{range .ToolCalls}}
                                 <div class="tool-call-card">
-                                    <div class="tool-call-header">
-                                        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>{{.Function.Name}}</span>
-                                        <span class="opacity-50 font-mono">{{.ID}}</span>
+                                    <div class="tool-call-head">
+                                        <span>{{.Function.Name}}</span>
+                                        <span>{{.ID}}</span>
                                     </div>
-                                    <div class="p-3 text-[12px] font-mono text-blue-100 overflow-x-auto"><pre><code class="language-json">{{prettyJsonString .Function.Arguments}}</code></pre></div>
-                                </div>
-                                {{end}}
-                            </div>
-                        </div>
-                    {{else}}
-                        <div class="message-card bubble-{{if eq .Role "system"}}system{{else}}{{.Role}}{{end}} px-5 py-4 shadow-sm {{if eq .ContentFormat "json"}}font-mono{{else}}markdown-body{{end}}">
-                            {{if eq .ContentFormat "json"}}
-                            <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Content}}</code></pre></div>
-                            {{else if .Content}}
-                            <div id="msg-{{$index}}"></div>
-                            {{end}}
-                            {{if .Blocks}}
-                            <div class="claude-block-stack {{if .Content}}mt-4{{end}}">
-                                {{range $bIndex, $block := .Blocks}}
-                                <div class="claude-block claude-block-{{$block.Kind}}">
-                                    <div class="claude-block-header">
-                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
-                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
-                                    </div>
-                                    <div class="claude-block-body">
-                                        {{if $block.URL}}
-                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
-                                        {{end}}
-                                        {{if eq $block.Format "json"}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
-                                        {{else if $block.Text}}
-                                        <div class="markdown-body" id="msg-block-{{$index}}-{{$bIndex}}"></div>
-                                        <textarea class="hidden" id="raw-msg-block-{{$index}}-{{$bIndex}}">{{$block.Text}}</textarea>
-                                        {{end}}
-                                        {{if and $block.Meta (ne $block.Format "json")}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
-                                        {{end}}
-                                    </div>
+                                    <pre class="tool-call-body">{{prettyJsonString .Function.Arguments}}</pre>
                                 </div>
                                 {{end}}
                             </div>
                             {{end}}
                         </div>
-                        <textarea class="hidden" id="raw-msg-{{$index}}">{{.Content}}</textarea>
-                    {{end}}
-                </div>
-                {{end}}
-
-                {{if or .AIContent .AIReasoning}}
-                <div class="pt-6 border-t border-slate-100">
-                    <div class="flex items-center gap-2 mb-4">
-                        <div class="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
-                        <span class="text-xs font-bold uppercase tracking-widest text-emerald-600">Response (Current)</span>
                     </div>
+                    {{end}}
 
-                    <div class="message-card bubble-assistant p-8 shadow-xl shadow-slate-200/40 border border-slate-200/60 ring-1 ring-slate-900/5 response-stack">
+                    {{if or .AIContent .AIReasoning .AIBlocks .ResponseToolCalls}}
+                    <div class="card response-card">
+                        <div class="section-head">
+                            <span class="section-dot"></span>
+                            <span class="section-title">Response (Current)</span>
+                        </div>
+
                         {{if .AIReasoning}}
-                        <details open class="mb-6 response-step">
-                            <summary class="text-xs font-bold text-slate-400 hover:text-indigo-600 transition-colors uppercase tracking-widest list-none flex items-center gap-2 cursor-pointer">Thinking Process</summary>
-                            <span class="response-dot">1</span>
-                            <div class="reasoning-box mt-3 font-mono leading-relaxed markdown-body" id="md-reasoning"></div>
-                            <textarea id="raw-reasoning" class="hidden">{{.AIReasoning}}</textarea>
-                        </details>
-                        <div class="h-[1px] bg-slate-100 mb-6"></div>
+                        <div class="response-step">
+                            <div class="step-title">Thinking Process</div>
+                            {{if gt (len .AIReasoning) 4000}}
+                            <details class="content-details">
+                                <summary>Large reasoning block, click to expand ({{len .AIReasoning}} chars)</summary>
+                                <div class="content-inner"><pre class="text-block mono">{{.AIReasoning}}</pre></div>
+                            </details>
+                            {{else}}
+                            <pre class="text-block mono">{{.AIReasoning}}</pre>
+                            {{end}}
+                        </div>
                         {{end}}
 
                         {{if .ResponseToolCalls}}
-                        <div class="mb-6 space-y-3 response-step">
-                            <span class="response-dot">{{if .AIReasoning}}2{{else}}1{{end}}</span>
-                            <div class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Tool Calls</div>
-                            {{range .ResponseToolCalls}}
-                            <div class="tool-call-card">
-                                <div class="tool-call-header">
-                                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-blue-500"></span>{{.Function.Name}}</span>
-                                    <span class="opacity-50 font-mono">{{.ID}}</span>
+                        <div class="response-step">
+                            <div class="step-title">Tool Calls</div>
+                            <div class="block-stack">
+                                {{range .ResponseToolCalls}}
+                                <div class="tool-call-card">
+                                    <div class="tool-call-head">
+                                        <span>{{.Function.Name}}</span>
+                                        <span>{{.ID}}</span>
+                                    </div>
+                                    <pre class="tool-call-body">{{prettyJsonString .Function.Arguments}}</pre>
                                 </div>
-                                <div class="p-3 text-[12px] font-mono text-blue-100 overflow-x-auto"><pre><code class="language-json">{{prettyJsonString .Function.Arguments}}</code></pre></div>
+                                {{end}}
                             </div>
-                            {{end}}
                         </div>
                         {{end}}
 
                         {{if .AIBlocks}}
-                        <div class="mb-6 space-y-3 response-step">
-                            <span class="response-dot">{{if .AIReasoning}}{{if .ResponseToolCalls}}3{{else}}2{{end}}{{else}}{{if .ResponseToolCalls}}2{{else}}1{{end}}{{end}}</span>
-                            <div class="text-[10px] font-bold uppercase tracking-widest text-slate-400">Artifacts</div>
-                            <div class="claude-block-stack">
-                                {{range $bIndex, $block := .AIBlocks}}
-                                <div class="claude-block claude-block-{{$block.Kind}}">
-                                    <div class="claude-block-header">
-                                        <span class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{{$block.Title}}</span>
-                                        {{if $block.FileID}}<span class="meta-note">{{$block.FileID}}</span>{{end}}
+                        <div class="response-step">
+                            <div class="step-title">Artifacts</div>
+                            <div class="block-stack">
+                                {{range .AIBlocks}}
+                                <div class="structured-block">
+                                    <div class="structured-head">
+                                        <span class="structured-title">{{.Title}}</span>
+                                        {{if .FileID}}<span class="meta-note">{{.FileID}}</span>{{end}}
                                     </div>
-                                    <div class="claude-block-body">
-                                        {{if $block.URL}}
-                                        <a class="media-link" href="{{$block.URL}}" target="_blank" rel="noreferrer">Open media source</a>
+                                    <div class="structured-body">
+                                        {{if .URL}}
+                                        <a href="{{.URL}}" target="_blank" rel="noreferrer">Open media source</a>
                                         {{end}}
-                                        {{if eq $block.Format "json"}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
-                                        {{else if $block.Text}}
-                                        <div class="markdown-body" id="ai-block-{{$bIndex}}"></div>
-                                        <textarea class="hidden" id="raw-ai-block-{{$bIndex}}">{{$block.Text}}</textarea>
+                                        {{if eq .Format "json"}}
+                                        <pre class="code-block">{{prettyJsonString .Meta}}</pre>
+                                        {{else if .Text}}
+                                        {{if gt (len .Text) 4000}}
+                                        <details class="content-details">
+                                            <summary>Large block, click to expand ({{len .Text}} chars)</summary>
+                                            <div class="content-inner"><pre class="text-block">{{.Text}}</pre></div>
+                                        </details>
+                                        {{else}}
+                                        <pre class="text-block">{{.Text}}</pre>
                                         {{end}}
-                                        {{if and $block.Meta (ne $block.Format "json")}}
-                                        <div class="json-panel mt-3"><pre><code class="language-json">{{prettyJsonString $block.Meta}}</code></pre></div>
+                                        {{end}}
+                                        {{if and .Meta (ne .Format "json")}}
+                                        <pre class="code-block">{{prettyJsonString .Meta}}</pre>
                                         {{end}}
                                     </div>
                                 </div>
@@ -412,123 +736,182 @@
                         </div>
                         {{end}}
 
+                        {{if .AIContent}}
                         <div class="response-step">
-                            <span class="response-dot">{{if .AIReasoning}}{{if .ResponseToolCalls}}{{if .AIBlocks}}4{{else}}3{{end}}{{else}}{{if .AIBlocks}}3{{else}}2{{end}}{{end}}{{else}}{{if .ResponseToolCalls}}{{if .AIBlocks}}3{{else}}2{{end}}{{else}}{{if .AIBlocks}}2{{else}}1{{end}}{{end}}{{end}}</span>
-                            <div class="markdown-body" id="md-response"></div>
+                            <div class="step-title">Final Text</div>
+                            {{if gt (len .AIContent) 4000}}
+                            <details class="content-details">
+                                <summary>Large response, click to expand ({{len .AIContent}} chars)</summary>
+                                <div class="content-inner"><pre class="text-block">{{.AIContent}}</pre></div>
+                            </details>
+                            {{else}}
+                            <pre class="text-block">{{.AIContent}}</pre>
+                            {{end}}
                         </div>
-                        <textarea id="raw-ai" class="hidden">{{.AIContent}}</textarea>
+                        {{end}}
+                    </div>
+                    {{else if and (eq (len .ChatMessages) 0) (eq (len .RequestTools) 0)}}
+                    <div class="empty-state">
+                        <strong>No parsed conversation context</strong>
+                        <span>The request body did not contain recognizable chat-style messages.</span>
+                    </div>
+                    {{end}}
+                </div>
+            </section>
+
+            <section class="panel" id="panel-raw">
+                <div class="chat-shell">
+                    <div class="raw-toolbar">
+                        <button type="button" class="secondary-btn" id="wrap-toggle">Enable wrapping</button>
+                    </div>
+                    <div id="raw-loading" class="loading">Loading raw protocol on demand...</div>
+                    <div id="raw-shell" class="raw-grid hidden no-wrap">
+                        <div class="card raw-card">
+                            <h2 class="panel-title">Request Protocol</h2>
+                            <pre class="code-block" id="raw-request"></pre>
+                        </div>
+                        <div class="card raw-card">
+                            <h2 class="panel-title">Response Protocol</h2>
+                            <pre class="code-block" id="raw-response"></pre>
+                        </div>
+                    </div>
+                    <div id="raw-error" class="empty-state hidden">
+                        <strong>Failed to load raw protocol</strong>
+                        <span id="raw-error-text"></span>
                     </div>
                 </div>
-                {{end}}
-            </div>
-        </div>
+            </section>
 
-        <div id="panel-raw" class="absolute inset-0 p-6 hidden bg-slate-50">
-            <div class="flex justify-end mb-3">
-                <button onclick="toggleWordWrap()" id="btn-wrap" class="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 hover:border-indigo-200 transition-all shadow-sm">
-                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h16" /></svg>
-                    <span id="wrap-text-label">开启自动换行</span>
-                </button>
-            </div>
-            <div id="raw-container" class="split-view">
-                <div class="code-window">
-                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-[10px] text-slate-500 uppercase tracking-widest">Request Protocol</div>
-                    <div class="flex-1 overflow-auto p-4"><pre><code class="language-http text-xs">{{.ReqFull}}</code></pre></div>
+            <section class="panel" id="panel-meta">
+                <div class="chat-shell">
+                    <div id="meta-loading" class="loading">Loading metadata on demand...</div>
+                    <div id="meta-shell" class="hidden" style="display:grid; gap:16px;">
+                        <div class="card meta-card">
+                            <h2 class="panel-title">Header JSON</h2>
+                            <pre class="code-block" id="meta-header"></pre>
+                        </div>
+                        <div class="card meta-card" id="meta-events-card">
+                            <h2 class="panel-title">Prelude Events</h2>
+                            <pre class="code-block" id="meta-events"></pre>
+                        </div>
+                    </div>
+                    <div id="meta-error" class="empty-state hidden">
+                        <strong>Failed to load metadata</strong>
+                        <span id="meta-error-text"></span>
+                    </div>
                 </div>
-                <div class="code-window">
-                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-[10px] text-slate-500 uppercase tracking-widest">Response Protocol</div>
-                    <div class="flex-1 overflow-auto p-4"><pre><code class="language-http text-xs">{{.ResFull}}</code></pre></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="panel-meta" class="absolute inset-0 p-10 hidden overflow-y-auto bg-slate-50">
-            <div class="max-w-4xl mx-auto">
-                <div class="code-window shadow-sm">
-                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-500 uppercase">Header JSON</div>
-                    <div class="p-6 overflow-x-auto font-mono text-xs"><pre><code class="language-json">{{json .Header}}</code></pre></div>
-                </div>
-                {{if .Events}}
-                <div class="code-window shadow-sm mt-6">
-                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 font-bold text-xs text-slate-500 uppercase">Prelude Events</div>
-                    <div class="p-6 overflow-x-auto font-mono text-xs"><pre><code class="language-json">{{json .Events}}</code></pre></div>
-                </div>
-                {{end}}
-            </div>
+            </section>
         </div>
     </main>
+</div>
 
-    <script>
-        marked.setOptions({
-            breaks: true,
-            highlight: function(code, lang) {
-                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-                return hljs.highlight(code, { language }).value;
-            },
-            langPrefix: 'hljs language-'
+<script>
+    const state = {
+        activePanel: 'chat',
+        detailPayload: null,
+        rawWrap: false,
+    };
+
+    function setActivePanel(name) {
+        ['chat', 'raw', 'meta'].forEach(panelName => {
+            const panel = document.getElementById('panel-' + panelName);
+            const tab = document.getElementById('tab-' + panelName);
+            const active = panelName === name;
+            panel.classList.toggle('active', active);
+            tab.classList.toggle('active', active);
         });
+        state.activePanel = name;
 
-        function renderAllContent() {
-            // 渲染所有历史消息 Markdown
-            document.querySelectorAll('[id^="raw-msg-"]').forEach(rawEl => {
-                if (rawEl.id.startsWith('raw-msg-block-')) return;
-                const index = rawEl.id.replace('raw-msg-', '');
-                const targetEl = document.getElementById('msg-' + index);
-                if (targetEl && rawEl.value) {
-                    targetEl.innerHTML = marked.parse(rawEl.value);
-                }
-            });
+        if ((name === 'raw' || name === 'meta') && !state.detailPayload) {
+            loadDetailPayload();
+        }
+    }
 
-            document.querySelectorAll('[id^="raw-msg-block-"]').forEach(rawEl => {
-                const index = rawEl.id.replace('raw-msg-block-', '');
-                const targetEl = document.getElementById('msg-block-' + index);
-                if (targetEl && rawEl.value) {
-                    targetEl.innerHTML = marked.parse(rawEl.value);
-                }
-            });
-
-            // 渲染思考过程和最后一条回复
-            const rawReasoning = document.getElementById('raw-reasoning');
-            if (rawReasoning) document.getElementById('md-reasoning').innerHTML = marked.parse(rawReasoning.value);
-
-            const aiRaw = document.getElementById('raw-ai');
-            if (aiRaw) document.getElementById('md-response').innerHTML = marked.parse(aiRaw.value);
-
-            document.querySelectorAll('[id^="raw-ai-block-"]').forEach(rawEl => {
-                const index = rawEl.id.replace('raw-ai-block-', '');
-                const targetEl = document.getElementById('ai-block-' + index);
-                if (targetEl && rawEl.value) {
-                    targetEl.innerHTML = marked.parse(rawEl.value);
-                }
-            });
-
-            hljs.highlightAll();
+    async function loadDetailPayload() {
+        if (state.detailPayload) {
+            renderRawPanel();
+            renderMetaPanel();
+            return;
         }
 
-        function switchTab(name) {
-            ['chat', 'raw', 'meta'].forEach(t => {
-                document.getElementById('panel-'+t).classList.add('hidden');
-                document.getElementById('tab-'+t).classList.remove('active');
-            });
-            document.getElementById('panel-'+name).classList.remove('hidden');
-            document.getElementById('tab-'+name).classList.add('active');
+        const path = new URLSearchParams(window.location.search).get('path');
+        if (!path) {
+            renderPanelError('raw', 'missing path');
+            renderPanelError('meta', 'missing path');
+            return;
         }
 
-        function toggleWordWrap() {
-            const container = document.getElementById('raw-container');
-            const label = document.getElementById('wrap-text-label');
-            const btn = document.getElementById('btn-wrap');
-            const isWrapped = container.classList.toggle('wrap-text');
-            
-            label.innerText = isWrapped ? '关闭自动换行' : '开启自动换行';
-            if (isWrapped) {
-                btn.classList.add('bg-indigo-50', 'border-indigo-200', 'text-indigo-600');
-            } else {
-                btn.classList.remove('bg-indigo-50', 'border-indigo-200', 'text-indigo-600');
+        try {
+            const resp = await fetch('/api/detail/raw?path=' + encodeURIComponent(path), {
+                headers: { 'Accept': 'application/json' },
+            });
+            if (!resp.ok) {
+                throw new Error(await resp.text() || ('HTTP ' + resp.status));
             }
+            state.detailPayload = await resp.json();
+            renderRawPanel();
+            renderMetaPanel();
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            renderPanelError('raw', message);
+            renderPanelError('meta', message);
         }
+    }
 
-        document.addEventListener('DOMContentLoaded', renderAllContent);
-    </script>
+    function renderRawPanel() {
+        if (!state.detailPayload) return;
+        document.getElementById('raw-loading').classList.add('hidden');
+        document.getElementById('raw-error').classList.add('hidden');
+        document.getElementById('raw-shell').classList.remove('hidden');
+        document.getElementById('raw-request').textContent = state.detailPayload.request_protocol || '';
+        document.getElementById('raw-response').textContent = state.detailPayload.response_protocol || '';
+    }
+
+    function renderMetaPanel() {
+        if (!state.detailPayload) return;
+        document.getElementById('meta-loading').classList.add('hidden');
+        document.getElementById('meta-error').classList.add('hidden');
+        document.getElementById('meta-shell').classList.remove('hidden');
+        document.getElementById('meta-header').textContent = JSON.stringify(state.detailPayload.header || {}, null, 2);
+
+        const events = state.detailPayload.events || [];
+        const card = document.getElementById('meta-events-card');
+        if (events.length === 0) {
+            card.classList.add('hidden');
+            return;
+        }
+        card.classList.remove('hidden');
+        document.getElementById('meta-events').textContent = JSON.stringify(events, null, 2);
+    }
+
+    function renderPanelError(prefix, message) {
+        const loading = document.getElementById(prefix + '-loading');
+        const shell = document.getElementById(prefix + '-shell');
+        const error = document.getElementById(prefix + '-error');
+        const text = document.getElementById(prefix + '-error-text');
+
+        if (loading) loading.classList.add('hidden');
+        if (shell) shell.classList.add('hidden');
+        if (error) error.classList.remove('hidden');
+        if (text) text.textContent = message;
+    }
+
+    function toggleWrap() {
+        state.rawWrap = !state.rawWrap;
+        const shell = document.getElementById('raw-shell');
+        const button = document.getElementById('wrap-toggle');
+        shell.classList.toggle('wrap', state.rawWrap);
+        shell.classList.toggle('no-wrap', !state.rawWrap);
+        button.classList.toggle('active', state.rawWrap);
+        button.textContent = state.rawWrap ? 'Disable wrapping' : 'Enable wrapping';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.tab-btn').forEach(button => {
+            button.addEventListener('click', () => setActivePanel(button.dataset.panel));
+        });
+        document.getElementById('wrap-toggle').addEventListener('click', toggleWrap);
+    });
+</script>
 </body>
 </html>
