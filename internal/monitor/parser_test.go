@@ -82,6 +82,40 @@ func TestParseLogFileResponsesRequestFallbackDoesNotLookLikeEmbedding(t *testing
 	}
 }
 
+func TestParseLogFileChatCompletionsRequestRendersStructuredMessages(t *testing.T) {
+	reqBody := `{"messages":[{"role":"system","content":"You are a personal assistant."},{"role":"user","content":[{"type":"text","text":"A new session "}]}],"tools":[{"type":"function","function":{"name":"read","description":"Read the contents of a file.","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}}]}`
+	content := buildRecordFixture(t, "/v1/chat/completions", false, reqBody, `{"choices":[{"message":{"content":"hello"}}]}`)
+
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if len(parsed.ChatMessages) != 2 {
+		t.Fatalf("len(ChatMessages) = %d, want 2", len(parsed.ChatMessages))
+	}
+	if parsed.ChatMessages[0].Role != "system" || parsed.ChatMessages[0].Content != "You are a personal assistant." {
+		t.Fatalf("system message = %+v", parsed.ChatMessages[0])
+	}
+	if parsed.ChatMessages[1].Role != "user" || parsed.ChatMessages[1].Content != "A new session" {
+		t.Fatalf("user message = %+v", parsed.ChatMessages[1])
+	}
+	if len(parsed.RequestTools) != 1 {
+		t.Fatalf("len(RequestTools) = %d, want 1", len(parsed.RequestTools))
+	}
+	if parsed.RequestTools[0].Name != "read" || parsed.RequestTools[0].Description != "Read the contents of a file." {
+		t.Fatalf("request tool = %+v", parsed.RequestTools[0])
+	}
+	if parsed.RequestTools[0].Source != "openai" {
+		t.Fatalf("request tool source = %q, want openai", parsed.RequestTools[0].Source)
+	}
+	if !strings.Contains(parsed.RequestTools[0].Parameters, `"file_path"`) {
+		t.Fatalf("request tool parameters = %q", parsed.RequestTools[0].Parameters)
+	}
+	if len(parsed.OpenAITools) != 1 || len(parsed.AnthropicTools) != 0 {
+		t.Fatalf("tool grouping = openai:%d anthropic:%d", len(parsed.OpenAITools), len(parsed.AnthropicTools))
+	}
+}
+
 func TestParseLogFileAnthropicMessagesRendersConversationAndStreamOutput(t *testing.T) {
 	reqBody := `{"system":"You are helpful.","messages":[{"role":"user","content":[{"type":"text","text":"inspect this repo"}]},{"role":"assistant","content":[{"type":"text","text":"Reading files."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/tmp/README.md"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"# read ok"}]}]}`
 	resBody := strings.Join([]string{
@@ -149,6 +183,31 @@ func TestParseLogFileAnthropicMessagesRendersConversationAndStreamOutput(t *test
 	}
 	if parsed.ResponseToolCalls[0].ID != "toolu_live" || parsed.ResponseToolCalls[0].Function.Name != "Bash" || parsed.ResponseToolCalls[0].Function.Arguments != `{"command":"pwd"}` {
 		t.Fatalf("ResponseToolCalls[0] = %+v", parsed.ResponseToolCalls[0])
+	}
+}
+
+func TestParseLogFileAnthropicRequestRendersToolDefinitions(t *testing.T) {
+	reqBody := `{"system":"You are helpful.","tools":[{"name":"read","description":"Read the contents of a file.","input_schema":{"type":"object","properties":{"file_path":{"type":"string"}}}}],"messages":[{"role":"user","content":[{"type":"text","text":"inspect this repo"}]}]}`
+	content := buildRecordFixture(t, "/v1/messages", false, reqBody, `{"content":[{"type":"text","text":"done"}]}`)
+
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if len(parsed.RequestTools) != 1 {
+		t.Fatalf("len(RequestTools) = %d, want 1", len(parsed.RequestTools))
+	}
+	if parsed.RequestTools[0].Name != "read" || parsed.RequestTools[0].Description != "Read the contents of a file." {
+		t.Fatalf("request tool = %+v", parsed.RequestTools[0])
+	}
+	if parsed.RequestTools[0].Source != "anthropic" {
+		t.Fatalf("request tool source = %q, want anthropic", parsed.RequestTools[0].Source)
+	}
+	if !strings.Contains(parsed.RequestTools[0].Parameters, `"file_path"`) {
+		t.Fatalf("request tool parameters = %q", parsed.RequestTools[0].Parameters)
+	}
+	if len(parsed.OpenAITools) != 0 || len(parsed.AnthropicTools) != 1 {
+		t.Fatalf("tool grouping = openai:%d anthropic:%d", len(parsed.OpenAITools), len(parsed.AnthropicTools))
 	}
 }
 

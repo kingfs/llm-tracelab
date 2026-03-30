@@ -60,6 +60,11 @@
         /* Tool Call Card */
         .tool-call-card { margin-top: 0.75rem; background: linear-gradient(180deg, #172133 0%, #101827 100%); border-radius: 0.9rem; overflow: hidden; border: 1px solid #2b3b52; box-shadow: 0 14px 28px -20px rgba(15,23,42,0.9); }
         .tool-call-header { background: rgba(9,14,24,0.92); color: #9fb0c8; padding: 0.6rem 0.85rem; font-size: 11px; font-weight: 600; display: flex; justify-content: space-between; border-bottom: 1px solid #26364f; }
+        .request-tools-card { border: 1px solid #d7e1ea; background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(246,249,252,0.98) 100%); border-radius: 1.1rem; padding: 1.1rem 1.2rem; box-shadow: 0 16px 32px -28px rgba(15,23,42,0.32); }
+        .request-tool-item { border: 1px solid rgba(148,163,184,0.18); background: rgba(255,255,255,0.82); border-radius: 0.95rem; overflow: hidden; }
+        .request-tool-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.8rem 0.95rem; border-bottom: 1px solid rgba(148,163,184,0.14); background: rgba(248,250,252,0.88); }
+        .request-tool-body { padding: 0.95rem; display: grid; gap: 0.85rem; }
+        .request-tool-desc { font-size: 13px; line-height: 1.65; color: #334155; }
         .message-shell { position: relative; }
         .message-shell::before { content: ''; position: absolute; left: -20px; top: 26px; bottom: -26px; width: 1px; background: linear-gradient(180deg, rgba(148,163,184,0.22), rgba(148,163,184,0)); }
         .message-shell:last-child::before { display: none; }
@@ -134,6 +139,71 @@
     <main class="flex-1 overflow-hidden relative">
         <div id="panel-chat" class="absolute inset-0 overflow-y-auto p-8 bg-[#fcfcfd]">
             <div class="chat-shell space-y-8 pb-20">
+                {{if or .OpenAITools .AnthropicTools}}
+                <section class="request-tools-card">
+                    <div class="flex items-center gap-2 mb-4">
+                        <div class="w-2 h-2 rounded-full bg-sky-500 shadow-[0_0_8px_rgba(14,165,233,0.45)]"></div>
+                        <span class="text-xs font-bold uppercase tracking-widest text-sky-700">Tool Definitions</span>
+                        <span class="meta-note">{{len .RequestTools}} tools</span>
+                    </div>
+                    <div class="space-y-5">
+                        {{if .OpenAITools}}
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="type-chip">OpenAI Tools</span>
+                                <span class="meta-note">{{len .OpenAITools}}</span>
+                            </div>
+                            {{range .OpenAITools}}
+                            <div class="request-tool-item">
+                                <div class="request-tool-head">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="meta-pill role-assistant">{{.Name}}</span>
+                                        <span class="type-chip">{{.Type}}</span>
+                                    </div>
+                                </div>
+                                <div class="request-tool-body">
+                                    {{if .Description}}
+                                    <div class="request-tool-desc">{{.Description}}</div>
+                                    {{end}}
+                                    {{if .Parameters}}
+                                    <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Parameters}}</code></pre></div>
+                                    {{end}}
+                                </div>
+                            </div>
+                            {{end}}
+                        </div>
+                        {{end}}
+
+                        {{if .AnthropicTools}}
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-2">
+                                <span class="type-chip">Anthropic Tools</span>
+                                <span class="meta-note">{{len .AnthropicTools}}</span>
+                            </div>
+                            {{range .AnthropicTools}}
+                            <div class="request-tool-item">
+                                <div class="request-tool-head">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="meta-pill role-assistant">{{.Name}}</span>
+                                        <span class="type-chip">{{.Type}}</span>
+                                    </div>
+                                </div>
+                                <div class="request-tool-body">
+                                    {{if .Description}}
+                                    <div class="request-tool-desc">{{.Description}}</div>
+                                    {{end}}
+                                    {{if .Parameters}}
+                                    <div class="json-panel"><pre><code class="language-json">{{prettyJsonString .Parameters}}</code></pre></div>
+                                    {{end}}
+                                </div>
+                            </div>
+                            {{end}}
+                        </div>
+                        {{end}}
+                    </div>
+                </section>
+                {{end}}
+
                 {{range $index, $msg := .ChatMessages}}
                 <div class="message-shell flex flex-col {{if eq .Role "user"}}items-end{{else}}items-start{{end}} group">
                     <div class="flex items-center gap-2 mb-2 px-1 flex-wrap">

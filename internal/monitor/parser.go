@@ -21,6 +21,9 @@ type ParsedData struct {
 
 	// Parsed Info
 	ChatMessages      []ChatMessage
+	RequestTools      []RequestTool
+	OpenAITools       []RequestTool
+	AnthropicTools    []RequestTool
 	AIContent         string
 	AIReasoning       string
 	AIBlocks          []ContentBlock
@@ -56,12 +59,45 @@ type ToolCall struct {
 		Arguments string `json:"arguments"` // JSON String
 	} `json:"function"`
 }
+
+type RequestTool struct {
+	Source      string `json:"source,omitempty"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Parameters  string `json:"parameters,omitempty"`
+}
 type chatRequest struct {
-	Messages []ChatMessage `json:"messages"`
 	// Embedding / Rerank 字段兼容
 	Input     interface{} `json:"input"`     // Embedding: string or []string
 	Query     string      `json:"query"`     // Reranker
 	Documents []string    `json:"documents"` // Reranker
+}
+
+type openAIChatRequest struct {
+	Messages []openAIChatRequestMessage `json:"messages"`
+	Tools    []rawRequestTool           `json:"tools"`
+}
+
+type openAIChatRequestMessage struct {
+	Role       string      `json:"role"`
+	Content    interface{} `json:"content"`
+	ToolCalls  []ToolCall  `json:"tool_calls"`
+	ToolCallID string      `json:"tool_call_id"`
+	Name       string      `json:"name"`
+}
+
+type rawRequestTool struct {
+	Type        string      `json:"type"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Parameters  interface{} `json:"parameters"`
+	InputSchema interface{} `json:"input_schema"`
+	Function    struct {
+		Name        string      `json:"name"`
+		Description string      `json:"description"`
+		Parameters  interface{} `json:"parameters"`
+	} `json:"function"`
 }
 
 type responsesRequest struct {
@@ -158,6 +194,8 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 
 	// 4. 解析 Request (自适应 Chat / Embedding / Reranker)
 	messages := parseRequestMessages(header.Meta.URL, reqBodyBytes)
+	requestTools := parseRequestTools(reqBodyBytes)
+	openAITools, anthropicTools := splitRequestToolsBySource(requestTools)
 
 	// 5. 解析 AI Content & Reasoning
 	contentStr, reasoningStr, aiBlocks, toolCalls := parseAIContent(header.Meta.URL, resBodyBytes, header.Layout.IsStream)
@@ -168,6 +206,9 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 		ReqFull:           string(reqFullBytes),
 		ResFull:           string(resFullBytes),
 		ChatMessages:      messages,
+		RequestTools:      requestTools,
+		OpenAITools:       openAITools,
+		AnthropicTools:    anthropicTools,
 		AIContent:         contentStr,
 		AIReasoning:       reasoningStr,
 		AIBlocks:          aiBlocks,
@@ -188,13 +229,13 @@ func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
 			return messages
 		}
 	}
+	if messages := parseOpenAIChatRequest(reqBodyBytes); len(messages) > 0 {
+		return messages
+	}
 
 	var reqRaw chatRequest
 	var messages []ChatMessage
 	if json.Unmarshal(reqBodyBytes, &reqRaw) == nil {
-		if len(reqRaw.Messages) > 0 {
-			return reqRaw.Messages
-		}
 		if reqRaw.Input != nil {
 			contentStr := formatInput(reqRaw.Input)
 			return []ChatMessage{{
@@ -213,6 +254,93 @@ func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
 	}
 
 	return messages
+}
+
+func parseOpenAIChatRequest(data []byte) []ChatMessage {
+	var req openAIChatRequest
+	if err := json.Unmarshal(data, &req); err != nil || len(req.Messages) == 0 {
+		return nil
+	}
+
+	messages := make([]ChatMessage, 0, len(req.Messages))
+	for _, message := range req.Messages {
+		role := firstNonEmpty(message.Role, "user")
+		content, blocks := renderOpenAIChatContent(message.Content)
+		if content == "" && len(blocks) == 0 && len(message.ToolCalls) == 0 {
+			continue
+		}
+
+		msgType := "message"
+		if len(message.ToolCalls) > 0 {
+			msgType = "tool_use"
+		}
+
+		messages = append(messages, ChatMessage{
+			Role:          role,
+			MessageType:   msgType,
+			Content:       content,
+			ContentFormat: detectContentFormat(content),
+			Blocks:        blocks,
+			ToolCalls:     append([]ToolCall(nil), message.ToolCalls...),
+			ToolCallID:    message.ToolCallID,
+			Name:          message.Name,
+		})
+	}
+	return messages
+}
+
+func parseRequestTools(data []byte) []RequestTool {
+	var req struct {
+		Tools []rawRequestTool `json:"tools"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil || len(req.Tools) == 0 {
+		return nil
+	}
+
+	tools := make([]RequestTool, 0, len(req.Tools))
+	for _, raw := range req.Tools {
+		name := firstNonEmpty(raw.Function.Name, raw.Name)
+		description := firstNonEmpty(raw.Function.Description, raw.Description)
+
+		parameters := raw.Function.Parameters
+		if parameters == nil {
+			parameters = raw.Parameters
+		}
+		if parameters == nil {
+			parameters = raw.InputSchema
+		}
+
+		source := "openai"
+		if raw.InputSchema != nil || (raw.Function.Name == "" && raw.Name != "") {
+			source = "anthropic"
+		}
+
+		tools = append(tools, RequestTool{
+			Source:      source,
+			Type:        firstNonEmpty(raw.Type, "function"),
+			Name:        name,
+			Description: description,
+			Parameters:  marshalNonEmptyAnthropicMeta(parameters),
+		})
+	}
+	return tools
+}
+
+func splitRequestToolsBySource(tools []RequestTool) ([]RequestTool, []RequestTool) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+
+	openAITools := make([]RequestTool, 0, len(tools))
+	anthropicTools := make([]RequestTool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Source == "anthropic" {
+			anthropicTools = append(anthropicTools, tool)
+			continue
+		}
+		openAITools = append(openAITools, tool)
+	}
+	return openAITools, anthropicTools
 }
 
 func parseAnthropicRequest(data []byte) []ChatMessage {
@@ -860,6 +988,74 @@ func renderResponsesContent(parts []responsesContentPart) string {
 	}
 
 	return strings.Join(segments, "\n\n")
+}
+
+func renderOpenAIChatContent(raw interface{}) (string, []ContentBlock) {
+	switch v := raw.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return strings.TrimSpace(v), nil
+	case []interface{}:
+		var (
+			parts  []string
+			blocks []ContentBlock
+		)
+		for _, item := range v {
+			itemBytes, err := json.Marshal(item)
+			if err != nil {
+				continue
+			}
+
+			var part responsesContentPart
+			if err := json.Unmarshal(itemBytes, &part); err != nil {
+				continue
+			}
+
+			text := strings.TrimSpace(firstNonEmpty(part.Text, part.Input, part.Output, part.Refusal))
+			if text != "" {
+				parts = append(parts, text)
+				continue
+			}
+
+			switch part.Type {
+			case "image_url", "input_image", "output_image":
+				meta := marshalNonEmptyAnthropicMeta(item)
+				blocks = append(blocks, ContentBlock{
+					Kind:   "image",
+					Title:  "Image",
+					Meta:   meta,
+					Format: "json",
+				})
+			case "file", "input_file", "output_file":
+				meta := marshalNonEmptyAnthropicMeta(item)
+				blocks = append(blocks, ContentBlock{
+					Kind:   "attachment",
+					Title:  "Attachment",
+					Meta:   meta,
+					Format: "json",
+				})
+			default:
+				meta := marshalNonEmptyAnthropicMeta(item)
+				if meta != "" {
+					blocks = append(blocks, ContentBlock{
+						Kind:   "attachment",
+						Title:  "Structured Content",
+						Meta:   meta,
+						Format: "json",
+					})
+				}
+			}
+		}
+		return strings.Join(parts, "\n\n"), blocks
+	default:
+		return "", []ContentBlock{{
+			Kind:   "attachment",
+			Title:  "Structured Content",
+			Meta:   marshalPretty(v),
+			Format: "json",
+		}}
+	}
 }
 
 func renderResponseOutput(v interface{}) string {
