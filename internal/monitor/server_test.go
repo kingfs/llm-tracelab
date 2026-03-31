@@ -210,6 +210,98 @@ func TestTraceRawAPIHandlerReturnsEventAttributes(t *testing.T) {
 	}
 }
 
+func TestTraceDetailAPIHandlerFiltersOutputTextDeltaEvents(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	header := buildRecordHeader("/v1/responses", true, `{"input":"hello"}`, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n")
+	events := append(recordfile.BuildEvents(header),
+		recordfile.RecordEvent{Type: "llm.output_text.delta", Message: "hi"},
+		recordfile.RecordEvent{
+			Type: "llm.usage",
+			Attributes: map[string]interface{}{
+				"total_tokens": 18,
+			},
+		},
+	)
+	prelude, err := recordfile.MarshalPrelude(header, events)
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	payload := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" +
+		`{"input":"hello"}` + "\n" +
+		"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" +
+		`data: {"type":"response.output_text.delta","delta":"hi"}` + "\n"
+	if err := os.WriteFile(tracePath, append(prelude, []byte(payload)...), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payloadResp detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payloadResp); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	for _, event := range payloadResp.Events {
+		if event["type"] == "llm.output_text.delta" {
+			t.Fatalf("delta event should be filtered from detail timeline: %+v", event)
+		}
+	}
+}
+
+func TestTraceDownloadAPIHandlerSetsAttachmentDisposition(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	content := buildRecordFixture(t, "/v1/chat/completions", false, `{"messages":[{"role":"user","content":"hello"}]}`, `{"choices":[{"message":{"content":"done"}}]}`)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/download", nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got := rr.Header().Get("Content-Disposition"); got != `attachment; filename="trace.http"` {
+		t.Fatalf("Content-Disposition = %q, want attachment download", got)
+	}
+}
+
 func TestTraceAPIHandlerReturnsNotFoundForUnknownID(t *testing.T) {
 	t.Parallel()
 

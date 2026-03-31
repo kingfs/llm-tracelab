@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -222,7 +223,7 @@ func traceAPIHandler(st *store.Store) http.HandlerFunc {
 		case len(parts) == 2 && parts[1] == "raw" && r.Method == http.MethodGet:
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
-			http.ServeFile(w, r, absPath)
+			serveTraceDownload(w, r, absPath)
 		default:
 			http.NotFound(w, r)
 		}
@@ -256,7 +257,7 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 			Usage:   parsed.Header.Usage,
 		},
 	}
-	resp.Events = toEventViewsFromRecord(parsed.Events)
+	resp.Events = toEventViewsFromRecord(filterTimelineEvents(parsed.Events))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -345,6 +346,25 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 		payload = append(payload, row)
 	}
 	return payload
+}
+
+func filterTimelineEvents(events []recordfile.RecordEvent) []recordfile.RecordEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	filtered := make([]recordfile.RecordEvent, 0, len(events))
+	for _, event := range events {
+		if event.Type == "llm.output_text.delta" {
+			continue
+		}
+		filtered = append(filtered, event)
+	}
+	return filtered
+}
+
+func serveTraceDownload(w http.ResponseWriter, r *http.Request, absPath string) {
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(absPath)))
+	http.ServeFile(w, r, absPath)
 }
 
 func cachedTokens(entry store.LogEntry) int {

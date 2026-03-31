@@ -47,7 +47,7 @@ tasks:
   docker:up:
     desc: Start llm-tracelab with docker compose
     cmds:
-      - docker compose up --build
+      - docker compose up --build -d
 
   check:
     desc: Run formatting, lint, and tests
