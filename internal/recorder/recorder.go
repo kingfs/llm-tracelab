@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
@@ -32,6 +33,7 @@ type LogInfo struct {
 	File   *os.File
 	Path   string
 	Header RecordHeader
+	Events []RecordEvent
 }
 
 type Recorder struct {
@@ -57,11 +59,15 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 
 	modelName := "unknown-model"
 	if len(bodyBytes) > 0 {
-		var payload struct {
-			Model string `json:"model"`
-		}
-		if json.Unmarshal(bodyBytes, &payload) == nil && payload.Model != "" {
-			modelName = payload.Model
+		if parsedReq, err := llm.ParseRequestForPath(req.URL.Path, siteURL, bodyBytes); err == nil && parsedReq.Model != "" {
+			modelName = parsedReq.Model
+		} else {
+			var payload struct {
+				Model string `json:"model"`
+			}
+			if json.Unmarshal(bodyBytes, &payload) == nil && payload.Model != "" {
+				modelName = payload.Model
+			}
 		}
 	}
 	if modelName == "unknown-model" && strings.HasSuffix(req.URL.Path, "/models") {
@@ -75,6 +81,7 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 	}
 
 	now := time.Now()
+	semantics := llm.ClassifyHTTPRequest(req, siteURL)
 	dirPath := filepath.Join(
 		r.OutputDir,
 		siteHost,
@@ -126,6 +133,9 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 			RequestID: fmt.Sprintf("%d", now.UnixNano()),
 			Time:      now,
 			Model:     modelName,
+			Provider:  semantics.Provider,
+			Operation: semantics.Operation,
+			Endpoint:  semantics.Endpoint,
 			URL:       req.URL.String(),
 			Method:    req.Method,
 			ClientIP:  req.RemoteAddr,
@@ -154,7 +164,11 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 		return err
 	}
 
-	prelude, err := recordfile.MarshalPrelude(info.Header, recordfile.BuildEvents(info.Header))
+	events := recordfile.BuildEvents(info.Header)
+	if len(info.Events) > 0 {
+		events = append(events, info.Events...)
+	}
+	prelude, err := recordfile.MarshalPrelude(info.Header, events)
 	if err != nil {
 		return err
 	}

@@ -9,9 +9,10 @@
 1. Client SDK sends an OpenAI-compatible request to the local proxy.
 2. Proxy may normalize the request, for example injecting `stream_options.include_usage=true`.
 3. Recorder writes the raw request and response into a `.http` cassette.
-4. Recorder writes compact metadata into the cassette prelude and indexes summary fields into SQLite.
-5. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
-6. Unit tests use `pkg/replay.Transport` to replay the recorded response from the cassette.
+4. `pkg/llm` normalizes provider-specific request/response semantics, stream transcripts, token usage, and event timelines.
+5. Recorder writes compact metadata plus `# event:` timeline lines into the cassette prelude and indexes summary fields into SQLite.
+6. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
+7. Unit tests use `pkg/replay.Transport` to replay the recorded response from the cassette.
 
 ## Storage Model
 
@@ -22,6 +23,24 @@
 The cassette remains the canonical replay artifact.
 SQLite exists to avoid expensive aggregate rescans and to support fast monitor queries.
 
+## V3 Prelude And Timeline
+
+`LLM_PROXY_V3` now has three logical layers before the raw payload:
+
+1. `# meta:` compact request summary and normalized usage
+2. `# event:` timeline rows
+3. blank line + raw HTTP request/response bytes
+
+The base recorder still emits request/response lifecycle events, but the proxy pipeline also appends provider-normalized `llm.*` events, for example:
+
+- `llm.output_text.delta`
+- `llm.reasoning.delta`
+- `llm.tool_call`
+- `llm.tool_call.delta`
+- `llm.usage`
+
+These events are generated in `pkg/llm.ResponsePipeline`, recorded into the cassette, and surfaced by the monitor detail API.
+
 ## Token Usage Normalization
 
 The monitor, cassette prelude, and SQLite index all use a shared usage shape:
@@ -31,7 +50,7 @@ The monitor, cassette prelude, and SQLite index all use a shared usage shape:
 - `total_tokens`
 - `prompt_tokens_details.cached_tokens`
 
-This shape is normalized from provider-specific response payloads inside `internal/proxy`.
+This shape is normalized from provider-specific response payloads inside `pkg/llm`.
 
 ### OpenAI-compatible chat completions
 
@@ -99,11 +118,12 @@ This is recorded as:
 
 ## Key Packages
 
-- `internal/proxy`: reverse proxy, response interception, request normalization
+- `internal/proxy`: reverse proxy, response interception, and cassette byte capture
 - `internal/recorder`: file writer and metadata finalization
 - `internal/store`: SQLite schema, sync, and query layer
-- `internal/monitor`: HTML monitor and cassette detail parsing
+- `internal/monitor`: embedded React monitor and cassette detail projection
 - `pkg/recordfile`: shared V2/V3 parsing and V3 prelude writer
+- `pkg/llm`: provider adapters, stream transcript normalization, usage pipeline, and event timeline generation
 - `pkg/replay`: HTTP response replay transport for tests
 
 ## Compatibility

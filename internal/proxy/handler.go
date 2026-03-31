@@ -18,7 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
@@ -86,12 +86,8 @@ type UsageSniffer struct {
 	File     io.Writer
 	Count    *int64
 	Usage    *recorder.UsageInfo
-	IsStream bool
-
-	// Stream 模式专用：行缓冲区
-	lineBuf []byte
-	// Non-Stream 模式专用：尾部滑动窗口
-	tailBuf []byte
+	Pipeline *llm.ResponsePipeline
+	Events   *[]recorder.RecordEvent
 }
 
 func (s *UsageSniffer) Read(p []byte) (n int, err error) {
@@ -106,194 +102,29 @@ func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 			}
 		}
 
-		// 2. 嗅探 Usage
-		if s.IsStream {
-			s.sniffStream(data)
-		} else {
-			s.sniffNonStream(data)
+		if s.Pipeline != nil {
+			s.Pipeline.Feed(data)
+			if usage, ok := s.Pipeline.Usage(); ok && s.Usage != nil {
+				*s.Usage = recorder.UsageInfo(usage)
+			}
 		}
 	}
 	return
 }
 
-// sniffStream 针对 SSE 流式数据的逐行解析
-func (s *UsageSniffer) sniffStream(chunk []byte) {
-	s.lineBuf = append(s.lineBuf, chunk...)
-
-	// 限制缓冲区大小
-	if len(s.lineBuf) > 64*1024 {
-		copy(s.lineBuf, s.lineBuf[len(s.lineBuf)-64*1024:])
-		s.lineBuf = s.lineBuf[:64*1024]
-	}
-
-	for {
-		idx := bytes.IndexByte(s.lineBuf, '\n')
-		if idx == -1 {
-			break
-		}
-
-		line := s.lineBuf[:idx]
-		s.lineBuf = s.lineBuf[idx+1:]
-
-		// 快速过滤
-		if !bytes.Contains(line, []byte(`"usage"`)) {
-			continue
-		}
-
-		lineStr := string(line)
-		// 处理 data: 前缀
-		if strings.HasPrefix(lineStr, "data:") {
-			jsonStr := strings.TrimSpace(strings.TrimPrefix(lineStr, "data:"))
-			if usage, ok := extractUsageFromJSON([]byte(jsonStr)); ok {
-				*s.Usage = usage
-			}
-		}
-	}
-}
-
-// sniffNonStream 针对普通 JSON 的尾部缓冲解析
-func (s *UsageSniffer) sniffNonStream(chunk []byte) {
-	maxBuf := 4096
-	if len(s.tailBuf)+len(chunk) > maxBuf {
-		combined := append(s.tailBuf, chunk...)
-		start := len(combined) - maxBuf
-		if start < 0 {
-			start = 0
-		}
-		s.tailBuf = combined[start:]
-	} else {
-		s.tailBuf = append(s.tailBuf, chunk...)
-	}
-}
-
 func (s *UsageSniffer) Close() error {
-	// Non-Stream 模式在结束时解析
-	if !s.IsStream && s.Usage != nil && s.Usage.TotalTokens == 0 {
-		extractUsageFromTail(s.tailBuf, s.Usage)
+	if s.Pipeline != nil {
+		s.Pipeline.Finalize()
+		if usage, ok := s.Pipeline.Usage(); ok && s.Usage != nil {
+			*s.Usage = recorder.UsageInfo(usage)
+		}
+		if s.Events != nil {
+			events := s.Pipeline.Events()
+			*s.Events = make([]recorder.RecordEvent, len(events))
+			copy(*s.Events, events)
+		}
 	}
 	return s.Source.Close()
-}
-
-// extractUsageFromTail 从数据末尾提取 usage (Non-Stream)
-func extractUsageFromTail(data []byte, target *recorder.UsageInfo) {
-	if len(data) == 0 {
-		return
-	}
-	str := string(data)
-
-	idx := strings.LastIndex(str, `"usage"`)
-	if idx == -1 {
-		return
-	}
-
-	segment := str[idx:]
-	startBrace := strings.Index(segment, "{")
-	if startBrace == -1 {
-		return
-	}
-
-	jsonPart := segment[startBrace:]
-	depth := 0
-	endBrace := -1
-	for i, r := range jsonPart {
-		if r == '{' {
-			depth++
-		} else if r == '}' {
-			depth--
-			if depth == 0 {
-				endBrace = i + 1
-				break
-			}
-		}
-	}
-
-	if endBrace != -1 {
-		jsonStr := jsonPart[:endBrace]
-		if usage, ok := extractUsageFromJSON([]byte(jsonStr)); ok {
-			*target = usage
-		}
-	}
-}
-
-type compatibleUsage struct {
-	PromptTokens             int                            `json:"prompt_tokens"`
-	CompletionTokens         int                            `json:"completion_tokens"`
-	TotalTokens              int                            `json:"total_tokens"`
-	InputTokens              int                            `json:"input_tokens"`
-	OutputTokens             int                            `json:"output_tokens"`
-	CacheCreationInputTokens int                            `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     int                            `json:"cache_read_input_tokens"`
-	InputTokenDetails        *recordfile.PromptTokenDetails `json:"input_tokens_details,omitempty"`
-	PromptTokenDetails       *recordfile.PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
-}
-
-func (u compatibleUsage) toRecordUsage() (recorder.UsageInfo, bool) {
-	promptTokens := u.PromptTokens
-	completionTokens := u.CompletionTokens
-	promptDetails := u.PromptTokenDetails
-
-	if promptTokens == 0 && completionTokens == 0 && (u.InputTokens > 0 || u.OutputTokens > 0) {
-		// Normalize Anthropic/OpenAI Responses style usage into the shared
-		// prompt/completion layout. For Anthropic, cached prompt tokens are
-		// reported separately and need to be folded back into prompt_tokens.
-		promptTokens = u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
-		completionTokens = u.OutputTokens
-		if promptDetails == nil {
-			promptDetails = u.InputTokenDetails
-		}
-		if promptDetails == nil && (u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0) {
-			promptDetails = &recordfile.PromptTokenDetails{
-				CachedTokens: u.CacheReadInputTokens,
-			}
-		}
-	}
-
-	totalTokens := u.TotalTokens
-	if totalTokens == 0 && (promptTokens > 0 || completionTokens > 0) {
-		totalTokens = promptTokens + completionTokens
-	}
-
-	if totalTokens == 0 && promptTokens == 0 && completionTokens == 0 {
-		return recorder.UsageInfo{}, false
-	}
-
-	return recorder.UsageInfo{
-		PromptTokens:       promptTokens,
-		CompletionTokens:   completionTokens,
-		TotalTokens:        totalTokens,
-		PromptTokenDetails: promptDetails,
-	}, true
-}
-
-func extractUsageFromJSON(data []byte) (recorder.UsageInfo, bool) {
-	var direct compatibleUsage
-	if err := json.Unmarshal(data, &direct); err == nil {
-		if usage, ok := direct.toRecordUsage(); ok {
-			return usage, true
-		}
-	}
-
-	var payload struct {
-		Usage    *compatibleUsage `json:"usage"`
-		Response *struct {
-			Usage *compatibleUsage `json:"usage"`
-		} `json:"response"`
-	}
-
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return recorder.UsageInfo{}, false
-	}
-	if payload.Usage != nil {
-		if usage, ok := payload.Usage.toRecordUsage(); ok {
-			return usage, true
-		}
-	}
-	if payload.Response != nil && payload.Response.Usage != nil {
-		if usage, ok := payload.Response.Usage.toRecordUsage(); ok {
-			return usage, true
-		}
-	}
-	return recorder.UsageInfo{}, false
 }
 
 // InstrumentedResponseWriter 保持不变
@@ -387,9 +218,8 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 		logInfo.Header.Layout.ResHeaderLen = int64(n)
 
 		// 3. 判断 Stream
-		isStream := false
-		if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") || resp.Header.Get("Transfer-Encoding") == "chunked" {
-			isStream = true
+		isStream := llm.DetectStreamingResponse(resp.Header)
+		if isStream {
 			logInfo.Header.Layout.IsStream = true
 		}
 
@@ -399,7 +229,8 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 			File:     logInfo.File,
 			Count:    &logInfo.Header.Layout.ResBodyLen,
 			Usage:    &logInfo.Header.Usage,
-			IsStream: isStream,
+			Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+			Events:   &logInfo.Events,
 		}
 		return nil
 	}

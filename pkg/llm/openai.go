@@ -3,8 +3,22 @@ package llm
 // ========== OpenAI Chat Completions 映射 ==========
 
 type OpenAIChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"` // 为了 0 alloc，基准场景只用 string
+	Role       string           `json:"role"`
+	Content    interface{}      `json:"content"`
+	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Name       string           `json:"name,omitempty"`
+}
+
+type OpenAIToolCall struct {
+	ID       string                 `json:"id,omitempty"`
+	Type     string                 `json:"type,omitempty"`
+	Function OpenAIToolFunctionCall `json:"function"`
+}
+
+type OpenAIToolFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 type OpenAIToolFunction struct {
@@ -75,21 +89,22 @@ func (r *LLMRequest) ToOpenAI() OpenAIChatRequest {
 	// messages
 	for i := range r.Messages {
 		m := &r.Messages[i]
-		if len(m.Content) == 1 && m.Content[0].Type == "text" {
-			msgs = append(msgs, OpenAIChatMessage{
-				Role:    m.Role,
-				Content: m.Content[0].Text,
-			})
-		} else if len(m.Content) == 0 {
+		if len(m.Content) == 0 {
 			continue
-		} else {
-			// 基准场景不走这里，避免额外 alloc
-			// 真实场景可扩展为多模态结构
-			msgs = append(msgs, OpenAIChatMessage{
-				Role:    m.Role,
-				Content: m.Content[0].Text,
-			})
 		}
+		msg := OpenAIChatMessage{Role: m.Role}
+		if len(m.Content) == 1 && m.Content[0].Type == "text" {
+			msg.Content = m.Content[0].Text
+		} else {
+			msg.Content = toOpenAIMessageContent(m.Content)
+		}
+		for _, content := range m.Content {
+			if content.Type == "tool_result" {
+				msg.ToolCallID = content.ToolCallID
+				msg.Name = content.ToolName
+			}
+		}
+		msgs = append(msgs, msg)
 	}
 
 	tools := make([]OpenAITool, 0, len(r.Tools))
@@ -140,20 +155,31 @@ func FromOpenAIRequest(req OpenAIChatRequest) LLMRequest {
 
 		// system message
 		if m.Role == "system" {
-			llmReq.System = append(llmReq.System, LLMContent{
-				Type: "text",
-				Text: m.Content,
-			})
+			appendOpenAIContentToSystem(&llmReq, m.Content)
 			continue
 		}
 
-		// normal message
-		llmReq.Messages = append(llmReq.Messages, LLMMessage{
-			Role: m.Role,
-			Content: []LLMContent{
-				{Type: "text", Text: m.Content},
-			},
-		})
+		msg := LLMMessage{
+			Role:    m.Role,
+			Content: parseOpenAIMessageContent(m.Content),
+		}
+		for _, toolCall := range m.ToolCalls {
+			msg.Content = append(msg.Content, LLMContent{
+				ID:         toolCall.ID,
+				Type:       "tool_use",
+				ToolCallID: toolCall.ID,
+				ToolName:   toolCall.Function.Name,
+				ToolArgs:   parseJSONObject(toolCall.Function.Arguments),
+			})
+		}
+		if m.ToolCallID != "" || m.Name != "" {
+			msg.Content = append(msg.Content, LLMContent{
+				Type:       "tool_result",
+				ToolCallID: m.ToolCallID,
+				ToolName:   m.Name,
+			})
+		}
+		llmReq.Messages = append(llmReq.Messages, msg)
 	}
 
 	// ---- Tools ----
@@ -179,16 +205,24 @@ func OpenAIToLLM(resp OpenAIChatResponse) LLMResponse {
 		ch := &resp.Choices[i]
 
 		content := getContentSlice()
-		content = append(content, LLMContent{
-			Type: "text",
-			Text: ch.Message.Content,
-		})
+		content = append(content, parseOpenAIMessageContent(ch.Message.Content)...)
+		toolCalls := make([]LLMToolCall, 0, len(ch.Message.ToolCalls))
+		for _, toolCall := range ch.Message.ToolCalls {
+			toolCalls = append(toolCalls, LLMToolCall{
+				ID:       toolCall.ID,
+				Type:     firstNonEmpty(toolCall.Type, "function"),
+				Name:     toolCall.Function.Name,
+				Args:     parseJSONObject(toolCall.Function.Arguments),
+				ArgsText: toolCall.Function.Arguments,
+			})
+		}
 
 		cands = append(cands, LLMCandidate{
 			Index:        ch.Index,
 			Role:         ch.Message.Role,
 			Content:      content,
 			FinishReason: ch.FinishReason,
+			ToolCalls:    toolCalls,
 		})
 	}
 
@@ -222,12 +256,24 @@ func (r *LLMResponse) ToOpenAIResponse() OpenAIChatResponse {
 		if len(c.Content) > 0 && c.Content[0].Type == "text" {
 			text = c.Content[0].Text
 		}
+		toolCalls := make([]OpenAIToolCall, 0, len(c.ToolCalls))
+		for _, toolCall := range c.ToolCalls {
+			toolCalls = append(toolCalls, OpenAIToolCall{
+				ID:   toolCall.ID,
+				Type: firstNonEmpty(toolCall.Type, "function"),
+				Function: OpenAIToolFunctionCall{
+					Name:      toolCall.Name,
+					Arguments: firstNonEmpty(toolCall.ArgsText, marshalCompactString(toolCall.Args)),
+				},
+			})
+		}
 
 		choices = append(choices, OpenAIChatChoice{
 			Index: c.Index,
 			Message: OpenAIChatMessage{
-				Role:    c.Role,
-				Content: text,
+				Role:      c.Role,
+				Content:   text,
+				ToolCalls: toolCalls,
 			},
 			FinishReason: c.FinishReason,
 		})
@@ -249,4 +295,71 @@ func (r *LLMResponse) ToOpenAIResponse() OpenAIChatResponse {
 		Choices: choices,
 		Usage:   usage,
 	}
+}
+
+func appendOpenAIContentToSystem(req *LLMRequest, raw interface{}) {
+	for _, content := range parseOpenAIMessageContent(raw) {
+		if content.Type == "text" {
+			req.System = append(req.System, content)
+		}
+	}
+}
+
+func parseOpenAIMessageContent(raw interface{}) []LLMContent {
+	switch value := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		return []LLMContent{{Type: "text", Text: value}}
+	case []interface{}:
+		result := make([]LLMContent, 0, len(value))
+		for _, item := range value {
+			itemMap, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			partType, _ := itemMap["type"].(string)
+			switch partType {
+			case "text", "input_text", "output_text":
+				text := firstNonEmpty(stringValue(itemMap["text"]), stringValue(itemMap["input_text"]), stringValue(itemMap["output_text"]))
+				if text != "" {
+					result = append(result, LLMContent{Type: "text", Text: text})
+				}
+			default:
+				result = append(result, LLMContent{
+					Type: partType,
+					Text: marshalCompactString(itemMap),
+				})
+			}
+		}
+		return result
+	default:
+		return []LLMContent{{Type: "text", Text: marshalCompactString(value)}}
+	}
+}
+
+func toOpenAIMessageContent(contents []LLMContent) []map[string]any {
+	result := make([]map[string]any, 0, len(contents))
+	for _, content := range contents {
+		switch content.Type {
+		case "text":
+			result = append(result, map[string]any{
+				"type": "text",
+				"text": content.Text,
+			})
+		default:
+			if content.Text != "" {
+				result = append(result, map[string]any{
+					"type": content.Type,
+					"text": content.Text,
+				})
+			}
+		}
+	}
+	return result
+}
+
+func stringValue(v any) string {
+	s, _ := v.(string)
+	return s
 }

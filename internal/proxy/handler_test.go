@@ -1,91 +1,50 @@
 package proxy
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
 
-func TestExtractUsageFromJSONChatCompletions(t *testing.T) {
-	data := []byte(`{"usage":{"prompt_tokens":26,"completion_tokens":93,"total_tokens":119,"prompt_tokens_details":{"cached_tokens":3}}}`)
-
-	usage, ok := extractUsageFromJSON(data)
-	if !ok {
-		t.Fatal("extractUsageFromJSON() ok = false, want true")
-	}
-	if usage.PromptTokens != 26 || usage.CompletionTokens != 93 || usage.TotalTokens != 119 {
-		t.Fatalf("usage = %+v, want prompt=26 completion=93 total=119", usage)
-	}
-	if usage.PromptTokenDetails == nil || usage.PromptTokenDetails.CachedTokens != 3 {
-		t.Fatalf("PromptTokenDetails = %+v, want cached_tokens=3", usage.PromptTokenDetails)
-	}
-}
-
-func TestExtractUsageFromJSONResponsesCompletedEvent(t *testing.T) {
-	data := []byte(`{"type":"response.completed","response":{"usage":{"input_tokens":7048,"output_tokens":28,"total_tokens":7076}}}`)
-
-	usage, ok := extractUsageFromJSON(data)
-	if !ok {
-		t.Fatal("extractUsageFromJSON() ok = false, want true")
-	}
-	if usage.PromptTokens != 7048 || usage.CompletionTokens != 28 || usage.TotalTokens != 7076 {
-		t.Fatalf("usage = %+v, want prompt=7048 completion=28 total=7076", usage)
-	}
-}
-
-func TestExtractUsageFromJSONAnthropicMessageDelta(t *testing.T) {
-	data := []byte(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":17430,"output_tokens":194,"cache_read_input_tokens":18560}}`)
-
-	usage, ok := extractUsageFromJSON(data)
-	if !ok {
-		t.Fatal("extractUsageFromJSON() ok = false, want true")
-	}
-	if usage.PromptTokens != 35990 || usage.CompletionTokens != 194 || usage.TotalTokens != 36184 {
-		t.Fatalf("usage = %+v, want prompt=35990 completion=194 total=36184", usage)
-	}
-	if usage.PromptTokenDetails == nil || usage.PromptTokenDetails.CachedTokens != 18560 {
-		t.Fatalf("PromptTokenDetails = %+v, want cached_tokens=18560", usage.PromptTokenDetails)
-	}
-}
-
-func TestUsageSnifferStreamResponsesCompletedEvent(t *testing.T) {
+func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
 	var usage recorder.UsageInfo
 	sniffer := UsageSniffer{
+		Source:   nopReadCloser{Reader: bytes.NewBufferString(`data: {"type":"response.completed","response":{"usage":{"input_tokens":7048,"output_tokens":28,"total_tokens":7076}}}` + "\n")},
 		Usage:    &usage,
-		IsStream: true,
+		Pipeline: llm.NewResponsePipeline(llm.ProviderOpenAICompatible, "/v1/responses", true),
 	}
 
-	sniffer.sniffStream([]byte("event: response.completed\n"))
-	sniffer.sniffStream([]byte(`data: {"type":"response.completed","response":{"usage":{"input_tokens":7048,"output_tokens":28,"total_tokens":7076}}}` + "\n"))
+	buf := make([]byte, 512)
+	if _, err := sniffer.Read(buf); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
 
 	if usage.PromptTokens != 7048 || usage.CompletionTokens != 28 || usage.TotalTokens != 7076 {
 		t.Fatalf("usage = %+v, want prompt=7048 completion=28 total=7076", usage)
 	}
 }
 
-func TestUsageSnifferStreamAnthropicMessageDelta(t *testing.T) {
+func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 	var usage recorder.UsageInfo
 	sniffer := UsageSniffer{
+		Source:   nopReadCloser{},
 		Usage:    &usage,
-		IsStream: true,
+		Pipeline: llm.NewResponsePipeline(llm.ProviderOpenAICompatible, "/v1/responses", false),
 	}
 
-	sniffer.sniffStream([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":17430,"output_tokens":194,"cache_read_input_tokens":18560}}` + "\n"))
-
-	if usage.PromptTokens != 35990 || usage.CompletionTokens != 194 || usage.TotalTokens != 36184 {
-		t.Fatalf("usage = %+v, want prompt=35990 completion=194 total=36184", usage)
+	sniffer.Pipeline.Feed([]byte(`{"id":"resp_123","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}`))
+	if err := sniffer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
 	}
-	if usage.PromptTokenDetails == nil || usage.PromptTokenDetails.CachedTokens != 18560 {
-		t.Fatalf("PromptTokenDetails = %+v, want cached_tokens=18560", usage.PromptTokenDetails)
-	}
-}
-
-func TestExtractUsageFromTailResponsesNonStream(t *testing.T) {
-	var usage recorder.UsageInfo
-
-	extractUsageFromTail([]byte(`{"id":"resp_123","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}`), &usage)
 
 	if usage.PromptTokens != 10 || usage.CompletionTokens != 4 || usage.TotalTokens != 14 {
 		t.Fatalf("usage = %+v, want prompt=10 completion=4 total=14", usage)
 	}
 }
+
+type nopReadCloser struct{ Reader *bytes.Buffer }
+
+func (n nopReadCloser) Read(p []byte) (int, error) { return n.Reader.Read(p) }
+func (nopReadCloser) Close() error                 { return nil }

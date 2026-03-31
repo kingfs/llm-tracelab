@@ -13,6 +13,15 @@
 
 项目定位接近 `http record/replay`，但针对 LLM 场景补了流式响应、Token usage、可视化查看和故障注入能力。
 
+## 当前版本发布说明
+
+这次重构后的版本重点有四个：
+
+- `pkg/llm` 升级为按 provider/endpoint 工作的 adapter 层，统一处理 request、response、stream transcript 和 usage pipeline
+- Monitor 改成 Go embed 的 React UI，列表页异步分页，详情页支持 timeline / summary / raw protocol
+- SQLite 索引改用稳定 `trace_id`，不再在 URL 中暴露本地路径
+- `LLM_PROXY_V3` 的 `# event:` 现在不仅有 request/response 基础事件，还会落 `llm.*` provider timeline
+
 ## 适合什么场景
 
 - 给 SDK 或业务代码做高可靠单元测试
@@ -25,7 +34,7 @@
 - 透明代理 OpenAI compatible 请求
 - 将一次请求/响应保存为本地 `.http` cassette
 - 使用 `pkg/replay.Transport` 在测试中直接回放
-- Monitor 页面查看请求详情、原始协议和 Token 消耗
+- Monitor 页面查看请求详情、统一 timeline、原始协议和 Token 消耗
 - 使用 SQLite 维护 metadata 索引，避免统计页每次全量读文件
 - 支持对旧版 V2 记录文件兼容读取
 
@@ -50,7 +59,8 @@ pkg/llm               多厂商请求/响应归一化
 
 1. 文件前导包含紧凑元数据行，而不是固定 2KB 占位行
 2. 原始 HTTP request/response 仍然完整保留，方便人工排查
-3. 请求摘要、耗时、Token、文件路径等会同步索引到 `trace_index.sqlite3`
+3. `# event:` 会记录统一 timeline，例如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`
+4. 请求摘要、耗时、Token、trace id 等会同步索引到 `trace_index.sqlite3`
 
 默认存储布局：
 
@@ -112,6 +122,12 @@ go run ./cmd/server -c config/config.yaml
 ### 3. 打开 Monitor
 
 访问 `http://localhost:8081`。
+
+详情页现在包含三个主视图：
+
+- `Timeline`：消费 cassette 中的统一 `llm.*` 事件
+- `Summary`：按对话、工具、输出块聚合展示
+- `Raw Protocol`：左右分栏查看原始 request/response
 
 ## 老日志迁移与索引重建
 
@@ -245,6 +261,7 @@ func TestChat(t *testing.T) {
 - SQLite 只做 metadata 索引，不替代原始文件
 - 新文件写 V3，旧文件继续兼容读取
 - 尽量保持文件可读、测试离线、实现本地优先
+- provider 语义、stream transcript、usage 和 event timeline 尽量收敛在 `pkg/llm`
 
 ## 截图
 

@@ -39,6 +39,9 @@ type MetaData struct {
 	RequestID     string    `json:"request_id"`
 	Time          time.Time `json:"time"`
 	Model         string    `json:"model"`
+	Provider      string    `json:"provider,omitempty"`
+	Operation     string    `json:"operation,omitempty"`
+	Endpoint      string    `json:"endpoint,omitempty"`
 	URL           string    `json:"url"`
 	Method        string    `json:"method"`
 	StatusCode    int       `json:"status_code"`
@@ -57,15 +60,16 @@ type RecordHeader struct {
 }
 
 type RecordEvent struct {
-	Type        string    `json:"type"`
-	Time        time.Time `json:"time,omitempty"`
-	Method      string    `json:"method,omitempty"`
-	URL         string    `json:"url,omitempty"`
-	StatusCode  int       `json:"status_code,omitempty"`
-	IsStream    bool      `json:"is_stream,omitempty"`
-	HeaderBytes int64     `json:"header_bytes,omitempty"`
-	BodyBytes   int64     `json:"body_bytes,omitempty"`
-	Message     string    `json:"message,omitempty"`
+	Type        string                 `json:"type"`
+	Time        time.Time              `json:"time,omitempty"`
+	Method      string                 `json:"method,omitempty"`
+	URL         string                 `json:"url,omitempty"`
+	StatusCode  int                    `json:"status_code,omitempty"`
+	IsStream    bool                   `json:"is_stream,omitempty"`
+	HeaderBytes int64                  `json:"header_bytes,omitempty"`
+	BodyBytes   int64                  `json:"body_bytes,omitempty"`
+	Message     string                 `json:"message,omitempty"`
+	Attributes  map[string]interface{} `json:"attributes,omitempty"`
 }
 
 type ParsedPrelude struct {

@@ -120,6 +120,21 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 			if parsed.Header.Layout.IsStream != tt.wantIsStream {
 				t.Fatalf("recorded IsStream = %v, want %v", parsed.Header.Layout.IsStream, tt.wantIsStream)
 			}
+			if tt.wantIsStream && len(parsed.Events) < 3 {
+				t.Fatalf("parsed.Events len = %d, want at least 3", len(parsed.Events))
+			}
+			if tt.wantIsStream {
+				foundUsage := false
+				for _, event := range parsed.Events {
+					if event.Type == "llm.usage" {
+						foundUsage = true
+						break
+					}
+				}
+				if !foundUsage {
+					t.Fatalf("stream recording missing llm.usage event: %+v", parsed.Events)
+				}
+			}
 
 			entries, err := waitForRecentEntries(st, 1, time.Second)
 			if err != nil {

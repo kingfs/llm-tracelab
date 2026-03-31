@@ -42,14 +42,17 @@ type LLMContent struct {
 	Type string `json:"type"` // text, image, audio, video, tool_use, tool_result
 
 	Text string `json:"text,omitempty"`
+	ID   string `json:"id,omitempty"`
 
 	ImageData []byte `json:"image_data,omitempty"`
 	AudioData []byte `json:"audio_data,omitempty"`
 	VideoData []byte `json:"video_data,omitempty"`
 
+	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolName   string         `json:"tool_name,omitempty"`
 	ToolArgs   map[string]any `json:"tool_args,omitempty"`
 	ToolResult map[string]any `json:"tool_result,omitempty"`
+	Refusal    string         `json:"refusal,omitempty"`
 }
 
 type LLMTool struct {
@@ -91,8 +94,11 @@ type LLMCandidate struct {
 }
 
 type LLMToolCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args,omitempty"`
+	ID       string         `json:"id,omitempty"`
+	Type     string         `json:"type,omitempty"`
+	Name     string         `json:"name"`
+	Args     map[string]any `json:"args,omitempty"`
+	ArgsText string         `json:"args_text,omitempty"`
 }
 
 type LLMRefusal struct {

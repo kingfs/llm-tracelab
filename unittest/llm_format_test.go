@@ -1,10 +1,7 @@
 package unittest
 
 import (
-	"encoding/json"
-	"net/http"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -29,21 +26,6 @@ func loadRecordedHTTP(path string) (req string, resp string, err error) {
 	return req, resp, nil
 }
 
-// 根据 URL 判断厂商
-func detectVendor(req *http.Request) string {
-	u := req.URL.String()
-	switch {
-	case strings.Contains(u, "api.openai.com"):
-		return "openai"
-	case strings.Contains(u, "api.anthropic.com"):
-		return "anthropic"
-	case strings.Contains(u, "generativelanguage.googleapis.com"):
-		return "gemini"
-	default:
-		return "unknown"
-	}
-}
-
 func TestReplayLLMRequestResponse(t *testing.T) {
 	req, resp, err := loadRecordedHTTP("testdata/non-stream.http")
 	assert.NoError(t, err)
@@ -51,47 +33,10 @@ func TestReplayLLMRequestResponse(t *testing.T) {
 	reqBody := []byte(req)
 	respBody := []byte(resp)
 
-	// vendor := detectVendor(req)
-	// assert.NotEqual(t, "unknown", vendor)
-
-	var llmReq llm.LLMRequest
-	var llmResp llm.LLMResponse
-	var oreq llm.OpenAIChatRequest
-	json.Unmarshal(reqBody, &oreq)
-	llmReq = llm.FromOpenAIRequest(oreq)
-
-	var ores llm.OpenAIChatResponse
-	json.Unmarshal(respBody, &ores)
-	llmResp = llm.OpenAIToLLM(ores)
-
-	// switch vendor {
-	// case "openai":
-	// 	var oreq llm.OpenAIChatRequest
-	// 	json.Unmarshal(reqBody, &oreq)
-	// 	llmReq = llm.FromOpenAIRequest(oreq)
-
-	// 	var ores llm.OpenAIChatResponse
-	// 	json.Unmarshal(respBody, &ores)
-	// 	llmResp = llm.OpenAIToLLM(ores)
-
-	// case "anthropic":
-	// 	var areq llm.AnthropicRequest
-	// 	json.Unmarshal(reqBody, &areq)
-	// 	llmReq = llm.FromAnthropicRequest(areq)
-
-	// 	var ares llm.AnthropicResponse
-	// 	json.Unmarshal(respBody, &ares)
-	// 	llmResp = llm.AnthropicToLLM(ares)
-
-	// case "gemini":
-	// 	var greq llm.GeminiGenerateContentRequest
-	// 	json.Unmarshal(reqBody, &greq)
-	// 	llmReq = llm.FromGeminiRequest(greq)
-
-	// 	var gres llm.GeminiResponse
-	// 	json.Unmarshal(respBody, &gres)
-	// 	llmResp = llm.GeminiToLLM(gres)
-	// }
+	llmReq, err := llm.ParseRequest(llm.ProviderOpenAICompatible, "/v1/chat/completions", reqBody)
+	assert.NoError(t, err)
+	llmResp, err := llm.ParseResponse(llm.ProviderOpenAICompatible, "/v1/chat/completions", respBody)
+	assert.NoError(t, err)
 
 	// ---- Assertions ----
 	assert.NotEmpty(t, llmReq.Model)

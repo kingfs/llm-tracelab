@@ -1,0 +1,327 @@
+package llm
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"sort"
+	"strings"
+)
+
+type anthropicStreamBlockState struct {
+	Type  string
+	ID    string
+	Name  string
+	Text  strings.Builder
+	Input strings.Builder
+}
+
+func (a openAIChatAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		toolCalls        []LLMToolCall
+		toolCallByIndex  = map[int]*LLMToolCall{}
+	)
+
+	scanner := newSSEScanner(body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+
+		var chunk struct {
+			ID      string `json:"id"`
+			Model   string `json:"model"`
+			Choices []struct {
+				Index int `json:"index"`
+				Delta struct {
+					Content          *string `json:"content"`
+					ReasoningContent *string `json:"reasoning_content"`
+					ToolCalls        []struct {
+						Index    int    `json:"index"`
+						ID       string `json:"id"`
+						Type     string `json:"type"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
+			continue
+		}
+		for _, choice := range chunk.Choices {
+			if choice.Delta.Content != nil {
+				contentBuilder.WriteString(*choice.Delta.Content)
+			}
+			if choice.Delta.ReasoningContent != nil {
+				reasoningBuilder.WriteString(*choice.Delta.ReasoningContent)
+			}
+			for _, tc := range choice.Delta.ToolCalls {
+				call := ensureToolCallByIndex(toolCallByIndex, tc.Index)
+				call.ID = firstNonEmpty(call.ID, tc.ID)
+				call.Type = firstNonEmpty(tc.Type, "function")
+				call.Name = firstNonEmpty(call.Name, tc.Function.Name)
+				call.ArgsText += tc.Function.Arguments
+			}
+		}
+	}
+
+	toolCalls = flattenToolCalls(toolCallByIndex)
+	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls), nil
+}
+
+func (a anthropicMessagesAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
+	type anthropicDelta struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
+		PartialJSON string `json:"partial_json"`
+	}
+	type anthropicContentBlock struct {
+		Type     string      `json:"type"`
+		ID       string      `json:"id"`
+		Name     string      `json:"name"`
+		Text     string      `json:"text"`
+		Thinking string      `json:"thinking"`
+		Input    interface{} `json:"input"`
+	}
+	type anthropicChunk struct {
+		Type         string                `json:"type"`
+		Index        int                   `json:"index"`
+		Delta        anthropicDelta        `json:"delta"`
+		ContentBlock anthropicContentBlock `json:"content_block"`
+	}
+	blockMap := map[int]*anthropicStreamBlockState{}
+	var blockOrder []int
+	scanner := newSSEScanner(body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+
+		var chunk anthropicChunk
+		if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
+			continue
+		}
+
+		block := ensureAnthropicBlock(blockMap, &blockOrder, chunk.Index)
+		switch chunk.Type {
+		case "content_block_start":
+			block.Type = chunk.ContentBlock.Type
+			block.ID = chunk.ContentBlock.ID
+			block.Name = chunk.ContentBlock.Name
+			if chunk.ContentBlock.Text != "" {
+				block.Text.WriteString(chunk.ContentBlock.Text)
+			}
+			if chunk.ContentBlock.Thinking != "" {
+				block.Text.WriteString(chunk.ContentBlock.Thinking)
+			}
+			if chunk.ContentBlock.Input != nil {
+				block.Input.WriteString(marshalCompactString(chunk.ContentBlock.Input))
+			}
+		case "content_block_delta":
+			switch chunk.Delta.Type {
+			case "text_delta":
+				block.Text.WriteString(chunk.Delta.Text)
+			case "thinking_delta":
+				block.Text.WriteString(firstNonEmpty(chunk.Delta.Thinking, chunk.Delta.Text))
+			case "input_json_delta":
+				if block.Input.String() == "{}" {
+					block.Input.Reset()
+				}
+				block.Input.WriteString(chunk.Delta.PartialJSON)
+			}
+		}
+	}
+
+	sort.Ints(blockOrder)
+	candidate := LLMCandidate{Index: 0, Role: "assistant"}
+	for _, idx := range blockOrder {
+		block := blockMap[idx]
+		switch block.Type {
+		case "text":
+			candidate.Content = append(candidate.Content, LLMContent{Type: "text", Text: block.Text.String()})
+		case "thinking":
+			candidate.Content = append(candidate.Content, LLMContent{Type: "thinking", Text: block.Text.String()})
+		case "tool_use":
+			candidate.ToolCalls = append(candidate.ToolCalls, LLMToolCall{
+				ID:       block.ID,
+				Type:     "function",
+				Name:     block.Name,
+				Args:     parseJSONObject(block.Input.String()),
+				ArgsText: block.Input.String(),
+			})
+		}
+	}
+	return LLMResponse{Candidates: []LLMCandidate{candidate}}, nil
+}
+
+func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
+	var (
+		contentBuilder   strings.Builder
+		reasoningBuilder strings.Builder
+		toolCallMap      = map[string]*LLMToolCall{}
+		toolCallOrder    []string
+	)
+
+	scanner := newSSEScanner(body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+
+		var envelope struct {
+			Type      string `json:"type"`
+			Delta     string `json:"delta"`
+			Arguments string `json:"arguments"`
+			ItemID    string `json:"item_id"`
+			Item      struct {
+				ID        string `json:"id"`
+				Type      string `json:"type"`
+				CallID    string `json:"call_id"`
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+				Role      string `json:"role"`
+				Content   []struct {
+					Type       string `json:"type"`
+					Text       string `json:"text"`
+					InputText  string `json:"input_text"`
+					OutputText string `json:"output_text"`
+					Refusal    string `json:"refusal"`
+				} `json:"content"`
+			} `json:"item"`
+		}
+		if err := json.Unmarshal([]byte(jsonStr), &envelope); err != nil {
+			continue
+		}
+
+		switch envelope.Type {
+		case "response.output_text.delta":
+			contentBuilder.WriteString(envelope.Delta)
+		case "response.reasoning_summary_text.delta":
+			reasoningBuilder.WriteString(envelope.Delta)
+		case "response.function_call_arguments.delta":
+			call := ensureToolCallByID(toolCallMap, &toolCallOrder, envelope.ItemID)
+			call.ArgsText += envelope.Delta
+		case "response.function_call_arguments.done":
+			call := ensureToolCallByID(toolCallMap, &toolCallOrder, envelope.ItemID)
+			call.ArgsText = envelope.Arguments
+		case "response.output_item.added", "response.output_item.done":
+			switch envelope.Item.Type {
+			case "function_call":
+				call := ensureToolCallByID(toolCallMap, &toolCallOrder, envelope.Item.ID)
+				call.ID = firstNonEmpty(envelope.Item.CallID, envelope.Item.ID)
+				call.Type = "function"
+				call.Name = envelope.Item.Name
+				if envelope.Item.Arguments != "" {
+					call.ArgsText = envelope.Item.Arguments
+				}
+			case "message":
+				if contentBuilder.Len() == 0 {
+					for _, part := range envelope.Item.Content {
+						text := firstNonEmpty(part.OutputText, part.Text, part.InputText, part.Refusal)
+						if text != "" {
+							contentBuilder.WriteString(text)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	toolCalls := make([]LLMToolCall, 0, len(toolCallOrder))
+	for _, id := range toolCallOrder {
+		call := toolCallMap[id]
+		call.Args = parseJSONObject(call.ArgsText)
+		toolCalls = append(toolCalls, *call)
+	}
+	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls), nil
+}
+
+func newSSEScanner(body []byte) *bufio.Scanner {
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 1024*1024)
+	return scanner
+}
+
+func singleCandidateResponse(content string, reasoning string, toolCalls []LLMToolCall) LLMResponse {
+	candidate := LLMCandidate{
+		Index:     0,
+		Role:      "assistant",
+		ToolCalls: toolCalls,
+	}
+	if content != "" {
+		candidate.Content = append(candidate.Content, LLMContent{Type: "text", Text: content})
+	}
+	if reasoning != "" {
+		candidate.Content = append(candidate.Content, LLMContent{Type: "thinking", Text: reasoning})
+	}
+	return LLMResponse{Candidates: []LLMCandidate{candidate}}
+}
+
+func ensureToolCallByIndex(toolCalls map[int]*LLMToolCall, idx int) *LLMToolCall {
+	if call, ok := toolCalls[idx]; ok {
+		return call
+	}
+	call := &LLMToolCall{}
+	toolCalls[idx] = call
+	return call
+}
+
+func flattenToolCalls(toolCalls map[int]*LLMToolCall) []LLMToolCall {
+	indexes := make([]int, 0, len(toolCalls))
+	for idx := range toolCalls {
+		indexes = append(indexes, idx)
+	}
+	sort.Ints(indexes)
+	result := make([]LLMToolCall, 0, len(indexes))
+	for _, idx := range indexes {
+		call := toolCalls[idx]
+		call.Args = parseJSONObject(call.ArgsText)
+		result = append(result, *call)
+	}
+	return result
+}
+
+func ensureToolCallByID(toolCalls map[string]*LLMToolCall, order *[]string, id string) *LLMToolCall {
+	if id == "" {
+		id = "toolcall"
+	}
+	if call, ok := toolCalls[id]; ok {
+		return call
+	}
+	call := &LLMToolCall{}
+	toolCalls[id] = call
+	*order = append(*order, id)
+	return call
+}
+
+func ensureAnthropicBlock(blocks map[int]*anthropicStreamBlockState, order *[]int, idx int) *anthropicStreamBlockState {
+	if block, ok := blocks[idx]; ok {
+		return block
+	}
+	block := &anthropicStreamBlockState{}
+	blocks[idx] = block
+	*order = append(*order, idx)
+	return block
+}

@@ -3,8 +3,15 @@ package llm
 // ========== Anthropic Messages 映射 ==========
 
 type AnthropicContentBlock struct {
-	Type string `json:"type"` // "text", "tool_use", ...
-	Text string `json:"text,omitempty"`
+	Type      string      `json:"type"` // "text", "tool_use", ...
+	Text      string      `json:"text,omitempty"`
+	Thinking  string      `json:"thinking,omitempty"`
+	ID        string      `json:"id,omitempty"`
+	Name      string      `json:"name,omitempty"`
+	Input     interface{} `json:"input,omitempty"`
+	ToolUseID string      `json:"tool_use_id,omitempty"`
+	Content   interface{} `json:"content,omitempty"`
+	IsError   bool        `json:"is_error,omitempty"`
 }
 
 type AnthropicMessage struct {
@@ -65,15 +72,30 @@ func (r *LLMRequest) ToAnthropic() AnthropicRequest {
 		blocks := make([]AnthropicContentBlock, len(m.Content))
 		for j := range m.Content {
 			c := &m.Content[j]
-			if c.Type == "text" {
+			switch c.Type {
+			case "text":
 				blocks[j] = AnthropicContentBlock{
 					Type: "text",
 					Text: c.Text,
 				}
-			} else {
+			case "tool_use":
+				blocks[j] = AnthropicContentBlock{
+					Type:  "tool_use",
+					ID:    firstNonEmpty(c.ID, c.ToolCallID),
+					Name:  c.ToolName,
+					Input: c.ToolArgs,
+				}
+			case "tool_result":
+				blocks[j] = AnthropicContentBlock{
+					Type:      "tool_result",
+					ToolUseID: c.ToolCallID,
+					Content:   c.ToolResult,
+					IsError:   false,
+				}
+			default:
 				blocks[j] = AnthropicContentBlock{
 					Type: "text",
-					Text: "",
+					Text: c.Text,
 				}
 			}
 		}
@@ -158,12 +180,7 @@ func FromAnthropicRequest(req AnthropicRequest) LLMRequest {
 	case []AnthropicContentBlock:
 		llmReq.System = make([]LLMContent, 0, len(v))
 		for i := range v {
-			if v[i].Type == "text" {
-				llmReq.System = append(llmReq.System, LLMContent{
-					Type: "text",
-					Text: v[i].Text,
-				})
-			}
+			appendAnthropicContentBlock(&llmReq.System, v[i])
 		}
 	}
 
@@ -174,13 +191,7 @@ func FromAnthropicRequest(req AnthropicRequest) LLMRequest {
 
 		contents := make([]LLMContent, 0, len(m.Content))
 		for j := range m.Content {
-			b := &m.Content[j]
-			if b.Type == "text" {
-				contents = append(contents, LLMContent{
-					Type: "text",
-					Text: b.Text,
-				})
-			}
+			appendAnthropicContentBlock(&contents, m.Content[j])
 		}
 
 		llmReq.Messages = append(llmReq.Messages, LLMMessage{
@@ -209,12 +220,7 @@ func AnthropicToLLM(resp AnthropicResponse) LLMResponse {
 	content := getContentSlice()
 	for i := range resp.Content {
 		b := &resp.Content[i]
-		if b.Type == "text" {
-			content = append(content, LLMContent{
-				Type: "text",
-				Text: b.Text,
-			})
-		}
+		appendAnthropicContentBlock(&content, *b)
 	}
 
 	var usage *LLMUsage
@@ -257,10 +263,24 @@ func (r *LLMResponse) ToAnthropicResponse() AnthropicResponse {
 
 	blocks := make([]AnthropicContentBlock, 0, len(c.Content))
 	for _, cc := range c.Content {
-		if cc.Type == "text" {
+		switch cc.Type {
+		case "text":
 			blocks = append(blocks, AnthropicContentBlock{
 				Type: "text",
 				Text: cc.Text,
+			})
+		case "tool_use":
+			blocks = append(blocks, AnthropicContentBlock{
+				Type:  "tool_use",
+				ID:    firstNonEmpty(cc.ID, cc.ToolCallID),
+				Name:  cc.ToolName,
+				Input: cc.ToolArgs,
+			})
+		case "tool_result":
+			blocks = append(blocks, AnthropicContentBlock{
+				Type:      "tool_result",
+				ToolUseID: cc.ToolCallID,
+				Content:   cc.ToolResult,
 			})
 		}
 	}
@@ -284,4 +304,46 @@ func (r *LLMResponse) ToAnthropicResponse() AnthropicResponse {
 		StopReason: c.FinishReason,
 		Usage:      usage,
 	}
+}
+
+func appendAnthropicContentBlock(target *[]LLMContent, block AnthropicContentBlock) {
+	switch block.Type {
+	case "text":
+		*target = append(*target, LLMContent{
+			Type: "text",
+			Text: block.Text,
+		})
+	case "thinking":
+		*target = append(*target, LLMContent{
+			Type: "thinking",
+			Text: firstNonEmpty(block.Thinking, block.Text),
+		})
+	case "tool_use":
+		*target = append(*target, LLMContent{
+			ID:         block.ID,
+			Type:       "tool_use",
+			ToolCallID: block.ID,
+			ToolName:   block.Name,
+			ToolArgs:   normalizeToolResult(block.Input),
+		})
+	case "tool_result":
+		text := ""
+		if raw, ok := block.Content.(string); ok {
+			text = raw
+		}
+		*target = append(*target, LLMContent{
+			Type:       "tool_result",
+			ToolCallID: block.ToolUseID,
+			Text:       text,
+			ToolResult: normalizeToolResult(block.Content),
+			Refusal:    boolMarker(block.IsError, "error"),
+		})
+	}
+}
+
+func boolMarker(v bool, text string) string {
+	if v {
+		return text
+	}
+	return ""
 }

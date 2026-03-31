@@ -78,10 +78,7 @@ func runServe(args []string) int {
 	if cfg.Monitor.Port != "" {
 		go func() {
 			mux := http.NewServeMux()
-			mux.HandleFunc("/", monitor.ListHandler(cfg.Debug.OutputDir, traceStore))
-			mux.HandleFunc("/view", monitor.DetailHandler(cfg.Debug.OutputDir))
-			mux.HandleFunc("/api/detail/raw", monitor.DetailRawHandler(cfg.Debug.OutputDir))
-			mux.HandleFunc("/download", monitor.DownloadHandler(cfg.Debug.OutputDir))
+			monitor.RegisterRoutes(mux, traceStore)
 
 			addr := ":" + cfg.Monitor.Port
 			slog.Info("Monitor dashboard started", "addr", addr, "url", "http://localhost"+addr)

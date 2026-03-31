@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
@@ -191,14 +192,22 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 	}
 	header := parsed.Header
 	reqFullBytes, reqBodyBytes, resFullBytes, resBodyBytes := recordfile.ExtractSections(content, parsed)
+	endpoint := firstNonEmpty(header.Meta.Endpoint, header.Meta.URL)
 
-	// 4. 解析 Request (自适应 Chat / Embedding / Reranker)
-	messages := parseRequestMessages(header.Meta.URL, reqBodyBytes)
-	requestTools := parseRequestTools(reqBodyBytes)
+	messages := parseRequestMessagesViaAdapter(header.Meta.Provider, endpoint, reqBodyBytes)
+	requestTools := parseRequestToolsViaAdapter(header.Meta.Provider, endpoint, reqBodyBytes)
+	if len(messages) == 0 {
+		messages = parseRequestMessages(header.Meta.URL, reqBodyBytes)
+	}
+	if len(requestTools) == 0 {
+		requestTools = parseRequestTools(reqBodyBytes)
+	}
 	openAITools, anthropicTools := splitRequestToolsBySource(requestTools)
 
-	// 5. 解析 AI Content & Reasoning
-	contentStr, reasoningStr, aiBlocks, toolCalls := parseAIContent(header.Meta.URL, resBodyBytes, header.Layout.IsStream)
+	contentStr, reasoningStr, aiBlocks, toolCalls := parseResponseViaAdapter(header.Meta.Provider, endpoint, resBodyBytes, header.Layout.IsStream)
+	if contentStr == "" && reasoningStr == "" && len(aiBlocks) == 0 && len(toolCalls) == 0 {
+		contentStr, reasoningStr, aiBlocks, toolCalls = parseAIContent(header.Meta.URL, resBodyBytes, header.Layout.IsStream)
+	}
 
 	return &ParsedData{
 		Header:            header,
@@ -216,6 +225,153 @@ func ParseLogFile(content []byte) (*ParsedData, error) {
 		// ReqBody:      string(reqBodyBytes), // 也可以加上
 		// ResBody:      string(resBodyBytes), // 也可以加上
 	}, nil
+}
+
+func parseRequestMessagesViaAdapter(provider string, endpoint string, reqBodyBytes []byte) []ChatMessage {
+	req, err := llm.ParseRequest(provider, endpoint, reqBodyBytes)
+	if err != nil {
+		return nil
+	}
+	return chatMessagesFromLLMRequest(req, endpoint)
+}
+
+func parseRequestToolsViaAdapter(provider string, endpoint string, reqBodyBytes []byte) []RequestTool {
+	req, err := llm.ParseRequest(provider, endpoint, reqBodyBytes)
+	if err != nil || len(req.Tools) == 0 {
+		return nil
+	}
+	source := provider
+	if source == "" || source == llm.ProviderUnknown {
+		source = llm.ClassifyPath(endpoint, "").Provider
+	}
+	switch source {
+	case llm.ProviderOpenAICompatible:
+		source = "openai"
+	case llm.ProviderAnthropic:
+		source = "anthropic"
+	}
+	if source == "" || source == llm.ProviderUnknown {
+		source = "unknown"
+	}
+	tools := make([]RequestTool, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		tools = append(tools, RequestTool{
+			Source:      source,
+			Type:        "function",
+			Name:        tool.Name,
+			Description: tool.Description,
+			Parameters:  marshalCompact(tool.Parameters),
+		})
+	}
+	return tools
+}
+
+func parseResponseViaAdapter(provider string, endpoint string, data []byte, isStream bool) (string, string, []ContentBlock, []ToolCall) {
+	var (
+		resp llm.LLMResponse
+		err  error
+	)
+	if isStream {
+		resp, err = llm.ParseStreamResponse(provider, endpoint, data)
+	} else {
+		resp, err = llm.ParseResponse(provider, endpoint, data)
+	}
+	if err != nil {
+		return "", "", nil, nil
+	}
+	return summarizeLLMResponse(resp)
+}
+
+func summarizeLLMResponse(resp llm.LLMResponse) (string, string, []ContentBlock, []ToolCall) {
+	if len(resp.Candidates) == 0 {
+		return "", "", nil, nil
+	}
+	candidate := resp.Candidates[0]
+	var (
+		contentParts   []string
+		reasoningParts []string
+		blocks         []ContentBlock
+		toolCalls      []ToolCall
+	)
+
+	for _, content := range candidate.Content {
+		switch content.Type {
+		case "text":
+			if strings.TrimSpace(content.Text) != "" {
+				contentParts = append(contentParts, content.Text)
+			}
+		case "thinking":
+			if strings.TrimSpace(content.Text) != "" {
+				reasoningParts = append(reasoningParts, content.Text)
+			}
+		case "tool_result":
+			rendered := renderResponseOutput(content.ToolResult)
+			if rendered != "" {
+				blocks = append(blocks, ContentBlock{
+					Kind:   "tool_result",
+					Title:  firstNonEmpty(content.ToolName, "Tool Result"),
+					Text:   rendered,
+					Format: detectContentFormat(rendered),
+				})
+			}
+		default:
+			if strings.TrimSpace(content.Text) != "" {
+				blocks = append(blocks, ContentBlock{
+					Kind:   content.Type,
+					Title:  humanizeKind(content.Type),
+					Text:   content.Text,
+					Format: detectContentFormat(content.Text),
+				})
+			}
+		}
+	}
+	for _, call := range candidate.ToolCalls {
+		toolCalls = append(toolCalls, ToolCall{
+			ID:   firstNonEmpty(call.ID, call.Name),
+			Type: firstNonEmpty(call.Type, "function"),
+			Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{
+				Name:      call.Name,
+				Arguments: firstNonEmpty(call.ArgsText, marshalCompact(call.Args)),
+			},
+		})
+	}
+	if candidate.Refusal != nil && strings.TrimSpace(candidate.Refusal.Message) != "" {
+		blocks = append(blocks, ContentBlock{
+			Kind:   "refusal",
+			Title:  "Refusal",
+			Text:   candidate.Refusal.Message,
+			Format: detectContentFormat(candidate.Refusal.Message),
+		})
+	}
+	return strings.Join(contentParts, "\n\n"), strings.Join(reasoningParts, "\n\n"), blocks, toolCalls
+}
+
+func humanizeKind(kind string) string {
+	if kind == "" {
+		return "Structured Content"
+	}
+	kind = strings.ReplaceAll(kind, "_", " ")
+	parts := strings.Fields(kind)
+	for i := range parts {
+		if len(parts[i]) == 0 {
+			continue
+		}
+		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func normalizeEndpointLike(endpoint string) string {
+	if endpoint == "" {
+		return ""
+	}
+	if idx := strings.Index(endpoint, "?"); idx >= 0 {
+		endpoint = endpoint[:idx]
+	}
+	return endpoint
 }
 
 func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
@@ -254,6 +410,156 @@ func parseRequestMessages(url string, reqBodyBytes []byte) []ChatMessage {
 	}
 
 	return messages
+}
+
+func chatMessagesFromLLMRequest(req llm.LLMRequest, endpoint string) []ChatMessage {
+	messages := make([]ChatMessage, 0, len(req.System)+len(req.Messages))
+	toolNames := map[string]string{}
+	if len(req.System) > 0 {
+		messages = append(messages, llmMessageToChatMessage("system", req.System, endpoint, toolNames))
+	}
+	for _, message := range req.Messages {
+		messages = append(messages, llmMessageToChatMessage(message.Role, message.Content, endpoint, toolNames))
+	}
+	return compactChatMessages(messages)
+}
+
+func llmMessageToChatMessage(role string, contents []llm.LLMContent, endpoint string, toolNames map[string]string) ChatMessage {
+	var (
+		texts     []string
+		blocks    []ContentBlock
+		toolCalls []ToolCall
+		msgType   = "message"
+		toolID    string
+		toolName  string
+		isError   bool
+	)
+
+	for _, content := range contents {
+		switch content.Type {
+		case "text":
+			if strings.TrimSpace(content.Text) != "" {
+				texts = append(texts, strings.TrimSpace(content.Text))
+			}
+		case "thinking":
+			if strings.TrimSpace(content.Text) != "" {
+				blocks = append(blocks, ContentBlock{
+					Kind:   "thinking",
+					Title:  "Thinking",
+					Text:   content.Text,
+					Format: detectContentFormat(content.Text),
+				})
+			}
+		case "tool_use":
+			msgType = toolUseMessageType(endpoint)
+			if toolID := firstNonEmpty(content.ToolCallID, content.ID); toolID != "" && content.ToolName != "" {
+				toolNames[toolID] = content.ToolName
+			}
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   firstNonEmpty(content.ToolCallID, content.ID),
+				Type: "function",
+				Function: struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				}{
+					Name:      content.ToolName,
+					Arguments: marshalCompact(content.ToolArgs),
+				},
+			})
+		case "tool_result":
+			msgType = toolResultMessageType(endpoint)
+			toolID = content.ToolCallID
+			toolName = firstNonEmpty(content.ToolName, toolNames[content.ToolCallID])
+			rendered := strings.TrimSpace(content.Text)
+			if rendered == "" {
+				rendered = renderToolResult(content.ToolResult)
+			}
+			if rendered != "" {
+				texts = append(texts, rendered)
+			}
+			if content.Refusal != "" {
+				isError = true
+			}
+			if content.Text == "" && content.ToolResult != nil {
+				blocks = append(blocks, ContentBlock{
+					Kind:   "attachment",
+					Title:  "Tool Result",
+					Meta:   marshalPretty(content.ToolResult),
+					Format: "json",
+				})
+			}
+		default:
+			if strings.TrimSpace(content.Text) != "" {
+				blocks = append(blocks, ContentBlock{
+					Kind:   content.Type,
+					Title:  strings.ReplaceAll(strings.Title(content.Type), "_", " "),
+					Text:   content.Text,
+					Format: detectContentFormat(content.Text),
+				})
+			}
+		}
+	}
+
+	content := strings.Join(texts, "\n\n")
+	return ChatMessage{
+		Role:          normalizeMessageRole(firstNonEmpty(role, "user"), msgType),
+		MessageType:   msgType,
+		Content:       content,
+		ContentFormat: detectContentFormat(content),
+		Blocks:        blocks,
+		ToolCalls:     toolCalls,
+		ToolCallID:    toolID,
+		Name:          toolName,
+		IsError:       isError,
+	}
+}
+
+func normalizeMessageRole(role string, msgType string) string {
+	switch msgType {
+	case "tool_result", "function_call_output":
+		return "tool"
+	default:
+		return role
+	}
+}
+
+func toolUseMessageType(endpoint string) string {
+	if normalizeEndpointLike(endpoint) == "/v1/responses" {
+		return "function_call"
+	}
+	return "tool_use"
+}
+
+func toolResultMessageType(endpoint string) string {
+	if normalizeEndpointLike(endpoint) == "/v1/responses" {
+		return "function_call_output"
+	}
+	return "tool_result"
+}
+
+func renderToolResult(v interface{}) string {
+	switch out := v.(type) {
+	case nil:
+		return ""
+	case map[string]any:
+		if value, ok := out["value"].(string); ok && len(out) == 1 {
+			return value
+		}
+		return marshalPretty(out)
+	default:
+		return renderResponseOutput(out)
+	}
+}
+
+func compactChatMessages(messages []ChatMessage) []ChatMessage {
+	result := make([]ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		if message.Content == "" && len(message.Blocks) == 0 && len(message.ToolCalls) == 0 {
+			continue
+		}
+		result = append(result, message)
+	}
+	return result
 }
 
 func parseOpenAIChatRequest(data []byte) []ChatMessage {

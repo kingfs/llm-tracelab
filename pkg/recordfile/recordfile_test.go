@@ -44,3 +44,37 @@ func TestMarshalAndParsePreludeV3(t *testing.T) {
 	assert.Len(t, parsed.Events, 2)
 	assert.Equal(t, int64(len(prelude)), parsed.PayloadOffset)
 }
+
+func TestMarshalAndParsePreludeV3PreservesEventAttributes(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: MetaData{
+			RequestID: "req-2",
+			Time:      time.Date(2026, 3, 31, 10, 0, 0, 0, time.UTC),
+			Model:     "gpt-5",
+			URL:       "/v1/responses",
+			Method:    "POST",
+		},
+	}
+	events := []RecordEvent{
+		{
+			Type:    "llm.usage",
+			Time:    time.Date(2026, 3, 31, 10, 0, 1, 0, time.UTC),
+			Message: "",
+			Attributes: map[string]interface{}{
+				"prompt_tokens":     float64(11),
+				"completion_tokens": float64(7),
+				"total_tokens":      float64(18),
+			},
+		},
+	}
+
+	prelude, err := MarshalPrelude(header, events)
+	require.NoError(t, err)
+
+	parsed, err := ParsePrelude(prelude)
+	require.NoError(t, err)
+	require.Len(t, parsed.Events, 1)
+	assert.Equal(t, "llm.usage", parsed.Events[0].Type)
+	assert.Equal(t, float64(18), parsed.Events[0].Attributes["total_tokens"])
+}

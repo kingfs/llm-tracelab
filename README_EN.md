@@ -14,6 +14,15 @@ The core workflow is simple:
 
 It is similar in spirit to HTTP record/replay tooling, but tuned for LLM traffic: streaming responses, token usage, trace inspection, and lightweight chaos testing.
 
+## Current Release Notes
+
+This refactor introduces four major changes:
+
+- `pkg/llm` is now a provider/endpoint adapter layer for requests, responses, stream transcripts, and usage pipelines
+- the monitor is now an embedded React UI with async pagination and detail views for timeline / summary / raw protocol
+- SQLite now exposes stable `trace_id` values instead of path-based monitor URLs
+- `LLM_PROXY_V3` `# event:` lines now include `llm.*` provider timelines in addition to base request/response events
+
 ## Good Fit
 
 - stable unit tests for SDK or application code
@@ -26,7 +35,7 @@ It is similar in spirit to HTTP record/replay tooling, but tuned for LLM traffic
 - transparent proxy for OpenAI-compatible requests
 - persists each exchange as a local `.http` cassette
 - `pkg/replay.Transport` for replay-based unit tests
-- monitor UI for request detail and raw protocol views
+- monitor UI for request detail, unified timeline, and raw protocol views
 - SQLite metadata index for fast list/stat queries
 - backward-compatible readers for legacy V2 record files
 
@@ -51,7 +60,8 @@ New recordings use `LLM_PROXY_V3`:
 
 1. a compact metadata prelude instead of a fixed 2KB header block
 2. full raw HTTP request/response bytes kept for inspection and replay
-3. metadata indexed into `trace_index.sqlite3` for fast monitor queries
+3. `# event:` lines now capture normalized provider timeline events such as `llm.output_text.delta`, `llm.reasoning.delta`, `llm.tool_call`, and `llm.usage`
+4. metadata is indexed into `trace_index.sqlite3` for fast monitor queries
 
 Default storage layout:
 
@@ -113,6 +123,12 @@ Point your SDK `base_url` to `http://localhost:8080/v1` and traffic will be reco
 ### 3. Open Monitor
 
 Visit `http://localhost:8081`.
+
+The detail page now has three first-class views:
+
+- `Timeline`: consumes normalized `llm.*` cassette events
+- `Summary`: conversation / tools / output block projection
+- `Raw Protocol`: side-by-side request/response inspection
 
 ## Legacy Migration And SQLite Rebuild
 
@@ -246,6 +262,7 @@ func TestChat(t *testing.T) {
 - SQLite is a metadata index, not a replacement for raw files
 - new writes use V3, old V2 files remain readable
 - prefer readable files, offline tests, and local-first workflows
+- provider semantics, stream transcripts, usage, and event timelines should converge inside `pkg/llm`
 
 ## Screenshots
 
