@@ -9,12 +9,6 @@ services:
     ports:
       - "8080:8080"
       - "8081:8081"
-    environment:
-      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com
-      LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY:-sk-test}
-      LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
-      LLM_TRACELAB_SERVER_PORT: "8080"
-      LLM_TRACELAB_MONITOR_PORT: "8081"
     volumes:
       - ./config/config.docker.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
