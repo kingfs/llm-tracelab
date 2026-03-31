@@ -168,10 +168,12 @@ function TraceListPage() {
 function TraceDetailPage() {
   const { traceID = "" } = useParams();
   const [tab, setTab] = useState("timeline");
+  const [renderMarkdown, setRenderMarkdown] = useState(true);
   const detail = useJSON(`/api/traces/${traceID}`, [traceID]);
   const raw = useJSON(`/api/traces/${traceID}/raw`, [traceID, tab === "raw" ? "raw" : "summary"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
+  const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
 
   return (
     <div className="shell shell-detail">
@@ -193,6 +195,29 @@ function TraceDetailPage() {
         </div>
       </header>
 
+      <section className="hero-grid detail-hero-grid">
+        <StatCard
+          label="Tokens"
+          value={usage?.total_tokens || 0}
+          accent="accent-gold"
+          detail={`in ${usage?.prompt_tokens || 0} / out ${usage?.completion_tokens || 0} / cached ${
+            usage?.prompt_token_details?.cached_tokens || 0
+          }`}
+        />
+        <StatCard
+          label="Latency"
+          value={`${header?.duration_ms || 0} ms`}
+          detail={`ttft ${header?.ttft_ms || 0} ms`}
+          accent="accent-green"
+        />
+        <StatCard
+          label="Endpoint"
+          value={header?.endpoint || header?.url || "-"}
+          detail={header?.time ? formatDateTime(header.time) : "-"}
+        />
+        <StatCard label="Request ID" value={header?.request_id || "-"} detail={header?.method || "POST"} mono />
+      </section>
+
       <nav className="detail-tabs">
         <button className={tab === "timeline" ? "tab active" : "tab"} onClick={() => setTab("timeline")}>
           Timeline
@@ -203,6 +228,11 @@ function TraceDetailPage() {
         <button className={tab === "raw" ? "tab active" : "tab"} onClick={() => setTab("raw")}>
           Raw Protocol
         </button>
+        {hasDeclaredToolsTab ? (
+          <button className={tab === "tools" ? "tab active" : "tab"} onClick={() => setTab("tools")}>
+            Declared Tools
+          </button>
+        ) : null}
       </nav>
 
       {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
@@ -212,16 +242,20 @@ function TraceDetailPage() {
 
       {tab === "summary" && detail.data ? (
         <div className="detail-grid">
-          <section className="panel panel-span-2">
+          <section className="panel">
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Conversation</p>
                 <h2>Request and response</h2>
               </div>
+              <label className="wrap-toggle">
+                <input type="checkbox" checked={renderMarkdown} onChange={(event) => setRenderMarkdown(event.target.checked)} />
+                Render markdown
+              </label>
             </div>
             <div className="message-list">
               {detail.data.messages.map((message, index) => (
-                <MessageCard key={`${message.role}-${index}`} message={message} />
+                <MessageCard key={`${message.role}-${index}`} message={message} renderMarkdown={renderMarkdown} />
               ))}
               {detail.data.ai_reasoning ? (
                 <CollapsibleCard title="Reasoning" subtitle="assistant reasoning" defaultOpen={false}>
@@ -234,7 +268,7 @@ function TraceDetailPage() {
                     <span className="role-pill">assistant</span>
                     <span className="message-kind">final output</span>
                   </div>
-                  <div className="message-body prose-block">{detail.data.ai_content}</div>
+                  <MessageContent value={detail.data.ai_content} format="markdown" renderMarkdown={renderMarkdown} className="message-body" />
                 </article>
               ) : null}
               {detail.data.tool_calls?.length ? (
@@ -253,46 +287,35 @@ function TraceDetailPage() {
               ) : null}
             </div>
           </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Trace meta</p>
-                <h2>Header</h2>
-              </div>
-            </div>
-            <dl className="meta-list">
-              <MetaRow label="Time" value={formatDateTime(header?.time)} />
-              <MetaRow label="Endpoint" value={header?.endpoint || header?.url} />
-              <MetaRow label="Duration" value={`${header?.duration_ms || 0} ms`} />
-              <MetaRow label="TTFT" value={`${header?.ttft_ms || 0} ms`} />
-              <MetaRow label="Request ID" value={header?.request_id} mono />
-            </dl>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Declared tools</p>
-                <h2>Request tools</h2>
-              </div>
-            </div>
-            {detail.data.tools?.length ? (
-              detail.data.tools.map((tool, index) => (
-                <CollapsibleCard key={`${tool.name}-${index}`} title={tool.name} subtitle={tool.source || tool.type} defaultOpen={false}>
-                  <p className="tool-description">{tool.description || "No description"}</p>
-                  <CodeBlock value={tool.parameters || "{}"} />
-                </CollapsibleCard>
-              ))
-            ) : (
-              <div className="empty-state">No tool definitions in request.</div>
-            )}
-          </section>
         </div>
       ) : null}
 
       {tab === "raw" ? <RawProtocolPanel raw={raw} /> : null}
+      {tab === "tools" && detail.data ? <DeclaredToolsPanel tools={detail.data.tools || []} /> : null}
     </div>
+  );
+}
+
+function DeclaredToolsPanel({ tools }) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Declared tools</p>
+          <h2>Request tools</h2>
+        </div>
+      </div>
+      {tools.length ? (
+        tools.map((tool, index) => (
+          <CollapsibleCard key={`${tool.name}-${index}`} title={tool.name} subtitle={tool.source || tool.type} defaultOpen={false}>
+            <p className="tool-description">{tool.description || "No description"}</p>
+            <CodeBlock value={tool.parameters || "{}"} />
+          </CollapsibleCard>
+        ))
+      ) : (
+        <div className="empty-state">No tool definitions in request.</div>
+      )}
+    </section>
   );
 }
 
@@ -372,7 +395,7 @@ function ProtocolColumn({ title, value, wrap }) {
   );
 }
 
-function MessageCard({ message }) {
+function MessageCard({ message, renderMarkdown }) {
   const alignClass = message.role === "assistant" ? "message-assistant" : message.role === "tool" ? "message-tool" : "message-user";
   const isCollapsible = message.message_type === "tool_use" || message.message_type === "tool_result";
 
@@ -382,7 +405,14 @@ function MessageCard({ message }) {
         <span className="role-pill">{message.role}</span>
         <span className="message-kind">{message.message_type || "message"}</span>
       </div>
-      {message.content ? <div className="message-body prose-block">{message.content}</div> : null}
+      {message.content ? (
+        <MessageContent
+          value={message.content}
+          format={message.content_format}
+          renderMarkdown={renderMarkdown}
+          className="message-body"
+        />
+      ) : null}
       {message.tool_calls?.length ? message.tool_calls.map((call) => <ToolCallView key={call.id || call.function?.name} call={call} />) : null}
       {message.blocks?.length ? message.blocks.map((block, index) => <BlockView key={`${block.kind}-${index}`} block={block} />) : null}
     </article>
@@ -439,26 +469,107 @@ function CollapsibleCard({ title, subtitle, defaultOpen = false, children, bodyC
   );
 }
 
-function MetaRow({ label, value, mono = false }) {
-  return (
-    <>
-      <dt>{label}</dt>
-      <dd className={mono ? "mono" : ""}>{value || "-"}</dd>
-    </>
-  );
-}
-
-function StatCard({ label, value, accent = "" }) {
+function StatCard({ label, value, accent = "", detail = "", mono = false }) {
   return (
     <article className={`stat-card ${accent}`.trim()}>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong className={mono ? "mono" : ""}>{value}</strong>
+      {detail ? <small className={mono ? "mono stat-detail" : "stat-detail"}>{detail}</small> : null}
     </article>
   );
 }
 
 function CodeBlock({ value }) {
   return <pre className="code-block">{value}</pre>;
+}
+
+function MessageContent({ value, format, renderMarkdown, className = "" }) {
+  if (renderMarkdown && format === "markdown") {
+    return <MarkdownBlock value={value} className={className} />;
+  }
+  return <div className={`${className} prose-block`.trim()}>{value}</div>;
+}
+
+function MarkdownBlock({ value, className = "" }) {
+  return <div className={`${className} prose-block rendered-markdown`.trim()} dangerouslySetInnerHTML={{ __html: renderMarkdownToHTML(value) }} />;
+}
+
+function renderMarkdownToHTML(input) {
+  if (!input) {
+    return "";
+  }
+
+  const codeBlocks = [];
+  const placeholderPrefix = "__LLM_TRACELAB_CODE_BLOCK_";
+  let text = String(input).replace(/\r\n/g, "\n");
+
+  text = text.replace(/```([\w-]+)?\n([\s\S]*?)```/g, (_, language = "", code = "") => {
+    const html = `<pre class="md-pre"><code${language ? ` data-lang="${escapeHTML(language)}"` : ""}>${escapeHTML(code.trimEnd())}</code></pre>`;
+    const token = `${placeholderPrefix}${codeBlocks.length}__`;
+    codeBlocks.push(html);
+    return token;
+  });
+
+  const blocks = text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => renderMarkdownBlock(block, placeholderPrefix));
+
+  let html = blocks.join("");
+  codeBlocks.forEach((codeBlock, index) => {
+    html = html.replace(`${placeholderPrefix}${index}__`, codeBlock);
+  });
+  return html;
+}
+
+function renderMarkdownBlock(block, placeholderPrefix) {
+  if (block.startsWith(placeholderPrefix)) {
+    return block;
+  }
+
+  const lines = block.split("\n");
+  if (lines.every((line) => /^>\s?/.test(line))) {
+    const content = lines.map((line) => line.replace(/^>\s?/, "")).join("<br />");
+    return `<blockquote>${renderMarkdownInline(content)}</blockquote>`;
+  }
+  if (lines.every((line) => /^[-*]\s+/.test(line))) {
+    return `<ul>${lines.map((line) => `<li>${renderMarkdownInline(line.replace(/^[-*]\s+/, ""))}</li>`).join("")}</ul>`;
+  }
+  if (lines.every((line) => /^\d+\.\s+/.test(line))) {
+    return `<ol>${lines.map((line) => `<li>${renderMarkdownInline(line.replace(/^\d+\.\s+/, ""))}</li>`).join("")}</ol>`;
+  }
+
+  const heading = block.match(/^(#{1,6})\s+(.+)$/);
+  if (heading) {
+    const level = Math.min(heading[1].length, 6);
+    return `<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`;
+  }
+
+  return `<p>${renderMarkdownInline(lines.join("<br />"))}</p>`;
+}
+
+function renderMarkdownInline(text) {
+  let html = escapeHTML(text);
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g, (_, label, href) => {
+    const safeHref = escapeHTML(href);
+    return `<a href="${safeHref}" target="_blank" rel="noreferrer">${label}</a>`;
+  });
+  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  html = html.replace(/(^|[\s(])\*([^*]+)\*(?=[\s).,!?:;]|$)/g, "$1<em>$2</em>");
+  html = html.replace(/(^|[\s(])_([^_]+)_(?=[\s).,!?:;]|$)/g, "$1<em>$2</em>");
+  return html;
+}
+
+function escapeHTML(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function formatDateTime(value) {

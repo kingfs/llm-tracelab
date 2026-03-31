@@ -138,6 +138,19 @@ a {
 
 .stat-card strong {
   font-size: clamp(1.8rem, 2vw, 2.6rem);
+  line-height: 1.1;
+  word-break: break-word;
+}
+
+.stat-detail {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.detail-hero-grid {
+  margin-bottom: 22px;
 }
 
 .accent-gold {
@@ -254,13 +267,9 @@ a {
 
 .detail-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
-}
-
-.panel-span-2 {
-  grid-row: span 2;
 }
 
 .message-list {
@@ -369,6 +378,70 @@ a {
   overflow: auto;
   font-size: 0.86rem;
   font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+.rendered-markdown > :first-child {
+  margin-top: 0;
+}
+
+.rendered-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.rendered-markdown p,
+.rendered-markdown ul,
+.rendered-markdown ol,
+.rendered-markdown blockquote,
+.rendered-markdown pre,
+.rendered-markdown h1,
+.rendered-markdown h2,
+.rendered-markdown h3,
+.rendered-markdown h4,
+.rendered-markdown h5,
+.rendered-markdown h6 {
+  margin: 0 0 12px;
+}
+
+.rendered-markdown ul,
+.rendered-markdown ol {
+  padding-left: 1.4rem;
+}
+
+.rendered-markdown blockquote {
+  padding-left: 14px;
+  border-left: 3px solid rgba(25, 93, 77, 0.28);
+  color: var(--muted);
+}
+
+.rendered-markdown code {
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  padding: 0.12rem 0.35rem;
+  border-radius: 8px;
+  background: rgba(29, 36, 31, 0.08);
+}
+
+.rendered-markdown .md-pre {
+  margin: 0 0 12px;
+  border-radius: 16px;
+  background: #1d241f;
+  color: #f1ede4;
+  padding: 16px;
+  overflow: auto;
+}
+
+.rendered-markdown .md-pre code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  white-space: pre-wrap;
+}
+
+.rendered-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .meta-list {

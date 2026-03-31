@@ -354,7 +354,7 @@ func filterTimelineEvents(events []recordfile.RecordEvent) []recordfile.RecordEv
 	}
 	filtered := make([]recordfile.RecordEvent, 0, len(events))
 	for _, event := range events {
-		if event.Type == "llm.output_text.delta" {
+		if event.Type == "llm.output_text.delta" || event.Type == "llm.tool_call.delta" {
 			continue
 		}
 		filtered = append(filtered, event)

@@ -210,7 +210,7 @@ func TestTraceRawAPIHandlerReturnsEventAttributes(t *testing.T) {
 	}
 }
 
-func TestTraceDetailAPIHandlerFiltersOutputTextDeltaEvents(t *testing.T) {
+func TestTraceDetailAPIHandlerFiltersNoisyDeltaEvents(t *testing.T) {
 	t.Parallel()
 
 	outputDir := t.TempDir()
@@ -218,6 +218,13 @@ func TestTraceDetailAPIHandlerFiltersOutputTextDeltaEvents(t *testing.T) {
 	header := buildRecordHeader("/v1/responses", true, `{"input":"hello"}`, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n")
 	events := append(recordfile.BuildEvents(header),
 		recordfile.RecordEvent{Type: "llm.output_text.delta", Message: "hi"},
+		recordfile.RecordEvent{
+			Type: "llm.tool_call.delta",
+			Attributes: map[string]interface{}{
+				"id":   "call_1",
+				"name": "search",
+			},
+		},
 		recordfile.RecordEvent{
 			Type: "llm.usage",
 			Attributes: map[string]interface{}{
@@ -262,8 +269,8 @@ func TestTraceDetailAPIHandlerFiltersOutputTextDeltaEvents(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	for _, event := range payloadResp.Events {
-		if event["type"] == "llm.output_text.delta" {
-			t.Fatalf("delta event should be filtered from detail timeline: %+v", event)
+		if event["type"] == "llm.output_text.delta" || event["type"] == "llm.tool_call.delta" {
+			t.Fatalf("noisy delta event should be filtered from detail timeline: %+v", event)
 		}
 	}
 }

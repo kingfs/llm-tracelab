@@ -9,6 +9,13 @@ tasks:
     cmds:
       - task: build
 
+  ui:build:
+    desc: Build embedded Trace Monitor UI
+    dir: web/monitor-ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run build
+
   fmt:
     desc: Format Go code
     cmds:
@@ -27,6 +34,7 @@ tasks:
   build:
     desc: Build server binary
     cmds:
+      - task: ui:build
       - go build -o {{.BIN}} ./cmd/server
 
   migrate:
@@ -50,10 +58,11 @@ tasks:
       - docker compose up --build -d
 
   check:
-    desc: Run formatting, lint, and tests
+    desc: Run formatting, lint, tests, and UI build
     cmds:
       - task: fmt
       - task: lint
+      - task: ui:build
       - task: test
 
   clean:
