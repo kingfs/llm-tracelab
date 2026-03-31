@@ -59,7 +59,6 @@ function App() {
 }
 
 function TraceListPage() {
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const [refreshTick, setRefreshTick] = useState(0);
@@ -123,41 +122,52 @@ function TraceListPage() {
 
         <div className="trace-table">
           <div className="trace-table-head">
-            <span>Trace</span>
-            <span>API</span>
+            <span>Model</span>
             <span>Status</span>
             <span>Latency</span>
             <span>Tokens</span>
-            <span>Open</span>
+            <span>Actions</span>
           </div>
           {items.map((item) => (
-            <button key={item.id} className="trace-row" onClick={() => navigate(`/traces/${item.id}`)}>
+            <article key={item.id} className="trace-row">
               <div>
-                <strong>{item.model || "unknown-model"}</strong>
-                <span>{formatDateTime(item.recorded_at)}</span>
+                <div className="trace-title-row">
+                  <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
+                  <div className="trace-tag-group">
+                    <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
+                    <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
+                    {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
+                  </div>
+                </div>
+                <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
               </div>
-              <div>
-                <strong>{item.operation || item.endpoint}</strong>
-                <span>{item.provider}</span>
-              </div>
-              <div>
+              <div className="trace-metric-stack">
                 <strong className={item.status_code >= 200 && item.status_code < 300 ? "status-ok" : "status-err"}>
                   {item.status_code}
                 </strong>
-                <span>{item.is_stream ? "stream" : "json"}</span>
+                <span>{item.method || "POST"}</span>
               </div>
-              <div>
+              <div className="trace-metric-stack">
                 <strong>{item.duration_ms} ms</strong>
                 <span>ttft {item.ttft_ms} ms</span>
               </div>
               <div>
-                <strong>{item.total_tokens}</strong>
-                <span>
-                  in {item.prompt_tokens} / out {item.completion_tokens}
-                </span>
+                <div className="token-inline-row">
+                  <MiniToken metric="in" value={item.prompt_tokens} tone="accent" icon="input" />
+                  <MiniToken metric="out" value={item.completion_tokens} tone="green" icon="output" />
+                  <MiniToken metric="total" value={item.total_tokens} tone="default" icon="total" />
+                  <MiniToken metric="cached" value={item.cached_tokens} tone="gold" icon="cached" />
+                </div>
               </div>
-              <div className="row-link">view</div>
-            </button>
+              <div className="action-group">
+                <Link className="icon-button" to={`/traces/${item.id}`} title="View trace" aria-label="View trace">
+                  <ViewIcon />
+                </Link>
+                <a className="icon-button" href={`/api/traces/${item.id}/download`} title="Download .http" aria-label="Download trace">
+                  <DownloadIcon />
+                </a>
+              </div>
+            </article>
           ))}
         </div>
       </section>
@@ -178,45 +188,41 @@ function TraceDetailPage() {
   return (
     <div className="shell shell-detail">
       <header className="topbar detail-topbar">
-        <div>
-          <Link to="/" className="inline-link">
-            overview
-          </Link>
-          <h1>{header?.model || "trace detail"}</h1>
-          <p className="detail-subtitle">
-            {header?.provider || "unknown"} / {header?.operation || header?.endpoint || "unknown"} / {header?.status_code || 0}
-          </p>
+        <div className="detail-title-block">
+          <div className="detail-heading-row">
+            <h1>{header?.model || "trace detail"}</h1>
+            <div className="trace-tag-group detail-tag-group">
+              <InlineTag tone="accent">{formatEndpointTag(header?.endpoint || header?.operation)}</InlineTag>
+              <InlineTag>{formatProviderTag(header?.provider)}</InlineTag>
+              {detail.data?.header?.layout?.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
+              <InlineTag tone={header?.status_code >= 200 && header?.status_code < 300 ? "green" : "danger"}>{header?.status_code || 0}</InlineTag>
+            </div>
+          </div>
+          <div className="detail-meta-strip">
+            <DetailMetaPill label="time" value={formatDateTime(header?.time)} />
+            <DetailMetaPill label="endpoint" value={header?.endpoint || header?.url || "-"} />
+            <DetailMetaPill label="duration" value={`${header?.duration_ms || 0} ms`} />
+            <DetailMetaPill label="ttft" value={`${header?.ttft_ms || 0} ms`} />
+            <DetailMetaPill label="request id" value={header?.request_id || "-"} mono />
+          </div>
         </div>
-        <div className="topbar-meta">
-          <a className="ghost-button" href={`/api/traces/${traceID}/download`}>
-            download
-          </a>
-          <span className="badge">{usage?.total_tokens || 0} tokens</span>
+        <div className="topbar-meta detail-toolbar">
+          <div className="detail-toolbar-actions">
+            <Link className="icon-button" to="/" title="Back to list" aria-label="Back to list">
+              <HomeIcon />
+            </Link>
+            <a className="icon-button" href={`/api/traces/${traceID}/download`} title="Download .http" aria-label="Download trace">
+              <DownloadIcon />
+            </a>
+          </div>
+          <div className="detail-toolbar-tokens">
+            <TokenBadge label="in" value={usage?.prompt_tokens || 0} icon="input" />
+            <TokenBadge label="out" value={usage?.completion_tokens || 0} icon="output" />
+            <TokenBadge label="total" value={usage?.total_tokens || 0} icon="total" accent="token-badge-strong" />
+            <TokenBadge label="cached" value={usage?.prompt_token_details?.cached_tokens || 0} icon="cached" />
+          </div>
         </div>
       </header>
-
-      <section className="hero-grid detail-hero-grid">
-        <StatCard
-          label="Tokens"
-          value={usage?.total_tokens || 0}
-          accent="accent-gold"
-          detail={`in ${usage?.prompt_tokens || 0} / out ${usage?.completion_tokens || 0} / cached ${
-            usage?.prompt_token_details?.cached_tokens || 0
-          }`}
-        />
-        <StatCard
-          label="Latency"
-          value={`${header?.duration_ms || 0} ms`}
-          detail={`ttft ${header?.ttft_ms || 0} ms`}
-          accent="accent-green"
-        />
-        <StatCard
-          label="Endpoint"
-          value={header?.endpoint || header?.url || "-"}
-          detail={header?.time ? formatDateTime(header.time) : "-"}
-        />
-        <StatCard label="Request ID" value={header?.request_id || "-"} detail={header?.method || "POST"} mono />
-      </section>
 
       <nav className="detail-tabs">
         <button className={tab === "timeline" ? "tab active" : "tab"} onClick={() => setTab("timeline")}>
@@ -245,47 +251,51 @@ function TraceDetailPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Conversation</p>
-                <h2>Request and response</h2>
+                <p className="eyebrow">{hasConversation(detail.data) ? "Conversation" : "Payload"}</p>
+                <h2>{hasConversation(detail.data) ? "Request and response" : "Request / response body"}</h2>
               </div>
               <label className="wrap-toggle">
                 <input type="checkbox" checked={renderMarkdown} onChange={(event) => setRenderMarkdown(event.target.checked)} />
                 Render markdown
               </label>
             </div>
-            <div className="message-list">
-              {detail.data.messages.map((message, index) => (
-                <MessageCard key={`${message.role}-${index}`} message={message} renderMarkdown={renderMarkdown} />
-              ))}
-              {detail.data.ai_reasoning ? (
-                <CollapsibleCard title="Reasoning" subtitle="assistant reasoning" defaultOpen={false}>
-                  <CodeBlock value={detail.data.ai_reasoning} />
-                </CollapsibleCard>
-              ) : null}
-              {detail.data.ai_content ? (
-                <article className="message-card message-assistant">
-                  <div className="message-meta">
-                    <span className="role-pill">assistant</span>
-                    <span className="message-kind">final output</span>
-                  </div>
-                  <MessageContent value={detail.data.ai_content} format="markdown" renderMarkdown={renderMarkdown} className="message-body" />
-                </article>
-              ) : null}
-              {detail.data.tool_calls?.length ? (
-                <CollapsibleCard title="Tool Calls" subtitle={`${detail.data.tool_calls.length} call(s)`} defaultOpen={false}>
-                  {detail.data.tool_calls.map((call) => (
-                    <ToolCallView key={call.id || call.function?.name} call={call} />
-                  ))}
-                </CollapsibleCard>
-              ) : null}
-              {detail.data.ai_blocks?.length ? (
-                <CollapsibleCard title="Output Blocks" subtitle={`${detail.data.ai_blocks.length} block(s)`} defaultOpen={false}>
-                  {detail.data.ai_blocks.map((block, index) => (
-                    <BlockView key={`${block.kind}-${index}`} block={block} />
-                  ))}
-                </CollapsibleCard>
-              ) : null}
-            </div>
+            {hasConversation(detail.data) ? (
+              <div className="message-list">
+                {detail.data.messages.map((message, index) => (
+                  <MessageCard key={`${message.role}-${index}`} message={message} renderMarkdown={renderMarkdown} />
+                ))}
+                {detail.data.ai_reasoning ? (
+                  <CollapsibleCard title="Reasoning" subtitle="assistant reasoning" defaultOpen={false}>
+                    <CodeBlock value={detail.data.ai_reasoning} />
+                  </CollapsibleCard>
+                ) : null}
+                {detail.data.ai_content ? (
+                  <article className="message-card message-assistant">
+                    <div className="message-meta">
+                      <span className="role-pill">assistant</span>
+                      <span className="message-kind">final output</span>
+                    </div>
+                    <MessageContent value={detail.data.ai_content} format="markdown" renderMarkdown={renderMarkdown} className="message-body" />
+                  </article>
+                ) : null}
+                {detail.data.tool_calls?.length ? (
+                  <CollapsibleCard title="Tool Calls" subtitle={`${detail.data.tool_calls.length} call(s)`} defaultOpen={false}>
+                    {detail.data.tool_calls.map((call) => (
+                      <ToolCallView key={call.id || call.function?.name} call={call} />
+                    ))}
+                  </CollapsibleCard>
+                ) : null}
+                {detail.data.ai_blocks?.length ? (
+                  <CollapsibleCard title="Output Blocks" subtitle={`${detail.data.ai_blocks.length} block(s)`} defaultOpen={false}>
+                    {detail.data.ai_blocks.map((block, index) => (
+                      <BlockView key={`${block.kind}-${index}`} block={block} />
+                    ))}
+                  </CollapsibleCard>
+                ) : null}
+              </div>
+            ) : (
+              <PayloadSummary raw={raw} />
+            )}
           </section>
         </div>
       ) : null}
@@ -386,12 +396,137 @@ function TimelinePanel({ events }) {
   );
 }
 
+function PayloadSummary({ raw }) {
+  const requestBody = extractHTTPBody(raw.data?.request_protocol || "");
+  const responseBody = extractHTTPBody(raw.data?.response_protocol || "");
+
+  return (
+    <div className="payload-grid">
+      <section className="payload-card">
+        <div className="protocol-head">Request body</div>
+        <CodeBlock value={formatBodyForDisplay(requestBody)} />
+      </section>
+      <section className="payload-card">
+        <div className="protocol-head">Response body</div>
+        <CodeBlock value={formatBodyForDisplay(responseBody)} />
+      </section>
+    </div>
+  );
+}
+
 function ProtocolColumn({ title, value, wrap }) {
   return (
     <div className="protocol-column">
       <div className="protocol-head">{title}</div>
       <pre className={wrap ? "protocol-code protocol-code-wrap" : "protocol-code"}>{value}</pre>
     </div>
+  );
+}
+
+function InlineTag({ children, tone = "default" }) {
+  return <span className={`inline-tag inline-tag-${tone}`}>{children}</span>;
+}
+
+function MiniToken({ metric, value, tone = "default", icon = "total" }) {
+  return (
+    <span className={`mini-token mini-token-${tone}`}>
+      <span className="metric-icon-wrap">
+        <MetricIcon type={icon} />
+      </span>
+      <span className="mini-token-label">{metric}</span>
+      <strong>{value || 0}</strong>
+    </span>
+  );
+}
+
+function TokenBadge({ label, value, accent = "", icon = "total" }) {
+  return (
+    <span className={`badge token-badge ${accent}`.trim()}>
+      <span className="metric-icon-wrap token-badge-icon">
+        <MetricIcon type={icon} />
+      </span>
+      <span className="token-badge-label">{label}</span>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function DetailMetaPill({ label, value, mono = false }) {
+  return (
+    <span className={`detail-meta-pill ${mono ? "mono" : ""}`.trim()}>
+      <span className="detail-meta-label">{label}</span>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function IconFrame({ children }) {
+  return <span className="icon-frame">{children}</span>;
+}
+
+function MetricIcon({ type = "total" }) {
+  if (type === "input") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M14 3.5h-4.5M14 12.5h-4.5M6 8H14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="m6.5 4.5-3.5 3.5 3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "output") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2 3.5h4.5M2 12.5h4.5M2 8H10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="m9.5 4.5 3.5 3.5-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "cached") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M5 5.5h7v7H5z" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M3.5 3.5h7v7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 4.5h10M3 8h10M3 11.5h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ViewIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+        <circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    </IconFrame>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4v10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="m8 11.5 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M5 19h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    </IconFrame>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 11.5 12 5l8 6.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M7.5 10.5V19h9v-8.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </IconFrame>
   );
 }
 
@@ -570,6 +705,67 @@ function escapeHTML(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function hasConversation(detail) {
+  return Boolean(
+    detail.messages?.length ||
+      detail.ai_content ||
+      detail.ai_reasoning ||
+      detail.ai_blocks?.length ||
+      detail.tool_calls?.length
+  );
+}
+
+function extractHTTPBody(protocol = "") {
+  if (!protocol) {
+    return "";
+  }
+  const separator = protocol.includes("\r\n\r\n") ? "\r\n\r\n" : "\n\n";
+  const index = protocol.indexOf(separator);
+  if (index === -1) {
+    return protocol;
+  }
+  return protocol.slice(index + separator.length);
+}
+
+function formatBodyForDisplay(value = "") {
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return "(empty)";
+  }
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return trimmed;
+  }
+}
+
+function formatEndpointTag(value = "") {
+  const endpoint = String(value || "").toLowerCase();
+  if (endpoint.includes("/v1/chat/completions")) {
+    return "chat";
+  }
+  if (endpoint.includes("/v1/responses")) {
+    return "resp";
+  }
+  if (endpoint.includes("/v1/messages")) {
+    return "msg";
+  }
+  if (endpoint.includes("/v1/models")) {
+    return "models";
+  }
+  return value || "api";
+}
+
+function formatProviderTag(value = "") {
+  if (!value) {
+    return "unknown";
+  }
+  if (value === "openai_compatible") {
+    return "openai";
+  }
+  return String(value).replaceAll("_", " ");
 }
 
 function formatDateTime(value) {
