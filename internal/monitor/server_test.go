@@ -218,6 +218,7 @@ func TestTraceDetailAPIHandlerFiltersNoisyDeltaEvents(t *testing.T) {
 	header := buildRecordHeader("/v1/responses", true, `{"input":"hello"}`, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n")
 	events := append(recordfile.BuildEvents(header),
 		recordfile.RecordEvent{Type: "llm.output_text.delta", Message: "hi"},
+		recordfile.RecordEvent{Type: "llm.reasoning.delta", Message: "think"},
 		recordfile.RecordEvent{
 			Type: "llm.tool_call.delta",
 			Attributes: map[string]interface{}{
@@ -269,9 +270,110 @@ func TestTraceDetailAPIHandlerFiltersNoisyDeltaEvents(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	for _, event := range payloadResp.Events {
-		if event["type"] == "llm.output_text.delta" || event["type"] == "llm.tool_call.delta" {
+		if strings.HasSuffix(event["type"].(string), ".delta") {
 			t.Fatalf("noisy delta event should be filtered from detail timeline: %+v", event)
 		}
+	}
+}
+
+func TestTraceDetailAPIHandlerEnrichesRequestAndResponseTimeline(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	reqBody := `{"input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"You are helpful."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"why failed?"}]},{"type":"function_call","call_id":"call_hist","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},{"type":"function_call_output","call_id":"call_hist","output":"{\"cwd\":\"/tmp\"}"}]}`
+	resBody := strings.Join([]string{
+		"event: response.reasoning_summary_text.delta",
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"inspect logs","item_id":"rs_1"}`,
+		"",
+		"event: response.output_item.added",
+		`data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_live","name":"exec_command"}}`,
+		"",
+		"event: response.function_call_arguments.delta",
+		`data: {"type":"response.function_call_arguments.delta","delta":"{\"cmd\":\"ls\"}","item_id":"fc_1"}`,
+		"",
+		"event: response.output_text.delta",
+		`data: {"type":"response.output_text.delta","delta":"final answer"}`,
+		"",
+	}, "\n")
+	content := buildRecordFixture(t, "/v1/responses", true, reqBody, resBody)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	var (
+		requestMessage  string
+		responseMessage string
+		requestItems    []interface{}
+		responseItems   []interface{}
+	)
+	for _, event := range payload.Events {
+		switch event["type"] {
+		case "request":
+			requestMessage, _ = event["message"].(string)
+			requestItems, _ = event["timeline_items"].([]interface{})
+		case "response":
+			responseMessage, _ = event["message"].(string)
+			responseItems, _ = event["timeline_items"].([]interface{})
+		}
+	}
+
+	if !strings.Contains(requestMessage, "├─ system: You are helpful.") {
+		t.Fatalf("request timeline missing system message: %q", requestMessage)
+	}
+	if !strings.Contains(requestMessage, `function call exec_command [call_hist]: {"cmd":"pwd"}`) {
+		t.Fatalf("request timeline missing tool call: %q", requestMessage)
+	}
+	if !strings.Contains(requestMessage, `tool response exec_command [call_hist]: {"cwd":"/tmp"}`) {
+		t.Fatalf("request timeline missing tool result: %q", requestMessage)
+	}
+	if !strings.Contains(responseMessage, "Thinking: inspect logs") {
+		t.Fatalf("response timeline missing thinking: %q", responseMessage)
+	}
+	if !strings.Contains(responseMessage, `tool call exec_command [call_live]: {"cmd":"ls"}`) {
+		t.Fatalf("response timeline missing tool call: %q", responseMessage)
+	}
+	if !strings.Contains(responseMessage, "Final output: final answer") {
+		t.Fatalf("response timeline missing final output: %q", responseMessage)
+	}
+	if len(requestItems) != 4 {
+		t.Fatalf("len(request timeline_items) = %d, want 4", len(requestItems))
+	}
+	if len(responseItems) != 3 {
+		t.Fatalf("len(response timeline_items) = %d, want 3", len(responseItems))
+	}
+	firstRequest, ok := requestItems[0].(map[string]interface{})
+	if !ok || firstRequest["kind"] != "message" || firstRequest["role"] != "system" {
+		t.Fatalf("unexpected first request timeline item: %#v", requestItems[0])
+	}
+	secondResponse, ok := responseItems[1].(map[string]interface{})
+	if !ok || secondResponse["kind"] != "tool_call" || secondResponse["name"] != "exec_command" {
+		t.Fatalf("unexpected response tool call item: %#v", responseItems[1])
 	}
 }
 

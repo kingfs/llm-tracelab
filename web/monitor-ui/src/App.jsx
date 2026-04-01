@@ -386,13 +386,72 @@ function TimelinePanel({ events }) {
                 </div>
                 <span className="timeline-badge">{event.is_stream ? "stream" : "record"}</span>
               </div>
-              {event.message ? <div className="timeline-message">{event.message}</div> : null}
+              {event.timeline_items?.length ? <TimelineTree items={event.timeline_items} /> : null}
+              {!event.timeline_items?.length && event.message ? <div className="timeline-message">{event.message}</div> : null}
               {event.attributes ? <CodeBlock value={JSON.stringify(event.attributes, null, 2)} /> : null}
             </div>
           </article>
         ))}
       </div>
     </section>
+  );
+}
+
+function TimelineTree({ items }) {
+  return (
+    <div className="timeline-tree">
+      {items.map((item, index) => (
+        <TimelineNode key={`${item.kind}-${item.id || item.name || item.label || index}`} item={item} depth={0} />
+      ))}
+    </div>
+  );
+}
+
+function TimelineNode({ item, depth = 0 }) {
+  const hasChildren = Boolean(item.children?.length);
+  const hasDetails = Boolean(item.body && item.body !== item.summary);
+  const collapsible = hasChildren || hasDetails;
+  const className = `timeline-node timeline-node-${item.kind || "item"}`;
+
+  if (!collapsible) {
+    return (
+      <div className={className}>
+        <div className="timeline-node-leaf">
+          <TimelineNodeHeading item={item} />
+          {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
+          {item.status === "error" ? <InlineTag tone="danger">error</InlineTag> : null}
+        </div>
+        {item.summary ? <div className="timeline-node-preview">{item.summary}</div> : null}
+      </div>
+    );
+  }
+
+  return (
+    <details className={className} open={depth === 0 && hasChildren}>
+      <summary className="timeline-node-summary">
+        <TimelineNodeHeading item={item} />
+        {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
+        {item.status === "error" ? <InlineTag tone="danger">error</InlineTag> : null}
+      </summary>
+      {item.summary ? <div className="timeline-node-preview">{item.summary}</div> : null}
+      {hasDetails ? <pre className="timeline-node-body">{item.body}</pre> : null}
+      {hasChildren ? (
+        <div className="timeline-children">
+          {item.children.map((child, index) => (
+            <TimelineNode key={`${child.kind}-${child.id || child.name || child.label || index}`} item={child} depth={depth + 1} />
+          ))}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function TimelineNodeHeading({ item }) {
+  return (
+    <div className="timeline-node-heading">
+      <span className="timeline-node-kind">{formatTimelineKind(item.kind)}</span>
+      <strong className="timeline-node-title">{formatTimelineTitle(item)}</strong>
+    </div>
   );
 }
 
@@ -665,8 +724,8 @@ function renderMarkdownBlock(block, placeholderPrefix) {
 
   const lines = block.split("\n");
   if (lines.every((line) => /^>\s?/.test(line))) {
-    const content = lines.map((line) => line.replace(/^>\s?/, "")).join("<br />");
-    return `<blockquote>${renderMarkdownInline(content)}</blockquote>`;
+    const content = lines.map((line) => renderMarkdownInline(line.replace(/^>\s?/, ""))).join("<br />");
+    return `<blockquote>${content}</blockquote>`;
   }
   if (lines.every((line) => /^[-*]\s+/.test(line))) {
     return `<ul>${lines.map((line) => `<li>${renderMarkdownInline(line.replace(/^[-*]\s+/, ""))}</li>`).join("")}</ul>`;
@@ -681,7 +740,7 @@ function renderMarkdownBlock(block, placeholderPrefix) {
     return `<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`;
   }
 
-  return `<p>${renderMarkdownInline(lines.join("<br />"))}</p>`;
+  return `<p>${lines.map((line) => renderMarkdownInline(line)).join("<br />")}</p>`;
 }
 
 function renderMarkdownInline(text) {
@@ -756,6 +815,30 @@ function formatEndpointTag(value = "") {
     return "models";
   }
   return value || "api";
+}
+
+function formatTimelineKind(kind = "") {
+  switch (kind) {
+    case "message":
+      return "message";
+    case "tool_call":
+      return "tool call";
+    case "tool_response":
+      return "tool response";
+    case "thinking":
+      return "thinking";
+    case "output":
+      return "output";
+    default:
+      return kind || "item";
+  }
+}
+
+function formatTimelineTitle(item = {}) {
+  if (item.kind === "message") {
+    return item.label || item.role || "Message";
+  }
+  return item.name || item.label || formatTimelineKind(item.kind);
 }
 
 function formatProviderTag(value = "") {

@@ -79,6 +79,18 @@ type recordHeaderView struct {
 
 type recordEventView map[string]interface{}
 
+type timelineItemView struct {
+	Kind     string             `json:"kind"`
+	Label    string             `json:"label,omitempty"`
+	Summary  string             `json:"summary,omitempty"`
+	Body     string             `json:"body,omitempty"`
+	Role     string             `json:"role,omitempty"`
+	Name     string             `json:"name,omitempty"`
+	ID       string             `json:"id,omitempty"`
+	Status   string             `json:"status,omitempty"`
+	Children []timelineItemView `json:"children,omitempty"`
+}
+
 type LogStats struct {
 	TotalRequest   int     `json:"total_request"`
 	AvgTTFT        int     `json:"avg_ttft"`
@@ -257,7 +269,7 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 			Usage:   parsed.Header.Usage,
 		},
 	}
-	resp.Events = toEventViewsFromRecord(filterTimelineEvents(parsed.Events))
+	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -348,18 +360,285 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 	return payload
 }
 
+func buildTimelineEventViews(parsed *ParsedData) []recordEventView {
+	if parsed == nil {
+		return []recordEventView{}
+	}
+	events := filterTimelineEvents(parsed.Events)
+	if len(events) == 0 {
+		return []recordEventView{}
+	}
+	views := toEventViewsFromRecord(events)
+	for idx, event := range events {
+		var items []timelineItemView
+		switch event.Type {
+		case "request":
+			items = buildRequestTimelineItems(parsed)
+		case "response":
+			items = buildResponseTimelineItems(parsed)
+		}
+		if len(items) == 0 {
+			continue
+		}
+		views[idx]["timeline_items"] = items
+		views[idx]["message"] = firstNonEmpty(event.Message, renderTimelineTree(flattenTimelineItems(items)))
+	}
+	return views
+}
+
 func filterTimelineEvents(events []recordfile.RecordEvent) []recordfile.RecordEvent {
 	if len(events) == 0 {
 		return nil
 	}
 	filtered := make([]recordfile.RecordEvent, 0, len(events))
 	for _, event := range events {
-		if event.Type == "llm.output_text.delta" || event.Type == "llm.tool_call.delta" {
+		if strings.HasSuffix(event.Type, ".delta") {
 			continue
 		}
 		filtered = append(filtered, event)
 	}
 	return filtered
+}
+
+func buildRequestTimelineItems(parsed *ParsedData) []timelineItemView {
+	if parsed == nil || len(parsed.ChatMessages) == 0 {
+		return nil
+	}
+
+	var items []timelineItemView
+	for _, message := range parsed.ChatMessages {
+		if item, ok := timelineItemForChatMessage(message); ok {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func buildResponseTimelineItems(parsed *ParsedData) []timelineItemView {
+	if parsed == nil {
+		return nil
+	}
+
+	var items []timelineItemView
+	if parsed.AIReasoning != "" {
+		body := timelineCompact(parsed.AIReasoning)
+		items = append(items, timelineItemView{
+			Kind:    "thinking",
+			Label:   "Thinking",
+			Summary: timelinePreview(body),
+			Body:    body,
+		})
+	}
+	for _, call := range parsed.ResponseToolCalls {
+		items = append(items, timelineToolCallItem(call, "tool call"))
+	}
+	if parsed.AIContent != "" {
+		body := timelineCompact(parsed.AIContent)
+		items = append(items, timelineItemView{
+			Kind:    "output",
+			Label:   "Final output",
+			Summary: timelinePreview(body),
+			Body:    body,
+		})
+	}
+	for _, block := range parsed.AIBlocks {
+		summary := firstNonEmpty(block.Text, block.Meta, block.URL, block.FileID)
+		if summary == "" {
+			continue
+		}
+		items = append(items, timelineItemView{
+			Kind:    firstNonEmpty(block.Kind, "block"),
+			Label:   firstNonEmpty(block.Title, block.Kind, "output"),
+			Summary: timelinePreview(summary),
+			Body:    timelineCompact(summary),
+		})
+	}
+	return items
+}
+
+func timelineItemForChatMessage(message ChatMessage) (timelineItemView, bool) {
+	role := firstNonEmpty(message.Role, "message")
+	switch message.MessageType {
+	case "tool_result", "function_call_output":
+		return timelineToolResultItem(message), true
+	}
+
+	item := timelineItemView{
+		Kind:  "message",
+		Label: timelineRoleLabel(role),
+		Role:  role,
+	}
+	if message.Content != "" {
+		body := timelineCompact(message.Content)
+		item.Summary = timelinePreview(body)
+		item.Body = body
+	}
+	for _, block := range message.Blocks {
+		summary := firstNonEmpty(block.Text, block.Meta, block.URL, block.FileID)
+		if summary == "" {
+			continue
+		}
+		item.Children = append(item.Children, timelineItemView{
+			Kind:    firstNonEmpty(block.Kind, "block"),
+			Label:   firstNonEmpty(block.Title, block.Kind, "block"),
+			Summary: timelinePreview(summary),
+			Body:    timelineCompact(summary),
+		})
+	}
+	for _, call := range message.ToolCalls {
+		label := "tool call"
+		if role == "assistant" && strings.Contains(message.MessageType, "function_call") {
+			label = "function call"
+		}
+		item.Children = append(item.Children, timelineToolCallItem(call, label))
+	}
+	if item.Summary == "" && len(item.Children) == 0 {
+		return timelineItemView{}, false
+	}
+	return item, true
+}
+
+func timelineToolCallItem(call ToolCall, label string) timelineItemView {
+	body := timelineCompact(call.Function.Arguments)
+	if body == "" {
+		body = "{}"
+	}
+	return timelineItemView{
+		Kind:    "tool_call",
+		Label:   label,
+		Name:    firstNonEmpty(call.Function.Name, call.ID, "tool"),
+		ID:      call.ID,
+		Summary: timelinePreview(body),
+		Body:    body,
+	}
+}
+
+func timelineToolResultItem(message ChatMessage) timelineItemView {
+	body := timelineCompact(message.Content)
+	if body == "" {
+		body = "(empty)"
+	}
+	status := "ok"
+	if message.IsError {
+		status = "error"
+	}
+	return timelineItemView{
+		Kind:    "tool_response",
+		Label:   "tool response",
+		Name:    firstNonEmpty(message.Name, message.ToolCallID, "tool"),
+		ID:      message.ToolCallID,
+		Status:  status,
+		Summary: timelinePreview(body),
+		Body:    body,
+	}
+}
+
+func flattenTimelineItems(items []timelineItemView) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	var lines []string
+	for _, item := range items {
+		lines = append(lines, flattenTimelineItem(item)...)
+	}
+	return lines
+}
+
+func flattenTimelineItem(item timelineItemView) []string {
+	if item.Kind == "message" {
+		line := firstNonEmpty(item.Role, item.Label, "message")
+		if item.Summary != "" {
+			line += ": " + item.Summary
+		}
+		lines := []string{line}
+		for _, child := range item.Children {
+			lines = append(lines, "  "+flattenTimelineItemLine(child))
+		}
+		return lines
+	}
+	return []string{flattenTimelineItemLine(item)}
+}
+
+func flattenTimelineItemLine(item timelineItemView) string {
+	switch item.Kind {
+	case "tool_call":
+		line := fmt.Sprintf("%s %s", firstNonEmpty(item.Label, "tool call"), firstNonEmpty(item.Name, "tool"))
+		if item.ID != "" {
+			line += fmt.Sprintf(" [%s]", item.ID)
+		}
+		if item.Summary != "" {
+			line += ": " + item.Summary
+		}
+		return line
+	case "tool_response":
+		line := fmt.Sprintf("%s %s", firstNonEmpty(item.Label, "tool response"), firstNonEmpty(item.Name, "tool"))
+		if item.ID != "" {
+			line += fmt.Sprintf(" [%s]", item.ID)
+		}
+		if item.Summary != "" {
+			line += ": " + item.Summary
+		}
+		if item.Status == "error" {
+			line += " [error]"
+		}
+		return line
+	default:
+		line := firstNonEmpty(item.Label, item.Kind, "item")
+		if item.Summary != "" {
+			line += ": " + item.Summary
+		}
+		return line
+	}
+}
+
+func renderTimelineTree(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	lines := make([]string, 0, len(items))
+	for idx, item := range items {
+		prefix := "├─ "
+		if idx == len(items)-1 {
+			prefix = "└─ "
+		}
+		lines = append(lines, prefix+item)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func timelinePreview(value string) string {
+	compact := timelineCompact(value)
+	if compact == "" {
+		return ""
+	}
+	const limit = 180
+	runes := []rune(compact)
+	if len(runes) <= limit {
+		return compact
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func timelineCompact(value string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+}
+
+func timelineRoleLabel(role string) string {
+	switch role {
+	case "system":
+		return "System"
+	case "user":
+		return "User"
+	case "assistant":
+		return "Assistant"
+	case "tool":
+		return "Tool"
+	default:
+		if role == "" {
+			return "Message"
+		}
+		return role
+	}
 }
 
 func serveTraceDownload(w http.ResponseWriter, r *http.Request, absPath string) {
