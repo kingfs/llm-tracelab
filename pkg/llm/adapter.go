@@ -29,8 +29,8 @@ func (e UnsupportedEndpointError) Error() string {
 func AdapterFor(provider string, endpoint string) (Adapter, error) {
 	semantics := TraceSemantics{
 		Provider:  provider,
-		Endpoint:  normalizeEndpoint(endpoint),
-		Operation: detectOperation(normalizeEndpoint(endpoint), provider),
+		Endpoint:  NormalizeEndpoint(endpoint),
+		Operation: detectOperation(NormalizeEndpoint(endpoint), provider),
 	}
 
 	switch {

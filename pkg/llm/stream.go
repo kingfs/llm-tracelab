@@ -217,6 +217,10 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 		switch envelope.Type {
 		case "response.output_text.delta":
 			contentBuilder.WriteString(envelope.Delta)
+		case "response.refusal.delta":
+			contentBuilder.WriteString(envelope.Delta)
+		case "response.reasoning_text.delta":
+			reasoningBuilder.WriteString(envelope.Delta)
 		case "response.reasoning_summary_text.delta":
 			reasoningBuilder.WriteString(envelope.Delta)
 		case "response.function_call_arguments.delta":
@@ -235,12 +239,39 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 				if envelope.Item.Arguments != "" {
 					call.ArgsText = envelope.Item.Arguments
 				}
+			case "web_search_call", "file_search_call", "computer_call", "mcp_call", "custom_tool_call":
+				call := ensureToolCallByID(toolCallMap, &toolCallOrder, envelope.Item.ID)
+				call.ID = firstNonEmpty(envelope.Item.CallID, envelope.Item.ID)
+				call.Type = envelope.Item.Type
+				call.Name = firstNonEmpty(envelope.Item.Name, envelope.Item.Type)
+				call.ArgsText = marshalCompactString(envelope.Item)
 			case "message":
 				if contentBuilder.Len() == 0 {
 					for _, part := range envelope.Item.Content {
-						text := firstNonEmpty(part.OutputText, part.Text, part.InputText, part.Refusal)
+						text := responseContentText(OpenAIResponsesContentPart{
+							Type:       part.Type,
+							Text:       part.Text,
+							InputText:  part.InputText,
+							OutputText: part.OutputText,
+							Refusal:    part.Refusal,
+						})
 						if text != "" {
 							contentBuilder.WriteString(text)
+						}
+					}
+				}
+			case "reasoning":
+				if reasoningBuilder.Len() == 0 {
+					for _, part := range envelope.Item.Content {
+						text := responseContentText(OpenAIResponsesContentPart{
+							Type:       part.Type,
+							Text:       part.Text,
+							InputText:  part.InputText,
+							OutputText: part.OutputText,
+							Refusal:    part.Refusal,
+						})
+						if text != "" {
+							reasoningBuilder.WriteString(text)
 						}
 					}
 				}

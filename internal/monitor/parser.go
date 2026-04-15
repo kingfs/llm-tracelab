@@ -244,10 +244,10 @@ func parseRequestToolsViaAdapter(provider string, endpoint string, reqBodyBytes 
 	if source == "" || source == llm.ProviderUnknown {
 		source = llm.ClassifyPath(endpoint, "").Provider
 	}
-	switch source {
-	case llm.ProviderOpenAICompatible:
+	switch {
+	case llm.IsOpenAICompatibleProvider(source):
 		source = "openai"
-	case llm.ProviderAnthropic:
+	case source == llm.ProviderAnthropic:
 		source = "anthropic"
 	}
 	if source == "" || source == llm.ProviderUnknown {

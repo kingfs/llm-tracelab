@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -30,14 +29,9 @@ func CheckConnectivity(baseURL, apiKey string) error {
 	}
 
 	// 构造测试 URL
-	targetURL := fmt.Sprintf("%s/v1/models", baseURL)
-	if strings.HasSuffix(baseURL, "/") {
-		targetURL = baseURL + "v1/models"
-	}
-	// 处理有些厂商 base_url 已经包含 /v1 的情况 (简单的容错)
-	if strings.HasSuffix(baseURL, "/v1") || strings.HasSuffix(baseURL, "/v1/") {
-		base := strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1")
-		targetURL = base + "/v1/models"
+	targetURL, err := BuildUpstreamURL(baseURL, "/v1/models")
+	if err != nil {
+		return fmt.Errorf("build check url failed: %w", err)
 	}
 
 	req, err := http.NewRequest("GET", targetURL, nil)
@@ -45,7 +39,7 @@ func CheckConnectivity(baseURL, apiKey string) error {
 		return fmt.Errorf("create check request failed: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	ApplyAuthHeaders(req.Header, baseURL, apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	slog.Info("Starting upstream connectivity check...", "url", targetURL)

@@ -20,11 +20,18 @@ func TestAdapterForPath(t *testing.T) {
 	adapter, err = AdapterForPath("/v1/messages", "https://api.anthropic.com")
 	require.NoError(t, err)
 	assert.Equal(t, ProviderAnthropic, adapter.Semantics().Provider)
+
+	adapter, err = AdapterForPath("/openai/v1/responses?api-version=preview", "https://example-resource.openai.azure.com/openai/v1")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderAzureOpenAI, adapter.Semantics().Provider)
+	assert.Equal(t, "/v1/responses", adapter.Semantics().Endpoint)
 }
 
 func TestParseOpenAIResponsesRequest(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5",
+		"instructions":"You are concise.",
+		"tool_choice":{"type":"auto"},
 		"input":[
 			{"type":"message","role":"user","content":[{"type":"input_text","text":"Find weather in Shanghai"}]},
 			{"type":"function_call","call_id":"call_1","name":"weather","arguments":"{\"city\":\"Shanghai\"}"},
@@ -36,6 +43,8 @@ func TestParseOpenAIResponsesRequest(t *testing.T) {
 	req, err := ParseRequest(ProviderOpenAICompatible, "/v1/responses", body)
 	require.NoError(t, err)
 	assert.Equal(t, "gpt-5", req.Model)
+	require.Len(t, req.System, 1)
+	assert.Equal(t, "You are concise.", req.System[0].Text)
 	require.Len(t, req.Messages, 3)
 	assert.Equal(t, "user", req.Messages[0].Role)
 	assert.Equal(t, "Find weather in Shanghai", req.Messages[0].Content[0].Text)
@@ -54,6 +63,7 @@ func TestParseOpenAIResponsesResponse(t *testing.T) {
 		"model":"gpt-5",
 		"created_at":123,
 		"output":[
+			{"type":"reasoning","content":[{"type":"summary_text","text":"Inspecting weather backend"}]},
 			{"type":"function_call","call_id":"call_1","name":"weather","arguments":"{\"city\":\"Shanghai\"}"},
 			{"type":"message","role":"assistant","content":[{"type":"output_text","text":"It is 22C."}]}
 		],
@@ -66,11 +76,26 @@ func TestParseOpenAIResponsesResponse(t *testing.T) {
 	assert.Equal(t, "gpt-5", resp.Model)
 	require.Len(t, resp.Candidates, 1)
 	assert.Equal(t, "assistant", resp.Candidates[0].Role)
-	assert.Equal(t, "It is 22C.", resp.Candidates[0].Content[0].Text)
+	assert.Equal(t, "Inspecting weather backend", resp.Candidates[0].Content[0].Text)
+	assert.Equal(t, "thinking", resp.Candidates[0].Content[0].Type)
+	assert.Equal(t, "It is 22C.", resp.Candidates[0].Content[1].Text)
 	require.Len(t, resp.Candidates[0].ToolCalls, 1)
 	assert.Equal(t, "weather", resp.Candidates[0].ToolCalls[0].Name)
 	assert.Equal(t, 16, resp.Usage.TotalTokens)
 	assert.Equal(t, 2, resp.Usage.ReasoningTokens)
+}
+
+func TestParseOpenAIResponsesRequestSingleObjectInput(t *testing.T) {
+	body := []byte(`{
+		"model":"gpt-5",
+		"input":{"type":"message","role":"developer","content":[{"type":"input_text","text":"Prefer tables."}]}
+	}`)
+
+	req, err := ParseRequest(ProviderOpenAICompatible, "/v1/responses", body)
+	require.NoError(t, err)
+	require.Len(t, req.System, 1)
+	assert.Equal(t, "Prefer tables.", req.System[0].Text)
+	assert.Empty(t, req.Messages)
 }
 
 func TestOpenAIResponsesRoundTripMarshal(t *testing.T) {

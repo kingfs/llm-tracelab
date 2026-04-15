@@ -2,15 +2,19 @@ package llm
 
 import (
 	"encoding/json"
+	"strings"
 )
 
 type OpenAIResponsesContentPart struct {
-	Type       string      `json:"type"`
-	Text       string      `json:"text,omitempty"`
-	InputText  string      `json:"input_text,omitempty"`
-	OutputText string      `json:"output_text,omitempty"`
-	Refusal    string      `json:"refusal,omitempty"`
-	Data       interface{} `json:"data,omitempty"`
+	Type       string                       `json:"type"`
+	Text       string                       `json:"text,omitempty"`
+	InputText  string                       `json:"input_text,omitempty"`
+	OutputText string                       `json:"output_text,omitempty"`
+	Refusal    string                       `json:"refusal,omitempty"`
+	Summary    []OpenAIResponsesContentPart `json:"summary,omitempty"`
+	ImageURL   string                       `json:"image_url,omitempty"`
+	FileID     string                       `json:"file_id,omitempty"`
+	Data       interface{}                  `json:"data,omitempty"`
 }
 
 type OpenAIResponsesInputItem struct {
@@ -27,14 +31,16 @@ type OpenAIResponsesInputItem struct {
 type OpenAIResponsesOutputItem = OpenAIResponsesInputItem
 
 type OpenAIResponsesRequest struct {
-	Model           string       `json:"model"`
-	Input           interface{}  `json:"input"`
-	Tools           []OpenAITool `json:"tools,omitempty"`
-	ToolChoice      string       `json:"tool_choice,omitempty"`
-	Temperature     *float64     `json:"temperature,omitempty"`
-	TopP            *float64     `json:"top_p,omitempty"`
-	MaxOutputTokens *int         `json:"max_output_tokens,omitempty"`
-	User            string       `json:"user,omitempty"`
+	Model              string       `json:"model"`
+	Input              interface{}  `json:"input"`
+	Instructions       string       `json:"instructions,omitempty"`
+	PreviousResponseID string       `json:"previous_response_id,omitempty"`
+	Tools              []OpenAITool `json:"tools,omitempty"`
+	ToolChoice         interface{}  `json:"tool_choice,omitempty"`
+	Temperature        *float64     `json:"temperature,omitempty"`
+	TopP               *float64     `json:"top_p,omitempty"`
+	MaxOutputTokens    *int         `json:"max_output_tokens,omitempty"`
+	User               string       `json:"user,omitempty"`
 }
 
 type OpenAIResponsesUsage struct {
@@ -84,11 +90,19 @@ func (a openAIResponsesAdapter) MarshalResponse(resp LLMResponse) ([]byte, error
 func FromOpenAIResponsesRequest(req OpenAIResponsesRequest) LLMRequest {
 	llmReq := LLMRequest{
 		Model:       req.Model,
-		ToolChoice:  req.ToolChoice,
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
 		MaxTokens:   req.MaxOutputTokens,
 		UserID:      req.User,
+	}
+	if toolChoice, ok := req.ToolChoice.(string); ok {
+		llmReq.ToolChoice = toolChoice
+	}
+	if req.Instructions != "" {
+		llmReq.System = append(llmReq.System, LLMContent{
+			Type: "text",
+			Text: req.Instructions,
+		})
 	}
 
 	llmReq.Tools = make([]LLMTool, 0, len(req.Tools))
@@ -101,29 +115,7 @@ func FromOpenAIResponsesRequest(req OpenAIResponsesRequest) LLMRequest {
 		})
 	}
 
-	switch input := req.Input.(type) {
-	case string:
-		llmReq.Messages = append(llmReq.Messages, LLMMessage{
-			Role: "user",
-			Content: []LLMContent{
-				{Type: "text", Text: input},
-			},
-		})
-	case []interface{}:
-		for _, raw := range input {
-			itemBytes, err := json.Marshal(raw)
-			if err != nil {
-				continue
-			}
-			var item OpenAIResponsesInputItem
-			if err := json.Unmarshal(itemBytes, &item); err != nil {
-				continue
-			}
-			if msg, ok := responsesItemToMessage(item); ok {
-				llmReq.Messages = append(llmReq.Messages, msg)
-			}
-		}
-	}
+	appendResponsesInput(&llmReq, req.Input)
 
 	return llmReq
 }
@@ -139,7 +131,7 @@ func OpenAIResponsesToLLM(resp OpenAIResponsesResponse) LLMResponse {
 		case "message":
 			candidate.Role = firstNonEmpty(item.Role, "assistant")
 			for _, part := range item.Content {
-				if text := firstNonEmpty(part.OutputText, part.Text, part.InputText); text != "" {
+				if text := responseContentText(part); text != "" {
 					candidate.Content = append(candidate.Content, LLMContent{
 						Type: "text",
 						Text: text,
@@ -152,13 +144,29 @@ func OpenAIResponsesToLLM(resp OpenAIResponsesResponse) LLMResponse {
 					}
 				}
 			}
+		case "reasoning":
+			for _, part := range item.Content {
+				if text := responseContentText(part); text != "" {
+					candidate.Content = append(candidate.Content, LLMContent{
+						Type: "thinking",
+						Text: text,
+					})
+				}
+			}
 		case "function_call":
 			candidate.ToolCalls = append(candidate.ToolCalls, LLMToolCall{
-				ID:       item.CallID,
+				ID:       firstNonEmpty(item.CallID, item.ID),
 				Type:     "function",
 				Name:     item.Name,
 				Args:     parseJSONObject(item.Arguments),
 				ArgsText: item.Arguments,
+			})
+		case "web_search_call", "file_search_call", "computer_call", "mcp_call", "custom_tool_call":
+			candidate.ToolCalls = append(candidate.ToolCalls, LLMToolCall{
+				ID:       firstNonEmpty(item.CallID, item.ID),
+				Type:     firstNonEmpty(item.Type, "function"),
+				Name:     firstNonEmpty(item.Name, item.Type),
+				ArgsText: marshalCompactString(item),
 			})
 		case "function_call_output":
 			candidate.Content = append(candidate.Content, LLMContent{
@@ -239,9 +247,11 @@ func (r *LLMRequest) ToOpenAIResponses() OpenAIResponsesRequest {
 		})
 	}
 
+	instructions := renderSystemInstructions(r.System)
 	return OpenAIResponsesRequest{
 		Model:           r.Model,
 		Input:           input,
+		Instructions:    instructions,
 		Tools:           tools,
 		ToolChoice:      r.ToolChoice,
 		Temperature:     r.Temperature,
@@ -315,12 +325,50 @@ func (r *LLMResponse) ToOpenAIResponsesResponse() OpenAIResponsesResponse {
 	return resp
 }
 
+func appendResponsesInput(req *LLMRequest, input interface{}) {
+	switch value := input.(type) {
+	case nil:
+		return
+	case string:
+		req.Messages = append(req.Messages, LLMMessage{
+			Role: "user",
+			Content: []LLMContent{
+				{Type: "text", Text: value},
+			},
+		})
+	case []interface{}:
+		for _, item := range value {
+			appendResponsesInput(req, item)
+		}
+	default:
+		itemBytes, err := json.Marshal(value)
+		if err != nil {
+			return
+		}
+		var item OpenAIResponsesInputItem
+		if err := json.Unmarshal(itemBytes, &item); err != nil {
+			return
+		}
+		if msg, ok := responsesItemToMessage(item); ok {
+			if msg.Role == "system" || msg.Role == "developer" {
+				for _, content := range msg.Content {
+					if content.Type == "text" && content.Text != "" {
+						req.System = append(req.System, content)
+					}
+				}
+				return
+			}
+			req.Messages = append(req.Messages, msg)
+		}
+	}
+}
+
 func responsesItemToMessage(item OpenAIResponsesInputItem) (LLMMessage, bool) {
 	switch item.Type {
 	case "message":
 		msg := LLMMessage{Role: firstNonEmpty(item.Role, "user")}
 		for _, part := range item.Content {
-			if text := firstNonEmpty(part.InputText, part.Text, part.OutputText); text != "" {
+			if text := responseContentText(part); text != "" {
 				msg.Content = append(msg.Content, LLMContent{
 					Type: "text",
 					Text: text,
@@ -360,6 +408,40 @@ func responsesItemToMessage(item OpenAIResponsesInputItem) (LLMMessage, bool) {
 	default:
 		return LLMMessage{}, false
 	}
+}
+
+func responseContentText(part OpenAIResponsesContentPart) string {
+	for _, text := range []string{part.OutputText, part.Text, part.InputText, part.Refusal} {
+		if text != "" {
+			return text
+		}
+	}
+	if len(part.Summary) > 0 {
+		segments := make([]string, 0, len(part.Summary))
+		for _, child := range part.Summary {
+			if text := responseContentText(child); text != "" {
+				segments = append(segments, text)
+			}
+		}
+		return strings.Join(segments, "\n")
+	}
+	if part.Data != nil {
+		return marshalCompactString(part.Data)
+	}
+	return ""
+}
+
+func renderSystemInstructions(system []LLMContent) string {
+	if len(system) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(system))
+	for _, content := range system {
+		if content.Type == "text" && content.Text != "" {
+			parts = append(parts, content.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func parseJSONObject(input string) map[string]any {

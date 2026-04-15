@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
 
@@ -25,6 +26,9 @@ import (
 func ensureStreamOptions(req *http.Request) {
 	// 1. 只有 POST 请求且 Content-Type 为 JSON 才处理
 	if req.Method != http.MethodPost || !strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+		return
+	}
+	if llm.NormalizeEndpoint(req.URL.Path) != "/v1/chat/completions" {
 		return
 	}
 
@@ -196,7 +200,9 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 		req.Host = targetURL.Host
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
-		req.Header.Set("Authorization", "Bearer "+cfg.Upstream.ApiKey)
+		req.URL.Path = upstream.JoinRequestPath(targetURL, req.URL.Path)
+		req.URL.RawPath = req.URL.Path
+		upstream.ApplyAuthHeaders(req.Header, cfg.Upstream.BaseURL, cfg.Upstream.ApiKey)
 		req.Header.Set("Accept-Encoding", "identity")
 	}
 

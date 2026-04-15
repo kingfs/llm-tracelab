@@ -133,7 +133,7 @@ func (p *ResponsePipeline) appendUsageEvent(usage UsageSummary) {
 }
 
 func (p *ResponsePipeline) appendProviderEvent(jsonStr string) {
-	switch normalizeEndpoint(p.endpoint) {
+	switch NormalizeEndpoint(p.endpoint) {
 	case "/v1/chat/completions":
 		p.appendOpenAIChatEvent(jsonStr)
 	case "/v1/responses":
@@ -200,6 +200,10 @@ func (p *ResponsePipeline) appendResponsesEvent(jsonStr string) {
 	switch env.Type {
 	case "response.output_text.delta":
 		p.appendEvent("llm.output_text.delta", env.Delta, nil)
+	case "response.refusal.delta":
+		p.appendEvent("llm.output_text.delta", env.Delta, map[string]interface{}{"kind": "refusal"})
+	case "response.reasoning_text.delta":
+		p.appendEvent("llm.reasoning.delta", env.Delta, nil)
 	case "response.reasoning_summary_text.delta":
 		p.appendEvent("llm.reasoning.delta", env.Delta, nil)
 	case "response.function_call_arguments.delta":
@@ -208,10 +212,11 @@ func (p *ResponsePipeline) appendResponsesEvent(jsonStr string) {
 			"arguments": env.Delta,
 		})
 	case "response.output_item.added", "response.output_item.done":
-		if env.Item.Type == "function_call" {
+		if env.Item.Type == "function_call" || strings.HasSuffix(env.Item.Type, "_call") {
 			p.appendEvent("llm.tool_call", "", map[string]interface{}{
 				"id":   firstNonEmpty(env.Item.CallID, env.Item.ID),
-				"name": env.Item.Name,
+				"name": firstNonEmpty(env.Item.Name, env.Item.Type),
+				"type": env.Item.Type,
 			})
 		}
 	}

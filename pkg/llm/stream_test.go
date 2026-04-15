@@ -10,9 +10,10 @@ import (
 
 func TestParseOpenAIResponsesStreamResponse(t *testing.T) {
 	body := strings.Join([]string{
-		`data: {"type":"response.reasoning_summary_text.delta","delta":"inspect logs","item_id":"rs_1"}`,
+		`data: {"type":"response.reasoning_text.delta","delta":"inspect logs","item_id":"rs_1"}`,
 		`data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_live","name":"exec_command"}}`,
 		`data: {"type":"response.function_call_arguments.delta","delta":"{\"cmd\":\"ls\"}","item_id":"fc_1"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ws_1","type":"web_search_call"}}`,
 		`data: {"type":"response.output_text.delta","delta":"final answer"}`,
 		`data: [DONE]`,
 	}, "\n")
@@ -22,9 +23,10 @@ func TestParseOpenAIResponsesStreamResponse(t *testing.T) {
 	require.Len(t, resp.Candidates, 1)
 	assert.Equal(t, "final answer", resp.Candidates[0].Content[0].Text)
 	assert.Equal(t, "inspect logs", resp.Candidates[0].Content[1].Text)
-	require.Len(t, resp.Candidates[0].ToolCalls, 1)
+	require.Len(t, resp.Candidates[0].ToolCalls, 2)
 	assert.Equal(t, "exec_command", resp.Candidates[0].ToolCalls[0].Name)
 	assert.Equal(t, `{"cmd":"ls"}`, resp.Candidates[0].ToolCalls[0].ArgsText)
+	assert.Equal(t, "web_search_call", resp.Candidates[0].ToolCalls[1].Name)
 }
 
 func TestParseAnthropicStreamResponse(t *testing.T) {
