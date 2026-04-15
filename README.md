@@ -119,6 +119,7 @@ debug:
 - Azure deployment 路由：设置 `provider_preset: azure`，并补 `deployment`
 - vLLM OpenAI-compatible server：设置 `provider_preset: vllm`
 - Anthropic Messages API：设置 `provider_preset: anthropic`，如需 beta 能力可在 `headers` 里补 `anthropic-beta`
+- Google GenAI API：设置 `provider_preset: google_genai`，当前先支持 `generateContent` 基础闭环
 
 当前推荐支持矩阵：
 
@@ -137,6 +138,9 @@ debug:
 - `provider_preset: anthropic`
   `protocol_family: anthropic_messages`
   `routing_profile: anthropic_default`
+- `provider_preset: google_genai | google | gemini`
+  `protocol_family: google_genai`
+  `routing_profile: google_ai_studio`
 
 Anthropic 示例：
 
@@ -148,6 +152,15 @@ upstream:
   api_version: "2023-06-01"
   headers:
     anthropic-beta: "tools-2024-04-04"
+```
+
+Google GenAI 示例：
+
+```yaml
+upstream:
+  base_url: "https://generativelanguage.googleapis.com"
+  api_key: "AIza..."
+  provider_preset: "google_genai"
 ```
 
 ### 2. 构建和运行

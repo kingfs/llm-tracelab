@@ -73,6 +73,11 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 	if modelName == "unknown-model" && strings.HasSuffix(req.URL.Path, "/models") {
 		modelName = "list_models"
 	}
+	if modelName == "unknown-model" {
+		if inferred := llm.ModelFromPath(req.URL.Path); inferred != "" {
+			modelName = inferred
+		}
+	}
 
 	u, _ := url.Parse(siteURL)
 	siteHost := "unknown"
@@ -102,13 +107,25 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 		return nil, err
 	}
 
-	originalKey := req.Header.Get("Authorization")
-	if r.MaskKey && originalKey != "" {
-		req.Header.Set("Authorization", "Bearer fake-key-logging")
+	originalHeaders := map[string]string{}
+	if r.MaskKey {
+		for _, name := range []string{"Authorization", "api-key", "x-api-key", "x-goog-api-key"} {
+			if value := req.Header.Get(name); value != "" {
+				originalHeaders[name] = value
+				switch name {
+				case "Authorization":
+					req.Header.Set(name, "Bearer fake-key-logging")
+				default:
+					req.Header.Set(name, "fake-key-logging")
+				}
+			}
+		}
 	}
 	reqDump, err := httputil.DumpRequest(req, false)
-	if r.MaskKey && originalKey != "" {
-		req.Header.Set("Authorization", originalKey)
+	if r.MaskKey {
+		for name, value := range originalHeaders {
+			req.Header.Set(name, value)
+		}
 	}
 	if err != nil {
 		f.Close()

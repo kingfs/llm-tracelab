@@ -13,6 +13,7 @@ const (
 	ProviderAzureOpenAI      = "azure_openai"
 	ProviderVLLM             = "vllm"
 	ProviderAnthropic        = "anthropic"
+	ProviderGoogleGenAI      = "google_genai"
 
 	OperationUnknown         = "unknown"
 	OperationChatCompletions = "chat.completions"
@@ -20,6 +21,7 @@ const (
 	OperationMessages        = "messages"
 	OperationEmbeddings      = "embeddings"
 	OperationModels          = "models"
+	OperationGenerateContent = "generate_content"
 )
 
 type TraceSemantics struct {
@@ -73,6 +75,9 @@ func NormalizeEndpoint(rawPath string) string {
 		{canonical: "/v1/messages", suffixes: []string{"/v1/messages", "/messages"}},
 		{canonical: "/v1/embeddings", suffixes: []string{"/v1/embeddings", "/embeddings"}},
 		{canonical: "/v1/models", suffixes: []string{"/v1/models", "/models"}},
+		{canonical: "/v1beta/models:generateContent", suffixes: []string{":generateContent"}},
+		{canonical: "/v1beta/models:streamGenerateContent", suffixes: []string{":streamGenerateContent"}},
+		{canonical: "/v1beta/models", suffixes: []string{"/v1beta/models"}},
 	} {
 		for _, suffix := range rule.suffixes {
 			if clean == suffix {
@@ -95,6 +100,13 @@ func detectProvider(endpoint string, upstreamBaseURL string) string {
 		strings.Contains(host, "anthropic.com"),
 		strings.Contains(host, "claude"):
 		return ProviderAnthropic
+	case endpoint == "/v1beta/models:generateContent",
+		endpoint == "/v1beta/models:streamGenerateContent",
+		endpoint == "/v1beta/models",
+		strings.Contains(host, "googleapis.com"),
+		strings.Contains(host, "googleapis.cn"),
+		strings.Contains(host, "ai.google.dev"):
+		return ProviderGoogleGenAI
 	case isOpenAICompatibleEndpoint(endpoint) &&
 		(strings.Contains(host, "azure.com") ||
 			strings.Contains(host, "azure.net") ||
@@ -124,9 +136,17 @@ func detectOperation(endpoint string, provider string) string {
 		return OperationEmbeddings
 	case "/v1/models":
 		return OperationModels
+	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
+		return OperationGenerateContent
 	default:
 		if provider == ProviderAnthropic {
 			return OperationMessages
+		}
+		if provider == ProviderGoogleGenAI && strings.HasPrefix(endpoint, "/v1beta/models") {
+			if strings.Contains(endpoint, "generateContent") {
+				return OperationGenerateContent
+			}
+			return OperationModels
 		}
 		return OperationUnknown
 	}
@@ -148,4 +168,30 @@ func IsOpenAICompatibleProvider(provider string) bool {
 	default:
 		return false
 	}
+}
+
+func ModelFromPath(rawPath string) string {
+	if rawPath == "" {
+		return ""
+	}
+	parsed, err := url.Parse(rawPath)
+	if err == nil && parsed.Path != "" {
+		rawPath = parsed.Path
+	}
+	clean := path.Clean(rawPath)
+	idx := strings.Index(clean, "/models/")
+	if idx == -1 {
+		return ""
+	}
+	rest := clean[idx+len("/models/"):]
+	if rest == "" {
+		return ""
+	}
+	if cut := strings.Index(rest, ":"); cut >= 0 {
+		rest = rest[:cut]
+	}
+	if rest == "" || rest == "." || rest == "/" {
+		return ""
+	}
+	return rest
 }

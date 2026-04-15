@@ -119,6 +119,15 @@ func TestResolveProviderPresets(t *testing.T) {
 			wantProfile: RoutingProfileAnthropicDefault,
 			wantVersion: DefaultAnthropicAPIVersion,
 		},
+		{
+			name: "google_genai_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+			wantFamily:  ProtocolFamilyGoogleGenAI,
+			wantProfile: RoutingProfileGoogleAIStudio,
+		},
 	}
 
 	for _, tt := range tests {
@@ -197,6 +206,15 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			path:    "/v1/messages",
 			wantURL: "https://api.anthropic.com/v1/messages",
 		},
+		{
+			name: "google_generate_content",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+			path:    "/v1beta/models/gemini-2.5-flash:generateContent",
+			wantURL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+		},
 	}
 
 	for _, tt := range tests {
@@ -265,5 +283,19 @@ func TestResolvedUpstreamApplyAuthHeaders(t *testing.T) {
 	}
 	if got := headers.Get("anthropic-beta"); got != "tools-2024-04-04" {
 		t.Fatalf("anthropic-beta = %q, want tools-2024-04-04", got)
+	}
+
+	resolved, err = Resolve(config.UpstreamConfig{
+		BaseURL:        "https://generativelanguage.googleapis.com",
+		ProviderPreset: "google_genai",
+		ApiKey:         "goog-secret",
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	headers = http.Header{}
+	resolved.ApplyAuthHeaders(headers)
+	if got := headers.Get("x-goog-api-key"); got != "goog-secret" {
+		t.Fatalf("x-goog-api-key = %q, want goog-secret", got)
 	}
 }

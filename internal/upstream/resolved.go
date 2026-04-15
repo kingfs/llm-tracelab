@@ -14,14 +14,17 @@ import (
 const (
 	ProtocolFamilyOpenAICompatible  = "openai_compatible"
 	ProtocolFamilyAnthropicMessages = "anthropic_messages"
+	ProtocolFamilyGoogleGenAI       = "google_genai"
 
 	RoutingProfileOpenAIDefault     = "openai_default"
 	RoutingProfileAzureOpenAIV1     = "azure_openai_v1"
 	RoutingProfileAzureOpenAIDeploy = "azure_openai_deployment"
 	RoutingProfileVLLMOpenAI        = "vllm_openai"
 	RoutingProfileAnthropicDefault  = "anthropic_default"
+	RoutingProfileGoogleAIStudio    = "google_ai_studio"
 	ConnectivityPathOpenAIModels    = "/v1/models"
 	ConnectivityPathAnthropicModels = "/v1/models"
+	ConnectivityPathGoogleModels    = "/v1beta/models"
 	DefaultAzureAPIVersion          = "preview"
 	DefaultAnthropicAPIVersion      = "2023-06-01"
 )
@@ -32,26 +35,30 @@ type providerPresetSpec struct {
 }
 
 var providerPresetRegistry = map[string]providerPresetSpec{
-	"alibaba":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"anthropic":     {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault},
-	"azure":         {ProtocolFamily: ProtocolFamilyOpenAICompatible},
-	"azure_openai":  {ProtocolFamily: ProtocolFamilyOpenAICompatible},
-	"baseten":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"cerebras":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"deepseek":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"fireworks":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"github":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"github_models": {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"groq":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"hugging_face":  {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"moonshot":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"nvidia_nim":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"openai":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"openrouter":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"perplexity":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"together":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"vllm":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI},
-	"xai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"alibaba":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"anthropic":        {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault},
+	"azure":            {ProtocolFamily: ProtocolFamilyOpenAICompatible},
+	"azure_openai":     {ProtocolFamily: ProtocolFamilyOpenAICompatible},
+	"baseten":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"cerebras":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"deepseek":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"fireworks":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"github":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"github_models":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"groq":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"google":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
+	"google_ai_studio": {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
+	"google_genai":     {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
+	"gemini":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
+	"hugging_face":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"moonshot":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"nvidia_nim":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"openai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"openrouter":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"perplexity":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"together":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"vllm":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI},
+	"xai":              {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
 }
 
 type ResolvedUpstream struct {
@@ -130,6 +137,14 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 			resolved.APIVersion = DefaultAnthropicAPIVersion
 		}
 		return resolved, nil
+	case ProtocolFamilyGoogleGenAI:
+		if resolved.RoutingProfile == "" {
+			resolved.RoutingProfile = RoutingProfileGoogleAIStudio
+		}
+		if resolved.RoutingProfile != RoutingProfileGoogleAIStudio {
+			return ResolvedUpstream{}, fmt.Errorf("unsupported upstream.routing_profile %q for protocol_family=%q", resolved.RoutingProfile, resolved.ProtocolFamily)
+		}
+		return resolved, nil
 	default:
 		return ResolvedUpstream{}, fmt.Errorf("unsupported upstream.protocol_family %q", resolved.ProtocolFamily)
 	}
@@ -165,13 +180,20 @@ func (u ResolvedUpstream) ApplyAuthHeaders(header http.Header) {
 	case RoutingProfileAnthropicDefault:
 		header.Del("Authorization")
 		header.Del("api-key")
+		header.Del("x-goog-api-key")
 		header.Set("x-api-key", u.APIKey)
 		if u.APIVersion != "" && header.Get("anthropic-version") == "" {
 			header.Set("anthropic-version", u.APIVersion)
 		}
+	case RoutingProfileGoogleAIStudio:
+		header.Del("Authorization")
+		header.Del("api-key")
+		header.Del("x-api-key")
+		header.Set("x-goog-api-key", u.APIKey)
 	default:
 		header.Del("api-key")
 		header.Del("x-api-key")
+		header.Del("x-goog-api-key")
 		header.Set("Authorization", "Bearer "+u.APIKey)
 	}
 	applyStaticHeaders(header, u.Headers)
@@ -181,6 +203,8 @@ func (u ResolvedUpstream) ConnectivityCheckURL() (string, error) {
 	switch u.ProtocolFamily {
 	case ProtocolFamilyAnthropicMessages:
 		return u.BuildURL(ConnectivityPathAnthropicModels)
+	case ProtocolFamilyGoogleGenAI:
+		return u.BuildURL(ConnectivityPathGoogleModels)
 	default:
 		return u.BuildURL(ConnectivityPathOpenAIModels)
 	}
@@ -219,12 +243,18 @@ func inferDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 		switch {
 		case strings.Contains(host, "anthropic.com"), strings.Contains(host, "claude"):
 			resolved.ProtocolFamily = ProtocolFamilyAnthropicMessages
+		case strings.Contains(host, "generativelanguage.googleapis.com"), strings.Contains(host, "googleapis.com"):
+			resolved.ProtocolFamily = ProtocolFamilyGoogleGenAI
 		default:
 			resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
 		}
 	}
 	if resolved.ProtocolFamily == ProtocolFamilyAnthropicMessages {
 		resolved.RoutingProfile = RoutingProfileAnthropicDefault
+		return
+	}
+	if resolved.ProtocolFamily == ProtocolFamilyGoogleGenAI {
+		resolved.RoutingProfile = RoutingProfileGoogleAIStudio
 		return
 	}
 	switch {

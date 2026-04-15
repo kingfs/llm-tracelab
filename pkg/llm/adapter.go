@@ -40,6 +40,8 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 		return openAIResponsesAdapter{semantics: semantics}, nil
 	case semantics.Endpoint == "/v1/messages":
 		return anthropicMessagesAdapter{semantics: semantics}, nil
+	case semantics.Endpoint == "/v1beta/models:generateContent":
+		return googleGenerateContentAdapter{semantics: semantics}, nil
 	default:
 		return nil, UnsupportedEndpointError{Provider: provider, Endpoint: semantics.Endpoint}
 	}
@@ -63,7 +65,14 @@ func ParseRequestForPath(rawPath string, upstreamBaseURL string, body []byte) (L
 	if err != nil {
 		return LLMRequest{}, err
 	}
-	return adapter.ParseRequest(body)
+	req, err := adapter.ParseRequest(body)
+	if err != nil {
+		return LLMRequest{}, err
+	}
+	if req.Model == "" {
+		req.Model = ModelFromPath(rawPath)
+	}
+	return req, nil
 }
 
 func ParseResponse(provider string, endpoint string, body []byte) (LLMResponse, error) {
@@ -158,4 +167,30 @@ func (a anthropicMessagesAdapter) MarshalRequest(req LLMRequest) ([]byte, error)
 func (a anthropicMessagesAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
 	result := resp.ToAnthropicResponse()
 	return json.Marshal(result)
+}
+
+type googleGenerateContentAdapter struct {
+	semantics TraceSemantics
+}
+
+func (a googleGenerateContentAdapter) Semantics() TraceSemantics { return a.semantics }
+func (a googleGenerateContentAdapter) ParseRequest(body []byte) (LLMRequest, error) {
+	var req GeminiGenerateContentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return LLMRequest{}, err
+	}
+	return FromGeminiRequest(req), nil
+}
+func (a googleGenerateContentAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	var resp GeminiResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return LLMResponse{}, err
+	}
+	return GeminiToLLM(resp), nil
+}
+func (a googleGenerateContentAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
+	return json.Marshal(req.ToGemini())
+}
+func (a googleGenerateContentAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
+	return json.Marshal(resp.ToGeminiResponse())
 }

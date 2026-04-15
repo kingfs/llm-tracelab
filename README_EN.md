@@ -120,6 +120,7 @@ Recommended compatibility pattern:
 - Azure deployment-style routing: set `provider_preset: azure` plus `deployment`
 - vLLM OpenAI-compatible server: set `provider_preset: vllm`
 - Anthropic Messages API: set `provider_preset: anthropic`; use `headers.anthropic-beta` if you need beta features
+- Google GenAI API: set `provider_preset: google_genai`; this round supports the base `generateContent` flow
 
 Current recommended support matrix:
 
@@ -138,6 +139,9 @@ Current recommended support matrix:
 - `provider_preset: anthropic`
   `protocol_family: anthropic_messages`
   `routing_profile: anthropic_default`
+- `provider_preset: google_genai | google | gemini`
+  `protocol_family: google_genai`
+  `routing_profile: google_ai_studio`
 
 Anthropic example:
 
@@ -149,6 +153,15 @@ upstream:
   api_version: "2023-06-01"
   headers:
     anthropic-beta: "tools-2024-04-04"
+```
+
+Google GenAI example:
+
+```yaml
+upstream:
+  base_url: "https://generativelanguage.googleapis.com"
+  api_key: "AIza..."
+  provider_preset: "google_genai"
 ```
 
 ### 2. Build And Run

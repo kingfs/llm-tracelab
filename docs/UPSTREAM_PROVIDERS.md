@@ -43,6 +43,20 @@ Typical endpoint:
 
 - `/v1/messages`
 
+### `google_genai`
+
+Used for Google Gemini / Google GenAI-native content-generation APIs.
+
+Supported routing profiles:
+
+- `google_ai_studio`
+
+Typical endpoints:
+
+- `/v1beta/models/{model}:generateContent`
+- `/v1beta/models/{model}:streamGenerateContent`
+- `/v1beta/models`
+
 ## Current Preset Matrix
 
 These presets currently resolve without requiring extra code changes:
@@ -68,6 +82,9 @@ These presets currently resolve without requiring extra code changes:
 | `azure_openai` | `openai_compatible` | inferred | alias of `azure` |
 | `vllm` | `openai_compatible` | `vllm_openai` | self-hosted OpenAI-compatible server |
 | `anthropic` | `anthropic_messages` | `anthropic_default` | Claude Messages API |
+| `google_genai` | `google_genai` | `google_ai_studio` | Google Gemini API |
+| `google` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
+| `gemini` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
 
 ## Selection Rules
 
@@ -107,9 +124,9 @@ Examples that may justify future families:
 
 ## Next Candidate
 
-### `google_genai` evaluation
+### `google_genai`
 
-The next protocol-family candidate should be Google GenAI-native APIs rather than another OpenAI-compatible preset.
+The project now has initial `google_genai` protocol-family support for the base Gemini `generateContent` flow.
 
 Reason:
 
@@ -119,7 +136,7 @@ Reason:
 
 Suggested implementation order:
 
-1. define the protocol-family contract in `internal/upstream`
-2. map Google auth, versioning, and URL behavior
-3. add `pkg/llm` request/response normalization for the chosen Google surface
-4. add replay-critical stream and usage tests before expanding presets
+1. expand from `generateContent` to `streamGenerateContent`
+2. improve usage/timeline extraction for Google-native responses
+3. decide whether Vertex-native APIs should share this family or become a separate routing profile
+4. add replay-critical stream tests before broadening the matrix further

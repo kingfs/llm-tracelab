@@ -25,6 +25,12 @@ func TestAdapterForPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ProviderAzureOpenAI, adapter.Semantics().Provider)
 	assert.Equal(t, "/v1/responses", adapter.Semantics().Endpoint)
+
+	adapter, err = AdapterForPath("/v1beta/models/gemini-2.5-flash:generateContent", "https://generativelanguage.googleapis.com")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderGoogleGenAI, adapter.Semantics().Provider)
+	assert.Equal(t, OperationGenerateContent, adapter.Semantics().Operation)
+	assert.Equal(t, "/v1beta/models:generateContent", adapter.Semantics().Endpoint)
 }
 
 func TestParseOpenAIResponsesRequest(t *testing.T) {
@@ -125,4 +131,30 @@ func TestOpenAIResponsesRoundTripMarshal(t *testing.T) {
 	assert.Equal(t, req.Model, parsed.Model)
 	assert.Equal(t, "Hello", parsed.Messages[0].Content[0].Text)
 	assert.Equal(t, "search", parsed.Messages[1].Content[0].ToolName)
+}
+
+func TestParseGeminiRequestAndResponseForPath(t *testing.T) {
+	reqBody := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"Hello Gemini"}]}],
+		"systemInstruction":{"role":"system","parts":[{"text":"Be concise"}]},
+		"generationConfig":{"temperature":0.2,"maxOutputTokens":64}
+	}`)
+
+	req, err := ParseRequestForPath("/v1beta/models/gemini-2.5-flash:generateContent", "https://generativelanguage.googleapis.com", reqBody)
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-2.5-flash", req.Model)
+	require.Len(t, req.System, 1)
+	assert.Equal(t, "Be concise", req.System[0].Text)
+	require.Len(t, req.Messages, 1)
+	assert.Equal(t, "Hello Gemini", req.Messages[0].Content[0].Text)
+
+	respBody := []byte(`{
+		"candidates":[{"content":{"role":"model","parts":[{"text":"Hello from Gemini"}]},"finishReason":"STOP"}],
+		"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7,"totalTokenCount":10}
+	}`)
+	resp, err := ParseResponse(ProviderGoogleGenAI, "/v1beta/models:generateContent", respBody)
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	assert.Equal(t, "Hello from Gemini", resp.Candidates[0].Content[0].Text)
+	assert.Equal(t, 10, resp.Usage.TotalTokens)
 }
