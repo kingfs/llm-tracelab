@@ -32,13 +32,14 @@ type Config struct {
 }
 
 type UpstreamConfig struct {
-	BaseURL        string `yaml:"base_url"`
-	ApiKey         string `yaml:"api_key"`
-	ProviderPreset string `yaml:"provider_preset"`
-	ProtocolFamily string `yaml:"protocol_family"`
-	RoutingProfile string `yaml:"routing_profile"`
-	APIVersion     string `yaml:"api_version"`
-	Deployment     string `yaml:"deployment"`
+	BaseURL        string            `yaml:"base_url"`
+	ApiKey         string            `yaml:"api_key"`
+	ProviderPreset string            `yaml:"provider_preset"`
+	ProtocolFamily string            `yaml:"protocol_family"`
+	RoutingProfile string            `yaml:"routing_profile"`
+	APIVersion     string            `yaml:"api_version"`
+	Deployment     string            `yaml:"deployment"`
+	Headers        map[string]string `yaml:"headers"`
 }
 
 type ChaosRule struct {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
@@ -213,6 +214,77 @@ func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 	}
 	if gotAPIKey != "azure-secret" {
 		t.Fatalf("api-key = %q, want azure-secret", gotAPIKey)
+	}
+}
+
+func TestHandlerAnthropicPresetRoutesAndAuths(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var gotPath string
+	var gotAPIKey string
+	var gotVersion string
+	var gotBeta string
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotVersion = r.Header.Get("anthropic-version")
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg_123","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"output_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL
+	cfg.Upstream.ProviderPreset = "anthropic"
+	cfg.Upstream.Headers = map[string]string{
+		"anthropic-beta": "tools-2024-04-04",
+	}
+	cfg.Upstream.ApiKey = "anth-secret"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/messages", bytes.NewBufferString(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}],"max_tokens":16}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if gotPath != "/v1/messages" {
+		t.Fatalf("upstream path = %q, want /v1/messages", gotPath)
+	}
+	if gotAPIKey != "anth-secret" {
+		t.Fatalf("x-api-key = %q, want anth-secret", gotAPIKey)
+	}
+	if gotVersion != upstream.DefaultAnthropicAPIVersion {
+		t.Fatalf("anthropic-version = %q, want %q", gotVersion, upstream.DefaultAnthropicAPIVersion)
+	}
+	if gotBeta != "tools-2024-04-04" {
+		t.Fatalf("anthropic-beta = %q, want tools-2024-04-04", gotBeta)
 	}
 }
 

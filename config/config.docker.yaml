@@ -12,6 +12,7 @@ upstream:
   routing_profile: ""
   api_version: ""
   deployment: ""
+  headers: {}
 
 debug:
   output_dir: "/app/data/traces"

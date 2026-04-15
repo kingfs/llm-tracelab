@@ -91,6 +91,7 @@ upstream:
   routing_profile: ""
   api_version: ""
   deployment: ""
+  headers: {}
 
 debug:
   output_dir: "./logs"
@@ -113,10 +114,41 @@ debug:
 
 推荐的兼容配置思路：
 
-- OpenAI / OpenRouter / Fireworks / Together 等 OpenAI-compatible 服务：只设置 `provider_preset` 和 `base_url`
+- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq 等 OpenAI-compatible 服务：只设置 `provider_preset` 和 `base_url`
 - Azure OpenAI `/openai/v1/...`：设置 `provider_preset: azure`，可选 `api_version`
 - Azure deployment 路由：设置 `provider_preset: azure`，并补 `deployment`
 - vLLM OpenAI-compatible server：设置 `provider_preset: vllm`
+- Anthropic Messages API：设置 `provider_preset: anthropic`，如需 beta 能力可在 `headers` 里补 `anthropic-beta`
+
+当前推荐支持矩阵：
+
+- `provider_preset: openai`
+  `protocol_family: openai_compatible`
+  `routing_profile: openai_default`
+- `provider_preset: openrouter | fireworks | together | deepseek | groq | moonshot | cerebras | perplexity`
+  `protocol_family: openai_compatible`
+  `routing_profile: openai_default`
+- `provider_preset: azure`
+  `protocol_family: openai_compatible`
+  `routing_profile: azure_openai_v1` 或 `azure_openai_deployment`
+- `provider_preset: vllm`
+  `protocol_family: openai_compatible`
+  `routing_profile: vllm_openai`
+- `provider_preset: anthropic`
+  `protocol_family: anthropic_messages`
+  `routing_profile: anthropic_default`
+
+Anthropic 示例：
+
+```yaml
+upstream:
+  base_url: "https://api.anthropic.com"
+  api_key: "sk-ant-xxx"
+  provider_preset: "anthropic"
+  api_version: "2023-06-01"
+  headers:
+    anthropic-beta: "tools-2024-04-04"
+```
 
 ### 2. 构建和运行
 

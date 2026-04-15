@@ -55,6 +55,16 @@ func TestResolveProviderPresets(t *testing.T) {
 			wantFamily:  ProtocolFamilyOpenAICompatible,
 			wantProfile: RoutingProfileVLLMOpenAI,
 		},
+		{
+			name: "anthropic_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+			},
+			wantFamily:  ProtocolFamilyAnthropicMessages,
+			wantProfile: RoutingProfileAnthropicDefault,
+			wantVersion: DefaultAnthropicAPIVersion,
+		},
 	}
 
 	for _, tt := range tests {
@@ -124,6 +134,15 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			path:    "/v1/chat/completions",
 			wantURL: "https://demo-resource.openai.azure.com/openai/deployments/gpt-4o-mini/chat/completions?api-version=2025-03-01-preview",
 		},
+		{
+			name: "anthropic_messages",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+			},
+			path:    "/v1/messages",
+			wantURL: "https://api.anthropic.com/v1/messages",
+		},
 	}
 
 	for _, tt := range tests {
@@ -169,5 +188,28 @@ func TestResolvedUpstreamApplyAuthHeaders(t *testing.T) {
 	resolved.ApplyAuthHeaders(headers)
 	if got := headers.Get("Authorization"); got != "Bearer sk-test" {
 		t.Fatalf("Authorization = %q, want Bearer sk-test", got)
+	}
+
+	resolved, err = Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.anthropic.com",
+		ProviderPreset: "anthropic",
+		ApiKey:         "anth-secret",
+		Headers: map[string]string{
+			"anthropic-beta": "tools-2024-04-04",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	headers = http.Header{}
+	resolved.ApplyAuthHeaders(headers)
+	if got := headers.Get("x-api-key"); got != "anth-secret" {
+		t.Fatalf("x-api-key = %q, want anth-secret", got)
+	}
+	if got := headers.Get("anthropic-version"); got != DefaultAnthropicAPIVersion {
+		t.Fatalf("anthropic-version = %q, want %q", got, DefaultAnthropicAPIVersion)
+	}
+	if got := headers.Get("anthropic-beta"); got != "tools-2024-04-04" {
+		t.Fatalf("anthropic-beta = %q, want tools-2024-04-04", got)
 	}
 }

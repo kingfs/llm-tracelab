@@ -92,6 +92,7 @@ upstream:
   routing_profile: ""
   api_version: ""
   deployment: ""
+  headers: {}
 
 debug:
   output_dir: "./logs"
@@ -114,10 +115,41 @@ Supported environment variable overrides:
 
 Recommended compatibility pattern:
 
-- OpenAI / OpenRouter / Fireworks / Together and similar OpenAI-compatible services: set `provider_preset` plus `base_url`
+- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq and similar OpenAI-compatible services: set `provider_preset` plus `base_url`
 - Azure OpenAI `/openai/v1/...`: set `provider_preset: azure` and optionally `api_version`
 - Azure deployment-style routing: set `provider_preset: azure` plus `deployment`
 - vLLM OpenAI-compatible server: set `provider_preset: vllm`
+- Anthropic Messages API: set `provider_preset: anthropic`; use `headers.anthropic-beta` if you need beta features
+
+Current recommended support matrix:
+
+- `provider_preset: openai`
+  `protocol_family: openai_compatible`
+  `routing_profile: openai_default`
+- `provider_preset: openrouter | fireworks | together | deepseek | groq | moonshot | cerebras | perplexity`
+  `protocol_family: openai_compatible`
+  `routing_profile: openai_default`
+- `provider_preset: azure`
+  `protocol_family: openai_compatible`
+  `routing_profile: azure_openai_v1` or `azure_openai_deployment`
+- `provider_preset: vllm`
+  `protocol_family: openai_compatible`
+  `routing_profile: vllm_openai`
+- `provider_preset: anthropic`
+  `protocol_family: anthropic_messages`
+  `routing_profile: anthropic_default`
+
+Anthropic example:
+
+```yaml
+upstream:
+  base_url: "https://api.anthropic.com"
+  api_key: "sk-ant-xxx"
+  provider_preset: "anthropic"
+  api_version: "2023-06-01"
+  headers:
+    anthropic-beta: "tools-2024-04-04"
+```
 
 ### 2. Build And Run
 

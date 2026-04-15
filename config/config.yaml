@@ -7,11 +7,12 @@ monitor:
 upstream:
   base_url: "http://localhost:30080"
   api_key: "sk-test"
-  provider_preset: "openai"      # openai | azure | vllm | openrouter | fireworks | together ...
-  protocol_family: ""            # 默认自动推断，目前主推 openai_compatible
-  routing_profile: ""            # 默认自动推断，可显式指定 openai_default / azure_openai_v1 / azure_openai_deployment / vllm_openai
-  api_version: ""                # Azure 常用，比如 2025-03-01-preview
+  provider_preset: "openai"      # openai | anthropic | azure | vllm | openrouter | fireworks | together ...
+  protocol_family: ""            # 默认自动推断，目前支持 openai_compatible / anthropic_messages
+  routing_profile: ""            # 默认自动推断，可显式指定 openai_default / azure_openai_v1 / azure_openai_deployment / vllm_openai / anthropic_default
+  api_version: ""                # Azure 用 query 参数；Anthropic 用 anthropic-version header
   deployment: ""                 # Azure deployment routing 时使用
+  headers: {}                    # 额外上游请求头，比如 anthropic-beta
 
 debug:
   output_dir: "./logs"
