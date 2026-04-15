@@ -51,7 +51,7 @@ pkg/replay            单元测试回放 Transport
 pkg/llm               多厂商请求/响应归一化
 ```
 
-更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)。
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)。
 
 ## 录制文件与索引
 

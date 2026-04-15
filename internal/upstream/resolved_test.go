@@ -26,6 +26,60 @@ func TestResolveProviderPresets(t *testing.T) {
 			wantProfile: RoutingProfileOpenAIDefault,
 		},
 		{
+			name: "openrouter_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://openrouter.ai/api/v1",
+				ProviderPreset: "openrouter",
+			},
+			wantFamily:  ProtocolFamilyOpenAICompatible,
+			wantProfile: RoutingProfileOpenAIDefault,
+		},
+		{
+			name: "fireworks_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.fireworks.ai/inference/v1",
+				ProviderPreset: "fireworks",
+			},
+			wantFamily:  ProtocolFamilyOpenAICompatible,
+			wantProfile: RoutingProfileOpenAIDefault,
+		},
+		{
+			name: "together_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.together.xyz/v1",
+				ProviderPreset: "together",
+			},
+			wantFamily:  ProtocolFamilyOpenAICompatible,
+			wantProfile: RoutingProfileOpenAIDefault,
+		},
+		{
+			name: "groq_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.groq.com/openai/v1",
+				ProviderPreset: "groq",
+			},
+			wantFamily:  ProtocolFamilyOpenAICompatible,
+			wantProfile: RoutingProfileOpenAIDefault,
+		},
+		{
+			name: "xai_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.x.ai/v1",
+				ProviderPreset: "xai",
+			},
+			wantFamily:  ProtocolFamilyOpenAICompatible,
+			wantProfile: RoutingProfileOpenAIDefault,
+		},
+		{
+			name: "github_models_preset_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://models.inference.ai.azure.com",
+				ProviderPreset: "github_models",
+			},
+			wantFamily:  ProtocolFamilyOpenAICompatible,
+			wantProfile: RoutingProfileOpenAIDefault,
+		},
+		{
 			name: "azure_v1_preset_defaults",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "https://demo-resource.openai.azure.com/openai/v1",

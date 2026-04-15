@@ -26,6 +26,34 @@ const (
 	DefaultAnthropicAPIVersion      = "2023-06-01"
 )
 
+type providerPresetSpec struct {
+	ProtocolFamily string
+	RoutingProfile string
+}
+
+var providerPresetRegistry = map[string]providerPresetSpec{
+	"alibaba":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"anthropic":     {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault},
+	"azure":         {ProtocolFamily: ProtocolFamilyOpenAICompatible},
+	"azure_openai":  {ProtocolFamily: ProtocolFamilyOpenAICompatible},
+	"baseten":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"cerebras":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"deepseek":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"fireworks":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"github":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"github_models": {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"groq":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"hugging_face":  {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"moonshot":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"nvidia_nim":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"openai":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"openrouter":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"perplexity":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"together":      {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"vllm":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI},
+	"xai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+}
+
 type ResolvedUpstream struct {
 	BaseURL        string
 	APIKey         string
@@ -159,39 +187,25 @@ func (u ResolvedUpstream) ConnectivityCheckURL() (string, error) {
 }
 
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
+	spec, ok := providerPresetRegistry[resolved.ProviderPreset]
+	if !ok {
+		return
+	}
+	if resolved.ProtocolFamily == "" {
+		resolved.ProtocolFamily = spec.ProtocolFamily
+	}
+	if resolved.RoutingProfile != "" {
+		return
+	}
 	switch resolved.ProviderPreset {
-	case "anthropic":
-		if resolved.ProtocolFamily == "" {
-			resolved.ProtocolFamily = ProtocolFamilyAnthropicMessages
-		}
-		if resolved.RoutingProfile == "" {
-			resolved.RoutingProfile = RoutingProfileAnthropicDefault
-		}
-	case "openai", "openrouter", "fireworks", "together", "deepseek", "perplexity", "moonshot", "alibaba", "cerebras", "groq", "baseten", "nvidia_nim", "hugging_face":
-		if resolved.ProtocolFamily == "" {
-			resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
-		}
-		if resolved.RoutingProfile == "" {
-			resolved.RoutingProfile = RoutingProfileOpenAIDefault
-		}
 	case "azure", "azure_openai":
-		if resolved.ProtocolFamily == "" {
-			resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
+		if resolved.Deployment != "" || strings.Contains(strings.ToLower(parsed.Path), "/deployments/") {
+			resolved.RoutingProfile = RoutingProfileAzureOpenAIDeploy
+		} else {
+			resolved.RoutingProfile = RoutingProfileAzureOpenAIV1
 		}
-		if resolved.RoutingProfile == "" {
-			if resolved.Deployment != "" || strings.Contains(strings.ToLower(parsed.Path), "/deployments/") {
-				resolved.RoutingProfile = RoutingProfileAzureOpenAIDeploy
-			} else {
-				resolved.RoutingProfile = RoutingProfileAzureOpenAIV1
-			}
-		}
-	case "vllm":
-		if resolved.ProtocolFamily == "" {
-			resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
-		}
-		if resolved.RoutingProfile == "" {
-			resolved.RoutingProfile = RoutingProfileVLLMOpenAI
-		}
+	default:
+		resolved.RoutingProfile = spec.RoutingProfile
 	}
 }
 

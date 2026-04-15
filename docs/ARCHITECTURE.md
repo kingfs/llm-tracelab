@@ -10,9 +10,10 @@
 2. Proxy may normalize the request, for example injecting `stream_options.include_usage=true`.
 3. Recorder writes the raw request and response into a `.http` cassette.
 4. `pkg/llm` normalizes provider-specific request/response semantics, stream transcripts, token usage, and event timelines.
-5. Recorder writes compact metadata plus `# event:` timeline lines into the cassette prelude and indexes summary fields into SQLite.
-6. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
-7. Unit tests use `pkg/replay.Transport` to replay the recorded response from the cassette.
+5. `internal/upstream` resolves config into protocol family, routing profile, auth headers, and upstream URL behavior.
+6. Recorder writes compact metadata plus `# event:` timeline lines into the cassette prelude and indexes summary fields into SQLite.
+7. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
+8. Unit tests use `pkg/replay.Transport` to replay the recorded response from the cassette.
 
 ## Storage Model
 
@@ -119,6 +120,7 @@ This is recorded as:
 ## Key Packages
 
 - `internal/proxy`: reverse proxy, response interception, and cassette byte capture
+- `internal/upstream`: upstream config resolution, auth/header application, and path/query rewriting
 - `internal/recorder`: file writer and metadata finalization
 - `internal/store`: SQLite schema, sync, and query layer
 - `internal/monitor`: embedded React monitor and cassette detail projection
