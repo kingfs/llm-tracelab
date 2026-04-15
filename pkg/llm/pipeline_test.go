@@ -26,6 +26,14 @@ func TestExtractUsageFromJSONResponsesCompletedEvent(t *testing.T) {
 	assert.Equal(t, 7076, usage.TotalTokens)
 }
 
+func TestExtractUsageFromJSONGoogleUsageMetadata(t *testing.T) {
+	usage, ok := ExtractUsageFromJSON([]byte(`{"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7,"totalTokenCount":10}}`))
+	require.True(t, ok)
+	assert.Equal(t, 3, usage.PromptTokens)
+	assert.Equal(t, 7, usage.CompletionTokens)
+	assert.Equal(t, 10, usage.TotalTokens)
+}
+
 func TestResponsePipelineStream(t *testing.T) {
 	pipeline := NewResponsePipeline(ProviderOpenAICompatible, "/v1/responses", true)
 	pipeline.Feed([]byte("event: response.completed\n"))
@@ -52,6 +60,21 @@ func TestResponsePipelineNonStream(t *testing.T) {
 	assert.Equal(t, 10, usage.PromptTokens)
 	assert.Equal(t, 4, usage.CompletionTokens)
 	assert.Equal(t, 14, usage.TotalTokens)
+}
+
+func TestResponsePipelineGoogleStream(t *testing.T) {
+	pipeline := NewResponsePipeline(ProviderGoogleGenAI, "/v1beta/models:streamGenerateContent", true)
+	pipeline.Feed([]byte(`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}` + "\n"))
+	pipeline.Feed([]byte(`data: {"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7,"totalTokenCount":10}}` + "\n"))
+
+	usage, ok := pipeline.Usage()
+	require.True(t, ok)
+	assert.Equal(t, 3, usage.PromptTokens)
+	assert.Equal(t, 7, usage.CompletionTokens)
+	assert.Equal(t, 10, usage.TotalTokens)
+	events := pipeline.Events()
+	require.NotEmpty(t, events)
+	assert.Equal(t, "llm.output_text.delta", events[0].Type)
 }
 
 func TestDetectStreamingResponse(t *testing.T) {

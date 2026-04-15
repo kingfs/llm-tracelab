@@ -48,3 +48,16 @@ func TestParseAnthropicStreamResponse(t *testing.T) {
 	assert.Equal(t, "Bash", resp.Candidates[0].ToolCalls[0].Name)
 	assert.Equal(t, `{"command":"pwd"}`, resp.Candidates[0].ToolCalls[0].ArgsText)
 }
+
+func TestParseGoogleGenerateContentStreamResponse(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello "}]}}]}`,
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Gemini"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7,"totalTokenCount":10}}`,
+	}, "\n")
+
+	resp, err := ParseStreamResponse(ProviderGoogleGenAI, "/v1beta/models:streamGenerateContent", []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	assert.Equal(t, "model", resp.Candidates[0].Role)
+	assert.Equal(t, "Hello Gemini", resp.Candidates[0].Content[0].Text)
+}

@@ -164,6 +164,13 @@ func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
 		}
 		target.RawQuery = q.Encode()
 	}
+	if u.RoutingProfile == RoutingProfileGoogleAIStudio && strings.Contains(target.Path, ":streamGenerateContent") {
+		q := target.Query()
+		if q.Get("alt") == "" {
+			q.Set("alt", "sse")
+		}
+		target.RawQuery = q.Encode()
+	}
 	return target.String(), nil
 }
 

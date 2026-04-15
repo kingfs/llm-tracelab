@@ -140,6 +140,8 @@ func (p *ResponsePipeline) appendProviderEvent(jsonStr string) {
 		p.appendResponsesEvent(jsonStr)
 	case "/v1/messages":
 		p.appendAnthropicEvent(jsonStr)
+	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
+		p.appendGoogleEvent(jsonStr)
 	}
 }
 
@@ -264,6 +266,31 @@ func (p *ResponsePipeline) appendAnthropicEvent(jsonStr string) {
 	}
 }
 
+func (p *ResponsePipeline) appendGoogleEvent(jsonStr string) {
+	var chunk struct {
+		Candidates []struct {
+			Content struct {
+				Role  string `json:"role"`
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
+		return
+	}
+	for _, candidate := range chunk.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.Text != "" {
+				p.appendEvent("llm.output_text.delta", part.Text, map[string]interface{}{
+					"role": firstNonEmpty(candidate.Content.Role, "model"),
+				})
+			}
+		}
+	}
+}
+
 func (p *ResponsePipeline) appendEvent(eventType string, message string, attrs map[string]interface{}) {
 	p.events = append(p.events, recordfile.RecordEvent{
 		Type:       eventType,
@@ -284,6 +311,9 @@ type compatibleUsage struct {
 	CacheReadInputTokens     int                            `json:"cache_read_input_tokens"`
 	InputTokenDetails        *recordfile.PromptTokenDetails `json:"input_tokens_details,omitempty"`
 	PromptTokenDetails       *recordfile.PromptTokenDetails `json:"prompt_tokens_details,omitempty"`
+	PromptTokenCount         int                            `json:"promptTokenCount"`
+	CandidatesTokenCount     int                            `json:"candidatesTokenCount"`
+	TotalTokenCount          int                            `json:"totalTokenCount"`
 }
 
 func (u compatibleUsage) toUsageSummary() (UsageSummary, bool) {
@@ -303,8 +333,15 @@ func (u compatibleUsage) toUsageSummary() (UsageSummary, bool) {
 			}
 		}
 	}
+	if promptTokens == 0 && completionTokens == 0 && (u.PromptTokenCount > 0 || u.CandidatesTokenCount > 0) {
+		promptTokens = u.PromptTokenCount
+		completionTokens = u.CandidatesTokenCount
+	}
 
 	totalTokens := u.TotalTokens
+	if totalTokens == 0 && u.TotalTokenCount > 0 {
+		totalTokens = u.TotalTokenCount
+	}
 	if totalTokens == 0 && (promptTokens > 0 || completionTokens > 0) {
 		totalTokens = promptTokens + completionTokens
 	}
@@ -329,9 +366,11 @@ func ExtractUsageFromJSON(data []byte) (UsageSummary, bool) {
 	}
 
 	var payload struct {
-		Usage    *compatibleUsage `json:"usage"`
-		Response *struct {
-			Usage *compatibleUsage `json:"usage"`
+		Usage         *compatibleUsage `json:"usage"`
+		UsageMetadata *compatibleUsage `json:"usageMetadata"`
+		Response      *struct {
+			Usage         *compatibleUsage `json:"usage"`
+			UsageMetadata *compatibleUsage `json:"usageMetadata"`
 		} `json:"response"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
@@ -342,8 +381,18 @@ func ExtractUsageFromJSON(data []byte) (UsageSummary, bool) {
 			return usage, true
 		}
 	}
+	if payload.UsageMetadata != nil {
+		if usage, ok := payload.UsageMetadata.toUsageSummary(); ok {
+			return usage, true
+		}
+	}
 	if payload.Response != nil && payload.Response.Usage != nil {
 		if usage, ok := payload.Response.Usage.toUsageSummary(); ok {
+			return usage, true
+		}
+	}
+	if payload.Response != nil && payload.Response.UsageMetadata != nil {
+		if usage, ok := payload.Response.UsageMetadata.toUsageSummary(); ok {
 			return usage, true
 		}
 	}
@@ -356,6 +405,9 @@ func ExtractUsageFromTail(data []byte) (UsageSummary, bool) {
 	}
 	str := string(data)
 	idx := strings.LastIndex(str, `"usage"`)
+	if usageMetaIdx := strings.LastIndex(str, `"usageMetadata"`); usageMetaIdx > idx {
+		idx = usageMetaIdx
+	}
 	if idx == -1 {
 		return UsageSummary{}, false
 	}

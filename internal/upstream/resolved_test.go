@@ -215,6 +215,15 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			path:    "/v1beta/models/gemini-2.5-flash:generateContent",
 			wantURL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
 		},
+		{
+			name: "google_stream_generate_content_adds_alt_sse",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+			path:    "/v1beta/models/gemini-2.5-flash:streamGenerateContent",
+			wantURL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+		},
 	}
 
 	for _, tt := range tests {

@@ -126,7 +126,7 @@ Examples that may justify future families:
 
 ### `google_genai`
 
-The project now has initial `google_genai` protocol-family support for the base Gemini `generateContent` flow.
+The project now has initial `google_genai` protocol-family support for the base Gemini `generateContent` and `streamGenerateContent` flows.
 
 Reason:
 
@@ -136,7 +136,7 @@ Reason:
 
 Suggested implementation order:
 
-1. expand from `generateContent` to `streamGenerateContent`
-2. improve usage/timeline extraction for Google-native responses
-3. decide whether Vertex-native APIs should share this family or become a separate routing profile
-4. add replay-critical stream tests before broadening the matrix further
+1. improve Google-native timeline richness beyond plain text deltas
+2. decide whether Vertex-native APIs should share this family or become a separate routing profile
+3. extend model listing / startup diagnostics specifically for Google responses
+4. broaden replay-critical stream tests before expanding presets further

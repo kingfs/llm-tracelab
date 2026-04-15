@@ -40,7 +40,8 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 		return openAIResponsesAdapter{semantics: semantics}, nil
 	case semantics.Endpoint == "/v1/messages":
 		return anthropicMessagesAdapter{semantics: semantics}, nil
-	case semantics.Endpoint == "/v1beta/models:generateContent":
+	case semantics.Endpoint == "/v1beta/models:generateContent",
+		semantics.Endpoint == "/v1beta/models:streamGenerateContent":
 		return googleGenerateContentAdapter{semantics: semantics}, nil
 	default:
 		return nil, UnsupportedEndpointError{Provider: provider, Endpoint: semantics.Endpoint}

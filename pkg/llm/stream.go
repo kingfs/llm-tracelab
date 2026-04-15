@@ -288,6 +288,46 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls), nil
 }
 
+func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
+	var (
+		contentBuilder strings.Builder
+		role           = "model"
+	)
+
+	scanner := newSSEScanner(body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+
+		var chunk GeminiResponse
+		if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
+			continue
+		}
+		for _, candidate := range chunk.Candidates {
+			if candidate.Content.Role != "" {
+				role = candidate.Content.Role
+			}
+			for _, part := range candidate.Content.Parts {
+				if part.Text != "" {
+					contentBuilder.WriteString(part.Text)
+				}
+			}
+		}
+	}
+
+	resp := singleCandidateResponse(contentBuilder.String(), "", nil)
+	if len(resp.Candidates) > 0 {
+		resp.Candidates[0].Role = role
+	}
+	return resp, nil
+}
+
 func newSSEScanner(body []byte) *bufio.Scanner {
 	scanner := bufio.NewScanner(bytes.NewReader(body))
 	buf := make([]byte, 0, 1024*1024)
