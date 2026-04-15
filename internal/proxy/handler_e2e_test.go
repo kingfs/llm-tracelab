@@ -288,6 +288,122 @@ func TestHandlerAnthropicPresetRoutesAndAuths(t *testing.T) {
 	}
 }
 
+func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
+	tests := []struct {
+		name             string
+		baseURLPath      string
+		providerPreset   string
+		requestPath      string
+		requestBody      string
+		wantUpstreamPath string
+		wantAuthHeader   string
+		wantNoAPIKey     bool
+	}{
+		{
+			name:             "openrouter_with_api_v1_prefix",
+			baseURLPath:      "/api/v1",
+			providerPreset:   "openrouter",
+			requestPath:      "/v1/responses",
+			requestBody:      `{"model":"openai/gpt-4.1","input":"hello"}`,
+			wantUpstreamPath: "/api/v1/responses",
+			wantAuthHeader:   "Bearer openrouter-secret",
+			wantNoAPIKey:     true,
+		},
+		{
+			name:             "groq_with_openai_v1_prefix",
+			baseURLPath:      "/openai/v1",
+			providerPreset:   "groq",
+			requestPath:      "/v1/chat/completions",
+			requestBody:      `{"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":"hello"}]}`,
+			wantUpstreamPath: "/openai/v1/chat/completions",
+			wantAuthHeader:   "Bearer groq-secret",
+			wantNoAPIKey:     true,
+		},
+		{
+			name:             "github_models_on_azure_host_stays_bearer",
+			baseURLPath:      "",
+			providerPreset:   "github_models",
+			requestPath:      "/v1/responses",
+			requestBody:      `{"model":"openai/gpt-4.1","input":"hello"}`,
+			wantUpstreamPath: "/v1/responses",
+			wantAuthHeader:   "Bearer github-secret",
+			wantNoAPIKey:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
+			var gotPath string
+			var gotAuthorization string
+			var gotAPIKey string
+
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotAuthorization = r.Header.Get("Authorization")
+				gotAPIKey = r.Header.Get("api-key")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_compat","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{}
+			cfg.Upstream.BaseURL = upstreamServer.URL + tt.baseURLPath
+			cfg.Upstream.ProviderPreset = tt.providerPreset
+			switch tt.providerPreset {
+			case "openrouter":
+				cfg.Upstream.ApiKey = "openrouter-secret"
+			case "groq":
+				cfg.Upstream.ApiKey = "groq-secret"
+			case "github_models":
+				cfg.Upstream.ApiKey = "github-secret"
+			}
+			cfg.Debug.OutputDir = outputDir
+			cfg.Debug.MaskKey = true
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			req, err := http.NewRequest(http.MethodPost, proxyServer.URL+tt.requestPath, bytes.NewBufferString(tt.requestBody))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := proxyServer.Client().Do(req)
+			if err != nil {
+				t.Fatalf("client.Do() error = %v", err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+			}
+			if gotPath != tt.wantUpstreamPath {
+				t.Fatalf("upstream path = %q, want %q", gotPath, tt.wantUpstreamPath)
+			}
+			if gotAuthorization != tt.wantAuthHeader {
+				t.Fatalf("Authorization = %q, want %q", gotAuthorization, tt.wantAuthHeader)
+			}
+			if tt.wantNoAPIKey && gotAPIKey != "" {
+				t.Fatalf("api-key = %q, want empty", gotAPIKey)
+			}
+		})
+	}
+}
+
 func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]store.LogEntry, error) {
 	deadline := time.Now().Add(timeout)
 	var lastEntries []store.LogEntry

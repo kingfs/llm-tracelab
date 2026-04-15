@@ -104,3 +104,22 @@ Examples that may justify future families:
 - Google GenAI-native APIs
 - Bedrock or Vertex APIs that are not used through an OpenAI-compatible surface
 - realtime or session-based APIs
+
+## Next Candidate
+
+### `google_genai` evaluation
+
+The next protocol-family candidate should be Google GenAI-native APIs rather than another OpenAI-compatible preset.
+
+Reason:
+
+- it validates that the current abstraction can support a genuinely different request and response model
+- it is more valuable architecturally than adding one more OpenAI-compatible alias
+- it creates a cleaner path for future non-OpenAI-compatible families such as Bedrock-native or Vertex-native APIs
+
+Suggested implementation order:
+
+1. define the protocol-family contract in `internal/upstream`
+2. map Google auth, versioning, and URL behavior
+3. add `pkg/llm` request/response normalization for the chosen Google surface
+4. add replay-critical stream and usage tests before expanding presets

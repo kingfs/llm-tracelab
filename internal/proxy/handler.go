@@ -202,8 +202,8 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 
 	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
-		originalDirector(req)
 		clientPath := req.URL.Path
+		originalDirector(req)
 		req.Host = targetURL.Host
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
