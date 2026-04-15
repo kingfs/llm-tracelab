@@ -178,10 +178,16 @@ type Handler struct {
 	recorder     *recorder.Recorder
 	chaosManager *chaos.Manager
 	cfg          *config.Config
+	upstream     upstream.ResolvedUpstream
 }
 
 func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
-	targetURL, err := url.Parse(cfg.Upstream.BaseURL)
+	resolvedUpstream, err := upstream.Resolve(cfg.Upstream)
+	if err != nil {
+		return nil, fmt.Errorf("resolve upstream config: %w", err)
+	}
+
+	targetURL, err := url.Parse(resolvedUpstream.BaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid upstream url: %w", err)
 	}
@@ -197,12 +203,21 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
 		originalDirector(req)
+		clientPath := req.URL.Path
 		req.Host = targetURL.Host
 		req.URL.Scheme = targetURL.Scheme
 		req.URL.Host = targetURL.Host
-		req.URL.Path = upstream.JoinRequestPath(targetURL, req.URL.Path)
+		req.URL.Path = targetURL.Path
 		req.URL.RawPath = req.URL.Path
-		upstream.ApplyAuthHeaders(req.Header, cfg.Upstream.BaseURL, cfg.Upstream.ApiKey)
+		fullURL, err := resolvedUpstream.BuildURL(clientPath)
+		if err == nil {
+			if parsed, parseErr := url.Parse(fullURL); parseErr == nil {
+				req.URL.Path = parsed.Path
+				req.URL.RawPath = parsed.RawPath
+				req.URL.RawQuery = parsed.RawQuery
+			}
+		}
+		resolvedUpstream.ApplyAuthHeaders(req.Header)
 		req.Header.Set("Accept-Encoding", "identity")
 	}
 
@@ -254,6 +269,7 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 		recorder:     rec,
 		chaosManager: cm,
 		cfg:          cfg,
+		upstream:     resolvedUpstream,
 	}, nil
 }
 
@@ -264,7 +280,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ensureStreamOptions(r)
 
 	// [Step 2] 准备日志 (此时 r.Body 已经包含 injected options，Log 里会记录下来)
-	logInfo, err := h.recorder.PrepareLogFile(r, h.cfg.Upstream.BaseURL)
+	logInfo, err := h.recorder.PrepareLogFile(r, h.upstream.BaseURL)
 	if err != nil {
 		slog.Error("Failed to prepare log file", "err", err)
 		http.Error(w, "Internal Logging Error", 500)

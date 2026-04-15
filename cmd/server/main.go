@@ -69,7 +69,7 @@ func runServe(args []string) int {
 	defer traceStore.Close()
 
 	// 2. 启动自检 (Fail Fast)
-	if err := upstream.CheckConnectivity(cfg.Upstream.BaseURL, cfg.Upstream.ApiKey); err != nil {
+	if err := upstream.CheckConnectivity(cfg.Upstream); err != nil {
 		slog.Error("Startup self-check failed! Exiting.", "error", err)
 		return 1
 	}

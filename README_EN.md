@@ -87,6 +87,11 @@ monitor:
 upstream:
   base_url: "https://api.openai.com"
   api_key: "sk-xxx"
+  provider_preset: "openai"
+  protocol_family: ""
+  routing_profile: ""
+  api_version: ""
+  deployment: ""
 
 debug:
   output_dir: "./logs"
@@ -99,8 +104,20 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_MONITOR_PORT`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
+- `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
+- `LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY`
+- `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
+- `LLM_TRACELAB_UPSTREAM_API_VERSION`
+- `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
+
+Recommended compatibility pattern:
+
+- OpenAI / OpenRouter / Fireworks / Together and similar OpenAI-compatible services: set `provider_preset` plus `base_url`
+- Azure OpenAI `/openai/v1/...`: set `provider_preset: azure` and optionally `api_version`
+- Azure deployment-style routing: set `provider_preset: azure` plus `deployment`
+- vLLM OpenAI-compatible server: set `provider_preset: vllm`
 
 ### 2. Build And Run
 

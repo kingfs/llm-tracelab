@@ -150,6 +150,72 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 	}
 }
 
+func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var gotPath string
+	var gotAPIVersion string
+	var gotAPIKey string
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAPIVersion = r.URL.Query().Get("api-version")
+		gotAPIKey = r.Header.Get("api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_azure","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL
+	cfg.Upstream.ProviderPreset = "azure"
+	cfg.Upstream.RoutingProfile = "azure_openai_deployment"
+	cfg.Upstream.Deployment = "gpt-4o-mini"
+	cfg.Upstream.APIVersion = "2025-03-01-preview"
+	cfg.Upstream.ApiKey = "azure-secret"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if gotPath != "/openai/deployments/gpt-4o-mini/responses" {
+		t.Fatalf("upstream path = %q, want /openai/deployments/gpt-4o-mini/responses", gotPath)
+	}
+	if gotAPIVersion != "2025-03-01-preview" {
+		t.Fatalf("api-version = %q, want 2025-03-01-preview", gotAPIVersion)
+	}
+	if gotAPIKey != "azure-secret" {
+		t.Fatalf("api-key = %q, want azure-secret", gotAPIKey)
+	}
+}
+
 func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]store.LogEntry, error) {
 	deadline := time.Now().Add(timeout)
 	var lastEntries []store.LogEntry

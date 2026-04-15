@@ -5,8 +5,13 @@ monitor:
   port: "8081" # 访问 http://localhost:8081 查看看板
 
 upstream:
-  base_url: "http://localhost:30080" 
+  base_url: "http://localhost:30080"
   api_key: "sk-test"
+  provider_preset: "openai"      # openai | azure | vllm | openrouter | fireworks | together ...
+  protocol_family: ""            # 默认自动推断，目前主推 openai_compatible
+  routing_profile: ""            # 默认自动推断，可显式指定 openai_default / azure_openai_v1 / azure_openai_deployment / vllm_openai
+  api_version: ""                # Azure 常用，比如 2025-03-01-preview
+  deployment: ""                 # Azure deployment routing 时使用
 
 debug:
   output_dir: "./logs"

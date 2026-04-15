@@ -17,10 +17,7 @@ type Config struct {
 		Port string `yaml:"port"`
 	} `yaml:"monitor"`
 
-	Upstream struct {
-		BaseURL string `yaml:"base_url"`
-		ApiKey  string `yaml:"api_key"`
-	} `yaml:"upstream"`
+	Upstream UpstreamConfig `yaml:"upstream"`
 
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
@@ -32,6 +29,16 @@ type Config struct {
 		Enabled bool        `yaml:"enabled"`
 		Rules   []ChaosRule `yaml:"rules"`
 	} `yaml:"chaos"`
+}
+
+type UpstreamConfig struct {
+	BaseURL        string `yaml:"base_url"`
+	ApiKey         string `yaml:"api_key"`
+	ProviderPreset string `yaml:"provider_preset"`
+	ProtocolFamily string `yaml:"protocol_family"`
+	RoutingProfile string `yaml:"routing_profile"`
+	APIVersion     string `yaml:"api_version"`
+	Deployment     string `yaml:"deployment"`
 }
 
 type ChaosRule struct {
@@ -68,6 +75,21 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_KEY"); v != "" {
 		cfg.Upstream.ApiKey = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET"); v != "" {
+		cfg.Upstream.ProviderPreset = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY"); v != "" {
+		cfg.Upstream.ProtocolFamily = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE"); v != "" {
+		cfg.Upstream.RoutingProfile = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_VERSION"); v != "" {
+		cfg.Upstream.APIVersion = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_DEPLOYMENT"); v != "" {
+		cfg.Upstream.Deployment = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v

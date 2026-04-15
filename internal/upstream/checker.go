@@ -10,6 +10,8 @@ import (
 	"net/http/httputil"
 	"os"
 	"time"
+
+	"github.com/kingfs/llm-tracelab/internal/config"
 )
 
 // OpenAI Compatible Models Response Structure
@@ -20,7 +22,12 @@ type modelsResponse struct {
 }
 
 // CheckConnectivity 调用上游 /v1/models 验证连通性
-func CheckConnectivity(baseURL, apiKey string) error {
+func CheckConnectivity(cfg config.UpstreamConfig) error {
+	resolved, err := Resolve(cfg)
+	if err != nil {
+		return err
+	}
+
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
@@ -28,8 +35,7 @@ func CheckConnectivity(baseURL, apiKey string) error {
 		},
 	}
 
-	// 构造测试 URL
-	targetURL, err := BuildUpstreamURL(baseURL, "/v1/models")
+	targetURL, err := resolved.ConnectivityCheckURL()
 	if err != nil {
 		return fmt.Errorf("build check url failed: %w", err)
 	}
@@ -39,7 +45,7 @@ func CheckConnectivity(baseURL, apiKey string) error {
 		return fmt.Errorf("create check request failed: %w", err)
 	}
 
-	ApplyAuthHeaders(req.Header, baseURL, apiKey)
+	resolved.ApplyAuthHeaders(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 
 	slog.Info("Starting upstream connectivity check...", "url", targetURL)
