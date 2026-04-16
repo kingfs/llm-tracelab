@@ -138,19 +138,16 @@ Examples that may justify future families:
 
 ## Next Candidate
 
-### `google_genai`
+### `vertex_native`
 
-The project now has initial `google_genai` protocol-family support for the base Gemini `generateContent` and `streamGenerateContent` flows.
+The current recommendation is to add `vertex_native` as the fourth protocol family, instead of folding Vertex into `google_genai`.
 
 Reason:
 
-- it validates that the current abstraction can support a genuinely different request and response model
-- it is more valuable architecturally than adding one more OpenAI-compatible alias
-- it creates a cleaner path for future non-OpenAI-compatible families such as Bedrock-native or Vertex-native APIs
+- Vertex-native differs enough in routing and auth semantics to justify isolation
+- it is a stronger architecture test than adding more OpenAI-compatible aliases
+- a minimal first cut can still reuse much of the existing Gemini body parsing logic
 
-Suggested implementation order:
+Planning note:
 
-1. improve Google-native timeline richness beyond plain text deltas
-2. decide whether Vertex-native APIs should share this family or become a separate routing profile
-3. extend model listing / startup diagnostics specifically for Google responses
-4. broaden replay-critical stream tests before expanding presets further
+- see [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md) for the proposed family boundary, routing profiles, and implementation order

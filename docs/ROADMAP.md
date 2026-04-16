@@ -280,6 +280,10 @@ These should be revisited before M4:
 - how far should the project go in normalizing reasoning and safety semantics before losing provider truth
 - whether model-listing and capability-discovery endpoints should become first-class replay targets
 
+Current planning note:
+
+- `vertex_native` is currently recommended as a separate family; see [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md)
+
 ## Decision Rule For Future Contributions
 
 When adding support for something new:
