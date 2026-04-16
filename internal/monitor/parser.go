@@ -380,6 +380,15 @@ func llmExtensionBlocks(resp llm.LLMResponse, candidate llm.LLMCandidate) []Cont
 		})
 	}
 
+	if payload := marshalCompact(resp.Extensions["model_list"]); payload != "" {
+		blocks = append(blocks, ContentBlock{
+			Kind:   "model_list",
+			Title:  "Model List",
+			Text:   payload,
+			Format: detectContentFormat(payload),
+		})
+	}
+
 	return blocks
 }
 

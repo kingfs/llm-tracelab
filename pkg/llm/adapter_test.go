@@ -32,6 +32,12 @@ func TestAdapterForPath(t *testing.T) {
 	assert.Equal(t, OperationGenerateContent, adapter.Semantics().Operation)
 	assert.Equal(t, "/v1beta/models:generateContent", adapter.Semantics().Endpoint)
 
+	adapter, err = AdapterForPath("/v1/models", "https://api.openai.com")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderOpenAICompatible, adapter.Semantics().Provider)
+	assert.Equal(t, OperationModels, adapter.Semantics().Operation)
+	assert.Equal(t, "/v1/models", adapter.Semantics().Endpoint)
+
 	adapter, err = AdapterForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", "https://us-central1-aiplatform.googleapis.com")
 	require.NoError(t, err)
 	assert.Equal(t, ProviderVertexNative, adapter.Semantics().Provider)
@@ -189,6 +195,35 @@ func TestParseVertexRequestAndResponseForPath(t *testing.T) {
 	require.Len(t, resp.Candidates, 1)
 	assert.Equal(t, "Hello from Vertex", resp.Candidates[0].Content[0].Text)
 	assert.Equal(t, 10, resp.Usage.TotalTokens)
+}
+
+func TestParseModelListRequestAndResponseForPath(t *testing.T) {
+	req, err := ParseRequestForPath("/v1/models", "https://api.openai.com", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "list_models", req.Model)
+	require.Len(t, req.Messages, 1)
+	assert.Equal(t, "List available models", req.Messages[0].Content[0].Text)
+
+	respBody := []byte(`{
+		"data":[
+			{"id":"gpt-5","object":"model"},
+			{"id":"gpt-4.1-mini","object":"model"}
+		]
+	}`)
+	resp, err := ParseResponse(ProviderOpenAICompatible, "/v1/models", respBody)
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	assert.Equal(t, "gpt-5\ngpt-4.1-mini", resp.Candidates[0].Content[0].Text)
+	assert.Contains(t, resp.Extensions, "model_list")
+
+	googleResp, err := ParseResponse(ProviderGoogleGenAI, "/v1beta/models", []byte(`{
+		"models":[
+			{"name":"models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash"}
+		]
+	}`))
+	require.NoError(t, err)
+	require.Len(t, googleResp.Candidates, 1)
+	assert.Equal(t, "models/gemini-2.5-flash", googleResp.Candidates[0].Content[0].Text)
 }
 
 func TestParseProviderErrorResponses(t *testing.T) {

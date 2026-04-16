@@ -146,6 +146,10 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 					matchedBlock = bytes.Contains(payload, []byte(tt.want.blockContains))
 				}
 				if !matchedBlock {
+					payload, _ := json.Marshal(llmResp.Extensions["model_list"])
+					matchedBlock = bytes.Contains(payload, []byte(tt.want.blockContains))
+				}
+				if !matchedBlock {
 					t.Fatalf("llm response block does not contain %q: refusal=%+v extensions=%+v", tt.want.blockContains, llmResp.Candidates[0].Refusal, llmResp.Extensions)
 				}
 			}
@@ -289,6 +293,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityPartialComp,
 		capabilityRefusal,
 		capabilityError,
+		capabilityModelList,
 	}
 
 	for _, capability := range requiredCapabilities {

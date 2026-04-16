@@ -66,6 +66,7 @@ const (
 	capabilityPartialComp cassetteCapability = "partial_completion"
 	capabilityRefusal     cassetteCapability = "refusal"
 	capabilityError       cassetteCapability = "error"
+	capabilityModelList   cassetteCapability = "model_list"
 )
 
 type cassetteFixtureCase struct {
@@ -93,9 +94,12 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		googleGenAIStreamFixture(),
 		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
+		openAIModelsFixture(),
+		googleGenAIModelsFixture(),
 		vertexNativeNonStreamHistoryFixture(),
 		vertexNativeProviderErrorFixture(),
 		vertexNativeStreamErrorFixture(),
+		vertexNativeModelsFixture(),
 		vertexNativeStreamFixture(),
 	}
 }
@@ -756,6 +760,74 @@ func googleGenAIBlockedFixture() cassetteFixtureCase {
 	}
 }
 
+func openAIModelsFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_models_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityModelList,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationModels,
+			endpoint:        "/v1/models",
+			url:             "/v1/models",
+			method:          "GET",
+			model:           "list_models",
+			requestProtocol: "GET /v1/models HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			requestBody:     `{}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"data":[{"id":"gpt-5","object":"model"},{"id":"gpt-4.1-mini","object":"model"}]}`,
+		},
+		want: cassetteExpectation{
+			replayContains:  `"gpt-5"`,
+			messageContains: "List available models",
+			historyContains: []string{"List available models"},
+			messageCount:    1,
+			aiContent:       "gpt-5\ngpt-4.1-mini",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Model List"},
+			statusCode:      200,
+			blockContains:   "gpt-5",
+		},
+	}
+}
+
+func googleGenAIModelsFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "google_genai_models_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityModelList,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderGoogleGenAI,
+			operation:       llm.OperationModels,
+			endpoint:        "/v1beta/models",
+			url:             "/v1beta/models",
+			method:          "GET",
+			model:           "list_models",
+			requestProtocol: "GET /v1beta/models HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			requestBody:     `{}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"models":[{"name":"models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash"},{"name":"models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro"}]}`,
+		},
+		want: cassetteExpectation{
+			replayContains:  `"models/gemini-2.5-flash"`,
+			messageContains: "List available models",
+			historyContains: []string{"List available models"},
+			messageCount:    1,
+			aiContent:       "models/gemini-2.5-flash\nmodels/gemini-2.5-pro",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Model List"},
+			statusCode:      200,
+			blockContains:   "gemini-2.5-flash",
+		},
+	}
+}
+
 func vertexNativeNonStreamHistoryFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "vertex_native_non_stream_history",
@@ -915,6 +987,40 @@ func vertexNativeStreamFixture() cassetteFixtureCase {
 			completionTokens: 7,
 			statusCode:       200,
 			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
+		},
+	}
+}
+
+func vertexNativeModelsFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "vertex_native_models_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityModelList,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderVertexNative,
+			operation:       llm.OperationModels,
+			endpoint:        "/v1/publishers/models",
+			url:             "/v1/publishers/google/models",
+			method:          "GET",
+			model:           "list_models",
+			requestProtocol: "GET /v1/publishers/google/models HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			requestBody:     `{}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"publisherModels":[{"name":"publishers/google/models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash"},{"name":"publishers/google/models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro"}]}`,
+		},
+		want: cassetteExpectation{
+			replayContains:  `"publishers/google/models/gemini-2.5-flash"`,
+			messageContains: "List available models",
+			historyContains: []string{"List available models"},
+			messageCount:    1,
+			aiContent:       "publishers/google/models/gemini-2.5-flash\npublishers/google/models/gemini-2.5-pro",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Model List"},
+			statusCode:      200,
+			blockContains:   "gemini-2.5-flash",
 		},
 	}
 }

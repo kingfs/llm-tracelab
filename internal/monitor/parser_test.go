@@ -305,6 +305,32 @@ func TestParseLogFileStreamProviderErrorDecoratesErrorBlock(t *testing.T) {
 	}
 }
 
+func TestParseLogFileModelListDecoratesModelListBlock(t *testing.T) {
+	reqBody := `{}`
+	resBody := `{"data":[{"id":"gpt-5","object":"model"},{"id":"gpt-4.1-mini","object":"model"}]}`
+
+	content := buildRecordFixture(t, "/v1/models", false, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if len(parsed.ChatMessages) != 1 {
+		t.Fatalf("len(ChatMessages) = %d, want 1", len(parsed.ChatMessages))
+	}
+	if parsed.ChatMessages[0].Content != "List available models" {
+		t.Fatalf("request content = %q, want List available models", parsed.ChatMessages[0].Content)
+	}
+	if parsed.AIContent != "gpt-5\ngpt-4.1-mini" {
+		t.Fatalf("AIContent = %q, want gpt-5\\ngpt-4.1-mini", parsed.AIContent)
+	}
+	if len(parsed.AIBlocks) != 1 {
+		t.Fatalf("len(AIBlocks) = %d, want 1", len(parsed.AIBlocks))
+	}
+	if parsed.AIBlocks[0].Title != "Model List" || !strings.Contains(parsed.AIBlocks[0].Text, "gpt-5") {
+		t.Fatalf("model list block = %+v", parsed.AIBlocks[0])
+	}
+}
+
 func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string, resBody string) []byte {
 	return buildRecordFixtureWithStatus(t, url, isStream, "200 OK", reqBody, resBody)
 }

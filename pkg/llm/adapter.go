@@ -38,6 +38,10 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 		return openAIChatAdapter{semantics: semantics}, nil
 	case semantics.Endpoint == "/v1/responses":
 		return openAIResponsesAdapter{semantics: semantics}, nil
+	case semantics.Endpoint == "/v1/models",
+		semantics.Endpoint == "/v1beta/models",
+		semantics.Endpoint == "/v1/publishers/models":
+		return modelListAdapter{semantics: semantics}, nil
 	case semantics.Endpoint == "/v1/messages":
 		return anthropicMessagesAdapter{semantics: semantics}, nil
 	case semantics.Endpoint == "/v1beta/models:generateContent",
@@ -177,6 +181,24 @@ func (a anthropicMessagesAdapter) MarshalRequest(req LLMRequest) ([]byte, error)
 func (a anthropicMessagesAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
 	result := resp.ToAnthropicResponse()
 	return json.Marshal(result)
+}
+
+type modelListAdapter struct {
+	semantics TraceSemantics
+}
+
+func (a modelListAdapter) Semantics() TraceSemantics { return a.semantics }
+func (a modelListAdapter) ParseRequest(body []byte) (LLMRequest, error) {
+	return defaultModelListRequest(), nil
+}
+func (a modelListAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	return parseModelListResponse(body)
+}
+func (a modelListAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
+	return []byte("{}"), nil
+}
+func (a modelListAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
+	return json.Marshal(resp.Extensions["model_list"])
 }
 
 type googleGenerateContentAdapter struct {
