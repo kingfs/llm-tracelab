@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ type cassetteSpec struct {
 	responseBody    string
 	isStream        bool
 	usage           recordfile.UsageInfo
+	events          []recordfile.RecordEvent
 }
 
 func TestCassetteMatrixReplayAndParse(t *testing.T) {
@@ -40,6 +42,8 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 		wantAIContent        string
 		wantPromptTokens     int
 		wantCompletionTokens int
+		wantToolCallName     string
+		wantEventTypes       []string
 	}{
 		{
 			name: "openai_responses_non_stream",
@@ -68,6 +72,46 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			wantCompletionTokens: 5,
 		},
 		{
+			name: "openai_responses_tool_call_stream",
+			spec: cassetteSpec{
+				provider:        llm.ProviderOpenAICompatible,
+				operation:       llm.OperationResponses,
+				endpoint:        "/v1/responses",
+				url:             "/v1/responses",
+				method:          http.MethodPost,
+				model:           "gpt-5",
+				requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+				requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect logs"}]}]}`,
+				responseStatus:  "200 OK",
+				responseHeaders: "Content-Type: text/event-stream\r\n",
+				responseBody: stringsJoin(
+					"data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\"}}",
+					"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"cmd\\\":\\\"pwd\\\"}\",\"item_id\":\"fc_1\"}",
+					"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}",
+					"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4,\"total_tokens\":13}}}",
+				),
+				isStream: true,
+				usage: recordfile.UsageInfo{
+					PromptTokens:     9,
+					CompletionTokens: 4,
+					TotalTokens:      13,
+				},
+				events: []recordfile.RecordEvent{
+					{Type: "llm.tool_call", Time: time.Date(2026, 4, 15, 12, 0, 1, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "call_1", "name": "exec_command", "type": "function_call"}},
+					{Type: "llm.tool_call.delta", Time: time.Date(2026, 4, 15, 12, 0, 2, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "fc_1", "arguments": "{\"cmd\":\"pwd\"}"}},
+					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 0, 3, 0, time.UTC), IsStream: true, Message: "done"},
+					{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 0, 4, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13}},
+				},
+			},
+			wantReplayContains:   "data:",
+			wantMessageContains:  "inspect logs",
+			wantAIContent:        "done",
+			wantPromptTokens:     9,
+			wantCompletionTokens: 4,
+			wantToolCallName:     "exec_command",
+			wantEventTypes:       []string{"llm.tool_call", "llm.tool_call.delta", "llm.output_text.delta", "llm.usage"},
+		},
+		{
 			name: "anthropic_messages_non_stream",
 			spec: cassetteSpec{
 				provider:        llm.ProviderAnthropic,
@@ -94,6 +138,44 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			wantCompletionTokens: 6,
 		},
 		{
+			name: "anthropic_messages_stream",
+			spec: cassetteSpec{
+				provider:        llm.ProviderAnthropic,
+				operation:       llm.OperationMessages,
+				endpoint:        "/v1/messages",
+				url:             "/v1/messages",
+				method:          http.MethodPost,
+				model:           "claude-sonnet-4-5",
+				requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+				requestBody:     `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"hello from anthropic stream"}]}],"max_tokens":16}`,
+				responseStatus:  "200 OK",
+				responseHeaders: "Content-Type: text/event-stream\r\n",
+				responseBody: stringsJoin(
+					"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
+					"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}",
+					"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude\"}}",
+					"data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":5,\"output_tokens\":7}}",
+				),
+				isStream: true,
+				usage: recordfile.UsageInfo{
+					PromptTokens:     5,
+					CompletionTokens: 7,
+					TotalTokens:      12,
+				},
+				events: []recordfile.RecordEvent{
+					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 1, 1, 0, time.UTC), IsStream: true, Message: "Hello "},
+					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 1, 2, 0, time.UTC), IsStream: true, Message: "Claude"},
+					{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 1, 3, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}},
+				},
+			},
+			wantReplayContains:   "data:",
+			wantMessageContains:  "hello from anthropic stream",
+			wantAIContent:        "Hello Claude",
+			wantPromptTokens:     5,
+			wantCompletionTokens: 7,
+			wantEventTypes:       []string{"llm.output_text.delta", "llm.usage"},
+		},
+		{
 			name: "google_genai_stream",
 			spec: cassetteSpec{
 				provider:        llm.ProviderGoogleGenAI,
@@ -114,12 +196,18 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 					CompletionTokens: 7,
 					TotalTokens:      10,
 				},
+				events: []recordfile.RecordEvent{
+					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 2, 1, 0, time.UTC), IsStream: true, Message: "Hello ", Attributes: map[string]interface{}{"role": "model"}},
+					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 2, 2, 0, time.UTC), IsStream: true, Message: "Gemini", Attributes: map[string]interface{}{"role": "model"}},
+					{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 2, 3, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 3, "completion_tokens": 7, "total_tokens": 10}},
+				},
 			},
 			wantReplayContains:   "data:",
 			wantMessageContains:  "hello from gemini",
 			wantAIContent:        "Hello Gemini",
 			wantPromptTokens:     3,
 			wantCompletionTokens: 7,
+			wantEventTypes:       []string{"llm.output_text.delta", "llm.usage"},
 		},
 	}
 
@@ -136,6 +224,17 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			}
 			if parsedPrelude.Header.Meta.Operation != tt.spec.operation {
 				t.Fatalf("operation = %q, want %q", parsedPrelude.Header.Meta.Operation, tt.spec.operation)
+			}
+			if len(tt.wantEventTypes) > 0 {
+				foundTypes := map[string]bool{}
+				for _, event := range parsedPrelude.Events {
+					foundTypes[event.Type] = true
+				}
+				for _, eventType := range tt.wantEventTypes {
+					if !foundTypes[eventType] {
+						t.Fatalf("missing event type %q in %+v", eventType, parsedPrelude.Events)
+					}
+				}
 			}
 
 			reqFull, reqBody, _, resBody := recordfile.ExtractSections(content, parsedPrelude)
@@ -184,6 +283,14 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if llmResp.Candidates[0].Content[0].Text != tt.wantAIContent {
 				t.Fatalf("content = %q, want %q", llmResp.Candidates[0].Content[0].Text, tt.wantAIContent)
 			}
+			if tt.wantToolCallName != "" {
+				if len(llmResp.Candidates[0].ToolCalls) == 0 {
+					t.Fatalf("expected tool call %q, got none", tt.wantToolCallName)
+				}
+				if llmResp.Candidates[0].ToolCalls[0].Name != tt.wantToolCallName {
+					t.Fatalf("tool call = %q, want %q", llmResp.Candidates[0].ToolCalls[0].Name, tt.wantToolCallName)
+				}
+			}
 
 			parsedMonitor, err := monitor.ParseLogFile(content)
 			if err != nil {
@@ -201,6 +308,14 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if parsedMonitor.AIContent != tt.wantAIContent {
 				t.Fatalf("monitor AIContent = %q, want %q", parsedMonitor.AIContent, tt.wantAIContent)
 			}
+			if tt.wantToolCallName != "" {
+				if len(parsedMonitor.ResponseToolCalls) == 0 {
+					t.Fatalf("expected monitor tool call %q, got none", tt.wantToolCallName)
+				}
+				if parsedMonitor.ResponseToolCalls[0].Function.Name != tt.wantToolCallName {
+					t.Fatalf("monitor tool call = %q, want %q", parsedMonitor.ResponseToolCalls[0].Function.Name, tt.wantToolCallName)
+				}
+			}
 			foundMessage := false
 			for _, message := range parsedMonitor.ChatMessages {
 				if bytes.Contains([]byte(message.Content), []byte(tt.wantMessageContains)) {
@@ -213,6 +328,10 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			}
 		})
 	}
+}
+
+func stringsJoin(lines ...string) string {
+	return strings.Join(lines, "\n\n") + "\n\n"
 }
 
 func writeCassetteFixture(t *testing.T, spec cassetteSpec) (string, []byte) {
@@ -246,7 +365,11 @@ func writeCassetteFixture(t *testing.T, spec cassetteSpec) (string, []byte) {
 		Usage: spec.usage,
 	}
 
-	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	events := recordfile.BuildEvents(header)
+	if len(spec.events) > 0 {
+		events = append(events, spec.events...)
+	}
+	prelude, err := recordfile.MarshalPrelude(header, events)
 	if err != nil {
 		t.Fatalf("MarshalPrelude() error = %v", err)
 	}
