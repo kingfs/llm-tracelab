@@ -146,6 +146,10 @@ func (p *ResponsePipeline) appendProviderEvent(jsonStr string) {
 }
 
 func (p *ResponsePipeline) appendOpenAIChatEvent(jsonStr string) {
+	if payload, ok := parseOpenAIStreamError(jsonStr); ok {
+		p.appendEvent("llm.output_block", marshalCompactString(payload), map[string]interface{}{"kind": "provider_error"})
+		return
+	}
 	var chunk struct {
 		Choices []struct {
 			Delta struct {
@@ -184,6 +188,10 @@ func (p *ResponsePipeline) appendOpenAIChatEvent(jsonStr string) {
 }
 
 func (p *ResponsePipeline) appendResponsesEvent(jsonStr string) {
+	if payload, ok := parseOpenAIStreamError(jsonStr); ok {
+		p.appendEvent("llm.output_block", marshalCompactString(payload), map[string]interface{}{"kind": "provider_error"})
+		return
+	}
 	var env struct {
 		Type      string `json:"type"`
 		Delta     string `json:"delta"`
@@ -225,6 +233,10 @@ func (p *ResponsePipeline) appendResponsesEvent(jsonStr string) {
 }
 
 func (p *ResponsePipeline) appendAnthropicEvent(jsonStr string) {
+	if payload, ok := parseAnthropicStreamError(jsonStr); ok {
+		p.appendEvent("llm.output_block", marshalCompactString(payload), map[string]interface{}{"kind": "provider_error"})
+		return
+	}
 	var chunk struct {
 		Type  string `json:"type"`
 		Index int    `json:"index"`
@@ -267,6 +279,10 @@ func (p *ResponsePipeline) appendAnthropicEvent(jsonStr string) {
 }
 
 func (p *ResponsePipeline) appendGoogleEvent(jsonStr string) {
+	if payload, ok := parseGoogleStreamError(jsonStr); ok {
+		p.appendEvent("llm.output_block", marshalCompactString(payload), map[string]interface{}{"kind": "provider_error"})
+		return
+	}
 	var chunk struct {
 		PromptFeedback map[string]any `json:"promptFeedback"`
 		Candidates     []struct {

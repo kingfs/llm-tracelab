@@ -94,6 +94,51 @@ func TestResponsePipelineGoogleStreamEmitsSafetyBlocks(t *testing.T) {
 	assert.Equal(t, "SAFETY", events[2].Message)
 }
 
+func TestResponsePipelineStreamErrorsEmitProviderErrorBlocks(t *testing.T) {
+	testCases := []struct {
+		name     string
+		provider string
+		endpoint string
+		line     string
+		wantText string
+	}{
+		{
+			name:     "openai responses",
+			provider: ProviderOpenAICompatible,
+			endpoint: "/v1/responses",
+			line:     `data: {"type":"response.failed","response":{"error":{"message":"stream aborted","type":"server_error","code":"stream_aborted"}}}` + "\n",
+			wantText: "stream aborted",
+		},
+		{
+			name:     "anthropic",
+			provider: ProviderAnthropic,
+			endpoint: "/v1/messages",
+			line:     `data: {"type":"error","error":{"type":"overloaded_error","message":"stream overloaded"}}` + "\n",
+			wantText: "stream overloaded",
+		},
+		{
+			name:     "google",
+			provider: ProviderGoogleGenAI,
+			endpoint: "/v1beta/models:streamGenerateContent",
+			line:     `data: {"error":{"code":429,"message":"stream quota exceeded","status":"RESOURCE_EXHAUSTED"}}` + "\n",
+			wantText: "stream quota exceeded",
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			pipeline := NewResponsePipeline(tt.provider, tt.endpoint, true)
+			pipeline.Feed([]byte(tt.line))
+
+			events := pipeline.Events()
+			require.Len(t, events, 1)
+			assert.Equal(t, "llm.output_block", events[0].Type)
+			assert.Equal(t, "provider_error", events[0].Attributes["kind"])
+			assert.Contains(t, events[0].Message, tt.wantText)
+		})
+	}
+}
+
 func TestDetectStreamingResponse(t *testing.T) {
 	header := http.Header{}
 	header.Set("Content-Type", "text/event-stream")

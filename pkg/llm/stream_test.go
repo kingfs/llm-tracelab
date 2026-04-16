@@ -61,3 +61,56 @@ func TestParseGoogleGenerateContentStreamResponse(t *testing.T) {
 	assert.Equal(t, "model", resp.Candidates[0].Role)
 	assert.Equal(t, "Hello Gemini", resp.Candidates[0].Content[0].Text)
 }
+
+func TestParseStreamProviderErrors(t *testing.T) {
+	testCases := []struct {
+		name     string
+		provider string
+		endpoint string
+		body     string
+		wantText string
+	}{
+		{
+			name:     "openai responses",
+			provider: ProviderOpenAICompatible,
+			endpoint: "/v1/responses",
+			body: strings.Join([]string{
+				`data: {"type":"response.output_text.delta","delta":"partial"}`,
+				`data: {"type":"response.failed","response":{"error":{"message":"stream aborted","type":"server_error","code":"stream_aborted"}}}`,
+			}, "\n"),
+			wantText: "stream aborted",
+		},
+		{
+			name:     "anthropic",
+			provider: ProviderAnthropic,
+			endpoint: "/v1/messages",
+			body: strings.Join([]string{
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
+				`data: {"type":"error","error":{"type":"overloaded_error","message":"stream overloaded"}}`,
+			}, "\n"),
+			wantText: "stream overloaded",
+		},
+		{
+			name:     "google",
+			provider: ProviderGoogleGenAI,
+			endpoint: "/v1beta/models:streamGenerateContent",
+			body: strings.Join([]string{
+				`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]}}]}`,
+				`data: {"error":{"code":429,"message":"stream quota exceeded","status":"RESOURCE_EXHAUSTED"}}`,
+			}, "\n"),
+			wantText: "stream quota exceeded",
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := ParseStreamResponse(tt.provider, tt.endpoint, []byte(tt.body))
+			require.NoError(t, err)
+			require.Len(t, resp.Candidates, 1)
+			assert.Equal(t, "error", resp.Candidates[0].FinishReason)
+			require.Contains(t, resp.Extensions, "error")
+			assert.Contains(t, marshalCompactString(resp.Extensions["error"]), tt.wantText)
+		})
+	}
+}

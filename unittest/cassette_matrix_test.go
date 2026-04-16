@@ -285,6 +285,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityMixedBlocks,
 		capabilitySafety,
 		capabilityProviderErr,
+		capabilityStreamError,
 		capabilityRefusal,
 		capabilityError,
 	}
@@ -307,6 +308,9 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		}
 		if capability == capabilityProviderErr && len(providers) < 3 {
 			t.Fatalf("provider error coverage should span 3 providers, got %d: %+v", len(providers), providers)
+		}
+		if capability == capabilityStreamError && len(providers) < 3 {
+			t.Fatalf("stream error coverage should span 3 providers, got %d: %+v", len(providers), providers)
 		}
 		if capability == capabilitySafety {
 			if !providers[llm.ProviderGoogleGenAI] {

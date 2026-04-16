@@ -22,6 +22,7 @@ func (a openAIChatAdapter) ParseStreamResponse(body []byte) (LLMResponse, error)
 		reasoningBuilder strings.Builder
 		toolCalls        []LLMToolCall
 		toolCallByIndex  = map[int]*LLMToolCall{}
+		streamError      map[string]any
 	)
 
 	scanner := newSSEScanner(body)
@@ -32,6 +33,10 @@ func (a openAIChatAdapter) ParseStreamResponse(body []byte) (LLMResponse, error)
 		}
 		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+		if payload, ok := parseOpenAIStreamError(jsonStr); ok {
+			streamError = payload
 			continue
 		}
 
@@ -76,7 +81,7 @@ func (a openAIChatAdapter) ParseStreamResponse(body []byte) (LLMResponse, error)
 	}
 
 	toolCalls = flattenToolCalls(toolCallByIndex)
-	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls), nil
+	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls, streamError), nil
 }
 
 func (a anthropicMessagesAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
@@ -102,6 +107,7 @@ func (a anthropicMessagesAdapter) ParseStreamResponse(body []byte) (LLMResponse,
 	}
 	blockMap := map[int]*anthropicStreamBlockState{}
 	var blockOrder []int
+	var streamError map[string]any
 	scanner := newSSEScanner(body)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -110,6 +116,10 @@ func (a anthropicMessagesAdapter) ParseStreamResponse(body []byte) (LLMResponse,
 		}
 		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+		if payload, ok := parseAnthropicStreamError(jsonStr); ok {
+			streamError = payload
 			continue
 		}
 
@@ -167,7 +177,7 @@ func (a anthropicMessagesAdapter) ParseStreamResponse(body []byte) (LLMResponse,
 			})
 		}
 	}
-	return LLMResponse{Candidates: []LLMCandidate{candidate}}, nil
+	return singleCandidateResponse(candidateText(candidate), candidateReasoning(candidate), candidate.ToolCalls, streamError), nil
 }
 
 func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
@@ -176,6 +186,7 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 		reasoningBuilder strings.Builder
 		toolCallMap      = map[string]*LLMToolCall{}
 		toolCallOrder    []string
+		streamError      map[string]any
 	)
 
 	scanner := newSSEScanner(body)
@@ -186,6 +197,10 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 		}
 		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+		if payload, ok := parseOpenAIStreamError(jsonStr); ok {
+			streamError = payload
 			continue
 		}
 
@@ -285,7 +300,7 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 		call.Args = parseJSONObject(call.ArgsText)
 		toolCalls = append(toolCalls, *call)
 	}
-	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls), nil
+	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls, streamError), nil
 }
 
 func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
@@ -294,6 +309,7 @@ func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 		role           = "model"
 		safetyAll      []LLMSafetyRating
 		promptFeedback map[string]any
+		streamError    map[string]any
 	)
 
 	scanner := newSSEScanner(body)
@@ -304,6 +320,10 @@ func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 		}
 		jsonStr := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if jsonStr == "" || jsonStr == "[DONE]" {
+			continue
+		}
+		if payload, ok := parseGoogleStreamError(jsonStr); ok {
+			streamError = payload
 			continue
 		}
 
@@ -333,7 +353,7 @@ func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 		}
 	}
 
-	resp := singleCandidateResponse(contentBuilder.String(), "", nil)
+	resp := singleCandidateResponse(contentBuilder.String(), "", nil, streamError)
 	if len(resp.Candidates) > 0 {
 		resp.Candidates[0].Role = role
 		if len(safetyAll) > 0 {
@@ -361,7 +381,7 @@ func newSSEScanner(body []byte) *bufio.Scanner {
 	return scanner
 }
 
-func singleCandidateResponse(content string, reasoning string, toolCalls []LLMToolCall) LLMResponse {
+func singleCandidateResponse(content string, reasoning string, toolCalls []LLMToolCall, streamError map[string]any) LLMResponse {
 	candidate := LLMCandidate{
 		Index:     0,
 		Role:      "assistant",
@@ -373,7 +393,32 @@ func singleCandidateResponse(content string, reasoning string, toolCalls []LLMTo
 	if reasoning != "" {
 		candidate.Content = append(candidate.Content, LLMContent{Type: "thinking", Text: reasoning})
 	}
-	return LLMResponse{Candidates: []LLMCandidate{candidate}}
+	resp := LLMResponse{Candidates: []LLMCandidate{candidate}}
+	if len(streamError) > 0 {
+		resp.Extensions = map[string]any{"error": streamError}
+		resp.Candidates[0].FinishReason = "error"
+	}
+	return resp
+}
+
+func candidateText(candidate LLMCandidate) string {
+	var parts []string
+	for _, content := range candidate.Content {
+		if content.Type == "text" && content.Text != "" {
+			parts = append(parts, content.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func candidateReasoning(candidate LLMCandidate) string {
+	var parts []string
+	for _, content := range candidate.Content {
+		if content.Type == "thinking" && content.Text != "" {
+			parts = append(parts, content.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func ensureToolCallByIndex(toolCalls map[int]*LLMToolCall, idx int) *LLMToolCall {

@@ -282,6 +282,29 @@ func TestParseLogFileProviderErrorDecoratesErrorBlock(t *testing.T) {
 	}
 }
 
+func TestParseLogFileStreamProviderErrorDecoratesErrorBlock(t *testing.T) {
+	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"stream failure"}]}]}`
+	resBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		`data: {"type":"response.failed","response":{"error":{"message":"stream aborted","type":"server_error","code":"stream_aborted"}}}`,
+	}, "\n")
+
+	content := buildRecordFixture(t, "/v1/responses", true, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if parsed.AIContent != "partial" {
+		t.Fatalf("AIContent = %q, want partial", parsed.AIContent)
+	}
+	if len(parsed.AIBlocks) != 1 {
+		t.Fatalf("len(AIBlocks) = %d, want 1", len(parsed.AIBlocks))
+	}
+	if parsed.AIBlocks[0].Title != "Provider Error" || !strings.Contains(parsed.AIBlocks[0].Text, "stream aborted") {
+		t.Fatalf("provider error block = %+v", parsed.AIBlocks[0])
+	}
+}
+
 func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string, resBody string) []byte {
 	return buildRecordFixtureWithStatus(t, url, isStream, "200 OK", reqBody, resBody)
 }

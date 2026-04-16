@@ -62,6 +62,7 @@ const (
 	capabilityMixedBlocks cassetteCapability = "mixed_blocks"
 	capabilitySafety      cassetteCapability = "safety"
 	capabilityProviderErr cassetteCapability = "provider_error"
+	capabilityStreamError cassetteCapability = "stream_error"
 	capabilityRefusal     cassetteCapability = "refusal"
 	capabilityError       cassetteCapability = "error"
 )
@@ -85,6 +86,9 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		openAIProviderErrorFixture(),
 		anthropicProviderErrorFixture(),
 		googleProviderErrorFixture(),
+		openAIResponsesStreamErrorFixture(),
+		anthropicMessagesStreamErrorFixture(),
+		googleGenAIStreamErrorFixture(),
 		googleGenAIStreamFixture(),
 		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
@@ -495,6 +499,124 @@ func googleProviderErrorFixture() cassetteFixtureCase {
 			blockContains:    "Quota exceeded",
 			promptTokens:     0,
 			completionTokens: 0,
+		},
+	}
+}
+
+func openAIResponsesStreamErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_stream_error",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityProviderErr,
+			capabilityStreamError,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"stream failure"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				`data: {"type":"response.output_text.delta","delta":"partial"}`,
+				`data: {"type":"response.failed","response":{"error":{"message":"stream aborted","type":"server_error","code":"stream_aborted"}}}`,
+			),
+			isStream: true,
+		},
+		want: cassetteExpectation{
+			replayContains:  `response.failed`,
+			messageContains: "stream failure",
+			historyContains: []string{"stream failure"},
+			messageCount:    1,
+			aiContent:       "partial",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Provider Error"},
+			statusCode:      200,
+			blockContains:   "stream aborted",
+		},
+	}
+}
+
+func anthropicMessagesStreamErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "anthropic_messages_stream_error",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityProviderErr,
+			capabilityStreamError,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderAnthropic,
+			operation:       llm.OperationMessages,
+			endpoint:        "/v1/messages",
+			url:             "/v1/messages",
+			method:          "POST",
+			model:           "claude-sonnet-4-5",
+			requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"stream failure"}]}],"max_tokens":16}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"partial"}}`,
+				`data: {"type":"error","error":{"type":"overloaded_error","message":"stream overloaded"}}`,
+			),
+			isStream: true,
+		},
+		want: cassetteExpectation{
+			replayContains:  `stream overloaded`,
+			messageContains: "stream failure",
+			historyContains: []string{"stream failure"},
+			messageCount:    1,
+			aiContent:       "partial",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Provider Error"},
+			statusCode:      200,
+			blockContains:   "stream overloaded",
+		},
+	}
+}
+
+func googleGenAIStreamErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "google_genai_stream_error",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityProviderErr,
+			capabilityStreamError,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderGoogleGenAI,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1beta/models:streamGenerateContent",
+			url:             "/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"contents":[{"role":"user","parts":[{"text":"stream failure"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]}}]}`,
+				`data: {"error":{"code":429,"message":"stream quota exceeded","status":"RESOURCE_EXHAUSTED"}}`,
+			),
+			isStream: true,
+		},
+		want: cassetteExpectation{
+			replayContains:  `stream quota exceeded`,
+			messageContains: "stream failure",
+			historyContains: []string{"stream failure"},
+			messageCount:    1,
+			aiContent:       "partial",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Provider Error"},
+			statusCode:      200,
+			blockContains:   "stream quota exceeded",
 		},
 	}
 }

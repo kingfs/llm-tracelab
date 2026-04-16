@@ -98,3 +98,46 @@ func providerErrorResponse(payload map[string]any) LLMResponse {
 		},
 	}
 }
+
+func parseOpenAIStreamError(jsonStr string) (map[string]any, bool) {
+	var failed struct {
+		Type     string `json:"type"`
+		Response struct {
+			Error struct {
+				Message string      `json:"message"`
+				Type    string      `json:"type"`
+				Code    interface{} `json:"code"`
+			} `json:"error"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &failed); err == nil && failed.Type == "response.failed" {
+		return map[string]any{
+			"provider": "openai_compatible",
+			"message":  failed.Response.Error.Message,
+			"type":     failed.Response.Error.Type,
+			"code":     failed.Response.Error.Code,
+		}, true
+	}
+
+	resp, ok := parseOpenAIProviderError([]byte(jsonStr))
+	if !ok {
+		return nil, false
+	}
+	return resp.Extensions["error"].(map[string]any), true
+}
+
+func parseAnthropicStreamError(jsonStr string) (map[string]any, bool) {
+	resp, ok := parseAnthropicProviderError([]byte(jsonStr))
+	if !ok {
+		return nil, false
+	}
+	return resp.Extensions["error"].(map[string]any), true
+}
+
+func parseGoogleStreamError(jsonStr string) (map[string]any, bool) {
+	resp, ok := parseGoogleProviderError([]byte(jsonStr))
+	if !ok {
+		return nil, false
+	}
+	return resp.Extensions["error"].(map[string]any), true
+}
