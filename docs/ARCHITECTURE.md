@@ -13,6 +13,7 @@
 5. `internal/upstream` resolves config into protocol family, routing profile, auth headers, and upstream URL behavior.
 6. Recorder writes compact metadata plus `# event:` timeline lines into the cassette prelude and indexes summary fields into SQLite.
 7. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
+8. Session-oriented monitor views are aggregated from SQLite using group metadata extracted from raw request headers such as `Session_id`.
 8. Unit tests use `pkg/replay.Transport` to replay the recorded response from the cassette.
 
 ## Storage Model
@@ -23,6 +24,7 @@
 
 The cassette remains the canonical replay artifact.
 SQLite exists to avoid expensive aggregate rescans and to support fast monitor queries.
+It also stores additive grouping metadata such as `session_id` so the monitor can switch between request and session perspectives without rescanning raw files.
 
 ## V3 Prelude And Timeline
 

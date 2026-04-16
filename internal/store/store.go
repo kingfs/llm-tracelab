@@ -3,10 +3,13 @@ package store
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
+	"net/textproto"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,9 +20,13 @@ import (
 )
 
 type LogEntry struct {
-	ID      string
-	Header  recordfile.RecordHeader
-	LogPath string
+	ID              string
+	Header          recordfile.RecordHeader
+	LogPath         string
+	SessionID       string
+	SessionSource   string
+	WindowID        string
+	ClientRequestID string
 }
 
 type Stats struct {
@@ -39,6 +46,38 @@ type Store struct {
 
 type ListPageResult struct {
 	Items      []LogEntry
+	Total      int
+	Page       int
+	PageSize   int
+	TotalPages int
+}
+
+type GroupingInfo struct {
+	SessionID       string
+	SessionSource   string
+	WindowID        string
+	ClientRequestID string
+}
+
+type SessionSummary struct {
+	SessionID      string
+	SessionSource  string
+	RequestCount   int
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	LastModel      string
+	Providers      []string
+	SuccessRequest int
+	FailedRequest  int
+	SuccessRate    float64
+	TotalTokens    int
+	AvgTTFT        int
+	TotalDuration  int64
+	StreamCount    int
+}
+
+type SessionPageResult struct {
+	Items      []SessionSummary
 	Total      int
 	Page       int
 	PageSize   int
@@ -107,11 +146,16 @@ func (s *Store) initSchema() error {
 			req_body_len INTEGER NOT NULL,
 			res_header_len INTEGER NOT NULL,
 			res_body_len INTEGER NOT NULL,
-			is_stream INTEGER NOT NULL
+			is_stream INTEGER NOT NULL,
+			session_id TEXT NOT NULL DEFAULT '',
+			session_source TEXT NOT NULL DEFAULT '',
+			window_id TEXT NOT NULL DEFAULT '',
+			client_request_id TEXT NOT NULL DEFAULT ''
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_recorded_at ON logs(recorded_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_model_recorded_at ON logs(model, recorded_at DESC);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id <> '';`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_session_id_recorded_at ON logs(session_id, recorded_at DESC) WHERE session_id <> '';`,
 	}
 
 	for _, stmt := range stmts {
@@ -131,10 +175,25 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("logs", "endpoint", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("logs", "session_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "session_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "window_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.backfillTraceIDs(); err != nil {
 		return err
 	}
 	if err := s.backfillSemantics(); err != nil {
+		return err
+	}
+	if err := s.backfillGrouping(); err != nil {
 		return err
 	}
 	return nil
@@ -246,6 +305,10 @@ func (s *Store) backfillSemantics() error {
 }
 
 func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
+	return s.UpsertLogWithGrouping(path, header, GroupingInfo{})
+}
+
+func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -278,8 +341,9 @@ func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
 			path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
 			status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -307,7 +371,11 @@ func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
 			req_body_len=excluded.req_body_len,
 			res_header_len=excluded.res_header_len,
 			res_body_len=excluded.res_body_len,
-			is_stream=excluded.is_stream
+			is_stream=excluded.is_stream,
+			session_id=excluded.session_id,
+			session_source=excluded.session_source,
+			window_id=excluded.window_id,
+			client_request_id=excluded.client_request_id
 	`,
 		path,
 		traceID,
@@ -337,6 +405,10 @@ func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
 		header.Layout.ResHeaderLen,
 		header.Layout.ResBodyLen,
 		boolToInt(header.Layout.IsStream),
+		grouping.SessionID,
+		grouping.SessionSource,
+		grouping.WindowID,
+		grouping.ClientRequestID,
 	)
 
 	return err
@@ -380,7 +452,12 @@ func (s *Store) Sync() error {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
 
-		return s.UpsertLog(path, parsed.Header)
+		grouping, err := ExtractGroupingInfo(content, parsed)
+		if err != nil {
+			return fmt.Errorf("extract grouping %s: %w", path, err)
+		}
+
+		return s.UpsertLogWithGrouping(path, parsed.Header, grouping)
 	})
 }
 
@@ -477,7 +554,8 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id
 		FROM logs
 		ORDER BY recorded_at DESC
 		LIMIT ?
@@ -518,7 +596,8 @@ func (s *Store) ListPage(page int, pageSize int) (ListPageResult, error) {
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id
 		FROM logs
 		ORDER BY recorded_at DESC
 		LIMIT ? OFFSET ?
@@ -557,11 +636,141 @@ func (s *Store) GetByID(traceID string) (LogEntry, error) {
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id
 		FROM logs
 		WHERE trace_id = ?
 	`, traceID)
 	return scanEntry(row)
+}
+
+func (s *Store) ListSessionPage(page int, pageSize int) (SessionPageResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs WHERE session_id <> '' GROUP BY session_id)`).Scan(&total); err != nil {
+		return SessionPageResult{}, err
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := s.db.Query(`
+		SELECT
+			s.session_id,
+			MIN(s.session_source) AS session_source,
+			COUNT(*) AS request_count,
+			MIN(s.recorded_at) AS first_seen,
+			MAX(s.recorded_at) AS last_seen,
+			COALESCE((
+				SELECT model FROM logs l2
+				WHERE l2.session_id = s.session_id
+				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
+				LIMIT 1
+			), '') AS last_model,
+			COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '') AS providers,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
+				100.0 * SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+			END AS success_rate,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
+			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
+			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
+		FROM logs s
+		WHERE s.session_id <> ''
+		GROUP BY s.session_id
+		ORDER BY MAX(s.recorded_at) DESC
+		LIMIT ? OFFSET ?
+	`, pageSize, offset)
+	if err != nil {
+		return SessionPageResult{}, err
+	}
+	defer rows.Close()
+
+	result := SessionPageResult{
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+	}
+	for rows.Next() {
+		summary, err := scanSessionSummary(rows)
+		if err != nil {
+			return SessionPageResult{}, err
+		}
+		result.Items = append(result.Items, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return SessionPageResult{}, err
+	}
+	if total == 0 {
+		return result, nil
+	}
+	result.TotalPages = int(math.Ceil(float64(total) / float64(pageSize)))
+	return result, nil
+}
+
+func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
+	row := s.db.QueryRow(`
+		SELECT
+			s.session_id,
+			MIN(s.session_source) AS session_source,
+			COUNT(*) AS request_count,
+			MIN(s.recorded_at) AS first_seen,
+			MAX(s.recorded_at) AS last_seen,
+			COALESCE((
+				SELECT model FROM logs l2
+				WHERE l2.session_id = s.session_id
+				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
+				LIMIT 1
+			), '') AS last_model,
+			COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '') AS providers,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
+				100.0 * SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+			END AS success_rate,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
+			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
+			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
+		FROM logs s
+		WHERE s.session_id = ?
+		GROUP BY s.session_id
+	`, sessionID)
+	return scanSessionSummary(row)
+}
+
+func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
+			duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id
+		FROM logs
+		WHERE session_id = ?
+		ORDER BY recorded_at DESC, trace_id DESC
+	`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []LogEntry
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
 }
 
 func (s *Store) PathByID(traceID string) (string, error) {
@@ -640,6 +849,10 @@ func scanEntry(scanner interface {
 		&entry.Header.Layout.ResHeaderLen,
 		&entry.Header.Layout.ResBodyLen,
 		&isStream,
+		&entry.SessionID,
+		&entry.SessionSource,
+		&entry.WindowID,
+		&entry.ClientRequestID,
 	)
 	if err != nil {
 		return LogEntry{}, err
@@ -658,6 +871,48 @@ func scanEntry(scanner interface {
 	return entry, nil
 }
 
+func scanSessionSummary(scanner interface {
+	Scan(dest ...any) error
+}) (SessionSummary, error) {
+	var (
+		summary      SessionSummary
+		firstSeen    string
+		lastSeen     string
+		providersCSV string
+		avgTTFT      float64
+	)
+	err := scanner.Scan(
+		&summary.SessionID,
+		&summary.SessionSource,
+		&summary.RequestCount,
+		&firstSeen,
+		&lastSeen,
+		&summary.LastModel,
+		&providersCSV,
+		&summary.SuccessRequest,
+		&summary.FailedRequest,
+		&summary.SuccessRate,
+		&summary.TotalTokens,
+		&avgTTFT,
+		&summary.TotalDuration,
+		&summary.StreamCount,
+	)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	summary.FirstSeen, err = timeParse(firstSeen)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	summary.LastSeen, err = timeParse(lastSeen)
+	if err != nil {
+		return SessionSummary{}, err
+	}
+	summary.AvgTTFT = int(math.Round(avgTTFT))
+	summary.Providers = splitProviders(providersCSV)
+	return summary, nil
+}
+
 func timeParse(v string) (time.Time, error) {
 	return time.Parse(timeLayout, v)
 }
@@ -667,4 +922,146 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func ExtractGroupingInfo(content []byte, parsed *recordfile.ParsedPrelude) (GroupingInfo, error) {
+	reqFull, _, _, _ := recordfile.ExtractSections(content, parsed)
+	return extractGroupingInfoFromRequest(reqFull)
+}
+
+func extractGroupingInfoFromRequest(reqFull []byte) (GroupingInfo, error) {
+	headers := parseRawRequestHeaders(reqFull)
+	info := GroupingInfo{
+		WindowID:        strings.TrimSpace(headers.Get("X-Codex-Window-Id")),
+		ClientRequestID: strings.TrimSpace(headers.Get("X-Client-Request-Id")),
+	}
+	if sessionID := strings.TrimSpace(headers.Get("Session_id")); sessionID != "" {
+		info.SessionID = sessionID
+		info.SessionSource = "header.session_id"
+		return info, nil
+	}
+
+	if rawMetadata := strings.TrimSpace(headers.Get("X-Codex-Turn-Metadata")); rawMetadata != "" {
+		var metadata struct {
+			SessionID string `json:"session_id"`
+		}
+		if err := json.Unmarshal([]byte(rawMetadata), &metadata); err == nil && strings.TrimSpace(metadata.SessionID) != "" {
+			info.SessionID = strings.TrimSpace(metadata.SessionID)
+			info.SessionSource = "header.x_codex_turn_metadata.session_id"
+			return info, nil
+		}
+	}
+
+	if info.WindowID != "" {
+		info.SessionID = normalizeWindowSessionID(info.WindowID)
+		if info.SessionID != "" {
+			info.SessionSource = "header.x_codex_window_id"
+			return info, nil
+		}
+	}
+
+	info.SessionSource = "none"
+	return info, nil
+}
+
+func parseRawRequestHeaders(reqFull []byte) textproto.MIMEHeader {
+	headers := make(textproto.MIMEHeader)
+	lines := strings.Split(string(reqFull), "\r\n")
+	for idx, line := range lines {
+		if idx == 0 || line == "" {
+			continue
+		}
+		name, value, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		headers.Add(textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name)), strings.TrimSpace(value))
+	}
+	return headers
+}
+
+func normalizeWindowSessionID(windowID string) string {
+	windowID = strings.TrimSpace(windowID)
+	if windowID == "" {
+		return ""
+	}
+	sessionID, _, found := strings.Cut(windowID, ":")
+	if !found {
+		return windowID
+	}
+	return strings.TrimSpace(sessionID)
+}
+
+func splitProviders(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	seen := map[string]struct{}{}
+	var providers []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		providers = append(providers, part)
+	}
+	sort.Strings(providers)
+	return providers
+}
+
+func (s *Store) backfillGrouping() error {
+	rows, err := s.db.Query(`SELECT path FROM logs WHERE session_source = ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return err
+		}
+		paths = append(paths, path)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		parsed, err := recordfile.ParsePrelude(content)
+		if err != nil {
+			if shouldSkipIncompleteRecord(content, err) {
+				continue
+			}
+			return err
+		}
+		grouping, err := ExtractGroupingInfo(content, parsed)
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(
+			`UPDATE logs SET session_id = ?, session_source = ?, window_id = ?, client_request_id = ? WHERE path = ?`,
+			grouping.SessionID,
+			grouping.SessionSource,
+			grouping.WindowID,
+			grouping.ClientRequestID,
+			path,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }

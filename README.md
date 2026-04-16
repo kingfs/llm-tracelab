@@ -19,6 +19,7 @@
 
 - `pkg/llm` 升级为按 provider/endpoint 工作的 adapter 层，统一处理 request、response、stream transcript 和 usage pipeline
 - Monitor 改成 Go embed 的 React UI，列表页异步分页，详情页支持 timeline / summary / raw protocol
+- Monitor 首页支持 `Sessions / Requests` 双视角，可按 `session_id` 等线索聚合相关请求
 - SQLite 索引改用稳定 `trace_id`，不再在 URL 中暴露本地路径
 - `LLM_PROXY_V3` 的 `# event:` 现在不仅有 request/response 基础事件，还会落 `llm.*` provider timeline
 
@@ -35,6 +36,7 @@
 - 将一次请求/响应保存为本地 `.http` cassette
 - 使用 `pkg/replay.Transport` 在测试中直接回放
 - Monitor 页面查看请求详情、统一 timeline、原始协议和 Token 消耗
+- Trace Monitor 支持按单请求查看，也支持按 session 聚合查看相关请求
 - 使用 SQLite 维护 metadata 索引，避免统计页每次全量读文件
 - 支持对旧版 V2 记录文件兼容读取
 
@@ -60,7 +62,7 @@ pkg/llm               多厂商请求/响应归一化
 1. 文件前导包含紧凑元数据行，而不是固定 2KB 占位行
 2. 原始 HTTP request/response 仍然完整保留，方便人工排查
 3. `# event:` 会记录统一 timeline，例如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`
-4. 请求摘要、耗时、Token、trace id 等会同步索引到 `trace_index.sqlite3`
+4. 请求摘要、耗时、Token、trace id，以及可提取的 `session_id` 等聚合字段会同步索引到 `trace_index.sqlite3`
 
 默认存储布局：
 

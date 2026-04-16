@@ -1,5 +1,5 @@
 import React, { startTransition, useEffect, useState } from "react";
-import { Link, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
@@ -53,6 +53,7 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<TraceListPage />} />
+      <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
       <Route path="/traces/:traceID" element={<TraceDetailPage />} />
     </Routes>
   );
@@ -60,9 +61,11 @@ function App() {
 
 function TraceListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const view = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const [refreshTick, setRefreshTick] = useState(0);
-  const { loading, data, error } = useJSON(`/api/traces?page=${page}&page_size=${PAGE_SIZE}`, [page, refreshTick]);
+  const endpoint = view === "sessions" ? "/api/sessions" : "/api/traces";
+  const { loading, data, error } = useJSON(`${endpoint}?page=${page}&page_size=${PAGE_SIZE}`, [endpoint, page, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -73,6 +76,19 @@ function TraceListPage() {
 
   const items = data?.items ?? [];
   const stats = data?.stats ?? {};
+  const sessionStats = summarizeSessionItems(items);
+  const setView = (nextView) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", nextView);
+    next.set("page", "1");
+    setSearchParams(next);
+  };
+  const goToPage = (nextPage) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("view", view);
+    next.set("page", String(nextPage));
+    setSearchParams(next);
+  };
 
   return (
     <div className="shell shell-list">
@@ -88,88 +104,221 @@ function TraceListPage() {
       </header>
 
       <section className="hero-grid">
-        <StatCard label="Total" value={stats.total_request ?? 0} />
-        <StatCard label="Avg TTFT" value={`${stats.avg_ttft ?? 0} ms`} />
-        <StatCard label="Tokens" value={stats.total_tokens ?? 0} accent="accent-gold" />
-        <StatCard label="Success" value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
+        {view === "sessions" ? (
+          <>
+            <StatCard label="Sessions" value={sessionStats.totalSessions} />
+            <StatCard label="Requests" value={sessionStats.totalRequests} />
+            <StatCard label="Tokens" value={sessionStats.totalTokens} accent="accent-gold" />
+            <StatCard label="Avg Success" value={`${sessionStats.avgSuccessRate.toFixed(1)}%`} accent="accent-green" />
+          </>
+        ) : (
+          <>
+            <StatCard label="Total" value={stats.total_request ?? 0} />
+            <StatCard label="Avg TTFT" value={`${stats.avg_ttft ?? 0} ms`} />
+            <StatCard label="Tokens" value={stats.total_tokens ?? 0} accent="accent-gold" />
+            <StatCard label="Success" value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
+          </>
+        )}
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Recent traffic</p>
-            <h2>Latest 50 traces</h2>
+            <h2>{view === "sessions" ? "Latest 50 sessions" : "Latest 50 traces"}</h2>
           </div>
-          <div className="pager">
-            <button className="ghost-button" disabled={page <= 1} onClick={() => setSearchParams({ page: String(page - 1) })}>
-              Previous
-            </button>
-            <span className="pager-label">
-              {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
-            </span>
-            <button
-              className="ghost-button"
-              disabled={!data || page >= (data.total_pages || 1)}
-              onClick={() => setSearchParams({ page: String(page + 1) })}
-            >
-              Next
-            </button>
+          <div className="panel-head-actions">
+            <div className="view-toggle" role="tablist" aria-label="Monitor view">
+              <button className={view === "sessions" ? "ghost-button active" : "ghost-button"} onClick={() => setView("sessions")}>
+                Sessions
+              </button>
+              <button className={view === "requests" ? "ghost-button active" : "ghost-button"} onClick={() => setView("requests")}>
+                Requests
+              </button>
+            </div>
+            <div className="pager">
+              <button className="ghost-button" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+                Previous
+              </button>
+              <span className="pager-label">
+                {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
+              </span>
+              <button className="ghost-button" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
+                Next
+              </button>
+            </div>
           </div>
         </div>
 
         {error ? <div className="empty-state error-box">{error}</div> : null}
-        {loading && !data ? <div className="empty-state">Loading traces...</div> : null}
+        {loading && !data ? <div className="empty-state">Loading {view}...</div> : null}
 
-        <div className="trace-table">
-          <div className="trace-table-head">
-            <span>Model</span>
-            <span>Status</span>
-            <span>Latency</span>
-            <span>Tokens</span>
-            <span>Actions</span>
+        {view === "sessions" ? <SessionList items={items} /> : <RequestList items={items} />}
+      </section>
+    </div>
+  );
+}
+
+function RequestList({ items }) {
+  return (
+    <div className="trace-table">
+      <div className="trace-table-head">
+        <span>Model</span>
+        <span>Status</span>
+        <span>Latency</span>
+        <span>Tokens</span>
+        <span>Actions</span>
+      </div>
+      {items.map((item) => (
+        <article key={item.id} className="trace-row">
+          <div>
+            <div className="trace-title-row">
+              <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
+              <div className="trace-tag-group">
+                <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
+                <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
+                {item.session_id ? <InlineTag tone="green">session</InlineTag> : null}
+                {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
+              </div>
+            </div>
+            <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
+            {item.session_id ? <span className="trace-subline mono">session {item.session_id}</span> : null}
           </div>
-          {items.map((item) => (
-            <article key={item.id} className="trace-row">
-              <div>
-                <div className="trace-title-row">
-                  <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
-                  <div className="trace-tag-group">
-                    <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
-                    <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
-                    {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
-                  </div>
-                </div>
-                <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
+          <div className="trace-metric-stack">
+            <strong className={item.status_code >= 200 && item.status_code < 300 ? "status-ok" : "status-err"}>{item.status_code}</strong>
+            <span>{item.method || "POST"}</span>
+          </div>
+          <div className="trace-metric-stack">
+            <strong>{item.duration_ms} ms</strong>
+            <span>ttft {item.ttft_ms} ms</span>
+          </div>
+          <div>
+            <div className="token-inline-row">
+              <MiniToken metric="in" value={item.prompt_tokens} tone="accent" icon="input" />
+              <MiniToken metric="out" value={item.completion_tokens} tone="green" icon="output" />
+              <MiniToken metric="total" value={item.total_tokens} tone="default" icon="total" />
+              <MiniToken metric="cached" value={item.cached_tokens} tone="gold" icon="cached" />
+            </div>
+          </div>
+          <div className="action-group">
+            {item.session_id ? (
+              <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title="View session" aria-label="View session">
+                <StackIcon />
+              </Link>
+            ) : null}
+            <Link className="icon-button" to={`/traces/${item.id}`} title="View trace" aria-label="View trace">
+              <ViewIcon />
+            </Link>
+            <a className="icon-button" href={`/api/traces/${item.id}/download`} title="Download .http" aria-label="Download trace">
+              <DownloadIcon />
+            </a>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SessionList({ items }) {
+  return (
+    <div className="session-table">
+      <div className="session-table-head">
+        <span>Session</span>
+        <span>Requests</span>
+        <span>Health</span>
+        <span>Tokens</span>
+        <span>Actions</span>
+      </div>
+      {items.map((item) => (
+        <article key={item.session_id} className="session-row">
+          <div>
+            <div className="trace-title-row">
+              <strong className="trace-model-name">{item.last_model || item.session_id}</strong>
+              <div className="trace-tag-group">
+                <InlineTag tone="accent">{item.session_source || "session"}</InlineTag>
+                {(item.providers || []).map((provider) => (
+                  <InlineTag key={provider}>{formatProviderTag(provider)}</InlineTag>
+                ))}
               </div>
-              <div className="trace-metric-stack">
-                <strong className={item.status_code >= 200 && item.status_code < 300 ? "status-ok" : "status-err"}>
-                  {item.status_code}
-                </strong>
-                <span>{item.method || "POST"}</span>
-              </div>
-              <div className="trace-metric-stack">
-                <strong>{item.duration_ms} ms</strong>
-                <span>ttft {item.ttft_ms} ms</span>
-              </div>
-              <div>
-                <div className="token-inline-row">
-                  <MiniToken metric="in" value={item.prompt_tokens} tone="accent" icon="input" />
-                  <MiniToken metric="out" value={item.completion_tokens} tone="green" icon="output" />
-                  <MiniToken metric="total" value={item.total_tokens} tone="default" icon="total" />
-                  <MiniToken metric="cached" value={item.cached_tokens} tone="gold" icon="cached" />
-                </div>
-              </div>
-              <div className="action-group">
-                <Link className="icon-button" to={`/traces/${item.id}`} title="View trace" aria-label="View trace">
-                  <ViewIcon />
-                </Link>
-                <a className="icon-button" href={`/api/traces/${item.id}/download`} title="Download .http" aria-label="Download trace">
-                  <DownloadIcon />
-                </a>
-              </div>
-            </article>
-          ))}
+            </div>
+            <span className="trace-subline mono">{item.session_id}</span>
+            <span className="trace-subline">last {formatDateTime(item.last_seen)}</span>
+          </div>
+          <div className="trace-metric-stack">
+            <strong>{item.request_count}</strong>
+            <span>streams {item.stream_count || 0}</span>
+          </div>
+          <div className="trace-metric-stack">
+            <strong className={item.failed_request > 0 ? "status-err" : "status-ok"}>{Number(item.success_rate ?? 0).toFixed(1)}%</strong>
+            <span>ttft {item.avg_ttft ?? 0} ms</span>
+          </div>
+          <div className="trace-metric-stack">
+            <strong>{item.total_tokens ?? 0}</strong>
+            <span>duration {item.total_duration_ms ?? 0} ms</span>
+          </div>
+          <div className="action-group">
+            <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title="View session" aria-label="View session">
+              <StackIcon />
+            </Link>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function SessionDetailPage() {
+  const { sessionID = "" } = useParams();
+  const detail = useJSON(`/api/sessions/${encodeURIComponent(sessionID)}`, [sessionID]);
+  const summary = detail.data?.summary;
+  const traces = detail.data?.traces ?? [];
+
+  return (
+    <div className="shell shell-detail">
+      <header className="topbar detail-topbar">
+        <div className="detail-title-block">
+          <div className="detail-heading-row">
+            <h1>{summary?.last_model || "session detail"}</h1>
+            <div className="trace-tag-group detail-tag-group">
+              <InlineTag tone="accent">{summary?.session_source || "session"}</InlineTag>
+              {(summary?.providers || []).map((provider) => (
+                <InlineTag key={provider}>{formatProviderTag(provider)}</InlineTag>
+              ))}
+            </div>
+          </div>
+          <div className="detail-meta-strip">
+            <DetailMetaPill label="session" value={summary?.session_id || sessionID} mono />
+            <DetailMetaPill label="first seen" value={formatDateTime(summary?.first_seen)} />
+            <DetailMetaPill label="last seen" value={formatDateTime(summary?.last_seen)} />
+            <DetailMetaPill label="requests" value={summary?.request_count ?? 0} />
+            <DetailMetaPill label="success" value={`${Number(summary?.success_rate ?? 0).toFixed(1)}%`} />
+          </div>
         </div>
+        <div className="topbar-meta detail-toolbar">
+          <div className="detail-toolbar-actions">
+            <Link className="icon-button" to="/?view=sessions" title="Back to sessions" aria-label="Back to sessions">
+              <HomeIcon />
+            </Link>
+          </div>
+          <div className="detail-toolbar-tokens">
+            <TokenBadge label="ttft" value={summary?.avg_ttft ?? 0} icon="total" />
+            <TokenBadge label="tokens" value={summary?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
+            <TokenBadge label="failed" value={summary?.failed_request ?? 0} icon="cached" />
+          </div>
+        </div>
+      </header>
+
+      {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
+      {detail.loading && !detail.data ? <div className="empty-state">Loading session...</div> : null}
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Session traces</p>
+            <h2>Grouped request list</h2>
+          </div>
+        </div>
+        <RequestList items={traces} />
       </section>
     </div>
   );
@@ -589,6 +738,18 @@ function HomeIcon() {
   );
 }
 
+function StackIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 4 4 8l8 4 8-4-8-4Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="m4 12 8 4 8-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="m4 16 8 4 8-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </IconFrame>
+  );
+}
+
 function MessageCard({ message, renderMarkdown }) {
   const alignClass = message.role === "assistant" ? "message-assistant" : message.role === "tool" ? "message-tool" : "message-user";
   const isCollapsible = message.message_type === "tool_use" || message.message_type === "tool_result";
@@ -849,6 +1010,25 @@ function formatProviderTag(value = "") {
     return "openai";
   }
   return String(value).replaceAll("_", " ");
+}
+
+function summarizeSessionItems(items = []) {
+  const summary = items.reduce(
+    (state, item) => {
+      state.totalSessions += 1;
+      state.totalRequests += Number(item.request_count || 0);
+      state.totalTokens += Number(item.total_tokens || 0);
+      state.successRateSum += Number(item.success_rate || 0);
+      return state;
+    },
+    { totalSessions: 0, totalRequests: 0, totalTokens: 0, successRateSum: 0 }
+  );
+  return {
+    totalSessions: summary.totalSessions,
+    totalRequests: summary.totalRequests,
+    totalTokens: summary.totalTokens,
+    avgSuccessRate: summary.totalSessions ? summary.successRateSum / summary.totalSessions : 0,
+  };
 }
 
 function formatDateTime(value) {

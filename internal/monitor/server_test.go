@@ -53,6 +53,113 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	}
 }
 
+func TestSessionListAPIHandlerReturnsGroupedItems(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	traceA := filepath.Join(outputDir, "trace-a.http")
+	traceB := filepath.Join(outputDir, "trace-b.http")
+	sessionID := "019d9659-34ca-7b03-917e-9f6bb8bc550b"
+	contentA := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		false,
+		[]string{"Session_id: " + sessionID},
+		`{"input":"hello"}`,
+		`{"output_text":"done"}`,
+	)
+	contentB := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		true,
+		[]string{`X-Codex-Turn-Metadata: {"session_id":"` + sessionID + `"}`},
+		`{"input":"hello again"}`,
+		"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n",
+	)
+	if err := os.WriteFile(traceA, contentA, 0o644); err != nil {
+		t.Fatalf("WriteFile(traceA) error = %v", err)
+	}
+	if err := os.WriteFile(traceB, contentB, 0o644); err != nil {
+		t.Fatalf("WriteFile(traceB) error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?page=1&page_size=50", nil)
+	rr := httptest.NewRecorder()
+	sessionListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload sessionListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].SessionID != sessionID {
+		t.Fatalf("SessionID = %q, want %q", payload.Items[0].SessionID, sessionID)
+	}
+	if payload.Items[0].RequestCount != 2 {
+		t.Fatalf("RequestCount = %d, want 2", payload.Items[0].RequestCount)
+	}
+}
+
+func TestSessionDetailAPIHandlerReturnsTraceList(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	sessionID := "sess-window"
+	content := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		false,
+		[]string{"X-Codex-Window-Id: " + sessionID + ":0"},
+		`{"input":"hello"}`,
+		`{"output_text":"done"}`,
+	)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
+	rr := httptest.NewRecorder()
+	sessionDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload sessionDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Summary.SessionID != sessionID {
+		t.Fatalf("summary session id = %q, want %q", payload.Summary.SessionID, sessionID)
+	}
+	if payload.Summary.SessionSource != "header.x_codex_window_id" {
+		t.Fatalf("summary session source = %q", payload.Summary.SessionSource)
+	}
+	if len(payload.Traces) != 1 {
+		t.Fatalf("len(payload.Traces) = %d, want 1", len(payload.Traces))
+	}
+	if payload.Traces[0].SessionID != sessionID {
+		t.Fatalf("trace session id = %q, want %q", payload.Traces[0].SessionID, sessionID)
+	}
+}
+
 func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
 	t.Parallel()
 
@@ -658,4 +765,29 @@ func buildRecordHeader(url string, isStream bool, reqBody string, resBody string
 			IsStream:     isStream,
 		},
 	}
+}
+
+func buildRecordFixtureWithRequestHeaders(t *testing.T, url string, isStream bool, extraHeaders []string, reqBody string, resBody string) []byte {
+	t.Helper()
+
+	requestHeaderLines := []string{
+		"POST " + url + " HTTP/1.1",
+		"Host: example.com",
+		"Content-Type: application/json",
+	}
+	requestHeaderLines = append(requestHeaderLines, extraHeaders...)
+	request := strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n" + reqBody
+	responseHeader := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	if isStream {
+		responseHeader = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+	}
+	header := buildRecordHeader(url, isStream, reqBody, resBody)
+	header.Layout.ReqHeaderLen = int64(len(strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n"))
+	header.Layout.ResHeaderLen = int64(len(responseHeader))
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	payload := request + "\n" + responseHeader + resBody
+	return append(prelude, []byte(payload)...)
 }

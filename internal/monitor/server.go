@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"database/sql"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,8 @@ type listResponse struct {
 
 type traceListItem struct {
 	ID               string    `json:"id"`
+	SessionID        string    `json:"session_id,omitempty"`
+	SessionSource    string    `json:"session_source,omitempty"`
 	RecordedAt       time.Time `json:"recorded_at"`
 	Model            string    `json:"model"`
 	Provider         string    `json:"provider"`
@@ -48,6 +51,37 @@ type traceListItem struct {
 	CachedTokens     int       `json:"cached_tokens"`
 	IsStream         bool      `json:"is_stream"`
 	Error            string    `json:"error,omitempty"`
+}
+
+type sessionListResponse struct {
+	Items       []sessionListItem `json:"items"`
+	Page        int               `json:"page"`
+	PageSize    int               `json:"page_size"`
+	Total       int               `json:"total"`
+	TotalPages  int               `json:"total_pages"`
+	RefreshedAt time.Time         `json:"refreshed_at"`
+}
+
+type sessionListItem struct {
+	SessionID      string    `json:"session_id"`
+	SessionSource  string    `json:"session_source"`
+	RequestCount   int       `json:"request_count"`
+	FirstSeen      time.Time `json:"first_seen"`
+	LastSeen       time.Time `json:"last_seen"`
+	LastModel      string    `json:"last_model"`
+	Providers      []string  `json:"providers"`
+	SuccessRequest int       `json:"success_request"`
+	FailedRequest  int       `json:"failed_request"`
+	SuccessRate    float64   `json:"success_rate"`
+	TotalTokens    int       `json:"total_tokens"`
+	AvgTTFT        int       `json:"avg_ttft"`
+	TotalDuration  int64     `json:"total_duration_ms"`
+	StreamCount    int       `json:"stream_count"`
+}
+
+type sessionDetailResponse struct {
+	Summary sessionListItem `json:"summary"`
+	Traces  []traceListItem `json:"traces"`
 }
 
 type detailResponse struct {
@@ -103,6 +137,8 @@ type LogStats struct {
 func RegisterRoutes(mux *http.ServeMux, st *store.Store) {
 	mux.HandleFunc("/api/traces", listAPIHandler(st))
 	mux.HandleFunc("/api/traces/", traceAPIHandler(st))
+	mux.HandleFunc("/api/sessions", sessionListAPIHandler(st))
+	mux.HandleFunc("/api/sessions/", sessionDetailAPIHandler(st))
 	mux.Handle("/", appHandler())
 }
 
@@ -186,6 +222,104 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 		for _, entry := range result.Items {
 			resp.Items = append(resp.Items, traceListItem{
 				ID:               entry.ID,
+				SessionID:        entry.SessionID,
+				SessionSource:    entry.SessionSource,
+				RecordedAt:       entry.Header.Meta.Time,
+				Model:            entry.Header.Meta.Model,
+				Provider:         entry.Header.Meta.Provider,
+				Operation:        entry.Header.Meta.Operation,
+				Endpoint:         entry.Header.Meta.Endpoint,
+				Method:           entry.Header.Meta.Method,
+				URL:              entry.Header.Meta.URL,
+				StatusCode:       entry.Header.Meta.StatusCode,
+				DurationMs:       entry.Header.Meta.DurationMs,
+				TTFTMs:           entry.Header.Meta.TTFTMs,
+				TotalTokens:      entry.Header.Usage.TotalTokens,
+				PromptTokens:     entry.Header.Usage.PromptTokens,
+				CompletionTokens: entry.Header.Usage.CompletionTokens,
+				CachedTokens:     cachedTokens(entry),
+				IsStream:         entry.Header.Layout.IsStream,
+				Error:            entry.Header.Meta.Error,
+			})
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if err := st.Sync(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
+			return
+		}
+
+		page := parseInt(r.URL.Query().Get("page"), 1)
+		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
+		result, err := st.ListSessionPage(page, pageSize)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+
+		resp := sessionListResponse{
+			Page:        result.Page,
+			PageSize:    result.PageSize,
+			Total:       result.Total,
+			TotalPages:  result.TotalPages,
+			RefreshedAt: time.Now().UTC(),
+		}
+		for _, item := range result.Items {
+			resp.Items = append(resp.Items, sessionSummaryItem(item))
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if err := st.Sync(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
+			return
+		}
+
+		sessionID := strings.TrimPrefix(pathClean(r.URL.Path), "/api/sessions/")
+		sessionID = strings.Trim(sessionID, "/")
+		if sessionID == "" || strings.Contains(sessionID, "/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		summary, err := st.GetSession(sessionID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) || errors.Is(err, os.ErrNotExist) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+		traces, err := st.ListTracesBySession(sessionID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+
+		resp := sessionDetailResponse{
+			Summary: sessionSummaryItem(summary),
+		}
+		for _, entry := range traces {
+			resp.Traces = append(resp.Traces, traceListItem{
+				ID:               entry.ID,
+				SessionID:        entry.SessionID,
+				SessionSource:    entry.SessionSource,
 				RecordedAt:       entry.Header.Meta.Time,
 				Model:            entry.Header.Meta.Model,
 				Provider:         entry.Header.Meta.Provider,
@@ -384,6 +518,25 @@ func buildTimelineEventViews(parsed *ParsedData) []recordEventView {
 		views[idx]["message"] = firstNonEmpty(event.Message, renderTimelineTree(flattenTimelineItems(items)))
 	}
 	return views
+}
+
+func sessionSummaryItem(summary store.SessionSummary) sessionListItem {
+	return sessionListItem{
+		SessionID:      summary.SessionID,
+		SessionSource:  summary.SessionSource,
+		RequestCount:   summary.RequestCount,
+		FirstSeen:      summary.FirstSeen,
+		LastSeen:       summary.LastSeen,
+		LastModel:      summary.LastModel,
+		Providers:      summary.Providers,
+		SuccessRequest: summary.SuccessRequest,
+		FailedRequest:  summary.FailedRequest,
+		SuccessRate:    summary.SuccessRate,
+		TotalTokens:    summary.TotalTokens,
+		AvgTTFT:        summary.AvgTTFT,
+		TotalDuration:  summary.TotalDuration,
+		StreamCount:    summary.StreamCount,
+	}
 }
 
 func filterTimelineEvents(events []recordfile.RecordEvent) []recordfile.RecordEvent {
