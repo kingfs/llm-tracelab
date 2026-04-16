@@ -304,6 +304,14 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 }
 
 func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
+	return parseGenerateContentStreamResponse(body, parseGoogleStreamError)
+}
+
+func (a vertexGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {
+	return parseGenerateContentStreamResponse(body, parseVertexStreamError)
+}
+
+func parseGenerateContentStreamResponse(body []byte, parseStreamError func(string) (map[string]any, bool)) (LLMResponse, error) {
 	var (
 		contentBuilder strings.Builder
 		role           = "model"
@@ -322,7 +330,7 @@ func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 		if jsonStr == "" || jsonStr == "[DONE]" {
 			continue
 		}
-		if payload, ok := parseGoogleStreamError(jsonStr); ok {
+		if payload, ok := parseStreamError(jsonStr); ok {
 			streamError = payload
 			continue
 		}

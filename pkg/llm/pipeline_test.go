@@ -77,8 +77,40 @@ func TestResponsePipelineGoogleStream(t *testing.T) {
 	assert.Equal(t, "llm.output_text.delta", events[0].Type)
 }
 
+func TestResponsePipelineVertexStream(t *testing.T) {
+	pipeline := NewResponsePipeline(ProviderVertexNative, "/v1/publishers/models:streamGenerateContent", true)
+	pipeline.Feed([]byte(`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}` + "\n"))
+	pipeline.Feed([]byte(`data: {"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7,"totalTokenCount":10}}` + "\n"))
+
+	usage, ok := pipeline.Usage()
+	require.True(t, ok)
+	assert.Equal(t, 3, usage.PromptTokens)
+	assert.Equal(t, 7, usage.CompletionTokens)
+	assert.Equal(t, 10, usage.TotalTokens)
+	events := pipeline.Events()
+	require.NotEmpty(t, events)
+	assert.Equal(t, "llm.output_text.delta", events[0].Type)
+}
+
 func TestResponsePipelineGoogleStreamEmitsSafetyBlocks(t *testing.T) {
 	pipeline := NewResponsePipeline(ProviderGoogleGenAI, "/v1beta/models:streamGenerateContent", true)
+	pipeline.Feed([]byte(`data: {"promptFeedback":{"blockReason":"SAFETY"}}` + "\n"))
+	pipeline.Feed([]byte(`data: {"candidates":[{"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}]}` + "\n"))
+
+	events := pipeline.Events()
+	require.Len(t, events, 3)
+	assert.Equal(t, "llm.output_block", events[0].Type)
+	assert.Contains(t, events[0].Message, "blockReason")
+	assert.Equal(t, "prompt_feedback", events[0].Attributes["kind"])
+	assert.Equal(t, "llm.output_block", events[1].Type)
+	assert.Equal(t, "safety", events[1].Attributes["kind"])
+	assert.Equal(t, "HARM_CATEGORY_HATE_SPEECH", events[1].Attributes["category"])
+	assert.Equal(t, "llm.output_block", events[2].Type)
+	assert.Equal(t, "SAFETY", events[2].Message)
+}
+
+func TestResponsePipelineVertexStreamEmitsSafetyBlocks(t *testing.T) {
+	pipeline := NewResponsePipeline(ProviderVertexNative, "/v1/publishers/models:streamGenerateContent", true)
 	pipeline.Feed([]byte(`data: {"promptFeedback":{"blockReason":"SAFETY"}}` + "\n"))
 	pipeline.Feed([]byte(`data: {"candidates":[{"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}]}` + "\n"))
 
@@ -122,6 +154,13 @@ func TestResponsePipelineStreamErrorsEmitProviderErrorBlocks(t *testing.T) {
 			endpoint: "/v1beta/models:streamGenerateContent",
 			line:     `data: {"error":{"code":429,"message":"stream quota exceeded","status":"RESOURCE_EXHAUSTED"}}` + "\n",
 			wantText: "stream quota exceeded",
+		},
+		{
+			name:     "vertex",
+			provider: ProviderVertexNative,
+			endpoint: "/v1/publishers/models:streamGenerateContent",
+			line:     `data: {"error":{"code":403,"message":"vertex stream denied","status":"PERMISSION_DENIED"}}` + "\n",
+			wantText: "vertex stream denied",
 		},
 	}
 

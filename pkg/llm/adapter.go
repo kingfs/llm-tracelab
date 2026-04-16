@@ -43,6 +43,9 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 	case semantics.Endpoint == "/v1beta/models:generateContent",
 		semantics.Endpoint == "/v1beta/models:streamGenerateContent":
 		return googleGenerateContentAdapter{semantics: semantics}, nil
+	case semantics.Endpoint == "/v1/publishers/models:generateContent",
+		semantics.Endpoint == "/v1/publishers/models:streamGenerateContent":
+		return vertexGenerateContentAdapter{semantics: semantics}, nil
 	default:
 		return nil, UnsupportedEndpointError{Provider: provider, Endpoint: semantics.Endpoint}
 	}
@@ -186,7 +189,7 @@ func (a googleGenerateContentAdapter) ParseRequest(body []byte) (LLMRequest, err
 	if err := json.Unmarshal(body, &req); err != nil {
 		return LLMRequest{}, err
 	}
-	return FromGeminiRequest(req), nil
+	return fromGenerateContentRequest(req), nil
 }
 func (a googleGenerateContentAdapter) ParseResponse(body []byte) (LLMResponse, error) {
 	if resp, ok := parseProviderErrorResponse(body); ok {
@@ -196,11 +199,40 @@ func (a googleGenerateContentAdapter) ParseResponse(body []byte) (LLMResponse, e
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return LLMResponse{}, err
 	}
-	return GeminiToLLM(resp), nil
+	return fromGenerateContentResponse(resp), nil
 }
 func (a googleGenerateContentAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
 	return json.Marshal(req.ToGemini())
 }
 func (a googleGenerateContentAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
-	return json.Marshal(resp.ToGeminiResponse())
+	return json.Marshal(resp.toGenerateContentResponse())
+}
+
+type vertexGenerateContentAdapter struct {
+	semantics TraceSemantics
+}
+
+func (a vertexGenerateContentAdapter) Semantics() TraceSemantics { return a.semantics }
+func (a vertexGenerateContentAdapter) ParseRequest(body []byte) (LLMRequest, error) {
+	var req GeminiGenerateContentRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return LLMRequest{}, err
+	}
+	return fromGenerateContentRequest(req), nil
+}
+func (a vertexGenerateContentAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	if resp, ok := parseProviderErrorResponse(body); ok {
+		return resp, nil
+	}
+	var resp GeminiResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return LLMResponse{}, err
+	}
+	return fromGenerateContentResponse(resp), nil
+}
+func (a vertexGenerateContentAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
+	return json.Marshal(req.ToGemini())
+}
+func (a vertexGenerateContentAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
+	return json.Marshal(resp.toGenerateContentResponse())
 }

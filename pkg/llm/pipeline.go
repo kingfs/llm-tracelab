@@ -141,7 +141,9 @@ func (p *ResponsePipeline) appendProviderEvent(jsonStr string) {
 	case "/v1/messages":
 		p.appendAnthropicEvent(jsonStr)
 	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
-		p.appendGoogleEvent(jsonStr)
+		p.appendGenerateContentEvent(jsonStr, parseGoogleStreamError)
+	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
+		p.appendGenerateContentEvent(jsonStr, parseVertexStreamError)
 	}
 }
 
@@ -278,8 +280,8 @@ func (p *ResponsePipeline) appendAnthropicEvent(jsonStr string) {
 	}
 }
 
-func (p *ResponsePipeline) appendGoogleEvent(jsonStr string) {
-	if payload, ok := parseGoogleStreamError(jsonStr); ok {
+func (p *ResponsePipeline) appendGenerateContentEvent(jsonStr string, parseStreamError func(string) (map[string]any, bool)) {
+	if payload, ok := parseStreamError(jsonStr); ok {
 		p.appendEvent("llm.output_block", marshalCompactString(payload), map[string]interface{}{"kind": "provider_error"})
 		return
 	}

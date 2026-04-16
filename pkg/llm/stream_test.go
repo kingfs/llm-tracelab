@@ -62,6 +62,19 @@ func TestParseGoogleGenerateContentStreamResponse(t *testing.T) {
 	assert.Equal(t, "Hello Gemini", resp.Candidates[0].Content[0].Text)
 }
 
+func TestParseVertexGenerateContentStreamResponse(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello "}]}}]}`,
+		`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Vertex"}]}}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":7,"totalTokenCount":10}}`,
+	}, "\n")
+
+	resp, err := ParseStreamResponse(ProviderVertexNative, "/v1/publishers/models:streamGenerateContent", []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	assert.Equal(t, "model", resp.Candidates[0].Role)
+	assert.Equal(t, "Hello Vertex", resp.Candidates[0].Content[0].Text)
+}
+
 func TestParseStreamProviderErrors(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -100,6 +113,16 @@ func TestParseStreamProviderErrors(t *testing.T) {
 				`data: {"error":{"code":429,"message":"stream quota exceeded","status":"RESOURCE_EXHAUSTED"}}`,
 			}, "\n"),
 			wantText: "stream quota exceeded",
+		},
+		{
+			name:     "vertex",
+			provider: ProviderVertexNative,
+			endpoint: "/v1/publishers/models:streamGenerateContent",
+			body: strings.Join([]string{
+				`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]}}]}`,
+				`data: {"error":{"code":403,"message":"vertex stream denied","status":"PERMISSION_DENIED"}}`,
+			}, "\n"),
+			wantText: "vertex stream denied",
 		},
 	}
 

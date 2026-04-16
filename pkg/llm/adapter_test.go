@@ -31,6 +31,12 @@ func TestAdapterForPath(t *testing.T) {
 	assert.Equal(t, ProviderGoogleGenAI, adapter.Semantics().Provider)
 	assert.Equal(t, OperationGenerateContent, adapter.Semantics().Operation)
 	assert.Equal(t, "/v1beta/models:generateContent", adapter.Semantics().Endpoint)
+
+	adapter, err = AdapterForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", "https://us-central1-aiplatform.googleapis.com")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderVertexNative, adapter.Semantics().Provider)
+	assert.Equal(t, OperationGenerateContent, adapter.Semantics().Operation)
+	assert.Equal(t, "/v1/publishers/models:generateContent", adapter.Semantics().Endpoint)
 }
 
 func TestParseOpenAIResponsesRequest(t *testing.T) {
@@ -159,6 +165,32 @@ func TestParseGeminiRequestAndResponseForPath(t *testing.T) {
 	assert.Equal(t, 10, resp.Usage.TotalTokens)
 }
 
+func TestParseVertexRequestAndResponseForPath(t *testing.T) {
+	reqBody := []byte(`{
+		"contents":[{"role":"user","parts":[{"text":"Hello Vertex"}]}],
+		"systemInstruction":{"role":"system","parts":[{"text":"Be precise"}]},
+		"generationConfig":{"temperature":0.1,"maxOutputTokens":32}
+	}`)
+
+	req, err := ParseRequestForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", "https://us-central1-aiplatform.googleapis.com", reqBody)
+	require.NoError(t, err)
+	assert.Equal(t, "gemini-2.5-flash", req.Model)
+	require.Len(t, req.System, 1)
+	assert.Equal(t, "Be precise", req.System[0].Text)
+	require.Len(t, req.Messages, 1)
+	assert.Equal(t, "Hello Vertex", req.Messages[0].Content[0].Text)
+
+	respBody := []byte(`{
+		"candidates":[{"content":{"role":"model","parts":[{"text":"Hello from Vertex"}]},"finishReason":"STOP"}],
+		"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":6,"totalTokenCount":10}
+	}`)
+	resp, err := ParseResponse(ProviderVertexNative, "/v1/publishers/models:generateContent", respBody)
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	assert.Equal(t, "Hello from Vertex", resp.Candidates[0].Content[0].Text)
+	assert.Equal(t, 10, resp.Usage.TotalTokens)
+}
+
 func TestParseProviderErrorResponses(t *testing.T) {
 	testCases := []struct {
 		name     string
@@ -187,6 +219,13 @@ func TestParseProviderErrorResponses(t *testing.T) {
 			endpoint: "/v1beta/models:generateContent",
 			body:     []byte(`{"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}}`),
 			wantText: "Quota exceeded",
+		},
+		{
+			name:     "vertex",
+			provider: ProviderVertexNative,
+			endpoint: "/v1/publishers/models:generateContent",
+			body:     []byte(`{"error":{"code":403,"message":"Vertex permission denied","status":"PERMISSION_DENIED"}}`),
+			wantText: "Vertex permission denied",
 		},
 	}
 

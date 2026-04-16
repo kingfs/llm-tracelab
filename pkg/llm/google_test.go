@@ -117,3 +117,21 @@ func TestGeminiStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 	assert.Contains(t, resp.Extensions, "prompt_feedback")
 	assert.Contains(t, resp.Candidates[0].Extensions, "safety_ratings")
 }
+
+func TestVertexStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
+	body := []byte(
+		"data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n" +
+			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"vertex partial\"}]},\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
+	)
+
+	resp, err := ParseStreamResponseForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent", "https://us-central1-aiplatform.googleapis.com", body)
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.NotNil(t, resp.Candidates[0].Refusal)
+	assert.Equal(t, "SAFETY", resp.Candidates[0].Refusal.Reason)
+	assert.Equal(t, "model", resp.Candidates[0].Role)
+	assert.Equal(t, "vertex partial", resp.Candidates[0].Content[0].Text)
+	assert.NotEmpty(t, resp.Safety)
+	assert.Contains(t, resp.Extensions, "prompt_feedback")
+	assert.Contains(t, resp.Candidates[0].Extensions, "safety_ratings")
+}

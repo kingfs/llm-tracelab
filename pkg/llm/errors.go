@@ -12,6 +12,9 @@ func parseProviderErrorResponse(body []byte) (LLMResponse, bool) {
 	if resp, ok := parseGoogleProviderError(body); ok {
 		return resp, true
 	}
+	if resp, ok := parseVertexProviderError(body); ok {
+		return resp, true
+	}
 	return LLMResponse{}, false
 }
 
@@ -63,6 +66,14 @@ func parseAnthropicProviderError(body []byte) (LLMResponse, bool) {
 }
 
 func parseGoogleProviderError(body []byte) (LLMResponse, bool) {
+	return parseGoogleStyleProviderError(body, ProviderGoogleGenAI)
+}
+
+func parseVertexProviderError(body []byte) (LLMResponse, bool) {
+	return parseGoogleStyleProviderError(body, ProviderVertexNative)
+}
+
+func parseGoogleStyleProviderError(body []byte, provider string) (LLMResponse, bool) {
 	var envelope struct {
 		Error struct {
 			Code    int         `json:"code"`
@@ -79,7 +90,7 @@ func parseGoogleProviderError(body []byte) (LLMResponse, bool) {
 	}
 
 	return providerErrorResponse(map[string]any{
-		"provider": "google_genai",
+		"provider": provider,
 		"code":     envelope.Error.Code,
 		"message":  envelope.Error.Message,
 		"status":   envelope.Error.Status,
@@ -135,7 +146,15 @@ func parseAnthropicStreamError(jsonStr string) (map[string]any, bool) {
 }
 
 func parseGoogleStreamError(jsonStr string) (map[string]any, bool) {
-	resp, ok := parseGoogleProviderError([]byte(jsonStr))
+	return parseGoogleStyleStreamError(jsonStr, ProviderGoogleGenAI)
+}
+
+func parseVertexStreamError(jsonStr string) (map[string]any, bool) {
+	return parseGoogleStyleStreamError(jsonStr, ProviderVertexNative)
+}
+
+func parseGoogleStyleStreamError(jsonStr string, provider string) (map[string]any, bool) {
+	resp, ok := parseGoogleStyleProviderError([]byte(jsonStr), provider)
 	if !ok {
 		return nil, false
 	}
