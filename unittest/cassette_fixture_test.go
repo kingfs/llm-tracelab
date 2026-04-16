@@ -36,6 +36,8 @@ type cassetteExpectation struct {
 	completionTokens int
 	aiReasoning      string
 	toolCallName     string
+	toolResultText   string
+	toolResultType   string
 	eventTypes       []string
 	blockContains    string
 	errorContent     string
@@ -44,12 +46,13 @@ type cassetteExpectation struct {
 type cassetteCapability string
 
 const (
-	capabilityNonStream cassetteCapability = "non_stream"
-	capabilityStream    cassetteCapability = "stream"
-	capabilityReasoning cassetteCapability = "reasoning"
-	capabilityToolCall  cassetteCapability = "tool_call"
-	capabilityRefusal   cassetteCapability = "refusal"
-	capabilityError     cassetteCapability = "error"
+	capabilityNonStream  cassetteCapability = "non_stream"
+	capabilityStream     cassetteCapability = "stream"
+	capabilityReasoning  cassetteCapability = "reasoning"
+	capabilityToolCall   cassetteCapability = "tool_call"
+	capabilityToolResult cassetteCapability = "tool_result"
+	capabilityRefusal    cassetteCapability = "refusal"
+	capabilityError      cassetteCapability = "error"
 )
 
 type cassetteFixtureCase struct {
@@ -63,6 +66,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 	return []cassetteFixtureCase{
 		openAIResponsesNonStreamFixture(),
 		openAIResponsesToolCallStreamFixture(),
+		openAIResponsesToolResultFixture(),
 		anthropicMessagesNonStreamFixture(),
 		anthropicMessagesStreamFixture(),
 		anthropicToolErrorFixture(),
@@ -158,6 +162,44 @@ func openAIResponsesToolCallStreamFixture() cassetteFixtureCase {
 	}
 }
 
+func openAIResponsesToolResultFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_tool_result_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityToolCall,
+			capabilityToolResult,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"where am i?"}]},{"type":"function_call","call_id":"call_hist","name":"exec_command","arguments":"{\"cmd\":\"pwd\"}"},{"type":"function_call_output","call_id":"call_hist","output":{"cwd":"/tmp/project"}}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"id":"resp_tool_result","model":"gpt-5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"You are in /tmp/project"}]}],"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     11,
+				CompletionTokens: 7,
+				TotalTokens:      18,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `You are in /tmp/project`,
+			messageContains:  "where am i?",
+			aiContent:        "You are in /tmp/project",
+			promptTokens:     11,
+			completionTokens: 7,
+			toolResultText:   `/tmp/project`,
+			toolResultType:   "function_call_output",
+		},
+	}
+}
+
 func anthropicMessagesNonStreamFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "anthropic_messages_non_stream",
@@ -243,6 +285,7 @@ func anthropicToolErrorFixture() cassetteFixtureCase {
 		name: "anthropic_tool_error_non_stream",
 		capabilities: []cassetteCapability{
 			capabilityNonStream,
+			capabilityToolResult,
 			capabilityError,
 		},
 		spec: cassetteSpec{

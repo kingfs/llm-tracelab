@@ -2,6 +2,7 @@ package unittest
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"testing"
@@ -68,6 +69,26 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			}
 			if llmReq.Model != tt.spec.model {
 				t.Fatalf("request model = %q, want %q", llmReq.Model, tt.spec.model)
+			}
+			if tt.want.toolResultText != "" {
+				foundToolResult := false
+				for _, msg := range llmReq.Messages {
+					for _, content := range msg.Content {
+						if content.Type != "tool_result" {
+							continue
+						}
+						if bytes.Contains([]byte(stringifyMap(content.ToolResult)), []byte(tt.want.toolResultText)) {
+							foundToolResult = true
+							break
+						}
+					}
+					if foundToolResult {
+						break
+					}
+				}
+				if !foundToolResult {
+					t.Fatalf("request tool_result not found for %q: %+v", tt.want.toolResultText, llmReq.Messages)
+				}
 			}
 
 			var llmResp llm.LLMResponse
@@ -164,6 +185,18 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 					t.Fatalf("error chat message not found for %q: %+v", tt.want.errorContent, parsedMonitor.ChatMessages)
 				}
 			}
+			if tt.want.toolResultType != "" {
+				foundToolResult := false
+				for _, message := range parsedMonitor.ChatMessages {
+					if message.MessageType == tt.want.toolResultType && bytes.Contains([]byte(message.Content), []byte(tt.want.toolResultText)) {
+						foundToolResult = true
+						break
+					}
+				}
+				if !foundToolResult {
+					t.Fatalf("tool result message not found for %q/%q: %+v", tt.want.toolResultType, tt.want.toolResultText, parsedMonitor.ChatMessages)
+				}
+			}
 		})
 	}
 }
@@ -179,6 +212,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityStream,
 		capabilityReasoning,
 		capabilityToolCall,
+		capabilityToolResult,
 		capabilityRefusal,
 		capabilityError,
 	}
@@ -200,4 +234,15 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 			t.Fatalf("stream coverage should span 3 providers, got %d: %+v", len(providers), providers)
 		}
 	}
+}
+
+func stringifyMap(v map[string]any) string {
+	if len(v) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
