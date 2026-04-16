@@ -62,6 +62,9 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if !bytes.Contains(replayedBody, []byte(tt.want.replayContains)) {
 				t.Fatalf("replayed body = %q, want contain %q", string(replayedBody), tt.want.replayContains)
 			}
+			if tt.want.statusCode > 0 && resp.StatusCode != tt.want.statusCode {
+				t.Fatalf("replayed status code = %d, want %d", resp.StatusCode, tt.want.statusCode)
+			}
 
 			llmReq, err := llm.ParseRequestForPath(tt.spec.url, "https://upstream.example", reqBody)
 			if err != nil {
@@ -137,8 +140,13 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				t.Fatalf("content = %q, want %q", gotContent, tt.want.aiContent)
 			}
 			if tt.want.blockContains != "" {
-				if llmResp.Candidates[0].Refusal == nil || !bytes.Contains([]byte(llmResp.Candidates[0].Refusal.Message), []byte(tt.want.blockContains)) {
-					t.Fatalf("llm refusal = %+v, want contain %q", llmResp.Candidates[0].Refusal, tt.want.blockContains)
+				matchedBlock := llmResp.Candidates[0].Refusal != nil && bytes.Contains([]byte(llmResp.Candidates[0].Refusal.Message), []byte(tt.want.blockContains))
+				if !matchedBlock {
+					payload, _ := json.Marshal(llmResp.Extensions["error"])
+					matchedBlock = bytes.Contains(payload, []byte(tt.want.blockContains))
+				}
+				if !matchedBlock {
+					t.Fatalf("llm response block does not contain %q: refusal=%+v extensions=%+v", tt.want.blockContains, llmResp.Candidates[0].Refusal, llmResp.Extensions)
 				}
 			}
 			if tt.want.toolCallName != "" {
@@ -165,6 +173,9 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			}
 			if parsedMonitor.Header.Usage.CompletionTokens != tt.want.completionTokens {
 				t.Fatalf("completion tokens = %d, want %d", parsedMonitor.Header.Usage.CompletionTokens, tt.want.completionTokens)
+			}
+			if tt.want.statusCode > 0 && parsedMonitor.Header.Meta.StatusCode != tt.want.statusCode {
+				t.Fatalf("monitor status code = %d, want %d", parsedMonitor.Header.Meta.StatusCode, tt.want.statusCode)
 			}
 			if parsedMonitor.AIContent != tt.want.aiContent {
 				t.Fatalf("monitor AIContent = %q, want %q", parsedMonitor.AIContent, tt.want.aiContent)
@@ -273,6 +284,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityHistory,
 		capabilityMixedBlocks,
 		capabilitySafety,
+		capabilityProviderErr,
 		capabilityRefusal,
 		capabilityError,
 	}
@@ -292,6 +304,9 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		}
 		if capability == capabilityStream && len(providers) < 3 {
 			t.Fatalf("stream coverage should span 3 providers, got %d: %+v", len(providers), providers)
+		}
+		if capability == capabilityProviderErr && len(providers) < 3 {
+			t.Fatalf("provider error coverage should span 3 providers, got %d: %+v", len(providers), providers)
 		}
 		if capability == capabilitySafety {
 			if !providers[llm.ProviderGoogleGenAI] {

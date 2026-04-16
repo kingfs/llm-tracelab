@@ -3,6 +3,7 @@ package unittest
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,7 @@ type cassetteExpectation struct {
 	aiBlockTitles    []string
 	promptTokens     int
 	completionTokens int
+	statusCode       int
 	aiReasoning      string
 	toolCallName     string
 	toolResultText   string
@@ -59,6 +61,7 @@ const (
 	capabilityHistory     cassetteCapability = "history"
 	capabilityMixedBlocks cassetteCapability = "mixed_blocks"
 	capabilitySafety      cassetteCapability = "safety"
+	capabilityProviderErr cassetteCapability = "provider_error"
 	capabilityRefusal     cassetteCapability = "refusal"
 	capabilityError       cassetteCapability = "error"
 )
@@ -79,6 +82,9 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		anthropicMessagesNonStreamFixture(),
 		anthropicMessagesStreamFixture(),
 		anthropicToolErrorFixture(),
+		openAIProviderErrorFixture(),
+		anthropicProviderErrorFixture(),
+		googleProviderErrorFixture(),
 		googleGenAIStreamFixture(),
 		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
@@ -117,6 +123,7 @@ func openAIResponsesNonStreamFixture() cassetteFixtureCase {
 			aiContent:        "hello from assistant",
 			promptTokens:     3,
 			completionTokens: 5,
+			statusCode:       200,
 		},
 	}
 }
@@ -155,6 +162,7 @@ func openAIResponsesMultiTurnFixture() cassetteFixtureCase {
 			aiContent:        "You said hello and I replied hi there.",
 			promptTokens:     14,
 			completionTokens: 9,
+			statusCode:       200,
 		},
 	}
 }
@@ -208,6 +216,7 @@ func openAIResponsesToolCallStreamFixture() cassetteFixtureCase {
 			aiReasoning:      "inspect logs",
 			promptTokens:     9,
 			completionTokens: 4,
+			statusCode:       200,
 			toolCallName:     "exec_command",
 			eventTypes:       []string{"llm.reasoning.delta", "llm.tool_call", "llm.tool_call.delta", "llm.output_text.delta", "llm.usage"},
 		},
@@ -249,6 +258,7 @@ func openAIResponsesToolResultFixture() cassetteFixtureCase {
 			aiContent:        "You are in /tmp/project",
 			promptTokens:     11,
 			completionTokens: 7,
+			statusCode:       200,
 			toolResultText:   `/tmp/project`,
 			toolResultType:   "function_call_output",
 		},
@@ -287,6 +297,7 @@ func anthropicMessagesNonStreamFixture() cassetteFixtureCase {
 			aiContent:        "hello from claude",
 			promptTokens:     4,
 			completionTokens: 6,
+			statusCode:       200,
 		},
 	}
 }
@@ -334,6 +345,7 @@ func anthropicMessagesStreamFixture() cassetteFixtureCase {
 			aiContent:        "Hello Claude",
 			promptTokens:     5,
 			completionTokens: 7,
+			statusCode:       200,
 			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
 		},
 	}
@@ -373,7 +385,116 @@ func anthropicToolErrorFixture() cassetteFixtureCase {
 			aiContent:        "command failed",
 			promptTokens:     6,
 			completionTokens: 4,
+			statusCode:       200,
 			errorContent:     "stacktrace",
+		},
+	}
+}
+
+func openAIProviderErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_provider_error_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityProviderErr,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"trigger rate limit"}]}]}`,
+			responseStatus:  "429 Too Many Requests",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+		},
+		want: cassetteExpectation{
+			replayContains:   `Rate limit exceeded`,
+			messageContains:  "trigger rate limit",
+			historyContains:  []string{"trigger rate limit"},
+			messageCount:     1,
+			aiContent:        "",
+			aiBlockCount:     1,
+			aiBlockTitles:    []string{"Provider Error"},
+			statusCode:       429,
+			blockContains:    "Rate limit exceeded",
+			promptTokens:     0,
+			completionTokens: 0,
+		},
+	}
+}
+
+func anthropicProviderErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "anthropic_messages_provider_error_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityProviderErr,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderAnthropic,
+			operation:       llm.OperationMessages,
+			endpoint:        "/v1/messages",
+			url:             "/v1/messages",
+			method:          "POST",
+			model:           "claude-sonnet-4-5",
+			requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"trigger overload"}]}],"max_tokens":16}`,
+			responseStatus:  "503 Service Unavailable",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"type":"error","error":{"type":"overloaded_error","message":"Anthropic overloaded"}}`,
+		},
+		want: cassetteExpectation{
+			replayContains:   `Anthropic overloaded`,
+			messageContains:  "trigger overload",
+			historyContains:  []string{"trigger overload"},
+			messageCount:     1,
+			aiContent:        "",
+			aiBlockCount:     1,
+			aiBlockTitles:    []string{"Provider Error"},
+			statusCode:       503,
+			blockContains:    "Anthropic overloaded",
+			promptTokens:     0,
+			completionTokens: 0,
+		},
+	}
+}
+
+func googleProviderErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "google_genai_provider_error_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityProviderErr,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderGoogleGenAI,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1beta/models:generateContent",
+			url:             "/v1beta/models/gemini-2.5-flash:generateContent",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1beta/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"contents":[{"role":"user","parts":[{"text":"trigger quota"}]}]}`,
+			responseStatus:  "429 Too Many Requests",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}}`,
+		},
+		want: cassetteExpectation{
+			replayContains:   `Quota exceeded`,
+			messageContains:  "trigger quota",
+			historyContains:  []string{"trigger quota"},
+			messageCount:     1,
+			aiContent:        "",
+			aiBlockCount:     1,
+			aiBlockTitles:    []string{"Provider Error"},
+			statusCode:       429,
+			blockContains:    "Quota exceeded",
+			promptTokens:     0,
+			completionTokens: 0,
 		},
 	}
 }
@@ -417,6 +538,7 @@ func googleGenAIStreamFixture() cassetteFixtureCase {
 			aiContent:        "Hello Gemini",
 			promptTokens:     3,
 			completionTokens: 7,
+			statusCode:       200,
 			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
 		},
 	}
@@ -458,6 +580,7 @@ func googleGenAIMixedBlocksFixture() cassetteFixtureCase {
 			aiBlockTitles:    []string{"Prompt Feedback", "Safety Ratings"},
 			promptTokens:     2,
 			completionTokens: 1,
+			statusCode:       200,
 		},
 	}
 }
@@ -497,6 +620,7 @@ func googleGenAIBlockedFixture() cassetteFixtureCase {
 			aiContent:        "",
 			promptTokens:     2,
 			completionTokens: 0,
+			statusCode:       200,
 			blockContains:    "SAFETY",
 		},
 	}
@@ -534,7 +658,7 @@ func writeCassetteFixture(t *testing.T, spec cassetteSpec) (string, []byte) {
 			Endpoint:   spec.endpoint,
 			URL:        spec.url,
 			Method:     spec.method,
-			StatusCode: 200,
+			StatusCode: parseHTTPStatusCode(spec.responseStatus),
 		},
 		Layout: recordfile.LayoutInfo{
 			ReqHeaderLen: int64(len(reqHead)),
@@ -567,4 +691,16 @@ func writeCassetteFixture(t *testing.T, spec cassetteSpec) (string, []byte) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	return path, content
+}
+
+func parseHTTPStatusCode(statusLine string) int {
+	fields := strings.Fields(statusLine)
+	if len(fields) == 0 {
+		return 200
+	}
+	code, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return 200
+	}
+	return code
 }

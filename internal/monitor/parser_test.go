@@ -259,13 +259,40 @@ func TestParseLogFileGoogleDecoratesPromptFeedbackAndSafety(t *testing.T) {
 	}
 }
 
+func TestParseLogFileProviderErrorDecoratesErrorBlock(t *testing.T) {
+	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"trigger rate limit"}]}]}`
+	resBody := `{"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"rate_limit_exceeded"}}`
+
+	content := buildRecordFixtureWithStatus(t, "/v1/responses", false, "429 Too Many Requests", reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if parsed.Header.Meta.StatusCode != 429 {
+		t.Fatalf("status code = %d, want 429", parsed.Header.Meta.StatusCode)
+	}
+	if parsed.AIContent != "" {
+		t.Fatalf("AIContent = %q, want empty", parsed.AIContent)
+	}
+	if len(parsed.AIBlocks) != 1 {
+		t.Fatalf("len(AIBlocks) = %d, want 1", len(parsed.AIBlocks))
+	}
+	if parsed.AIBlocks[0].Title != "Provider Error" || !strings.Contains(parsed.AIBlocks[0].Text, "Rate limit exceeded") {
+		t.Fatalf("provider error block = %+v", parsed.AIBlocks[0])
+	}
+}
+
 func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string, resBody string) []byte {
+	return buildRecordFixtureWithStatus(t, url, isStream, "200 OK", reqBody, resBody)
+}
+
+func buildRecordFixtureWithStatus(t *testing.T, url string, isStream bool, status string, reqBody string, resBody string) []byte {
 	t.Helper()
 
 	reqHeader := "POST " + url + " HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
-	resHeader := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resHeader := "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n\r\n"
 	if isStream {
-		resHeader = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+		resHeader = "HTTP/1.1 " + status + "\r\nContent-Type: text/event-stream\r\n\r\n"
 	}
 
 	header := recordfile.RecordHeader{
@@ -276,7 +303,7 @@ func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string,
 			Model:         "gpt-5.1-codex",
 			URL:           url,
 			Method:        "POST",
-			StatusCode:    200,
+			StatusCode:    parseHTTPStatusCode(status),
 			DurationMs:    100,
 			TTFTMs:        10,
 			ClientIP:      "127.0.0.1",
@@ -304,4 +331,19 @@ func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string,
 	payload.WriteString(resBody)
 
 	return append(prelude, []byte(payload.String())...)
+}
+
+func parseHTTPStatusCode(status string) int {
+	fields := strings.Fields(status)
+	if len(fields) == 0 {
+		return 200
+	}
+	switch fields[0] {
+	case "429":
+		return 429
+	case "503":
+		return 503
+	default:
+		return 200
+	}
 }

@@ -129,6 +129,9 @@ func (a openAIChatAdapter) ParseRequest(body []byte) (LLMRequest, error) {
 	return FromOpenAIRequest(req), nil
 }
 func (a openAIChatAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	if resp, ok := parseProviderErrorResponse(body); ok {
+		return resp, nil
+	}
 	var resp OpenAIChatResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return LLMResponse{}, err
@@ -156,6 +159,9 @@ func (a anthropicMessagesAdapter) ParseRequest(body []byte) (LLMRequest, error) 
 	return FromAnthropicRequest(req), nil
 }
 func (a anthropicMessagesAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	if resp, ok := parseProviderErrorResponse(body); ok {
+		return resp, nil
+	}
 	var resp AnthropicResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return LLMResponse{}, err
@@ -183,6 +189,9 @@ func (a googleGenerateContentAdapter) ParseRequest(body []byte) (LLMRequest, err
 	return FromGeminiRequest(req), nil
 }
 func (a googleGenerateContentAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	if resp, ok := parseProviderErrorResponse(body); ok {
+		return resp, nil
+	}
 	var resp GeminiResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return LLMResponse{}, err

@@ -74,6 +74,9 @@ func (a openAIResponsesAdapter) ParseRequest(body []byte) (LLMRequest, error) {
 	return FromOpenAIResponsesRequest(req), nil
 }
 func (a openAIResponsesAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	if resp, ok := parseProviderErrorResponse(body); ok {
+		return resp, nil
+	}
 	var resp OpenAIResponsesResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return LLMResponse{}, err

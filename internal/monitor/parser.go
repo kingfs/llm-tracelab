@@ -371,6 +371,15 @@ func llmExtensionBlocks(resp llm.LLMResponse, candidate llm.LLMCandidate) []Cont
 		})
 	}
 
+	if payload := marshalCompact(resp.Extensions["error"]); payload != "" {
+		blocks = append(blocks, ContentBlock{
+			Kind:   "provider_error",
+			Title:  "Provider Error",
+			Text:   payload,
+			Format: detectContentFormat(payload),
+		})
+	}
+
 	return blocks
 }
 

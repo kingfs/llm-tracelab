@@ -158,3 +158,46 @@ func TestParseGeminiRequestAndResponseForPath(t *testing.T) {
 	assert.Equal(t, "Hello from Gemini", resp.Candidates[0].Content[0].Text)
 	assert.Equal(t, 10, resp.Usage.TotalTokens)
 }
+
+func TestParseProviderErrorResponses(t *testing.T) {
+	testCases := []struct {
+		name     string
+		provider string
+		endpoint string
+		body     []byte
+		wantText string
+	}{
+		{
+			name:     "openai compatible",
+			provider: ProviderOpenAICompatible,
+			endpoint: "/v1/responses",
+			body:     []byte(`{"error":{"message":"Rate limit exceeded","type":"rate_limit_error","code":"rate_limit_exceeded"}}`),
+			wantText: "Rate limit exceeded",
+		},
+		{
+			name:     "anthropic",
+			provider: ProviderAnthropic,
+			endpoint: "/v1/messages",
+			body:     []byte(`{"type":"error","error":{"type":"overloaded_error","message":"Anthropic overloaded"}}`),
+			wantText: "Anthropic overloaded",
+		},
+		{
+			name:     "google",
+			provider: ProviderGoogleGenAI,
+			endpoint: "/v1beta/models:generateContent",
+			body:     []byte(`{"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}}`),
+			wantText: "Quota exceeded",
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := ParseResponse(tt.provider, tt.endpoint, tt.body)
+			require.NoError(t, err)
+			require.Len(t, resp.Candidates, 1)
+			assert.Equal(t, "error", resp.Candidates[0].FinishReason)
+			require.Contains(t, resp.Extensions, "error")
+			assert.Contains(t, marshalCompactString(resp.Extensions["error"]), tt.wantText)
+		})
+	}
+}
