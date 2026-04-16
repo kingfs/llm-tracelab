@@ -1,0 +1,26 @@
+server:
+  port: "8080"
+
+monitor:
+  port: "8081"
+
+upstream:
+  base_url: "https://demo-resource.openai.azure.com"
+  api_key: "azure-key"
+  provider_preset: "azure"
+  protocol_family: ""
+  routing_profile: ""
+  api_version: "2025-03-01-preview"
+  deployment: "gpt-4o-mini"
+  project: ""
+  location: ""
+  model_resource: ""
+  headers: {}
+
+debug:
+  output_dir: "./logs/azure-openai"
+  mask_key: true
+
+chaos:
+  enabled: false
+  rules: []

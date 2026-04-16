@@ -102,6 +102,14 @@ debug:
   mask_key: false
 ```
 
+If you prefer starting from a ready-made config, use one of these examples:
+
+- [config/examples/openai.yaml](./config/examples/openai.yaml)
+- [config/examples/anthropic.yaml](./config/examples/anthropic.yaml)
+- [config/examples/google_genai.yaml](./config/examples/google_genai.yaml)
+- [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
+- [config/examples/vertex.yaml](./config/examples/vertex.yaml)
+
 Supported environment variable overrides:
 
 - `LLM_TRACELAB_SERVER_PORT`

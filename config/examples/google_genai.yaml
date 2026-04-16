@@ -1,0 +1,26 @@
+server:
+  port: "8080"
+
+monitor:
+  port: "8081"
+
+upstream:
+  base_url: "https://generativelanguage.googleapis.com"
+  api_key: "AIza..."
+  provider_preset: "google_genai"
+  protocol_family: ""
+  routing_profile: ""
+  api_version: ""
+  deployment: ""
+  project: ""
+  location: ""
+  model_resource: ""
+  headers: {}
+
+debug:
+  output_dir: "./logs/google-genai"
+  mask_key: true
+
+chaos:
+  enabled: false
+  rules: []

@@ -1,0 +1,27 @@
+server:
+  port: "8080"
+
+monitor:
+  port: "8081"
+
+upstream:
+  base_url: "https://api.anthropic.com"
+  api_key: "sk-ant-xxx"
+  provider_preset: "anthropic"
+  protocol_family: ""
+  routing_profile: ""
+  api_version: "2023-06-01"
+  deployment: ""
+  project: ""
+  location: ""
+  model_resource: ""
+  headers:
+    anthropic-beta: "tools-2024-04-04"
+
+debug:
+  output_dir: "./logs/anthropic"
+  mask_key: true
+
+chaos:
+  enabled: false
+  rules: []
