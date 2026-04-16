@@ -520,6 +520,195 @@ func TestHandlerGoogleGenAIStreamAddsAltSSE(t *testing.T) {
 	}
 }
 
+func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var gotPath string
+	var gotAuthorization string
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"hello from vertex"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":4,"candidatesTokenCount":6,"totalTokenCount":10}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL
+	cfg.Upstream.ProtocolFamily = upstream.ProtocolFamilyVertexNative
+	cfg.Upstream.RoutingProfile = upstream.RoutingProfileVertexExpress
+	cfg.Upstream.ModelResource = "publishers/google/models/gemini-2.5-flash"
+	cfg.Upstream.ApiKey = "vertex-secret"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/publishers/google/models/gemini-2.5-flash:generateContent", bytes.NewBufferString(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if gotPath != "/v1/publishers/google/models/gemini-2.5-flash:generateContent" {
+		t.Fatalf("upstream path = %q, want /v1/publishers/google/models/gemini-2.5-flash:generateContent", gotPath)
+	}
+	if gotAuthorization != "Bearer vertex-secret" {
+		t.Fatalf("Authorization = %q, want Bearer vertex-secret", gotAuthorization)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Provider != upstream.ProtocolFamilyVertexNative {
+		t.Fatalf("recorded provider = %q, want %q", parsed.Header.Meta.Provider, upstream.ProtocolFamilyVertexNative)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/publishers/models:generateContent" {
+		t.Fatalf("recorded endpoint = %q, want /v1/publishers/models:generateContent", parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Usage.TotalTokens != 10 {
+		t.Fatalf("recorded total tokens = %d, want 10", parsed.Header.Usage.TotalTokens)
+	}
+}
+
+func TestHandlerVertexProjectLocationStreamAddsAltSSEAndRecordsEvents(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var gotPath string
+	var gotAlt string
+	var gotAuthorization string
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAlt = r.URL.Query().Get("alt")
+		gotAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello \"}]}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Vertex\"}]}}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":7,\"totalTokenCount\":10}}\n\n")
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL
+	cfg.Upstream.ProtocolFamily = upstream.ProtocolFamilyVertexNative
+	cfg.Upstream.RoutingProfile = upstream.RoutingProfileVertexProject
+	cfg.Upstream.Project = "demo-project"
+	cfg.Upstream.Location = "us-central1"
+	cfg.Upstream.ModelResource = "publishers/google/models/gemini-2.5-flash"
+	cfg.Upstream.ApiKey = "vertex-secret"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	reqPath := "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent"
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+reqPath, bytes.NewBufferString(`{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if gotPath != reqPath {
+		t.Fatalf("upstream path = %q, want %q", gotPath, reqPath)
+	}
+	if gotAlt != "sse" {
+		t.Fatalf("alt = %q, want sse", gotAlt)
+	}
+	if gotAuthorization != "Bearer vertex-secret" {
+		t.Fatalf("Authorization = %q, want Bearer vertex-secret", gotAuthorization)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if !parsed.Header.Layout.IsStream {
+		t.Fatalf("recorded IsStream = false, want true")
+	}
+	if parsed.Header.Meta.Provider != upstream.ProtocolFamilyVertexNative {
+		t.Fatalf("recorded provider = %q, want %q", parsed.Header.Meta.Provider, upstream.ProtocolFamilyVertexNative)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/publishers/models:streamGenerateContent" {
+		t.Fatalf("recorded endpoint = %q, want /v1/publishers/models:streamGenerateContent", parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Usage.TotalTokens != 10 {
+		t.Fatalf("recorded total tokens = %d, want 10", parsed.Header.Usage.TotalTokens)
+	}
+	foundOutput := false
+	foundUsage := false
+	for _, event := range parsed.Events {
+		switch event.Type {
+		case "llm.output_text.delta":
+			foundOutput = true
+		case "llm.usage":
+			foundUsage = true
+		}
+	}
+	if !foundOutput || !foundUsage {
+		t.Fatalf("recorded events missing output/usage: %+v", parsed.Events)
+	}
+
+	entries, err := waitForRecentEntries(st, 1, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+	}
+	if entries[0].Header.Meta.Provider != upstream.ProtocolFamilyVertexNative {
+		t.Fatalf("indexed provider = %q, want %q", entries[0].Header.Meta.Provider, upstream.ProtocolFamilyVertexNative)
+	}
+	if entries[0].Header.Usage.TotalTokens != 10 {
+		t.Fatalf("indexed total tokens = %d, want 10", entries[0].Header.Usage.TotalTokens)
+	}
+}
+
 func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]store.LogEntry, error) {
 	deadline := time.Now().Add(timeout)
 	var lastEntries []store.LogEntry

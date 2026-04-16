@@ -93,6 +93,10 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		googleGenAIStreamFixture(),
 		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
+		vertexNativeNonStreamHistoryFixture(),
+		vertexNativeProviderErrorFixture(),
+		vertexNativeStreamErrorFixture(),
+		vertexNativeStreamFixture(),
 	}
 }
 
@@ -748,6 +752,169 @@ func googleGenAIBlockedFixture() cassetteFixtureCase {
 			completionTokens: 0,
 			statusCode:       200,
 			blockContains:    "SAFETY",
+		},
+	}
+}
+
+func vertexNativeNonStreamHistoryFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "vertex_native_non_stream_history",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityHistory,
+			capabilityMixedBlocks,
+			capabilitySafety,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderVertexNative,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1/publishers/models:generateContent",
+			url:             "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"systemInstruction":{"role":"system","parts":[{"text":"Be safe"}]},"contents":[{"role":"user","parts":[{"text":"hello"}]},{"role":"model","parts":[{"text":"hi there"}]},{"role":"user","parts":[{"text":"unsafe request"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"candidates":[{"content":{"role":"model","parts":[{"text":"vertex partial"}]},"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}],"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     5,
+				CompletionTokens: 2,
+				TotalTokens:      7,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `"blockReason":"SAFETY"`,
+			messageContains:  "unsafe request",
+			historyContains:  []string{"Be safe", "hello", "hi there", "unsafe request"},
+			messageCount:     4,
+			aiContent:        "vertex partial",
+			aiBlockCount:     2,
+			aiBlockTitles:    []string{"Prompt Feedback", "Safety Ratings"},
+			promptTokens:     5,
+			completionTokens: 2,
+			statusCode:       200,
+		},
+	}
+}
+
+func vertexNativeProviderErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "vertex_native_provider_error_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityProviderErr,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderVertexNative,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1/publishers/models:generateContent",
+			url:             "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"contents":[{"role":"user","parts":[{"text":"trigger permission denial"}]}]}`,
+			responseStatus:  "403 Forbidden",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"error":{"code":403,"message":"Vertex permission denied","status":"PERMISSION_DENIED"}}`,
+		},
+		want: cassetteExpectation{
+			replayContains:   `Vertex permission denied`,
+			messageContains:  "trigger permission denial",
+			historyContains:  []string{"trigger permission denial"},
+			messageCount:     1,
+			aiContent:        "",
+			aiBlockCount:     1,
+			aiBlockTitles:    []string{"Provider Error"},
+			statusCode:       403,
+			blockContains:    "Vertex permission denied",
+			promptTokens:     0,
+			completionTokens: 0,
+		},
+	}
+}
+
+func vertexNativeStreamErrorFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "vertex_native_stream_error",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityProviderErr,
+			capabilityStreamError,
+			capabilityPartialComp,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderVertexNative,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1/publishers/models:streamGenerateContent",
+			url:             "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"contents":[{"role":"user","parts":[{"text":"stream failure"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]}}]}`,
+				`data: {"error":{"code":403,"message":"vertex stream denied","status":"PERMISSION_DENIED"}}`,
+			),
+			isStream: true,
+		},
+		want: cassetteExpectation{
+			replayContains:  `vertex stream denied`,
+			messageContains: "stream failure",
+			historyContains: []string{"stream failure"},
+			messageCount:    1,
+			aiContent:       "partial",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Provider Error"},
+			statusCode:      200,
+			blockContains:   "vertex stream denied",
+		},
+	}
+}
+
+func vertexNativeStreamFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "vertex_native_stream",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderVertexNative,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1/publishers/models:streamGenerateContent",
+			url:             "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"contents":[{"role":"user","parts":[{"text":"hello from vertex"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello \"}]}}]}\n\n" +
+				"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Vertex\"}]}}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":7,\"totalTokenCount\":10}}\n\n",
+			isStream: true,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     3,
+				CompletionTokens: 7,
+				TotalTokens:      10,
+			},
+			events: []recordfile.RecordEvent{
+				{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 3, 1, 0, time.UTC), IsStream: true, Message: "Hello ", Attributes: map[string]interface{}{"role": "model"}},
+				{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 3, 2, 0, time.UTC), IsStream: true, Message: "Vertex", Attributes: map[string]interface{}{"role": "model"}},
+				{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 3, 3, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 3, "completion_tokens": 7, "total_tokens": 10}},
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   "data:",
+			messageContains:  "hello from vertex",
+			historyContains:  []string{"hello from vertex"},
+			messageCount:     1,
+			aiContent:        "Hello Vertex",
+			promptTokens:     3,
+			completionTokens: 7,
+			statusCode:       200,
+			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
 		},
 	}
 }
