@@ -184,6 +184,7 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 	var (
 		contentBuilder   strings.Builder
 		reasoningBuilder strings.Builder
+		refusalBuilder   strings.Builder
 		toolCallMap      = map[string]*LLMToolCall{}
 		toolCallOrder    []string
 		streamError      map[string]any
@@ -233,7 +234,7 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 		case "response.output_text.delta":
 			contentBuilder.WriteString(envelope.Delta)
 		case "response.refusal.delta":
-			contentBuilder.WriteString(envelope.Delta)
+			refusalBuilder.WriteString(envelope.Delta)
 		case "response.reasoning_text.delta":
 			reasoningBuilder.WriteString(envelope.Delta)
 		case "response.reasoning_summary_text.delta":
@@ -300,7 +301,31 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 		call.Args = parseJSONObject(call.ArgsText)
 		toolCalls = append(toolCalls, *call)
 	}
-	return singleCandidateResponse(contentBuilder.String(), reasoningBuilder.String(), toolCalls, streamError), nil
+
+	candidate := LLMCandidate{
+		Index:     0,
+		Role:      "assistant",
+		ToolCalls: toolCalls,
+	}
+	if contentBuilder.Len() > 0 {
+		candidate.Content = append(candidate.Content, LLMContent{Type: "text", Text: contentBuilder.String()})
+	}
+	if reasoningBuilder.Len() > 0 {
+		candidate.Content = append(candidate.Content, LLMContent{Type: "thinking", Text: reasoningBuilder.String()})
+	}
+	if refusalBuilder.Len() > 0 {
+		candidate.Refusal = &LLMRefusal{
+			Reason:  "refusal",
+			Message: refusalBuilder.String(),
+		}
+	}
+
+	resp := LLMResponse{Candidates: []LLMCandidate{candidate}}
+	if len(streamError) > 0 {
+		resp.Extensions = map[string]any{"error": streamError}
+		resp.Candidates[0].FinishReason = "error"
+	}
+	return resp, nil
 }
 
 func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMResponse, error) {

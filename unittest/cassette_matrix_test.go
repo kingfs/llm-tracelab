@@ -133,8 +133,11 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				t.Fatalf("llm response should contain at least one candidate")
 			}
 			gotContent := ""
-			if len(llmResp.Candidates[0].Content) > 0 {
-				gotContent = llmResp.Candidates[0].Content[0].Text
+			for _, content := range llmResp.Candidates[0].Content {
+				if content.Type == "text" {
+					gotContent = content.Text
+					break
+				}
 			}
 			if gotContent != tt.want.aiContent {
 				t.Fatalf("content = %q, want %q", gotContent, tt.want.aiContent)

@@ -86,6 +86,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		anthropicMessagesStreamFixture(),
 		anthropicToolErrorFixture(),
 		openAIProviderErrorFixture(),
+		openAIResponsesRefusalStreamFixture(),
 		anthropicProviderErrorFixture(),
 		googleProviderErrorFixture(),
 		openAIResponsesStreamErrorFixture(),
@@ -436,6 +437,51 @@ func openAIProviderErrorFixture() cassetteFixtureCase {
 			blockContains:    "Rate limit exceeded",
 			promptTokens:     0,
 			completionTokens: 0,
+		},
+	}
+}
+
+func openAIResponsesRefusalStreamFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_refusal_stream",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityReasoning,
+			capabilityRefusal,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"give disallowed instructions"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				`data: {"type":"response.reasoning_summary_text.delta","delta":"checking safety"}`,
+				`data: {"type":"response.refusal.delta","delta":"I can't help with that."}`,
+			),
+			isStream: true,
+			events: []recordfile.RecordEvent{
+				{Type: "llm.reasoning.delta", Time: time.Date(2026, 4, 15, 12, 0, 0, 500000000, time.UTC), IsStream: true, Message: "checking safety"},
+				{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 0, 1, 0, time.UTC), IsStream: true, Message: "I can't help with that.", Attributes: map[string]interface{}{"kind": "refusal"}},
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:  `response.refusal.delta`,
+			messageContains: "give disallowed instructions",
+			historyContains: []string{"give disallowed instructions"},
+			messageCount:    1,
+			aiContent:       "",
+			aiBlockCount:    1,
+			aiBlockTitles:   []string{"Refusal"},
+			aiReasoning:     "checking safety",
+			statusCode:      200,
+			blockContains:   "I can't help with that.",
+			eventTypes:      []string{"llm.reasoning.delta", "llm.output_text.delta"},
 		},
 	}
 }

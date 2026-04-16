@@ -305,6 +305,32 @@ func TestParseLogFileStreamProviderErrorDecoratesErrorBlock(t *testing.T) {
 	}
 }
 
+func TestParseLogFileResponsesStreamRefusalDecoratesRefusalBlock(t *testing.T) {
+	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"give disallowed instructions"}]}]}`
+	resBody := strings.Join([]string{
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"checking safety"}`,
+		`data: {"type":"response.refusal.delta","delta":"I can't help with that."}`,
+	}, "\n")
+
+	content := buildRecordFixture(t, "/v1/responses", true, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if parsed.AIReasoning != "checking safety" {
+		t.Fatalf("AIReasoning = %q, want checking safety", parsed.AIReasoning)
+	}
+	if parsed.AIContent != "" {
+		t.Fatalf("AIContent = %q, want empty", parsed.AIContent)
+	}
+	if len(parsed.AIBlocks) != 1 {
+		t.Fatalf("len(AIBlocks) = %d, want 1", len(parsed.AIBlocks))
+	}
+	if parsed.AIBlocks[0].Title != "Refusal" || !strings.Contains(parsed.AIBlocks[0].Text, "can't help") {
+		t.Fatalf("refusal block = %+v", parsed.AIBlocks[0])
+	}
+}
+
 func TestParseLogFileModelListDecoratesModelListBlock(t *testing.T) {
 	reqBody := `{}`
 	resBody := `{"data":[{"id":"gpt-5","object":"model"},{"id":"gpt-4.1-mini","object":"model"}]}`

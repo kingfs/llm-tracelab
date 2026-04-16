@@ -103,6 +103,28 @@ func TestParseOpenAIResponsesResponse(t *testing.T) {
 	assert.Equal(t, 2, resp.Usage.ReasoningTokens)
 }
 
+func TestParseOpenAIResponsesResponseCustomToolAndRefusal(t *testing.T) {
+	body := []byte(`{
+		"id":"resp_custom",
+		"model":"gpt-5",
+		"output":[
+			{"type":"reasoning","content":[{"type":"summary_text","text":"checking policy"}]},
+			{"type":"custom_tool_call","call_id":"call_custom","name":"policy_guard","arguments":"{\"topic\":\"restricted\"}"},
+			{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I can't help with that."}]}
+		]
+	}`)
+
+	resp, err := ParseResponse(ProviderOpenAICompatible, "/v1/responses", body)
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.NotNil(t, resp.Candidates[0].Refusal)
+	assert.Equal(t, "I can't help with that.", resp.Candidates[0].Refusal.Message)
+	require.Len(t, resp.Candidates[0].ToolCalls, 1)
+	assert.Equal(t, "custom_tool_call", resp.Candidates[0].ToolCalls[0].Type)
+	assert.Equal(t, "policy_guard", resp.Candidates[0].ToolCalls[0].Name)
+	assert.Equal(t, "checking policy", resp.Candidates[0].Content[0].Text)
+}
+
 func TestParseOpenAIResponsesRequestSingleObjectInput(t *testing.T) {
 	body := []byte(`{
 		"model":"gpt-5",

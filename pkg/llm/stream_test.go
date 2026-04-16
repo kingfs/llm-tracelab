@@ -29,6 +29,21 @@ func TestParseOpenAIResponsesStreamResponse(t *testing.T) {
 	assert.Equal(t, "web_search_call", resp.Candidates[0].ToolCalls[1].Name)
 }
 
+func TestParseOpenAIResponsesStreamResponsePreservesRefusal(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"checking safety"}`,
+		`data: {"type":"response.refusal.delta","delta":"I can't help with that."}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	resp, err := ParseStreamResponse(ProviderOpenAICompatible, "/v1/responses", []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.NotNil(t, resp.Candidates[0].Refusal)
+	assert.Equal(t, "I can't help with that.", resp.Candidates[0].Refusal.Message)
+	assert.Equal(t, "checking safety", resp.Candidates[0].Content[0].Text)
+}
+
 func TestParseAnthropicStreamResponse(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
