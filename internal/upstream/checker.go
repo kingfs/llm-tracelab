@@ -25,7 +25,7 @@ type modelsResponse struct {
 	} `json:"models"`
 }
 
-// CheckConnectivity 调用上游 /v1/models 验证连通性
+// CheckConnectivity 调用上游模型列表 endpoint 验证连通性
 func CheckConnectivity(cfg config.UpstreamConfig) error {
 	return checkConnectivity(cfg, defaultConnectivityHTTPClient(), os.Stdout)
 }

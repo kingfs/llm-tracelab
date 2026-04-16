@@ -75,7 +75,7 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 			defer upstream.Close()
 
 			cfg := &config.Config{}
-			cfg.Upstream.BaseURL = upstream.URL
+			cfg.Upstream.BaseURL = upstream.URL + "/v1"
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
@@ -321,7 +321,7 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 		},
 		{
 			name:             "github_models_on_azure_host_stays_bearer",
-			baseURLPath:      "",
+			baseURLPath:      "/v1",
 			providerPreset:   "github_models",
 			requestPath:      "/v1/responses",
 			requestBody:      `{"model":"openai/gpt-4.1","input":"hello"}`,

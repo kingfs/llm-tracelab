@@ -85,7 +85,7 @@ monitor:
   port: "8081"
 
 upstream:
-  base_url: "https://api.openai.com"
+  base_url: "https://api.openai.com/v1"
   api_key: "sk-xxx"
   provider_preset: "openai"      # prefer preset-first config
   protocol_family: ""            # leave empty for inference; conflicting preset/family fails fast
@@ -129,7 +129,7 @@ Supported environment variable overrides:
 
 Recommended compatibility pattern:
 
-- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq and similar OpenAI-compatible services: set `provider_preset` plus `base_url`
+- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq and similar OpenAI-compatible services: set `provider_preset` plus `base_url`, and make sure `base_url` already includes the upstream API prefix such as `/v1`, `/api/v1`, `/openai`, or `/openai/v1`
 - Azure OpenAI `/openai/v1/...`: set `provider_preset: azure` and optionally `api_version`
 - Azure deployment-style routing: set `provider_preset: azure` plus `deployment`
 - vLLM OpenAI-compatible server: set `provider_preset: vllm`
@@ -319,7 +319,7 @@ If you only want to use the published Docker Hub image, you can run it directly 
 docker run --rm \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com \
+  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
   -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
   -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_SERVER_PORT=8080 \
@@ -338,7 +338,7 @@ services:
       - "8080:8080"
       - "8081:8081"
     environment:
-      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com
+      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com/v1
       LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"

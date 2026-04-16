@@ -20,7 +20,7 @@ func TestResolveProviderPresets(t *testing.T) {
 		{
 			name: "openai_preset_defaults",
 			cfg: config.UpstreamConfig{
-				BaseURL:        "https://api.openai.com",
+				BaseURL:        "https://api.openai.com/v1",
 				ProviderPreset: "openai",
 			},
 			wantFamily:  ProtocolFamilyOpenAICompatible,
@@ -74,7 +74,7 @@ func TestResolveProviderPresets(t *testing.T) {
 		{
 			name: "github_models_preset_defaults",
 			cfg: config.UpstreamConfig{
-				BaseURL:        "https://models.inference.ai.azure.com",
+				BaseURL:        "https://models.inference.ai.azure.com/v1",
 				ProviderPreset: "github_models",
 			},
 			wantFamily:  ProtocolFamilyOpenAICompatible,
@@ -207,7 +207,7 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 		{
 			name: "unknown_preset",
 			cfg: config.UpstreamConfig{
-				BaseURL:        "https://api.openai.com",
+				BaseURL:        "https://api.openai.com/v1",
 				ProviderPreset: "unknown_vendor",
 			},
 			wantErr: `unsupported upstream.provider_preset "unknown_vendor"`,
@@ -260,6 +260,13 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 			},
 			wantErr: `upstream.location is required for routing_profile="vertex_project_location"`,
 		},
+		{
+			name: "openai_root_base_url_requires_api_prefix",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.openai.com",
+			},
+			wantErr: `upstream.base_url must include the upstream API path prefix for protocol_family="openai_compatible" (examples: /v1, /api/v1, /openai, /openai/v1)`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -283,12 +290,20 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 		wantURL string
 	}{
 		{
-			name: "openai_default",
+			name: "openai_default_with_v1_base_path",
 			cfg: config.UpstreamConfig{
-				BaseURL: "https://api.openai.com",
+				BaseURL: "https://api.openai.com/v1",
 			},
 			path:    "/v1/responses",
 			wantURL: "https://api.openai.com/v1/responses",
+		},
+		{
+			name: "openai_default_with_openai_base_path",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://compat.example.com/openai",
+			},
+			path:    "/v1/models",
+			wantURL: "https://compat.example.com/openai/models",
 		},
 		{
 			name: "base_url_with_v1_prefix",
@@ -404,7 +419,7 @@ func TestResolvedUpstreamApplyAuthHeaders(t *testing.T) {
 	}
 
 	resolved, err = Resolve(config.UpstreamConfig{
-		BaseURL: "https://api.openai.com",
+		BaseURL: "https://api.openai.com/v1",
 		ApiKey:  "sk-test",
 	})
 	if err != nil {
@@ -480,7 +495,7 @@ func TestResolvedUpstreamStartupDiagnostics(t *testing.T) {
 		{
 			name: "openai_default",
 			cfg: config.UpstreamConfig{
-				BaseURL: "https://api.openai.com",
+				BaseURL: "https://api.openai.com/v1",
 			},
 			wantConnectivityURL:     "https://api.openai.com/v1/models",
 			wantConnectivityPath:    ConnectivityPathOpenAIModels,

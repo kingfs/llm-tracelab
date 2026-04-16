@@ -84,7 +84,7 @@ func TestCheckConnectivityPrintsRequestDumpOnTransportError(t *testing.T) {
 	}
 
 	err := checkConnectivity(config.UpstreamConfig{
-		BaseURL: "https://api.openai.com",
+		BaseURL: "https://api.openai.com/v1",
 	}, client, &out)
 	if err == nil {
 		t.Fatal("checkConnectivity() error = nil, want non-nil")
@@ -106,7 +106,7 @@ func TestCheckConnectivityPrintsRequestDumpOnTransportError(t *testing.T) {
 	logOutput := logs.String()
 	for _, want := range []string{
 		"Starting upstream connectivity check...",
-		"connectivity_endpoint=/v1/models",
+		"connectivity_endpoint=/models",
 		"Upstream check connection failed",
 	} {
 		if !strings.Contains(logOutput, want) {
@@ -136,7 +136,7 @@ func TestCheckConnectivityPrintsFailedInteraction(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	err := checkConnectivity(config.UpstreamConfig{
-		BaseURL: srv.URL,
+		BaseURL: srv.URL + "/v1",
 	}, srv.Client(), &out)
 	if err == nil {
 		t.Fatal("checkConnectivity() error = nil, want non-nil")
@@ -161,7 +161,7 @@ func TestCheckConnectivityPrintsFailedInteraction(t *testing.T) {
 	logOutput := logs.String()
 	for _, want := range []string{
 		"Starting upstream connectivity check...",
-		"connectivity_endpoint=/v1/models",
+		"connectivity_endpoint=/models",
 		"Upstream check returned non-200 status",
 	} {
 		if !strings.Contains(logOutput, want) {

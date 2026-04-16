@@ -113,7 +113,7 @@ server:
 monitor:
   port: ""
 upstream:
-  base_url: "https://api.openai.com"
+  base_url: "https://api.openai.com/v1"
 debug:
   output_dir: "` + dir + `"
   mask_key: false

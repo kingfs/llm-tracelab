@@ -25,7 +25,7 @@ const (
 	RoutingProfileGoogleAIStudio    = "google_ai_studio"
 	RoutingProfileVertexExpress     = "vertex_express"
 	RoutingProfileVertexProject     = "vertex_project_location"
-	ConnectivityPathOpenAIModels    = "/v1/models"
+	ConnectivityPathOpenAIModels    = "/models"
 	ConnectivityPathAnthropicModels = "/v1/models"
 	ConnectivityPathGoogleModels    = "/v1beta/models"
 	ConnectivityPathVertexModels    = "/v1/publishers/google/models"
@@ -131,6 +131,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		}
 		switch resolved.RoutingProfile {
 		case RoutingProfileOpenAIDefault, RoutingProfileVLLMOpenAI:
+			if err := validateOpenAIBasePath(resolved); err != nil {
+				return ResolvedUpstream{}, err
+			}
 			if err := validateResolvedPreset(resolved); err != nil {
 				return ResolvedUpstream{}, err
 			}
@@ -138,6 +141,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		case RoutingProfileAzureOpenAIV1:
 			if resolved.APIVersion == "" {
 				resolved.APIVersion = DefaultAzureAPIVersion
+			}
+			if err := validateOpenAIBasePath(resolved); err != nil {
+				return ResolvedUpstream{}, err
 			}
 			if err := validateResolvedPreset(resolved); err != nil {
 				return ResolvedUpstream{}, err
@@ -498,6 +504,17 @@ func cloneStringMap(input map[string]string) map[string]string {
 	return out
 }
 
+func validateOpenAIBasePath(resolved ResolvedUpstream) error {
+	parsed, err := url.Parse(resolved.BaseURL)
+	if err != nil {
+		return fmt.Errorf("invalid upstream.base_url: %w", err)
+	}
+	if cleanURLPath(parsed.Path) == "/" {
+		return fmt.Errorf("upstream.base_url must include the upstream API path prefix for protocol_family=%q (examples: /v1, /api/v1, /openai, /openai/v1)", resolved.ProtocolFamily)
+	}
+	return nil
+}
+
 func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstream) string {
 	basePath := cleanURLPath("/")
 	if target != nil {
@@ -517,6 +534,17 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 		if strings.Contains(basePath, "/deployments/") {
 			return basePath + stripOpenAIVersionPrefix(reqPath)
 		}
+	}
+	if resolved.ProtocolFamily == ProtocolFamilyOpenAICompatible {
+		trimmedReqPath := stripOpenAIVersionPrefix(reqPath)
+		if llm.NormalizeEndpoint(basePath) == llm.NormalizeEndpoint(reqPath) {
+			return basePath
+		}
+		joined := path.Join(basePath, trimmedReqPath)
+		if !strings.HasPrefix(joined, "/") {
+			joined = "/" + joined
+		}
+		return joined
 	}
 
 	trimmedReqPath := reqPath

@@ -31,6 +31,11 @@ Typical endpoints:
 - `/v1/embeddings`
 - `/v1/models`
 
+Configuration note:
+
+- `upstream.base_url` must already include the upstream API path prefix for OpenAI-compatible providers, such as `/v1`, `/api/v1`, `/openai`, or `/openai/v1`
+- the proxy still accepts client requests under `/v1/...`, but forwards them upstream as `base_url + /...`
+
 ### `anthropic_messages`
 
 Used for Anthropic Claude Messages-style APIs.

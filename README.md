@@ -84,7 +84,7 @@ monitor:
   port: "8081"
 
 upstream:
-  base_url: "https://api.openai.com"
+  base_url: "https://api.openai.com/v1"
   api_key: "sk-xxx"
   provider_preset: "openai"      # 推荐优先填写 preset
   protocol_family: ""            # 可留空自动推断；与 provider_preset 冲突会在启动时报错
@@ -128,7 +128,7 @@ debug:
 
 推荐的兼容配置思路：
 
-- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq 等 OpenAI-compatible 服务：只设置 `provider_preset` 和 `base_url`
+- OpenAI / OpenRouter / Fireworks / Together / DeepSeek / Groq 等 OpenAI-compatible 服务：只设置 `provider_preset` 和 `base_url`，并确保 `base_url` 已包含上游 API 前缀，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`
 - Azure OpenAI `/openai/v1/...`：设置 `provider_preset: azure`，可选 `api_version`
 - Azure deployment 路由：设置 `provider_preset: azure`，并补 `deployment`
 - vLLM OpenAI-compatible server：设置 `provider_preset: vllm`
@@ -318,7 +318,7 @@ docker compose up --build
 docker run --rm \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com \
+  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
   -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
   -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_SERVER_PORT=8080 \
@@ -337,7 +337,7 @@ services:
       - "8080:8080"
       - "8081:8081"
     environment:
-      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com
+      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com/v1
       LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"

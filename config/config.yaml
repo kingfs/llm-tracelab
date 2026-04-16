@@ -5,7 +5,7 @@ monitor:
   port: "8081" # 访问 http://localhost:8081 查看看板
 
 upstream:
-  base_url: "http://localhost:30080"
+  base_url: "http://localhost:30080/v1"
   api_key: "sk-test"
   provider_preset: "openai"      # 推荐优先用 preset；支持 verified/compatible 两类，详见 docs/UPSTREAM_PROVIDERS.md
   protocol_family: ""            # 默认自动推断，目前支持 openai_compatible / anthropic_messages / google_genai / vertex_native
