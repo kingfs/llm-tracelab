@@ -268,8 +268,11 @@ func (p *ResponsePipeline) appendAnthropicEvent(jsonStr string) {
 
 func (p *ResponsePipeline) appendGoogleEvent(jsonStr string) {
 	var chunk struct {
-		Candidates []struct {
-			Content struct {
+		PromptFeedback map[string]any `json:"promptFeedback"`
+		Candidates     []struct {
+			FinishReason  string               `json:"finishReason"`
+			SafetyRatings []GeminiSafetyRating `json:"safetyRatings,omitempty"`
+			Content       struct {
 				Role  string `json:"role"`
 				Parts []struct {
 					Text string `json:"text"`
@@ -280,6 +283,11 @@ func (p *ResponsePipeline) appendGoogleEvent(jsonStr string) {
 	if err := json.Unmarshal([]byte(jsonStr), &chunk); err != nil {
 		return
 	}
+	if len(chunk.PromptFeedback) > 0 {
+		p.appendEvent("llm.output_block", marshalCompactString(chunk.PromptFeedback), map[string]interface{}{
+			"kind": "prompt_feedback",
+		})
+	}
 	for _, candidate := range chunk.Candidates {
 		for _, part := range candidate.Content.Parts {
 			if part.Text != "" {
@@ -287,6 +295,21 @@ func (p *ResponsePipeline) appendGoogleEvent(jsonStr string) {
 					"role": firstNonEmpty(candidate.Content.Role, "model"),
 				})
 			}
+		}
+		for _, rating := range candidate.SafetyRatings {
+			if !rating.Blocked {
+				continue
+			}
+			p.appendEvent("llm.output_block", marshalCompactString(rating), map[string]interface{}{
+				"kind":        "safety",
+				"category":    rating.Category,
+				"probability": rating.Probability,
+			})
+		}
+		if candidate.FinishReason != "" && candidate.FinishReason != "STOP" {
+			p.appendEvent("llm.output_block", candidate.FinishReason, map[string]interface{}{
+				"kind": "finish_reason",
+			})
 		}
 	}
 }

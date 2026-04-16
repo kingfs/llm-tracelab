@@ -292,6 +292,8 @@ func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 	var (
 		contentBuilder strings.Builder
 		role           = "model"
+		safetyAll      []LLMSafetyRating
+		promptFeedback map[string]any
 	)
 
 	scanner := newSSEScanner(body)
@@ -318,12 +320,36 @@ func (a googleGenerateContentAdapter) ParseStreamResponse(body []byte) (LLMRespo
 					contentBuilder.WriteString(part.Text)
 				}
 			}
+			for _, rating := range candidate.SafetyRatings {
+				safetyAll = append(safetyAll, LLMSafetyRating{
+					Category:    rating.Category,
+					Probability: rating.Probability,
+					Blocked:     rating.Blocked,
+				})
+			}
+		}
+		if len(chunk.PromptFeedback) > 0 {
+			promptFeedback = chunk.PromptFeedback
 		}
 	}
 
 	resp := singleCandidateResponse(contentBuilder.String(), "", nil)
 	if len(resp.Candidates) > 0 {
 		resp.Candidates[0].Role = role
+		if len(safetyAll) > 0 {
+			resp.Candidates[0].Extensions = map[string]any{
+				"safety_ratings": safetyAll,
+			}
+			resp.Safety = append(resp.Safety, safetyAll...)
+		}
+	}
+	if len(promptFeedback) > 0 {
+		resp.Extensions = map[string]any{
+			"prompt_feedback": promptFeedback,
+		}
+		if resp.Candidates[0].Refusal == nil {
+			resp.Candidates[0].Refusal = geminiPromptFeedbackRefusal(promptFeedback)
+		}
 	}
 	return resp, nil
 }

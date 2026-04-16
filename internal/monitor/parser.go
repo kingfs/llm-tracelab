@@ -346,7 +346,32 @@ func summarizeLLMResponse(resp llm.LLMResponse) (string, string, []ContentBlock,
 			Format: detectContentFormat(candidate.Refusal.Message),
 		})
 	}
+	blocks = append(blocks, llmExtensionBlocks(resp, candidate)...)
 	return strings.Join(contentParts, "\n\n"), strings.Join(reasoningParts, "\n\n"), blocks, toolCalls
+}
+
+func llmExtensionBlocks(resp llm.LLMResponse, candidate llm.LLMCandidate) []ContentBlock {
+	var blocks []ContentBlock
+
+	if payload := marshalCompact(resp.Extensions["prompt_feedback"]); payload != "" {
+		blocks = append(blocks, ContentBlock{
+			Kind:   "safety",
+			Title:  "Prompt Feedback",
+			Text:   payload,
+			Format: detectContentFormat(payload),
+		})
+	}
+
+	if payload := marshalCompact(candidate.Extensions["safety_ratings"]); payload != "" {
+		blocks = append(blocks, ContentBlock{
+			Kind:   "safety",
+			Title:  "Safety Ratings",
+			Text:   payload,
+			Format: detectContentFormat(payload),
+		})
+	}
+
+	return blocks
 }
 
 func humanizeKind(kind string) string {

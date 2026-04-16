@@ -77,6 +77,23 @@ func TestResponsePipelineGoogleStream(t *testing.T) {
 	assert.Equal(t, "llm.output_text.delta", events[0].Type)
 }
 
+func TestResponsePipelineGoogleStreamEmitsSafetyBlocks(t *testing.T) {
+	pipeline := NewResponsePipeline(ProviderGoogleGenAI, "/v1beta/models:streamGenerateContent", true)
+	pipeline.Feed([]byte(`data: {"promptFeedback":{"blockReason":"SAFETY"}}` + "\n"))
+	pipeline.Feed([]byte(`data: {"candidates":[{"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}]}` + "\n"))
+
+	events := pipeline.Events()
+	require.Len(t, events, 3)
+	assert.Equal(t, "llm.output_block", events[0].Type)
+	assert.Contains(t, events[0].Message, "blockReason")
+	assert.Equal(t, "prompt_feedback", events[0].Attributes["kind"])
+	assert.Equal(t, "llm.output_block", events[1].Type)
+	assert.Equal(t, "safety", events[1].Attributes["kind"])
+	assert.Equal(t, "HARM_CATEGORY_HATE_SPEECH", events[1].Attributes["category"])
+	assert.Equal(t, "llm.output_block", events[2].Type)
+	assert.Equal(t, "SAFETY", events[2].Message)
+}
+
 func TestDetectStreamingResponse(t *testing.T) {
 	header := http.Header{}
 	header.Set("Content-Type", "text/event-stream")

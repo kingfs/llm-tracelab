@@ -236,6 +236,29 @@ func TestParseLogFileAnthropicDecoratesThinkingAndToolErrors(t *testing.T) {
 	}
 }
 
+func TestParseLogFileGoogleDecoratesPromptFeedbackAndSafety(t *testing.T) {
+	reqBody := `{"systemInstruction":{"role":"system","parts":[{"text":"Be safe"}]},"contents":[{"role":"user","parts":[{"text":"unsafe request"}]}]}`
+	resBody := `{"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}],"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`
+
+	content := buildRecordFixture(t, "/v1beta/models/gemini-2.5-flash:generateContent", false, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if parsed.AIContent != "partial" {
+		t.Fatalf("AIContent = %q, want partial", parsed.AIContent)
+	}
+	if len(parsed.AIBlocks) != 2 {
+		t.Fatalf("len(AIBlocks) = %d, want 2", len(parsed.AIBlocks))
+	}
+	if parsed.AIBlocks[0].Title != "Prompt Feedback" || !strings.Contains(parsed.AIBlocks[0].Text, "blockReason") {
+		t.Fatalf("prompt feedback block = %+v", parsed.AIBlocks[0])
+	}
+	if parsed.AIBlocks[1].Title != "Safety Ratings" || !strings.Contains(parsed.AIBlocks[1].Text, "HARM_CATEGORY_HATE_SPEECH") {
+		t.Fatalf("safety ratings block = %+v", parsed.AIBlocks[1])
+	}
+}
+
 func buildRecordFixture(t *testing.T, url string, isStream bool, reqBody string, resBody string) []byte {
 	t.Helper()
 
