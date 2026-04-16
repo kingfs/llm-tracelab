@@ -95,3 +95,49 @@ debug:
 		}
 	}
 }
+
+func TestRunMigrateLogsSummary(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	prev := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+	})
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+upstream:
+  base_url: "https://api.openai.com"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	code := runMigrate([]string{"-c", configPath, "-rewrite-v2=false", "-rebuild-index=false"})
+	if code != 0 {
+		t.Fatalf("runMigrate() = %d, want 0", code)
+	}
+
+	output := buf.String()
+	for _, want := range []string{
+		"Migration finished",
+		"output_dir=" + dir,
+		"scanned_files=0",
+		"converted_files=0",
+		"skipped_v3_files=0",
+		"indexed_rows=0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("log output = %q, want contain %q", output, want)
+		}
+	}
+}
