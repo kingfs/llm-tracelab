@@ -272,6 +272,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityMultiTurn,
 		capabilityHistory,
 		capabilityMixedBlocks,
+		capabilitySafety,
 		capabilityRefusal,
 		capabilityError,
 	}
@@ -291,6 +292,36 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		}
 		if capability == capabilityStream && len(providers) < 3 {
 			t.Fatalf("stream coverage should span 3 providers, got %d: %+v", len(providers), providers)
+		}
+		if capability == capabilitySafety {
+			if !providers[llm.ProviderGoogleGenAI] {
+				t.Fatalf("safety coverage should include %q fixtures, got %+v", llm.ProviderGoogleGenAI, providers)
+			}
+
+			foundPromptFeedback := false
+			foundSafetyRatings := false
+			for _, fixture := range fixtures {
+				if !fixture.hasCapability(capabilitySafety) {
+					continue
+				}
+				for _, title := range fixture.want.aiBlockTitles {
+					if title == "Prompt Feedback" {
+						foundPromptFeedback = true
+					}
+					if title == "Safety Ratings" {
+						foundSafetyRatings = true
+					}
+				}
+				if fixture.want.blockContains != "" {
+					foundPromptFeedback = true
+				}
+			}
+			if !foundPromptFeedback {
+				t.Fatalf("safety coverage should assert prompt feedback or refusal blocks")
+			}
+			if !foundSafetyRatings {
+				t.Fatalf("safety coverage should assert safety rating blocks")
+			}
 		}
 	}
 }

@@ -58,6 +58,7 @@ const (
 	capabilityMultiTurn   cassetteCapability = "multi_turn"
 	capabilityHistory     cassetteCapability = "history"
 	capabilityMixedBlocks cassetteCapability = "mixed_blocks"
+	capabilitySafety      cassetteCapability = "safety"
 	capabilityRefusal     cassetteCapability = "refusal"
 	capabilityError       cassetteCapability = "error"
 )
@@ -427,6 +428,7 @@ func googleGenAIMixedBlocksFixture() cassetteFixtureCase {
 		capabilities: []cassetteCapability{
 			capabilityNonStream,
 			capabilityMixedBlocks,
+			capabilitySafety,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderGoogleGenAI,
@@ -465,6 +467,7 @@ func googleGenAIBlockedFixture() cassetteFixtureCase {
 		name: "google_genai_blocked_non_stream",
 		capabilities: []cassetteCapability{
 			capabilityNonStream,
+			capabilitySafety,
 			capabilityRefusal,
 			capabilityMixedBlocks,
 		},
