@@ -331,7 +331,7 @@ func (u ResolvedUpstream) ConnectivityCheckURL() (string, error) {
 	case ProtocolFamilyGoogleGenAI:
 		return u.BuildURL(ConnectivityPathGoogleModels)
 	case ProtocolFamilyVertexNative:
-		return u.BuildURL(ConnectivityPathVertexModels)
+		return u.BuildURL(u.vertexConnectivityPath())
 	default:
 		return u.BuildURL(ConnectivityPathOpenAIModels)
 	}
@@ -344,10 +344,21 @@ func (u ResolvedUpstream) ConnectivityCheckEndpoint() string {
 	case ProtocolFamilyGoogleGenAI:
 		return ConnectivityPathGoogleModels
 	case ProtocolFamilyVertexNative:
-		return ConnectivityPathVertexModels
+		return u.vertexConnectivityPath()
 	default:
 		return ConnectivityPathOpenAIModels
 	}
+}
+
+func (u ResolvedUpstream) vertexConnectivityPath() string {
+	resourceBase := strings.Trim(u.ModelResource, "/")
+	if resourceBase == "" {
+		resourceBase = "publishers/google/models"
+	}
+	if u.RoutingProfile == RoutingProfileVertexProject {
+		return "/v1/projects/" + u.Project + "/locations/" + u.Location + "/" + resourceBase
+	}
+	return "/v1/" + resourceBase
 }
 
 func (u ResolvedUpstream) ModelRoutingHint() string {

@@ -506,8 +506,8 @@ func TestResolvedUpstreamStartupDiagnostics(t *testing.T) {
 				Location:       "us-central1",
 				ModelResource:  "publishers/google/models",
 			},
-			wantConnectivityURL:     "https://us-central1-aiplatform.googleapis.com/v1/projects/demo-project/locations/us-central1/publishers/google/models/publishers/google/models",
-			wantConnectivityPath:    ConnectivityPathVertexModels,
+			wantConnectivityURL:     "https://us-central1-aiplatform.googleapis.com/v1/projects/demo-project/locations/us-central1/publishers/google/models",
+			wantConnectivityPath:    "/v1/projects/demo-project/locations/us-central1/publishers/google/models",
 			wantModelRoutingContain: "/v1/projects/{project}/locations/{location}",
 		},
 	}
