@@ -70,6 +70,9 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if llmReq.Model != tt.spec.model {
 				t.Fatalf("request model = %q, want %q", llmReq.Model, tt.spec.model)
 			}
+			if tt.want.messageCount > 0 && requestHistoryCount(llmReq) != tt.want.messageCount {
+				t.Fatalf("request history count = %d, want %d", requestHistoryCount(llmReq), tt.want.messageCount)
+			}
 			if tt.want.toolResultText != "" {
 				foundToolResult := false
 				for _, msg := range llmReq.Messages {
@@ -88,6 +91,29 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				}
 				if !foundToolResult {
 					t.Fatalf("request tool_result not found for %q: %+v", tt.want.toolResultText, llmReq.Messages)
+				}
+			}
+			for _, expected := range tt.want.historyContains {
+				foundHistory := false
+				for _, content := range llmReq.System {
+					if bytes.Contains([]byte(content.Text), []byte(expected)) || bytes.Contains([]byte(content.Refusal), []byte(expected)) || bytes.Contains([]byte(stringifyMap(content.ToolResult)), []byte(expected)) {
+						foundHistory = true
+						break
+					}
+				}
+				for _, msg := range llmReq.Messages {
+					for _, content := range msg.Content {
+						if bytes.Contains([]byte(content.Text), []byte(expected)) || bytes.Contains([]byte(content.Refusal), []byte(expected)) || bytes.Contains([]byte(stringifyMap(content.ToolResult)), []byte(expected)) {
+							foundHistory = true
+							break
+						}
+					}
+					if foundHistory {
+						break
+					}
+				}
+				if !foundHistory {
+					t.Fatalf("request history does not contain %q: %+v", expected, llmReq.Messages)
 				}
 			}
 
@@ -131,6 +157,9 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if len(parsedMonitor.ChatMessages) == 0 {
 				t.Fatalf("monitor chat messages should not be empty")
 			}
+			if tt.want.messageCount > 0 && len(parsedMonitor.ChatMessages) != tt.want.messageCount {
+				t.Fatalf("monitor chat messages = %d, want %d", len(parsedMonitor.ChatMessages), tt.want.messageCount)
+			}
 			if parsedMonitor.Header.Usage.PromptTokens != tt.want.promptTokens {
 				t.Fatalf("prompt tokens = %d, want %d", parsedMonitor.Header.Usage.PromptTokens, tt.want.promptTokens)
 			}
@@ -160,6 +189,18 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			}
 			if !foundMessage {
 				t.Fatalf("chat messages do not contain %q: %+v", tt.want.messageContains, parsedMonitor.ChatMessages)
+			}
+			for _, expected := range tt.want.historyContains {
+				foundHistory := false
+				for _, message := range parsedMonitor.ChatMessages {
+					if bytes.Contains([]byte(message.Content), []byte(expected)) {
+						foundHistory = true
+						break
+					}
+				}
+				if !foundHistory {
+					t.Fatalf("chat history does not contain %q: %+v", expected, parsedMonitor.ChatMessages)
+				}
 			}
 			if tt.want.blockContains != "" {
 				foundBlock := false
@@ -213,6 +254,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityReasoning,
 		capabilityToolCall,
 		capabilityToolResult,
+		capabilityMultiTurn,
 		capabilityRefusal,
 		capabilityError,
 	}
@@ -245,4 +287,12 @@ func stringifyMap(v map[string]any) string {
 		return ""
 	}
 	return string(data)
+}
+
+func requestHistoryCount(req llm.LLMRequest) int {
+	count := len(req.Messages)
+	if len(req.System) > 0 {
+		count++
+	}
+	return count
 }

@@ -31,6 +31,8 @@ type cassetteSpec struct {
 type cassetteExpectation struct {
 	replayContains   string
 	messageContains  string
+	historyContains  []string
+	messageCount     int
 	aiContent        string
 	promptTokens     int
 	completionTokens int
@@ -51,6 +53,7 @@ const (
 	capabilityReasoning  cassetteCapability = "reasoning"
 	capabilityToolCall   cassetteCapability = "tool_call"
 	capabilityToolResult cassetteCapability = "tool_result"
+	capabilityMultiTurn  cassetteCapability = "multi_turn"
 	capabilityRefusal    cassetteCapability = "refusal"
 	capabilityError      cassetteCapability = "error"
 )
@@ -65,6 +68,7 @@ type cassetteFixtureCase struct {
 func cassetteFixtureCatalog() []cassetteFixtureCase {
 	return []cassetteFixtureCase{
 		openAIResponsesNonStreamFixture(),
+		openAIResponsesMultiTurnFixture(),
 		openAIResponsesToolCallStreamFixture(),
 		openAIResponsesToolResultFixture(),
 		anthropicMessagesNonStreamFixture(),
@@ -102,9 +106,48 @@ func openAIResponsesNonStreamFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   `"total_tokens":8`,
 			messageContains:  "hello from openai",
+			historyContains:  []string{"hello from openai"},
+			messageCount:     1,
 			aiContent:        "hello from assistant",
 			promptTokens:     3,
 			completionTokens: 5,
+		},
+	}
+}
+
+func openAIResponsesMultiTurnFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_multi_turn_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityMultiTurn,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"system","content":[{"type":"input_text","text":"You are concise."}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi there"}]},{"type":"message","role":"user","content":[{"type":"input_text","text":"summarize our chat"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"id":"resp_multi_turn","model":"gpt-5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"You said hello and I replied hi there."}]}],"usage":{"input_tokens":14,"output_tokens":9,"total_tokens":23}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     14,
+				CompletionTokens: 9,
+				TotalTokens:      23,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `You said hello and I replied hi there.`,
+			messageContains:  "summarize our chat",
+			historyContains:  []string{"You are concise.", "hello", "hi there", "summarize our chat"},
+			messageCount:     4,
+			aiContent:        "You said hello and I replied hi there.",
+			promptTokens:     14,
+			completionTokens: 9,
 		},
 	}
 }
@@ -152,6 +195,8 @@ func openAIResponsesToolCallStreamFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   "data:",
 			messageContains:  "inspect logs",
+			historyContains:  []string{"inspect logs"},
+			messageCount:     1,
 			aiContent:        "done",
 			aiReasoning:      "inspect logs",
 			promptTokens:     9,
@@ -191,6 +236,8 @@ func openAIResponsesToolResultFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   `You are in /tmp/project`,
 			messageContains:  "where am i?",
+			historyContains:  []string{"where am i?", "/tmp/project"},
+			messageCount:     3,
 			aiContent:        "You are in /tmp/project",
 			promptTokens:     11,
 			completionTokens: 7,
@@ -227,6 +274,8 @@ func anthropicMessagesNonStreamFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   `"output_tokens":6`,
 			messageContains:  "hello from anthropic",
+			historyContains:  []string{"Be concise", "hello from anthropic"},
+			messageCount:     2,
 			aiContent:        "hello from claude",
 			promptTokens:     4,
 			completionTokens: 6,
@@ -272,6 +321,8 @@ func anthropicMessagesStreamFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   "data:",
 			messageContains:  "hello from anthropic stream",
+			historyContains:  []string{"hello from anthropic stream"},
+			messageCount:     1,
 			aiContent:        "Hello Claude",
 			promptTokens:     5,
 			completionTokens: 7,
@@ -309,6 +360,8 @@ func anthropicToolErrorFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   `"output_tokens":4`,
 			messageContains:  "stacktrace",
+			historyContains:  []string{"stacktrace"},
+			messageCount:     2,
 			aiContent:        "command failed",
 			promptTokens:     6,
 			completionTokens: 4,
@@ -351,6 +404,8 @@ func googleGenAIStreamFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   "data:",
 			messageContains:  "hello from gemini",
+			historyContains:  []string{"hello from gemini"},
+			messageCount:     1,
 			aiContent:        "Hello Gemini",
 			promptTokens:     3,
 			completionTokens: 7,
@@ -387,6 +442,8 @@ func googleGenAIBlockedFixture() cassetteFixtureCase {
 		want: cassetteExpectation{
 			replayContains:   `"blockReason":"SAFETY"`,
 			messageContains:  "unsafe request",
+			historyContains:  []string{"unsafe request"},
+			messageCount:     1,
 			aiContent:        "",
 			promptTokens:     2,
 			completionTokens: 0,
