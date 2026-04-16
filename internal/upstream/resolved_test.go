@@ -200,8 +200,9 @@ func TestResolveProviderPresets(t *testing.T) {
 
 func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 	tests := []struct {
-		name string
-		cfg  config.UpstreamConfig
+		name    string
+		cfg     config.UpstreamConfig
+		wantErr string
 	}{
 		{
 			name: "unknown_preset",
@@ -209,6 +210,7 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				BaseURL:        "https://api.openai.com",
 				ProviderPreset: "unknown_vendor",
 			},
+			wantErr: `unsupported upstream.provider_preset "unknown_vendor"`,
 		},
 		{
 			name: "preset_family_mismatch",
@@ -217,6 +219,7 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				ProviderPreset: "anthropic",
 				ProtocolFamily: ProtocolFamilyGoogleGenAI,
 			},
+			wantErr: `upstream.provider_preset="anthropic" requires protocol_family="anthropic_messages", got "google_genai"`,
 		},
 		{
 			name: "preset_profile_mismatch",
@@ -225,6 +228,7 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				ProviderPreset: "openrouter",
 				RoutingProfile: RoutingProfileAzureOpenAIV1,
 			},
+			wantErr: `upstream.provider_preset="openrouter" does not support routing_profile="azure_openai_v1"`,
 		},
 		{
 			name: "vertex_missing_model_resource",
@@ -233,6 +237,7 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				ProtocolFamily: ProtocolFamilyVertexNative,
 				RoutingProfile: RoutingProfileVertexExpress,
 			},
+			wantErr: `upstream.model_resource is required for routing_profile="vertex_express"`,
 		},
 		{
 			name: "vertex_preset_profile_mismatch",
@@ -242,13 +247,29 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				RoutingProfile: RoutingProfileGoogleAIStudio,
 				ModelResource:  "publishers/google/models",
 			},
+			wantErr: `upstream.provider_preset="vertex" does not support routing_profile="google_ai_studio"`,
+		},
+		{
+			name: "vertex_project_missing_location",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
+				ProtocolFamily: ProtocolFamilyVertexNative,
+				RoutingProfile: RoutingProfileVertexProject,
+				Project:        "demo-project",
+				ModelResource:  "publishers/google/models",
+			},
+			wantErr: `upstream.location is required for routing_profile="vertex_project_location"`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Resolve(tt.cfg); err == nil {
+			_, err := Resolve(tt.cfg)
+			if err == nil {
 				t.Fatalf("Resolve() error = nil, want non-nil")
+			}
+			if err.Error() != tt.wantErr {
+				t.Fatalf("Resolve() error = %q, want %q", err.Error(), tt.wantErr)
 			}
 		})
 	}

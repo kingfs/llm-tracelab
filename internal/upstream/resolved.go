@@ -121,6 +121,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 	if resolved.ProtocolFamily == "" {
 		resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
 	}
+	if err := validateResolvedPreset(resolved); err != nil {
+		return ResolvedUpstream{}, err
+	}
 	switch resolved.ProtocolFamily {
 	case ProtocolFamilyOpenAICompatible:
 		if resolved.RoutingProfile == "" {
