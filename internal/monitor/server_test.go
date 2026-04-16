@@ -565,6 +565,71 @@ func TestTraceAPIHandlerReturnsNotFoundForUnknownID(t *testing.T) {
 	}
 }
 
+func TestListAPIHandlerReturnsStoreNotConfiguredError(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
+	rr := httptest.NewRecorder()
+	listAPIHandler(nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rr.Code)
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload["error"] != "store not configured" {
+		t.Fatalf("error = %q, want store not configured", payload["error"])
+	}
+}
+
+func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "broken.http")
+	if err := os.WriteFile(tracePath, []byte("not a valid cassette"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	entry := store.LogEntry{
+		ID:      "broken",
+		LogPath: tracePath,
+	}
+	rr := httptest.NewRecorder()
+	handleTraceDetail(rr, tracePath, entry)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rr.Code)
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !strings.Contains(payload["error"], "parse error:") {
+		t.Fatalf("error = %q, want parse error prefix", payload["error"])
+	}
+}
+
+func TestTraceRawAPIHandlerReturnsFileNotFoundError(t *testing.T) {
+	t.Parallel()
+
+	rr := httptest.NewRecorder()
+	handleTraceRaw(rr, filepath.Join(t.TempDir(), "missing.http"), store.LogEntry{ID: "missing"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+
+	var payload map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload["error"] != "file not found" {
+		t.Fatalf("error = %q, want file not found", payload["error"])
+	}
+}
+
 func buildRecordHeader(url string, isStream bool, reqBody string, resBody string) recordfile.RecordHeader {
 	reqHeader := "POST " + url + " HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
 	resHeader := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
