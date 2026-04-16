@@ -5,7 +5,7 @@
 
 **中文说明** | [English](./README_EN.md)
 
-`llm-tracelab` 是一个面向 OpenAI Compatible API 的 LLM 录制与回放代理。它的核心目标很直接：
+`llm-tracelab` 是一个本地优先的 LLM HTTP 录制与回放代理。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面。核心目标很直接：
 
 - 开发时把真实大模型 HTTP 请求录下来
 - 单元测试时直接回放，不再依赖外网和真实模型
@@ -51,7 +51,7 @@ pkg/replay            单元测试回放 Transport
 pkg/llm               多厂商请求/响应归一化
 ```
 
-更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，第四协议族候选设计见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
 
 ## 录制文件与索引
 
@@ -91,6 +91,9 @@ upstream:
   routing_profile: ""            # 可留空自动推断；不支持的 preset/profile 组合会 fail fast
   api_version: ""                # Azure 用 query 参数；Anthropic 用 anthropic-version header
   deployment: ""                 # Azure deployment routing 时使用
+  project: ""                    # Vertex project/location routing 时使用
+  location: ""                   # Vertex regional host / path routing 时使用
+  model_resource: ""             # Vertex model 资源，例如 publishers/google/models/gemini-2.5-flash
   headers: {}                    # 额外上游请求头，比如 anthropic-beta
 
 debug:
@@ -109,6 +112,9 @@ debug:
 - `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
 - `LLM_TRACELAB_UPSTREAM_API_VERSION`
 - `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
+- `LLM_TRACELAB_UPSTREAM_PROJECT`
+- `LLM_TRACELAB_UPSTREAM_LOCATION`
+- `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
 
@@ -120,6 +126,7 @@ debug:
 - vLLM OpenAI-compatible server：设置 `provider_preset: vllm`
 - Anthropic Messages API：设置 `provider_preset: anthropic`，如需 beta 能力可在 `headers` 里补 `anthropic-beta`
 - Google GenAI API：设置 `provider_preset: google_genai`，当前支持 `generateContent` 和 `streamGenerateContent` 基础闭环
+- Vertex AI native API：当前无 `provider_preset`，请显式设置 `protocol_family: vertex_native`，并根据模式选择 `routing_profile: vertex_express` 或 `vertex_project_location`
 
 支持级别说明：
 
@@ -160,6 +167,10 @@ debug:
   `support: verified`
   `protocol_family: google_genai`
   `routing_profile: google_ai_studio`
+- `protocol_family: vertex_native`
+  `support: verified`
+  `routing_profile: vertex_express | vertex_project_location`
+  `notes: 当前无 provider_preset；已覆盖 adapter / proxy / cassette regression`
 
 Anthropic 示例：
 
@@ -180,6 +191,30 @@ upstream:
   base_url: "https://generativelanguage.googleapis.com"
   api_key: "AIza..."
   provider_preset: "google_genai"
+```
+
+Vertex express 示例：
+
+```yaml
+upstream:
+  base_url: "https://aiplatform.googleapis.com"
+  api_key: "ya29..."
+  protocol_family: "vertex_native"
+  routing_profile: "vertex_express"
+  model_resource: "publishers/google/models/gemini-2.5-flash"
+```
+
+Vertex project/location 示例：
+
+```yaml
+upstream:
+  base_url: "https://us-central1-aiplatform.googleapis.com"
+  api_key: "ya29..."
+  protocol_family: "vertex_native"
+  routing_profile: "vertex_project_location"
+  project: "demo-project"
+  location: "us-central1"
+  model_resource: "publishers/google/models/gemini-2.5-flash"
 ```
 
 Azure deployment 示例：

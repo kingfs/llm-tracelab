@@ -5,7 +5,7 @@
 
 [中文说明](./README.md) | **English**
 
-`llm-tracelab` is a local-first record/replay proxy for OpenAI-compatible LLM APIs.
+`llm-tracelab` is a local-first record/replay proxy for LLM HTTP APIs. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
 The core workflow is simple:
 
 - record real LLM HTTP traffic during development
@@ -52,7 +52,7 @@ pkg/replay            replay transport for tests
 pkg/llm               cross-provider normalization helpers
 ```
 
-AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), and the next-family planning note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
+AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), and the Vertex family design note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
 
 ## Record Format And Index
 
@@ -92,6 +92,9 @@ upstream:
   routing_profile: ""            # leave empty for inference; unsupported preset/profile combos fail fast
   api_version: ""                # Azure uses query params; Anthropic uses anthropic-version header
   deployment: ""                 # used by Azure deployment routing
+  project: ""                    # used by Vertex project/location routing
+  location: ""                   # used by Vertex regional host / path routing
+  model_resource: ""             # Vertex model resource such as publishers/google/models/gemini-2.5-flash
   headers: {}                    # extra upstream headers such as anthropic-beta
 
 debug:
@@ -110,6 +113,9 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
 - `LLM_TRACELAB_UPSTREAM_API_VERSION`
 - `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
+- `LLM_TRACELAB_UPSTREAM_PROJECT`
+- `LLM_TRACELAB_UPSTREAM_LOCATION`
+- `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
 
@@ -121,6 +127,7 @@ Recommended compatibility pattern:
 - vLLM OpenAI-compatible server: set `provider_preset: vllm`
 - Anthropic Messages API: set `provider_preset: anthropic`; use `headers.anthropic-beta` if you need beta features
 - Google GenAI API: set `provider_preset: google_genai`; this round supports the base `generateContent` and `streamGenerateContent` flows
+- Vertex AI native API: there is no `provider_preset` yet; configure `protocol_family: vertex_native` plus either `routing_profile: vertex_express` or `vertex_project_location`
 
 Support level meanings:
 
@@ -161,6 +168,10 @@ Current recommended support matrix:
   `support: verified`
   `protocol_family: google_genai`
   `routing_profile: google_ai_studio`
+- `protocol_family: vertex_native`
+  `support: verified`
+  `routing_profile: vertex_express | vertex_project_location`
+  `notes: no provider preset yet; covered by adapter / proxy / cassette regressions`
 
 Anthropic example:
 
@@ -181,6 +192,30 @@ upstream:
   base_url: "https://generativelanguage.googleapis.com"
   api_key: "AIza..."
   provider_preset: "google_genai"
+```
+
+Vertex express example:
+
+```yaml
+upstream:
+  base_url: "https://aiplatform.googleapis.com"
+  api_key: "ya29..."
+  protocol_family: "vertex_native"
+  routing_profile: "vertex_express"
+  model_resource: "publishers/google/models/gemini-2.5-flash"
+```
+
+Vertex project/location example:
+
+```yaml
+upstream:
+  base_url: "https://us-central1-aiplatform.googleapis.com"
+  api_key: "ya29..."
+  protocol_family: "vertex_native"
+  routing_profile: "vertex_project_location"
+  project: "demo-project"
+  location: "us-central1"
+  model_resource: "publishers/google/models/gemini-2.5-flash"
 ```
 
 Azure deployment example:

@@ -57,6 +57,22 @@ Typical endpoints:
 - `/v1beta/models/{model}:streamGenerateContent`
 - `/v1beta/models`
 
+### `vertex_native`
+
+Used for Vertex AI native content-generation APIs with project/location-aware routing and Google Cloud Bearer auth.
+
+Supported routing profiles:
+
+- `vertex_express`
+- `vertex_project_location`
+
+Currently verified endpoints:
+
+- `/v1/publishers/{publisher}/models/{model}:generateContent`
+- `/v1/publishers/{publisher}/models/{model}:streamGenerateContent`
+- `/v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}:generateContent`
+- `/v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}:streamGenerateContent`
+
 ## Support Levels
 
 Presets are classified as:
@@ -100,6 +116,24 @@ Invalid combinations now fail fast at startup. For example:
 - `provider_preset: openrouter` with `routing_profile: azure_openai_v1`
 - unknown `provider_preset` values
 
+## Explicit Family Config
+
+Not every supported family has a user-facing preset yet.
+
+`vertex_native` is now implemented and verified through parser, proxy, and cassette regression coverage, but it currently requires explicit config instead of `provider_preset`.
+
+Recommended config patterns:
+
+- `protocol_family: vertex_native`
+- `routing_profile: vertex_express | vertex_project_location`
+- `model_resource: publishers/google/models/<model>`
+- `api_key: <google-cloud-bearer-token>`
+
+Additional fields for `vertex_project_location`:
+
+- `project`
+- `location`
+
 ## Selection Rules
 
 Resolution order is:
@@ -136,18 +170,13 @@ Examples that may justify future families:
 - Bedrock or Vertex APIs that are not used through an OpenAI-compatible surface
 - realtime or session-based APIs
 
-## Next Candidate
+## Planning Note
 
-### `vertex_native`
+`vertex_native` is now the fourth implemented protocol family.
 
-The current recommendation is to add `vertex_native` as the fourth protocol family, instead of folding Vertex into `google_genai`.
+Its broader scope is still intentionally limited in v1:
 
-Reason:
+- `generateContent`
+- `streamGenerateContent`
 
-- Vertex-native differs enough in routing and auth semantics to justify isolation
-- it is a stronger architecture test than adding more OpenAI-compatible aliases
-- a minimal first cut can still reuse much of the existing Gemini body parsing logic
-
-Planning note:
-
-- see [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md) for the proposed family boundary, routing profiles, and implementation order
+Planning and non-goals remain documented in [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md).
