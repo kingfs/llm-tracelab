@@ -57,34 +57,48 @@ Typical endpoints:
 - `/v1beta/models/{model}:streamGenerateContent`
 - `/v1beta/models`
 
+## Support Levels
+
+Presets are classified as:
+
+- `verified`: explicitly covered by behavior tests or cassette-level regression tests
+- `compatible`: expected to work because they map cleanly to an existing family, but have lighter direct verification
+- `planned`: not yet a preset or not yet implemented
+
 ## Current Preset Matrix
 
 These presets currently resolve without requiring extra code changes:
 
-| Provider preset | Protocol family | Routing profile | Notes |
-| --- | --- | --- | --- |
-| `openai` | `openai_compatible` | `openai_default` | default OpenAI-style routing |
-| `openrouter` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `fireworks` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `together` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `deepseek` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `groq` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `xai` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `moonshot` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `cerebras` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `baseten` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `perplexity` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `alibaba` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `hugging_face` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `nvidia_nim` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `github_models` | `openai_compatible` | `openai_default` | GitHub Models OpenAI-compatible surface |
-| `azure` | `openai_compatible` | inferred | chooses `azure_openai_v1` or `azure_openai_deployment` |
-| `azure_openai` | `openai_compatible` | inferred | alias of `azure` |
-| `vllm` | `openai_compatible` | `vllm_openai` | self-hosted OpenAI-compatible server |
-| `anthropic` | `anthropic_messages` | `anthropic_default` | Claude Messages API |
-| `google_genai` | `google_genai` | `google_ai_studio` | Google Gemini API |
-| `google` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
-| `gemini` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
+| Provider preset | Support | Protocol family | Routing profile | Notes |
+| --- | --- | --- | --- | --- |
+| `openai` | `verified` | `openai_compatible` | `openai_default` | default OpenAI-style routing |
+| `openrouter` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `fireworks` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `together` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `deepseek` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `groq` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `xai` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `moonshot` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `cerebras` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `baseten` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `perplexity` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `alibaba` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `hugging_face` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `nvidia_nim` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `github_models` | `verified` | `openai_compatible` | `openai_default` | GitHub Models OpenAI-compatible surface |
+| `azure` | `verified` | `openai_compatible` | inferred | chooses `azure_openai_v1` or `azure_openai_deployment` |
+| `azure_openai` | `verified` | `openai_compatible` | inferred | alias of `azure` |
+| `vllm` | `verified` | `openai_compatible` | `vllm_openai` | self-hosted OpenAI-compatible server |
+| `anthropic` | `verified` | `anthropic_messages` | `anthropic_default` | Claude Messages API |
+| `google_genai` | `verified` | `google_genai` | `google_ai_studio` | Google Gemini API |
+| `google` | `verified` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
+| `gemini` | `verified` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
+
+Invalid combinations now fail fast at startup. For example:
+
+- `provider_preset: anthropic` with `protocol_family: google_genai`
+- `provider_preset: openrouter` with `routing_profile: azure_openai_v1`
+- unknown `provider_preset` values
 
 ## Selection Rules
 

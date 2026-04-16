@@ -152,6 +152,45 @@ func TestResolveProviderPresets(t *testing.T) {
 	}
 }
 
+func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.UpstreamConfig
+	}{
+		{
+			name: "unknown_preset",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.openai.com",
+				ProviderPreset: "unknown_vendor",
+			},
+		},
+		{
+			name: "preset_family_mismatch",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+				ProtocolFamily: ProtocolFamilyGoogleGenAI,
+			},
+		},
+		{
+			name: "preset_profile_mismatch",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://openrouter.ai/api/v1",
+				ProviderPreset: "openrouter",
+				RoutingProfile: RoutingProfileAzureOpenAIV1,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Resolve(tt.cfg); err == nil {
+				t.Fatalf("Resolve() error = nil, want non-nil")
+			}
+		})
+	}
+}
+
 func TestResolvedUpstreamBuildURL(t *testing.T) {
 	tests := []struct {
 		name    string

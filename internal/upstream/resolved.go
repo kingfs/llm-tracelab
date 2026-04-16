@@ -30,35 +30,37 @@ const (
 )
 
 type providerPresetSpec struct {
-	ProtocolFamily string
-	RoutingProfile string
+	ProtocolFamily  string
+	RoutingProfile  string
+	SupportLevel    string
+	AllowedProfiles []string
 }
 
 var providerPresetRegistry = map[string]providerPresetSpec{
-	"alibaba":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"anthropic":        {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault},
-	"azure":            {ProtocolFamily: ProtocolFamilyOpenAICompatible},
-	"azure_openai":     {ProtocolFamily: ProtocolFamilyOpenAICompatible},
-	"baseten":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"cerebras":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"deepseek":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"fireworks":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"github":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"github_models":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"groq":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"google":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
-	"google_ai_studio": {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
-	"google_genai":     {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
-	"gemini":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio},
-	"hugging_face":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"moonshot":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"nvidia_nim":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"openai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"openrouter":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"perplexity":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"together":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
-	"vllm":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI},
-	"xai":              {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault},
+	"alibaba":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"anthropic":        {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAnthropicDefault}},
+	"azure":            {ProtocolFamily: ProtocolFamilyOpenAICompatible, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy}},
+	"azure_openai":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy}},
+	"baseten":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"cerebras":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"deepseek":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"fireworks":        {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"github":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"github_models":    {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"groq":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"google":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileGoogleAIStudio}},
+	"google_ai_studio": {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileGoogleAIStudio}},
+	"google_genai":     {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileGoogleAIStudio}},
+	"gemini":           {ProtocolFamily: ProtocolFamilyGoogleGenAI, RoutingProfile: RoutingProfileGoogleAIStudio, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileGoogleAIStudio}},
+	"hugging_face":     {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"moonshot":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"nvidia_nim":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"openai":           {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"openrouter":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"perplexity":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"together":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
+	"vllm":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileVLLMOpenAI}},
+	"xai":              {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 }
 
 type ResolvedUpstream struct {
@@ -92,6 +94,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		Deployment:     strings.TrimSpace(cfg.Deployment),
 		Headers:        cloneStringMap(cfg.Headers),
 	}
+	if err := validatePresetSelection(resolved.ProviderPreset, resolved.ProtocolFamily); err != nil {
+		return ResolvedUpstream{}, err
+	}
 
 	applyPresetDefaults(&resolved, parsed)
 	inferDefaults(&resolved, parsed)
@@ -106,10 +111,16 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		}
 		switch resolved.RoutingProfile {
 		case RoutingProfileOpenAIDefault, RoutingProfileVLLMOpenAI:
+			if err := validateResolvedPreset(resolved); err != nil {
+				return ResolvedUpstream{}, err
+			}
 			return resolved, nil
 		case RoutingProfileAzureOpenAIV1:
 			if resolved.APIVersion == "" {
 				resolved.APIVersion = DefaultAzureAPIVersion
+			}
+			if err := validateResolvedPreset(resolved); err != nil {
+				return ResolvedUpstream{}, err
 			}
 			return resolved, nil
 		case RoutingProfileAzureOpenAIDeploy:
@@ -121,6 +132,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 			}
 			if resolved.Deployment == "" {
 				return ResolvedUpstream{}, fmt.Errorf("upstream.deployment is required for routing_profile=%q", resolved.RoutingProfile)
+			}
+			if err := validateResolvedPreset(resolved); err != nil {
+				return ResolvedUpstream{}, err
 			}
 			return resolved, nil
 		default:
@@ -136,6 +150,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		if resolved.APIVersion == "" {
 			resolved.APIVersion = DefaultAnthropicAPIVersion
 		}
+		if err := validateResolvedPreset(resolved); err != nil {
+			return ResolvedUpstream{}, err
+		}
 		return resolved, nil
 	case ProtocolFamilyGoogleGenAI:
 		if resolved.RoutingProfile == "" {
@@ -144,10 +161,57 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		if resolved.RoutingProfile != RoutingProfileGoogleAIStudio {
 			return ResolvedUpstream{}, fmt.Errorf("unsupported upstream.routing_profile %q for protocol_family=%q", resolved.RoutingProfile, resolved.ProtocolFamily)
 		}
+		if err := validateResolvedPreset(resolved); err != nil {
+			return ResolvedUpstream{}, err
+		}
 		return resolved, nil
 	default:
 		return ResolvedUpstream{}, fmt.Errorf("unsupported upstream.protocol_family %q", resolved.ProtocolFamily)
 	}
+}
+
+func validatePresetSelection(providerPreset string, protocolFamily string) error {
+	if providerPreset == "" {
+		return nil
+	}
+	spec, ok := providerPresetRegistry[providerPreset]
+	if !ok {
+		return fmt.Errorf("unsupported upstream.provider_preset %q", providerPreset)
+	}
+	if protocolFamily != "" && spec.ProtocolFamily != "" && protocolFamily != spec.ProtocolFamily {
+		return fmt.Errorf("upstream.provider_preset=%q requires protocol_family=%q, got %q", providerPreset, spec.ProtocolFamily, protocolFamily)
+	}
+	return nil
+}
+
+func validateResolvedPreset(resolved ResolvedUpstream) error {
+	if resolved.ProviderPreset == "" {
+		return nil
+	}
+	spec, ok := providerPresetRegistry[resolved.ProviderPreset]
+	if !ok {
+		return fmt.Errorf("unsupported upstream.provider_preset %q", resolved.ProviderPreset)
+	}
+	if spec.ProtocolFamily != "" && resolved.ProtocolFamily != spec.ProtocolFamily {
+		return fmt.Errorf("upstream.provider_preset=%q resolved to protocol_family=%q, got %q", resolved.ProviderPreset, spec.ProtocolFamily, resolved.ProtocolFamily)
+	}
+	if len(spec.AllowedProfiles) == 0 || resolved.RoutingProfile == "" {
+		return nil
+	}
+	for _, profile := range spec.AllowedProfiles {
+		if resolved.RoutingProfile == profile {
+			return nil
+		}
+	}
+	return fmt.Errorf("upstream.provider_preset=%q does not support routing_profile=%q", resolved.ProviderPreset, resolved.RoutingProfile)
+}
+
+func PresetSupportMatrix() map[string]providerPresetSpec {
+	out := make(map[string]providerPresetSpec, len(providerPresetRegistry))
+	for key, value := range providerPresetRegistry {
+		out[key] = value
+	}
+	return out
 }
 
 func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {

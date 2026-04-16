@@ -48,7 +48,13 @@ func CheckConnectivity(cfg config.UpstreamConfig) error {
 	resolved.ApplyAuthHeaders(req.Header)
 	req.Header.Set("Content-Type", "application/json")
 
-	slog.Info("Starting upstream connectivity check...", "url", targetURL)
+	slog.Info(
+		"Starting upstream connectivity check...",
+		"url", targetURL,
+		"provider_preset", resolved.ProviderPreset,
+		"protocol_family", resolved.ProtocolFamily,
+		"routing_profile", resolved.RoutingProfile,
+	)
 
 	resp, err := client.Do(req)
 	if err != nil {

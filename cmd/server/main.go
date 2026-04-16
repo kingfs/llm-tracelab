@@ -58,8 +58,21 @@ func runServe(args []string) int {
 		slog.Error("Failed to load config", "path", *configPath, "error", err)
 		return 1
 	}
+	resolvedUpstream, err := upstream.Resolve(cfg.Upstream)
+	if err != nil {
+		slog.Error("Invalid upstream config", "error", err)
+		return 1
+	}
 
 	slog.Info("Starting LLM Proxy...", "version", "1.0.0", "go_version", "1.23+")
+	slog.Info(
+		"Resolved upstream config",
+		"provider_preset", resolvedUpstream.ProviderPreset,
+		"protocol_family", resolvedUpstream.ProtocolFamily,
+		"routing_profile", resolvedUpstream.RoutingProfile,
+		"api_version", resolvedUpstream.APIVersion,
+		"deployment", resolvedUpstream.Deployment,
+	)
 
 	traceStore, err := store.New(cfg.Debug.OutputDir)
 	if err != nil {
