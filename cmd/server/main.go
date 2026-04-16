@@ -70,18 +70,7 @@ func runServe(args []string) int {
 	}
 
 	slog.Info("Starting LLM Proxy...", "version", "1.0.0", "go_version", "1.23+")
-	slog.Info(
-		"Resolved upstream config",
-		"base_url", resolvedUpstream.BaseURL,
-		"provider_preset", resolvedUpstream.ProviderPreset,
-		"protocol_family", resolvedUpstream.ProtocolFamily,
-		"routing_profile", resolvedUpstream.RoutingProfile,
-		"api_version", resolvedUpstream.APIVersion,
-		"deployment", resolvedUpstream.Deployment,
-		"connectivity_endpoint", diagnostics.ConnectivityEndpoint,
-		"connectivity_url", diagnostics.ConnectivityURL,
-		"model_routing_hint", diagnostics.ModelRoutingHint,
-	)
+	logResolvedUpstreamConfig(resolvedUpstream, diagnostics)
 
 	traceStore, err := store.New(cfg.Debug.OutputDir)
 	if err != nil {
@@ -182,4 +171,19 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  llm-tracelab serve -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab migrate -c config.yaml [-rewrite-v2=true] [-rebuild-index=true]")
+}
+
+func logResolvedUpstreamConfig(resolvedUpstream upstream.ResolvedUpstream, diagnostics upstream.StartupDiagnostics) {
+	slog.Info(
+		"Resolved upstream config",
+		"base_url", resolvedUpstream.BaseURL,
+		"provider_preset", resolvedUpstream.ProviderPreset,
+		"protocol_family", resolvedUpstream.ProtocolFamily,
+		"routing_profile", resolvedUpstream.RoutingProfile,
+		"api_version", resolvedUpstream.APIVersion,
+		"deployment", resolvedUpstream.Deployment,
+		"connectivity_endpoint", diagnostics.ConnectivityEndpoint,
+		"connectivity_url", diagnostics.ConnectivityURL,
+		"model_routing_hint", diagnostics.ModelRoutingHint,
+	)
 }
