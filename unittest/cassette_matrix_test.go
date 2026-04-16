@@ -169,6 +169,9 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if parsedMonitor.AIContent != tt.want.aiContent {
 				t.Fatalf("monitor AIContent = %q, want %q", parsedMonitor.AIContent, tt.want.aiContent)
 			}
+			if tt.want.aiBlockCount > 0 && len(parsedMonitor.AIBlocks) != tt.want.aiBlockCount {
+				t.Fatalf("monitor AIBlocks = %d, want %d", len(parsedMonitor.AIBlocks), tt.want.aiBlockCount)
+			}
 			if parsedMonitor.AIReasoning != tt.want.aiReasoning {
 				t.Fatalf("monitor AIReasoning = %q, want %q", parsedMonitor.AIReasoning, tt.want.aiReasoning)
 			}
@@ -214,6 +217,18 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 					t.Fatalf("ai blocks do not contain %q: %+v", tt.want.blockContains, parsedMonitor.AIBlocks)
 				}
 			}
+			for _, title := range tt.want.aiBlockTitles {
+				foundTitle := false
+				for _, block := range parsedMonitor.AIBlocks {
+					if block.Title == title {
+						foundTitle = true
+						break
+					}
+				}
+				if !foundTitle {
+					t.Fatalf("ai block title %q not found: %+v", title, parsedMonitor.AIBlocks)
+				}
+			}
 			if tt.want.errorContent != "" {
 				foundError := false
 				for _, message := range parsedMonitor.ChatMessages {
@@ -255,6 +270,8 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilityToolCall,
 		capabilityToolResult,
 		capabilityMultiTurn,
+		capabilityHistory,
+		capabilityMixedBlocks,
 		capabilityRefusal,
 		capabilityError,
 	}

@@ -34,6 +34,8 @@ type cassetteExpectation struct {
 	historyContains  []string
 	messageCount     int
 	aiContent        string
+	aiBlockCount     int
+	aiBlockTitles    []string
 	promptTokens     int
 	completionTokens int
 	aiReasoning      string
@@ -48,14 +50,16 @@ type cassetteExpectation struct {
 type cassetteCapability string
 
 const (
-	capabilityNonStream  cassetteCapability = "non_stream"
-	capabilityStream     cassetteCapability = "stream"
-	capabilityReasoning  cassetteCapability = "reasoning"
-	capabilityToolCall   cassetteCapability = "tool_call"
-	capabilityToolResult cassetteCapability = "tool_result"
-	capabilityMultiTurn  cassetteCapability = "multi_turn"
-	capabilityRefusal    cassetteCapability = "refusal"
-	capabilityError      cassetteCapability = "error"
+	capabilityNonStream   cassetteCapability = "non_stream"
+	capabilityStream      cassetteCapability = "stream"
+	capabilityReasoning   cassetteCapability = "reasoning"
+	capabilityToolCall    cassetteCapability = "tool_call"
+	capabilityToolResult  cassetteCapability = "tool_result"
+	capabilityMultiTurn   cassetteCapability = "multi_turn"
+	capabilityHistory     cassetteCapability = "history"
+	capabilityMixedBlocks cassetteCapability = "mixed_blocks"
+	capabilityRefusal     cassetteCapability = "refusal"
+	capabilityError       cassetteCapability = "error"
 )
 
 type cassetteFixtureCase struct {
@@ -75,6 +79,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		anthropicMessagesStreamFixture(),
 		anthropicToolErrorFixture(),
 		googleGenAIStreamFixture(),
+		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
 	}
 }
@@ -121,6 +126,7 @@ func openAIResponsesMultiTurnFixture() cassetteFixtureCase {
 		capabilities: []cassetteCapability{
 			capabilityNonStream,
 			capabilityMultiTurn,
+			capabilityHistory,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderOpenAICompatible,
@@ -214,6 +220,7 @@ func openAIResponsesToolResultFixture() cassetteFixtureCase {
 			capabilityNonStream,
 			capabilityToolCall,
 			capabilityToolResult,
+			capabilityHistory,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderOpenAICompatible,
@@ -414,12 +421,52 @@ func googleGenAIStreamFixture() cassetteFixtureCase {
 	}
 }
 
+func googleGenAIMixedBlocksFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "google_genai_mixed_blocks_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityMixedBlocks,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderGoogleGenAI,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1beta/models:generateContent",
+			url:             "/v1beta/models/gemini-2.5-flash:generateContent",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1beta/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"systemInstruction":{"role":"system","parts":[{"text":"Be safe"}]},"contents":[{"role":"user","parts":[{"text":"unsafe request"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}],"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     2,
+				CompletionTokens: 1,
+				TotalTokens:      3,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `"blockReason":"SAFETY"`,
+			messageContains:  "unsafe request",
+			historyContains:  []string{"Be safe", "unsafe request"},
+			messageCount:     2,
+			aiContent:        "partial",
+			aiBlockCount:     2,
+			aiBlockTitles:    []string{"Prompt Feedback", "Safety Ratings"},
+			promptTokens:     2,
+			completionTokens: 1,
+		},
+	}
+}
+
 func googleGenAIBlockedFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "google_genai_blocked_non_stream",
 		capabilities: []cassetteCapability{
 			capabilityNonStream,
 			capabilityRefusal,
+			capabilityMixedBlocks,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderGoogleGenAI,
