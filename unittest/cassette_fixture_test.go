@@ -97,6 +97,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		anthropicMessagesStreamErrorFixture(),
 		googleGenAIStreamErrorFixture(),
 		googleGenAIStreamFixture(),
+		googleGenAIHistoryFixture(),
 		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
 		openAIModelsFixture(),
@@ -828,6 +829,45 @@ func googleGenAIStreamFixture() cassetteFixtureCase {
 			completionTokens: 7,
 			statusCode:       200,
 			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
+		},
+	}
+}
+
+func googleGenAIHistoryFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "google_genai_non_stream_history",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityMultiTurn,
+			capabilityHistory,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderGoogleGenAI,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1beta/models:generateContent",
+			url:             "/v1beta/models/gemini-2.5-flash:generateContent",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1beta/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"systemInstruction":{"role":"system","parts":[{"text":"Be concise"}]},"contents":[{"role":"user","parts":[{"text":"hello"}]},{"role":"model","parts":[{"text":"hi there"}]},{"role":"user","parts":[{"text":"summarize our chat"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"candidates":[{"content":{"role":"model","parts":[{"text":"You greeted me and I replied hi there."}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":9,"totalTokenCount":16}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     7,
+				CompletionTokens: 9,
+				TotalTokens:      16,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `"totalTokenCount":16`,
+			messageContains:  "summarize our chat",
+			historyContains:  []string{"Be concise", "hello", "hi there", "summarize our chat"},
+			messageCount:     4,
+			aiContent:        "You greeted me and I replied hi there.",
+			promptTokens:     7,
+			completionTokens: 9,
+			statusCode:       200,
 		},
 	}
 }
