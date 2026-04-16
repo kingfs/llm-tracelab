@@ -98,6 +98,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		anthropicMessagesStreamErrorFixture(),
 		googleGenAIStreamErrorFixture(),
 		googleGenAIStreamFixture(),
+		googleGenAIStreamSafetyFixture(),
 		googleGenAIHistoryFixture(),
 		googleGenAIMixedBlocksFixture(),
 		googleGenAIBlockedFixture(),
@@ -873,6 +874,59 @@ func googleGenAIStreamFixture() cassetteFixtureCase {
 			completionTokens: 7,
 			statusCode:       200,
 			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
+		},
+	}
+}
+
+func googleGenAIStreamSafetyFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "google_genai_stream_safety",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilitySafety,
+			capabilityMixedBlocks,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderGoogleGenAI,
+			operation:       llm.OperationGenerateContent,
+			endpoint:        "/v1beta/models:streamGenerateContent",
+			url:             "/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+			method:          "POST",
+			model:           "gemini-2.5-flash",
+			requestProtocol: "POST /v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"contents":[{"role":"user","parts":[{"text":"unsafe stream request"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				`data: {"promptFeedback":{"blockReason":"SAFETY"}}`,
+				`data: {"candidates":[{"content":{"role":"model","parts":[{"text":"partial"}]},"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`,
+			),
+			isStream: true,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     2,
+				CompletionTokens: 1,
+				TotalTokens:      3,
+			},
+			events: []recordfile.RecordEvent{
+				{Type: "llm.output_block", Time: time.Date(2026, 4, 15, 12, 20, 0, 0, time.UTC), IsStream: true, Message: "{\"blockReason\":\"SAFETY\"}", Attributes: map[string]interface{}{"kind": "prompt_feedback"}},
+				{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 20, 1, 0, time.UTC), IsStream: true, Message: "partial", Attributes: map[string]interface{}{"role": "model"}},
+				{Type: "llm.output_block", Time: time.Date(2026, 4, 15, 12, 20, 2, 0, time.UTC), IsStream: true, Message: "{\"category\":\"HARM_CATEGORY_HATE_SPEECH\",\"probability\":\"HIGH\",\"blocked\":true}", Attributes: map[string]interface{}{"kind": "safety", "category": "HARM_CATEGORY_HATE_SPEECH", "probability": "HIGH"}},
+				{Type: "llm.output_block", Time: time.Date(2026, 4, 15, 12, 20, 3, 0, time.UTC), IsStream: true, Message: "SAFETY", Attributes: map[string]interface{}{"kind": "finish_reason"}},
+				{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 20, 4, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3}},
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `data:`,
+			messageContains:  "unsafe stream request",
+			historyContains:  []string{"unsafe stream request"},
+			messageCount:     1,
+			aiContent:        "partial",
+			aiBlockCount:     4,
+			aiBlockTitles:    []string{"Refusal", "Prompt Feedback", "Finish Reason", "Safety Ratings"},
+			promptTokens:     2,
+			completionTokens: 1,
+			statusCode:       200,
+			eventTypes:       []string{"llm.output_block", "llm.output_text.delta", "llm.usage"},
 		},
 	}
 }
