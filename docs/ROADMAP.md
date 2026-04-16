@@ -45,10 +45,42 @@ The project already has:
   - `openai_compatible`
   - `anthropic_messages`
   - `google_genai`
+  - `vertex_native`
 - upstream presets for OpenAI, Azure, vLLM, Anthropic, Google, and a set of OpenAI-compatible providers
 - cross-layer regression coverage via cassette matrix tests
+- startup diagnostics for resolved upstream routing and connectivity checks
+- monitor/detail/raw API coverage for explicit refusal and provider-error surfaces
+- representative example configs for stable provider families
 
 This is enough to move from foundational plumbing into structured expansion.
+
+## Progress Snapshot
+
+Current roadmap status as of this update:
+
+- `M1` is effectively complete:
+  - `responses` higher-value edge cases were tightened
+  - Google timeline / safety / finish-reason semantics were strengthened
+  - cassette coverage now spans multi-turn, history, and richer tool flows across the stable families
+  - support-status docs were updated
+- `M2` is effectively complete:
+  - incompatible `provider_preset` / `protocol_family` / `routing_profile` combinations fail fast
+  - startup logs now show resolved family/profile plus connectivity and model-routing hints
+  - support matrix docs now classify presets as `verified`, `compatible`, or `planned`
+- `M3` is effectively complete for the currently implemented feature set:
+  - fixture capabilities now include `multi_turn`, `history`, `mixed_blocks`, `safety`, and `model_list`
+  - recorder / replay / monitor alignment is protected by cassette-first regression tests
+- `M4` has been completed with `vertex_native` as the first new protocol family:
+  - isolated routing/auth logic
+  - adapter-based request/response/stream handling
+  - replay-critical cassette coverage
+  - monitor normalization support
+- `M5` is in progress:
+  - health/self-check diagnostics and tests have improved
+  - monitor error-surface coverage has improved
+  - migration CLI summary coverage has improved
+  - representative provider example configs now exist
+  - remaining work is mostly final polish rather than major feature delivery
 
 ## Planning Principles
 
@@ -82,10 +114,10 @@ Current families:
 - `openai_compatible`
 - `anthropic_messages`
 - `google_genai`
+- `vertex_native`
 
 Future candidates:
 
-- `vertex_native`
 - `bedrock_native`
 - `realtime_session`
 
@@ -157,6 +189,10 @@ Exit criteria:
 - high-frequency providers have explicit verified presets
 - README and provider docs distinguish stable support vs planned support
 
+Status:
+
+- effectively complete
+
 ## M2. Make Compatibility Predictable
 
 Goal:
@@ -173,6 +209,10 @@ Exit criteria:
 - invalid config combinations fail fast with actionable errors
 - startup output clearly shows resolved protocol family and routing profile
 - docs classify presets as `verified`, `compatible`, or `planned`
+
+Status:
+
+- effectively complete
 
 ## M3. Strengthen Replay-Critical Semantics
 
@@ -195,6 +235,10 @@ Exit criteria:
 - new features are blocked unless they add cassette-level regression coverage
 - core provider flows are tested through recorder/replay/monitor, not only parser unit tests
 
+Status:
+
+- effectively complete for the currently supported feature set
+
 ## M4. Add One New Protocol Family
 
 Goal:
@@ -202,9 +246,8 @@ Prove the architecture scales beyond the current three families.
 
 Candidate order:
 
-1. `vertex_native`
-2. `bedrock_native`
-3. `realtime_session`
+1. `bedrock_native`
+2. `realtime_session`
 
 Selection rule:
 
@@ -217,6 +260,10 @@ Exit criteria:
 - request/response/stream parsing is adapter-based
 - replay-critical cassette coverage exists
 - monitor can render a useful normalized summary
+
+Status:
+
+- completed with `vertex_native`
 
 ## M5. Operational Polish
 
@@ -235,28 +282,34 @@ Exit criteria:
 - a new user can configure at least one provider from each stable family without reading source
 - operational failure modes are visible and diagnosable
 
+Status:
+
+- in progress
+- most remaining work is final polish around diagnostics, examples, and CLI/monitor ergonomics
+
 ## Priority Order
 
 Recommended execution order:
 
-1. finish M1
-2. finish M2
-3. finish M3
-4. select and execute M4
-5. finish M5
+1. finish M5
+2. keep cassette-first guardrails in place for follow-on work
+3. evaluate the next roadmap cycle after final operational polish
 
 This order matters.
-The project should avoid expanding to too many new families before current semantics, docs, and test guardrails are stable.
+The project should avoid expanding to too many new families before current semantics, docs, diagnostics, and test guardrails are stable.
 
 ## Near-Term Plan
 
 The next concrete implementation sequence should be:
 
-1. add `multi_turn` cassette capability and fixtures
-2. improve Google timeline richness and normalized blocks
-3. add support-status documentation and config validation
-4. expand provider verification for high-frequency presets
-5. evaluate `vertex_native` as the next protocol family
+1. finish the remaining `M5` operational polish:
+   - final health/self-check edge cases
+   - final monitor/raw-detail error-path polish
+   - any remaining migration/index ergonomics gaps
+2. do a final milestone close-out pass against `M1` / `M2` / `M3` / `M5`
+3. decide whether the next roadmap cycle should prioritize:
+   - another new protocol family such as `bedrock_native`
+   - or more provider compatibility on top of existing families
 
 ## Acceptance Checklist Per Feature
 
@@ -273,7 +326,7 @@ Every meaningful roadmap item should satisfy most of this checklist:
 
 ## Open Questions
 
-These should be revisited before M4:
+These should be revisited before the next protocol-family expansion:
 
 - should Vertex share `google_genai` semantics with a different routing profile, or become its own family
 - should Bedrock-native support be added directly, or only through provider-compatible surfaces first
@@ -282,7 +335,7 @@ These should be revisited before M4:
 
 Current planning note:
 
-- `vertex_native` is currently recommended as a separate family; see [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md)
+- `vertex_native` has been completed as a separate family; see [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md)
 
 ## Decision Rule For Future Contributions
 
