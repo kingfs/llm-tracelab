@@ -377,6 +377,142 @@ func TestTraceDetailAPIHandlerEnrichesRequestAndResponseTimeline(t *testing.T) {
 	}
 }
 
+func TestTraceDetailAPIHandlerSurfacesProviderErrorBlocks(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"stream failure"}]}]}`
+	resBody := strings.Join([]string{
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		`data: {"type":"response.failed","response":{"error":{"message":"stream aborted","type":"server_error","code":"stream_aborted"}}}`,
+	}, "\n")
+	content := buildRecordFixture(t, "/v1/responses", true, reqBody, resBody)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.AIContent != "partial" {
+		t.Fatalf("AIContent = %q, want partial", payload.AIContent)
+	}
+	if len(payload.AIBlocks) != 1 {
+		t.Fatalf("len(AIBlocks) = %d, want 1", len(payload.AIBlocks))
+	}
+	if payload.AIBlocks[0].Title != "Provider Error" || !strings.Contains(payload.AIBlocks[0].Text, "stream aborted") {
+		t.Fatalf("AIBlocks[0] = %+v", payload.AIBlocks[0])
+	}
+
+	var responseItems []interface{}
+	for _, event := range payload.Events {
+		if event["type"] == "response" {
+			responseItems, _ = event["timeline_items"].([]interface{})
+			break
+		}
+	}
+	if len(responseItems) != 2 {
+		t.Fatalf("len(response timeline_items) = %d, want 2", len(responseItems))
+	}
+	second, ok := responseItems[1].(map[string]interface{})
+	if !ok || second["kind"] != "provider_error" || second["label"] != "Provider Error" {
+		t.Fatalf("unexpected provider error timeline item: %#v", responseItems[1])
+	}
+	if body, _ := second["body"].(string); !strings.Contains(body, "stream aborted") {
+		t.Fatalf("provider error body = %q, want contain stream aborted", body)
+	}
+}
+
+func TestTraceDetailAPIHandlerSurfacesRefusalBlocks(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	reqBody := `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"give disallowed instructions"}]}]}`
+	resBody := strings.Join([]string{
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"checking safety"}`,
+		`data: {"type":"response.refusal.delta","delta":"I can't help with that."}`,
+	}, "\n")
+	content := buildRecordFixture(t, "/v1/responses", true, reqBody, resBody)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.AIReasoning != "checking safety" {
+		t.Fatalf("AIReasoning = %q, want checking safety", payload.AIReasoning)
+	}
+	if len(payload.AIBlocks) != 1 {
+		t.Fatalf("len(AIBlocks) = %d, want 1", len(payload.AIBlocks))
+	}
+	if payload.AIBlocks[0].Title != "Refusal" || !strings.Contains(payload.AIBlocks[0].Text, "can't help") {
+		t.Fatalf("AIBlocks[0] = %+v", payload.AIBlocks[0])
+	}
+
+	var responseItems []interface{}
+	for _, event := range payload.Events {
+		if event["type"] == "response" {
+			responseItems, _ = event["timeline_items"].([]interface{})
+			break
+		}
+	}
+	if len(responseItems) != 2 {
+		t.Fatalf("len(response timeline_items) = %d, want 2", len(responseItems))
+	}
+	second, ok := responseItems[1].(map[string]interface{})
+	if !ok || second["kind"] != "refusal" || second["label"] != "Refusal" {
+		t.Fatalf("unexpected refusal timeline item: %#v", responseItems[1])
+	}
+	if body, _ := second["body"].(string); !strings.Contains(body, "can't help") {
+		t.Fatalf("refusal body = %q, want contain refusal text", body)
+	}
+}
+
 func TestTraceDownloadAPIHandlerSetsAttachmentDisposition(t *testing.T) {
 	t.Parallel()
 
