@@ -88,6 +88,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		openAIResponsesToolResultFixture(),
 		anthropicMessagesNonStreamFixture(),
 		anthropicMessagesStreamFixture(),
+		anthropicMessagesHistoryToolFlowFixture(),
 		anthropicToolErrorFixture(),
 		openAIProviderErrorFixture(),
 		openAIResponsesRefusalStreamFixture(),
@@ -470,6 +471,49 @@ func anthropicMessagesStreamFixture() cassetteFixtureCase {
 			completionTokens: 7,
 			statusCode:       200,
 			eventTypes:       []string{"llm.output_text.delta", "llm.usage"},
+		},
+	}
+}
+
+func anthropicMessagesHistoryToolFlowFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "anthropic_messages_history_tool_flow_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityMultiTurn,
+			capabilityHistory,
+			capabilityToolCall,
+			capabilityToolResult,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderAnthropic,
+			operation:       llm.OperationMessages,
+			endpoint:        "/v1/messages",
+			url:             "/v1/messages",
+			method:          "POST",
+			model:           "claude-sonnet-4-5",
+			requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"claude-sonnet-4-5","system":"Be concise","messages":[{"role":"user","content":[{"type":"text","text":"where am i?"}]},{"role":"assistant","content":[{"type":"tool_use","id":"toolu_hist","name":"Bash","input":{"command":"pwd"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_hist","content":"{\"cwd\":\"/tmp/project\"}"}]},{"role":"user","content":[{"type":"text","text":"summarize the result"}]}],"max_tokens":32}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"id":"msg_hist","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"You are in /tmp/project."}],"usage":{"input_tokens":12,"output_tokens":8}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     12,
+				CompletionTokens: 8,
+				TotalTokens:      20,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `"output_tokens":8`,
+			messageContains:  "summarize the result",
+			historyContains:  []string{"Be concise", "where am i?", "/tmp/project", "summarize the result"},
+			messageCount:     5,
+			aiContent:        "You are in /tmp/project.",
+			promptTokens:     12,
+			completionTokens: 8,
+			statusCode:       200,
+			toolResultText:   `/tmp/project`,
+			toolResultType:   "tool_result",
 		},
 	}
 }
