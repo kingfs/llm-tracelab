@@ -51,6 +51,19 @@ func TestResponsePipelineStream(t *testing.T) {
 	assert.Equal(t, "llm.usage", events[len(events)-1].Type)
 }
 
+func TestResponsePipelineResponsesCustomToolCallPreservesArguments(t *testing.T) {
+	pipeline := NewResponsePipeline(ProviderOpenAICompatible, "/v1/responses", true)
+	pipeline.Feed([]byte(`data: {"type":"response.output_item.done","item":{"id":"ct_1","type":"custom_tool_call","call_id":"call_custom","name":"policy_guard","arguments":"{\"topic\":\"restricted\"}"}}` + "\n"))
+
+	events := pipeline.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, "llm.tool_call", events[0].Type)
+	assert.Equal(t, "call_custom", events[0].Attributes["id"])
+	assert.Equal(t, "custom_tool_call", events[0].Attributes["type"])
+	assert.Equal(t, "policy_guard", events[0].Attributes["name"])
+	assert.Equal(t, `{"topic":"restricted"}`, events[0].Attributes["arguments"])
+}
+
 func TestResponsePipelineNonStream(t *testing.T) {
 	pipeline := NewResponsePipeline(ProviderOpenAICompatible, "/v1/responses", false)
 	pipeline.Feed([]byte(`{"id":"resp_123","usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}`))

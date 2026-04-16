@@ -42,6 +42,8 @@ type cassetteExpectation struct {
 	statusCode       int
 	aiReasoning      string
 	toolCallName     string
+	toolCallType     string
+	toolCallArgs     string
 	toolResultText   string
 	toolResultType   string
 	eventTypes       []string
@@ -81,6 +83,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		openAIResponsesNonStreamFixture(),
 		openAIResponsesMultiTurnFixture(),
 		openAIResponsesToolCallStreamFixture(),
+		openAIResponsesCustomToolCallStreamFixture(),
 		openAIResponsesToolResultFixture(),
 		anthropicMessagesNonStreamFixture(),
 		anthropicMessagesStreamFixture(),
@@ -233,6 +236,62 @@ func openAIResponsesToolCallStreamFixture() cassetteFixtureCase {
 			statusCode:       200,
 			toolCallName:     "exec_command",
 			eventTypes:       []string{"llm.reasoning.delta", "llm.tool_call", "llm.tool_call.delta", "llm.output_text.delta", "llm.usage"},
+		},
+	}
+}
+
+func openAIResponsesCustomToolCallStreamFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_custom_tool_call_stream",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityReasoning,
+			capabilityToolCall,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"check policy"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: text/event-stream\r\n",
+			responseBody: stringsJoin(
+				"data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"checking policy\"}",
+				"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ct_1\",\"type\":\"custom_tool_call\",\"call_id\":\"call_custom\",\"name\":\"policy_guard\",\"arguments\":\"{\\\"topic\\\":\\\"restricted\\\"}\"}}",
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"blocked\"}",
+				"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":3,\"total_tokens\":11}}}",
+			),
+			isStream: true,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     8,
+				CompletionTokens: 3,
+				TotalTokens:      11,
+			},
+			events: []recordfile.RecordEvent{
+				{Type: "llm.reasoning.delta", Time: time.Date(2026, 4, 15, 12, 10, 0, 0, time.UTC), IsStream: true, Message: "checking policy"},
+				{Type: "llm.tool_call", Time: time.Date(2026, 4, 15, 12, 10, 1, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "call_custom", "name": "policy_guard", "type": "custom_tool_call", "arguments": "{\"topic\":\"restricted\"}"}},
+				{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 10, 2, 0, time.UTC), IsStream: true, Message: "blocked"},
+				{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 10, 3, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11}},
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   "data:",
+			messageContains:  "check policy",
+			historyContains:  []string{"check policy"},
+			messageCount:     1,
+			aiContent:        "blocked",
+			aiReasoning:      "checking policy",
+			promptTokens:     8,
+			completionTokens: 3,
+			statusCode:       200,
+			toolCallName:     "policy_guard",
+			toolCallType:     "custom_tool_call",
+			toolCallArgs:     `{"topic":"restricted"}`,
+			eventTypes:       []string{"llm.reasoning.delta", "llm.tool_call", "llm.output_text.delta", "llm.usage"},
 		},
 	}
 }

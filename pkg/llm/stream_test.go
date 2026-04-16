@@ -44,6 +44,26 @@ func TestParseOpenAIResponsesStreamResponsePreservesRefusal(t *testing.T) {
 	assert.Equal(t, "checking safety", resp.Candidates[0].Content[0].Text)
 }
 
+func TestParseOpenAIResponsesStreamResponsePreservesCustomToolCall(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.reasoning_summary_text.delta","delta":"checking policy"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"ct_1","type":"custom_tool_call","call_id":"call_custom","name":"policy_guard","arguments":"{\"topic\":\"restricted\"}"}}`,
+		`data: {"type":"response.output_text.delta","delta":"blocked"}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	resp, err := ParseStreamResponse(ProviderOpenAICompatible, "/v1/responses", []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	assert.Equal(t, "blocked", resp.Candidates[0].Content[0].Text)
+	assert.Equal(t, "checking policy", resp.Candidates[0].Content[1].Text)
+	require.Len(t, resp.Candidates[0].ToolCalls, 1)
+	assert.Equal(t, "call_custom", resp.Candidates[0].ToolCalls[0].ID)
+	assert.Equal(t, "custom_tool_call", resp.Candidates[0].ToolCalls[0].Type)
+	assert.Equal(t, "policy_guard", resp.Candidates[0].ToolCalls[0].Name)
+	assert.Equal(t, `{"topic":"restricted"}`, resp.Candidates[0].ToolCalls[0].ArgsText)
+}
+
 func TestParseAnthropicStreamResponse(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,

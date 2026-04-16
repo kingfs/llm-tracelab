@@ -165,11 +165,13 @@ func OpenAIResponsesToLLM(resp OpenAIResponsesResponse) LLMResponse {
 				ArgsText: item.Arguments,
 			})
 		case "web_search_call", "file_search_call", "computer_call", "mcp_call", "custom_tool_call":
+			argsText := firstNonEmpty(item.Arguments, marshalCompactString(item))
 			candidate.ToolCalls = append(candidate.ToolCalls, LLMToolCall{
 				ID:       firstNonEmpty(item.CallID, item.ID),
 				Type:     firstNonEmpty(item.Type, "function"),
 				Name:     firstNonEmpty(item.Name, item.Type),
-				ArgsText: marshalCompactString(item),
+				Args:     parseJSONObject(argsText),
+				ArgsText: argsText,
 			})
 		case "function_call_output":
 			candidate.Content = append(candidate.Content, LLMContent{

@@ -200,10 +200,11 @@ func (p *ResponsePipeline) appendResponsesEvent(jsonStr string) {
 		Arguments string `json:"arguments"`
 		ItemID    string `json:"item_id"`
 		Item      struct {
-			ID     string `json:"id"`
-			Type   string `json:"type"`
-			CallID string `json:"call_id"`
-			Name   string `json:"name"`
+			ID        string `json:"id"`
+			Type      string `json:"type"`
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
 		} `json:"item"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &env); err != nil {
@@ -225,11 +226,15 @@ func (p *ResponsePipeline) appendResponsesEvent(jsonStr string) {
 		})
 	case "response.output_item.added", "response.output_item.done":
 		if env.Item.Type == "function_call" || strings.HasSuffix(env.Item.Type, "_call") {
-			p.appendEvent("llm.tool_call", "", map[string]interface{}{
+			attrs := map[string]interface{}{
 				"id":   firstNonEmpty(env.Item.CallID, env.Item.ID),
 				"name": firstNonEmpty(env.Item.Name, env.Item.Type),
 				"type": env.Item.Type,
-			})
+			}
+			if env.Item.Arguments != "" {
+				attrs["arguments"] = env.Item.Arguments
+			}
+			p.appendEvent("llm.tool_call", "", attrs)
 		}
 	}
 }

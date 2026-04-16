@@ -257,10 +257,11 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 				}
 			case "web_search_call", "file_search_call", "computer_call", "mcp_call", "custom_tool_call":
 				call := ensureToolCallByID(toolCallMap, &toolCallOrder, envelope.Item.ID)
+				argsText := firstNonEmpty(envelope.Item.Arguments, marshalCompactString(envelope.Item))
 				call.ID = firstNonEmpty(envelope.Item.CallID, envelope.Item.ID)
 				call.Type = envelope.Item.Type
 				call.Name = firstNonEmpty(envelope.Item.Name, envelope.Item.Type)
-				call.ArgsText = marshalCompactString(envelope.Item)
+				call.ArgsText = argsText
 			case "message":
 				if contentBuilder.Len() == 0 {
 					for _, part := range envelope.Item.Content {

@@ -122,6 +122,7 @@ func TestParseOpenAIResponsesResponseCustomToolAndRefusal(t *testing.T) {
 	require.Len(t, resp.Candidates[0].ToolCalls, 1)
 	assert.Equal(t, "custom_tool_call", resp.Candidates[0].ToolCalls[0].Type)
 	assert.Equal(t, "policy_guard", resp.Candidates[0].ToolCalls[0].Name)
+	assert.Equal(t, `{"topic":"restricted"}`, resp.Candidates[0].ToolCalls[0].ArgsText)
 	assert.Equal(t, "checking policy", resp.Candidates[0].Content[0].Text)
 }
 

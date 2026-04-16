@@ -163,6 +163,12 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				if llmResp.Candidates[0].ToolCalls[0].Name != tt.want.toolCallName {
 					t.Fatalf("tool call = %q, want %q", llmResp.Candidates[0].ToolCalls[0].Name, tt.want.toolCallName)
 				}
+				if tt.want.toolCallType != "" && llmResp.Candidates[0].ToolCalls[0].Type != tt.want.toolCallType {
+					t.Fatalf("tool call type = %q, want %q", llmResp.Candidates[0].ToolCalls[0].Type, tt.want.toolCallType)
+				}
+				if tt.want.toolCallArgs != "" && llmResp.Candidates[0].ToolCalls[0].ArgsText != tt.want.toolCallArgs {
+					t.Fatalf("tool call args = %q, want %q", llmResp.Candidates[0].ToolCalls[0].ArgsText, tt.want.toolCallArgs)
+				}
 			}
 
 			parsedMonitor, err := monitor.ParseLogFile(content)
@@ -199,6 +205,12 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				}
 				if parsedMonitor.ResponseToolCalls[0].Function.Name != tt.want.toolCallName {
 					t.Fatalf("monitor tool call = %q, want %q", parsedMonitor.ResponseToolCalls[0].Function.Name, tt.want.toolCallName)
+				}
+				if tt.want.toolCallType != "" && parsedMonitor.ResponseToolCalls[0].Type != tt.want.toolCallType {
+					t.Fatalf("monitor tool call type = %q, want %q", parsedMonitor.ResponseToolCalls[0].Type, tt.want.toolCallType)
+				}
+				if tt.want.toolCallArgs != "" && parsedMonitor.ResponseToolCalls[0].Function.Arguments != tt.want.toolCallArgs {
+					t.Fatalf("monitor tool call args = %q, want %q", parsedMonitor.ResponseToolCalls[0].Function.Arguments, tt.want.toolCallArgs)
 				}
 			}
 			foundMessage := false
