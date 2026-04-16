@@ -347,6 +347,14 @@ func summarizeLLMResponse(resp llm.LLMResponse) (string, string, []ContentBlock,
 		})
 	}
 	blocks = append(blocks, llmExtensionBlocks(resp, candidate)...)
+	if candidate.FinishReason != "" && candidate.FinishReason != "STOP" && candidate.FinishReason != "error" {
+		blocks = append(blocks, ContentBlock{
+			Kind:   "finish_reason",
+			Title:  "Finish Reason",
+			Text:   candidate.FinishReason,
+			Format: detectContentFormat(candidate.FinishReason),
+		})
+	}
 	return strings.Join(contentParts, "\n\n"), strings.Join(reasoningParts, "\n\n"), blocks, toolCalls
 }
 

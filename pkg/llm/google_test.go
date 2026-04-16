@@ -103,7 +103,7 @@ func TestGeminiToLLMBlockedPromptFeedback(t *testing.T) {
 func TestGeminiStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 	body := []byte(
 		"data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n" +
-			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]},\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
+			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"partial\"}]},\"finishReason\":\"SAFETY\",\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
 	)
 
 	resp, err := ParseStreamResponseForPath("/v1beta/models/gemini-2.5-flash:streamGenerateContent", "https://generativelanguage.googleapis.com", body)
@@ -112,6 +112,7 @@ func TestGeminiStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 	require.NotNil(t, resp.Candidates[0].Refusal)
 	assert.Equal(t, "SAFETY", resp.Candidates[0].Refusal.Reason)
 	assert.Equal(t, "model", resp.Candidates[0].Role)
+	assert.Equal(t, "SAFETY", resp.Candidates[0].FinishReason)
 	assert.Equal(t, "partial", resp.Candidates[0].Content[0].Text)
 	assert.NotEmpty(t, resp.Safety)
 	assert.Contains(t, resp.Extensions, "prompt_feedback")
@@ -121,7 +122,7 @@ func TestGeminiStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 func TestVertexStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 	body := []byte(
 		"data: {\"promptFeedback\":{\"blockReason\":\"SAFETY\"}}\n\n" +
-			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"vertex partial\"}]},\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
+			"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"vertex partial\"}]},\"finishReason\":\"SAFETY\",\"safetyRatings\":[{\"category\":\"HATE\",\"probability\":\"HIGH\",\"blocked\":true}]}]}\n\n",
 	)
 
 	resp, err := ParseStreamResponseForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent", "https://us-central1-aiplatform.googleapis.com", body)
@@ -130,6 +131,7 @@ func TestVertexStreamResponsePreservesPromptFeedbackAndSafety(t *testing.T) {
 	require.NotNil(t, resp.Candidates[0].Refusal)
 	assert.Equal(t, "SAFETY", resp.Candidates[0].Refusal.Reason)
 	assert.Equal(t, "model", resp.Candidates[0].Role)
+	assert.Equal(t, "SAFETY", resp.Candidates[0].FinishReason)
 	assert.Equal(t, "vertex partial", resp.Candidates[0].Content[0].Text)
 	assert.NotEmpty(t, resp.Safety)
 	assert.Contains(t, resp.Extensions, "prompt_feedback")

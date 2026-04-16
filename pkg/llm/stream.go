@@ -340,6 +340,7 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 	var (
 		contentBuilder strings.Builder
 		role           = "model"
+		finishReason   string
 		safetyAll      []LLMSafetyRating
 		promptFeedback map[string]any
 		streamError    map[string]any
@@ -368,6 +369,9 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 			if candidate.Content.Role != "" {
 				role = candidate.Content.Role
 			}
+			if candidate.FinishReason != "" {
+				finishReason = candidate.FinishReason
+			}
 			for _, part := range candidate.Content.Parts {
 				if part.Text != "" {
 					contentBuilder.WriteString(part.Text)
@@ -389,6 +393,9 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 	resp := singleCandidateResponse(contentBuilder.String(), "", nil, streamError)
 	if len(resp.Candidates) > 0 {
 		resp.Candidates[0].Role = role
+		if finishReason != "" {
+			resp.Candidates[0].FinishReason = finishReason
+		}
 		if len(safetyAll) > 0 {
 			resp.Candidates[0].Extensions = map[string]any{
 				"safety_ratings": safetyAll,

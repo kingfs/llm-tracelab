@@ -248,15 +248,32 @@ func TestParseLogFileGoogleDecoratesPromptFeedbackAndSafety(t *testing.T) {
 	if parsed.AIContent != "partial" {
 		t.Fatalf("AIContent = %q, want partial", parsed.AIContent)
 	}
-	if len(parsed.AIBlocks) != 2 {
-		t.Fatalf("len(AIBlocks) = %d, want 2", len(parsed.AIBlocks))
+	if len(parsed.AIBlocks) != 3 {
+		t.Fatalf("len(AIBlocks) = %d, want 3", len(parsed.AIBlocks))
 	}
-	if parsed.AIBlocks[0].Title != "Prompt Feedback" || !strings.Contains(parsed.AIBlocks[0].Text, "blockReason") {
-		t.Fatalf("prompt feedback block = %+v", parsed.AIBlocks[0])
+	assertBlockByTitleContains(t, parsed.AIBlocks, "Prompt Feedback", "blockReason")
+	assertBlockByTitleContains(t, parsed.AIBlocks, "Finish Reason", "SAFETY")
+	assertBlockByTitleContains(t, parsed.AIBlocks, "Safety Ratings", "HARM_CATEGORY_HATE_SPEECH")
+}
+
+func TestParseLogFileVertexDecoratesPromptFeedbackSafetyAndFinishReason(t *testing.T) {
+	reqBody := `{"systemInstruction":{"role":"system","parts":[{"text":"Be safe"}]},"contents":[{"role":"user","parts":[{"text":"unsafe request"}]}]}`
+	resBody := `{"candidates":[{"content":{"role":"model","parts":[{"text":"vertex partial"}]},"finishReason":"SAFETY","safetyRatings":[{"category":"HARM_CATEGORY_HATE_SPEECH","probability":"HIGH","blocked":true}]}],"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}`
+
+	content := buildRecordFixture(t, "/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", false, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
 	}
-	if parsed.AIBlocks[1].Title != "Safety Ratings" || !strings.Contains(parsed.AIBlocks[1].Text, "HARM_CATEGORY_HATE_SPEECH") {
-		t.Fatalf("safety ratings block = %+v", parsed.AIBlocks[1])
+	if parsed.AIContent != "vertex partial" {
+		t.Fatalf("AIContent = %q, want vertex partial", parsed.AIContent)
 	}
+	if len(parsed.AIBlocks) != 3 {
+		t.Fatalf("len(AIBlocks) = %d, want 3", len(parsed.AIBlocks))
+	}
+	assertBlockByTitleContains(t, parsed.AIBlocks, "Prompt Feedback", "blockReason")
+	assertBlockByTitleContains(t, parsed.AIBlocks, "Finish Reason", "SAFETY")
+	assertBlockByTitleContains(t, parsed.AIBlocks, "Safety Ratings", "HARM_CATEGORY_HATE_SPEECH")
 }
 
 func TestParseLogFileProviderErrorDecoratesErrorBlock(t *testing.T) {
@@ -421,4 +438,15 @@ func parseHTTPStatusCode(status string) int {
 	default:
 		return 200
 	}
+}
+
+func assertBlockByTitleContains(t *testing.T, blocks []ContentBlock, title string, needle string) {
+	t.Helper()
+
+	for _, block := range blocks {
+		if block.Title == title && strings.Contains(block.Text, needle) {
+			return
+		}
+	}
+	t.Fatalf("block title %q containing %q not found: %+v", title, needle, blocks)
 }
