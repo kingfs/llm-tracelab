@@ -286,6 +286,7 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		capabilitySafety,
 		capabilityProviderErr,
 		capabilityStreamError,
+		capabilityPartialComp,
 		capabilityRefusal,
 		capabilityError,
 	}
@@ -311,6 +312,25 @@ func TestCassetteFixtureCatalogCoverage(t *testing.T) {
 		}
 		if capability == capabilityStreamError && len(providers) < 3 {
 			t.Fatalf("stream error coverage should span 3 providers, got %d: %+v", len(providers), providers)
+		}
+		if capability == capabilityPartialComp {
+			if len(providers) < 3 {
+				t.Fatalf("partial completion coverage should span 3 providers, got %d: %+v", len(providers), providers)
+			}
+			for _, fixture := range fixtures {
+				if !fixture.hasCapability(capabilityPartialComp) {
+					continue
+				}
+				if fixture.want.aiContent == "" {
+					t.Fatalf("partial completion fixture %q should keep partial ai content", fixture.name)
+				}
+				if fixture.want.blockContains == "" {
+					t.Fatalf("partial completion fixture %q should assert terminating block", fixture.name)
+				}
+				if fixture.want.aiBlockCount == 0 {
+					t.Fatalf("partial completion fixture %q should expect ai blocks", fixture.name)
+				}
+			}
 		}
 		if capability == capabilitySafety {
 			if !providers[llm.ProviderGoogleGenAI] {

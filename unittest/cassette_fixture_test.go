@@ -63,6 +63,7 @@ const (
 	capabilitySafety      cassetteCapability = "safety"
 	capabilityProviderErr cassetteCapability = "provider_error"
 	capabilityStreamError cassetteCapability = "stream_error"
+	capabilityPartialComp cassetteCapability = "partial_completion"
 	capabilityRefusal     cassetteCapability = "refusal"
 	capabilityError       cassetteCapability = "error"
 )
@@ -510,6 +511,7 @@ func openAIResponsesStreamErrorFixture() cassetteFixtureCase {
 			capabilityStream,
 			capabilityProviderErr,
 			capabilityStreamError,
+			capabilityPartialComp,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderOpenAICompatible,
@@ -549,6 +551,7 @@ func anthropicMessagesStreamErrorFixture() cassetteFixtureCase {
 			capabilityStream,
 			capabilityProviderErr,
 			capabilityStreamError,
+			capabilityPartialComp,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderAnthropic,
@@ -589,6 +592,7 @@ func googleGenAIStreamErrorFixture() cassetteFixtureCase {
 			capabilityStream,
 			capabilityProviderErr,
 			capabilityStreamError,
+			capabilityPartialComp,
 		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderGoogleGenAI,
