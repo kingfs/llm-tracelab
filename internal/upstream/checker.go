@@ -39,6 +39,10 @@ func CheckConnectivity(cfg config.UpstreamConfig) error {
 	if err != nil {
 		return fmt.Errorf("build check url failed: %w", err)
 	}
+	diagnostics, err := resolved.StartupDiagnostics()
+	if err != nil {
+		return fmt.Errorf("build startup diagnostics failed: %w", err)
+	}
 
 	req, err := http.NewRequest("GET", targetURL, nil)
 	if err != nil {
@@ -51,9 +55,11 @@ func CheckConnectivity(cfg config.UpstreamConfig) error {
 	slog.Info(
 		"Starting upstream connectivity check...",
 		"url", targetURL,
+		"connectivity_endpoint", diagnostics.ConnectivityEndpoint,
 		"provider_preset", resolved.ProviderPreset,
 		"protocol_family", resolved.ProtocolFamily,
 		"routing_profile", resolved.RoutingProfile,
+		"model_routing_hint", diagnostics.ModelRoutingHint,
 	)
 
 	resp, err := client.Do(req)

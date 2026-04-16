@@ -82,6 +82,12 @@ type ResolvedUpstream struct {
 	Headers        map[string]string
 }
 
+type StartupDiagnostics struct {
+	ConnectivityEndpoint string
+	ConnectivityURL      string
+	ModelRoutingHint     string
+}
+
 func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	if baseURL == "" {
@@ -329,6 +335,56 @@ func (u ResolvedUpstream) ConnectivityCheckURL() (string, error) {
 	default:
 		return u.BuildURL(ConnectivityPathOpenAIModels)
 	}
+}
+
+func (u ResolvedUpstream) ConnectivityCheckEndpoint() string {
+	switch u.ProtocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		return ConnectivityPathAnthropicModels
+	case ProtocolFamilyGoogleGenAI:
+		return ConnectivityPathGoogleModels
+	case ProtocolFamilyVertexNative:
+		return ConnectivityPathVertexModels
+	default:
+		return ConnectivityPathOpenAIModels
+	}
+}
+
+func (u ResolvedUpstream) ModelRoutingHint() string {
+	switch u.ProtocolFamily {
+	case ProtocolFamilyGoogleGenAI:
+		return "model is selected in the request path; normalized endpoint /v1beta/models:generateContent maps to concrete /v1beta/models/{model}:generateContent"
+	case ProtocolFamilyVertexNative:
+		switch u.RoutingProfile {
+		case RoutingProfileVertexExpress:
+			return "model is selected in the request path under /v1/{model_resource}/{model}:generateContent"
+		case RoutingProfileVertexProject:
+			return "model is selected in the request path under /v1/projects/{project}/locations/{location}/{model_resource}/{model}:generateContent"
+		default:
+			return "model is selected in the request path for vertex-native requests"
+		}
+	case ProtocolFamilyAnthropicMessages:
+		return "model stays in the request body as messages.model"
+	default:
+		switch u.RoutingProfile {
+		case RoutingProfileAzureOpenAIDeploy:
+			return "model is selected by deployment in the request path; client body model is not used for upstream routing"
+		default:
+			return "model stays in the request body"
+		}
+	}
+}
+
+func (u ResolvedUpstream) StartupDiagnostics() (StartupDiagnostics, error) {
+	connectivityURL, err := u.ConnectivityCheckURL()
+	if err != nil {
+		return StartupDiagnostics{}, err
+	}
+	return StartupDiagnostics{
+		ConnectivityEndpoint: u.ConnectivityCheckEndpoint(),
+		ConnectivityURL:      connectivityURL,
+		ModelRoutingHint:     u.ModelRoutingHint(),
+	}, nil
 }
 
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {

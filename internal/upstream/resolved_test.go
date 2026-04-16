@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -444,5 +445,92 @@ func TestResolvedUpstreamApplyAuthHeaders(t *testing.T) {
 	resolved.ApplyAuthHeaders(headers)
 	if got := headers.Get("Authorization"); got != "Bearer vertex-secret" {
 		t.Fatalf("Authorization = %q, want Bearer vertex-secret", got)
+	}
+}
+
+func TestResolvedUpstreamStartupDiagnostics(t *testing.T) {
+	tests := []struct {
+		name                    string
+		cfg                     config.UpstreamConfig
+		wantConnectivityURL     string
+		wantConnectivityPath    string
+		wantModelRoutingContain string
+	}{
+		{
+			name: "openai_default",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.openai.com",
+			},
+			wantConnectivityURL:     "https://api.openai.com/v1/models",
+			wantConnectivityPath:    ConnectivityPathOpenAIModels,
+			wantModelRoutingContain: "request body",
+		},
+		{
+			name: "azure_deployment",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://demo-resource.openai.azure.com",
+				ProviderPreset: "azure",
+				RoutingProfile: RoutingProfileAzureOpenAIDeploy,
+				Deployment:     "gpt-4o-mini",
+			},
+			wantConnectivityURL:     "https://demo-resource.openai.azure.com/openai/deployments/gpt-4o-mini/models?api-version=preview",
+			wantConnectivityPath:    ConnectivityPathOpenAIModels,
+			wantModelRoutingContain: "deployment",
+		},
+		{
+			name: "anthropic",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+			},
+			wantConnectivityURL:     "https://api.anthropic.com/v1/models",
+			wantConnectivityPath:    ConnectivityPathAnthropicModels,
+			wantModelRoutingContain: "messages.model",
+		},
+		{
+			name: "google",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+			wantConnectivityURL:     "https://generativelanguage.googleapis.com/v1beta/models",
+			wantConnectivityPath:    ConnectivityPathGoogleModels,
+			wantModelRoutingContain: "request path",
+		},
+		{
+			name: "vertex_project",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				Project:        "demo-project",
+				Location:       "us-central1",
+				ModelResource:  "publishers/google/models",
+			},
+			wantConnectivityURL:     "https://us-central1-aiplatform.googleapis.com/v1/projects/demo-project/locations/us-central1/publishers/google/models/publishers/google/models",
+			wantConnectivityPath:    ConnectivityPathVertexModels,
+			wantModelRoutingContain: "/v1/projects/{project}/locations/{location}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := Resolve(tt.cfg)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			diagnostics, err := resolved.StartupDiagnostics()
+			if err != nil {
+				t.Fatalf("StartupDiagnostics() error = %v", err)
+			}
+			if diagnostics.ConnectivityURL != tt.wantConnectivityURL {
+				t.Fatalf("ConnectivityURL = %q, want %q", diagnostics.ConnectivityURL, tt.wantConnectivityURL)
+			}
+			if diagnostics.ConnectivityEndpoint != tt.wantConnectivityPath {
+				t.Fatalf("ConnectivityEndpoint = %q, want %q", diagnostics.ConnectivityEndpoint, tt.wantConnectivityPath)
+			}
+			if !strings.Contains(diagnostics.ModelRoutingHint, tt.wantModelRoutingContain) {
+				t.Fatalf("ModelRoutingHint = %q, want contain %q", diagnostics.ModelRoutingHint, tt.wantModelRoutingContain)
+			}
+		})
 	}
 }
