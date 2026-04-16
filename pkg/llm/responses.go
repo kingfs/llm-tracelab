@@ -134,17 +134,18 @@ func OpenAIResponsesToLLM(resp OpenAIResponsesResponse) LLMResponse {
 		case "message":
 			candidate.Role = firstNonEmpty(item.Role, "assistant")
 			for _, part := range item.Content {
-				if text := responseContentText(part); text != "" {
-					candidate.Content = append(candidate.Content, LLMContent{
-						Type: "text",
-						Text: text,
-					})
-				}
 				if part.Refusal != "" {
 					candidate.Refusal = &LLMRefusal{
 						Reason:  "refusal",
 						Message: part.Refusal,
 					}
+					continue
+				}
+				if text := responseContentText(part); text != "" {
+					candidate.Content = append(candidate.Content, LLMContent{
+						Type: "text",
+						Text: text,
+					})
 				}
 			}
 		case "reasoning":

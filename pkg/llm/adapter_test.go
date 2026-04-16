@@ -119,11 +119,13 @@ func TestParseOpenAIResponsesResponseCustomToolAndRefusal(t *testing.T) {
 	require.Len(t, resp.Candidates, 1)
 	require.NotNil(t, resp.Candidates[0].Refusal)
 	assert.Equal(t, "I can't help with that.", resp.Candidates[0].Refusal.Message)
+	require.Len(t, resp.Candidates[0].Content, 1)
+	assert.Equal(t, "thinking", resp.Candidates[0].Content[0].Type)
+	assert.Equal(t, "checking policy", resp.Candidates[0].Content[0].Text)
 	require.Len(t, resp.Candidates[0].ToolCalls, 1)
 	assert.Equal(t, "custom_tool_call", resp.Candidates[0].ToolCalls[0].Type)
 	assert.Equal(t, "policy_guard", resp.Candidates[0].ToolCalls[0].Name)
 	assert.Equal(t, `{"topic":"restricted"}`, resp.Candidates[0].ToolCalls[0].ArgsText)
-	assert.Equal(t, "checking policy", resp.Candidates[0].Content[0].Text)
 }
 
 func TestParseOpenAIResponsesRequestSingleObjectInput(t *testing.T) {

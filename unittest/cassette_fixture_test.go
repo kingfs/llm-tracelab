@@ -84,6 +84,7 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 		openAIResponsesMultiTurnFixture(),
 		openAIResponsesToolCallStreamFixture(),
 		openAIResponsesCustomToolCallStreamFixture(),
+		openAIResponsesMixedOutputFixture(),
 		openAIResponsesToolResultFixture(),
 		anthropicMessagesNonStreamFixture(),
 		anthropicMessagesStreamFixture(),
@@ -292,6 +293,54 @@ func openAIResponsesCustomToolCallStreamFixture() cassetteFixtureCase {
 			toolCallType:     "custom_tool_call",
 			toolCallArgs:     `{"topic":"restricted"}`,
 			eventTypes:       []string{"llm.reasoning.delta", "llm.tool_call", "llm.output_text.delta", "llm.usage"},
+		},
+	}
+}
+
+func openAIResponsesMixedOutputFixture() cassetteFixtureCase {
+	return cassetteFixtureCase{
+		name: "openai_responses_mixed_output_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityReasoning,
+			capabilityToolCall,
+			capabilityRefusal,
+			capabilityMixedBlocks,
+		},
+		spec: cassetteSpec{
+			provider:        llm.ProviderOpenAICompatible,
+			operation:       llm.OperationResponses,
+			endpoint:        "/v1/responses",
+			url:             "/v1/responses",
+			method:          "POST",
+			model:           "gpt-5",
+			requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+			requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"check restricted policy"}]}]}`,
+			responseStatus:  "200 OK",
+			responseHeaders: "Content-Type: application/json\r\n",
+			responseBody:    `{"id":"resp_mixed","model":"gpt-5","output":[{"type":"reasoning","content":[{"type":"summary_text","text":"checking policy"}]},{"id":"ct_1","type":"custom_tool_call","call_id":"call_custom","name":"policy_guard","arguments":"{\"topic\":\"restricted\"}"},{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I can't help with that."}]}],"usage":{"input_tokens":8,"output_tokens":3,"total_tokens":11,"reasoning_tokens":1}}`,
+			usage: recordfile.UsageInfo{
+				PromptTokens:     8,
+				CompletionTokens: 3,
+				TotalTokens:      11,
+			},
+		},
+		want: cassetteExpectation{
+			replayContains:   `"reasoning_tokens":1`,
+			messageContains:  "check restricted policy",
+			historyContains:  []string{"check restricted policy"},
+			messageCount:     1,
+			aiContent:        "",
+			aiBlockCount:     1,
+			aiBlockTitles:    []string{"Refusal"},
+			promptTokens:     8,
+			completionTokens: 3,
+			statusCode:       200,
+			aiReasoning:      "checking policy",
+			toolCallName:     "policy_guard",
+			toolCallType:     "custom_tool_call",
+			toolCallArgs:     `{"topic":"restricted"}`,
+			blockContains:    "can't help",
 		},
 	}
 }
