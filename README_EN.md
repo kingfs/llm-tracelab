@@ -52,7 +52,7 @@ pkg/replay            replay transport for tests
 pkg/llm               cross-provider normalization helpers
 ```
 
-AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), and the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md).
+AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), and the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md).
 
 ## Record Format And Index
 
