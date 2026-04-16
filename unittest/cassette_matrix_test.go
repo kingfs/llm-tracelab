@@ -167,3 +167,37 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 		})
 	}
 }
+
+func TestCassetteFixtureCatalogCoverage(t *testing.T) {
+	fixtures := cassetteFixtureCatalog()
+	if len(fixtures) == 0 {
+		t.Fatal("fixture catalog should not be empty")
+	}
+
+	requiredCapabilities := []cassetteCapability{
+		capabilityNonStream,
+		capabilityStream,
+		capabilityReasoning,
+		capabilityToolCall,
+		capabilityRefusal,
+		capabilityError,
+	}
+
+	for _, capability := range requiredCapabilities {
+		count := 0
+		providers := map[string]bool{}
+		for _, fixture := range fixtures {
+			if !fixture.hasCapability(capability) {
+				continue
+			}
+			count++
+			providers[fixture.spec.provider] = true
+		}
+		if count == 0 {
+			t.Fatalf("missing fixture coverage for capability %q", capability)
+		}
+		if capability == capabilityStream && len(providers) < 3 {
+			t.Fatalf("stream coverage should span 3 providers, got %d: %+v", len(providers), providers)
+		}
+	}
+}

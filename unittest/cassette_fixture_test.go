@@ -41,10 +41,22 @@ type cassetteExpectation struct {
 	errorContent     string
 }
 
+type cassetteCapability string
+
+const (
+	capabilityNonStream cassetteCapability = "non_stream"
+	capabilityStream    cassetteCapability = "stream"
+	capabilityReasoning cassetteCapability = "reasoning"
+	capabilityToolCall  cassetteCapability = "tool_call"
+	capabilityRefusal   cassetteCapability = "refusal"
+	capabilityError     cassetteCapability = "error"
+)
+
 type cassetteFixtureCase struct {
-	name string
-	spec cassetteSpec
-	want cassetteExpectation
+	name         string
+	capabilities []cassetteCapability
+	spec         cassetteSpec
+	want         cassetteExpectation
 }
 
 func cassetteFixtureCatalog() []cassetteFixtureCase {
@@ -62,6 +74,9 @@ func cassetteFixtureCatalog() []cassetteFixtureCase {
 func openAIResponsesNonStreamFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "openai_responses_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderOpenAICompatible,
 			operation:       llm.OperationResponses,
@@ -93,6 +108,11 @@ func openAIResponsesNonStreamFixture() cassetteFixtureCase {
 func openAIResponsesToolCallStreamFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "openai_responses_tool_call_stream",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+			capabilityReasoning,
+			capabilityToolCall,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderOpenAICompatible,
 			operation:       llm.OperationResponses,
@@ -141,6 +161,9 @@ func openAIResponsesToolCallStreamFixture() cassetteFixtureCase {
 func anthropicMessagesNonStreamFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "anthropic_messages_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderAnthropic,
 			operation:       llm.OperationMessages,
@@ -172,6 +195,9 @@ func anthropicMessagesNonStreamFixture() cassetteFixtureCase {
 func anthropicMessagesStreamFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "anthropic_messages_stream",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderAnthropic,
 			operation:       llm.OperationMessages,
@@ -215,6 +241,10 @@ func anthropicMessagesStreamFixture() cassetteFixtureCase {
 func anthropicToolErrorFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "anthropic_tool_error_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityError,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderAnthropic,
 			operation:       llm.OperationMessages,
@@ -247,6 +277,9 @@ func anthropicToolErrorFixture() cassetteFixtureCase {
 func googleGenAIStreamFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "google_genai_stream",
+		capabilities: []cassetteCapability{
+			capabilityStream,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderGoogleGenAI,
 			operation:       llm.OperationGenerateContent,
@@ -286,6 +319,10 @@ func googleGenAIStreamFixture() cassetteFixtureCase {
 func googleGenAIBlockedFixture() cassetteFixtureCase {
 	return cassetteFixtureCase{
 		name: "google_genai_blocked_non_stream",
+		capabilities: []cassetteCapability{
+			capabilityNonStream,
+			capabilityRefusal,
+		},
 		spec: cassetteSpec{
 			provider:        llm.ProviderGoogleGenAI,
 			operation:       llm.OperationGenerateContent,
@@ -317,6 +354,15 @@ func googleGenAIBlockedFixture() cassetteFixtureCase {
 
 func stringsJoin(lines ...string) string {
 	return strings.Join(lines, "\n\n") + "\n\n"
+}
+
+func (c cassetteFixtureCase) hasCapability(capability cassetteCapability) bool {
+	for _, got := range c.capabilities {
+		if got == capability {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCassetteFixture(t *testing.T, spec cassetteSpec) (string, []byte) {
