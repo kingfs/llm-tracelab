@@ -86,12 +86,12 @@ monitor:
 upstream:
   base_url: "https://api.openai.com"
   api_key: "sk-xxx"
-  provider_preset: "openai"
-  protocol_family: ""
-  routing_profile: ""
-  api_version: ""
-  deployment: ""
-  headers: {}
+  provider_preset: "openai"      # 推荐优先填写 preset
+  protocol_family: ""            # 可留空自动推断；与 provider_preset 冲突会在启动时报错
+  routing_profile: ""            # 可留空自动推断；不支持的 preset/profile 组合会 fail fast
+  api_version: ""                # Azure 用 query 参数；Anthropic 用 anthropic-version header
+  deployment: ""                 # Azure deployment routing 时使用
+  headers: {}                    # 额外上游请求头，比如 anthropic-beta
 
 debug:
   output_dir: "./logs"
@@ -121,24 +121,43 @@ debug:
 - Anthropic Messages API：设置 `provider_preset: anthropic`，如需 beta 能力可在 `headers` 里补 `anthropic-beta`
 - Google GenAI API：设置 `provider_preset: google_genai`，当前支持 `generateContent` 和 `streamGenerateContent` 基础闭环
 
+支持级别说明：
+
+- `verified`：已有行为测试或 cassette 级回归覆盖
+- `compatible`：按现有协议族抽象应当可工作，但直接验证较少
+- `planned`：尚未接入 preset 或尚未实现
+
+配置校验规则：
+
+- `provider_preset`、`protocol_family`、`routing_profile` 不再是松散字段
+- 无效组合会在启动时直接报错，而不是等到请求阶段才失败
+- 例如 `provider_preset: anthropic` 搭配 `protocol_family: google_genai` 会直接失败
+- 例如 `provider_preset: openrouter` 搭配 `routing_profile: azure_openai_v1` 也会直接失败
+
 当前推荐支持矩阵：
 
 - `provider_preset: openai`
+  `support: verified`
   `protocol_family: openai_compatible`
   `routing_profile: openai_default`
 - `provider_preset: openrouter | fireworks | together | deepseek | groq | moonshot | cerebras | perplexity`
+  `support: openrouter/fireworks/together/groq=verified; deepseek/moonshot/cerebras/perplexity=compatible`
   `protocol_family: openai_compatible`
   `routing_profile: openai_default`
 - `provider_preset: azure`
+  `support: verified`
   `protocol_family: openai_compatible`
   `routing_profile: azure_openai_v1` 或 `azure_openai_deployment`
 - `provider_preset: vllm`
+  `support: verified`
   `protocol_family: openai_compatible`
   `routing_profile: vllm_openai`
 - `provider_preset: anthropic`
+  `support: verified`
   `protocol_family: anthropic_messages`
   `routing_profile: anthropic_default`
 - `provider_preset: google_genai | google | gemini`
+  `support: verified`
   `protocol_family: google_genai`
   `routing_profile: google_ai_studio`
 
@@ -161,6 +180,17 @@ upstream:
   base_url: "https://generativelanguage.googleapis.com"
   api_key: "AIza..."
   provider_preset: "google_genai"
+```
+
+Azure deployment 示例：
+
+```yaml
+upstream:
+  base_url: "https://demo-resource.openai.azure.com"
+  api_key: "azure-key"
+  provider_preset: "azure"
+  deployment: "gpt-4o-mini"
+  api_version: "2025-03-01-preview"
 ```
 
 ### 2. 构建和运行

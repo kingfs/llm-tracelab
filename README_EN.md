@@ -87,12 +87,12 @@ monitor:
 upstream:
   base_url: "https://api.openai.com"
   api_key: "sk-xxx"
-  provider_preset: "openai"
-  protocol_family: ""
-  routing_profile: ""
-  api_version: ""
-  deployment: ""
-  headers: {}
+  provider_preset: "openai"      # prefer preset-first config
+  protocol_family: ""            # leave empty for inference; conflicting preset/family fails fast
+  routing_profile: ""            # leave empty for inference; unsupported preset/profile combos fail fast
+  api_version: ""                # Azure uses query params; Anthropic uses anthropic-version header
+  deployment: ""                 # used by Azure deployment routing
+  headers: {}                    # extra upstream headers such as anthropic-beta
 
 debug:
   output_dir: "./logs"
@@ -122,24 +122,43 @@ Recommended compatibility pattern:
 - Anthropic Messages API: set `provider_preset: anthropic`; use `headers.anthropic-beta` if you need beta features
 - Google GenAI API: set `provider_preset: google_genai`; this round supports the base `generateContent` and `streamGenerateContent` flows
 
+Support level meanings:
+
+- `verified`: backed by direct behavior tests or cassette-level regression coverage
+- `compatible`: expected to work under an existing protocol family, but with lighter direct verification
+- `planned`: not yet implemented as a preset or not yet supported
+
+Config validation rules:
+
+- `provider_preset`, `protocol_family`, and `routing_profile` are no longer loose independent knobs
+- invalid combinations now fail at startup instead of failing later during proxy traffic
+- for example, `provider_preset: anthropic` with `protocol_family: google_genai` is rejected
+- likewise, `provider_preset: openrouter` with `routing_profile: azure_openai_v1` is rejected
+
 Current recommended support matrix:
 
 - `provider_preset: openai`
+  `support: verified`
   `protocol_family: openai_compatible`
   `routing_profile: openai_default`
 - `provider_preset: openrouter | fireworks | together | deepseek | groq | moonshot | cerebras | perplexity`
+  `support: openrouter/fireworks/together/groq=verified; deepseek/moonshot/cerebras/perplexity=compatible`
   `protocol_family: openai_compatible`
   `routing_profile: openai_default`
 - `provider_preset: azure`
+  `support: verified`
   `protocol_family: openai_compatible`
   `routing_profile: azure_openai_v1` or `azure_openai_deployment`
 - `provider_preset: vllm`
+  `support: verified`
   `protocol_family: openai_compatible`
   `routing_profile: vllm_openai`
 - `provider_preset: anthropic`
+  `support: verified`
   `protocol_family: anthropic_messages`
   `routing_profile: anthropic_default`
 - `provider_preset: google_genai | google | gemini`
+  `support: verified`
   `protocol_family: google_genai`
   `routing_profile: google_ai_studio`
 
@@ -162,6 +181,17 @@ upstream:
   base_url: "https://generativelanguage.googleapis.com"
   api_key: "AIza..."
   provider_preset: "google_genai"
+```
+
+Azure deployment example:
+
+```yaml
+upstream:
+  base_url: "https://demo-resource.openai.azure.com"
+  api_key: "azure-key"
+  provider_preset: "azure"
+  deployment: "gpt-4o-mini"
+  api_version: "2025-03-01-preview"
 ```
 
 ### 2. Build And Run
