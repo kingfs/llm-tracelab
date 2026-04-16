@@ -8,10 +8,13 @@ upstream:
   base_url: "http://localhost:30080"
   api_key: "sk-test"
   provider_preset: "openai"      # 推荐优先用 preset；支持 verified/compatible 两类，详见 docs/UPSTREAM_PROVIDERS.md
-  protocol_family: ""            # 默认自动推断，目前支持 openai_compatible / anthropic_messages / google_genai
+  protocol_family: ""            # 默认自动推断，目前支持 openai_compatible / anthropic_messages / google_genai / vertex_native
   routing_profile: ""            # 默认自动推断；不支持的 preset/profile 组合会在启动时报错
   api_version: ""                # Azure 用 query 参数；Anthropic 用 anthropic-version header
   deployment: ""                 # Azure deployment routing 时使用
+  project: ""                    # Vertex project-location routing 时使用
+  location: ""                   # Vertex project-location routing 时使用
+  model_resource: ""             # Vertex native 资源前缀，例如 publishers/google/models
   headers: {}                    # 额外上游请求头，比如 anthropic-beta
 
 debug:

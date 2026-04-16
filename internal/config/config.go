@@ -39,6 +39,9 @@ type UpstreamConfig struct {
 	RoutingProfile string            `yaml:"routing_profile"`
 	APIVersion     string            `yaml:"api_version"`
 	Deployment     string            `yaml:"deployment"`
+	Project        string            `yaml:"project"`
+	Location       string            `yaml:"location"`
+	ModelResource  string            `yaml:"model_resource"`
 	Headers        map[string]string `yaml:"headers"`
 }
 
@@ -91,6 +94,15 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_DEPLOYMENT"); v != "" {
 		cfg.Upstream.Deployment = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROJECT"); v != "" {
+		cfg.Upstream.Project = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_LOCATION"); v != "" {
+		cfg.Upstream.Location = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE"); v != "" {
+		cfg.Upstream.ModelResource = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v

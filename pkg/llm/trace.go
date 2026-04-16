@@ -14,6 +14,7 @@ const (
 	ProviderVLLM             = "vllm"
 	ProviderAnthropic        = "anthropic"
 	ProviderGoogleGenAI      = "google_genai"
+	ProviderVertexNative     = "vertex_native"
 
 	OperationUnknown         = "unknown"
 	OperationChatCompletions = "chat.completions"
@@ -66,6 +67,26 @@ func NormalizeEndpoint(rawPath string) string {
 	if !strings.HasPrefix(clean, "/") {
 		clean = "/" + clean
 	}
+	if strings.Contains(clean, "/publishers/") && strings.Contains(clean, "/models/") {
+		switch {
+		case strings.HasSuffix(clean, ":generateContent"):
+			return "/v1/publishers/models:generateContent"
+		case strings.HasSuffix(clean, ":streamGenerateContent"):
+			return "/v1/publishers/models:streamGenerateContent"
+		default:
+			return "/v1/publishers/models"
+		}
+	}
+	if strings.HasPrefix(clean, "/v1beta/models/") {
+		switch {
+		case strings.HasSuffix(clean, ":generateContent"):
+			return "/v1beta/models:generateContent"
+		case strings.HasSuffix(clean, ":streamGenerateContent"):
+			return "/v1beta/models:streamGenerateContent"
+		default:
+			return "/v1beta/models"
+		}
+	}
 	for _, rule := range []struct {
 		canonical string
 		suffixes  []string
@@ -75,8 +96,8 @@ func NormalizeEndpoint(rawPath string) string {
 		{canonical: "/v1/messages", suffixes: []string{"/v1/messages", "/messages"}},
 		{canonical: "/v1/embeddings", suffixes: []string{"/v1/embeddings", "/embeddings"}},
 		{canonical: "/v1/models", suffixes: []string{"/v1/models", "/models"}},
-		{canonical: "/v1beta/models:generateContent", suffixes: []string{":generateContent"}},
-		{canonical: "/v1beta/models:streamGenerateContent", suffixes: []string{":streamGenerateContent"}},
+		{canonical: "/v1beta/models:generateContent", suffixes: []string{"/v1beta/models:generateContent"}},
+		{canonical: "/v1beta/models:streamGenerateContent", suffixes: []string{"/v1beta/models:streamGenerateContent"}},
 		{canonical: "/v1beta/models", suffixes: []string{"/v1beta/models"}},
 	} {
 		for _, suffix := range rule.suffixes {
@@ -100,6 +121,11 @@ func detectProvider(endpoint string, upstreamBaseURL string) string {
 		strings.Contains(host, "anthropic.com"),
 		strings.Contains(host, "claude"):
 		return ProviderAnthropic
+	case endpoint == "/v1/publishers/models:generateContent",
+		endpoint == "/v1/publishers/models:streamGenerateContent",
+		endpoint == "/v1/publishers/models",
+		strings.Contains(host, "aiplatform.googleapis.com"):
+		return ProviderVertexNative
 	case endpoint == "/v1beta/models:generateContent",
 		endpoint == "/v1beta/models:streamGenerateContent",
 		endpoint == "/v1beta/models",
@@ -136,6 +162,10 @@ func detectOperation(endpoint string, provider string) string {
 		return OperationEmbeddings
 	case "/v1/models":
 		return OperationModels
+	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
+		return OperationGenerateContent
+	case "/v1/publishers/models":
+		return OperationModels
 	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
 		return OperationGenerateContent
 	default:
@@ -143,6 +173,12 @@ func detectOperation(endpoint string, provider string) string {
 			return OperationMessages
 		}
 		if provider == ProviderGoogleGenAI && strings.HasPrefix(endpoint, "/v1beta/models") {
+			if strings.Contains(endpoint, "generateContent") {
+				return OperationGenerateContent
+			}
+			return OperationModels
+		}
+		if provider == ProviderVertexNative && strings.HasPrefix(endpoint, "/v1/publishers/models") {
 			if strings.Contains(endpoint, "generateContent") {
 				return OperationGenerateContent
 			}

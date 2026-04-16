@@ -128,6 +128,29 @@ func TestResolveProviderPresets(t *testing.T) {
 			wantFamily:  ProtocolFamilyGoogleGenAI,
 			wantProfile: RoutingProfileGoogleAIStudio,
 		},
+		{
+			name: "vertex_express_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProtocolFamily: ProtocolFamilyVertexNative,
+				RoutingProfile: RoutingProfileVertexExpress,
+				ModelResource:  "publishers/google/models",
+			},
+			wantFamily:  ProtocolFamilyVertexNative,
+			wantProfile: RoutingProfileVertexExpress,
+		},
+		{
+			name: "vertex_project_location_inferred",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
+				ProtocolFamily: ProtocolFamilyVertexNative,
+				Project:        "demo-project",
+				Location:       "us-central1",
+				ModelResource:  "publishers/google/models",
+			},
+			wantFamily:  ProtocolFamilyVertexNative,
+			wantProfile: RoutingProfileVertexProject,
+		},
 	}
 
 	for _, tt := range tests {
@@ -178,6 +201,14 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				BaseURL:        "https://openrouter.ai/api/v1",
 				ProviderPreset: "openrouter",
 				RoutingProfile: RoutingProfileAzureOpenAIV1,
+			},
+		},
+		{
+			name: "vertex_missing_model_resource",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProtocolFamily: ProtocolFamilyVertexNative,
+				RoutingProfile: RoutingProfileVertexExpress,
 			},
 		},
 	}
@@ -262,6 +293,30 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			},
 			path:    "/v1beta/models/gemini-2.5-flash:streamGenerateContent",
 			wantURL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
+		},
+		{
+			name: "vertex_express_generate_content",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProtocolFamily: ProtocolFamilyVertexNative,
+				RoutingProfile: RoutingProfileVertexExpress,
+				ModelResource:  "publishers/google/models",
+			},
+			path:    "/v1/publishers/google/models/gemini-2.5-flash:generateContent",
+			wantURL: "https://aiplatform.googleapis.com/v1/publishers/google/models/gemini-2.5-flash:generateContent",
+		},
+		{
+			name: "vertex_project_location_stream_adds_alt_sse",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
+				ProtocolFamily: ProtocolFamilyVertexNative,
+				RoutingProfile: RoutingProfileVertexProject,
+				Project:        "demo-project",
+				Location:       "us-central1",
+				ModelResource:  "publishers/google/models",
+			},
+			path:    "/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent",
+			wantURL: "https://us-central1-aiplatform.googleapis.com/v1/projects/demo-project/locations/us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
 		},
 	}
 

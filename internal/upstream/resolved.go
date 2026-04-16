@@ -15,6 +15,7 @@ const (
 	ProtocolFamilyOpenAICompatible  = "openai_compatible"
 	ProtocolFamilyAnthropicMessages = "anthropic_messages"
 	ProtocolFamilyGoogleGenAI       = "google_genai"
+	ProtocolFamilyVertexNative      = "vertex_native"
 
 	RoutingProfileOpenAIDefault     = "openai_default"
 	RoutingProfileAzureOpenAIV1     = "azure_openai_v1"
@@ -22,9 +23,12 @@ const (
 	RoutingProfileVLLMOpenAI        = "vllm_openai"
 	RoutingProfileAnthropicDefault  = "anthropic_default"
 	RoutingProfileGoogleAIStudio    = "google_ai_studio"
+	RoutingProfileVertexExpress     = "vertex_express"
+	RoutingProfileVertexProject     = "vertex_project_location"
 	ConnectivityPathOpenAIModels    = "/v1/models"
 	ConnectivityPathAnthropicModels = "/v1/models"
 	ConnectivityPathGoogleModels    = "/v1beta/models"
+	ConnectivityPathVertexModels    = "/v1/publishers/google/models"
 	DefaultAzureAPIVersion          = "preview"
 	DefaultAnthropicAPIVersion      = "2023-06-01"
 )
@@ -71,6 +75,9 @@ type ResolvedUpstream struct {
 	RoutingProfile string
 	APIVersion     string
 	Deployment     string
+	Project        string
+	Location       string
+	ModelResource  string
 	Headers        map[string]string
 }
 
@@ -92,6 +99,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		RoutingProfile: normalizeSlug(cfg.RoutingProfile),
 		APIVersion:     strings.TrimSpace(cfg.APIVersion),
 		Deployment:     strings.TrimSpace(cfg.Deployment),
+		Project:        strings.TrimSpace(cfg.Project),
+		Location:       strings.TrimSpace(cfg.Location),
+		ModelResource:  strings.Trim(strings.TrimSpace(cfg.ModelResource), "/"),
 		Headers:        cloneStringMap(cfg.Headers),
 	}
 	if err := validatePresetSelection(resolved.ProviderPreset, resolved.ProtocolFamily); err != nil {
@@ -165,6 +175,36 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 			return ResolvedUpstream{}, err
 		}
 		return resolved, nil
+	case ProtocolFamilyVertexNative:
+		if resolved.RoutingProfile == "" {
+			resolved.RoutingProfile = RoutingProfileVertexExpress
+		}
+		switch resolved.RoutingProfile {
+		case RoutingProfileVertexExpress:
+			if resolved.ModelResource == "" {
+				return ResolvedUpstream{}, fmt.Errorf("upstream.model_resource is required for routing_profile=%q", resolved.RoutingProfile)
+			}
+			if err := validateResolvedPreset(resolved); err != nil {
+				return ResolvedUpstream{}, err
+			}
+			return resolved, nil
+		case RoutingProfileVertexProject:
+			if resolved.Project == "" {
+				return ResolvedUpstream{}, fmt.Errorf("upstream.project is required for routing_profile=%q", resolved.RoutingProfile)
+			}
+			if resolved.Location == "" {
+				return ResolvedUpstream{}, fmt.Errorf("upstream.location is required for routing_profile=%q", resolved.RoutingProfile)
+			}
+			if resolved.ModelResource == "" {
+				return ResolvedUpstream{}, fmt.Errorf("upstream.model_resource is required for routing_profile=%q", resolved.RoutingProfile)
+			}
+			if err := validateResolvedPreset(resolved); err != nil {
+				return ResolvedUpstream{}, err
+			}
+			return resolved, nil
+		default:
+			return ResolvedUpstream{}, fmt.Errorf("unsupported upstream.routing_profile %q for protocol_family=%q", resolved.RoutingProfile, resolved.ProtocolFamily)
+		}
 	default:
 		return ResolvedUpstream{}, fmt.Errorf("unsupported upstream.protocol_family %q", resolved.ProtocolFamily)
 	}
@@ -235,6 +275,13 @@ func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
 		}
 		target.RawQuery = q.Encode()
 	}
+	if (u.RoutingProfile == RoutingProfileVertexExpress || u.RoutingProfile == RoutingProfileVertexProject) && strings.Contains(target.Path, ":streamGenerateContent") {
+		q := target.Query()
+		if q.Get("alt") == "" {
+			q.Set("alt", "sse")
+		}
+		target.RawQuery = q.Encode()
+	}
 	return target.String(), nil
 }
 
@@ -276,6 +323,8 @@ func (u ResolvedUpstream) ConnectivityCheckURL() (string, error) {
 		return u.BuildURL(ConnectivityPathAnthropicModels)
 	case ProtocolFamilyGoogleGenAI:
 		return u.BuildURL(ConnectivityPathGoogleModels)
+	case ProtocolFamilyVertexNative:
+		return u.BuildURL(ConnectivityPathVertexModels)
 	default:
 		return u.BuildURL(ConnectivityPathOpenAIModels)
 	}
@@ -314,6 +363,8 @@ func inferDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 		switch {
 		case strings.Contains(host, "anthropic.com"), strings.Contains(host, "claude"):
 			resolved.ProtocolFamily = ProtocolFamilyAnthropicMessages
+		case strings.Contains(host, "aiplatform.googleapis.com"):
+			resolved.ProtocolFamily = ProtocolFamilyVertexNative
 		case strings.Contains(host, "generativelanguage.googleapis.com"), strings.Contains(host, "googleapis.com"):
 			resolved.ProtocolFamily = ProtocolFamilyGoogleGenAI
 		default:
@@ -326,6 +377,14 @@ func inferDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	}
 	if resolved.ProtocolFamily == ProtocolFamilyGoogleGenAI {
 		resolved.RoutingProfile = RoutingProfileGoogleAIStudio
+		return
+	}
+	if resolved.ProtocolFamily == ProtocolFamilyVertexNative {
+		if host == "aiplatform.googleapis.com" {
+			resolved.RoutingProfile = RoutingProfileVertexExpress
+		} else {
+			resolved.RoutingProfile = RoutingProfileVertexProject
+		}
 		return
 	}
 	switch {
@@ -371,6 +430,9 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 	if reqPath == "/" {
 		return basePath
 	}
+	if resolved.RoutingProfile == RoutingProfileVertexExpress || resolved.RoutingProfile == RoutingProfileVertexProject {
+		return joinVertexRequestPath(reqPath, resolved)
+	}
 	if resolved.RoutingProfile == RoutingProfileAzureOpenAIDeploy {
 		if resolved.Deployment != "" {
 			return "/openai/deployments/" + resolved.Deployment + stripOpenAIVersionPrefix(reqPath)
@@ -393,6 +455,44 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 		joined = "/" + joined
 	}
 	return joined
+}
+
+func joinVertexRequestPath(reqPath string, resolved ResolvedUpstream) string {
+	resourceBase := resolved.ModelResource
+	if resourceBase == "" {
+		resourceBase = "publishers/google/models"
+	}
+	resourceBase = strings.Trim(resourceBase, "/")
+	resourceRoot := "/" + resourceBase
+	if resolved.RoutingProfile == RoutingProfileVertexProject {
+		resourceRoot = "/projects/" + resolved.Project + "/locations/" + resolved.Location + resourceRoot
+	}
+	if strings.HasPrefix(reqPath, "/v1"+resourceRoot) {
+		return reqPath
+	}
+	if resolved.RoutingProfile == RoutingProfileVertexExpress && strings.HasPrefix(reqPath, "/v1/publishers/") {
+		return reqPath
+	}
+	switch llm.NormalizeEndpoint(reqPath) {
+	case "/v1/publishers/models:generateContent":
+		return "/v1" + resourceRoot + suffixAfterModel(reqPath, ":generateContent")
+	case "/v1/publishers/models:streamGenerateContent":
+		return "/v1" + resourceRoot + suffixAfterModel(reqPath, ":streamGenerateContent")
+	case "/v1/publishers/models":
+		return "/v1" + resourceRoot
+	default:
+		return path.Join("/v1", resourceRoot, strings.TrimPrefix(reqPath, "/v1/"))
+	}
+}
+
+func suffixAfterModel(reqPath string, fallback string) string {
+	if idx := strings.Index(reqPath, "/models/"); idx >= 0 {
+		rest := reqPath[idx+len("/models/"):]
+		if rest != "" {
+			return "/models/" + rest
+		}
+	}
+	return "/models/" + fallback
 }
 
 func deploymentFromBasePath(basePath string) string {
