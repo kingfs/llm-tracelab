@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLLMRequest_ToGemini(t *testing.T) {
@@ -76,4 +77,25 @@ func TestGeminiToLLM(t *testing.T) {
 
 	assert.Equal(t, 1, len(llmResp.Safety))
 	assert.Equal(t, "HATE", llmResp.Safety[0].Category)
+}
+
+func TestGeminiToLLMBlockedPromptFeedback(t *testing.T) {
+	resp := GeminiResponse{
+		PromptFeedback: map[string]any{
+			"blockReason": "SAFETY",
+		},
+		UsageMetadata: &GeminiUsageMetadata{
+			PromptTokenCount:     2,
+			CandidatesTokenCount: 0,
+			TotalTokenCount:      2,
+		},
+	}
+
+	llmResp := GeminiToLLM(resp)
+
+	require.Len(t, llmResp.Candidates, 1)
+	require.NotNil(t, llmResp.Candidates[0].Refusal)
+	assert.Equal(t, "SAFETY", llmResp.Candidates[0].Refusal.Reason)
+	assert.Contains(t, llmResp.Candidates[0].Refusal.Message, "blockReason")
+	assert.Equal(t, 2, llmResp.Usage.TotalTokens)
 }

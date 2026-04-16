@@ -280,6 +280,16 @@ func GeminiToLLM(resp GeminiResponse) LLMResponse {
 		usage = &u
 	}
 
+	if len(cands) == 0 {
+		if refusal := geminiPromptFeedbackRefusal(resp.PromptFeedback); refusal != nil {
+			cands = append(cands, LLMCandidate{
+				Index:   0,
+				Role:    "model",
+				Refusal: refusal,
+			})
+		}
+	}
+
 	return LLMResponse{
 		Candidates: cands,
 		Usage:      usage,
@@ -287,6 +297,24 @@ func GeminiToLLM(resp GeminiResponse) LLMResponse {
 		Extensions: map[string]any{
 			"prompt_feedback": resp.PromptFeedback,
 		},
+	}
+}
+
+func geminiPromptFeedbackRefusal(promptFeedback map[string]any) *LLMRefusal {
+	if len(promptFeedback) == 0 {
+		return nil
+	}
+	reason := "blocked"
+	if blockReason, ok := promptFeedback["blockReason"].(string); ok && blockReason != "" {
+		reason = blockReason
+	}
+	message := marshalCompactString(promptFeedback)
+	if message == "" {
+		message = reason
+	}
+	return &LLMRefusal{
+		Reason:  reason,
+		Message: message,
 	}
 }
 

@@ -42,8 +42,11 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 		wantAIContent        string
 		wantPromptTokens     int
 		wantCompletionTokens int
+		wantAIReasoning      string
 		wantToolCallName     string
 		wantEventTypes       []string
+		wantBlockContains    string
+		wantErrorContent     string
 	}{
 		{
 			name: "openai_responses_non_stream",
@@ -85,6 +88,7 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 				responseStatus:  "200 OK",
 				responseHeaders: "Content-Type: text/event-stream\r\n",
 				responseBody: stringsJoin(
+					"data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"inspect logs\",\"item_id\":\"rs_1\"}",
 					"data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\"}}",
 					"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"cmd\\\":\\\"pwd\\\"}\",\"item_id\":\"fc_1\"}",
 					"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}",
@@ -97,6 +101,7 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 					TotalTokens:      13,
 				},
 				events: []recordfile.RecordEvent{
+					{Type: "llm.reasoning.delta", Time: time.Date(2026, 4, 15, 12, 0, 0, 500000000, time.UTC), IsStream: true, Message: "inspect logs"},
 					{Type: "llm.tool_call", Time: time.Date(2026, 4, 15, 12, 0, 1, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "call_1", "name": "exec_command", "type": "function_call"}},
 					{Type: "llm.tool_call.delta", Time: time.Date(2026, 4, 15, 12, 0, 2, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "fc_1", "arguments": "{\"cmd\":\"pwd\"}"}},
 					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 0, 3, 0, time.UTC), IsStream: true, Message: "done"},
@@ -106,10 +111,11 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			wantReplayContains:   "data:",
 			wantMessageContains:  "inspect logs",
 			wantAIContent:        "done",
+			wantAIReasoning:      "inspect logs",
 			wantPromptTokens:     9,
 			wantCompletionTokens: 4,
 			wantToolCallName:     "exec_command",
-			wantEventTypes:       []string{"llm.tool_call", "llm.tool_call.delta", "llm.output_text.delta", "llm.usage"},
+			wantEventTypes:       []string{"llm.reasoning.delta", "llm.tool_call", "llm.tool_call.delta", "llm.output_text.delta", "llm.usage"},
 		},
 		{
 			name: "anthropic_messages_non_stream",
@@ -176,6 +182,33 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			wantEventTypes:       []string{"llm.output_text.delta", "llm.usage"},
 		},
 		{
+			name: "anthropic_tool_error_non_stream",
+			spec: cassetteSpec{
+				provider:        llm.ProviderAnthropic,
+				operation:       llm.OperationMessages,
+				endpoint:        "/v1/messages",
+				url:             "/v1/messages",
+				method:          http.MethodPost,
+				model:           "claude-sonnet-4-5",
+				requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+				requestBody:     `{"model":"claude-sonnet-4-5","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_err","name":"Bash","input":{"command":"exit 1"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_err","is_error":true,"content":"stacktrace"}]}],"max_tokens":16}`,
+				responseStatus:  "200 OK",
+				responseHeaders: "Content-Type: application/json\r\n",
+				responseBody:    `{"id":"msg_err","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"command failed"}],"usage":{"input_tokens":6,"output_tokens":4}}`,
+				usage: recordfile.UsageInfo{
+					PromptTokens:     6,
+					CompletionTokens: 4,
+					TotalTokens:      10,
+				},
+			},
+			wantReplayContains:   `"output_tokens":4`,
+			wantMessageContains:  "stacktrace",
+			wantAIContent:        "command failed",
+			wantPromptTokens:     6,
+			wantCompletionTokens: 4,
+			wantErrorContent:     "stacktrace",
+		},
+		{
 			name: "google_genai_stream",
 			spec: cassetteSpec{
 				provider:        llm.ProviderGoogleGenAI,
@@ -208,6 +241,33 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			wantPromptTokens:     3,
 			wantCompletionTokens: 7,
 			wantEventTypes:       []string{"llm.output_text.delta", "llm.usage"},
+		},
+		{
+			name: "google_genai_blocked_non_stream",
+			spec: cassetteSpec{
+				provider:        llm.ProviderGoogleGenAI,
+				operation:       llm.OperationGenerateContent,
+				endpoint:        "/v1beta/models:generateContent",
+				url:             "/v1beta/models/gemini-2.5-flash:generateContent",
+				method:          http.MethodPost,
+				model:           "gemini-2.5-flash",
+				requestProtocol: "POST /v1beta/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
+				requestBody:     `{"contents":[{"role":"user","parts":[{"text":"unsafe request"}]}]}`,
+				responseStatus:  "200 OK",
+				responseHeaders: "Content-Type: application/json\r\n",
+				responseBody:    `{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":0,"totalTokenCount":2}}`,
+				usage: recordfile.UsageInfo{
+					PromptTokens:     2,
+					CompletionTokens: 0,
+					TotalTokens:      2,
+				},
+			},
+			wantReplayContains:   `"blockReason":"SAFETY"`,
+			wantMessageContains:  "unsafe request",
+			wantAIContent:        "",
+			wantPromptTokens:     2,
+			wantCompletionTokens: 0,
+			wantBlockContains:    "SAFETY",
 		},
 	}
 
@@ -277,11 +337,20 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse response error = %v", err)
 			}
-			if len(llmResp.Candidates) == 0 || len(llmResp.Candidates[0].Content) == 0 {
-				t.Fatalf("llm response should contain candidate content")
+			if len(llmResp.Candidates) == 0 {
+				t.Fatalf("llm response should contain at least one candidate")
 			}
-			if llmResp.Candidates[0].Content[0].Text != tt.wantAIContent {
-				t.Fatalf("content = %q, want %q", llmResp.Candidates[0].Content[0].Text, tt.wantAIContent)
+			gotContent := ""
+			if len(llmResp.Candidates[0].Content) > 0 {
+				gotContent = llmResp.Candidates[0].Content[0].Text
+			}
+			if gotContent != tt.wantAIContent {
+				t.Fatalf("content = %q, want %q", gotContent, tt.wantAIContent)
+			}
+			if tt.wantBlockContains != "" {
+				if llmResp.Candidates[0].Refusal == nil || !bytes.Contains([]byte(llmResp.Candidates[0].Refusal.Message), []byte(tt.wantBlockContains)) {
+					t.Fatalf("llm refusal = %+v, want contain %q", llmResp.Candidates[0].Refusal, tt.wantBlockContains)
+				}
 			}
 			if tt.wantToolCallName != "" {
 				if len(llmResp.Candidates[0].ToolCalls) == 0 {
@@ -308,6 +377,9 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if parsedMonitor.AIContent != tt.wantAIContent {
 				t.Fatalf("monitor AIContent = %q, want %q", parsedMonitor.AIContent, tt.wantAIContent)
 			}
+			if parsedMonitor.AIReasoning != tt.wantAIReasoning {
+				t.Fatalf("monitor AIReasoning = %q, want %q", parsedMonitor.AIReasoning, tt.wantAIReasoning)
+			}
 			if tt.wantToolCallName != "" {
 				if len(parsedMonitor.ResponseToolCalls) == 0 {
 					t.Fatalf("expected monitor tool call %q, got none", tt.wantToolCallName)
@@ -325,6 +397,30 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			}
 			if !foundMessage {
 				t.Fatalf("chat messages do not contain %q: %+v", tt.wantMessageContains, parsedMonitor.ChatMessages)
+			}
+			if tt.wantBlockContains != "" {
+				foundBlock := false
+				for _, block := range parsedMonitor.AIBlocks {
+					if bytes.Contains([]byte(block.Text), []byte(tt.wantBlockContains)) {
+						foundBlock = true
+						break
+					}
+				}
+				if !foundBlock {
+					t.Fatalf("ai blocks do not contain %q: %+v", tt.wantBlockContains, parsedMonitor.AIBlocks)
+				}
+			}
+			if tt.wantErrorContent != "" {
+				foundError := false
+				for _, message := range parsedMonitor.ChatMessages {
+					if message.IsError && bytes.Contains([]byte(message.Content), []byte(tt.wantErrorContent)) {
+						foundError = true
+						break
+					}
+				}
+				if !foundError {
+					t.Fatalf("error chat message not found for %q: %+v", tt.wantErrorContent, parsedMonitor.ChatMessages)
+				}
 			}
 		})
 	}
