@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -67,6 +68,57 @@ func TestCheckConnectivityPrintsAvailableModelsAndDiagnostics(t *testing.T) {
 			t.Fatalf("logs = %q, want contain %q", logOutput, want)
 		}
 	}
+}
+
+func TestCheckConnectivityPrintsRequestDumpOnTransportError(t *testing.T) {
+	var out bytes.Buffer
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial tcp 127.0.0.1:443: connect: connection refused")
+		}),
+	}
+
+	err := checkConnectivity(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com",
+	}, client, &out)
+	if err == nil {
+		t.Fatal("checkConnectivity() error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("error = %q, want connection refused", err.Error())
+	}
+
+	stdout := out.String()
+	for _, want := range []string{
+		"=== REQUEST DUMP ===",
+		"GET /v1/models HTTP/1.1",
+		"Host: api.openai.com",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout = %q, want contain %q", stdout, want)
+		}
+	}
+	logOutput := logs.String()
+	for _, want := range []string{
+		"Starting upstream connectivity check...",
+		"connectivity_endpoint=/v1/models",
+		"Upstream check connection failed",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("logs = %q, want contain %q", logOutput, want)
+		}
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func TestCheckConnectivityPrintsFailedInteraction(t *testing.T) {
