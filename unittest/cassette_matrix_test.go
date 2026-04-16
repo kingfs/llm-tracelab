@@ -4,11 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/monitor"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -16,262 +12,8 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/replay"
 )
 
-type cassetteSpec struct {
-	provider        string
-	operation       string
-	endpoint        string
-	url             string
-	method          string
-	model           string
-	requestProtocol string
-	requestBody     string
-	responseStatus  string
-	responseHeaders string
-	responseBody    string
-	isStream        bool
-	usage           recordfile.UsageInfo
-	events          []recordfile.RecordEvent
-}
-
 func TestCassetteMatrixReplayAndParse(t *testing.T) {
-	tests := []struct {
-		name                 string
-		spec                 cassetteSpec
-		wantReplayContains   string
-		wantMessageContains  string
-		wantAIContent        string
-		wantPromptTokens     int
-		wantCompletionTokens int
-		wantAIReasoning      string
-		wantToolCallName     string
-		wantEventTypes       []string
-		wantBlockContains    string
-		wantErrorContent     string
-	}{
-		{
-			name: "openai_responses_non_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderOpenAICompatible,
-				operation:       llm.OperationResponses,
-				endpoint:        "/v1/responses",
-				url:             "/v1/responses",
-				method:          http.MethodPost,
-				model:           "gpt-5",
-				requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello from openai"}]}]}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: application/json\r\n",
-				responseBody:    `{"id":"resp_1","model":"gpt-5","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from assistant"}]}],"usage":{"input_tokens":3,"output_tokens":5,"total_tokens":8}}`,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     3,
-					CompletionTokens: 5,
-					TotalTokens:      8,
-				},
-			},
-			wantReplayContains:   `"total_tokens":8`,
-			wantMessageContains:  "hello from openai",
-			wantAIContent:        "hello from assistant",
-			wantPromptTokens:     3,
-			wantCompletionTokens: 5,
-		},
-		{
-			name: "openai_responses_tool_call_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderOpenAICompatible,
-				operation:       llm.OperationResponses,
-				endpoint:        "/v1/responses",
-				url:             "/v1/responses",
-				method:          http.MethodPost,
-				model:           "gpt-5",
-				requestProtocol: "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect logs"}]}]}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: text/event-stream\r\n",
-				responseBody: stringsJoin(
-					"data: {\"type\":\"response.reasoning_summary_text.delta\",\"delta\":\"inspect logs\",\"item_id\":\"rs_1\"}",
-					"data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"exec_command\"}}",
-					"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"cmd\\\":\\\"pwd\\\"}\",\"item_id\":\"fc_1\"}",
-					"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}",
-					"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":9,\"output_tokens\":4,\"total_tokens\":13}}}",
-				),
-				isStream: true,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     9,
-					CompletionTokens: 4,
-					TotalTokens:      13,
-				},
-				events: []recordfile.RecordEvent{
-					{Type: "llm.reasoning.delta", Time: time.Date(2026, 4, 15, 12, 0, 0, 500000000, time.UTC), IsStream: true, Message: "inspect logs"},
-					{Type: "llm.tool_call", Time: time.Date(2026, 4, 15, 12, 0, 1, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "call_1", "name": "exec_command", "type": "function_call"}},
-					{Type: "llm.tool_call.delta", Time: time.Date(2026, 4, 15, 12, 0, 2, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"id": "fc_1", "arguments": "{\"cmd\":\"pwd\"}"}},
-					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 0, 3, 0, time.UTC), IsStream: true, Message: "done"},
-					{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 0, 4, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 9, "completion_tokens": 4, "total_tokens": 13}},
-				},
-			},
-			wantReplayContains:   "data:",
-			wantMessageContains:  "inspect logs",
-			wantAIContent:        "done",
-			wantAIReasoning:      "inspect logs",
-			wantPromptTokens:     9,
-			wantCompletionTokens: 4,
-			wantToolCallName:     "exec_command",
-			wantEventTypes:       []string{"llm.reasoning.delta", "llm.tool_call", "llm.tool_call.delta", "llm.output_text.delta", "llm.usage"},
-		},
-		{
-			name: "anthropic_messages_non_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderAnthropic,
-				operation:       llm.OperationMessages,
-				endpoint:        "/v1/messages",
-				url:             "/v1/messages",
-				method:          http.MethodPost,
-				model:           "claude-sonnet-4-5",
-				requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"model":"claude-sonnet-4-5","system":"Be concise","messages":[{"role":"user","content":[{"type":"text","text":"hello from anthropic"}]}],"max_tokens":16}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: application/json\r\n",
-				responseBody:    `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"hello from claude"}],"usage":{"input_tokens":4,"output_tokens":6}}`,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     4,
-					CompletionTokens: 6,
-					TotalTokens:      10,
-				},
-			},
-			wantReplayContains:   `"output_tokens":6`,
-			wantMessageContains:  "hello from anthropic",
-			wantAIContent:        "hello from claude",
-			wantPromptTokens:     4,
-			wantCompletionTokens: 6,
-		},
-		{
-			name: "anthropic_messages_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderAnthropic,
-				operation:       llm.OperationMessages,
-				endpoint:        "/v1/messages",
-				url:             "/v1/messages",
-				method:          http.MethodPost,
-				model:           "claude-sonnet-4-5",
-				requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":[{"type":"text","text":"hello from anthropic stream"}]}],"max_tokens":16}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: text/event-stream\r\n",
-				responseBody: stringsJoin(
-					"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}",
-					"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}",
-					"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Claude\"}}",
-					"data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":5,\"output_tokens\":7}}",
-				),
-				isStream: true,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     5,
-					CompletionTokens: 7,
-					TotalTokens:      12,
-				},
-				events: []recordfile.RecordEvent{
-					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 1, 1, 0, time.UTC), IsStream: true, Message: "Hello "},
-					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 1, 2, 0, time.UTC), IsStream: true, Message: "Claude"},
-					{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 1, 3, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12}},
-				},
-			},
-			wantReplayContains:   "data:",
-			wantMessageContains:  "hello from anthropic stream",
-			wantAIContent:        "Hello Claude",
-			wantPromptTokens:     5,
-			wantCompletionTokens: 7,
-			wantEventTypes:       []string{"llm.output_text.delta", "llm.usage"},
-		},
-		{
-			name: "anthropic_tool_error_non_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderAnthropic,
-				operation:       llm.OperationMessages,
-				endpoint:        "/v1/messages",
-				url:             "/v1/messages",
-				method:          http.MethodPost,
-				model:           "claude-sonnet-4-5",
-				requestProtocol: "POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"model":"claude-sonnet-4-5","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"toolu_err","name":"Bash","input":{"command":"exit 1"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_err","is_error":true,"content":"stacktrace"}]}],"max_tokens":16}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: application/json\r\n",
-				responseBody:    `{"id":"msg_err","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"command failed"}],"usage":{"input_tokens":6,"output_tokens":4}}`,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     6,
-					CompletionTokens: 4,
-					TotalTokens:      10,
-				},
-			},
-			wantReplayContains:   `"output_tokens":4`,
-			wantMessageContains:  "stacktrace",
-			wantAIContent:        "command failed",
-			wantPromptTokens:     6,
-			wantCompletionTokens: 4,
-			wantErrorContent:     "stacktrace",
-		},
-		{
-			name: "google_genai_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderGoogleGenAI,
-				operation:       llm.OperationGenerateContent,
-				endpoint:        "/v1beta/models:streamGenerateContent",
-				url:             "/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse",
-				method:          http.MethodPost,
-				model:           "gemini-2.5-flash",
-				requestProtocol: "POST /v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"contents":[{"role":"user","parts":[{"text":"hello from gemini"}]}]}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: text/event-stream\r\n",
-				responseBody: "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Hello \"}]}}]}\n\n" +
-					"data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"Gemini\"}]}}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":7,\"totalTokenCount\":10}}\n\n",
-				isStream: true,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     3,
-					CompletionTokens: 7,
-					TotalTokens:      10,
-				},
-				events: []recordfile.RecordEvent{
-					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 2, 1, 0, time.UTC), IsStream: true, Message: "Hello ", Attributes: map[string]interface{}{"role": "model"}},
-					{Type: "llm.output_text.delta", Time: time.Date(2026, 4, 15, 12, 2, 2, 0, time.UTC), IsStream: true, Message: "Gemini", Attributes: map[string]interface{}{"role": "model"}},
-					{Type: "llm.usage", Time: time.Date(2026, 4, 15, 12, 2, 3, 0, time.UTC), IsStream: true, Attributes: map[string]interface{}{"prompt_tokens": 3, "completion_tokens": 7, "total_tokens": 10}},
-				},
-			},
-			wantReplayContains:   "data:",
-			wantMessageContains:  "hello from gemini",
-			wantAIContent:        "Hello Gemini",
-			wantPromptTokens:     3,
-			wantCompletionTokens: 7,
-			wantEventTypes:       []string{"llm.output_text.delta", "llm.usage"},
-		},
-		{
-			name: "google_genai_blocked_non_stream",
-			spec: cassetteSpec{
-				provider:        llm.ProviderGoogleGenAI,
-				operation:       llm.OperationGenerateContent,
-				endpoint:        "/v1beta/models:generateContent",
-				url:             "/v1beta/models/gemini-2.5-flash:generateContent",
-				method:          http.MethodPost,
-				model:           "gemini-2.5-flash",
-				requestProtocol: "POST /v1beta/models/gemini-2.5-flash:generateContent HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n",
-				requestBody:     `{"contents":[{"role":"user","parts":[{"text":"unsafe request"}]}]}`,
-				responseStatus:  "200 OK",
-				responseHeaders: "Content-Type: application/json\r\n",
-				responseBody:    `{"promptFeedback":{"blockReason":"SAFETY"},"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":0,"totalTokenCount":2}}`,
-				usage: recordfile.UsageInfo{
-					PromptTokens:     2,
-					CompletionTokens: 0,
-					TotalTokens:      2,
-				},
-			},
-			wantReplayContains:   `"blockReason":"SAFETY"`,
-			wantMessageContains:  "unsafe request",
-			wantAIContent:        "",
-			wantPromptTokens:     2,
-			wantCompletionTokens: 0,
-			wantBlockContains:    "SAFETY",
-		},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range cassetteFixtureCatalog() {
 		t.Run(tt.name, func(t *testing.T) {
 			path, content := writeCassetteFixture(t, tt.spec)
 
@@ -285,12 +27,12 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if parsedPrelude.Header.Meta.Operation != tt.spec.operation {
 				t.Fatalf("operation = %q, want %q", parsedPrelude.Header.Meta.Operation, tt.spec.operation)
 			}
-			if len(tt.wantEventTypes) > 0 {
+			if len(tt.want.eventTypes) > 0 {
 				foundTypes := map[string]bool{}
 				for _, event := range parsedPrelude.Events {
 					foundTypes[event.Type] = true
 				}
-				for _, eventType := range tt.wantEventTypes {
+				for _, eventType := range tt.want.eventTypes {
 					if !foundTypes[eventType] {
 						t.Fatalf("missing event type %q in %+v", eventType, parsedPrelude.Events)
 					}
@@ -316,8 +58,8 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("io.ReadAll() error = %v", err)
 			}
-			if !bytes.Contains(replayedBody, []byte(tt.wantReplayContains)) {
-				t.Fatalf("replayed body = %q, want contain %q", string(replayedBody), tt.wantReplayContains)
+			if !bytes.Contains(replayedBody, []byte(tt.want.replayContains)) {
+				t.Fatalf("replayed body = %q, want contain %q", string(replayedBody), tt.want.replayContains)
 			}
 
 			llmReq, err := llm.ParseRequestForPath(tt.spec.url, "https://upstream.example", reqBody)
@@ -344,20 +86,20 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if len(llmResp.Candidates[0].Content) > 0 {
 				gotContent = llmResp.Candidates[0].Content[0].Text
 			}
-			if gotContent != tt.wantAIContent {
-				t.Fatalf("content = %q, want %q", gotContent, tt.wantAIContent)
+			if gotContent != tt.want.aiContent {
+				t.Fatalf("content = %q, want %q", gotContent, tt.want.aiContent)
 			}
-			if tt.wantBlockContains != "" {
-				if llmResp.Candidates[0].Refusal == nil || !bytes.Contains([]byte(llmResp.Candidates[0].Refusal.Message), []byte(tt.wantBlockContains)) {
-					t.Fatalf("llm refusal = %+v, want contain %q", llmResp.Candidates[0].Refusal, tt.wantBlockContains)
+			if tt.want.blockContains != "" {
+				if llmResp.Candidates[0].Refusal == nil || !bytes.Contains([]byte(llmResp.Candidates[0].Refusal.Message), []byte(tt.want.blockContains)) {
+					t.Fatalf("llm refusal = %+v, want contain %q", llmResp.Candidates[0].Refusal, tt.want.blockContains)
 				}
 			}
-			if tt.wantToolCallName != "" {
+			if tt.want.toolCallName != "" {
 				if len(llmResp.Candidates[0].ToolCalls) == 0 {
-					t.Fatalf("expected tool call %q, got none", tt.wantToolCallName)
+					t.Fatalf("expected tool call %q, got none", tt.want.toolCallName)
 				}
-				if llmResp.Candidates[0].ToolCalls[0].Name != tt.wantToolCallName {
-					t.Fatalf("tool call = %q, want %q", llmResp.Candidates[0].ToolCalls[0].Name, tt.wantToolCallName)
+				if llmResp.Candidates[0].ToolCalls[0].Name != tt.want.toolCallName {
+					t.Fatalf("tool call = %q, want %q", llmResp.Candidates[0].ToolCalls[0].Name, tt.want.toolCallName)
 				}
 			}
 
@@ -368,118 +110,60 @@ func TestCassetteMatrixReplayAndParse(t *testing.T) {
 			if len(parsedMonitor.ChatMessages) == 0 {
 				t.Fatalf("monitor chat messages should not be empty")
 			}
-			if parsedMonitor.Header.Usage.PromptTokens != tt.wantPromptTokens {
-				t.Fatalf("prompt tokens = %d, want %d", parsedMonitor.Header.Usage.PromptTokens, tt.wantPromptTokens)
+			if parsedMonitor.Header.Usage.PromptTokens != tt.want.promptTokens {
+				t.Fatalf("prompt tokens = %d, want %d", parsedMonitor.Header.Usage.PromptTokens, tt.want.promptTokens)
 			}
-			if parsedMonitor.Header.Usage.CompletionTokens != tt.wantCompletionTokens {
-				t.Fatalf("completion tokens = %d, want %d", parsedMonitor.Header.Usage.CompletionTokens, tt.wantCompletionTokens)
+			if parsedMonitor.Header.Usage.CompletionTokens != tt.want.completionTokens {
+				t.Fatalf("completion tokens = %d, want %d", parsedMonitor.Header.Usage.CompletionTokens, tt.want.completionTokens)
 			}
-			if parsedMonitor.AIContent != tt.wantAIContent {
-				t.Fatalf("monitor AIContent = %q, want %q", parsedMonitor.AIContent, tt.wantAIContent)
+			if parsedMonitor.AIContent != tt.want.aiContent {
+				t.Fatalf("monitor AIContent = %q, want %q", parsedMonitor.AIContent, tt.want.aiContent)
 			}
-			if parsedMonitor.AIReasoning != tt.wantAIReasoning {
-				t.Fatalf("monitor AIReasoning = %q, want %q", parsedMonitor.AIReasoning, tt.wantAIReasoning)
+			if parsedMonitor.AIReasoning != tt.want.aiReasoning {
+				t.Fatalf("monitor AIReasoning = %q, want %q", parsedMonitor.AIReasoning, tt.want.aiReasoning)
 			}
-			if tt.wantToolCallName != "" {
+			if tt.want.toolCallName != "" {
 				if len(parsedMonitor.ResponseToolCalls) == 0 {
-					t.Fatalf("expected monitor tool call %q, got none", tt.wantToolCallName)
+					t.Fatalf("expected monitor tool call %q, got none", tt.want.toolCallName)
 				}
-				if parsedMonitor.ResponseToolCalls[0].Function.Name != tt.wantToolCallName {
-					t.Fatalf("monitor tool call = %q, want %q", parsedMonitor.ResponseToolCalls[0].Function.Name, tt.wantToolCallName)
+				if parsedMonitor.ResponseToolCalls[0].Function.Name != tt.want.toolCallName {
+					t.Fatalf("monitor tool call = %q, want %q", parsedMonitor.ResponseToolCalls[0].Function.Name, tt.want.toolCallName)
 				}
 			}
 			foundMessage := false
 			for _, message := range parsedMonitor.ChatMessages {
-				if bytes.Contains([]byte(message.Content), []byte(tt.wantMessageContains)) {
+				if bytes.Contains([]byte(message.Content), []byte(tt.want.messageContains)) {
 					foundMessage = true
 					break
 				}
 			}
 			if !foundMessage {
-				t.Fatalf("chat messages do not contain %q: %+v", tt.wantMessageContains, parsedMonitor.ChatMessages)
+				t.Fatalf("chat messages do not contain %q: %+v", tt.want.messageContains, parsedMonitor.ChatMessages)
 			}
-			if tt.wantBlockContains != "" {
+			if tt.want.blockContains != "" {
 				foundBlock := false
 				for _, block := range parsedMonitor.AIBlocks {
-					if bytes.Contains([]byte(block.Text), []byte(tt.wantBlockContains)) {
+					if bytes.Contains([]byte(block.Text), []byte(tt.want.blockContains)) {
 						foundBlock = true
 						break
 					}
 				}
 				if !foundBlock {
-					t.Fatalf("ai blocks do not contain %q: %+v", tt.wantBlockContains, parsedMonitor.AIBlocks)
+					t.Fatalf("ai blocks do not contain %q: %+v", tt.want.blockContains, parsedMonitor.AIBlocks)
 				}
 			}
-			if tt.wantErrorContent != "" {
+			if tt.want.errorContent != "" {
 				foundError := false
 				for _, message := range parsedMonitor.ChatMessages {
-					if message.IsError && bytes.Contains([]byte(message.Content), []byte(tt.wantErrorContent)) {
+					if message.IsError && bytes.Contains([]byte(message.Content), []byte(tt.want.errorContent)) {
 						foundError = true
 						break
 					}
 				}
 				if !foundError {
-					t.Fatalf("error chat message not found for %q: %+v", tt.wantErrorContent, parsedMonitor.ChatMessages)
+					t.Fatalf("error chat message not found for %q: %+v", tt.want.errorContent, parsedMonitor.ChatMessages)
 				}
 			}
 		})
 	}
-}
-
-func stringsJoin(lines ...string) string {
-	return strings.Join(lines, "\n\n") + "\n\n"
-}
-
-func writeCassetteFixture(t *testing.T, spec cassetteSpec) (string, []byte) {
-	t.Helper()
-
-	reqHead := []byte(spec.requestProtocol)
-	reqBody := []byte(spec.requestBody)
-	resHead := []byte("HTTP/1.1 " + spec.responseStatus + "\r\n" + spec.responseHeaders + "\r\n")
-	resBody := []byte(spec.responseBody)
-
-	header := recordfile.RecordHeader{
-		Version: "LLM_PROXY_V3",
-		Meta: recordfile.MetaData{
-			RequestID:  "test-" + spec.provider,
-			Time:       time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC),
-			Model:      spec.model,
-			Provider:   spec.provider,
-			Operation:  spec.operation,
-			Endpoint:   spec.endpoint,
-			URL:        spec.url,
-			Method:     spec.method,
-			StatusCode: 200,
-		},
-		Layout: recordfile.LayoutInfo{
-			ReqHeaderLen: int64(len(reqHead)),
-			ReqBodyLen:   int64(len(reqBody)),
-			ResHeaderLen: int64(len(resHead)),
-			ResBodyLen:   int64(len(resBody)),
-			IsStream:     spec.isStream,
-		},
-		Usage: spec.usage,
-	}
-
-	events := recordfile.BuildEvents(header)
-	if len(spec.events) > 0 {
-		events = append(events, spec.events...)
-	}
-	prelude, err := recordfile.MarshalPrelude(header, events)
-	if err != nil {
-		t.Fatalf("MarshalPrelude() error = %v", err)
-	}
-
-	content := append([]byte{}, prelude...)
-	content = append(content, reqHead...)
-	content = append(content, reqBody...)
-	content = append(content, '\n')
-	content = append(content, resHead...)
-	content = append(content, resBody...)
-
-	path := filepath.Join(t.TempDir(), spec.provider+".http")
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-	return path, content
 }
