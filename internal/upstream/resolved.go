@@ -64,6 +64,7 @@ var providerPresetRegistry = map[string]providerPresetSpec{
 	"perplexity":       {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"together":         {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"vllm":             {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileVLLMOpenAI, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileVLLMOpenAI}},
+	"vertex":           {ProtocolFamily: ProtocolFamilyVertexNative, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileVertexExpress, RoutingProfileVertexProject}},
 	"xai":              {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 }
 
@@ -347,6 +348,12 @@ func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 			resolved.RoutingProfile = RoutingProfileAzureOpenAIDeploy
 		} else {
 			resolved.RoutingProfile = RoutingProfileAzureOpenAIV1
+		}
+	case "vertex":
+		if strings.EqualFold(parsed.Host, "aiplatform.googleapis.com") {
+			resolved.RoutingProfile = RoutingProfileVertexExpress
+		} else {
+			resolved.RoutingProfile = RoutingProfileVertexProject
 		}
 	default:
 		resolved.RoutingProfile = spec.RoutingProfile

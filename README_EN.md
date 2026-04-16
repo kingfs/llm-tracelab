@@ -127,7 +127,7 @@ Recommended compatibility pattern:
 - vLLM OpenAI-compatible server: set `provider_preset: vllm`
 - Anthropic Messages API: set `provider_preset: anthropic`; use `headers.anthropic-beta` if you need beta features
 - Google GenAI API: set `provider_preset: google_genai`; this round supports the base `generateContent` and `streamGenerateContent` flows
-- Vertex AI native API: there is no `provider_preset` yet; configure `protocol_family: vertex_native` plus either `routing_profile: vertex_express` or `vertex_project_location`
+- Vertex AI native API: prefer `provider_preset: vertex`; it infers `vertex_express` or `vertex_project_location` from `base_url`
 
 Support level meanings:
 
@@ -168,10 +168,11 @@ Current recommended support matrix:
   `support: verified`
   `protocol_family: google_genai`
   `routing_profile: google_ai_studio`
-- `protocol_family: vertex_native`
+- `provider_preset: vertex`
   `support: verified`
+  `protocol_family: vertex_native`
   `routing_profile: vertex_express | vertex_project_location`
-  `notes: no provider preset yet; covered by adapter / proxy / cassette regressions`
+  `notes: controlled preset; covered by adapter / proxy / cassette regressions`
 
 Anthropic example:
 
@@ -200,8 +201,7 @@ Vertex express example:
 upstream:
   base_url: "https://aiplatform.googleapis.com"
   api_key: "ya29..."
-  protocol_family: "vertex_native"
-  routing_profile: "vertex_express"
+  provider_preset: "vertex"
   model_resource: "publishers/google/models/gemini-2.5-flash"
 ```
 
@@ -211,12 +211,16 @@ Vertex project/location example:
 upstream:
   base_url: "https://us-central1-aiplatform.googleapis.com"
   api_key: "ya29..."
-  protocol_family: "vertex_native"
-  routing_profile: "vertex_project_location"
+  provider_preset: "vertex"
   project: "demo-project"
   location: "us-central1"
   model_resource: "publishers/google/models/gemini-2.5-flash"
 ```
+
+If you want to avoid presets entirely, explicit config still works:
+
+- `protocol_family: vertex_native`
+- `routing_profile: vertex_express | vertex_project_location`
 
 Azure deployment example:
 

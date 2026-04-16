@@ -129,6 +129,28 @@ func TestResolveProviderPresets(t *testing.T) {
 			wantProfile: RoutingProfileGoogleAIStudio,
 		},
 		{
+			name: "vertex_preset_express_defaults",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				ModelResource:  "publishers/google/models",
+			},
+			wantFamily:  ProtocolFamilyVertexNative,
+			wantProfile: RoutingProfileVertexExpress,
+		},
+		{
+			name: "vertex_preset_project_location_inferred",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				Project:        "demo-project",
+				Location:       "us-central1",
+				ModelResource:  "publishers/google/models",
+			},
+			wantFamily:  ProtocolFamilyVertexNative,
+			wantProfile: RoutingProfileVertexProject,
+		},
+		{
 			name: "vertex_express_defaults",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "https://aiplatform.googleapis.com",
@@ -209,6 +231,15 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				BaseURL:        "https://aiplatform.googleapis.com",
 				ProtocolFamily: ProtocolFamilyVertexNative,
 				RoutingProfile: RoutingProfileVertexExpress,
+			},
+		},
+		{
+			name: "vertex_preset_profile_mismatch",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				RoutingProfile: RoutingProfileGoogleAIStudio,
+				ModelResource:  "publishers/google/models",
 			},
 		},
 	}
@@ -298,8 +329,7 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			name: "vertex_express_generate_content",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "https://aiplatform.googleapis.com",
-				ProtocolFamily: ProtocolFamilyVertexNative,
-				RoutingProfile: RoutingProfileVertexExpress,
+				ProviderPreset: "vertex",
 				ModelResource:  "publishers/google/models",
 			},
 			path:    "/v1/publishers/google/models/gemini-2.5-flash:generateContent",
@@ -309,8 +339,7 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			name: "vertex_project_location_stream_adds_alt_sse",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "https://us-central1-aiplatform.googleapis.com",
-				ProtocolFamily: ProtocolFamilyVertexNative,
-				RoutingProfile: RoutingProfileVertexProject,
+				ProviderPreset: "vertex",
 				Project:        "demo-project",
 				Location:       "us-central1",
 				ModelResource:  "publishers/google/models",
@@ -400,5 +429,20 @@ func TestResolvedUpstreamApplyAuthHeaders(t *testing.T) {
 	resolved.ApplyAuthHeaders(headers)
 	if got := headers.Get("x-goog-api-key"); got != "goog-secret" {
 		t.Fatalf("x-goog-api-key = %q, want goog-secret", got)
+	}
+
+	resolved, err = Resolve(config.UpstreamConfig{
+		BaseURL:        "https://aiplatform.googleapis.com",
+		ProviderPreset: "vertex",
+		ModelResource:  "publishers/google/models",
+		ApiKey:         "vertex-secret",
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	headers = http.Header{}
+	resolved.ApplyAuthHeaders(headers)
+	if got := headers.Get("Authorization"); got != "Bearer vertex-secret" {
+		t.Fatalf("Authorization = %q, want Bearer vertex-secret", got)
 	}
 }

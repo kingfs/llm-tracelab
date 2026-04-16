@@ -109,6 +109,7 @@ These presets currently resolve without requiring extra code changes:
 | `google_genai` | `verified` | `google_genai` | `google_ai_studio` | Google Gemini API |
 | `google` | `verified` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
 | `gemini` | `verified` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
+| `vertex` | `verified` | `vertex_native` | inferred | chooses `vertex_express` or `vertex_project_location` from `base_url` |
 
 Invalid combinations now fail fast at startup. For example:
 
@@ -118,12 +119,19 @@ Invalid combinations now fail fast at startup. For example:
 
 ## Explicit Family Config
 
-Not every supported family has a user-facing preset yet.
+Not every supported family needs many presets.
 
-`vertex_native` is now implemented and verified through parser, proxy, and cassette regression coverage, but it currently requires explicit config instead of `provider_preset`.
+`vertex_native` now has a single controlled preset: `vertex`.
+
+It remains intentionally narrow:
+
+- only `vertex_express`
+- only `vertex_project_location`
+- no extra aliases yet
 
 Recommended config patterns:
 
+- `provider_preset: vertex`
 - `protocol_family: vertex_native`
 - `routing_profile: vertex_express | vertex_project_location`
 - `model_resource: publishers/google/models/<model>`
@@ -133,6 +141,8 @@ Additional fields for `vertex_project_location`:
 
 - `project`
 - `location`
+
+Explicit `protocol_family` / `routing_profile` config still works when you want to avoid presets entirely.
 
 ## Selection Rules
 

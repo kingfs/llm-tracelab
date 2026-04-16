@@ -541,7 +541,7 @@ func TestHandlerVertexExpressRoutesAuthsAndRecords(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL
-	cfg.Upstream.ProtocolFamily = upstream.ProtocolFamilyVertexNative
+	cfg.Upstream.ProviderPreset = "vertex"
 	cfg.Upstream.RoutingProfile = upstream.RoutingProfileVertexExpress
 	cfg.Upstream.ModelResource = "publishers/google/models/gemini-2.5-flash"
 	cfg.Upstream.ApiKey = "vertex-secret"
@@ -619,7 +619,7 @@ func TestHandlerVertexProjectLocationStreamAddsAltSSEAndRecordsEvents(t *testing
 
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL
-	cfg.Upstream.ProtocolFamily = upstream.ProtocolFamilyVertexNative
+	cfg.Upstream.ProviderPreset = "vertex"
 	cfg.Upstream.RoutingProfile = upstream.RoutingProfileVertexProject
 	cfg.Upstream.Project = "demo-project"
 	cfg.Upstream.Location = "us-central1"

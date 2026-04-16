@@ -126,7 +126,7 @@ debug:
 - vLLM OpenAI-compatible server：设置 `provider_preset: vllm`
 - Anthropic Messages API：设置 `provider_preset: anthropic`，如需 beta 能力可在 `headers` 里补 `anthropic-beta`
 - Google GenAI API：设置 `provider_preset: google_genai`，当前支持 `generateContent` 和 `streamGenerateContent` 基础闭环
-- Vertex AI native API：当前无 `provider_preset`，请显式设置 `protocol_family: vertex_native`，并根据模式选择 `routing_profile: vertex_express` 或 `vertex_project_location`
+- Vertex AI native API：优先使用 `provider_preset: vertex`；它会根据 `base_url` 推断 `vertex_express` 或 `vertex_project_location`
 
 支持级别说明：
 
@@ -167,10 +167,11 @@ debug:
   `support: verified`
   `protocol_family: google_genai`
   `routing_profile: google_ai_studio`
-- `protocol_family: vertex_native`
+- `provider_preset: vertex`
   `support: verified`
+  `protocol_family: vertex_native`
   `routing_profile: vertex_express | vertex_project_location`
-  `notes: 当前无 provider_preset；已覆盖 adapter / proxy / cassette regression`
+  `notes: 受控 preset；已覆盖 adapter / proxy / cassette regression`
 
 Anthropic 示例：
 
@@ -199,8 +200,7 @@ Vertex express 示例：
 upstream:
   base_url: "https://aiplatform.googleapis.com"
   api_key: "ya29..."
-  protocol_family: "vertex_native"
-  routing_profile: "vertex_express"
+  provider_preset: "vertex"
   model_resource: "publishers/google/models/gemini-2.5-flash"
 ```
 
@@ -210,12 +210,16 @@ Vertex project/location 示例：
 upstream:
   base_url: "https://us-central1-aiplatform.googleapis.com"
   api_key: "ya29..."
-  protocol_family: "vertex_native"
-  routing_profile: "vertex_project_location"
+  provider_preset: "vertex"
   project: "demo-project"
   location: "us-central1"
   model_resource: "publishers/google/models/gemini-2.5-flash"
 ```
+
+如果你想完全避免 preset，也仍然可以继续显式填写：
+
+- `protocol_family: vertex_native`
+- `routing_profile: vertex_express | vertex_project_location`
 
 Azure deployment 示例：
 
