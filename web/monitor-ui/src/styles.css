@@ -170,6 +170,32 @@ a {
   gap: 18px;
 }
 
+.routing-failure-summary {
+  display: grid;
+  gap: 16px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.54);
+  padding: 18px 20px;
+}
+
+.routing-failure-summary-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.routing-failure-summary-head strong {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.routing-failure-recent-list {
+  display: grid;
+  gap: 10px;
+}
+
 .upstream-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

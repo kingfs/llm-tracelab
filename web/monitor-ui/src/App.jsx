@@ -231,7 +231,14 @@ function TraceListPage() {
         </form>
         {upstreams.error ? <div className="empty-state error-box">{upstreams.error}</div> : null}
         {upstreams.loading && !upstreams.data ? <div className="empty-state">Loading upstream targets...</div> : null}
-        {upstreams.data ? <UpstreamOverview items={upstreams.data.items || []} analyticsWindow={upstreams.data.window || upstreamWindow} analyticsModel={upstreams.data.model || upstreamModel} /> : null}
+        {upstreams.data ? (
+          <UpstreamOverview
+            items={upstreams.data.items || []}
+            analyticsWindow={upstreams.data.window || upstreamWindow}
+            analyticsModel={upstreams.data.model || upstreamModel}
+            routingFailures={upstreams.data.routing_failures || {}}
+          />
+        ) : null}
       </section>
 
       <section className="panel">
@@ -301,11 +308,7 @@ function TraceListPage() {
   );
 }
 
-function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "" }) {
-  if (!items.length) {
-    return <div className="empty-state">No upstream targets discovered.</div>;
-  }
-
+function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "", routingFailures = {} }) {
   const healthyCount = items.filter((item) => item.health_state === "healthy").length;
   const attentionCount = items.filter((item) => item.health_state !== "healthy").length;
   const modelCount = new Set(items.flatMap((item) => item.models || [])).size;
@@ -322,6 +325,39 @@ function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "" 
         <span>window {analyticsWindow}</span>
         <span>model filter {analyticsModel || "all"}</span>
       </div>
+      <div className="routing-failure-summary">
+        <div className="routing-failure-summary-head">
+          <div>
+            <div className="upstream-card-label">Routing failures</div>
+            <span className="trace-subline">Selection-stage failures without a chosen upstream</span>
+          </div>
+          <strong>{routingFailures.total ?? 0}</strong>
+        </div>
+        {(routingFailures.reasons || []).length ? (
+          <div className="session-breakdown-grid">
+            <BreakdownList title="Reasons" items={routingFailures.reasons || []} formatter={(item) => formatFailureReason(item.label)} />
+            <section className="breakdown-card">
+              <div className="breakdown-title">Recent failures</div>
+              <div className="routing-failure-recent-list">
+                {(routingFailures.recent || []).map((item) => (
+                  <Link key={item.trace_id} className="upstream-failure-card" to={buildTraceLink(item.trace_id, "requests", "", "", "failure")}>
+                    <div className="trace-tag-group">
+                      <InlineTag tone="danger">{item.status_code}</InlineTag>
+                      <InlineTag>{formatFailureReason(item.reason)}</InlineTag>
+                    </div>
+                    <strong>{item.model || "unknown-model"}</strong>
+                    <span>{formatDateTime(item.recorded_at)}</span>
+                    {item.error_text ? <div className="upstream-failure-detail">{item.error_text}</div> : null}
+                  </Link>
+                ))}
+              </div>
+            </section>
+          </div>
+        ) : (
+          <div className="empty-state">No routing failures in this window.</div>
+        )}
+      </div>
+      {!items.length ? <div className="empty-state">No upstream targets discovered.</div> : null}
       <div className="upstream-grid">
         {items.map((item) => (
           <article key={item.id} className="upstream-card">

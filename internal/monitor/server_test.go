@@ -582,6 +582,78 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 	}
 }
 
+func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, recordedAt time.Time, model string, reason string) {
+		t.Helper()
+		path := filepath.Join(outputDir, name)
+		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:            name,
+				Time:                 recordedAt,
+				Model:                model,
+				Provider:             "openai_compatible",
+				Operation:            "responses",
+				Endpoint:             "/v1/responses",
+				URL:                  "/v1/responses",
+				Method:               "POST",
+				StatusCode:           http.StatusBadGateway,
+				DurationMs:           20,
+				TTFTMs:               0,
+				ClientIP:             "127.0.0.1",
+				ContentLength:        10,
+				Error:                "selection failed",
+				RoutingPolicy:        "p2c",
+				RoutingFailureReason: reason,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	writeLog("match-a.http", now.Add(-20*time.Minute), "gpt-5", "no_supporting_target")
+	writeLog("match-b.http", now.Add(-10*time.Minute), "gpt-5", "all_targets_open")
+	writeLog("other-model.http", now.Add(-5*time.Minute), "gemini-2.5-flash", "no_supporting_target")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=1h&model=gpt-5", nil)
+	rr := httptest.NewRecorder()
+	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload upstreamListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.RoutingFailures.Total != 2 {
+		t.Fatalf("RoutingFailures.Total = %d, want 2", payload.RoutingFailures.Total)
+	}
+	if len(payload.RoutingFailures.Reasons) != 2 {
+		t.Fatalf("RoutingFailures.Reasons = %#v, want 2 items", payload.RoutingFailures.Reasons)
+	}
+	if len(payload.RoutingFailures.Recent) != 2 {
+		t.Fatalf("RoutingFailures.Recent = %#v, want 2 items", payload.RoutingFailures.Recent)
+	}
+	if payload.RoutingFailures.Recent[0].Reason != "all_targets_open" {
+		t.Fatalf("most recent reason = %q, want all_targets_open", payload.RoutingFailures.Recent[0].Reason)
+	}
+}
+
 func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	t.Parallel()
 

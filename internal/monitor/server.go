@@ -174,10 +174,11 @@ type RouteOptions struct {
 }
 
 type upstreamListResponse struct {
-	Items       []upstreamItem `json:"items"`
-	RefreshedAt time.Time      `json:"refreshed_at"`
-	Window      string         `json:"window"`
-	Model       string         `json:"model"`
+	Items           []upstreamItem            `json:"items"`
+	RoutingFailures routingFailureSummaryView `json:"routing_failures"`
+	RefreshedAt     time.Time                 `json:"refreshed_at"`
+	Window          string                    `json:"window"`
+	Model           string                    `json:"model"`
 }
 
 type upstreamItem struct {
@@ -218,6 +219,22 @@ type upstreamFailureItem struct {
 	StatusCode int       `json:"status_code"`
 	RecordedAt time.Time `json:"recorded_at"`
 	ErrorText  string    `json:"error_text,omitempty"`
+}
+
+type routingFailureSummaryView struct {
+	Total   int                  `json:"total"`
+	Reasons []sessionCountItem   `json:"reasons"`
+	Recent  []routingFailureItem `json:"recent"`
+}
+
+type routingFailureItem struct {
+	TraceID    string    `json:"trace_id"`
+	Model      string    `json:"model"`
+	Endpoint   string    `json:"endpoint"`
+	RecordedAt time.Time `json:"recorded_at"`
+	Reason     string    `json:"reason"`
+	ErrorText  string    `json:"error_text,omitempty"`
+	StatusCode int       `json:"status_code"`
 }
 
 type upstreamDetailResponse struct {
@@ -288,11 +305,26 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 			return
 		}
 
+		routingFailures := routingFailureSummaryView{}
+		if st != nil {
+			analytics, err := st.GetRoutingFailureAnalytics(since, modelFilter, 5, 5)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query routing failures: " + err.Error()})
+				return
+			}
+			routingFailures = routingFailureSummaryView{
+				Total:   analytics.Total,
+				Reasons: toSessionCountItems(analytics.Reasons),
+				Recent:  toRoutingFailureItems(analytics.Recent),
+			}
+		}
+
 		writeJSON(w, http.StatusOK, upstreamListResponse{
-			Items:       items,
-			RefreshedAt: time.Now().UTC(),
-			Window:      windowLabel,
-			Model:       modelFilter,
+			Items:           items,
+			RoutingFailures: routingFailures,
+			RefreshedAt:     time.Now().UTC(),
+			Window:          windowLabel,
+			Model:           modelFilter,
 		})
 	}
 }
@@ -498,6 +530,22 @@ func toUpstreamFailureItems(records []store.UpstreamFailureRecord) []upstreamFai
 			StatusCode: record.StatusCode,
 			RecordedAt: record.RecordedAt,
 			ErrorText:  record.ErrorText,
+		})
+	}
+	return out
+}
+
+func toRoutingFailureItems(records []store.RoutingFailureRecord) []routingFailureItem {
+	out := make([]routingFailureItem, 0, len(records))
+	for _, record := range records {
+		out = append(out, routingFailureItem{
+			TraceID:    record.TraceID,
+			Model:      record.Model,
+			Endpoint:   record.Endpoint,
+			RecordedAt: record.RecordedAt,
+			Reason:     record.Reason,
+			ErrorText:  record.ErrorText,
+			StatusCode: record.StatusCode,
 		})
 	}
 	return out

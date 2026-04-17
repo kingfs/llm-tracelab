@@ -148,6 +148,22 @@ type CountItem struct {
 	Count int
 }
 
+type RoutingFailureAnalytics struct {
+	Total   int
+	Reasons []CountItem
+	Recent  []RoutingFailureRecord
+}
+
+type RoutingFailureRecord struct {
+	TraceID    string
+	Model      string
+	Endpoint   string
+	RecordedAt time.Time
+	Reason     string
+	ErrorText  string
+	StatusCode int
+}
+
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
@@ -287,6 +303,84 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, limitReasons int, limitRecent int) (RoutingFailureAnalytics, error) {
+	if limitReasons <= 0 {
+		limitReasons = 5
+	}
+	if limitRecent <= 0 {
+		limitRecent = 5
+	}
+
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	baseWhere := `routing_failure_reason <> ''`
+	if strings.TrimSpace(whereSQL) != "" {
+		baseWhere += whereSQL
+	}
+
+	var analytics RoutingFailureAnalytics
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&analytics.Total); err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+
+	reasonArgs := append([]any{}, whereArgs...)
+	reasonArgs = append(reasonArgs, limitReasons)
+	reasonRows, err := s.db.Query(`
+		SELECT routing_failure_reason, COUNT(*) AS count
+		FROM logs
+		WHERE `+baseWhere+`
+		GROUP BY routing_failure_reason
+		ORDER BY count DESC, routing_failure_reason ASC
+		LIMIT ?
+	`, reasonArgs...)
+	if err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+	defer reasonRows.Close()
+	for reasonRows.Next() {
+		var item CountItem
+		if err := reasonRows.Scan(&item.Label, &item.Count); err != nil {
+			return RoutingFailureAnalytics{}, err
+		}
+		analytics.Reasons = append(analytics.Reasons, item)
+	}
+	if err := reasonRows.Err(); err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+
+	recentArgs := append([]any{}, whereArgs...)
+	recentArgs = append(recentArgs, limitRecent)
+	recentRows, err := s.db.Query(`
+		SELECT trace_id, model, endpoint, recorded_at, routing_failure_reason, error_text, status_code
+		FROM logs
+		WHERE `+baseWhere+`
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT ?
+	`, recentArgs...)
+	if err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+	defer recentRows.Close()
+	for recentRows.Next() {
+		var (
+			item       RoutingFailureRecord
+			recordedAt string
+		)
+		if err := recentRows.Scan(&item.TraceID, &item.Model, &item.Endpoint, &recordedAt, &item.Reason, &item.ErrorText, &item.StatusCode); err != nil {
+			return RoutingFailureAnalytics{}, err
+		}
+		item.RecordedAt, err = timeParse(recordedAt)
+		if err != nil {
+			return RoutingFailureAnalytics{}, err
+		}
+		analytics.Recent = append(analytics.Recent, item)
+	}
+	if err := recentRows.Err(); err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+
+	return analytics, nil
 }
 
 func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilter string, traceLimit int) (UpstreamDetail, error) {

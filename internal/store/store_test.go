@@ -698,6 +698,73 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 	}
 }
 
+func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, recordedAt time.Time, model string, reason string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:            name,
+				Time:                 recordedAt,
+				Model:                model,
+				Provider:             "openai_compatible",
+				Operation:            "responses",
+				Endpoint:             "/v1/responses",
+				URL:                  "/v1/responses",
+				Method:               "POST",
+				StatusCode:           502,
+				DurationMs:           12,
+				TTFTMs:               0,
+				ClientIP:             "127.0.0.1",
+				ContentLength:        8,
+				Error:                "selection failed",
+				RoutingPolicy:        "p2c",
+				RoutingFailureReason: reason,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	base := time.Date(2026, 4, 18, 11, 0, 0, 0, time.UTC)
+	writeLog("reason-a.http", base.Add(1*time.Minute), "gpt-5", "no_supporting_target")
+	writeLog("reason-b.http", base.Add(2*time.Minute), "gpt-5", "no_supporting_target")
+	writeLog("reason-c.http", base.Add(3*time.Minute), "gpt-5", "all_targets_open")
+	writeLog("other-model.http", base.Add(4*time.Minute), "gemini-2.5-flash", "no_supporting_target")
+
+	analytics, err := st.GetRoutingFailureAnalytics(time.Time{}, "gpt-5", 5, 5)
+	if err != nil {
+		t.Fatalf("GetRoutingFailureAnalytics() error = %v", err)
+	}
+	if analytics.Total != 3 {
+		t.Fatalf("Total = %d, want 3", analytics.Total)
+	}
+	if len(analytics.Reasons) != 2 {
+		t.Fatalf("Reasons = %#v, want 2 items", analytics.Reasons)
+	}
+	if analytics.Reasons[0].Label != "no_supporting_target" || analytics.Reasons[0].Count != 2 {
+		t.Fatalf("top reason = %#v, want no_supporting_target x2", analytics.Reasons[0])
+	}
+	if len(analytics.Recent) != 3 {
+		t.Fatalf("Recent = %#v, want 3 items", analytics.Recent)
+	}
+	if analytics.Recent[0].Reason != "all_targets_open" {
+		t.Fatalf("most recent reason = %q, want all_targets_open", analytics.Recent[0].Reason)
+	}
+}
+
 func mustTraceID(t *testing.T, st *Store, path string) string {
 	t.Helper()
 	var traceID string
