@@ -160,8 +160,6 @@ func (s *Store) initSchema() error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_recorded_at ON logs(recorded_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_model_recorded_at ON logs(model, recorded_at DESC);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id <> '';`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_session_id_recorded_at ON logs(session_id, recorded_at DESC) WHERE session_id <> '';`,
 	}
 
 	for _, stmt := range stmts {
@@ -192,6 +190,15 @@ func (s *Store) initSchema() error {
 	}
 	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
+	}
+	postColumnStmts := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id <> '';`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_session_id_recorded_at ON logs(session_id, recorded_at DESC) WHERE session_id <> '';`,
+	}
+	for _, stmt := range postColumnStmts {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
 	}
 	if err := s.backfillTraceIDs(); err != nil {
 		return err

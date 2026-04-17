@@ -1,13 +1,106 @@
 package store
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	_ "modernc.org/sqlite"
 )
+
+func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	legacySchema := `
+	CREATE TABLE logs (
+		path TEXT PRIMARY KEY,
+		trace_id TEXT NOT NULL DEFAULT '',
+		mod_time_ns INTEGER NOT NULL,
+		file_size INTEGER NOT NULL,
+		version TEXT NOT NULL,
+		request_id TEXT NOT NULL,
+		recorded_at TEXT NOT NULL,
+		model TEXT NOT NULL,
+		provider TEXT NOT NULL DEFAULT '',
+		operation TEXT NOT NULL DEFAULT '',
+		endpoint TEXT NOT NULL DEFAULT '',
+		url TEXT NOT NULL,
+		method TEXT NOT NULL,
+		status_code INTEGER NOT NULL,
+		duration_ms INTEGER NOT NULL,
+		ttft_ms INTEGER NOT NULL,
+		client_ip TEXT NOT NULL,
+		content_length INTEGER NOT NULL,
+		error_text TEXT NOT NULL,
+		prompt_tokens INTEGER NOT NULL,
+		completion_tokens INTEGER NOT NULL,
+		total_tokens INTEGER NOT NULL,
+		cached_tokens INTEGER NOT NULL,
+		req_header_len INTEGER NOT NULL,
+		req_body_len INTEGER NOT NULL,
+		res_header_len INTEGER NOT NULL,
+		res_body_len INTEGER NOT NULL,
+		is_stream INTEGER NOT NULL
+	);
+	CREATE INDEX idx_logs_recorded_at ON logs(recorded_at DESC);
+	CREATE INDEX idx_logs_model_recorded_at ON logs(model, recorded_at DESC);
+	`
+	if _, err := db.Exec(legacySchema); err != nil {
+		t.Fatalf("db.Exec(legacySchema) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	rows, err := st.db.Query(`PRAGMA table_info(logs)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(logs) error = %v", err)
+	}
+	defer rows.Close()
+
+	columns := map[string]bool{}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			typ        string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
+			t.Fatalf("rows.Scan() error = %v", err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows.Err() error = %v", err)
+	}
+
+	for _, name := range []string{"session_id", "session_source", "window_id", "client_request_id"} {
+		if !columns[name] {
+			t.Fatalf("column %q missing after upgrade", name)
+		}
+	}
+}
 
 func TestStatsHandlesAverageTTFTAsFloat(t *testing.T) {
 	dir := t.TempDir()
