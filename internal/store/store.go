@@ -149,9 +149,10 @@ type CountItem struct {
 }
 
 type RoutingFailureAnalytics struct {
-	Total   int
-	Reasons []CountItem
-	Recent  []RoutingFailureRecord
+	Total    int
+	Reasons  []CountItem
+	Recent   []RoutingFailureRecord
+	Timeline []TimeCountItem
 }
 
 type RoutingFailureRecord struct {
@@ -162,6 +163,11 @@ type RoutingFailureRecord struct {
 	Reason     string
 	ErrorText  string
 	StatusCode int
+}
+
+type TimeCountItem struct {
+	Time  time.Time
+	Count int
 }
 
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
@@ -305,12 +311,18 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 	return out, rows.Err()
 }
 
-func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, limitReasons int, limitRecent int) (RoutingFailureAnalytics, error) {
+func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, limitReasons int, limitRecent int, bucketSize time.Duration, bucketCount int) (RoutingFailureAnalytics, error) {
 	if limitReasons <= 0 {
 		limitReasons = 5
 	}
 	if limitRecent <= 0 {
 		limitRecent = 5
+	}
+	if bucketSize <= 0 {
+		bucketSize = time.Hour
+	}
+	if bucketCount <= 0 {
+		bucketCount = 12
 	}
 
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
@@ -378,6 +390,66 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	}
 	if err := recentRows.Err(); err != nil {
 		return RoutingFailureAnalytics{}, err
+	}
+
+	referenceTime := time.Now().UTC()
+	var latestRecordedAt string
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+	if strings.TrimSpace(latestRecordedAt) != "" {
+		latestTime, err := timeParse(latestRecordedAt)
+		if err != nil {
+			return RoutingFailureAnalytics{}, err
+		}
+		if latestTime.After(referenceTime) {
+			referenceTime = latestTime
+		}
+	}
+	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+	timelineArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
+	timelineRows, err := s.db.Query(`
+		SELECT recorded_at
+		FROM logs
+		WHERE recorded_at >= ? AND `+baseWhere+`
+		ORDER BY recorded_at ASC
+	`, timelineArgs...)
+	if err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+	defer timelineRows.Close()
+
+	buckets := make(map[time.Time]int, bucketCount)
+	for index := 0; index < bucketCount; index++ {
+		slot := bucketStart.Add(time.Duration(index) * bucketSize)
+		buckets[slot] = 0
+	}
+	for timelineRows.Next() {
+		var recordedAt string
+		if err := timelineRows.Scan(&recordedAt); err != nil {
+			return RoutingFailureAnalytics{}, err
+		}
+		recordedTime, err := timeParse(recordedAt)
+		if err != nil {
+			return RoutingFailureAnalytics{}, err
+		}
+		slot := recordedTime.UTC().Truncate(bucketSize)
+		if slot.Before(bucketStart) {
+			continue
+		}
+		if _, ok := buckets[slot]; ok {
+			buckets[slot]++
+		}
+	}
+	if err := timelineRows.Err(); err != nil {
+		return RoutingFailureAnalytics{}, err
+	}
+	for index := 0; index < bucketCount; index++ {
+		slot := bucketStart.Add(time.Duration(index) * bucketSize)
+		analytics.Timeline = append(analytics.Timeline, TimeCountItem{
+			Time:  slot,
+			Count: buckets[slot],
+		})
 	}
 
 	return analytics, nil

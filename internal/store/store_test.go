@@ -744,7 +744,7 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 	writeLog("reason-c.http", base.Add(3*time.Minute), "gpt-5", "all_targets_open")
 	writeLog("other-model.http", base.Add(4*time.Minute), "gemini-2.5-flash", "no_supporting_target")
 
-	analytics, err := st.GetRoutingFailureAnalytics(time.Time{}, "gpt-5", 5, 5)
+	analytics, err := st.GetRoutingFailureAnalytics(time.Time{}, "gpt-5", 5, 5, time.Hour, 6)
 	if err != nil {
 		t.Fatalf("GetRoutingFailureAnalytics() error = %v", err)
 	}
@@ -762,6 +762,16 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 	}
 	if analytics.Recent[0].Reason != "all_targets_open" {
 		t.Fatalf("most recent reason = %q, want all_targets_open", analytics.Recent[0].Reason)
+	}
+	if len(analytics.Timeline) != 6 {
+		t.Fatalf("Timeline = %#v, want 6 buckets", analytics.Timeline)
+	}
+	totalTimeline := 0
+	for _, item := range analytics.Timeline {
+		totalTimeline += item.Count
+	}
+	if totalTimeline != 3 {
+		t.Fatalf("timeline total = %d, want 3", totalTimeline)
 	}
 }
 

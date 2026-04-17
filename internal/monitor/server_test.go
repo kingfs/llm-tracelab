@@ -652,6 +652,16 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 	if payload.RoutingFailures.Recent[0].Reason != "all_targets_open" {
 		t.Fatalf("most recent reason = %q, want all_targets_open", payload.RoutingFailures.Recent[0].Reason)
 	}
+	if len(payload.RoutingFailures.Timeline) != 12 {
+		t.Fatalf("RoutingFailures.Timeline = %#v, want 12 buckets", payload.RoutingFailures.Timeline)
+	}
+	totalTimeline := 0
+	for _, item := range payload.RoutingFailures.Timeline {
+		totalTimeline += item.Count
+	}
+	if totalTimeline != 2 {
+		t.Fatalf("timeline total = %d, want 2", totalTimeline)
+	}
 }
 
 func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {

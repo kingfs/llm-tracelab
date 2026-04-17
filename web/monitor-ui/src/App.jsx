@@ -356,6 +356,12 @@ function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "",
         ) : (
           <div className="empty-state">No routing failures in this window.</div>
         )}
+        {(routingFailures.timeline || []).length ? (
+          <section className="breakdown-card">
+            <div className="breakdown-title">Failure timeline</div>
+            <RoutingFailureTimeline items={routingFailures.timeline || []} />
+          </section>
+        ) : null}
       </div>
       {!items.length ? <div className="empty-state">No upstream targets discovered.</div> : null}
       <div className="upstream-grid">
@@ -1062,6 +1068,29 @@ function BreakdownList({ title, items, formatter }) {
         <div className="empty-state">No data</div>
       )}
     </section>
+  );
+}
+
+function RoutingFailureTimeline({ items = [] }) {
+  const maxCount = items.reduce((max, item) => Math.max(max, Number(item.count || 0)), 0);
+  const columnCount = Math.max(items.length, 1);
+
+  return (
+    <div className="routing-timeline" style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}>
+      {items.map((item, index) => {
+        const count = Number(item.count || 0);
+        const height = maxCount > 0 ? Math.max((count / maxCount) * 100, count > 0 ? 16 : 6) : 6;
+        return (
+          <div key={`${item.time || index}`} className="routing-timeline-item">
+            <div className="routing-timeline-count">{count}</div>
+            <div className="routing-timeline-bar-wrap">
+              <div className={count > 0 ? "routing-timeline-bar routing-timeline-bar-active" : "routing-timeline-bar"} style={{ height: `${height}%` }} />
+            </div>
+            <div className="routing-timeline-label">{formatTimelineBucketLabel(item.time)}</div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2241,6 +2270,18 @@ function formatTime(value) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+  });
+}
+
+function formatTimelineBucketLabel(value) {
+  if (!value) {
+    return "-";
+  }
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 

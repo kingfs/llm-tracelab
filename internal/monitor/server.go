@@ -222,9 +222,10 @@ type upstreamFailureItem struct {
 }
 
 type routingFailureSummaryView struct {
-	Total   int                  `json:"total"`
-	Reasons []sessionCountItem   `json:"reasons"`
-	Recent  []routingFailureItem `json:"recent"`
+	Total    int                        `json:"total"`
+	Reasons  []sessionCountItem         `json:"reasons"`
+	Recent   []routingFailureItem       `json:"recent"`
+	Timeline []routingFailureBucketItem `json:"timeline"`
 }
 
 type routingFailureItem struct {
@@ -235,6 +236,11 @@ type routingFailureItem struct {
 	Reason     string    `json:"reason"`
 	ErrorText  string    `json:"error_text,omitempty"`
 	StatusCode int       `json:"status_code"`
+}
+
+type routingFailureBucketItem struct {
+	Time  time.Time `json:"time"`
+	Count int       `json:"count"`
 }
 
 type upstreamDetailResponse struct {
@@ -307,15 +313,17 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 
 		routingFailures := routingFailureSummaryView{}
 		if st != nil {
-			analytics, err := st.GetRoutingFailureAnalytics(since, modelFilter, 5, 5)
+			bucketSize, bucketCount := routingFailureBucketSpec(windowLabel)
+			analytics, err := st.GetRoutingFailureAnalytics(since, modelFilter, 5, 5, bucketSize, bucketCount)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query routing failures: " + err.Error()})
 				return
 			}
 			routingFailures = routingFailureSummaryView{
-				Total:   analytics.Total,
-				Reasons: toSessionCountItems(analytics.Reasons),
-				Recent:  toRoutingFailureItems(analytics.Recent),
+				Total:    analytics.Total,
+				Reasons:  toSessionCountItems(analytics.Reasons),
+				Recent:   toRoutingFailureItems(analytics.Recent),
+				Timeline: toRoutingFailureBucketItems(analytics.Timeline),
 			}
 		}
 
@@ -549,6 +557,30 @@ func toRoutingFailureItems(records []store.RoutingFailureRecord) []routingFailur
 		})
 	}
 	return out
+}
+
+func toRoutingFailureBucketItems(records []store.TimeCountItem) []routingFailureBucketItem {
+	out := make([]routingFailureBucketItem, 0, len(records))
+	for _, record := range records {
+		out = append(out, routingFailureBucketItem{
+			Time:  record.Time,
+			Count: record.Count,
+		})
+	}
+	return out
+}
+
+func routingFailureBucketSpec(window string) (time.Duration, int) {
+	switch window {
+	case "1h":
+		return 5 * time.Minute, 12
+	case "7d":
+		return 12 * time.Hour, 14
+	case "all":
+		return 24 * time.Hour, 14
+	default:
+		return 2 * time.Hour, 12
+	}
 }
 
 func parseUpstreamWindow(value string) (string, time.Time) {
