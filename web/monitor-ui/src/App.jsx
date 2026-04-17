@@ -276,6 +276,16 @@ function RequestList({ items, fromView = "", fromSessionID = "" }) {
                 <StackIcon />
               </Link>
             ) : null}
+            {fromSessionID ? (
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline")}>
+                Timeline
+              </Link>
+            ) : null}
+            {fromSessionID ? (
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw")}>
+                Raw
+              </Link>
+            ) : null}
             <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID)} title="View trace" aria-label="View trace">
               <ViewIcon />
             </Link>
