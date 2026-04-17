@@ -1271,6 +1271,11 @@ a {
   padding: 18px;
 }
 
+.protocol-column-focused {
+  border: 1px solid rgba(25, 93, 77, 0.28);
+  box-shadow: 0 0 0 3px rgba(25, 93, 77, 0.1), var(--shadow);
+}
+
 .protocol-code {
   min-height: 65vh;
   white-space: pre;

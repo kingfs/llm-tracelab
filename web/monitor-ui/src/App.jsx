@@ -285,7 +285,7 @@ function RequestList({ items, fromView = "", fromSessionID = "", focusFailures =
               </Link>
             ) : null}
             {fromSessionID ? (
-              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw", focus)}>
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
                 Raw
               </Link>
             ) : null}
@@ -468,7 +468,7 @@ function SessionDetailPage() {
                     <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")}>
                       Timeline
                     </Link>
-                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")}>
+                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
                       Raw
                     </Link>
                     <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title="View trace" aria-label="View trace">
@@ -550,7 +550,7 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
   const focus = tone === "danger" ? "failure" : "";
   const traceLink = buildTraceLink(item.trace_id, "", sessionID, "", focus);
   const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline", focus);
-  const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw", focus);
+  const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw", focus === "failure" ? "response" : focus);
 
   return (
     <div className={`failure-node failure-node-${tone}`}>
@@ -808,7 +808,7 @@ function TraceDetailPage() {
         </div>
       ) : null}
 
-      {tab === "raw" ? <RawProtocolPanel raw={raw} /> : null}
+      {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} /> : null}
       {tab === "tools" && detail.data ? <DeclaredToolsPanel tools={detail.data.tools || []} /> : null}
     </div>
   );
@@ -837,8 +837,20 @@ function DeclaredToolsPanel({ tools }) {
   );
 }
 
-function RawProtocolPanel({ raw }) {
+function RawProtocolPanel({ raw, focusTarget = "" }) {
   const [wrap, setWrap] = useState(false);
+  const requestRef = useRef(null);
+  const responseRef = useRef(null);
+
+  useEffect(() => {
+    if (focusTarget === "request" && requestRef.current) {
+      requestRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+      return;
+    }
+    if (focusTarget === "response" && responseRef.current) {
+      responseRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+    }
+  }, [focusTarget]);
 
   if (raw.error) {
     return <div className="empty-state error-box">{raw.error}</div>;
@@ -860,8 +872,8 @@ function RawProtocolPanel({ raw }) {
         </label>
       </div>
       <div className="raw-grid">
-        <ProtocolColumn title="Request" value={raw.data?.request_protocol || ""} wrap={wrap} />
-        <ProtocolColumn title="Response" value={raw.data?.response_protocol || ""} wrap={wrap} />
+        <ProtocolColumn ref={requestRef} title="Request" value={raw.data?.request_protocol || ""} wrap={wrap} focused={focusTarget === "request"} />
+        <ProtocolColumn ref={responseRef} title="Response" value={raw.data?.response_protocol || ""} wrap={wrap} focused={focusTarget === "response"} />
       </div>
     </section>
   );
@@ -981,14 +993,14 @@ function PayloadSummary({ raw }) {
   );
 }
 
-function ProtocolColumn({ title, value, wrap }) {
+const ProtocolColumn = React.forwardRef(function ProtocolColumn({ title, value, wrap, focused = false }, ref) {
   return (
-    <div className="protocol-column">
+    <div ref={ref} className={focused ? "protocol-column protocol-column-focused" : "protocol-column"}>
       <div className="protocol-head">{title}</div>
       <pre className={wrap ? "protocol-code protocol-code-wrap" : "protocol-code"}>{value}</pre>
     </div>
   );
-}
+});
 
 function InlineTag({ children, tone = "default" }) {
   return <span className={`inline-tag inline-tag-${tone}`}>{children}</span>;
