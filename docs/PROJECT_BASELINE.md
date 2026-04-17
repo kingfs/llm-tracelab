@@ -11,6 +11,11 @@ It is intended for two audiences:
 
 This is not a roadmap. It describes the current implemented state.
 
+Related documents:
+
+- [Monitor Guide](./MONITOR_GUIDE.md) for user-facing monitor workflows
+- [Maintainer Baseline](./MAINTAINER_BASELINE.md) for implementation constraints and upgrade expectations
+
 ## Product Scope
 
 `llm-tracelab` is a local-first LLM HTTP record/replay proxy.

@@ -68,4 +68,6 @@ Compatibility note:
 - `README.md` and `README_EN.md`: human-facing overview and quick start
 - `AGENTS.md`: AI-oriented project map and invariants
 - `docs/PROJECT_BASELINE.md`: current implemented capability baseline for both humans and AI agents
+- `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
+- `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants
 - add focused docs under `docs/` only when they clarify architecture or storage decisions
