@@ -112,6 +112,82 @@ type UpstreamModelRecord struct {
 	SeenAt     time.Time
 }
 
+func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
+		       priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
+		FROM upstream_targets
+		ORDER BY priority DESC, id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []UpstreamTargetRecord
+	for rows.Next() {
+		var (
+			record        UpstreamTargetRecord
+			enabled       int
+			lastRefreshAt string
+		)
+		if err := rows.Scan(
+			&record.ID,
+			&record.BaseURL,
+			&record.ProviderPreset,
+			&record.ProtocolFamily,
+			&record.RoutingProfile,
+			&enabled,
+			&record.Priority,
+			&record.Weight,
+			&record.CapacityHint,
+			&lastRefreshAt,
+			&record.LastRefreshStatus,
+			&record.LastRefreshError,
+		); err != nil {
+			return nil, err
+		}
+		record.Enabled = enabled == 1
+		if strings.TrimSpace(lastRefreshAt) != "" {
+			record.LastRefreshAt, err = timeParse(lastRefreshAt)
+			if err != nil {
+				return nil, err
+			}
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT upstream_id, model, source, seen_at
+		FROM upstream_models
+		ORDER BY upstream_id ASC, model ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []UpstreamModelRecord
+	for rows.Next() {
+		var (
+			record UpstreamModelRecord
+			seenAt string
+		)
+		if err := rows.Scan(&record.UpstreamID, &record.Model, &record.Source, &seenAt); err != nil {
+			return nil, err
+		}
+		record.SeenAt, err = timeParse(seenAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
 func New(outputDir string) (*Store, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, err

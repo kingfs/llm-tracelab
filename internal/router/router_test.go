@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 )
@@ -97,5 +98,59 @@ func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 	}
 	if selection.Target.ID != "default" {
 		t.Fatalf("selected target = %q, want default", selection.Target.ID)
+	}
+}
+
+func TestRouterSnapshotsExposeHealthAndModels(t *testing.T) {
+	cfg := &config.Config{
+		Router: config.RouterConfig{},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5", "gpt-4.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = 50 * time.Millisecond
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	rtr.Complete(selection, Outcome{Success: false})
+
+	snapshots := rtr.Snapshots()
+	if len(snapshots) != 1 {
+		t.Fatalf("len(snapshots) = %d, want 1", len(snapshots))
+	}
+	if snapshots[0].HealthState != HealthOpen {
+		t.Fatalf("HealthState = %q, want %q", snapshots[0].HealthState, HealthOpen)
+	}
+	if len(snapshots[0].Models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(snapshots[0].Models))
+	}
+	if snapshots[0].LastRefreshStatus == "" {
+		t.Fatalf("LastRefreshStatus is empty")
 	}
 }

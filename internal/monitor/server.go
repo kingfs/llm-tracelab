@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
@@ -168,11 +169,45 @@ type LogStats struct {
 	SuccessRate    float64 `json:"success_rate"`
 }
 
-func RegisterRoutes(mux *http.ServeMux, st *store.Store) {
+type RouteOptions struct {
+	Router *router.Router
+}
+
+type upstreamListResponse struct {
+	Items       []upstreamItem `json:"items"`
+	RefreshedAt time.Time      `json:"refreshed_at"`
+}
+
+type upstreamItem struct {
+	ID                string    `json:"id"`
+	Enabled           bool      `json:"enabled"`
+	Priority          int       `json:"priority"`
+	Weight            float64   `json:"weight"`
+	CapacityHint      float64   `json:"capacity_hint"`
+	ModelDiscovery    string    `json:"model_discovery"`
+	BaseURL           string    `json:"base_url"`
+	ProviderPreset    string    `json:"provider_preset"`
+	ProtocolFamily    string    `json:"protocol_family"`
+	RoutingProfile    string    `json:"routing_profile"`
+	HealthState       string    `json:"health_state"`
+	Inflight          int64     `json:"inflight"`
+	LastRefreshAt     time.Time `json:"last_refresh_at"`
+	LastRefreshStatus string    `json:"last_refresh_status"`
+	LastRefreshError  string    `json:"last_refresh_error,omitempty"`
+	OpenUntil         time.Time `json:"open_until,omitempty"`
+	Models            []string  `json:"models"`
+}
+
+func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
+	var opt RouteOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	mux.HandleFunc("/api/traces", listAPIHandler(st))
 	mux.HandleFunc("/api/traces/", traceAPIHandler(st))
 	mux.HandleFunc("/api/sessions", sessionListAPIHandler(st))
 	mux.HandleFunc("/api/sessions/", sessionDetailAPIHandler(st))
+	mux.HandleFunc("/api/upstreams", upstreamListAPIHandler(st, opt.Router))
 	mux.Handle("/", appHandler())
 }
 
@@ -202,6 +237,78 @@ func appHandler() http.Handler {
 		}
 		serveEmbeddedIndex(distFS, w, r)
 	})
+}
+
+func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var items []upstreamItem
+		switch {
+		case rtr != nil:
+			for _, snapshot := range rtr.Snapshots() {
+				items = append(items, upstreamItem{
+					ID:                snapshot.ID,
+					Enabled:           snapshot.Enabled,
+					Priority:          snapshot.Priority,
+					Weight:            snapshot.Weight,
+					CapacityHint:      snapshot.CapacityHint,
+					ModelDiscovery:    snapshot.ModelDiscovery,
+					BaseURL:           snapshot.BaseURL,
+					ProviderPreset:    snapshot.ProviderPreset,
+					ProtocolFamily:    snapshot.ProtocolFamily,
+					RoutingProfile:    snapshot.RoutingProfile,
+					HealthState:       snapshot.HealthState,
+					Inflight:          snapshot.Inflight,
+					LastRefreshAt:     snapshot.LastRefreshAt,
+					LastRefreshStatus: snapshot.LastRefreshStatus,
+					LastRefreshError:  snapshot.LastRefreshError,
+					OpenUntil:         snapshot.OpenUntil,
+					Models:            snapshot.Models,
+				})
+			}
+		case st != nil:
+			targets, err := st.ListUpstreamTargets()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream targets: " + err.Error()})
+				return
+			}
+			models, err := st.ListUpstreamModels()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream models: " + err.Error()})
+				return
+			}
+			modelMap := make(map[string][]string)
+			for _, model := range models {
+				modelMap[model.UpstreamID] = append(modelMap[model.UpstreamID], model.Model)
+			}
+			for _, target := range targets {
+				sort.Strings(modelMap[target.ID])
+				items = append(items, upstreamItem{
+					ID:                target.ID,
+					Enabled:           target.Enabled,
+					Priority:          target.Priority,
+					Weight:            target.Weight,
+					CapacityHint:      target.CapacityHint,
+					BaseURL:           target.BaseURL,
+					ProviderPreset:    target.ProviderPreset,
+					ProtocolFamily:    target.ProtocolFamily,
+					RoutingProfile:    target.RoutingProfile,
+					HealthState:       "unknown",
+					LastRefreshAt:     target.LastRefreshAt,
+					LastRefreshStatus: target.LastRefreshStatus,
+					LastRefreshError:  target.LastRefreshError,
+					Models:            modelMap[target.ID],
+				})
+			}
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "router not configured"})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, upstreamListResponse{
+			Items:       items,
+			RefreshedAt: time.Now().UTC(),
+		})
+	}
 }
 
 func serveEmbeddedIndex(distFS fs.FS, w http.ResponseWriter, r *http.Request) {

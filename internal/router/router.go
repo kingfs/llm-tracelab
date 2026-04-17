@@ -37,8 +37,12 @@ type Router struct {
 	openWindow       time.Duration
 	failureThreshold int64
 	fallbackPolicy   string
+	refreshInterval  time.Duration
+	discoveryEnabled bool
 	store            *store.Store
 	random           *rand.Rand
+	stopCh           chan struct{}
+	stopOnce         sync.Once
 }
 
 type Target struct {
@@ -58,7 +62,35 @@ type Target struct {
 	consecutiveFailures int64
 	openUntil           time.Time
 	models              map[string]struct{}
+	lastRefreshAt       time.Time
+	lastRefreshStatus   string
+	lastRefreshError    string
 }
+
+type Snapshot struct {
+	ID                string    `json:"id"`
+	Enabled           bool      `json:"enabled"`
+	Priority          int       `json:"priority"`
+	Weight            float64   `json:"weight"`
+	CapacityHint      float64   `json:"capacity_hint"`
+	ModelDiscovery    string    `json:"model_discovery"`
+	BaseURL           string    `json:"base_url"`
+	ProviderPreset    string    `json:"provider_preset"`
+	ProtocolFamily    string    `json:"protocol_family"`
+	RoutingProfile    string    `json:"routing_profile"`
+	HealthState       string    `json:"health_state"`
+	Inflight          int64     `json:"inflight"`
+	LastRefreshAt     time.Time `json:"last_refresh_at"`
+	LastRefreshStatus string    `json:"last_refresh_status"`
+	LastRefreshError  string    `json:"last_refresh_error,omitempty"`
+	OpenUntil         time.Time `json:"open_until,omitempty"`
+	Models            []string  `json:"models"`
+}
+
+const (
+	HealthHealthy = "healthy"
+	HealthOpen    = "open"
+)
 
 type Selection struct {
 	Target         *Target
@@ -86,11 +118,17 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		openWindow:       cfg.Router.Selection.OpenWindow,
 		failureThreshold: cfg.Router.Selection.FailureThreshold,
 		fallbackPolicy:   normalizeFallback(cfg.Router.Fallback.OnMissingModel),
+		refreshInterval:  cfg.Router.ModelDiscovery.RefreshInterval,
+		discoveryEnabled: cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
 		store:            st,
 		random:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		stopCh:           make(chan struct{}),
 	}
 	if r.openWindow <= 0 {
 		r.openWindow = 15 * time.Second
+	}
+	if r.refreshInterval <= 0 {
+		r.refreshInterval = 10 * time.Minute
 	}
 	if r.failureThreshold <= 0 {
 		r.failureThreshold = 3
@@ -142,50 +180,10 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 }
 
 func (r *Router) Initialize() error {
-	var usable int
-	for _, target := range r.targets {
-		models, status, refreshErr := r.refreshTarget(target)
-		if refreshErr == nil || len(models) > 0 || target.allowUnknownModels {
-			usable++
-		}
-		if len(models) > 0 {
-			target.setModels(models)
-		}
-		if r.store != nil {
-			record := store.UpstreamTargetRecord{
-				ID:                target.ID,
-				BaseURL:           target.Upstream.BaseURL,
-				ProviderPreset:    target.Upstream.ProviderPreset,
-				ProtocolFamily:    target.Upstream.ProtocolFamily,
-				RoutingProfile:    target.Upstream.RoutingProfile,
-				Enabled:           target.Enabled,
-				Priority:          target.Priority,
-				Weight:            target.Weight,
-				CapacityHint:      target.CapacityHint,
-				LastRefreshAt:     time.Now().UTC(),
-				LastRefreshStatus: status,
-			}
-			if refreshErr != nil {
-				record.LastRefreshError = refreshErr.Error()
-			}
-			if err := r.store.UpsertUpstreamTarget(record); err != nil {
-				return err
-			}
-			modelRecords := make([]store.UpstreamModelRecord, 0, len(models))
-			for _, model := range models {
-				modelRecords = append(modelRecords, store.UpstreamModelRecord{
-					UpstreamID: target.ID,
-					Model:      model,
-					Source:     "catalog",
-					SeenAt:     time.Now().UTC(),
-				})
-			}
-			if err := r.store.ReplaceUpstreamModels(target.ID, modelRecords); err != nil {
-				return err
-			}
-		}
+	usable, err := r.refreshAll()
+	if err != nil {
+		return err
 	}
-	r.rebuildCatalog()
 	if usable == 0 {
 		return fmt.Errorf("no usable upstream targets after startup discovery")
 	}
@@ -203,6 +201,56 @@ func (r *Router) Policy() string {
 		return ""
 	}
 	return r.policy
+}
+
+func (r *Router) StartBackgroundRefresh() {
+	if r == nil || !r.discoveryEnabled || r.refreshInterval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(r.refreshInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := r.refreshAll(); err != nil {
+					continue
+				}
+			case <-r.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (r *Router) Close() {
+	if r == nil {
+		return
+	}
+	r.stopOnce.Do(func() {
+		close(r.stopCh)
+	})
+}
+
+func (r *Router) Snapshots() []Snapshot {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	targets := append([]*Target(nil), r.targets...)
+	r.mu.RUnlock()
+
+	out := make([]Snapshot, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, target.snapshot())
+	}
+	slices.SortFunc(out, func(a, b Snapshot) int {
+		if a.Priority != b.Priority {
+			return b.Priority - a.Priority
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return out
 }
 
 func (r *Router) Select(req *http.Request) (*Selection, error) {
@@ -345,6 +393,55 @@ func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
 	return models, status, discoverErr
 }
 
+func (r *Router) refreshAll() (int, error) {
+	var usable int
+	for _, target := range r.targets {
+		models, status, refreshErr := r.refreshTarget(target)
+		if refreshErr == nil || len(models) > 0 || target.allowUnknownModels {
+			usable++
+		}
+		target.setRefreshResult(models, status, refreshErr)
+		if r.store != nil {
+			record := store.UpstreamTargetRecord{
+				ID:                target.ID,
+				BaseURL:           target.Upstream.BaseURL,
+				ProviderPreset:    target.Upstream.ProviderPreset,
+				ProtocolFamily:    target.Upstream.ProtocolFamily,
+				RoutingProfile:    target.Upstream.RoutingProfile,
+				Enabled:           target.Enabled,
+				Priority:          target.Priority,
+				Weight:            target.Weight,
+				CapacityHint:      target.CapacityHint,
+				LastRefreshAt:     target.snapshot().LastRefreshAt,
+				LastRefreshStatus: status,
+			}
+			if refreshErr != nil {
+				record.LastRefreshError = refreshErr.Error()
+			}
+			if err := r.store.UpsertUpstreamTarget(record); err != nil {
+				return 0, err
+			}
+			modelRecords := make([]store.UpstreamModelRecord, 0, len(models))
+			seenAt := time.Now().UTC()
+			for _, model := range models {
+				modelRecords = append(modelRecords, store.UpstreamModelRecord{
+					UpstreamID: target.ID,
+					Model:      model,
+					Source:     "catalog",
+					SeenAt:     seenAt,
+				})
+			}
+			if err := r.store.ReplaceUpstreamModels(target.ID, modelRecords); err != nil {
+				return 0, err
+			}
+		}
+	}
+	r.mu.Lock()
+	r.rebuildCatalog()
+	r.mu.Unlock()
+	return usable, nil
+}
+
 func (r *Router) rebuildCatalog() {
 	catalog := make(map[string][]*Target)
 	for _, target := range r.targets {
@@ -368,6 +465,57 @@ func (t *Target) setModels(models []string) {
 		if model != "" {
 			t.models[strings.ToLower(model)] = struct{}{}
 		}
+	}
+}
+
+func (t *Target) setRefreshResult(models []string, status string, refreshErr error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.models = make(map[string]struct{}, len(models))
+	for _, model := range models {
+		if model != "" {
+			t.models[strings.ToLower(model)] = struct{}{}
+		}
+	}
+	t.lastRefreshAt = time.Now().UTC()
+	t.lastRefreshStatus = status
+	if refreshErr != nil {
+		t.lastRefreshError = refreshErr.Error()
+	} else {
+		t.lastRefreshError = ""
+	}
+}
+
+func (t *Target) snapshot() Snapshot {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	models := make([]string, 0, len(t.models))
+	for model := range t.models {
+		models = append(models, model)
+	}
+	slices.Sort(models)
+	health := HealthHealthy
+	if !t.openUntil.IsZero() && time.Now().Before(t.openUntil) {
+		health = HealthOpen
+	}
+	return Snapshot{
+		ID:                t.ID,
+		Enabled:           t.Enabled,
+		Priority:          t.Priority,
+		Weight:            t.Weight,
+		CapacityHint:      t.CapacityHint,
+		ModelDiscovery:    t.ModelDiscovery,
+		BaseURL:           t.Upstream.BaseURL,
+		ProviderPreset:    t.Upstream.ProviderPreset,
+		ProtocolFamily:    t.Upstream.ProtocolFamily,
+		RoutingProfile:    t.Upstream.RoutingProfile,
+		HealthState:       health,
+		Inflight:          t.inflight,
+		LastRefreshAt:     t.lastRefreshAt,
+		LastRefreshStatus: t.lastRefreshStatus,
+		LastRefreshError:  t.lastRefreshError,
+		OpenUntil:         t.openUntil,
+		Models:            models,
 	}
 }
 

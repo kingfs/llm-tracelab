@@ -78,13 +78,15 @@ func runServe(args []string) int {
 		slog.Error("Failed to initialize upstream router", "error", err)
 		return 1
 	}
+	defer rtr.Close()
+	rtr.StartBackgroundRefresh()
 	logResolvedTargets(rtr)
 
 	// --- 启动 Monitor (新增) ---
 	if cfg.Monitor.Port != "" {
 		go func() {
 			mux := http.NewServeMux()
-			monitor.RegisterRoutes(mux, traceStore)
+			monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: rtr})
 
 			addr := ":" + cfg.Monitor.Port
 			slog.Info("Monitor dashboard started", "addr", addr, "url", "http://localhost"+addr)

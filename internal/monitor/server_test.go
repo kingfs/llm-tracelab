@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
@@ -287,6 +289,114 @@ func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
 	if statusCodes[0] != 200 || statusCodes[1] != 500 {
 		t.Fatalf("timeline status codes = %+v, want [200 500]", statusCodes)
 	}
+}
+
+func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5", "gpt-4.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	rtr, err := router.New(cfg, nil)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	rr := httptest.NewRecorder()
+	upstreamListAPIHandler(nil, rtr).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload upstreamListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].ID != "openai-primary" {
+		t.Fatalf("ID = %q, want openai-primary", payload.Items[0].ID)
+	}
+	if len(payload.Items[0].Models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(payload.Items[0].Models))
+	}
+	if payload.Items[0].HealthState != router.HealthHealthy {
+		t.Fatalf("HealthState = %q, want %q", payload.Items[0].HealthState, router.HealthHealthy)
+	}
+}
+
+func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
+		ID:                "openrouter-fallback",
+		BaseURL:           "https://openrouter.ai/api/v1",
+		ProviderPreset:    "openrouter",
+		ProtocolFamily:    "openai_compatible",
+		RoutingProfile:    "openai_default",
+		Enabled:           true,
+		Priority:          90,
+		Weight:            1,
+		CapacityHint:      1,
+		LastRefreshAt:     time.Date(2026, 4, 17, 8, 0, 0, 0, time.UTC),
+		LastRefreshStatus: "ready",
+	}); err != nil {
+		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
+	}
+	if err := st.ReplaceUpstreamModels("openrouter-fallback", []store.UpstreamModelRecord{
+		{UpstreamID: "openrouter-fallback", Model: "gpt-5", Source: "catalog", SeenAt: time.Date(2026, 4, 17, 8, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	rr := httptest.NewRecorder()
+	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload upstreamListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].ID != "openrouter-fallback" {
+		t.Fatalf("ID = %q, want openrouter-fallback", payload.Items[0].ID)
+	}
+	if len(payload.Items[0].Models) != 1 || payload.Items[0].Models[0] != "gpt-5" {
+		t.Fatalf("Models = %#v, want [gpt-5]", payload.Items[0].Models)
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
 }
 
 func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
