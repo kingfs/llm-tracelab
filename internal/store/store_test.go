@@ -622,6 +622,82 @@ func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
 	}
 }
 
+func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, recordedAt time.Time, endpoint string, model string, statusCode int, tokens int, errText string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:                      name,
+				Time:                           recordedAt,
+				Model:                          model,
+				Provider:                       "openai_compatible",
+				Operation:                      "responses",
+				Endpoint:                       endpoint,
+				URL:                            endpoint,
+				Method:                         "POST",
+				StatusCode:                     statusCode,
+				DurationMs:                     40,
+				TTFTMs:                         90,
+				ClientIP:                       "127.0.0.1",
+				ContentLength:                  6,
+				Error:                          errText,
+				SelectedUpstreamID:             "openai-primary",
+				SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+				SelectedUpstreamProviderPreset: "openai",
+				RoutingPolicy:                  "p2c",
+			},
+			Usage: recordfile.UsageInfo{
+				PromptTokens:     tokens / 2,
+				CompletionTokens: tokens / 2,
+				TotalTokens:      tokens,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	base := time.Date(2026, 4, 18, 10, 0, 0, 0, time.UTC)
+	writeLog("match-a.http", base.Add(1*time.Minute), "/v1/responses", "gpt-5", 200, 20, "")
+	writeLog("match-b.http", base.Add(2*time.Minute), "/v1/chat/completions", "gpt-5", 503, 0, "upstream overloaded")
+	writeLog("other-model.http", base.Add(3*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, 10, "")
+
+	detail, err := st.GetUpstreamDetail("openai-primary", time.Time{}, "gpt-5", 10)
+	if err != nil {
+		t.Fatalf("GetUpstreamDetail() error = %v", err)
+	}
+	if detail.Analytics.UpstreamID != "openai-primary" {
+		t.Fatalf("UpstreamID = %q, want openai-primary", detail.Analytics.UpstreamID)
+	}
+	if len(detail.Traces) != 2 {
+		t.Fatalf("len(Traces) = %d, want 2", len(detail.Traces))
+	}
+	if detail.Traces[0].Header.Meta.RequestID != "match-b.http" {
+		t.Fatalf("most recent trace = %q, want match-b.http", detail.Traces[0].Header.Meta.RequestID)
+	}
+	if len(detail.Models) != 1 || detail.Models[0].Label != "gpt-5" || detail.Models[0].Count != 2 {
+		t.Fatalf("Models = %#v, want gpt-5 x 2", detail.Models)
+	}
+	if len(detail.Endpoints) != 2 {
+		t.Fatalf("Endpoints = %#v, want 2 items", detail.Endpoints)
+	}
+	if len(detail.Analytics.RecentFailures) != 1 || detail.Analytics.RecentFailures[0].Model != "gpt-5" {
+		t.Fatalf("RecentFailures = %#v, want one gpt-5 failure", detail.Analytics.RecentFailures)
+	}
+}
+
 func mustTraceID(t *testing.T, st *Store, path string) string {
 	t.Helper()
 	var traceID string

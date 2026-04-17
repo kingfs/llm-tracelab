@@ -54,6 +54,7 @@ function App() {
     <Routes>
       <Route path="/" element={<TraceListPage />} />
       <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
+      <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
       <Route path="/traces/:traceID" element={<TraceDetailPage />} />
     </Routes>
   );
@@ -446,8 +447,16 @@ function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "" 
 
             <div className="upstream-card-footer">
               <span>last refresh {formatDateTime(item.last_refresh_at)}</span>
-              {item.last_refresh_error ? <span className="status-err">{item.last_refresh_error}</span> : null}
-              {item.open_until ? <span>open until {formatDateTime(item.open_until)}</span> : null}
+              <div className="action-group action-group-start">
+                <Link
+                  className="ghost-button"
+                  to={buildUpstreamLink(item.id, analyticsWindow, analyticsModel)}
+                >
+                  Detail
+                </Link>
+                {item.last_refresh_error ? <span className="status-err">{item.last_refresh_error}</span> : null}
+                {item.open_until ? <span>open until {formatDateTime(item.open_until)}</span> : null}
+              </div>
             </div>
           </article>
         ))}
@@ -771,6 +780,191 @@ function SessionDetailPage() {
         ) : (
           <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures />
         )}
+      </section>
+    </div>
+  );
+}
+
+function UpstreamDetailPage() {
+  const { upstreamID = "" } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const windowValue = normalizeUpstreamWindow(searchParams.get("window"));
+  const modelValue = searchParams.get("model") || "";
+  const [modelDraft, setModelDraft] = useState(modelValue);
+  const params = new URLSearchParams();
+  params.set("window", windowValue);
+  if (modelValue) {
+    params.set("model", modelValue);
+  }
+  const detail = useJSON(`/api/upstreams/${encodeURIComponent(upstreamID)}?${params.toString()}`, [upstreamID, windowValue, modelValue]);
+  const target = detail.data?.target;
+  const breakdown = detail.data?.breakdown;
+  const traces = detail.data?.traces ?? [];
+  const timeline = detail.data?.timeline ?? [];
+
+  const setWindow = (nextWindow) => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setSearchParams(next);
+  };
+  const applyModel = (event) => {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "model", modelDraft);
+    setSearchParams(next);
+  };
+
+  useEffect(() => {
+    setModelDraft(modelValue);
+  }, [modelValue]);
+
+  return (
+    <div className="shell shell-detail">
+      <header className="topbar detail-topbar">
+        <div className="detail-title-block">
+          <div className="detail-heading-row">
+            <h1>{target?.id || upstreamID || "upstream detail"}</h1>
+            <div className="trace-tag-group detail-tag-group">
+              <InlineTag tone={healthTone(target?.health_state)}>{formatHealthLabel(target?.health_state)}</InlineTag>
+              <InlineTag tone="accent">{target?.provider_preset || "custom"}</InlineTag>
+              <InlineTag>{target?.routing_profile || target?.protocol_family || "route"}</InlineTag>
+            </div>
+          </div>
+          <div className="detail-meta-strip">
+            <DetailMetaPill label="base url" value={target?.base_url || "-"} mono />
+            <DetailMetaPill label="last seen" value={formatDateTime(target?.last_seen)} />
+            <DetailMetaPill label="requests" value={target?.request_count ?? 0} />
+            <DetailMetaPill label="success" value={`${Number(target?.success_rate || 0).toFixed(1)}%`} />
+          </div>
+        </div>
+        <div className="topbar-meta detail-toolbar">
+          <div className="detail-toolbar-actions">
+            <Link className="icon-button" to={buildTraceListLink("requests", windowValue, modelValue)} title="Back to monitor" aria-label="Back to monitor">
+              <HomeIcon />
+            </Link>
+          </div>
+          <div className="detail-toolbar-tokens">
+            <TokenBadge label="ttft" value={target?.avg_ttft ?? 0} icon="total" />
+            <TokenBadge label="tokens" value={target?.total_tokens ?? 0} icon="output" accent="token-badge-strong" />
+            <TokenBadge label="failed" value={target?.failed_request ?? 0} icon="cached" />
+          </div>
+        </div>
+      </header>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Analytics filters</p>
+            <h2>Window and model</h2>
+          </div>
+          <div className="panel-head-actions">
+            <div className="view-toggle" role="tablist" aria-label="Upstream detail window">
+              {["1h", "24h", "7d", "all"].map((window) => (
+                <button
+                  key={window}
+                  className={windowValue === window ? "ghost-button active" : "ghost-button"}
+                  onClick={() => setWindow(window)}
+                >
+                  {window}
+                </button>
+              ))}
+            </div>
+            <span className="badge">{detail.data?.refreshed_at ? formatTime(detail.data.refreshed_at) : "..."}</span>
+          </div>
+        </div>
+        <form className="filter-bar" onSubmit={applyModel}>
+          <input
+            className="filter-input filter-input-wide"
+            type="search"
+            name="model"
+            value={modelDraft}
+            onChange={(event) => setModelDraft(event.target.value)}
+            placeholder="Filter detail by model"
+          />
+          <button className="ghost-button" type="submit">Apply</button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={() => {
+              setModelDraft("");
+              const next = new URLSearchParams(searchParams);
+              next.delete("model");
+              setSearchParams(next);
+            }}
+          >
+            Reset
+          </button>
+        </form>
+      </section>
+
+      {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
+      {detail.loading && !detail.data ? <div className="empty-state">Loading upstream detail...</div> : null}
+
+      {detail.data ? (
+        <div className="detail-grid detail-grid-compact">
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Traffic summary</p>
+                <h2>Routing health</h2>
+              </div>
+            </div>
+            <div className="hero-grid hero-grid-compact">
+              <StatCard label="Requests" value={target?.request_count ?? 0} />
+              <StatCard label="Failed" value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
+              <StatCard label="Inflight" value={target?.inflight ?? 0} />
+              <StatCard label="Capacity" value={formatCapacity(target?.weight, target?.capacity_hint)} />
+            </div>
+          </section>
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Distribution</p>
+                <h2>Models and endpoints</h2>
+              </div>
+            </div>
+            <div className="session-breakdown-grid">
+              <BreakdownList title="Models" items={breakdown?.models || []} formatter={(item) => item.label} />
+              <BreakdownList title="Endpoints" items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Recent failures</p>
+            <h2>Failure timeline</h2>
+          </div>
+        </div>
+        {timeline.length ? (
+          <div className="upstream-failure-list upstream-failure-list-detail">
+            {timeline.map((failure) => (
+              <Link key={failure.trace_id} className="upstream-failure-card" to={buildTraceLink(failure.trace_id, "requests", "", "", "failure")}>
+                <div className="trace-tag-group">
+                  <InlineTag tone="danger">{failure.status_code}</InlineTag>
+                  <InlineTag tone="accent">{formatEndpointTag(failure.endpoint)}</InlineTag>
+                </div>
+                <strong>{failure.model || "unknown-model"}</strong>
+                <span>{formatDateTime(failure.recorded_at)}</span>
+                {failure.error_text ? <div className="upstream-failure-detail">{failure.error_text}</div> : null}
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-state">No recent failures for this upstream.</div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Recent requests</p>
+            <h2>Latest routed traces</h2>
+          </div>
+        </div>
+        {traces.length ? <RequestList items={traces} focusFailures /> : <div className="empty-state">No traces for this upstream.</div>}
       </section>
     </div>
   );
@@ -1786,6 +1980,33 @@ function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "", fo
   }
   const query = params.toString();
   return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
+}
+
+function buildUpstreamLink(upstreamID, windowValue = "24h", modelValue = "") {
+  const params = new URLSearchParams();
+  if (windowValue && windowValue !== "24h") {
+    params.set("window", windowValue);
+  }
+  if (modelValue) {
+    params.set("model", modelValue);
+  }
+  const query = params.toString();
+  return query ? `/upstreams/${encodeURIComponent(upstreamID)}?${query}` : `/upstreams/${encodeURIComponent(upstreamID)}`;
+}
+
+function buildTraceListLink(view = "requests", upstreamWindow = "24h", upstreamModel = "") {
+  const params = new URLSearchParams();
+  if (view && view !== "requests") {
+    params.set("view", view);
+  }
+  if (upstreamWindow && upstreamWindow !== "24h") {
+    params.set("upstream_window", upstreamWindow);
+  }
+  if (upstreamModel) {
+    params.set("upstream_model", upstreamModel);
+  }
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
 }
 
 function normalizeTraceTab(value = "") {

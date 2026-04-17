@@ -220,6 +220,22 @@ type upstreamFailureItem struct {
 	ErrorText  string    `json:"error_text,omitempty"`
 }
 
+type upstreamDetailResponse struct {
+	Target      upstreamItem          `json:"target"`
+	Breakdown   upstreamBreakdownView `json:"breakdown"`
+	Timeline    []upstreamFailureItem `json:"timeline"`
+	Traces      []traceListItem       `json:"traces"`
+	RefreshedAt time.Time             `json:"refreshed_at"`
+	Window      string                `json:"window"`
+	Model       string                `json:"model"`
+}
+
+type upstreamBreakdownView struct {
+	Models       []sessionCountItem `json:"models"`
+	Endpoints    []sessionCountItem `json:"endpoints"`
+	FailedTraces int                `json:"failed_traces"`
+}
+
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	var opt RouteOptions
 	if len(opts) > 0 {
@@ -230,6 +246,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/sessions", sessionListAPIHandler(st))
 	mux.HandleFunc("/api/sessions/", sessionDetailAPIHandler(st))
 	mux.HandleFunc("/api/upstreams", upstreamListAPIHandler(st, opt.Router))
+	mux.HandleFunc("/api/upstreams/", upstreamDetailAPIHandler(st, opt.Router))
 	mux.Handle("/", appHandler())
 }
 
@@ -265,101 +282,9 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
 		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
-		var items []upstreamItem
-		analyticsByID := map[string]store.UpstreamAnalyticsRecord{}
-		if st != nil {
-			analytics, err := st.ListUpstreamAnalytics(5, 3, since, modelFilter)
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream analytics: " + err.Error()})
-				return
-			}
-			for _, item := range analytics {
-				analyticsByID[item.UpstreamID] = item
-			}
-		}
-		switch {
-		case rtr != nil:
-			for _, snapshot := range rtr.Snapshots() {
-				analytics := analyticsByID[snapshot.ID]
-				items = append(items, upstreamItem{
-					ID:                snapshot.ID,
-					Enabled:           snapshot.Enabled,
-					Priority:          snapshot.Priority,
-					Weight:            snapshot.Weight,
-					CapacityHint:      snapshot.CapacityHint,
-					ModelDiscovery:    snapshot.ModelDiscovery,
-					BaseURL:           snapshot.BaseURL,
-					ProviderPreset:    snapshot.ProviderPreset,
-					ProtocolFamily:    snapshot.ProtocolFamily,
-					RoutingProfile:    snapshot.RoutingProfile,
-					HealthState:       snapshot.HealthState,
-					Inflight:          snapshot.Inflight,
-					LastRefreshAt:     snapshot.LastRefreshAt,
-					LastRefreshStatus: snapshot.LastRefreshStatus,
-					LastRefreshError:  snapshot.LastRefreshError,
-					OpenUntil:         snapshot.OpenUntil,
-					Models:            snapshot.Models,
-					RequestCount:      analytics.RequestCount,
-					SuccessRequest:    analytics.SuccessRequest,
-					FailedRequest:     analytics.FailedRequest,
-					SuccessRate:       analytics.SuccessRate,
-					TotalTokens:       analytics.TotalTokens,
-					AvgTTFT:           analytics.AvgTTFT,
-					LastSeen:          analytics.LastSeen,
-					RecentModels:      analytics.Models,
-					LastModel:         analytics.LastModel,
-					RecentErrors:      analytics.RecentErrors,
-					RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
-				})
-			}
-		case st != nil:
-			targets, err := st.ListUpstreamTargets()
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream targets: " + err.Error()})
-				return
-			}
-			models, err := st.ListUpstreamModels()
-			if err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream models: " + err.Error()})
-				return
-			}
-			modelMap := make(map[string][]string)
-			for _, model := range models {
-				modelMap[model.UpstreamID] = append(modelMap[model.UpstreamID], model.Model)
-			}
-			for _, target := range targets {
-				analytics := analyticsByID[target.ID]
-				sort.Strings(modelMap[target.ID])
-				items = append(items, upstreamItem{
-					ID:                target.ID,
-					Enabled:           target.Enabled,
-					Priority:          target.Priority,
-					Weight:            target.Weight,
-					CapacityHint:      target.CapacityHint,
-					BaseURL:           target.BaseURL,
-					ProviderPreset:    target.ProviderPreset,
-					ProtocolFamily:    target.ProtocolFamily,
-					RoutingProfile:    target.RoutingProfile,
-					HealthState:       "unknown",
-					LastRefreshAt:     target.LastRefreshAt,
-					LastRefreshStatus: target.LastRefreshStatus,
-					LastRefreshError:  target.LastRefreshError,
-					Models:            modelMap[target.ID],
-					RequestCount:      analytics.RequestCount,
-					SuccessRequest:    analytics.SuccessRequest,
-					FailedRequest:     analytics.FailedRequest,
-					SuccessRate:       analytics.SuccessRate,
-					TotalTokens:       analytics.TotalTokens,
-					AvgTTFT:           analytics.AvgTTFT,
-					LastSeen:          analytics.LastSeen,
-					RecentModels:      analytics.Models,
-					LastModel:         analytics.LastModel,
-					RecentErrors:      analytics.RecentErrors,
-					RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
-				})
-			}
-		default:
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "router not configured"})
+		items, err := buildUpstreamItems(st, rtr, since, modelFilter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 
@@ -369,6 +294,197 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 			Window:      windowLabel,
 			Model:       modelFilter,
 		})
+	}
+}
+
+func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if err := st.Sync(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
+			return
+		}
+
+		upstreamID := strings.TrimPrefix(pathClean(r.URL.Path), "/api/upstreams/")
+		upstreamID = strings.Trim(upstreamID, "/")
+		if upstreamID == "" || strings.Contains(upstreamID, "/") {
+			http.NotFound(w, r)
+			return
+		}
+
+		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
+		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
+		detail, err := st.GetUpstreamDetail(upstreamID, since, modelFilter, 50)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "upstream not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream detail: " + err.Error()})
+			return
+		}
+
+		items, err := buildUpstreamItems(st, rtr, since, modelFilter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		var target upstreamItem
+		for _, item := range items {
+			if item.ID == upstreamID {
+				target = item
+				break
+			}
+		}
+		if target.ID == "" {
+			baseURL := ""
+			providerPreset := ""
+			if len(detail.Traces) > 0 {
+				baseURL = detail.Traces[0].Header.Meta.SelectedUpstreamBaseURL
+				providerPreset = detail.Traces[0].Header.Meta.SelectedUpstreamProviderPreset
+			}
+			target = upstreamItem{
+				ID:             detail.Analytics.UpstreamID,
+				BaseURL:        baseURL,
+				ProviderPreset: providerPreset,
+				RequestCount:   detail.Analytics.RequestCount,
+				SuccessRequest: detail.Analytics.SuccessRequest,
+				FailedRequest:  detail.Analytics.FailedRequest,
+				SuccessRate:    detail.Analytics.SuccessRate,
+				TotalTokens:    detail.Analytics.TotalTokens,
+				AvgTTFT:        detail.Analytics.AvgTTFT,
+				LastSeen:       detail.Analytics.LastSeen,
+				RecentModels:   detail.Analytics.Models,
+				LastModel:      detail.Analytics.LastModel,
+				RecentErrors:   detail.Analytics.RecentErrors,
+				RecentFailures: toUpstreamFailureItems(detail.Analytics.RecentFailures),
+			}
+		}
+
+		resp := upstreamDetailResponse{
+			Target: target,
+			Breakdown: upstreamBreakdownView{
+				Models:       toSessionCountItems(detail.Models),
+				Endpoints:    toSessionCountItems(detail.Endpoints),
+				FailedTraces: detail.Analytics.FailedRequest,
+			},
+			Timeline:    toUpstreamFailureItems(detail.Analytics.RecentFailures),
+			RefreshedAt: time.Now().UTC(),
+			Window:      windowLabel,
+			Model:       modelFilter,
+		}
+		for _, entry := range detail.Traces {
+			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func buildUpstreamItems(st *store.Store, rtr *router.Router, since time.Time, modelFilter string) ([]upstreamItem, error) {
+	var items []upstreamItem
+	analyticsByID := map[string]store.UpstreamAnalyticsRecord{}
+	if st != nil {
+		analytics, err := st.ListUpstreamAnalytics(5, 3, since, modelFilter)
+		if err != nil {
+			return nil, fmt.Errorf("query upstream analytics: %w", err)
+		}
+		for _, item := range analytics {
+			analyticsByID[item.UpstreamID] = item
+		}
+	}
+
+	switch {
+	case rtr != nil:
+		for _, snapshot := range rtr.Snapshots() {
+			items = append(items, newUpstreamItemFromSnapshot(snapshot, analyticsByID[snapshot.ID]))
+		}
+	case st != nil:
+		targets, err := st.ListUpstreamTargets()
+		if err != nil {
+			return nil, fmt.Errorf("query upstream targets: %w", err)
+		}
+		models, err := st.ListUpstreamModels()
+		if err != nil {
+			return nil, fmt.Errorf("query upstream models: %w", err)
+		}
+		modelMap := make(map[string][]string)
+		for _, model := range models {
+			modelMap[model.UpstreamID] = append(modelMap[model.UpstreamID], model.Model)
+		}
+		for _, target := range targets {
+			sort.Strings(modelMap[target.ID])
+			items = append(items, newUpstreamItemFromStore(target, modelMap[target.ID], analyticsByID[target.ID]))
+		}
+	default:
+		return nil, errors.New("router not configured")
+	}
+	return items, nil
+}
+
+func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.UpstreamAnalyticsRecord) upstreamItem {
+	return upstreamItem{
+		ID:                snapshot.ID,
+		Enabled:           snapshot.Enabled,
+		Priority:          snapshot.Priority,
+		Weight:            snapshot.Weight,
+		CapacityHint:      snapshot.CapacityHint,
+		ModelDiscovery:    snapshot.ModelDiscovery,
+		BaseURL:           snapshot.BaseURL,
+		ProviderPreset:    snapshot.ProviderPreset,
+		ProtocolFamily:    snapshot.ProtocolFamily,
+		RoutingProfile:    snapshot.RoutingProfile,
+		HealthState:       snapshot.HealthState,
+		Inflight:          snapshot.Inflight,
+		LastRefreshAt:     snapshot.LastRefreshAt,
+		LastRefreshStatus: snapshot.LastRefreshStatus,
+		LastRefreshError:  snapshot.LastRefreshError,
+		OpenUntil:         snapshot.OpenUntil,
+		Models:            snapshot.Models,
+		RequestCount:      analytics.RequestCount,
+		SuccessRequest:    analytics.SuccessRequest,
+		FailedRequest:     analytics.FailedRequest,
+		SuccessRate:       analytics.SuccessRate,
+		TotalTokens:       analytics.TotalTokens,
+		AvgTTFT:           analytics.AvgTTFT,
+		LastSeen:          analytics.LastSeen,
+		RecentModels:      analytics.Models,
+		LastModel:         analytics.LastModel,
+		RecentErrors:      analytics.RecentErrors,
+		RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
+	}
+}
+
+func newUpstreamItemFromStore(target store.UpstreamTargetRecord, models []string, analytics store.UpstreamAnalyticsRecord) upstreamItem {
+	return upstreamItem{
+		ID:                target.ID,
+		Enabled:           target.Enabled,
+		Priority:          target.Priority,
+		Weight:            target.Weight,
+		CapacityHint:      target.CapacityHint,
+		BaseURL:           target.BaseURL,
+		ProviderPreset:    target.ProviderPreset,
+		ProtocolFamily:    target.ProtocolFamily,
+		RoutingProfile:    target.RoutingProfile,
+		HealthState:       "unknown",
+		LastRefreshAt:     target.LastRefreshAt,
+		LastRefreshStatus: target.LastRefreshStatus,
+		LastRefreshError:  target.LastRefreshError,
+		Models:            models,
+		RequestCount:      analytics.RequestCount,
+		SuccessRequest:    analytics.SuccessRequest,
+		FailedRequest:     analytics.FailedRequest,
+		SuccessRate:       analytics.SuccessRate,
+		TotalTokens:       analytics.TotalTokens,
+		AvgTTFT:           analytics.AvgTTFT,
+		LastSeen:          analytics.LastSeen,
+		RecentModels:      analytics.Models,
+		LastModel:         analytics.LastModel,
+		RecentErrors:      analytics.RecentErrors,
+		RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
 	}
 }
 
@@ -782,6 +898,30 @@ func sessionSummaryItem(summary store.SessionSummary) sessionListItem {
 	}
 }
 
+func traceListItemFromEntry(entry store.LogEntry) traceListItem {
+	return traceListItem{
+		ID:               entry.ID,
+		SessionID:        entry.SessionID,
+		SessionSource:    entry.SessionSource,
+		RecordedAt:       entry.Header.Meta.Time,
+		Model:            entry.Header.Meta.Model,
+		Provider:         entry.Header.Meta.Provider,
+		Operation:        entry.Header.Meta.Operation,
+		Endpoint:         entry.Header.Meta.Endpoint,
+		Method:           entry.Header.Meta.Method,
+		URL:              entry.Header.Meta.URL,
+		StatusCode:       entry.Header.Meta.StatusCode,
+		DurationMs:       entry.Header.Meta.DurationMs,
+		TTFTMs:           entry.Header.Meta.TTFTMs,
+		TotalTokens:      entry.Header.Usage.TotalTokens,
+		PromptTokens:     entry.Header.Usage.PromptTokens,
+		CompletionTokens: entry.Header.Usage.CompletionTokens,
+		CachedTokens:     cachedTokens(entry),
+		IsStream:         entry.Header.Layout.IsStream,
+		Error:            entry.Header.Meta.Error,
+	}
+}
+
 func parseListFilter(r *http.Request) store.ListFilter {
 	if r == nil {
 		return store.ListFilter{}
@@ -826,6 +966,17 @@ func sortSessionCounts(counts map[string]int) []sessionCountItem {
 		return items[i].Label < items[j].Label
 	})
 	return items
+}
+
+func toSessionCountItems(items []store.CountItem) []sessionCountItem {
+	out := make([]sessionCountItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, sessionCountItem{
+			Label: item.Label,
+			Count: item.Count,
+		})
+	}
+	return out
 }
 
 func buildSessionTimeline(traces []traceListItem) []sessionTimelineItem {

@@ -582,6 +582,123 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 	}
 }
 
+func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
+		ID:                "openai-primary",
+		BaseURL:           "https://api.openai.com/v1",
+		ProviderPreset:    "openai",
+		ProtocolFamily:    "openai_compatible",
+		RoutingProfile:    "openai_default",
+		Enabled:           true,
+		Priority:          100,
+		Weight:            1,
+		CapacityHint:      1,
+		LastRefreshAt:     time.Now().UTC(),
+		LastRefreshStatus: "ready",
+	}); err != nil {
+		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
+	}
+
+	writeLog := func(name string, recordedAt time.Time, endpoint string, model string, statusCode int, errText string) {
+		t.Helper()
+		path := filepath.Join(outputDir, name)
+		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:                      name,
+				Time:                           recordedAt,
+				Model:                          model,
+				Provider:                       "openai_compatible",
+				Operation:                      "responses",
+				Endpoint:                       endpoint,
+				URL:                            endpoint,
+				Method:                         "POST",
+				StatusCode:                     statusCode,
+				DurationMs:                     44,
+				TTFTMs:                         12,
+				ClientIP:                       "127.0.0.1",
+				ContentLength:                  7,
+				Error:                          errText,
+				SelectedUpstreamID:             "openai-primary",
+				SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+				SelectedUpstreamProviderPreset: "openai",
+				RoutingPolicy:                  "p2c",
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	writeLog("match-a.http", now.Add(-20*time.Minute), "/v1/responses", "gpt-5", 200, "")
+	writeLog("match-b.http", now.Add(-10*time.Minute), "/v1/chat/completions", "gpt-5", 503, "upstream overloaded")
+	writeLog("other-model.http", now.Add(-5*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, "")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams/openai-primary?window=1h&model=gpt-5", nil)
+	rr := httptest.NewRecorder()
+	upstreamDetailAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload upstreamDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Target.ID != "openai-primary" {
+		t.Fatalf("Target.ID = %q, want openai-primary", payload.Target.ID)
+	}
+	if payload.Window != "1h" || payload.Model != "gpt-5" {
+		t.Fatalf("filters = window:%q model:%q", payload.Window, payload.Model)
+	}
+	if len(payload.Traces) != 2 {
+		t.Fatalf("len(Traces) = %d, want 2", len(payload.Traces))
+	}
+	if payload.Breakdown.FailedTraces != 1 {
+		t.Fatalf("FailedTraces = %d, want 1", payload.Breakdown.FailedTraces)
+	}
+	if len(payload.Breakdown.Models) != 1 || payload.Breakdown.Models[0].Label != "gpt-5" {
+		t.Fatalf("Models = %#v, want [gpt-5]", payload.Breakdown.Models)
+	}
+	if len(payload.Breakdown.Endpoints) != 2 {
+		t.Fatalf("Endpoints = %#v, want 2 items", payload.Breakdown.Endpoints)
+	}
+	if len(payload.Timeline) != 1 || payload.Timeline[0].StatusCode != 503 {
+		t.Fatalf("Timeline = %#v, want one 503 failure", payload.Timeline)
+	}
+}
+
+func TestUpstreamDetailAPIHandlerReturnsNotFound(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams/missing", nil)
+	rr := httptest.NewRecorder()
+	upstreamDetailAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

@@ -136,6 +136,18 @@ type UpstreamFailureRecord struct {
 	ErrorText  string
 }
 
+type UpstreamDetail struct {
+	Analytics UpstreamAnalyticsRecord
+	Traces    []LogEntry
+	Models    []CountItem
+	Endpoints []CountItem
+}
+
+type CountItem struct {
+	Label string
+	Count int
+}
+
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
@@ -275,6 +287,70 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since ti
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilter string, traceLimit int) (UpstreamDetail, error) {
+	if traceLimit <= 0 {
+		traceLimit = 50
+	}
+	analytics, err := s.ListUpstreamAnalytics(8, 5, since, modelFilter)
+	if err != nil {
+		return UpstreamDetail{}, err
+	}
+	var detail UpstreamDetail
+	for _, item := range analytics {
+		if item.UpstreamID == upstreamID {
+			detail.Analytics = item
+			break
+		}
+	}
+	if detail.Analytics.UpstreamID == "" {
+		return UpstreamDetail{}, sql.ErrNoRows
+	}
+
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	queryArgs := append([]any{upstreamID}, whereArgs...)
+	queryArgs = append(queryArgs, traceLimit)
+	rows, err := s.db.Query(`
+		SELECT
+			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
+			duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count
+		FROM logs
+		WHERE selected_upstream_id = ?`+whereSQL+`
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT ?
+	`, queryArgs...)
+	if err != nil {
+		return UpstreamDetail{}, err
+	}
+	defer rows.Close()
+
+	modelCounts := map[string]int{}
+	endpointCounts := map[string]int{}
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			return UpstreamDetail{}, err
+		}
+		detail.Traces = append(detail.Traces, entry)
+		if entry.Header.Meta.Model != "" {
+			modelCounts[entry.Header.Meta.Model]++
+		}
+		if entry.Header.Meta.Endpoint != "" {
+			endpointCounts[entry.Header.Meta.Endpoint]++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return UpstreamDetail{}, err
+	}
+	detail.Models = sortedCountItems(modelCounts)
+	detail.Endpoints = sortedCountItems(endpointCounts)
+	return detail, nil
 }
 
 func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.Time, modelFilter string) ([]string, string, error) {
@@ -424,6 +500,20 @@ func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, [
 		return "", nil
 	}
 	return " AND " + strings.Join(clauses, " AND "), args
+}
+
+func sortedCountItems(counts map[string]int) []CountItem {
+	items := make([]CountItem, 0, len(counts))
+	for label, count := range counts {
+		items = append(items, CountItem{Label: label, Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		return items[i].Label < items[j].Label
+	})
+	return items
 }
 
 func New(outputDir string) (*Store, error) {

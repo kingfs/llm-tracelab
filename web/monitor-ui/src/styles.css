@@ -267,6 +267,10 @@ a {
   gap: 10px;
 }
 
+.upstream-failure-list-detail {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .upstream-failure-card {
   display: grid;
   gap: 8px;
