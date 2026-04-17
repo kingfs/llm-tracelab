@@ -584,6 +584,7 @@ function TraceDetailPage() {
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
+  const failureSummary = summarizeTraceFailure(detail.data);
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
@@ -633,6 +634,26 @@ function TraceDetailPage() {
           </div>
         </div>
       </header>
+
+      {failureSummary ? (
+        <section className="panel trace-failure-panel">
+          <div className="trace-failure-head">
+            <div>
+              <p className="eyebrow">Failure summary</p>
+              <h2>{failureSummary.title}</h2>
+            </div>
+            <InlineTag tone="danger">{header?.status_code || 0}</InlineTag>
+          </div>
+          <p className="trace-failure-summary">{failureSummary.summary}</p>
+          <div className="trace-failure-meta">
+            <span>{header?.endpoint || header?.url || "-"}</span>
+            <span>duration {header?.duration_ms || 0} ms</span>
+            <span>ttft {header?.ttft_ms || 0} ms</span>
+            <span>tokens {usage?.total_tokens || 0}</span>
+          </div>
+          {failureSummary.detail ? <pre className="trace-failure-detail">{failureSummary.detail}</pre> : null}
+        </section>
+      ) : null}
 
       <nav className="detail-tabs">
         <button className={tab === "timeline" ? "tab active" : "tab"} onClick={() => setTab("timeline")}>
@@ -1271,6 +1292,46 @@ function formatProviderTag(value = "") {
     return "openai";
   }
   return String(value).replaceAll("_", " ");
+}
+
+function summarizeTraceFailure(detail) {
+  if (!detail?.header?.meta) {
+    return null;
+  }
+  const header = detail.header.meta;
+  const statusCode = Number(header.status_code || 0);
+  const blocks = detail.ai_blocks || [];
+  const providerError = blocks.find((block) => block.title === "Provider Error");
+  if (providerError) {
+    return {
+      title: "Provider Error",
+      summary: `The upstream provider returned an error response for this request.`,
+      detail: providerError.text || providerError.meta || "",
+    };
+  }
+  const refusal = blocks.find((block) => block.title === "Refusal");
+  if (refusal) {
+    return {
+      title: "Refusal",
+      summary: `The model refused to continue this request.`,
+      detail: refusal.text || refusal.meta || "",
+    };
+  }
+  if (header.error) {
+    return {
+      title: "Trace Error",
+      summary: `The proxy recorded an error while handling this request.`,
+      detail: header.error,
+    };
+  }
+  if (statusCode >= 400) {
+    return {
+      title: "HTTP Failure",
+      summary: `This request completed with HTTP ${statusCode}.`,
+      detail: "",
+    };
+  }
+  return null;
 }
 
 function summarizeSessionItems(items = []) {

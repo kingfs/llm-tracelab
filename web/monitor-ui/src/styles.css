@@ -612,6 +612,55 @@ a {
   margin-bottom: 18px;
 }
 
+.trace-failure-panel {
+  margin-bottom: 18px;
+  border-color: rgba(161, 54, 42, 0.2);
+  background: linear-gradient(180deg, rgba(253, 241, 238, 0.96), rgba(255, 252, 245, 0.94));
+}
+
+.trace-failure-head,
+.trace-failure-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.trace-failure-head {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.trace-failure-summary,
+.trace-failure-meta,
+.trace-failure-detail {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.trace-failure-summary {
+  margin: 0 0 12px;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.trace-failure-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+}
+
+.trace-failure-detail {
+  margin: 0;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(29, 36, 31, 0.95);
+  color: #f1ede4;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.84rem;
+}
+
 .tab {
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
