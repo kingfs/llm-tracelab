@@ -758,8 +758,14 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	if len(payload.Breakdown.Endpoints) != 2 {
 		t.Fatalf("Endpoints = %#v, want 2 items", payload.Breakdown.Endpoints)
 	}
+	if len(payload.Breakdown.FailureReasons) != 1 || payload.Breakdown.FailureReasons[0].Label != "upstream_overloaded" {
+		t.Fatalf("FailureReasons = %#v, want upstream_overloaded", payload.Breakdown.FailureReasons)
+	}
 	if len(payload.Timeline) != 1 || payload.Timeline[0].StatusCode != 503 {
 		t.Fatalf("Timeline = %#v, want one 503 failure", payload.Timeline)
+	}
+	if payload.Timeline[0].Reason != "upstream_overloaded" {
+		t.Fatalf("Timeline reason = %q, want upstream_overloaded", payload.Timeline[0].Reason)
 	}
 	if len(payload.FailureTimeline) != 12 {
 		t.Fatalf("len(FailureTimeline) = %d, want 12", len(payload.FailureTimeline))

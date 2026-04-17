@@ -704,6 +704,7 @@ function SessionDetailPage() {
             <div className="session-breakdown-grid">
               <BreakdownList title="Models" items={breakdown?.models || []} formatter={(item) => item.label} />
               <BreakdownList title="Endpoints" items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
+              <BreakdownList title="Failure reasons" items={breakdown?.failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} />
             </div>
           </section>
         </div>
@@ -1002,6 +1003,7 @@ function UpstreamDetailPage() {
                 <div className="trace-tag-group">
                   <InlineTag tone="danger">{failure.status_code}</InlineTag>
                   <InlineTag tone="accent">{formatEndpointTag(failure.endpoint)}</InlineTag>
+                  {failure.reason ? <InlineTag>{formatFailureReason(failure.reason)}</InlineTag> : null}
                 </div>
                 <strong>{failure.model || "unknown-model"}</strong>
                 <span>{formatDateTime(failure.recorded_at)}</span>

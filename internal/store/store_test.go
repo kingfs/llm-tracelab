@@ -693,8 +693,14 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 	if len(detail.Endpoints) != 2 {
 		t.Fatalf("Endpoints = %#v, want 2 items", detail.Endpoints)
 	}
+	if len(detail.FailureReasons) != 1 || detail.FailureReasons[0].Label != "upstream_overloaded" || detail.FailureReasons[0].Count != 1 {
+		t.Fatalf("FailureReasons = %#v, want upstream_overloaded x 1", detail.FailureReasons)
+	}
 	if len(detail.Analytics.RecentFailures) != 1 || detail.Analytics.RecentFailures[0].Model != "gpt-5" {
 		t.Fatalf("RecentFailures = %#v, want one gpt-5 failure", detail.Analytics.RecentFailures)
+	}
+	if detail.Analytics.RecentFailures[0].Reason != "upstream_overloaded" {
+		t.Fatalf("RecentFailure reason = %q, want upstream_overloaded", detail.Analytics.RecentFailures[0].Reason)
 	}
 	if len(detail.Timeline) != 4 {
 		t.Fatalf("len(Timeline) = %d, want 4", len(detail.Timeline))

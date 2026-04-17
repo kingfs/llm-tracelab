@@ -133,15 +133,17 @@ type UpstreamFailureRecord struct {
 	Endpoint   string
 	StatusCode int
 	RecordedAt time.Time
+	Reason     string
 	ErrorText  string
 }
 
 type UpstreamDetail struct {
-	Analytics UpstreamAnalyticsRecord
-	Traces    []LogEntry
-	Models    []CountItem
-	Endpoints []CountItem
-	Timeline  []TimeCountItem
+	Analytics      UpstreamAnalyticsRecord
+	Traces         []LogEntry
+	Models         []CountItem
+	Endpoints      []CountItem
+	FailureReasons []CountItem
+	Timeline       []TimeCountItem
 }
 
 type CountItem struct {
@@ -523,6 +525,10 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	}
 	detail.Models = sortedCountItems(modelCounts)
 	detail.Endpoints = sortedCountItems(endpointCounts)
+	detail.FailureReasons, err = s.upstreamFailureReasons(upstreamID, 5, since, modelFilter)
+	if err != nil {
+		return UpstreamDetail{}, err
+	}
 
 	timelineArgs := append([]any{upstreamID}, whereArgs...)
 	var latestRecordedAt string
@@ -718,9 +724,72 @@ func (s *Store) upstreamRecentFailures(upstreamID string, limit int, since time.
 		if err != nil {
 			return nil, err
 		}
+		record.Reason = classifyUpstreamFailure(record.StatusCode, record.ErrorText)
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) upstreamFailureReasons(upstreamID string, limit int, since time.Time, modelFilter string) ([]CountItem, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	args := append([]any{upstreamID}, whereArgs...)
+	rows, err := s.db.Query(`
+		SELECT status_code, error_text
+		FROM logs
+		WHERE selected_upstream_id = ?
+		  `+whereSQL+`
+		  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var (
+			statusCode int
+			errorText  string
+		)
+		if err := rows.Scan(&statusCode, &errorText); err != nil {
+			return nil, err
+		}
+		counts[classifyUpstreamFailure(statusCode, errorText)]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	items := sortedCountItems(counts)
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func classifyUpstreamFailure(statusCode int, errorText string) string {
+	text := strings.ToLower(strings.TrimSpace(errorText))
+	switch {
+	case statusCode == 408 || statusCode == 504 || strings.Contains(text, "timeout") || strings.Contains(text, "timed out") || strings.Contains(text, "deadline exceeded") || strings.Contains(text, "context deadline exceeded"):
+		return "timeout"
+	case statusCode == 429 || strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests"):
+		return "rate_limited"
+	case statusCode == 401 || statusCode == 403 || strings.Contains(text, "unauthorized") || strings.Contains(text, "forbidden") || strings.Contains(text, "invalid api key") || strings.Contains(text, "authentication"):
+		return "auth_denied"
+	case statusCode == 503 || strings.Contains(text, "overloaded") || strings.Contains(text, "overload") || strings.Contains(text, "capacity") || strings.Contains(text, "unavailable"):
+		return "upstream_overloaded"
+	case statusCode >= 500:
+		return "upstream_error"
+	case statusCode >= 400:
+		return "request_rejected"
+	case text != "":
+		return "transport_error"
+	default:
+		return "unknown_failure"
+	}
 }
 
 func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, []any) {

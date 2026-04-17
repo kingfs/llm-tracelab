@@ -216,6 +216,7 @@ type upstreamFailureItem struct {
 	TraceID    string    `json:"trace_id"`
 	Model      string    `json:"model"`
 	Endpoint   string    `json:"endpoint"`
+	Reason     string    `json:"reason"`
 	StatusCode int       `json:"status_code"`
 	RecordedAt time.Time `json:"recorded_at"`
 	ErrorText  string    `json:"error_text,omitempty"`
@@ -255,9 +256,10 @@ type upstreamDetailResponse struct {
 }
 
 type upstreamBreakdownView struct {
-	Models       []sessionCountItem `json:"models"`
-	Endpoints    []sessionCountItem `json:"endpoints"`
-	FailedTraces int                `json:"failed_traces"`
+	Models         []sessionCountItem `json:"models"`
+	Endpoints      []sessionCountItem `json:"endpoints"`
+	FailureReasons []sessionCountItem `json:"failure_reasons"`
+	FailedTraces   int                `json:"failed_traces"`
 }
 
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
@@ -410,9 +412,10 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 		resp := upstreamDetailResponse{
 			Target: target,
 			Breakdown: upstreamBreakdownView{
-				Models:       toSessionCountItems(detail.Models),
-				Endpoints:    toSessionCountItems(detail.Endpoints),
-				FailedTraces: detail.Analytics.FailedRequest,
+				Models:         toSessionCountItems(detail.Models),
+				Endpoints:      toSessionCountItems(detail.Endpoints),
+				FailureReasons: toSessionCountItems(detail.FailureReasons),
+				FailedTraces:   detail.Analytics.FailedRequest,
 			},
 			Timeline:        toUpstreamFailureItems(detail.Analytics.RecentFailures),
 			FailureTimeline: toRoutingFailureBucketItems(detail.Timeline),
@@ -538,6 +541,7 @@ func toUpstreamFailureItems(records []store.UpstreamFailureRecord) []upstreamFai
 			TraceID:    record.TraceID,
 			Model:      record.Model,
 			Endpoint:   record.Endpoint,
+			Reason:     record.Reason,
 			StatusCode: record.StatusCode,
 			RecordedAt: record.RecordedAt,
 			ErrorText:  record.ErrorText,
