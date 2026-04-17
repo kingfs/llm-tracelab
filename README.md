@@ -53,7 +53,7 @@ pkg/replay            单元测试回放 Transport
 pkg/llm               多厂商请求/响应归一化
 ```
 
-更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，多 upstream 路由设计说明见 [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
 
 ## 录制文件与索引
 
