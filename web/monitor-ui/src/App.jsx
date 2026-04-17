@@ -280,7 +280,7 @@ function RequestList({ items, fromView = "", fromSessionID = "", focusFailures =
               </Link>
             ) : null}
             {fromSessionID ? (
-              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", "timeline")}>
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
                 Timeline
               </Link>
             ) : null}
@@ -465,7 +465,10 @@ function SessionDetailPage() {
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
                   <div className="action-group action-group-start">
-                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline", "timeline")}>
+                    <Link
+                      className="ghost-button"
+                      to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline", item.status_code >= 200 && item.status_code < 300 ? "timeline" : "timeline_error")}
+                    >
                       Timeline
                     </Link>
                     <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
@@ -549,7 +552,7 @@ function SessionDetailPage() {
 function FailureContextNode({ label, item, tone = "default", sessionID = "", delta = null, detail = "" }) {
   const focus = tone === "danger" ? "failure" : "";
   const traceLink = buildTraceLink(item.trace_id, "", sessionID, "", focus);
-  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline", "timeline");
+  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline", tone === "danger" ? "timeline_error" : "timeline");
   const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw", focus === "failure" ? "response" : focus);
 
   return (
@@ -881,9 +884,10 @@ function RawProtocolPanel({ raw, focusTarget = "" }) {
 
 function TimelinePanel({ events, focusTarget = "" }) {
   const panelRef = useRef(null);
+  const focusPath = focusTarget === "timeline_error" ? findFirstTimelineErrorPath(events) : [];
 
   useEffect(() => {
-    if (focusTarget !== "timeline" || !panelRef.current) {
+    if ((focusTarget !== "timeline" && focusTarget !== "timeline_error") || !panelRef.current) {
       return;
     }
     panelRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
@@ -915,7 +919,7 @@ function TimelinePanel({ events, focusTarget = "" }) {
                 </div>
                 <span className="timeline-badge">{event.is_stream ? "stream" : "record"}</span>
               </div>
-              {event.timeline_items?.length ? <TimelineTree items={event.timeline_items} /> : null}
+              {event.timeline_items?.length ? <TimelineTree items={event.timeline_items} focusPath={focusPath} /> : null}
               {!event.timeline_items?.length && event.message ? <div className="timeline-message">{event.message}</div> : null}
               {event.attributes ? <CodeBlock value={JSON.stringify(event.attributes, null, 2)} /> : null}
             </div>
@@ -926,25 +930,35 @@ function TimelinePanel({ events, focusTarget = "" }) {
   );
 }
 
-function TimelineTree({ items }) {
+function TimelineTree({ items, focusPath = [] }) {
   return (
     <div className="timeline-tree">
       {items.map((item, index) => (
-        <TimelineNode key={`${item.kind}-${item.id || item.name || item.label || index}`} item={item} depth={0} />
+        <TimelineNode key={buildTimelineNodeKey(item, index)} nodeKey={buildTimelineNodeKey(item, index)} item={item} depth={0} focusPath={focusPath} />
       ))}
     </div>
   );
 }
 
-function TimelineNode({ item, depth = 0 }) {
+function TimelineNode({ item, depth = 0, nodeKey = "", focusPath = [] }) {
+  const nodeRef = useRef(null);
   const hasChildren = Boolean(item.children?.length);
   const hasDetails = Boolean(item.body && item.body !== item.summary);
   const collapsible = hasChildren || hasDetails;
-  const className = `timeline-node timeline-node-${item.kind || "item"}`;
+  const focused = focusPath.includes(nodeKey);
+  const focusedBranch = focusPath.length > 0 && focused;
+  const className = `timeline-node timeline-node-${item.kind || "item"}${focused ? " timeline-node-focused" : ""}`;
+
+  useEffect(() => {
+    if (!focused || !nodeRef.current) {
+      return;
+    }
+    nodeRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [focused]);
 
   if (!collapsible) {
     return (
-      <div className={className}>
+      <div ref={nodeRef} className={className}>
         <div className="timeline-node-leaf">
           <TimelineNodeHeading item={item} />
           {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
@@ -956,7 +970,7 @@ function TimelineNode({ item, depth = 0 }) {
   }
 
   return (
-    <details className={className} open={depth === 0 && hasChildren}>
+    <details ref={nodeRef} className={className} open={(depth === 0 && hasChildren) || focusedBranch}>
       <summary className="timeline-node-summary">
         <TimelineNodeHeading item={item} />
         {item.id ? <span className="timeline-node-id">{item.id}</span> : null}
@@ -967,7 +981,13 @@ function TimelineNode({ item, depth = 0 }) {
       {hasChildren ? (
         <div className="timeline-children">
           {item.children.map((child, index) => (
-            <TimelineNode key={`${child.kind}-${child.id || child.name || child.label || index}`} item={child} depth={depth + 1} />
+            <TimelineNode
+              key={buildTimelineNodeKey(child, index)}
+              nodeKey={buildTimelineNodeKey(child, index)}
+              item={child}
+              depth={depth + 1}
+              focusPath={focusPath}
+            />
           ))}
         </div>
       ) : null}
@@ -1380,6 +1400,35 @@ function formatTimelineTitle(item = {}) {
     return item.label || item.role || "Message";
   }
   return item.name || item.label || formatTimelineKind(item.kind);
+}
+
+function buildTimelineNodeKey(item = {}, index = 0) {
+  return `${item.kind || "item"}-${item.id || item.name || item.label || index}`;
+}
+
+function findFirstTimelineErrorPath(events = []) {
+  for (const event of events) {
+    const path = findTimelineItemErrorPath(event.timeline_items || []);
+    if (path.length) {
+      return path;
+    }
+  }
+  return [];
+}
+
+function findTimelineItemErrorPath(items = []) {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const nodeKey = buildTimelineNodeKey(item, index);
+    if (item.status === "error") {
+      return [nodeKey];
+    }
+    const childPath = findTimelineItemErrorPath(item.children || []);
+    if (childPath.length) {
+      return [nodeKey, ...childPath];
+    }
+  }
+  return [];
 }
 
 function formatProviderTag(value = "") {
