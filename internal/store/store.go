@@ -52,6 +52,12 @@ type ListPageResult struct {
 	TotalPages int
 }
 
+type ListFilter struct {
+	Query    string
+	Provider string
+	Model    string
+}
+
 type GroupingInfo struct {
 	SessionID       string
 	SessionSource   string
@@ -577,7 +583,7 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 	return entries, rows.Err()
 }
 
-func (s *Store) ListPage(page int, pageSize int) (ListPageResult, error) {
+func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -585,13 +591,20 @@ func (s *Store) ListPage(page int, pageSize int) (ListPageResult, error) {
 		pageSize = 50
 	}
 
+	whereSQL, whereArgs := buildLogFilterClause(filter, "")
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs`).Scan(&total); err != nil {
+	countSQL := `SELECT COUNT(*) FROM logs`
+	if whereSQL != "" {
+		countSQL += " WHERE " + whereSQL
+	}
+	if err := s.db.QueryRow(countSQL, whereArgs...).Scan(&total); err != nil {
 		return ListPageResult{}, err
 	}
 
 	offset := (page - 1) * pageSize
-	rows, err := s.db.Query(`
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, pageSize, offset)
+	listSQL := `
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
@@ -599,9 +612,15 @@ func (s *Store) ListPage(page int, pageSize int) (ListPageResult, error) {
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id
 		FROM logs
+	`
+	if whereSQL != "" {
+		listSQL += " WHERE " + whereSQL
+	}
+	listSQL += `
 		ORDER BY recorded_at DESC
 		LIMIT ? OFFSET ?
-	`, pageSize, offset)
+	`
+	rows, err := s.db.Query(listSQL, queryArgs...)
 	if err != nil {
 		return ListPageResult{}, err
 	}
@@ -644,7 +663,7 @@ func (s *Store) GetByID(traceID string) (LogEntry, error) {
 	return scanEntry(row)
 }
 
-func (s *Store) ListSessionPage(page int, pageSize int) (SessionPageResult, error) {
+func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -652,13 +671,20 @@ func (s *Store) ListSessionPage(page int, pageSize int) (SessionPageResult, erro
 		pageSize = 50
 	}
 
+	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
+	sessionWhere := `s.session_id <> ''`
+	if whereSQL != "" {
+		sessionWhere += " AND " + whereSQL
+	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs WHERE session_id <> '' GROUP BY session_id)`).Scan(&total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs s WHERE `+sessionWhere+` GROUP BY session_id)`, whereArgs...).Scan(&total); err != nil {
 		return SessionPageResult{}, err
 	}
 
 	offset := (page - 1) * pageSize
-	rows, err := s.db.Query(`
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, pageSize, offset)
+	listSQL := `
 		SELECT
 			s.session_id,
 			MIN(s.session_source) AS session_source,
@@ -682,11 +708,12 @@ func (s *Store) ListSessionPage(page int, pageSize int) (SessionPageResult, erro
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
 			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
 		FROM logs s
-		WHERE s.session_id <> ''
+		WHERE ` + sessionWhere + `
 		GROUP BY s.session_id
 		ORDER BY MAX(s.recorded_at) DESC
 		LIMIT ? OFFSET ?
-	`, pageSize, offset)
+	`
+	rows, err := s.db.Query(listSQL, queryArgs...)
 	if err != nil {
 		return SessionPageResult{}, err
 	}
@@ -1012,6 +1039,52 @@ func splitProviders(value string) []string {
 	}
 	sort.Strings(providers)
 	return providers
+}
+
+func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
+	column := func(name string) string {
+		if alias == "" {
+			return name
+		}
+		return alias + "." + name
+	}
+
+	var (
+		clauses []string
+		args    []any
+	)
+
+	if provider := strings.TrimSpace(filter.Provider); provider != "" {
+		clauses = append(clauses, `LOWER(`+column("provider")+`) = LOWER(?)`)
+		args = append(args, provider)
+	}
+	if model := strings.TrimSpace(filter.Model); model != "" {
+		clauses = append(clauses, `LOWER(`+column("model")+`) LIKE LOWER(?)`)
+		args = append(args, "%"+escapeLike(model)+"%")
+	}
+	if query := strings.TrimSpace(filter.Query); query != "" {
+		pattern := "%" + escapeLike(query) + "%"
+		clauses = append(clauses, `(
+			LOWER(`+column("session_id")+`) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(`+column("trace_id")+`) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(`+column("model")+`) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(`+column("provider")+`) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(`+column("endpoint")+`) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(`+column("url")+`) LIKE LOWER(?) ESCAPE '\'
+		)`)
+		for range 6 {
+			args = append(args, pattern)
+		}
+	}
+
+	return strings.Join(clauses, " AND "), args
+}
+
+func escapeLike(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	value = strings.ReplaceAll(value, `%`, `\%`)
+	value = strings.ReplaceAll(value, `_`, `\_`)
+	return value
 }
 
 func (s *Store) backfillGrouping() error {

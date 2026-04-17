@@ -111,6 +111,60 @@ func TestSessionListAPIHandlerReturnsGroupedItems(t *testing.T) {
 	}
 }
 
+func TestSessionListAPIHandlerAppliesFilters(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	traceA := filepath.Join(outputDir, "trace-a.http")
+	traceB := filepath.Join(outputDir, "trace-b.http")
+	contentA := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		false,
+		[]string{"Session_id: sess-openai"},
+		`{"input":"hello"}`,
+		`{"output_text":"done"}`,
+	)
+	contentB := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/chat/completions",
+		false,
+		nil,
+		`{"model":"gemini-pro","messages":[{"role":"user","content":"hello"}]}`,
+		`{"choices":[{"message":{"content":"done"}}]}`,
+	)
+	if err := os.WriteFile(traceA, contentA, 0o644); err != nil {
+		t.Fatalf("WriteFile(traceA) error = %v", err)
+	}
+	if err := os.WriteFile(traceB, contentB, 0o644); err != nil {
+		t.Fatalf("WriteFile(traceB) error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions?provider=openai_compatible&q=sess-openai", nil)
+	rr := httptest.NewRecorder()
+	sessionListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload sessionListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].SessionID != "sess-openai" {
+		t.Fatalf("SessionID = %q, want sess-openai", payload.Items[0].SessionID)
+	}
+}
+
 func TestSessionDetailAPIHandlerReturnsTraceList(t *testing.T) {
 	t.Parallel()
 

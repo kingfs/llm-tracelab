@@ -312,6 +312,28 @@ a {
   flex-wrap: wrap;
 }
 
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.filter-input {
+  min-width: 180px;
+  padding: 0.72rem 0.96rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+
+.filter-input-wide {
+  min-width: min(480px, 100%);
+  flex: 1 1 320px;
+}
+
 .view-toggle .ghost-button.active {
   border-color: rgba(25, 93, 77, 0.35);
   background: var(--accent);

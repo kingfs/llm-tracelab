@@ -199,7 +199,8 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
 		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
-		result, err := st.ListPage(page, pageSize)
+		filter := parseListFilter(r)
+		result, err := st.ListPage(page, pageSize, filter)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
@@ -265,7 +266,8 @@ func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
 		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
-		result, err := st.ListSessionPage(page, pageSize)
+		filter := parseListFilter(r)
+		result, err := st.ListSessionPage(page, pageSize, filter)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
@@ -548,6 +550,18 @@ func sessionSummaryItem(summary store.SessionSummary) sessionListItem {
 		AvgTTFT:        summary.AvgTTFT,
 		TotalDuration:  summary.TotalDuration,
 		StreamCount:    summary.StreamCount,
+	}
+}
+
+func parseListFilter(r *http.Request) store.ListFilter {
+	if r == nil {
+		return store.ListFilter{}
+	}
+	query := r.URL.Query()
+	return store.ListFilter{
+		Query:    strings.TrimSpace(query.Get("q")),
+		Provider: strings.TrimSpace(query.Get("provider")),
+		Model:    strings.TrimSpace(query.Get("model")),
 	}
 }
 

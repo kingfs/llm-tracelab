@@ -63,9 +63,26 @@ function TraceListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const view = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const query = searchParams.get("q") || "";
+  const provider = searchParams.get("provider") || "";
+  const model = searchParams.get("model") || "";
   const [refreshTick, setRefreshTick] = useState(0);
   const endpoint = view === "sessions" ? "/api/sessions" : "/api/traces";
-  const { loading, data, error } = useJSON(`${endpoint}?page=${page}&page_size=${PAGE_SIZE}`, [endpoint, page, refreshTick]);
+  const [filters, setFilters] = useState({ query, provider, model });
+  const requestParams = new URLSearchParams({
+    page: String(page),
+    page_size: String(PAGE_SIZE),
+  });
+  if (query) {
+    requestParams.set("q", query);
+  }
+  if (provider) {
+    requestParams.set("provider", provider);
+  }
+  if (model) {
+    requestParams.set("model", model);
+  }
+  const { loading, data, error } = useJSON(`${endpoint}?${requestParams.toString()}`, [endpoint, page, query, provider, model, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -73,6 +90,10 @@ function TraceListPage() {
     }, REFRESH_MS);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    setFilters({ query, provider, model });
+  }, [query, provider, model]);
 
   const items = data?.items ?? [];
   const stats = data?.stats ?? {};
@@ -87,6 +108,26 @@ function TraceListPage() {
     const next = new URLSearchParams(searchParams);
     next.set("view", view);
     next.set("page", String(nextPage));
+    setSearchParams(next);
+  };
+  const applyFilters = (event) => {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    next.set("view", view);
+    next.set("page", "1");
+    setOrDeleteParam(next, "q", filters.query);
+    setOrDeleteParam(next, "provider", filters.provider);
+    setOrDeleteParam(next, "model", filters.model);
+    setSearchParams(next);
+  };
+  const resetFilters = () => {
+    setFilters({ query: "", provider: "", model: "" });
+    const next = new URLSearchParams(searchParams);
+    next.set("view", view);
+    next.set("page", "1");
+    next.delete("q");
+    next.delete("provider");
+    next.delete("model");
     setSearchParams(next);
   };
 
@@ -149,6 +190,35 @@ function TraceListPage() {
             </div>
           </div>
         </div>
+        <form className="filter-bar" onSubmit={applyFilters}>
+          <input
+            className="filter-input filter-input-wide"
+            type="search"
+            placeholder={view === "sessions" ? "Search session id, model, provider" : "Search trace id, session id, model"}
+            value={filters.query}
+            onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+          />
+          <input
+            className="filter-input"
+            type="text"
+            placeholder="provider"
+            value={filters.provider}
+            onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
+          />
+          <input
+            className="filter-input"
+            type="text"
+            placeholder="model"
+            value={filters.model}
+            onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
+          />
+          <button className="ghost-button" type="submit">
+            Apply
+          </button>
+          <button className="ghost-button" type="button" onClick={resetFilters}>
+            Reset
+          </button>
+        </form>
 
         {error ? <div className="empty-state error-box">{error}</div> : null}
         {loading && !data ? <div className="empty-state">Loading {view}...</div> : null}
@@ -1052,6 +1122,14 @@ function buildTraceLink(traceID, fromView = "", fromSessionID = "") {
   }
   const query = params.toString();
   return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
+}
+
+function setOrDeleteParam(params, key, value) {
+  if (value && String(value).trim()) {
+    params.set(key, String(value).trim());
+    return;
+  }
+  params.delete(key);
 }
 
 function formatDateTime(value) {

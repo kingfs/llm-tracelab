@@ -224,7 +224,7 @@ func TestListSessionPageAggregatesBySession(t *testing.T) {
 	writeLog("b.http", base.Add(2*time.Minute), 500, 200, 99, "sess-a")
 	writeLog("c.http", base.Add(3*time.Minute), 200, 150, 30, "sess-b")
 
-	result, err := st.ListSessionPage(1, 50)
+	result, err := st.ListSessionPage(1, 50, ListFilter{})
 	if err != nil {
 		t.Fatalf("ListSessionPage() error = %v", err)
 	}
@@ -245,6 +245,116 @@ func TestListSessionPageAggregatesBySession(t *testing.T) {
 	}
 	if result.Items[1].TotalTokens != 10 {
 		t.Fatalf("TotalTokens = %d, want 10", result.Items[1].TotalTokens)
+	}
+}
+
+func TestListPageAppliesFilters(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, model string, provider string, sessionID string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:     name,
+				Time:          time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+				Model:         model,
+				Provider:      provider,
+				Operation:     "responses",
+				Endpoint:      "/v1/responses",
+				URL:           "/v1/responses",
+				Method:        "POST",
+				StatusCode:    200,
+				DurationMs:    30,
+				TTFTMs:        10,
+				ClientIP:      "127.0.0.1",
+				ContentLength: 4,
+			},
+		}
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{
+			SessionID:     sessionID,
+			SessionSource: "header.session_id",
+		}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+		}
+	}
+
+	writeLog("alpha.http", "gpt-alpha", "openai_compatible", "sess-alpha")
+	writeLog("beta.http", "gemini-pro", "google_genai", "sess-beta")
+
+	result, err := st.ListPage(1, 50, ListFilter{Provider: "google_genai", Query: "sess-beta"})
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(result.Items) = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Header.Meta.Model != "gemini-pro" {
+		t.Fatalf("model = %q, want gemini-pro", result.Items[0].Header.Meta.Model)
+	}
+}
+
+func TestListSessionPageAppliesFilters(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, model string, provider string, sessionID string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:     name,
+				Time:          time.Date(2026, 4, 16, 10, 0, 0, 0, time.UTC),
+				Model:         model,
+				Provider:      provider,
+				Operation:     "responses",
+				Endpoint:      "/v1/responses",
+				URL:           "/v1/responses",
+				Method:        "POST",
+				StatusCode:    200,
+				DurationMs:    30,
+				TTFTMs:        10,
+				ClientIP:      "127.0.0.1",
+				ContentLength: 4,
+			},
+		}
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{
+			SessionID:     sessionID,
+			SessionSource: "header.session_id",
+		}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+		}
+	}
+
+	writeLog("codex.http", "gpt-5-codex", "openai_compatible", "sess-codex")
+	writeLog("google.http", "gemini-pro", "google_genai", "sess-google")
+
+	result, err := st.ListSessionPage(1, 50, ListFilter{Model: "codex"})
+	if err != nil {
+		t.Fatalf("ListSessionPage() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(result.Items) = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].SessionID != "sess-codex" {
+		t.Fatalf("SessionID = %q, want sess-codex", result.Items[0].SessionID)
 	}
 }
 
