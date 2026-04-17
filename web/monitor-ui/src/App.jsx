@@ -651,6 +651,19 @@ function TraceDetailPage() {
             <span>ttft {header?.ttft_ms || 0} ms</span>
             <span>tokens {usage?.total_tokens || 0}</span>
           </div>
+          <div className="trace-failure-actions">
+            <button className={tab === "timeline" ? "ghost-button active" : "ghost-button"} onClick={() => setTab("timeline")}>
+              Open Timeline
+            </button>
+            <button className={tab === "raw" ? "ghost-button active" : "ghost-button"} onClick={() => setTab("raw")}>
+              Open Raw Protocol
+            </button>
+            {session?.session_id ? (
+              <Link className="ghost-button" to={`/sessions/${encodeURIComponent(session.session_id)}`}>
+                Back to Session
+              </Link>
+            ) : null}
+          </div>
           {failureSummary.detail ? <pre className="trace-failure-detail">{failureSummary.detail}</pre> : null}
         </section>
       ) : null}

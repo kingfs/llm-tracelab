@@ -649,6 +649,18 @@ a {
   margin-bottom: 12px;
 }
 
+.trace-failure-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.trace-failure-actions .ghost-button {
+  text-decoration: none;
+}
+
 .trace-failure-detail {
   margin: 0;
   padding: 14px;
