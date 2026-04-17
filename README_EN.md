@@ -396,6 +396,28 @@ If the default Go module proxy is slow or blocked in your network, pass `GOPROXY
 GOPROXY=https://goproxy.cn,direct docker compose build
 ```
 
+`task docker:build` and `task docker:up` now share the same build variable convention. They automatically forward the current shell's `GOPROXY`, `GOSUMDB`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values, including lowercase variants, into Docker build:
+
+```bash
+GOPROXY=https://goproxy.cn,direct task docker:build
+GOPROXY=https://goproxy.cn,direct task docker:up
+```
+
+If you want to override Docker build behavior without changing the shell-wide Go settings, use the `DOCKER_BUILD_*` variables consistently:
+
+```bash
+DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
+DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
+```
+
+The same precedence also applies when you run `docker compose build` or `docker compose up --build` directly.
+
+Recommended convention:
+
+- Local development: prefer `DOCKER_BUILD_GOPROXY`; existing shell-wide `GOPROXY` values are still honored as fallback
+- CI / GitHub Actions: leave them unset and use the public default `https://proxy.golang.org,direct`
+- If your network also requires system-level proxy settings, prefer `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`; regular proxy env vars remain supported as fallback
+
 Default mounts:
 
 - `./config/config.docker.yaml -> /app/config/config.yaml:ro`

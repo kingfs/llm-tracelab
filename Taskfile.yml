@@ -50,12 +50,32 @@ tasks:
   docker:build:
     desc: Build Docker image
     cmds:
-      - docker build -t llm-tracelab:local .
+      - >-
+        docker build
+        --build-arg GOPROXY="${DOCKER_BUILD_GOPROXY:-${GOPROXY:-https://proxy.golang.org,direct}}"
+        --build-arg GOSUMDB="${DOCKER_BUILD_GOSUMDB:-${GOSUMDB:-sum.golang.org}}"
+        --build-arg HTTP_PROXY="${DOCKER_BUILD_HTTP_PROXY:-${HTTP_PROXY:-}}"
+        --build-arg HTTPS_PROXY="${DOCKER_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
+        --build-arg NO_PROXY="${DOCKER_BUILD_NO_PROXY:-${NO_PROXY:-}}"
+        --build-arg http_proxy="${DOCKER_BUILD_http_proxy:-${http_proxy:-}}"
+        --build-arg https_proxy="${DOCKER_BUILD_https_proxy:-${https_proxy:-}}"
+        --build-arg no_proxy="${DOCKER_BUILD_no_proxy:-${no_proxy:-}}"
+        -t llm-tracelab:local
+        .
 
   docker:up:
     desc: Start llm-tracelab with docker compose
     cmds:
-      - docker compose up --build -d
+      - >-
+        DOCKER_BUILD_GOPROXY="${DOCKER_BUILD_GOPROXY:-${GOPROXY:-https://proxy.golang.org,direct}}"
+        DOCKER_BUILD_GOSUMDB="${DOCKER_BUILD_GOSUMDB:-${GOSUMDB:-sum.golang.org}}"
+        DOCKER_BUILD_HTTP_PROXY="${DOCKER_BUILD_HTTP_PROXY:-${HTTP_PROXY:-}}"
+        DOCKER_BUILD_HTTPS_PROXY="${DOCKER_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
+        DOCKER_BUILD_NO_PROXY="${DOCKER_BUILD_NO_PROXY:-${NO_PROXY:-}}"
+        DOCKER_BUILD_http_proxy="${DOCKER_BUILD_http_proxy:-${http_proxy:-}}"
+        DOCKER_BUILD_https_proxy="${DOCKER_BUILD_https_proxy:-${https_proxy:-}}"
+        DOCKER_BUILD_no_proxy="${DOCKER_BUILD_no_proxy:-${no_proxy:-}}"
+        docker compose up --build -d
 
   check:
     desc: Run formatting, lint, tests, and UI build

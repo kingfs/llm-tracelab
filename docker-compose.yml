@@ -4,7 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        GOPROXY: ${DOCKER_BUILD_GOPROXY:-${GOPROXY:-https://proxy.golang.org,direct}}
+        GOSUMDB: ${DOCKER_BUILD_GOSUMDB:-${GOSUMDB:-sum.golang.org}}
+        HTTP_PROXY: ${DOCKER_BUILD_HTTP_PROXY:-${HTTP_PROXY:-}}
+        HTTPS_PROXY: ${DOCKER_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-}}
+        NO_PROXY: ${DOCKER_BUILD_NO_PROXY:-${NO_PROXY:-}}
+        http_proxy: ${DOCKER_BUILD_http_proxy:-${http_proxy:-}}
+        https_proxy: ${DOCKER_BUILD_https_proxy:-${https_proxy:-}}
+        no_proxy: ${DOCKER_BUILD_no_proxy:-${no_proxy:-}}
     image: llm-tracelab:local
     ports:
       - "8080:8080"

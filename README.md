@@ -397,6 +397,28 @@ services:
 GOPROXY=https://goproxy.cn,direct docker compose build
 ```
 
+`task docker:build` 和 `task docker:up` 使用同一套构建变量约定，会自动读取当前 shell 的 `GOPROXY`、`GOSUMDB`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`（以及对应的小写变量）并传入 Docker build，无需额外改脚本：
+
+```bash
+GOPROXY=https://goproxy.cn,direct task docker:build
+GOPROXY=https://goproxy.cn,direct task docker:up
+```
+
+如果只希望覆盖 Docker 构建阶段而不影响当前 shell，统一使用 `DOCKER_BUILD_*` 变量：
+
+```bash
+DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
+DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
+```
+
+同样地，直接执行 `docker compose build` / `docker compose up --build` 时，也优先读取 `DOCKER_BUILD_*`，再回落到普通环境变量。
+
+推荐约定：
+
+- 本地开发：优先设置 `DOCKER_BUILD_GOPROXY`；如果已经全局设置 `GOPROXY`，脚本也会自动兼容
+- CI / GitHub Actions：默认不设置，直接使用公开默认值 `https://proxy.golang.org,direct`
+- 如果公司网络还要求系统代理，优先设置 `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`；未设置时会回落到 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
+
 默认挂载：
 
 - `./config/config.docker.yaml -> /app/config/config.yaml:ro`

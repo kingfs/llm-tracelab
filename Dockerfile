@@ -5,11 +5,18 @@ WORKDIR /src
 ENV CGO_ENABLED=0
 
 ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOSUMDB=sum.golang.org
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ARG http_proxy
+ARG https_proxy
+ARG no_proxy
 
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY go.mod go.sum ./
-RUN go env -w GOPROXY="${GOPROXY}" && \
+RUN go env -w GOPROXY="${GOPROXY}" GOSUMDB="${GOSUMDB}" && \
 	go mod download
 
 COPY . .

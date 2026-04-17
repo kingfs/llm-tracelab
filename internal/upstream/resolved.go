@@ -275,8 +275,15 @@ func (u ResolvedUpstream) BuildURL(clientPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	target.Path = joinRequestPath(target, clientPath, u)
+	clientURL, err := url.Parse(clientPath)
+	if err != nil {
+		return "", err
+	}
+	target.Path = joinRequestPath(target, clientURL.Path, u)
 	target.RawPath = target.Path
+	if clientURL.RawQuery != "" {
+		target.RawQuery = clientURL.RawQuery
+	}
 	if u.RoutingProfile == RoutingProfileAzureOpenAIV1 || u.RoutingProfile == RoutingProfileAzureOpenAIDeploy {
 		q := target.Query()
 		if u.APIVersion != "" && q.Get("api-version") == "" {

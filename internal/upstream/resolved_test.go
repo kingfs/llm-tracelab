@@ -345,6 +345,15 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			wantURL: "https://api.anthropic.com/v1/messages",
 		},
 		{
+			name: "anthropic_messages_preserves_query",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+			},
+			path:    "/v1/messages?beta=true",
+			wantURL: "https://api.anthropic.com/v1/messages?beta=true",
+		},
+		{
 			name: "google_generate_content",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "https://generativelanguage.googleapis.com",
