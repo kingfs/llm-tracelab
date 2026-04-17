@@ -86,6 +86,7 @@ type sessionDetailResponse struct {
 
 type detailResponse struct {
 	ID          string            `json:"id"`
+	Session     *traceSessionView `json:"session,omitempty"`
 	Header      recordHeaderView  `json:"header"`
 	Events      []recordEventView `json:"events"`
 	Messages    []ChatMessage     `json:"messages"`
@@ -102,6 +103,11 @@ type rawDetailResponse struct {
 	ResponseProtocol string            `json:"response_protocol"`
 	Header           recordHeaderView  `json:"header"`
 	Events           []recordEventView `json:"events"`
+}
+
+type traceSessionView struct {
+	SessionID     string `json:"session_id"`
+	SessionSource string `json:"session_source"`
 }
 
 type recordHeaderView struct {
@@ -402,6 +408,12 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 			Layout:  parsed.Header.Layout,
 			Usage:   parsed.Header.Usage,
 		},
+	}
+	if entry.SessionID != "" {
+		resp.Session = &traceSessionView{
+			SessionID:     entry.SessionID,
+			SessionSource: entry.SessionSource,
+		}
 	}
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)

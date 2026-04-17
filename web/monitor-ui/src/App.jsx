@@ -153,13 +153,13 @@ function TraceListPage() {
         {error ? <div className="empty-state error-box">{error}</div> : null}
         {loading && !data ? <div className="empty-state">Loading {view}...</div> : null}
 
-        {view === "sessions" ? <SessionList items={items} /> : <RequestList items={items} />}
+        {view === "sessions" ? <SessionList items={items} /> : <RequestList items={items} fromView={view} />}
       </section>
     </div>
   );
 }
 
-function RequestList({ items }) {
+function RequestList({ items, fromView = "", fromSessionID = "" }) {
   return (
     <div className="trace-table">
       <div className="trace-table-head">
@@ -206,7 +206,7 @@ function RequestList({ items }) {
                 <StackIcon />
               </Link>
             ) : null}
-            <Link className="icon-button" to={`/traces/${item.id}`} title="View trace" aria-label="View trace">
+            <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID)} title="View trace" aria-label="View trace">
               <ViewIcon />
             </Link>
             <a className="icon-button" href={`/api/traces/${item.id}/download`} title="Download .http" aria-label="Download trace">
@@ -318,7 +318,7 @@ function SessionDetailPage() {
             <h2>Grouped request list</h2>
           </div>
         </div>
-        <RequestList items={traces} />
+        <RequestList items={traces} fromSessionID={summary?.session_id || sessionID} />
       </section>
     </div>
   );
@@ -326,13 +326,18 @@ function SessionDetailPage() {
 
 function TraceDetailPage() {
   const { traceID = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const [tab, setTab] = useState("timeline");
   const [renderMarkdown, setRenderMarkdown] = useState(true);
   const detail = useJSON(`/api/traces/${traceID}`, [traceID]);
   const raw = useJSON(`/api/traces/${traceID}/raw`, [traceID, tab === "raw" ? "raw" : "summary"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
+  const session = detail.data?.session;
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
+  const fromSessionID = searchParams.get("from_session") || "";
+  const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
+  const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/?view=${fromView}`;
 
   return (
     <div className="shell shell-detail">
@@ -348,6 +353,7 @@ function TraceDetailPage() {
             </div>
           </div>
           <div className="detail-meta-strip">
+            {session?.session_id ? <DetailMetaPill label="session" value={session.session_id} mono /> : null}
             <DetailMetaPill label="time" value={formatDateTime(header?.time)} />
             <DetailMetaPill label="endpoint" value={header?.endpoint || header?.url || "-"} />
             <DetailMetaPill label="duration" value={`${header?.duration_ms || 0} ms`} />
@@ -357,9 +363,14 @@ function TraceDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/" title="Back to list" aria-label="Back to list">
+            <Link className="icon-button" to={backLink} title={fromSessionID ? "Back to session" : "Back to list"} aria-label={fromSessionID ? "Back to session" : "Back to list"}>
               <HomeIcon />
             </Link>
+            {session?.session_id ? (
+              <Link className="icon-button" to={`/sessions/${encodeURIComponent(session.session_id)}`} title="View session" aria-label="View session">
+                <StackIcon />
+              </Link>
+            ) : null}
             <a className="icon-button" href={`/api/traces/${traceID}/download`} title="Download .http" aria-label="Download trace">
               <DownloadIcon />
             </a>
@@ -1029,6 +1040,18 @@ function summarizeSessionItems(items = []) {
     totalTokens: summary.totalTokens,
     avgSuccessRate: summary.totalSessions ? summary.successRateSum / summary.totalSessions : 0,
   };
+}
+
+function buildTraceLink(traceID, fromView = "", fromSessionID = "") {
+  const params = new URLSearchParams();
+  if (fromView) {
+    params.set("view", fromView);
+  }
+  if (fromSessionID) {
+    params.set("from_session", fromSessionID);
+  }
+  const query = params.toString();
+  return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
 }
 
 function formatDateTime(value) {

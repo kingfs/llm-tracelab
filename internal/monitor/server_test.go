@@ -203,6 +203,59 @@ func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
 	}
 }
 
+func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	sessionID := "sess-trace-detail"
+	content := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		false,
+		[]string{"Session_id: " + sessionID},
+		`{"input":"hello"}`,
+		`{"output_text":"done"}`,
+	)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Session == nil {
+		t.Fatalf("session missing from detail payload")
+	}
+	if payload.Session.SessionID != sessionID {
+		t.Fatalf("SessionID = %q, want %q", payload.Session.SessionID, sessionID)
+	}
+	if payload.Session.SessionSource != "header.session_id" {
+		t.Fatalf("SessionSource = %q, want header.session_id", payload.Session.SessionSource)
+	}
+}
+
 func TestTraceRawAPIHandlerReturnsProtocolAndMeta(t *testing.T) {
 	t.Parallel()
 
