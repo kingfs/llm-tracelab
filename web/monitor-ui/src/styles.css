@@ -122,6 +122,10 @@ a {
   margin-bottom: 0;
 }
 
+.upstream-hero-grid {
+  margin-bottom: 18px;
+}
+
 .stat-card,
 .panel,
 .message-card,
@@ -159,6 +163,89 @@ a {
   font-size: 0.84rem;
   line-height: 1.5;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.upstream-section {
+  display: grid;
+  gap: 18px;
+}
+
+.upstream-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.upstream-card {
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.54);
+  padding: 18px 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.upstream-card-head,
+.upstream-card-footer,
+.upstream-model-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.upstream-card-head {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.upstream-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.upstream-card-section {
+  display: grid;
+  gap: 10px;
+}
+
+.upstream-card-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.upstream-model-list {
+  gap: 8px;
+}
+
+.upstream-model-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0.32rem 0.58rem;
+  border-radius: 999px;
+  background: rgba(25, 93, 77, 0.08);
+  border: 1px solid rgba(25, 93, 77, 0.12);
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.2;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.upstream-model-pill-more {
+  background: rgba(184, 120, 24, 0.08);
+  border-color: rgba(184, 120, 24, 0.18);
+}
+
+.upstream-card-footer {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .detail-hero-grid {
@@ -1310,6 +1397,7 @@ a {
   .failure-context-strip,
   .payload-grid,
   .raw-grid,
+  .upstream-grid,
   .trace-table-head,
   .trace-row,
   .session-table-head,
@@ -1342,7 +1430,23 @@ a {
     align-items: stretch;
   }
 
+  .upstream-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .action-group {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .upstream-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upstream-card-head,
+  .upstream-card-footer {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

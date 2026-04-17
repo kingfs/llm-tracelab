@@ -83,6 +83,7 @@ function TraceListPage() {
     requestParams.set("model", model);
   }
   const { loading, data, error } = useJSON(`${endpoint}?${requestParams.toString()}`, [endpoint, page, query, provider, model, refreshTick]);
+  const upstreams = useJSON("/api/upstreams", [refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -165,6 +166,21 @@ function TraceListPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
+            <p className="eyebrow">Routing surface</p>
+            <h2>Active upstream targets</h2>
+          </div>
+          <div className="panel-head-actions">
+            <span className="badge">{upstreams.data?.refreshed_at ? formatTime(upstreams.data.refreshed_at) : "..."}</span>
+          </div>
+        </div>
+        {upstreams.error ? <div className="empty-state error-box">{upstreams.error}</div> : null}
+        {upstreams.loading && !upstreams.data ? <div className="empty-state">Loading upstream targets...</div> : null}
+        {upstreams.data ? <UpstreamOverview items={upstreams.data.items || []} /> : null}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
             <p className="eyebrow">Recent traffic</p>
             <h2>{view === "sessions" ? "Latest 50 sessions" : "Latest 50 traces"}</h2>
           </div>
@@ -225,6 +241,101 @@ function TraceListPage() {
 
         {view === "sessions" ? <SessionList items={items} /> : <RequestList items={items} fromView={view} />}
       </section>
+    </div>
+  );
+}
+
+function UpstreamOverview({ items }) {
+  if (!items.length) {
+    return <div className="empty-state">No upstream targets discovered.</div>;
+  }
+
+  const healthyCount = items.filter((item) => item.health_state === "healthy").length;
+  const attentionCount = items.filter((item) => item.health_state !== "healthy").length;
+  const modelCount = new Set(items.flatMap((item) => item.models || [])).size;
+
+  return (
+    <div className="upstream-section">
+      <div className="hero-grid hero-grid-compact upstream-hero-grid">
+        <StatCard label="Targets" value={items.length} />
+        <StatCard label="Healthy" value={healthyCount} accent="accent-green" />
+        <StatCard label="Attention" value={attentionCount} accent={attentionCount > 0 ? "accent-red" : ""} />
+        <StatCard label="Models" value={modelCount} accent="accent-gold" />
+      </div>
+      <div className="upstream-grid">
+        {items.map((item) => (
+          <article key={item.id} className="upstream-card">
+            <div className="upstream-card-head">
+              <div>
+                <div className="trace-title-row">
+                  <strong className="trace-model-name">{item.id}</strong>
+                  <div className="trace-tag-group">
+                    <InlineTag tone={healthTone(item.health_state)}>{formatHealthLabel(item.health_state)}</InlineTag>
+                    <InlineTag tone="accent">{item.provider_preset || "custom"}</InlineTag>
+                    <InlineTag>{item.routing_profile || item.protocol_family || "route"}</InlineTag>
+                  </div>
+                </div>
+                <span className="trace-subline mono">{item.base_url}</span>
+              </div>
+              <div className="trace-metric-stack">
+                <strong>{item.inflight ?? 0}</strong>
+                <span>inflight</span>
+              </div>
+            </div>
+
+            <div className="upstream-meta-grid">
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">refresh</span>
+                <strong>{item.last_refresh_status || "unknown"}</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">ttft</span>
+                <strong>{Math.round(item.ttft_fast_ms || 0)} ms</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">latency</span>
+                <strong>{Math.round(item.latency_fast_ms || 0)} ms</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">error</span>
+                <strong>{formatRatio(item.error_rate)}</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">timeout</span>
+                <strong>{formatRatio(item.timeout_rate)}</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">capacity</span>
+                <strong>{formatCapacity(item.weight, item.capacity_hint)}</strong>
+              </div>
+            </div>
+
+            <div className="upstream-card-section">
+              <div className="upstream-card-label">Catalog</div>
+              <div className="upstream-model-list">
+                {(item.models || []).length ? (
+                  (item.models || []).slice(0, 12).map((model) => (
+                    <span key={`${item.id}-${model}`} className="upstream-model-pill">
+                      {model}
+                    </span>
+                  ))
+                ) : (
+                  <span className="trace-subline">No models indexed</span>
+                )}
+                {(item.models || []).length > 12 ? (
+                  <span className="upstream-model-pill upstream-model-pill-more">+{item.models.length - 12} more</span>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="upstream-card-footer">
+              <span>last refresh {formatDateTime(item.last_refresh_at)}</span>
+              {item.last_refresh_error ? <span className="status-err">{item.last_refresh_error}</span> : null}
+              {item.open_until ? <span>open until {formatDateTime(item.open_until)}</span> : null}
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1451,6 +1562,36 @@ function formatProviderTag(value = "") {
     return "openai";
   }
   return String(value).replaceAll("_", " ");
+}
+
+function formatHealthLabel(value = "") {
+  if (!value) {
+    return "unknown";
+  }
+  return String(value).replaceAll("_", " ");
+}
+
+function healthTone(value = "") {
+  switch (value) {
+    case "healthy":
+      return "green";
+    case "degraded":
+    case "probation":
+      return "gold";
+    case "open":
+      return "danger";
+    default:
+      return "default";
+  }
+}
+
+function formatRatio(value) {
+  const number = Number(value || 0);
+  return `${(number * 100).toFixed(1)}%`;
+}
+
+function formatCapacity(weight, capacityHint) {
+  return `${Number(weight || 0).toFixed(1)} x ${Number(capacityHint || 0).toFixed(1)}`;
 }
 
 function summarizeTraceFailure(detail) {
