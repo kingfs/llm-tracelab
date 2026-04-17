@@ -36,6 +36,15 @@ type LogInfo struct {
 	Events []RecordEvent
 }
 
+type PrepareOptions struct {
+	SiteURL                        string
+	SelectedUpstreamID             string
+	SelectedUpstreamProviderPreset string
+	RoutingPolicy                  string
+	RoutingScore                   float64
+	RoutingCandidateCount          int
+}
+
 type Recorder struct {
 	OutputDir string
 	MaskKey   bool
@@ -51,6 +60,10 @@ func New(outputDir string, maskKey bool, st *store.Store) *Recorder {
 }
 
 func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, error) {
+	return r.PrepareLogFileWithOptions(req, PrepareOptions{SiteURL: siteURL})
+}
+
+func (r *Recorder) PrepareLogFileWithOptions(req *http.Request, opts PrepareOptions) (*LogInfo, error) {
 	var bodyBytes []byte
 	if req.Body != nil {
 		bodyBytes, _ = io.ReadAll(req.Body)
@@ -59,7 +72,7 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 
 	modelName := "unknown-model"
 	if len(bodyBytes) > 0 {
-		if parsedReq, err := llm.ParseRequestForPath(req.URL.Path, siteURL, bodyBytes); err == nil && parsedReq.Model != "" {
+		if parsedReq, err := llm.ParseRequestForPath(req.URL.Path, opts.SiteURL, bodyBytes); err == nil && parsedReq.Model != "" {
 			modelName = parsedReq.Model
 		} else {
 			var payload struct {
@@ -79,14 +92,14 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 		}
 	}
 
-	u, _ := url.Parse(siteURL)
+	u, _ := url.Parse(opts.SiteURL)
 	siteHost := "unknown"
 	if u != nil {
 		siteHost = u.Host
 	}
 
 	now := time.Now()
-	semantics := llm.ClassifyHTTPRequest(req, siteURL)
+	semantics := llm.ClassifyHTTPRequest(req, opts.SiteURL)
 	dirPath := filepath.Join(
 		r.OutputDir,
 		siteHost,
@@ -147,15 +160,21 @@ func (r *Recorder) PrepareLogFile(req *http.Request, siteURL string) (*LogInfo, 
 	header := RecordHeader{
 		Version: "LLM_PROXY_V3",
 		Meta: MetaData{
-			RequestID: fmt.Sprintf("%d", now.UnixNano()),
-			Time:      now,
-			Model:     modelName,
-			Provider:  semantics.Provider,
-			Operation: semantics.Operation,
-			Endpoint:  semantics.Endpoint,
-			URL:       req.URL.String(),
-			Method:    req.Method,
-			ClientIP:  req.RemoteAddr,
+			RequestID:                      fmt.Sprintf("%d", now.UnixNano()),
+			Time:                           now,
+			Model:                          modelName,
+			Provider:                       semantics.Provider,
+			Operation:                      semantics.Operation,
+			Endpoint:                       semantics.Endpoint,
+			URL:                            req.URL.String(),
+			Method:                         req.Method,
+			ClientIP:                       req.RemoteAddr,
+			SelectedUpstreamID:             opts.SelectedUpstreamID,
+			SelectedUpstreamBaseURL:        opts.SiteURL,
+			SelectedUpstreamProviderPreset: opts.SelectedUpstreamProviderPreset,
+			RoutingPolicy:                  opts.RoutingPolicy,
+			RoutingScore:                   opts.RoutingScore,
+			RoutingCandidateCount:          opts.RoutingCandidateCount,
 		},
 		Layout: LayoutInfo{
 			ReqHeaderLen: int64(nHead),

@@ -118,6 +118,12 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 			if parsed.Header.Meta.URL != "/v1/responses" {
 				t.Fatalf("recorded URL = %q, want /v1/responses", parsed.Header.Meta.URL)
 			}
+			if parsed.Header.Meta.SelectedUpstreamBaseURL != upstream.URL+"/v1" {
+				t.Fatalf("SelectedUpstreamBaseURL = %q, want %q", parsed.Header.Meta.SelectedUpstreamBaseURL, upstream.URL+"/v1")
+			}
+			if parsed.Header.Meta.SelectedUpstreamID == "" {
+				t.Fatalf("SelectedUpstreamID is empty")
+			}
 			if parsed.Header.Layout.IsStream != tt.wantIsStream {
 				t.Fatalf("recorded IsStream = %v, want %v", parsed.Header.Layout.IsStream, tt.wantIsStream)
 			}

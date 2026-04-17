@@ -17,9 +17,16 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/chaos"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
-	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
+)
+
+type contextKey string
+
+const (
+	logInfoContextKey   contextKey = "log_info"
+	selectionContextKey contextKey = "router_selection"
 )
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
@@ -178,38 +185,50 @@ type Handler struct {
 	recorder     *recorder.Recorder
 	chaosManager *chaos.Manager
 	cfg          *config.Config
-	upstream     upstream.ResolvedUpstream
+	router       *router.Router
 }
 
-func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
-	resolvedUpstream, err := upstream.Resolve(cfg.Upstream)
-	if err != nil {
-		return nil, fmt.Errorf("resolve upstream config: %w", err)
+func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
+	var rtr *router.Router
+	if len(provided) > 0 {
+		rtr = provided[0]
 	}
-
-	targetURL, err := url.Parse(resolvedUpstream.BaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("invalid upstream url: %w", err)
+	var err error
+	if rtr == nil {
+		rtr, err = router.New(cfg, st)
+		if err != nil {
+			return nil, fmt.Errorf("build router: %w", err)
+		}
+		if err := rtr.Initialize(); err != nil {
+			return nil, fmt.Errorf("initialize router: %w", err)
+		}
 	}
 
 	rec := recorder.New(cfg.Debug.OutputDir, cfg.Debug.MaskKey, st)
 	cm := chaos.New(cfg)
 
-	rp := httputil.NewSingleHostReverseProxy(targetURL)
-	rp.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	rp := &httputil.ReverseProxy{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
 
-	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
+		selection, ok := req.Context().Value(selectionContextKey).(*router.Selection)
+		if !ok || selection == nil || selection.Target == nil {
+			return
+		}
 		clientPath := req.URL.Path
-		originalDirector(req)
-		req.Host = targetURL.Host
-		req.URL.Scheme = targetURL.Scheme
-		req.URL.Host = targetURL.Host
-		req.URL.Path = targetURL.Path
-		req.URL.RawPath = req.URL.Path
-		fullURL, err := resolvedUpstream.BuildURL(clientPath)
+		if req.URL.RawQuery != "" {
+			clientPath += "?" + req.URL.RawQuery
+		}
+		targetURL, err := url.Parse(selection.Target.Upstream.BaseURL)
+		if err == nil {
+			req.Host = targetURL.Host
+			req.URL.Scheme = targetURL.Scheme
+			req.URL.Host = targetURL.Host
+		}
+		fullURL, err := selection.Target.Upstream.BuildURL(clientPath)
 		if err == nil {
 			if parsed, parseErr := url.Parse(fullURL); parseErr == nil {
 				req.URL.Path = parsed.Path
@@ -217,12 +236,12 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 				req.URL.RawQuery = parsed.RawQuery
 			}
 		}
-		resolvedUpstream.ApplyAuthHeaders(req.Header)
+		selection.Target.Upstream.ApplyAuthHeaders(req.Header)
 		req.Header.Set("Accept-Encoding", "identity")
 	}
 
 	rp.ModifyResponse = func(resp *http.Response) error {
-		logInfo, ok := resp.Request.Context().Value("LogInfo").(*recorder.LogInfo)
+		logInfo, ok := resp.Request.Context().Value(logInfoContextKey).(*recorder.LogInfo)
 		if !ok || logInfo == nil {
 			return nil
 		}
@@ -258,7 +277,7 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		slog.Error("Proxy error", "err", err)
-		if logInfo, ok := r.Context().Value("LogInfo").(*recorder.LogInfo); ok && logInfo != nil {
+		if logInfo, ok := r.Context().Value(logInfoContextKey).(*recorder.LogInfo); ok && logInfo != nil {
 			logInfo.Header.Meta.Error = err.Error()
 		}
 		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
@@ -269,7 +288,7 @@ func NewHandler(cfg *config.Config, st *store.Store) (*Handler, error) {
 		recorder:     rec,
 		chaosManager: cm,
 		cfg:          cfg,
-		upstream:     resolvedUpstream,
+		router:       rtr,
 	}, nil
 }
 
@@ -279,13 +298,40 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// [Step 1] 自动注入 stream_options
 	ensureStreamOptions(r)
 
+	selection, err := h.router.Select(r)
+	if err != nil {
+		slog.Error("Failed to select upstream target", "error", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
 	// [Step 2] 准备日志 (此时 r.Body 已经包含 injected options，Log 里会记录下来)
-	logInfo, err := h.recorder.PrepareLogFile(r, h.upstream.BaseURL)
+	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
+		SiteURL:                        selection.Target.Upstream.BaseURL,
+		SelectedUpstreamID:             selection.Target.ID,
+		SelectedUpstreamProviderPreset: selection.Target.Upstream.ProviderPreset,
+		RoutingPolicy:                  h.routerPolicy(),
+		RoutingScore:                   selection.Score,
+		RoutingCandidateCount:          selection.CandidateCount,
+	})
 	if err != nil {
 		slog.Error("Failed to prepare log file", "err", err)
 		http.Error(w, "Internal Logging Error", 500)
+		h.router.Complete(selection, router.Outcome{})
 		return
 	}
+	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+		Type: "routing.selection",
+		Time: start,
+		Attributes: map[string]interface{}{
+			"upstream_id":       selection.Target.ID,
+			"provider_preset":   selection.Target.Upstream.ProviderPreset,
+			"candidate_count":   selection.CandidateCount,
+			"routing_score":     selection.Score,
+			"routing_policy":    h.routerPolicy(),
+			"candidate_targets": selection.Candidates,
+		},
+	})
 
 	irw := NewInstrumentedResponseWriter(w)
 
@@ -302,9 +348,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if uErr := h.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
 		}
+		h.router.Complete(selection, router.Outcome{Success: code >= 200 && code < 300 && logInfo.Header.Meta.Error == ""})
 
 		slog.Info("Request completed",
 			"model", logInfo.Header.Meta.Model,
+			"selected_upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
 			"status", code,
 			"tokens_total", logInfo.Header.Usage.TotalTokens, // 此时应该有值了
 		)
@@ -321,6 +369,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// ...
 	}
 
-	ctx := context.WithValue(r.Context(), "LogInfo", logInfo)
+	ctx := context.WithValue(r.Context(), logInfoContextKey, logInfo)
+	ctx = context.WithValue(ctx, selectionContextKey, selection)
 	h.proxy.ServeHTTP(irw, r.WithContext(ctx))
+}
+
+func (h *Handler) routerPolicy() string {
+	if h == nil || h.router == nil {
+		return ""
+	}
+	return h.router.Policy()
 }

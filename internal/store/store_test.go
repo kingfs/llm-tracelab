@@ -454,3 +454,97 @@ func TestListSessionPageAppliesFilters(t *testing.T) {
 func len64(v string) int64 {
 	return int64(len(v))
 }
+
+func TestUpstreamCatalogPersistenceAndRoutingMetadata(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertUpstreamTarget(UpstreamTargetRecord{
+		ID:                "openai-primary",
+		BaseURL:           "https://api.openai.com/v1",
+		ProviderPreset:    "openai",
+		ProtocolFamily:    "openai_compatible",
+		RoutingProfile:    "openai_default",
+		Enabled:           true,
+		Priority:          100,
+		Weight:            1,
+		CapacityHint:      1,
+		LastRefreshAt:     time.Date(2026, 4, 17, 7, 0, 0, 0, time.UTC),
+		LastRefreshStatus: "ready",
+	}); err != nil {
+		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
+	}
+	if err := st.ReplaceUpstreamModels("openai-primary", []UpstreamModelRecord{
+		{UpstreamID: "openai-primary", Model: "gpt-5", Source: "catalog", SeenAt: time.Date(2026, 4, 17, 7, 0, 0, 0, time.UTC)},
+		{UpstreamID: "openai-primary", Model: "gpt-4.1", Source: "catalog", SeenAt: time.Date(2026, 4, 17, 7, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
+	}
+
+	logPath := filepath.Join(dir, "trace.http")
+	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:                      "req-1",
+			Time:                           time.Date(2026, 4, 17, 7, 1, 0, 0, time.UTC),
+			Model:                          "gpt-5",
+			Provider:                       "openai_compatible",
+			Operation:                      "responses",
+			Endpoint:                       "/v1/responses",
+			URL:                            "/v1/responses",
+			Method:                         "POST",
+			StatusCode:                     200,
+			DurationMs:                     42,
+			TTFTMs:                         11,
+			ClientIP:                       "127.0.0.1",
+			ContentLength:                  12,
+			SelectedUpstreamID:             "openai-primary",
+			SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+			SelectedUpstreamProviderPreset: "openai",
+			RoutingPolicy:                  "p2c",
+			RoutingScore:                   1.25,
+			RoutingCandidateCount:          2,
+		},
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+
+	entry, err := st.GetByID(mustTraceID(t, st, logPath))
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if entry.Header.Meta.SelectedUpstreamID != "openai-primary" {
+		t.Fatalf("SelectedUpstreamID = %q, want openai-primary", entry.Header.Meta.SelectedUpstreamID)
+	}
+	if entry.Header.Meta.RoutingPolicy != "p2c" {
+		t.Fatalf("RoutingPolicy = %q, want p2c", entry.Header.Meta.RoutingPolicy)
+	}
+	if entry.Header.Meta.RoutingCandidateCount != 2 {
+		t.Fatalf("RoutingCandidateCount = %d, want 2", entry.Header.Meta.RoutingCandidateCount)
+	}
+
+	var count int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM upstream_models WHERE upstream_id = ?`, "openai-primary").Scan(&count); err != nil {
+		t.Fatalf("QueryRow() error = %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("upstream_models count = %d, want 2", count)
+	}
+}
+
+func mustTraceID(t *testing.T, st *Store, path string) string {
+	t.Helper()
+	var traceID string
+	if err := st.db.QueryRow(`SELECT trace_id FROM logs WHERE path = ?`, path).Scan(&traceID); err != nil {
+		t.Fatalf("trace id query error = %v", err)
+	}
+	return traceID
+}

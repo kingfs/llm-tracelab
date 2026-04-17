@@ -36,20 +36,26 @@ type LayoutInfo struct {
 }
 
 type MetaData struct {
-	RequestID     string    `json:"request_id"`
-	Time          time.Time `json:"time"`
-	Model         string    `json:"model"`
-	Provider      string    `json:"provider,omitempty"`
-	Operation     string    `json:"operation,omitempty"`
-	Endpoint      string    `json:"endpoint,omitempty"`
-	URL           string    `json:"url"`
-	Method        string    `json:"method"`
-	StatusCode    int       `json:"status_code"`
-	DurationMs    int64     `json:"duration_ms"`
-	TTFTMs        int64     `json:"ttft_ms"`
-	ClientIP      string    `json:"client_ip"`
-	ContentLength int64     `json:"content_length"`
-	Error         string    `json:"error,omitempty"`
+	RequestID                      string    `json:"request_id"`
+	Time                           time.Time `json:"time"`
+	Model                          string    `json:"model"`
+	Provider                       string    `json:"provider,omitempty"`
+	Operation                      string    `json:"operation,omitempty"`
+	Endpoint                       string    `json:"endpoint,omitempty"`
+	URL                            string    `json:"url"`
+	Method                         string    `json:"method"`
+	StatusCode                     int       `json:"status_code"`
+	DurationMs                     int64     `json:"duration_ms"`
+	TTFTMs                         int64     `json:"ttft_ms"`
+	ClientIP                       string    `json:"client_ip"`
+	ContentLength                  int64     `json:"content_length"`
+	Error                          string    `json:"error,omitempty"`
+	SelectedUpstreamID             string    `json:"selected_upstream_id,omitempty"`
+	SelectedUpstreamBaseURL        string    `json:"selected_upstream_base_url,omitempty"`
+	SelectedUpstreamProviderPreset string    `json:"selected_upstream_provider_preset,omitempty"`
+	RoutingPolicy                  string    `json:"routing_policy,omitempty"`
+	RoutingScore                   float64   `json:"routing_score,omitempty"`
+	RoutingCandidateCount          int       `json:"routing_candidate_count,omitempty"`
 }
 
 type RecordHeader struct {

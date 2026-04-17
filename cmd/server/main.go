@@ -13,6 +13,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/migrate"
 	"github.com/kingfs/llm-tracelab/internal/monitor"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
 )
@@ -58,19 +59,8 @@ func runServe(args []string) int {
 		slog.Error("Failed to load config", "path", *configPath, "error", err)
 		return 1
 	}
-	resolvedUpstream, err := upstream.Resolve(cfg.Upstream)
-	if err != nil {
-		slog.Error("Invalid upstream config", "error", err)
-		return 1
-	}
-	diagnostics, err := resolvedUpstream.StartupDiagnostics()
-	if err != nil {
-		slog.Error("Failed to build upstream startup diagnostics", "error", err)
-		return 1
-	}
 
 	slog.Info("Starting LLM Proxy...", "version", "1.0.0", "go_version", "1.23+")
-	logResolvedUpstreamConfig(resolvedUpstream, diagnostics)
 
 	traceStore, err := store.New(cfg.Debug.OutputDir)
 	if err != nil {
@@ -79,11 +69,16 @@ func runServe(args []string) int {
 	}
 	defer traceStore.Close()
 
-	// 2. 启动自检 (Fail Fast)
-	if err := upstream.CheckConnectivity(cfg.Upstream); err != nil {
-		slog.Error("Startup self-check failed! Exiting.", "error", err)
+	rtr, err := router.New(cfg, traceStore)
+	if err != nil {
+		slog.Error("Invalid upstream config", "error", err)
 		return 1
 	}
+	if err := rtr.Initialize(); err != nil {
+		slog.Error("Failed to initialize upstream router", "error", err)
+		return 1
+	}
+	logResolvedTargets(rtr)
 
 	// --- 启动 Monitor (新增) ---
 	if cfg.Monitor.Port != "" {
@@ -100,7 +95,7 @@ func runServe(args []string) int {
 	}
 
 	// 3. 初始化 Handler
-	handler, err := proxy.NewHandler(cfg, traceStore)
+	handler, err := proxy.NewHandler(cfg, traceStore, rtr)
 	if err != nil {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1
@@ -171,6 +166,29 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  llm-tracelab serve -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab migrate -c config.yaml [-rewrite-v2=true] [-rebuild-index=true]")
+}
+
+func logResolvedTargets(rtr *router.Router) {
+	for _, target := range rtr.Targets() {
+		diagnostics, err := target.Upstream.StartupDiagnostics()
+		if err != nil {
+			slog.Warn("Failed to build upstream startup diagnostics", "upstream_id", target.ID, "error", err)
+			continue
+		}
+		slog.Info(
+			"Resolved upstream target",
+			"upstream_id", target.ID,
+			"base_url", target.Upstream.BaseURL,
+			"provider_preset", target.Upstream.ProviderPreset,
+			"protocol_family", target.Upstream.ProtocolFamily,
+			"routing_profile", target.Upstream.RoutingProfile,
+			"api_version", target.Upstream.APIVersion,
+			"deployment", target.Upstream.Deployment,
+			"connectivity_endpoint", diagnostics.ConnectivityEndpoint,
+			"connectivity_url", diagnostics.ConnectivityURL,
+			"model_routing_hint", diagnostics.ModelRoutingHint,
+		)
+	}
 }
 
 func logResolvedUpstreamConfig(resolvedUpstream upstream.ResolvedUpstream, diagnostics upstream.StartupDiagnostics) {

@@ -90,6 +90,28 @@ type SessionPageResult struct {
 	TotalPages int
 }
 
+type UpstreamTargetRecord struct {
+	ID                string
+	BaseURL           string
+	ProviderPreset    string
+	ProtocolFamily    string
+	RoutingProfile    string
+	Enabled           bool
+	Priority          int
+	Weight            float64
+	CapacityHint      float64
+	LastRefreshAt     time.Time
+	LastRefreshStatus string
+	LastRefreshError  string
+}
+
+type UpstreamModelRecord struct {
+	UpstreamID string
+	Model      string
+	Source     string
+	SeenAt     time.Time
+}
+
 func New(outputDir string) (*Store, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, err
@@ -156,10 +178,38 @@ func (s *Store) initSchema() error {
 			session_id TEXT NOT NULL DEFAULT '',
 			session_source TEXT NOT NULL DEFAULT '',
 			window_id TEXT NOT NULL DEFAULT '',
-			client_request_id TEXT NOT NULL DEFAULT ''
+			client_request_id TEXT NOT NULL DEFAULT '',
+			selected_upstream_id TEXT NOT NULL DEFAULT '',
+			selected_upstream_base_url TEXT NOT NULL DEFAULT '',
+			selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
+			routing_policy TEXT NOT NULL DEFAULT '',
+			routing_score REAL NOT NULL DEFAULT 0,
+			routing_candidate_count INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_recorded_at ON logs(recorded_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_model_recorded_at ON logs(model, recorded_at DESC);`,
+		`CREATE TABLE IF NOT EXISTS upstream_targets (
+			id TEXT PRIMARY KEY,
+			base_url TEXT NOT NULL,
+			provider_preset TEXT NOT NULL,
+			protocol_family TEXT NOT NULL,
+			routing_profile TEXT NOT NULL,
+			enabled INTEGER NOT NULL,
+			priority INTEGER NOT NULL,
+			weight REAL NOT NULL,
+			capacity_hint REAL NOT NULL,
+			last_refresh_at TEXT NOT NULL DEFAULT '',
+			last_refresh_status TEXT NOT NULL DEFAULT '',
+			last_refresh_error TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE TABLE IF NOT EXISTS upstream_models (
+			upstream_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			source TEXT NOT NULL,
+			seen_at TEXT NOT NULL,
+			PRIMARY KEY (upstream_id, model)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_upstream_models_model ON upstream_models(model);`,
 	}
 
 	for _, stmt := range stmts {
@@ -189,6 +239,24 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "selected_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "selected_upstream_base_url", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "selected_upstream_provider_preset", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_policy", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_score", "REAL NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_candidate_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	postColumnStmts := []string{
@@ -321,6 +389,76 @@ func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
 	return s.UpsertLogWithGrouping(path, header, GroupingInfo{})
 }
 
+func (s *Store) UpsertUpstreamTarget(record UpstreamTargetRecord) error {
+	lastRefreshAt := ""
+	if !record.LastRefreshAt.IsZero() {
+		lastRefreshAt = record.LastRefreshAt.UTC().Format(timeLayout)
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO upstream_targets (
+			id, base_url, provider_preset, protocol_family, routing_profile, enabled,
+			priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			base_url=excluded.base_url,
+			provider_preset=excluded.provider_preset,
+			protocol_family=excluded.protocol_family,
+			routing_profile=excluded.routing_profile,
+			enabled=excluded.enabled,
+			priority=excluded.priority,
+			weight=excluded.weight,
+			capacity_hint=excluded.capacity_hint,
+			last_refresh_at=excluded.last_refresh_at,
+			last_refresh_status=excluded.last_refresh_status,
+			last_refresh_error=excluded.last_refresh_error
+	`,
+		record.ID,
+		record.BaseURL,
+		record.ProviderPreset,
+		record.ProtocolFamily,
+		record.RoutingProfile,
+		boolToInt(record.Enabled),
+		record.Priority,
+		record.Weight,
+		record.CapacityHint,
+		lastRefreshAt,
+		record.LastRefreshStatus,
+		record.LastRefreshError,
+	)
+	return err
+}
+
+func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModelRecord) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM upstream_models WHERE upstream_id = ?`, upstreamID); err != nil {
+		return err
+	}
+	for _, record := range records {
+		seenAt := record.SeenAt
+		if seenAt.IsZero() {
+			seenAt = time.Now().UTC()
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO upstream_models (upstream_id, model, source, seen_at)
+			VALUES (?, ?, ?, ?)
+		`,
+			upstreamID,
+			record.Model,
+			record.Source,
+			seenAt.UTC().Format(timeLayout),
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeader, grouping GroupingInfo) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -355,8 +493,10 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -388,7 +528,13 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			session_id=excluded.session_id,
 			session_source=excluded.session_source,
 			window_id=excluded.window_id,
-			client_request_id=excluded.client_request_id
+			client_request_id=excluded.client_request_id,
+			selected_upstream_id=excluded.selected_upstream_id,
+			selected_upstream_base_url=excluded.selected_upstream_base_url,
+			selected_upstream_provider_preset=excluded.selected_upstream_provider_preset,
+			routing_policy=excluded.routing_policy,
+			routing_score=excluded.routing_score,
+			routing_candidate_count=excluded.routing_candidate_count
 	`,
 		path,
 		traceID,
@@ -422,6 +568,12 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		grouping.SessionSource,
 		grouping.WindowID,
 		grouping.ClientRequestID,
+		header.Meta.SelectedUpstreamID,
+		header.Meta.SelectedUpstreamBaseURL,
+		header.Meta.SelectedUpstreamProviderPreset,
+		header.Meta.RoutingPolicy,
+		header.Meta.RoutingScore,
+		header.Meta.RoutingCandidateCount,
 	)
 
 	return err
@@ -568,7 +720,9 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count
 		FROM logs
 		ORDER BY recorded_at DESC
 		LIMIT ?
@@ -617,7 +771,9 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count
 		FROM logs
 	`
 	if whereSQL != "" {
@@ -663,7 +819,9 @@ func (s *Store) GetByID(traceID string) (LogEntry, error) {
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count
 		FROM logs
 		WHERE trace_id = ?
 	`, traceID)
@@ -786,7 +944,9 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count
 		FROM logs
 		WHERE session_id = ?
 		ORDER BY recorded_at DESC, trace_id DESC
@@ -849,11 +1009,12 @@ func scanEntry(scanner interface {
 	Scan(dest ...any) error
 }) (LogEntry, error) {
 	var (
-		entry      LogEntry
-		recordedAt string
-		errorText  string
-		cached     int
-		isStream   int
+		entry        LogEntry
+		recordedAt   string
+		errorText    string
+		cached       int
+		isStream     int
+		routingScore float64
 	)
 
 	err := scanner.Scan(
@@ -887,6 +1048,12 @@ func scanEntry(scanner interface {
 		&entry.SessionSource,
 		&entry.WindowID,
 		&entry.ClientRequestID,
+		&entry.Header.Meta.SelectedUpstreamID,
+		&entry.Header.Meta.SelectedUpstreamBaseURL,
+		&entry.Header.Meta.SelectedUpstreamProviderPreset,
+		&entry.Header.Meta.RoutingPolicy,
+		&routingScore,
+		&entry.Header.Meta.RoutingCandidateCount,
 	)
 	if err != nil {
 		return LogEntry{}, err
@@ -897,6 +1064,7 @@ func scanEntry(scanner interface {
 		return LogEntry{}, err
 	}
 	entry.Header.Meta.Error = errorText
+	entry.Header.Meta.RoutingScore = routingScore
 	entry.Header.Layout.IsStream = isStream == 1
 	if cached > 0 {
 		entry.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
