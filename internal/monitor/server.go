@@ -194,6 +194,10 @@ type upstreamItem struct {
 	RoutingProfile    string                `json:"routing_profile"`
 	HealthState       string                `json:"health_state"`
 	Inflight          int64                 `json:"inflight"`
+	TTFTFastMs        float64               `json:"ttft_fast_ms"`
+	LatencyFastMs     float64               `json:"latency_fast_ms"`
+	ErrorRate         float64               `json:"error_rate"`
+	TimeoutRate       float64               `json:"timeout_rate"`
 	LastRefreshAt     time.Time             `json:"last_refresh_at"`
 	LastRefreshStatus string                `json:"last_refresh_status"`
 	LastRefreshError  string                `json:"last_refresh_error,omitempty"`
@@ -485,6 +489,10 @@ func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.Upstr
 		RoutingProfile:    snapshot.RoutingProfile,
 		HealthState:       snapshot.HealthState,
 		Inflight:          snapshot.Inflight,
+		TTFTFastMs:        snapshot.TTFTFastMs,
+		LatencyFastMs:     snapshot.LatencyFastMs,
+		ErrorRate:         snapshot.ErrorRate,
+		TimeoutRate:       snapshot.TimeoutRate,
 		LastRefreshAt:     snapshot.LastRefreshAt,
 		LastRefreshStatus: snapshot.LastRefreshStatus,
 		LastRefreshError:  snapshot.LastRefreshError,

@@ -963,6 +963,37 @@ function UpstreamDetailPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
+                <p className="eyebrow">Router health</p>
+                <h2>Decision signals</h2>
+              </div>
+            </div>
+            <div className="session-breakdown-grid">
+              <section className="breakdown-card">
+                <div className="breakdown-title">Health state</div>
+                <div className="routing-summary-stack">
+                  <strong className="trace-model-name">{formatHealthLabel(target?.health_state)}</strong>
+                  <div className="trace-tag-group">
+                    <InlineTag tone={healthTone(target?.health_state)}>{formatHealthLabel(target?.health_state)}</InlineTag>
+                    <InlineTag tone="accent">{formatFailureReason(breakdown?.failure_reasons?.[0]?.label || "unknown_failure")}</InlineTag>
+                  </div>
+                  <span className="trace-subline">{buildUpstreamHealthSummary(target, breakdown?.failure_reasons || [])}</span>
+                </div>
+              </section>
+              <section className="breakdown-card">
+                <div className="breakdown-title">Live metrics</div>
+                <div className="detail-meta-strip">
+                  <DetailMetaPill label="error" value={formatRatio(target?.error_rate)} />
+                  <DetailMetaPill label="timeout" value={formatRatio(target?.timeout_rate)} />
+                  <DetailMetaPill label="ttft" value={`${Math.round(target?.ttft_fast_ms || target?.avg_ttft || 0)} ms`} />
+                  <DetailMetaPill label="latency" value={`${Math.round(target?.latency_fast_ms || 0)} ms`} />
+                  <DetailMetaPill label="refresh" value={target?.last_refresh_status || "unknown"} />
+                </div>
+              </section>
+            </div>
+          </section>
+          <section className="panel">
+            <div className="panel-head">
+              <div>
                 <p className="eyebrow">Distribution</p>
                 <h2>Models and endpoints</h2>
               </div>
@@ -2255,6 +2286,14 @@ function buildFailureDetail(item) {
     parts.push(`ttft ${item.ttft_ms} ms`);
   }
   return parts.join(" · ");
+}
+
+function buildUpstreamHealthSummary(target, failureReasons = []) {
+  const health = formatHealthLabel(target?.health_state || "unknown");
+  const errorRate = formatRatio(target?.error_rate);
+  const timeoutRate = formatRatio(target?.timeout_rate);
+  const topReason = failureReasons[0]?.label ? formatFailureReason(failureReasons[0].label) : "no dominant failure reason";
+  return `${health} with error ${errorRate}, timeout ${timeoutRate}, dominant failure ${topReason}.`;
 }
 
 function formatSignedMetric(value = 0) {
