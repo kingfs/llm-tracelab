@@ -576,8 +576,8 @@ function BreakdownList({ title, items, formatter }) {
 
 function TraceDetailPage() {
   const { traceID = "" } = useParams();
-  const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState("timeline");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [tab, setTab] = useState(() => normalizeTraceTab(searchParams.get("tab")));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
   const detail = useJSON(`/api/traces/${traceID}`, [traceID]);
   const raw = useJSON(`/api/traces/${traceID}/raw`, [traceID, tab === "raw" ? "raw" : "summary"]);
@@ -589,6 +589,27 @@ function TraceDetailPage() {
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/?view=${fromView}`;
+
+  useEffect(() => {
+    const requestedTab = normalizeTraceTab(searchParams.get("tab"));
+    setTab((current) => (current === requestedTab ? current : requestedTab));
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (tab !== "tools" || hasDeclaredToolsTab) {
+      return;
+    }
+    setTab("timeline");
+  }, [hasDeclaredToolsTab, tab]);
+
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "tab", tab === "timeline" ? "" : tab);
+    if (next.toString() === searchParams.toString()) {
+      return;
+    }
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, tab]);
 
   return (
     <div className="shell shell-detail">
@@ -1366,16 +1387,31 @@ function summarizeSessionItems(items = []) {
   };
 }
 
-function buildTraceLink(traceID, fromView = "", fromSessionID = "") {
+function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "") {
   const params = new URLSearchParams();
+  const normalizedTab = normalizeTraceTab(tab);
   if (fromView) {
     params.set("view", fromView);
   }
   if (fromSessionID) {
     params.set("from_session", fromSessionID);
   }
+  if (tab && normalizedTab !== "timeline") {
+    params.set("tab", normalizedTab);
+  }
   const query = params.toString();
   return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
+}
+
+function normalizeTraceTab(value = "") {
+  switch (value) {
+    case "summary":
+    case "raw":
+    case "tools":
+      return value;
+    default:
+      return "timeline";
+  }
 }
 
 function setOrDeleteParam(params, key, value) {
