@@ -836,7 +836,7 @@ func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -886,7 +886,7 @@ func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -903,6 +903,93 @@ func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 	}
 	if payload.Session.SessionSource != "header.session_id" {
 		t.Fatalf("SessionSource = %q, want header.session_id", payload.Session.SessionSource)
+	}
+}
+
+func TestTraceDetailAPIHandlerIncludesSelectedUpstreamHealth(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	reqBody := `{"input":"hello"}`
+	resBody := `{"output_text":"done"}`
+	header := buildRecordHeader("/v1/responses", false, reqBody, resBody)
+	header.Meta.SelectedUpstreamID = "openai-primary"
+	header.Meta.SelectedUpstreamBaseURL = "https://api.openai.com/v1"
+	header.Meta.SelectedUpstreamProviderPreset = "openai"
+	header.Meta.RoutingPolicy = "p2c"
+	header.Meta.RoutingScore = 0.91
+	header.Meta.RoutingCandidateCount = 2
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	payload := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" +
+		reqBody + "\n" +
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" +
+		resBody
+	if err := os.WriteFile(tracePath, append(prelude, []byte(payload)...), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.1-codex"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	rtr, err := router.New(cfg, nil)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, rtr).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payloadResp detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payloadResp); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payloadResp.SelectedUpstreamHealth == nil {
+		t.Fatalf("SelectedUpstreamHealth missing from detail payload")
+	}
+	if payloadResp.SelectedUpstreamHealth.ID != "openai-primary" {
+		t.Fatalf("SelectedUpstreamHealth.ID = %q, want openai-primary", payloadResp.SelectedUpstreamHealth.ID)
+	}
+	if payloadResp.SelectedUpstreamHealth.HealthState != router.HealthHealthy {
+		t.Fatalf("HealthState = %q, want %q", payloadResp.SelectedUpstreamHealth.HealthState, router.HealthHealthy)
+	}
+	if payloadResp.SelectedUpstreamHealth.HealthThresholds.ErrorRateDegraded != 0.15 {
+		t.Fatalf("ErrorRateDegraded = %v, want 0.15", payloadResp.SelectedUpstreamHealth.HealthThresholds.ErrorRateDegraded)
 	}
 }
 
@@ -931,7 +1018,7 @@ func TestTraceRawAPIHandlerReturnsProtocolAndMeta(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/raw", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -993,7 +1080,7 @@ func TestTraceRawAPIHandlerReturnsEventAttributes(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/raw", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -1070,7 +1157,7 @@ func TestTraceDetailAPIHandlerFiltersNoisyDeltaEvents(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -1126,7 +1213,7 @@ func TestTraceDetailAPIHandlerEnrichesRequestAndResponseTimeline(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -1217,7 +1304,7 @@ func TestTraceDetailAPIHandlerSurfacesProviderErrorBlocks(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -1285,7 +1372,7 @@ func TestTraceDetailAPIHandlerSurfacesRefusalBlocks(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -1348,7 +1435,7 @@ func TestTraceDownloadAPIHandlerSetsAttachmentDisposition(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/download", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
 	}
@@ -1369,7 +1456,7 @@ func TestTraceAPIHandlerReturnsNotFoundForUnknownID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/traces/missing/raw", nil)
 	rr := httptest.NewRecorder()
-	traceAPIHandler(st).ServeHTTP(rr, req)
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
 	}
@@ -1408,7 +1495,7 @@ func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) 
 		LogPath: tracePath,
 	}
 	rr := httptest.NewRecorder()
-	handleTraceDetail(rr, tracePath, entry)
+	handleTraceDetail(rr, tracePath, entry, nil)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rr.Code)
 	}

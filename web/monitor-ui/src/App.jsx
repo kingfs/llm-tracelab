@@ -1198,6 +1198,7 @@ function TraceDetailPage() {
   const routingScore = Number(header?.routing_score || 0);
   const routingCandidateCount = Number(header?.routing_candidate_count || 0);
   const routingFailureReason = header?.routing_failure_reason || "";
+  const selectedUpstreamHealth = detail.data?.selected_upstream_health;
   const focusTarget = searchParams.get("focus") || "";
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
   const fromSessionID = searchParams.get("from_session") || "";
@@ -1401,6 +1402,31 @@ function TraceDetailPage() {
                     </span>
                   </div>
                 </section>
+                {selectedUpstreamHealth ? (
+                  <section className="breakdown-card">
+                    <div className="breakdown-title">Upstream health at review time</div>
+                    <div className="routing-summary-stack">
+                      <div className="trace-tag-group">
+                        <InlineTag tone={healthTone(selectedUpstreamHealth.health_state)}>{formatHealthLabel(selectedUpstreamHealth.health_state)}</InlineTag>
+                        <InlineTag tone={metricThresholdTone(resolveThresholdState(selectedUpstreamHealth.error_rate, selectedUpstreamHealth.health_thresholds?.error_rate_degraded, selectedUpstreamHealth.health_thresholds?.error_rate_open))}>
+                          error {resolveThresholdState(selectedUpstreamHealth.error_rate, selectedUpstreamHealth.health_thresholds?.error_rate_degraded, selectedUpstreamHealth.health_thresholds?.error_rate_open)}
+                        </InlineTag>
+                        <InlineTag tone={metricThresholdTone(resolveThresholdState(selectedUpstreamHealth.timeout_rate, selectedUpstreamHealth.health_thresholds?.timeout_rate_degraded, selectedUpstreamHealth.health_thresholds?.timeout_rate_open))}>
+                          timeout {resolveThresholdState(selectedUpstreamHealth.timeout_rate, selectedUpstreamHealth.health_thresholds?.timeout_rate_degraded, selectedUpstreamHealth.health_thresholds?.timeout_rate_open)}
+                        </InlineTag>
+                      </div>
+                      <span className="trace-subline">
+                        {buildTraceUpstreamHealthSummary(selectedUpstreamHealth)}
+                      </span>
+                      <div className="detail-meta-strip">
+                        <DetailMetaPill label="error" value={formatRatio(selectedUpstreamHealth.error_rate)} />
+                        <DetailMetaPill label="timeout" value={formatRatio(selectedUpstreamHealth.timeout_rate)} />
+                        <DetailMetaPill label="ttft" value={`${Math.round(selectedUpstreamHealth.ttft_fast_ms || 0)} ms`} />
+                        <DetailMetaPill label="latency" value={`${Math.round(selectedUpstreamHealth.latency_fast_ms || 0)} ms`} />
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -2353,6 +2379,17 @@ function buildUpstreamHealthSummary(target, failureReasons = [], thresholds = nu
   }
   const signalText = signals.length ? ` Thresholds: ${signals.join(", ")}.` : "";
   return `${health} with error ${errorRate}, timeout ${timeoutRate}, dominant failure ${topReason}.${signalText}`;
+}
+
+function buildTraceUpstreamHealthSummary(health) {
+  if (!health) {
+    return "No upstream health context available.";
+  }
+  const thresholds = health.health_thresholds || {};
+  const errorState = resolveThresholdState(health.error_rate, thresholds.error_rate_degraded, thresholds.error_rate_open);
+  const timeoutState = resolveThresholdState(health.timeout_rate, thresholds.timeout_rate_degraded, thresholds.timeout_rate_open);
+  const ttftState = resolveThresholdState(computeTTFTRatio(health), thresholds.ttft_degraded_ratio, null);
+  return `${formatHealthLabel(health.health_state)} now; error ${formatRatio(health.error_rate)} (${errorState}), timeout ${formatRatio(health.timeout_rate)} (${timeoutState}), ttft ratio ${formatMultiplier(computeTTFTRatio(health))} (${ttftState}).`;
 }
 
 function computeTTFTRatio(target) {

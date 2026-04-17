@@ -114,16 +114,31 @@ type sessionTimelineItem struct {
 }
 
 type detailResponse struct {
-	ID          string            `json:"id"`
-	Session     *traceSessionView `json:"session,omitempty"`
-	Header      recordHeaderView  `json:"header"`
-	Events      []recordEventView `json:"events"`
-	Messages    []ChatMessage     `json:"messages"`
-	Tools       []RequestTool     `json:"tools"`
-	AIContent   string            `json:"ai_content"`
-	AIReasoning string            `json:"ai_reasoning"`
-	AIBlocks    []ContentBlock    `json:"ai_blocks"`
-	ToolCalls   []ToolCall        `json:"tool_calls"`
+	ID                     string                   `json:"id"`
+	Session                *traceSessionView        `json:"session,omitempty"`
+	Header                 recordHeaderView         `json:"header"`
+	Events                 []recordEventView        `json:"events"`
+	Messages               []ChatMessage            `json:"messages"`
+	Tools                  []RequestTool            `json:"tools"`
+	AIContent              string                   `json:"ai_content"`
+	AIReasoning            string                   `json:"ai_reasoning"`
+	AIBlocks               []ContentBlock           `json:"ai_blocks"`
+	ToolCalls              []ToolCall               `json:"tool_calls"`
+	SelectedUpstreamHealth *traceUpstreamHealthView `json:"selected_upstream_health,omitempty"`
+}
+
+type traceUpstreamHealthView struct {
+	ID                string              `json:"id"`
+	HealthState       string              `json:"health_state"`
+	TTFTFastMs        float64             `json:"ttft_fast_ms"`
+	TTFTSlowMs        float64             `json:"ttft_slow_ms"`
+	LatencyFastMs     float64             `json:"latency_fast_ms"`
+	ErrorRate         float64             `json:"error_rate"`
+	TimeoutRate       float64             `json:"timeout_rate"`
+	Inflight          int64               `json:"inflight"`
+	LastRefreshAt     time.Time           `json:"last_refresh_at"`
+	LastRefreshStatus string              `json:"last_refresh_status"`
+	HealthThresholds  healthThresholdView `json:"health_thresholds"`
 }
 
 type rawDetailResponse struct {
@@ -284,7 +299,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		opt = opts[0]
 	}
 	mux.HandleFunc("/api/traces", listAPIHandler(st))
-	mux.HandleFunc("/api/traces/", traceAPIHandler(st))
+	mux.HandleFunc("/api/traces/", traceAPIHandler(st, opt.Router))
 	mux.HandleFunc("/api/sessions", sessionListAPIHandler(st))
 	mux.HandleFunc("/api/sessions/", sessionDetailAPIHandler(st))
 	mux.HandleFunc("/api/upstreams", upstreamListAPIHandler(st, opt.Router))
@@ -541,6 +556,32 @@ func toHealthThresholdView(thresholds router.HealthThresholds) healthThresholdVi
 		FailureThreshold:    thresholds.FailureThreshold,
 		OpenWindow:          thresholds.OpenWindow.String(),
 	}
+}
+
+func selectedUpstreamHealthView(rtr *router.Router, upstreamID string) *traceUpstreamHealthView {
+	if rtr == nil || strings.TrimSpace(upstreamID) == "" {
+		return nil
+	}
+	thresholds := toHealthThresholdView(rtr.HealthThresholds())
+	for _, snapshot := range rtr.Snapshots() {
+		if snapshot.ID != upstreamID {
+			continue
+		}
+		return &traceUpstreamHealthView{
+			ID:                snapshot.ID,
+			HealthState:       snapshot.HealthState,
+			TTFTFastMs:        snapshot.TTFTFastMs,
+			TTFTSlowMs:        snapshot.TTFTSlowMs,
+			LatencyFastMs:     snapshot.LatencyFastMs,
+			ErrorRate:         snapshot.ErrorRate,
+			TimeoutRate:       snapshot.TimeoutRate,
+			Inflight:          snapshot.Inflight,
+			LastRefreshAt:     snapshot.LastRefreshAt,
+			LastRefreshStatus: snapshot.LastRefreshStatus,
+			HealthThresholds:  thresholds,
+		}
+	}
+	return nil
 }
 
 func newUpstreamItemFromStore(target store.UpstreamTargetRecord, models []string, analytics store.UpstreamAnalyticsRecord) upstreamItem {
@@ -821,7 +862,7 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func traceAPIHandler(st *store.Store) http.HandlerFunc {
+func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(pathClean(r.URL.Path), "/api/traces/")
 		path = strings.Trim(path, "/")
@@ -844,7 +885,7 @@ func traceAPIHandler(st *store.Store) http.HandlerFunc {
 
 		switch {
 		case len(parts) == 1 && r.Method == http.MethodGet:
-			handleTraceDetail(w, absPath, entry)
+			handleTraceDetail(w, absPath, entry, rtr)
 		case len(parts) == 2 && parts[1] == "raw" && r.Method == http.MethodGet:
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
@@ -855,7 +896,7 @@ func traceAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry) {
+func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry, rtr *router.Router) {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
@@ -887,6 +928,9 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 			SessionID:     entry.SessionID,
 			SessionSource: entry.SessionSource,
 		}
+	}
+	if health := selectedUpstreamHealthView(rtr, entry.Header.Meta.SelectedUpstreamID); health != nil {
+		resp.SelectedUpstreamHealth = health
 	}
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)
