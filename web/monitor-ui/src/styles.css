@@ -995,12 +995,21 @@ a {
 
 .failure-context-head span,
 .failure-node,
-.failure-node-label {
+.failure-node-label,
+.failure-context-summary,
+.failure-delta-row,
+.failure-node-detail {
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .failure-context-head span {
   color: var(--muted);
+}
+
+.failure-context-summary {
+  margin: 0 0 14px;
+  color: var(--text);
+  line-height: 1.5;
 }
 
 .failure-context-strip {
@@ -1033,6 +1042,23 @@ a {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.14em;
+}
+
+.failure-delta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.failure-node-detail {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .timeline-tree {

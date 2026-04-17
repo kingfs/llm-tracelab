@@ -477,9 +477,17 @@ function SessionDetailPage() {
                   <strong>{context.current.model || "unknown-model"}</strong>
                   <span>{formatDateTime(context.current.time)}</span>
                 </div>
+                <p className="failure-context-summary">{buildFailureSummary(context)}</p>
                 <div className="failure-context-strip">
                   {context.previous ? <FailureContextNode label="Before" item={context.previous} tone="default" sessionID={summary?.session_id || sessionID} /> : null}
-                  <FailureContextNode label="Failed" item={context.current} tone="danger" sessionID={summary?.session_id || sessionID} />
+                  <FailureContextNode
+                    label="Failed"
+                    item={context.current}
+                    tone="danger"
+                    sessionID={summary?.session_id || sessionID}
+                    delta={buildFailureDelta(context.previous, context.current)}
+                    detail={context.current.error || buildFailureDetail(context.current)}
+                  />
                   {context.next ? <FailureContextNode label="After" item={context.next} tone="accent" sessionID={summary?.session_id || sessionID} /> : null}
                 </div>
               </article>
@@ -518,7 +526,7 @@ function SessionDetailPage() {
   );
 }
 
-function FailureContextNode({ label, item, tone = "default", sessionID = "" }) {
+function FailureContextNode({ label, item, tone = "default", sessionID = "", delta = null, detail = "" }) {
   return (
     <div className={`failure-node failure-node-${tone}`}>
       <div className="failure-node-label">{label}</div>
@@ -529,6 +537,14 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "" }) {
       <strong>{item.model || "unknown-model"}</strong>
       <span>{formatDateTime(item.time)}</span>
       <span>duration {item.duration_ms} ms</span>
+      <span>tokens {item.total_tokens}</span>
+      {delta ? (
+        <div className="failure-delta-row">
+          <span>vs prev duration {formatSignedMetric(delta.duration_ms)} ms</span>
+          <span>tokens {formatSignedMetric(delta.total_tokens)}</span>
+        </div>
+      ) : null}
+      {detail ? <div className="failure-node-detail">{detail}</div> : null}
       <div className="action-group action-group-start">
         <Link className="icon-button" to={buildTraceLink(item.trace_id, "", sessionID)} title="View trace" aria-label="View trace">
           <ViewIcon />
@@ -1310,6 +1326,49 @@ function buildFailureContexts(timeline = []) {
     });
   }
   return failures;
+}
+
+function buildFailureSummary(context) {
+  const endpoint = formatEndpointTag(context.current.endpoint);
+  const provider = formatProviderTag(context.current.provider);
+  const status = context.current.status_code || 0;
+  if (context.previous) {
+    const durationDelta = formatSignedMetric(context.current.duration_ms - context.previous.duration_ms);
+    return `${provider} ${endpoint} failed with HTTP ${status}; duration ${durationDelta} ms vs previous request.`;
+  }
+  return `${provider} ${endpoint} failed with HTTP ${status}.`;
+}
+
+function buildFailureDelta(previous, current) {
+  if (!previous || !current) {
+    return null;
+  }
+  return {
+    duration_ms: current.duration_ms - previous.duration_ms,
+    total_tokens: current.total_tokens - previous.total_tokens,
+  };
+}
+
+function buildFailureDetail(item) {
+  const parts = [];
+  if (item.endpoint) {
+    parts.push(item.endpoint);
+  }
+  if (item.provider) {
+    parts.push(formatProviderTag(item.provider));
+  }
+  if (item.ttft_ms) {
+    parts.push(`ttft ${item.ttft_ms} ms`);
+  }
+  return parts.join(" · ");
+}
+
+function formatSignedMetric(value = 0) {
+  const number = Number(value || 0);
+  if (number > 0) {
+    return `+${number}`;
+  }
+  return String(number);
 }
 
 function formatDateTime(value) {
