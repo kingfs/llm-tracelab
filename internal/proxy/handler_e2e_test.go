@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -246,6 +247,90 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	}
 	if entries[0].Header.Meta.RoutingFailureReason != router.SelectionFailureNoSupportingTarget {
 		t.Fatalf("indexed RoutingFailureReason = %q, want %q", entries[0].Header.Meta.RoutingFailureReason, router.SelectionFailureNoSupportingTarget)
+	}
+}
+
+func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1", "gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "anthropic-secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1", "claude-sonnet-4-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", rec.Code)
+	}
+
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, rec.Body.String())
+	}
+	if len(payload.Data) != 3 {
+		t.Fatalf("len(data) = %d, want 3; body=%s", len(payload.Data), rec.Body.String())
+	}
+	want := []string{"claude-sonnet-4-5", "glm-5.1", "gpt-5"}
+	for i := range want {
+		if payload.Data[i].ID != want[i] {
+			t.Fatalf("data[%d].id = %q, want %q", i, payload.Data[i].ID, want[i])
+		}
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/models" {
+		t.Fatalf("recorded Endpoint = %q, want /v1/models", parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Meta.StatusCode != http.StatusOK {
+		t.Fatalf("recorded StatusCode = %d, want 200", parsed.Header.Meta.StatusCode)
 	}
 }
 

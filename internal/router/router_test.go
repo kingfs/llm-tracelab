@@ -241,6 +241,54 @@ func TestRouterSelectAllowsAnthropicModelListEndpoint(t *testing.T) {
 	}
 }
 
+func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1", "gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1", "claude-sonnet-4-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	models := rtr.AggregatedModels()
+	want := []string{"claude-sonnet-4-5", "glm-5.1", "gpt-5"}
+	if len(models) != len(want) {
+		t.Fatalf("len(models) = %d, want %d (%v)", len(models), len(want), models)
+	}
+	for i := range want {
+		if models[i] != want[i] {
+			t.Fatalf("models[%d] = %q, want %q (all=%v)", i, models[i], want[i], models)
+		}
+	}
+}
+
 func TestRouterAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

@@ -22,6 +22,17 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
 
+type aggregatedModelListResponse struct {
+	Object string                     `json:"object,omitempty"`
+	Data   []aggregatedModelListEntry `json:"data"`
+}
+
+type aggregatedModelListEntry struct {
+	ID      string `json:"id"`
+	Object  string `json:"object,omitempty"`
+	OwnedBy string `json:"owned_by,omitempty"`
+}
+
 type contextKey string
 
 const (
@@ -295,6 +306,11 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
+	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
+		h.serveAggregatedModelList(w, r, start)
+		return
+	}
+
 	// [Step 1] 自动注入 stream_options
 	ensureStreamOptions(r)
 
@@ -384,6 +400,86 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), logInfoContextKey, logInfo)
 	ctx = context.WithValue(ctx, selectionContextKey, selection)
 	h.proxy.ServeHTTP(irw, r.WithContext(ctx))
+}
+
+func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
+	if h == nil || h.router == nil {
+		http.Error(w, "router unavailable", http.StatusBadGateway)
+		return
+	}
+
+	models := h.router.AggregatedModels()
+	payload := aggregatedModelListResponse{
+		Object: "list",
+		Data:   make([]aggregatedModelListEntry, 0, len(models)),
+	}
+	for _, model := range models {
+		payload.Data = append(payload.Data, aggregatedModelListEntry{
+			ID:      model,
+			Object:  "model",
+			OwnedBy: "llm-tracelab",
+		})
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "failed to marshal model list", http.StatusInternalServerError)
+		return
+	}
+
+	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
+		RoutingPolicy: h.routerPolicy(),
+	})
+	if err != nil {
+		slog.Error("Failed to prepare aggregated model-list log file", "err", err)
+		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
+		return
+	}
+	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+		Type: "routing.aggregate",
+		Time: start,
+		Attributes: map[string]interface{}{
+			"endpoint":    "/v1/models",
+			"model_count": len(models),
+		},
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(body); err != nil {
+		slog.Error("Failed to write aggregated model-list response", "err", err)
+	}
+
+	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", http.StatusOK, http.StatusText(http.StatusOK)))
+	headerBuf.WriteString("Content-Type: application/json\r\n")
+	headerBuf.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	headerBuf.WriteString("\r\n")
+	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
+		slog.Error("Failed to write aggregated model-list separator", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+	nHead, err := logInfo.File.Write(headerBuf.Bytes())
+	if err != nil {
+		slog.Error("Failed to write aggregated model-list response header", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+	nBody, err := logInfo.File.Write(body)
+	if err != nil {
+		slog.Error("Failed to write aggregated model-list response body", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+
+	logInfo.Header.Meta.DurationMs = time.Since(start).Milliseconds()
+	logInfo.Header.Meta.StatusCode = http.StatusOK
+	logInfo.Header.Meta.ContentLength = int64(len(body))
+	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
+	logInfo.Header.Layout.ResBodyLen = int64(nBody)
+	logInfo.Header.Layout.IsStream = false
+	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+		slog.Error("Failed to update aggregated model-list log file", "path", logInfo.Path, "err", err)
+	}
 }
 
 func (h *Handler) routerPolicy() string {

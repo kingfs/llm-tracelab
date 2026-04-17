@@ -398,6 +398,34 @@ func (r *Router) Snapshots() []Snapshot {
 	return out
 }
 
+func (r *Router) AggregatedModels() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	targets := append([]*Target(nil), r.targets...)
+	r.mu.RUnlock()
+
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, target := range targets {
+		target.mu.Lock()
+		for model := range target.models {
+			if model == "" {
+				continue
+			}
+			if _, ok := seen[model]; ok {
+				continue
+			}
+			seen[model] = struct{}{}
+			out = append(out, model)
+		}
+		target.mu.Unlock()
+	}
+	slices.Sort(out)
+	return out
+}
+
 func (r *Router) Select(req *http.Request) (*Selection, error) {
 	if req == nil {
 		return nil, &SelectionError{
