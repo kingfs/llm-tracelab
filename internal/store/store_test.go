@@ -674,7 +674,7 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 	writeLog("match-b.http", base.Add(2*time.Minute), "/v1/chat/completions", "gpt-5", 503, 0, "upstream overloaded")
 	writeLog("other-model.http", base.Add(3*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, 10, "")
 
-	detail, err := st.GetUpstreamDetail("openai-primary", time.Time{}, "gpt-5", 10)
+	detail, err := st.GetUpstreamDetail("openai-primary", time.Time{}, "gpt-5", 10, time.Minute, 4)
 	if err != nil {
 		t.Fatalf("GetUpstreamDetail() error = %v", err)
 	}
@@ -695,6 +695,16 @@ func TestGetUpstreamDetailReturnsBreakdownAndRecentTraces(t *testing.T) {
 	}
 	if len(detail.Analytics.RecentFailures) != 1 || detail.Analytics.RecentFailures[0].Model != "gpt-5" {
 		t.Fatalf("RecentFailures = %#v, want one gpt-5 failure", detail.Analytics.RecentFailures)
+	}
+	if len(detail.Timeline) != 4 {
+		t.Fatalf("len(Timeline) = %d, want 4", len(detail.Timeline))
+	}
+	totalTimeline := 0
+	for _, item := range detail.Timeline {
+		totalTimeline += item.Count
+	}
+	if totalTimeline != 1 {
+		t.Fatalf("timeline total = %d, want 1", totalTimeline)
 	}
 }
 

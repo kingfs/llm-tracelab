@@ -761,6 +761,16 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	if len(payload.Timeline) != 1 || payload.Timeline[0].StatusCode != 503 {
 		t.Fatalf("Timeline = %#v, want one 503 failure", payload.Timeline)
 	}
+	if len(payload.FailureTimeline) != 12 {
+		t.Fatalf("len(FailureTimeline) = %d, want 12", len(payload.FailureTimeline))
+	}
+	totalTimeline := 0
+	for _, item := range payload.FailureTimeline {
+		totalTimeline += item.Count
+	}
+	if totalTimeline != 1 {
+		t.Fatalf("failure timeline total = %d, want 1", totalTimeline)
+	}
 }
 
 func TestUpstreamDetailAPIHandlerReturnsNotFound(t *testing.T) {

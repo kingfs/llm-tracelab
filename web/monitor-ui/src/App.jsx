@@ -843,6 +843,7 @@ function UpstreamDetailPage() {
   const breakdown = detail.data?.breakdown;
   const traces = detail.data?.traces ?? [];
   const timeline = detail.data?.timeline ?? [];
+  const failureTimeline = detail.data?.failure_timeline ?? [];
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -976,8 +977,22 @@ function UpstreamDetailPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
+            <p className="eyebrow">Failure trend</p>
+            <h2>Time-bucketed failures</h2>
+          </div>
+        </div>
+        {failureTimeline.length ? (
+          <RoutingFailureTimeline items={failureTimeline} />
+        ) : (
+          <div className="empty-state">No failure timeline available for this upstream.</div>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
             <p className="eyebrow">Recent failures</p>
-            <h2>Failure timeline</h2>
+            <h2>Latest failed traces</h2>
           </div>
         </div>
         {timeline.length ? (

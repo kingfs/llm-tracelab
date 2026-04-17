@@ -244,13 +244,14 @@ type routingFailureBucketItem struct {
 }
 
 type upstreamDetailResponse struct {
-	Target      upstreamItem          `json:"target"`
-	Breakdown   upstreamBreakdownView `json:"breakdown"`
-	Timeline    []upstreamFailureItem `json:"timeline"`
-	Traces      []traceListItem       `json:"traces"`
-	RefreshedAt time.Time             `json:"refreshed_at"`
-	Window      string                `json:"window"`
-	Model       string                `json:"model"`
+	Target          upstreamItem               `json:"target"`
+	Breakdown       upstreamBreakdownView      `json:"breakdown"`
+	Timeline        []upstreamFailureItem      `json:"timeline"`
+	FailureTimeline []routingFailureBucketItem `json:"failure_timeline"`
+	Traces          []traceListItem            `json:"traces"`
+	RefreshedAt     time.Time                  `json:"refreshed_at"`
+	Window          string                     `json:"window"`
+	Model           string                     `json:"model"`
 }
 
 type upstreamBreakdownView struct {
@@ -357,7 +358,8 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 
 		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
 		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
-		detail, err := st.GetUpstreamDetail(upstreamID, since, modelFilter, 50)
+		bucketSize, bucketCount := routingFailureBucketSpec(windowLabel)
+		detail, err := st.GetUpstreamDetail(upstreamID, since, modelFilter, 50, bucketSize, bucketCount)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "upstream not found"})
@@ -412,10 +414,11 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 				Endpoints:    toSessionCountItems(detail.Endpoints),
 				FailedTraces: detail.Analytics.FailedRequest,
 			},
-			Timeline:    toUpstreamFailureItems(detail.Analytics.RecentFailures),
-			RefreshedAt: time.Now().UTC(),
-			Window:      windowLabel,
-			Model:       modelFilter,
+			Timeline:        toUpstreamFailureItems(detail.Analytics.RecentFailures),
+			FailureTimeline: toRoutingFailureBucketItems(detail.Timeline),
+			RefreshedAt:     time.Now().UTC(),
+			Window:          windowLabel,
+			Model:           modelFilter,
 		}
 		for _, entry := range detail.Traces {
 			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))

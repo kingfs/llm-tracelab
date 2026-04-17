@@ -141,6 +141,7 @@ type UpstreamDetail struct {
 	Traces    []LogEntry
 	Models    []CountItem
 	Endpoints []CountItem
+	Timeline  []TimeCountItem
 }
 
 type CountItem struct {
@@ -455,9 +456,15 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	return analytics, nil
 }
 
-func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilter string, traceLimit int) (UpstreamDetail, error) {
+func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilter string, traceLimit int, bucketSize time.Duration, bucketCount int) (UpstreamDetail, error) {
 	if traceLimit <= 0 {
 		traceLimit = 50
+	}
+	if bucketSize <= 0 {
+		bucketSize = 2 * time.Hour
+	}
+	if bucketCount <= 0 {
+		bucketCount = 12
 	}
 	analytics, err := s.ListUpstreamAnalytics(8, 5, since, modelFilter)
 	if err != nil {
@@ -516,6 +523,73 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	}
 	detail.Models = sortedCountItems(modelCounts)
 	detail.Endpoints = sortedCountItems(endpointCounts)
+
+	timelineArgs := append([]any{upstreamID}, whereArgs...)
+	var latestRecordedAt string
+	err = s.db.QueryRow(`
+		SELECT COALESCE(MAX(recorded_at), '')
+		FROM logs
+		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL,
+		timelineArgs...,
+	).Scan(&latestRecordedAt)
+	if err != nil {
+		return UpstreamDetail{}, err
+	}
+	referenceTime := time.Now().UTC()
+	if latestRecordedAt != "" {
+		latestTime, err := timeParse(latestRecordedAt)
+		if err != nil {
+			return UpstreamDetail{}, err
+		}
+		if latestTime.After(referenceTime) {
+			referenceTime = latestTime
+		}
+	}
+	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+	buckets := make(map[time.Time]int, bucketCount)
+	failureTimelineArgs := append([]any{upstreamID}, whereArgs...)
+	timelineRows, err := s.db.Query(`
+		SELECT recorded_at
+		FROM logs
+		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL+`
+		ORDER BY recorded_at ASC
+	`, failureTimelineArgs...)
+	if err != nil {
+		return UpstreamDetail{}, err
+	}
+	defer timelineRows.Close()
+	for timelineRows.Next() {
+		var recordedAt string
+		if err := timelineRows.Scan(&recordedAt); err != nil {
+			return UpstreamDetail{}, err
+		}
+		recordedTime, err := timeParse(recordedAt)
+		if err != nil {
+			return UpstreamDetail{}, err
+		}
+		slot := recordedTime.UTC().Truncate(bucketSize)
+		if slot.Before(bucketStart) {
+			continue
+		}
+		if slot.After(referenceTime.Truncate(bucketSize)) {
+			continue
+		}
+		if _, ok := buckets[slot]; ok {
+			buckets[slot]++
+			continue
+		}
+		buckets[slot] = 1
+	}
+	if err := timelineRows.Err(); err != nil {
+		return UpstreamDetail{}, err
+	}
+	for index := 0; index < bucketCount; index++ {
+		slot := bucketStart.Add(time.Duration(index) * bucketSize)
+		detail.Timeline = append(detail.Timeline, TimeCountItem{
+			Time:  slot,
+			Count: buckets[slot],
+		})
+	}
 	return detail, nil
 }
 
