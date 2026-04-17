@@ -777,6 +777,15 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	if totalTimeline != 1 {
 		t.Fatalf("failure timeline total = %d, want 1", totalTimeline)
 	}
+	if payload.HealthThresholds.ErrorRateDegraded != 0.15 || payload.HealthThresholds.ErrorRateOpen != 0.35 {
+		t.Fatalf("HealthThresholds error rates = %+v, want degraded 0.15 and open 0.35", payload.HealthThresholds)
+	}
+	if payload.HealthThresholds.TimeoutRateDegraded != 0.10 || payload.HealthThresholds.TimeoutRateOpen != 0.25 {
+		t.Fatalf("HealthThresholds timeout rates = %+v, want degraded 0.10 and open 0.25", payload.HealthThresholds)
+	}
+	if payload.HealthThresholds.TTFTDegradedRatio != 1.5 || payload.HealthThresholds.FailureThreshold != 3 || payload.HealthThresholds.OpenWindow != "15s" {
+		t.Fatalf("HealthThresholds = %+v, want default router thresholds", payload.HealthThresholds)
+	}
 }
 
 func TestUpstreamDetailAPIHandlerReturnsNotFound(t *testing.T) {

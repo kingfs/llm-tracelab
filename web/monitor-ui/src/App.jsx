@@ -845,6 +845,7 @@ function UpstreamDetailPage() {
   const traces = detail.data?.traces ?? [];
   const timeline = detail.data?.timeline ?? [];
   const failureTimeline = detail.data?.failure_timeline ?? [];
+  const thresholds = detail.data?.health_thresholds;
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -976,7 +977,7 @@ function UpstreamDetailPage() {
                     <InlineTag tone={healthTone(target?.health_state)}>{formatHealthLabel(target?.health_state)}</InlineTag>
                     <InlineTag tone="accent">{formatFailureReason(breakdown?.failure_reasons?.[0]?.label || "unknown_failure")}</InlineTag>
                   </div>
-                  <span className="trace-subline">{buildUpstreamHealthSummary(target, breakdown?.failure_reasons || [])}</span>
+                  <span className="trace-subline">{buildUpstreamHealthSummary(target, breakdown?.failure_reasons || [], thresholds)}</span>
                 </div>
               </section>
               <section className="breakdown-card">
@@ -987,6 +988,42 @@ function UpstreamDetailPage() {
                   <DetailMetaPill label="ttft" value={`${Math.round(target?.ttft_fast_ms || target?.avg_ttft || 0)} ms`} />
                   <DetailMetaPill label="latency" value={`${Math.round(target?.latency_fast_ms || 0)} ms`} />
                   <DetailMetaPill label="refresh" value={target?.last_refresh_status || "unknown"} />
+                </div>
+              </section>
+              <section className="breakdown-card">
+                <div className="breakdown-title">Threshold checks</div>
+                <div className="breakdown-list">
+                  <div className="breakdown-row">
+                    <span className="breakdown-label">error rate</span>
+                    <div className="trace-tag-group">
+                      <InlineTag tone={metricThresholdTone(resolveThresholdState(target?.error_rate, thresholds?.error_rate_degraded, thresholds?.error_rate_open))}>
+                        {resolveThresholdState(target?.error_rate, thresholds?.error_rate_degraded, thresholds?.error_rate_open)}
+                      </InlineTag>
+                      <strong>{formatRatio(target?.error_rate)} / {formatRatio(thresholds?.error_rate_degraded)} / {formatRatio(thresholds?.error_rate_open)}</strong>
+                    </div>
+                  </div>
+                  <div className="breakdown-row">
+                    <span className="breakdown-label">timeout rate</span>
+                    <div className="trace-tag-group">
+                      <InlineTag tone={metricThresholdTone(resolveThresholdState(target?.timeout_rate, thresholds?.timeout_rate_degraded, thresholds?.timeout_rate_open))}>
+                        {resolveThresholdState(target?.timeout_rate, thresholds?.timeout_rate_degraded, thresholds?.timeout_rate_open)}
+                      </InlineTag>
+                      <strong>{formatRatio(target?.timeout_rate)} / {formatRatio(thresholds?.timeout_rate_degraded)} / {formatRatio(thresholds?.timeout_rate_open)}</strong>
+                    </div>
+                  </div>
+                  <div className="breakdown-row">
+                    <span className="breakdown-label">ttft ratio</span>
+                    <div className="trace-tag-group">
+                      <InlineTag tone={metricThresholdTone(resolveThresholdState(computeTTFTRatio(target), thresholds?.ttft_degraded_ratio, null))}>
+                        {resolveThresholdState(computeTTFTRatio(target), thresholds?.ttft_degraded_ratio, null)}
+                      </InlineTag>
+                      <strong>{formatMultiplier(computeTTFTRatio(target))} / {formatMultiplier(thresholds?.ttft_degraded_ratio)}</strong>
+                    </div>
+                  </div>
+                  <div className="breakdown-row">
+                    <span className="breakdown-label">router gates</span>
+                    <strong>{thresholds?.failure_threshold ?? 0} failures · open {thresholds?.open_window || "-"}</strong>
+                  </div>
                 </div>
               </section>
             </div>
@@ -2083,6 +2120,14 @@ function formatRoutingScore(value = 0) {
   return Number(value || 0).toFixed(2);
 }
 
+function formatMultiplier(value = 0) {
+  const number = Number(value || 0);
+  if (number <= 0) {
+    return "-";
+  }
+  return `${number.toFixed(2)}x`;
+}
+
 function buildRoutingDecisionSummary({ upstreamID = "", policy = "", score = 0, candidateCount = 0, failureReason = "" }) {
   const target = upstreamID || "unknown upstream";
   const policyLabel = policy || "selected";
@@ -2288,12 +2333,64 @@ function buildFailureDetail(item) {
   return parts.join(" · ");
 }
 
-function buildUpstreamHealthSummary(target, failureReasons = []) {
+function buildUpstreamHealthSummary(target, failureReasons = [], thresholds = null) {
   const health = formatHealthLabel(target?.health_state || "unknown");
   const errorRate = formatRatio(target?.error_rate);
   const timeoutRate = formatRatio(target?.timeout_rate);
   const topReason = failureReasons[0]?.label ? formatFailureReason(failureReasons[0].label) : "no dominant failure reason";
-  return `${health} with error ${errorRate}, timeout ${timeoutRate}, dominant failure ${topReason}.`;
+  const signals = [];
+  const errorState = resolveThresholdState(target?.error_rate, thresholds?.error_rate_degraded, thresholds?.error_rate_open);
+  if (errorState !== "healthy" && errorState !== "unknown") {
+    signals.push(`error ${errorState}`);
+  }
+  const timeoutState = resolveThresholdState(target?.timeout_rate, thresholds?.timeout_rate_degraded, thresholds?.timeout_rate_open);
+  if (timeoutState !== "healthy" && timeoutState !== "unknown") {
+    signals.push(`timeout ${timeoutState}`);
+  }
+  const ttftState = resolveThresholdState(computeTTFTRatio(target), thresholds?.ttft_degraded_ratio, null);
+  if (ttftState !== "healthy" && ttftState !== "unknown") {
+    signals.push(`ttft ${ttftState}`);
+  }
+  const signalText = signals.length ? ` Thresholds: ${signals.join(", ")}.` : "";
+  return `${health} with error ${errorRate}, timeout ${timeoutRate}, dominant failure ${topReason}.${signalText}`;
+}
+
+function computeTTFTRatio(target) {
+  const fast = Number(target?.ttft_fast_ms || 0);
+  const slow = Number(target?.ttft_slow_ms || 0);
+  if (fast <= 0 || slow <= 0) {
+    return 0;
+  }
+  return fast / slow;
+}
+
+function resolveThresholdState(value, degradedThreshold, openThreshold) {
+  const current = Number(value || 0);
+  const degraded = Number(degradedThreshold || 0);
+  const open = openThreshold == null ? 0 : Number(openThreshold || 0);
+  if (current <= 0 || degraded <= 0) {
+    return "unknown";
+  }
+  if (open > 0 && current >= open) {
+    return "open";
+  }
+  if (current >= degraded) {
+    return "degraded";
+  }
+  return "healthy";
+}
+
+function metricThresholdTone(value = "") {
+  switch (value) {
+    case "open":
+      return "danger";
+    case "degraded":
+      return "gold";
+    case "healthy":
+      return "green";
+    default:
+      return "default";
+  }
 }
 
 function formatSignedMetric(value = 0) {

@@ -195,6 +195,7 @@ type upstreamItem struct {
 	HealthState       string                `json:"health_state"`
 	Inflight          int64                 `json:"inflight"`
 	TTFTFastMs        float64               `json:"ttft_fast_ms"`
+	TTFTSlowMs        float64               `json:"ttft_slow_ms"`
 	LatencyFastMs     float64               `json:"latency_fast_ms"`
 	ErrorRate         float64               `json:"error_rate"`
 	TimeoutRate       float64               `json:"timeout_rate"`
@@ -249,14 +250,25 @@ type routingFailureBucketItem struct {
 }
 
 type upstreamDetailResponse struct {
-	Target          upstreamItem               `json:"target"`
-	Breakdown       upstreamBreakdownView      `json:"breakdown"`
-	Timeline        []upstreamFailureItem      `json:"timeline"`
-	FailureTimeline []routingFailureBucketItem `json:"failure_timeline"`
-	Traces          []traceListItem            `json:"traces"`
-	RefreshedAt     time.Time                  `json:"refreshed_at"`
-	Window          string                     `json:"window"`
-	Model           string                     `json:"model"`
+	Target           upstreamItem               `json:"target"`
+	Breakdown        upstreamBreakdownView      `json:"breakdown"`
+	Timeline         []upstreamFailureItem      `json:"timeline"`
+	FailureTimeline  []routingFailureBucketItem `json:"failure_timeline"`
+	HealthThresholds healthThresholdView        `json:"health_thresholds"`
+	Traces           []traceListItem            `json:"traces"`
+	RefreshedAt      time.Time                  `json:"refreshed_at"`
+	Window           string                     `json:"window"`
+	Model            string                     `json:"model"`
+}
+
+type healthThresholdView struct {
+	TTFTDegradedRatio   float64 `json:"ttft_degraded_ratio"`
+	ErrorRateDegraded   float64 `json:"error_rate_degraded"`
+	TimeoutRateDegraded float64 `json:"timeout_rate_degraded"`
+	ErrorRateOpen       float64 `json:"error_rate_open"`
+	TimeoutRateOpen     float64 `json:"timeout_rate_open"`
+	FailureThreshold    int64   `json:"failure_threshold"`
+	OpenWindow          string  `json:"open_window"`
 }
 
 type upstreamBreakdownView struct {
@@ -423,9 +435,15 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 			},
 			Timeline:        toUpstreamFailureItems(detail.Analytics.RecentFailures),
 			FailureTimeline: toRoutingFailureBucketItems(detail.Timeline),
-			RefreshedAt:     time.Now().UTC(),
-			Window:          windowLabel,
-			Model:           modelFilter,
+			HealthThresholds: toHealthThresholdView(func() router.HealthThresholds {
+				if rtr != nil {
+					return rtr.HealthThresholds()
+				}
+				return router.DefaultHealthThresholds()
+			}()),
+			RefreshedAt: time.Now().UTC(),
+			Window:      windowLabel,
+			Model:       modelFilter,
 		}
 		for _, entry := range detail.Traces {
 			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
@@ -490,6 +508,7 @@ func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.Upstr
 		HealthState:       snapshot.HealthState,
 		Inflight:          snapshot.Inflight,
 		TTFTFastMs:        snapshot.TTFTFastMs,
+		TTFTSlowMs:        snapshot.TTFTSlowMs,
 		LatencyFastMs:     snapshot.LatencyFastMs,
 		ErrorRate:         snapshot.ErrorRate,
 		TimeoutRate:       snapshot.TimeoutRate,
@@ -509,6 +528,18 @@ func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.Upstr
 		LastModel:         analytics.LastModel,
 		RecentErrors:      analytics.RecentErrors,
 		RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
+	}
+}
+
+func toHealthThresholdView(thresholds router.HealthThresholds) healthThresholdView {
+	return healthThresholdView{
+		TTFTDegradedRatio:   thresholds.TTFTDegradedRatio,
+		ErrorRateDegraded:   thresholds.ErrorRateDegraded,
+		TimeoutRateDegraded: thresholds.TimeoutRateDegraded,
+		ErrorRateOpen:       thresholds.ErrorRateOpen,
+		TimeoutRateOpen:     thresholds.TimeoutRateOpen,
+		FailureThreshold:    thresholds.FailureThreshold,
+		OpenWindow:          thresholds.OpenWindow.String(),
 	}
 }
 

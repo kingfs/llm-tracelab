@@ -50,6 +50,16 @@ type costConfig struct {
 	TimeoutRateOpen     float64
 }
 
+type HealthThresholds struct {
+	TTFTDegradedRatio   float64       `json:"ttft_degraded_ratio"`
+	ErrorRateDegraded   float64       `json:"error_rate_degraded"`
+	TimeoutRateDegraded float64       `json:"timeout_rate_degraded"`
+	ErrorRateOpen       float64       `json:"error_rate_open"`
+	TimeoutRateOpen     float64       `json:"timeout_rate_open"`
+	FailureThreshold    int64         `json:"failure_threshold"`
+	OpenWindow          time.Duration `json:"open_window"`
+}
+
 func defaultCostConfig() costConfig {
 	return costConfig{
 		FastAlpha:           0.30,
@@ -61,6 +71,19 @@ func defaultCostConfig() costConfig {
 		TimeoutRateDegraded: 0.10,
 		ErrorRateOpen:       0.35,
 		TimeoutRateOpen:     0.25,
+	}
+}
+
+func DefaultHealthThresholds() HealthThresholds {
+	costs := defaultCostConfig()
+	return HealthThresholds{
+		TTFTDegradedRatio:   costs.TTFTDegradedRatio,
+		ErrorRateDegraded:   costs.ErrorRateDegraded,
+		TimeoutRateDegraded: costs.TimeoutRateDegraded,
+		ErrorRateOpen:       costs.ErrorRateOpen,
+		TimeoutRateOpen:     costs.TimeoutRateOpen,
+		FailureThreshold:    3,
+		OpenWindow:          15 * time.Second,
 	}
 }
 
@@ -79,6 +102,23 @@ type Router struct {
 	random           *rand.Rand
 	stopCh           chan struct{}
 	stopOnce         sync.Once
+}
+
+func (r *Router) HealthThresholds() HealthThresholds {
+	if r == nil {
+		return DefaultHealthThresholds()
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return HealthThresholds{
+		TTFTDegradedRatio:   r.costs.TTFTDegradedRatio,
+		ErrorRateDegraded:   r.costs.ErrorRateDegraded,
+		TimeoutRateDegraded: r.costs.TimeoutRateDegraded,
+		ErrorRateOpen:       r.costs.ErrorRateOpen,
+		TimeoutRateOpen:     r.costs.TimeoutRateOpen,
+		FailureThreshold:    r.failureThreshold,
+		OpenWindow:          r.openWindow,
+	}
 }
 
 type Target struct {
