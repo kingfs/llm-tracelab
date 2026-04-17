@@ -1041,6 +1041,12 @@ function TraceDetailPage() {
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
   const failureSummary = summarizeTraceFailure(detail.data);
+  const selectedUpstreamID = header?.selected_upstream_id || "";
+  const selectedUpstreamBaseURL = header?.selected_upstream_base_url || "";
+  const selectedUpstreamProviderPreset = header?.selected_upstream_provider_preset || "";
+  const routingPolicy = header?.routing_policy || "";
+  const routingScore = Number(header?.routing_score || 0);
+  const routingCandidateCount = Number(header?.routing_candidate_count || 0);
   const focusTarget = searchParams.get("focus") || "";
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
   const fromSessionID = searchParams.get("from_session") || "";
@@ -1090,6 +1096,7 @@ function TraceDetailPage() {
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone="accent">{formatEndpointTag(header?.endpoint || header?.operation)}</InlineTag>
               <InlineTag>{formatProviderTag(header?.provider)}</InlineTag>
+              {selectedUpstreamID ? <InlineTag tone="green">{selectedUpstreamID}</InlineTag> : null}
               {detail.data?.header?.layout?.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
               <InlineTag tone={header?.status_code >= 200 && header?.status_code < 300 ? "green" : "danger"}>{header?.status_code || 0}</InlineTag>
             </div>
@@ -1192,6 +1199,54 @@ function TraceDetailPage() {
 
       {tab === "summary" && detail.data ? (
         <div className="detail-grid">
+          {selectedUpstreamID ? (
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <p className="eyebrow">Routing decision</p>
+                  <h2>Selected upstream</h2>
+                </div>
+                <div className="panel-head-actions">
+                  <Link className="ghost-button" to={buildUpstreamLink(selectedUpstreamID)}>
+                    Open Upstream
+                  </Link>
+                </div>
+              </div>
+              <div className="detail-meta-strip">
+                <DetailMetaPill label="upstream" value={selectedUpstreamID} mono />
+                <DetailMetaPill label="provider" value={selectedUpstreamProviderPreset || "-"} />
+                <DetailMetaPill label="policy" value={routingPolicy || "-"} />
+                <DetailMetaPill label="score" value={formatRoutingScore(routingScore)} />
+                <DetailMetaPill label="candidates" value={routingCandidateCount || 0} />
+              </div>
+              <div className="routing-summary-grid">
+                <section className="breakdown-card">
+                  <div className="breakdown-title">Resolved upstream</div>
+                  <div className="routing-summary-stack">
+                    <strong className="trace-model-name">{selectedUpstreamID}</strong>
+                    <span className="trace-subline mono">{selectedUpstreamBaseURL || "-"}</span>
+                    <div className="trace-tag-group">
+                      <InlineTag tone="accent">{selectedUpstreamProviderPreset || "custom"}</InlineTag>
+                      {routingPolicy ? <InlineTag>{routingPolicy}</InlineTag> : null}
+                    </div>
+                  </div>
+                </section>
+                <section className="breakdown-card">
+                  <div className="breakdown-title">Decision explanation</div>
+                  <div className="routing-summary-stack">
+                    <span className="trace-subline">
+                      {buildRoutingDecisionSummary({
+                        upstreamID: selectedUpstreamID,
+                        policy: routingPolicy,
+                        score: routingScore,
+                        candidateCount: routingCandidateCount,
+                      })}
+                    </span>
+                  </div>
+                </section>
+              </div>
+            </section>
+          ) : null}
           <section className="panel">
             <div className="panel-head">
               <div>
@@ -1902,6 +1957,19 @@ function formatRatio(value) {
 
 function formatCapacity(weight, capacityHint) {
   return `${Number(weight || 0).toFixed(1)} x ${Number(capacityHint || 0).toFixed(1)}`;
+}
+
+function formatRoutingScore(value = 0) {
+  return Number(value || 0).toFixed(2);
+}
+
+function buildRoutingDecisionSummary({ upstreamID = "", policy = "", score = 0, candidateCount = 0 }) {
+  const target = upstreamID || "unknown upstream";
+  const policyLabel = policy || "selected";
+  if (candidateCount > 0) {
+    return `${target} was chosen by ${policyLabel} from ${candidateCount} candidate${candidateCount > 1 ? "s" : ""} with score ${formatRoutingScore(score)}.`;
+  }
+  return `${target} was chosen by ${policyLabel} with score ${formatRoutingScore(score)}.`;
 }
 
 function summarizeTraceFailure(detail) {

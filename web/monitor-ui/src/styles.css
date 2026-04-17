@@ -854,6 +854,18 @@ a {
   gap: 16px;
 }
 
+.routing-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.routing-summary-stack {
+  display: grid;
+  gap: 8px;
+}
+
 .breakdown-card {
   border: 1px solid rgba(34, 40, 49, 0.1);
   border-radius: 18px;
@@ -1454,6 +1466,7 @@ a {
   .hero-grid,
   .detail-grid,
   .session-breakdown-grid,
+  .routing-summary-grid,
   .failure-context-strip,
   .payload-grid,
   .raw-grid,

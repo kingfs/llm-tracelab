@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document records the current functional baseline of `llm-tracelab` after the session aggregation and monitor UX work landed.
+This document records the current functional baseline of `llm-tracelab` after the session aggregation, multi-upstream routing, and monitor UX work landed.
 
 It is intended for two audiences:
 
@@ -26,7 +26,7 @@ Its current baseline workflow is:
 2. persist the raw HTTP exchange as a human-inspectable `.http` cassette
 3. index request metadata into SQLite for fast monitor queries
 4. replay the cassette in tests without upstream network access
-5. inspect traces in the monitor from either a request-centric or session-centric perspective
+5. inspect traces in the monitor from request-centric, session-centric, and upstream-centric perspectives
 
 ## Current Provider Coverage
 
@@ -70,6 +70,19 @@ Current `logs` table baseline includes both request metadata and grouping metada
 - `session_source`
 - `window_id`
 - `client_request_id`
+- `selected_upstream_id`
+- `selected_upstream_base_url`
+- `selected_upstream_provider_preset`
+- `routing_policy`
+- `routing_score`
+- `routing_candidate_count`
+
+Additional additive SQLite tables now persist multi-upstream runtime state:
+
+- `upstream_targets`
+- `upstream_models`
+
+These tables provide warm-start model catalog state and monitor-facing upstream analytics without coupling replay to live providers.
 
 ### Schema Upgrade Behavior
 
@@ -125,9 +138,55 @@ Session detail currently includes:
 - failed-only request filter
 - failure context windows around failed requests
 
+## Multi-Upstream Routing Baseline
+
+Multi-upstream routing is now an implemented feature, not just a plan.
+
+### Configuration And Compatibility
+
+The current baseline supports both:
+
+- legacy single `upstream`
+- additive `upstreams` plus `router`
+
+The compatibility path keeps older configs working while allowing one proxy instance to serve multiple providers for the same model family.
+
+### Routing Runtime
+
+The current routing baseline includes:
+
+- request-scoped upstream target selection
+- persisted model catalog snapshots per upstream
+- health-aware target state
+- cost-aware selection derived from the `llmrouterv2` direction
+- additive per-trace routing metadata recorded into cassettes and SQLite
+
+### Upstream Monitor APIs
+
+Current upstream monitor API surface includes:
+
+- `GET /api/upstreams`
+- `GET /api/upstreams/:upstreamID`
+
+These APIs expose:
+
+- target health summary
+- model coverage
+- filtered routing analytics by window and model
+- recent failures
+- per-upstream drilldown with recent traces and breakdowns
+
 ## Monitor Baseline
 
 The embedded monitor UI is a React frontend served from Go embed assets.
+
+### Monitor Perspectives
+
+The monitor home page now has stable perspectives for:
+
+- requests
+- sessions
+- upstream routing analytics
 
 ### Request Detail Tabs
 
@@ -137,6 +196,21 @@ Trace detail now supports these stable tabs:
 - `Summary`
 - `Raw Protocol`
 - `Declared Tools` when applicable
+
+### Request Routing Context
+
+Trace detail now also exposes the selected upstream and routing decision context when the trace was recorded through the multi-upstream router.
+
+Current routing context includes:
+
+- selected upstream id
+- selected upstream provider preset
+- selected upstream base URL
+- routing policy
+- routing score
+- routing candidate count
+
+The trace detail page links directly from an individual request to the upstream drilldown page.
 
 ### Cross-View Navigation
 
@@ -168,7 +242,11 @@ Users can currently:
 
 - browse raw request-level traces
 - switch to grouped session-level inspection
+- inspect active upstream targets on the home page
+- filter upstream analytics by time window and model
+- drill from an upstream summary card into per-upstream detail
 - jump from a session into a specific trace
+- jump from a trace into the selected upstream view
 - land directly in the most relevant trace tab
 - focus the failure summary
 - focus the raw response payload
@@ -184,6 +262,12 @@ The implemented monitor/session enhancements must not break:
 - cassette readability
 - V2 read compatibility
 - replay behavior
+
+The implemented multi-upstream routing enhancements must not break:
+
+- replay behavior when routing metadata is absent
+- V2 and V3 record parsing
+- human readability of raw `.http` cassettes
 
 ## Testing And Quality Baseline
 
@@ -208,6 +292,13 @@ The following work is considered functionally complete at the baseline level:
 - SQLite grouping/index persistence
 - session list/detail APIs
 - monitor dual-perspective home page
+- multi-upstream config compatibility
+- upstream target/model catalog persistence
+- request-scoped upstream routing
+- upstream health and refresh tracking
+- upstream analytics list and drilldown pages
+- per-trace routing metadata recording
+- trace-to-upstream navigation
 - session detail overview and filtering
 - trace/session cross-view navigation
 - tab-level deep links
