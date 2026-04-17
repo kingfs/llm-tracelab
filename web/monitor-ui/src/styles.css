@@ -618,6 +618,11 @@ a {
   background: linear-gradient(180deg, rgba(253, 241, 238, 0.96), rgba(255, 252, 245, 0.94));
 }
 
+.trace-failure-panel-focused {
+  border-color: rgba(161, 54, 42, 0.42);
+  box-shadow: 0 0 0 3px rgba(161, 54, 42, 0.12), var(--shadow);
+}
+
 .trace-failure-head,
 .trace-failure-meta {
   display: flex;

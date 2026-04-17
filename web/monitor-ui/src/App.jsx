@@ -1,4 +1,4 @@
-import React, { startTransition, useEffect, useState } from "react";
+import React, { startTransition, useEffect, useRef, useState } from "react";
 import { Link, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 
 const REFRESH_MS = 60_000;
@@ -229,7 +229,7 @@ function TraceListPage() {
   );
 }
 
-function RequestList({ items, fromView = "", fromSessionID = "" }) {
+function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false }) {
   return (
     <div className="trace-table">
       <div className="trace-table-head">
@@ -239,8 +239,11 @@ function RequestList({ items, fromView = "", fromSessionID = "" }) {
         <span>Tokens</span>
         <span>Actions</span>
       </div>
-      {items.map((item) => (
-        <article key={item.id} className={item.status_code >= 200 && item.status_code < 300 ? "trace-row" : "trace-row trace-row-failed"}>
+      {items.map((item) => {
+        const focus = focusFailures && (item.status_code < 200 || item.status_code >= 300) ? "failure" : "";
+
+        return (
+          <article key={item.id} className={item.status_code >= 200 && item.status_code < 300 ? "trace-row" : "trace-row trace-row-failed"}>
           <div>
             <div className="trace-title-row">
               <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
@@ -277,24 +280,25 @@ function RequestList({ items, fromView = "", fromSessionID = "" }) {
               </Link>
             ) : null}
             {fromSessionID ? (
-              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline")}>
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", focus)}>
                 Timeline
               </Link>
             ) : null}
             {fromSessionID ? (
-              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw")}>
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw", focus)}>
                 Raw
               </Link>
             ) : null}
-            <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID)} title="View trace" aria-label="View trace">
+            <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID, "", focus)} title="View trace" aria-label="View trace">
               <ViewIcon />
             </Link>
             <a className="icon-button" href={`/api/traces/${item.id}/download`} title="Download .http" aria-label="Download trace">
               <DownloadIcon />
             </a>
           </div>
-        </article>
-      ))}
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -461,13 +465,13 @@ function SessionDetailPage() {
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
                   <div className="action-group action-group-start">
-                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline")}>
+                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")}>
                       Timeline
                     </Link>
-                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw")}>
+                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")}>
                       Raw
                     </Link>
-                    <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID)} title="View trace" aria-label="View trace">
+                    <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")} title="View trace" aria-label="View trace">
                       <ViewIcon />
                     </Link>
                   </div>
@@ -535,7 +539,7 @@ function SessionDetailPage() {
         {traceFilter === "failed" && visibleTraces.length === 0 ? (
           <div className="empty-state">No failed traces in this session.</div>
         ) : (
-          <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} />
+          <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures />
         )}
       </section>
     </div>
@@ -543,9 +547,10 @@ function SessionDetailPage() {
 }
 
 function FailureContextNode({ label, item, tone = "default", sessionID = "", delta = null, detail = "" }) {
-  const traceLink = buildTraceLink(item.trace_id, "", sessionID);
-  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline");
-  const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw");
+  const focus = tone === "danger" ? "failure" : "";
+  const traceLink = buildTraceLink(item.trace_id, "", sessionID, "", focus);
+  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline", focus);
+  const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw", focus);
 
   return (
     <div className={`failure-node failure-node-${tone}`}>
@@ -605,12 +610,14 @@ function TraceDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(() => normalizeTraceTab(searchParams.get("tab")));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
+  const failureSummaryRef = useRef(null);
   const detail = useJSON(`/api/traces/${traceID}`, [traceID]);
   const raw = useJSON(`/api/traces/${traceID}/raw`, [traceID, tab === "raw" ? "raw" : "summary"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
   const failureSummary = summarizeTraceFailure(detail.data);
+  const focusTarget = searchParams.get("focus") || "";
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
@@ -636,6 +643,13 @@ function TraceDetailPage() {
     }
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, tab]);
+
+  useEffect(() => {
+    if (focusTarget !== "failure" || !failureSummary || !failureSummaryRef.current) {
+      return;
+    }
+    failureSummaryRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [failureSummary, focusTarget]);
 
   return (
     <div className="shell shell-detail">
@@ -683,7 +697,10 @@ function TraceDetailPage() {
       </header>
 
       {failureSummary ? (
-        <section className="panel trace-failure-panel">
+        <section
+          ref={failureSummaryRef}
+          className={focusTarget === "failure" ? "panel trace-failure-panel trace-failure-panel-focused" : "panel trace-failure-panel"}
+        >
           <div className="trace-failure-head">
             <div>
               <p className="eyebrow">Failure summary</p>
@@ -1413,7 +1430,7 @@ function summarizeSessionItems(items = []) {
   };
 }
 
-function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "") {
+function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "", focus = "") {
   const params = new URLSearchParams();
   const normalizedTab = normalizeTraceTab(tab);
   if (fromView) {
@@ -1424,6 +1441,9 @@ function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab = "") {
   }
   if (tab && normalizedTab !== "timeline") {
     params.set("tab", normalizedTab);
+  }
+  if (focus) {
+    params.set("focus", focus);
   }
   const query = params.toString();
   return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
