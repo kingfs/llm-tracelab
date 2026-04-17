@@ -501,6 +501,16 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 }
 
 func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
+	if model == ModelDiscoveryListModels {
+		candidates := make([]*Target, 0, len(r.targets))
+		for _, target := range r.targets {
+			if supportsPath(target, rawPath) {
+				candidates = append(candidates, target)
+			}
+		}
+		return candidates
+	}
+
 	var candidates []*Target
 	if model != "" {
 		for _, target := range r.modelToTargets[strings.ToLower(model)] {

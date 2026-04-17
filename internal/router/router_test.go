@@ -152,6 +152,95 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 	}
 }
 
+func TestRouterSelectAllowsModelListRequestsWithoutCatalogMatch(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "anthropic-secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"claude-sonnet-4-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "openai-primary" {
+		t.Fatalf("selected target = %q, want openai-primary", selection.Target.ID)
+	}
+}
+
+func TestRouterSelectAllowsAnthropicModelListEndpoint(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "anthropic-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"claude-sonnet-4-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "anthropic-primary" {
+		t.Fatalf("selected target = %q, want anthropic-primary", selection.Target.ID)
+	}
+}
+
 func TestRouterAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
