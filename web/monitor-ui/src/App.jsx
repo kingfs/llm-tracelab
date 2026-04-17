@@ -346,6 +346,7 @@ function SessionDetailPage() {
   const timeline = detail.data?.timeline ?? [];
   const traces = detail.data?.traces ?? [];
   const visibleTraces = traceFilter === "failed" ? traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300) : traces;
+  const failureContexts = buildFailureContexts(timeline);
 
   return (
     <div className="shell shell-detail">
@@ -461,6 +462,32 @@ function SessionDetailPage() {
         </section>
       ) : null}
 
+      {failureContexts.length ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Failure context</p>
+              <h2>Requests around each failure</h2>
+            </div>
+          </div>
+          <div className="failure-context-list">
+            {failureContexts.map((context) => (
+              <article key={context.current.trace_id} className="failure-context-card">
+                <div className="failure-context-head">
+                  <strong>{context.current.model || "unknown-model"}</strong>
+                  <span>{formatDateTime(context.current.time)}</span>
+                </div>
+                <div className="failure-context-strip">
+                  {context.previous ? <FailureContextNode label="Before" item={context.previous} tone="default" sessionID={summary?.session_id || sessionID} /> : null}
+                  <FailureContextNode label="Failed" item={context.current} tone="danger" sessionID={summary?.session_id || sessionID} />
+                  {context.next ? <FailureContextNode label="After" item={context.next} tone="accent" sessionID={summary?.session_id || sessionID} /> : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -487,6 +514,26 @@ function SessionDetailPage() {
           <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} />
         )}
       </section>
+    </div>
+  );
+}
+
+function FailureContextNode({ label, item, tone = "default", sessionID = "" }) {
+  return (
+    <div className={`failure-node failure-node-${tone}`}>
+      <div className="failure-node-label">{label}</div>
+      <div className="trace-tag-group">
+        <InlineTag tone={tone === "danger" ? "danger" : tone === "accent" ? "accent" : "default"}>{formatEndpointTag(item.endpoint)}</InlineTag>
+        <InlineTag>{item.status_code}</InlineTag>
+      </div>
+      <strong>{item.model || "unknown-model"}</strong>
+      <span>{formatDateTime(item.time)}</span>
+      <span>duration {item.duration_ms} ms</span>
+      <div className="action-group action-group-start">
+        <Link className="icon-button" to={buildTraceLink(item.trace_id, "", sessionID)} title="View trace" aria-label="View trace">
+          <ViewIcon />
+        </Link>
+      </div>
     </div>
   );
 }
@@ -1247,6 +1294,22 @@ function setOrDeleteParam(params, key, value) {
     return;
   }
   params.delete(key);
+}
+
+function buildFailureContexts(timeline = []) {
+  const failures = [];
+  for (let index = 0; index < timeline.length; index += 1) {
+    const current = timeline[index];
+    if (current.status_code >= 200 && current.status_code < 300) {
+      continue;
+    }
+    failures.push({
+      previous: index > 0 ? timeline[index - 1] : null,
+      current,
+      next: index < timeline.length - 1 ? timeline[index + 1] : null,
+    });
+  }
+  return failures;
 }
 
 function formatDateTime(value) {

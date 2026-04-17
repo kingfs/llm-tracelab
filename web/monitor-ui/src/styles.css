@@ -973,6 +973,68 @@ a {
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
+.failure-context-list {
+  display: grid;
+  gap: 16px;
+}
+
+.failure-context-card {
+  border: 1px solid rgba(34, 40, 49, 0.1);
+  border-radius: 20px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.failure-context-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.failure-context-head span,
+.failure-node,
+.failure-node-label {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.failure-context-head span {
+  color: var(--muted);
+}
+
+.failure-context-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.failure-node {
+  border: 1px solid rgba(34, 40, 49, 0.08);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.65);
+  display: grid;
+  gap: 8px;
+}
+
+.failure-node-danger {
+  border-color: rgba(161, 54, 42, 0.28);
+  background: rgba(253, 235, 232, 0.78);
+}
+
+.failure-node-accent {
+  border-color: rgba(25, 93, 77, 0.18);
+  background: rgba(223, 236, 230, 0.66);
+}
+
+.failure-node-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
 .timeline-tree {
   display: grid;
   gap: 12px;
@@ -1138,6 +1200,7 @@ a {
   .hero-grid,
   .detail-grid,
   .session-breakdown-grid,
+  .failure-context-strip,
   .payload-grid,
   .raw-grid,
   .trace-table-head,
