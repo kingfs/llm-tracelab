@@ -280,7 +280,7 @@ function RequestList({ items, fromView = "", fromSessionID = "", focusFailures =
               </Link>
             ) : null}
             {fromSessionID ? (
-              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", focus)}>
+              <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", "timeline")}>
                 Timeline
               </Link>
             ) : null}
@@ -465,7 +465,7 @@ function SessionDetailPage() {
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
                   <div className="action-group action-group-start">
-                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline", item.status_code >= 200 && item.status_code < 300 ? "" : "failure")}>
+                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline", "timeline")}>
                       Timeline
                     </Link>
                     <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw", item.status_code >= 200 && item.status_code < 300 ? "" : "response")}>
@@ -549,7 +549,7 @@ function SessionDetailPage() {
 function FailureContextNode({ label, item, tone = "default", sessionID = "", delta = null, detail = "" }) {
   const focus = tone === "danger" ? "failure" : "";
   const traceLink = buildTraceLink(item.trace_id, "", sessionID, "", focus);
-  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline", focus);
+  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline", "timeline");
   const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw", focus === "failure" ? "response" : focus);
 
   return (
@@ -752,7 +752,7 @@ function TraceDetailPage() {
       {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
       {detail.loading && !detail.data ? <div className="empty-state">Loading trace...</div> : null}
 
-      {tab === "timeline" && detail.data ? <TimelinePanel events={detail.data.events || []} /> : null}
+      {tab === "timeline" && detail.data ? <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} /> : null}
 
       {tab === "summary" && detail.data ? (
         <div className="detail-grid">
@@ -879,13 +879,22 @@ function RawProtocolPanel({ raw, focusTarget = "" }) {
   );
 }
 
-function TimelinePanel({ events }) {
+function TimelinePanel({ events, focusTarget = "" }) {
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    if (focusTarget !== "timeline" || !panelRef.current) {
+      return;
+    }
+    panelRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [focusTarget]);
+
   if (!events.length) {
     return <div className="empty-state">No timeline events recorded for this trace.</div>;
   }
 
   return (
-    <section className="panel timeline-panel">
+    <section ref={panelRef} className={focusTarget === "timeline" ? "panel timeline-panel timeline-panel-focused" : "panel timeline-panel"}>
       <div className="panel-head">
         <div>
           <p className="eyebrow">Provider timeline</p>

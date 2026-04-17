@@ -952,6 +952,11 @@ a {
   padding: 26px;
 }
 
+.timeline-panel-focused {
+  border-color: rgba(25, 93, 77, 0.28);
+  box-shadow: 0 0 0 3px rgba(25, 93, 77, 0.1), var(--shadow);
+}
+
 .timeline-list {
   display: grid;
   gap: 14px;
