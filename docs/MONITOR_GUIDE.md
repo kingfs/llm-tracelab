@@ -118,11 +118,14 @@ Current routing context includes:
 - routing policy
 - routing score
 - routing candidate count
+- selected upstream health state when the router is attached
+- current health-threshold interpretation for error/timeout/TTFT signals
 
 This lets you answer a practical debugging question directly from one trace:
 
 1. which upstream handled this request
 2. why the router considered it the chosen target
+3. whether that upstream is currently healthy, degraded, or open from the router's point of view
 
 ## Deep Links And Focus
 

@@ -175,6 +175,22 @@ This is considered implemented at the current baseline:
 - trace/session deep links and tab selection
 - trace focus targets including `timeline_error`
 - legacy SQLite schema upgrade fix for session columns
+- multi-upstream runtime routing with persisted model catalog state
+- per-trace routing metadata and selected-upstream health context
+- upstream analytics, drilldown, routing failure analytics, and health-threshold exposure
+
+For maintainers, this implies an important convergence rule:
+
+- do not continue expanding monitor surfaces as a substitute for unfinished routing/runtime work
+- once the multi-upstream routing loop is closed, further monitor changes should be justified as focused follow-up work rather than part of the core delivery
+
+The current core delivery is already closed around:
+
+1. multi-upstream config compatibility
+2. runtime target selection
+3. local model coverage persistence
+4. replay-safe routing metadata
+5. operator-visible routing diagnostics
 
 ## Reasonable Next Refinements
 

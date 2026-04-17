@@ -12,6 +12,27 @@ That is sufficient for simple local proxying, but it becomes awkward in real use
 
 This document proposes a multi-upstream design that keeps `llm-tracelab` local-first and replay-safe while making provider selection dynamic.
 
+## Current Status
+
+This design note is no longer purely aspirational.
+
+The current implementation baseline has completed the core delivery target for the first multi-upstream round:
+
+- additive `upstreams` plus `router` config is implemented
+- legacy single `upstream` config remains compatible
+- multiple upstream targets are resolved at startup
+- request-scoped target selection is active in the proxy hot path
+- model catalog state is refreshed in memory and persisted in SQLite
+- selected upstream metadata is recorded into cassettes and indexed into SQLite
+- health-aware `P2C` selection derived from the `llmrouterv2` direction is active
+- routing failures, target health, and decision context are exposed in the monitor
+
+The remaining items in this document should therefore be read as:
+
+- future refinements that are still valid
+- richer signals that are explicitly out of scope for this first delivery
+- guidance for later iterations, not blockers for calling the first round complete
+
 ## Problem Statement
 
 Today the proxy has a hard single-upstream shape:
@@ -458,6 +479,25 @@ Later additions:
 - optional cache affinity
 - optional stream decode-gap metrics
 - monitor pages for provider/model health
+
+## Convergence Boundary
+
+To keep this task from expanding indefinitely, the first multi-upstream round should now be treated as complete when these conditions hold:
+
+1. one config can keep multiple upstreams online concurrently
+2. model coverage is remembered across process restarts
+3. the proxy selects upstreams per request instead of by static config edits
+4. selection failures are explicit and test-covered
+5. replay remains cassette-driven and unaffected by live routing state
+
+Work beyond this line should be treated as follow-up work, not as unfinished core delivery.
+
+That means the following are not required to close this task:
+
+- reproducing the full `/tmp/llmrouterv2` metric set
+- adding every possible monitor slice or chart
+- adding cache-affinity or decode-gap routing terms
+- reworking replay or storage boundaries
 
 ## Testing Strategy
 

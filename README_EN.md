@@ -75,6 +75,10 @@ logs/
 
 ### 1. Configure
 
+The recommended baseline is now the multi-upstream shape.
+
+The legacy single `upstream` block is still supported for the simplest single-target setup, but if the same model may be served by multiple providers you should prefer `upstreams + router` so switching providers no longer requires stopping the proxy and editing config.
+
 Edit [config/config.yaml](./config/config.yaml):
 
 ```yaml
@@ -84,22 +88,59 @@ server:
 monitor:
   port: "8081"
 
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "sk-xxx"
-  provider_preset: "openai"      # prefer preset-first config
-  protocol_family: ""            # leave empty for inference; conflicting preset/family fails fast
-  routing_profile: ""            # leave empty for inference; unsupported preset/profile combos fail fast
-  api_version: ""                # Azure uses query params; Anthropic uses anthropic-version header
-  deployment: ""                 # used by Azure deployment routing
-  project: ""                    # used by Vertex project/location routing
-  location: ""                   # used by Vertex regional host / path routing
-  model_resource: ""             # Vertex model resource such as publishers/google/models/gemini-2.5-flash
-  headers: {}                    # extra upstream headers such as anthropic-beta
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+    startup_policy: "best_effort"
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "openai-primary"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: []
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: "sk-openai"
+      provider_preset: "openai"
+
+  - id: "openrouter-fallback"
+    enabled: true
+    priority: 80
+    weight: 0.8
+    capacity_hint: 1.2
+    model_discovery: "static_only"
+    static_models:
+      - "gpt-5"
+      - "gpt-4.1"
+    upstream:
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "sk-openrouter"
+      provider_preset: "openrouter"
+      headers: {}                    # extra upstream headers such as HTTP-Referer
 
 debug:
   output_dir: "./logs"
   mask_key: false
+```
+
+If you only need a single upstream proxy, the old format still works:
+
+```yaml
+upstream:
+  base_url: "https://api.openai.com/v1"
+  api_key: "sk-xxx"
+  provider_preset: "openai"
 ```
 
 If you prefer starting from a ready-made config, use one of these examples:

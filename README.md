@@ -76,6 +76,10 @@ logs/
 
 ### 1. 配置
 
+当前推荐优先使用多 upstream 配置。
+
+旧的单 `upstream` 仍然兼容，适合最简单的单目标场景；但如果你的同一模型可能由多个 provider 提供，应直接使用 `upstreams + router`，避免再通过停服改配置切换上游。
+
 编辑 [config/config.yaml](./config/config.yaml)：
 
 ```yaml
@@ -85,22 +89,59 @@ server:
 monitor:
   port: "8081"
 
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "sk-xxx"
-  provider_preset: "openai"      # 推荐优先填写 preset
-  protocol_family: ""            # 可留空自动推断；与 provider_preset 冲突会在启动时报错
-  routing_profile: ""            # 可留空自动推断；不支持的 preset/profile 组合会 fail fast
-  api_version: ""                # Azure 用 query 参数；Anthropic 用 anthropic-version header
-  deployment: ""                 # Azure deployment routing 时使用
-  project: ""                    # Vertex project/location routing 时使用
-  location: ""                   # Vertex regional host / path routing 时使用
-  model_resource: ""             # Vertex model 资源，例如 publishers/google/models/gemini-2.5-flash
-  headers: {}                    # 额外上游请求头，比如 anthropic-beta
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+    startup_policy: "best_effort"
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "openai-primary"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: []
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: "sk-openai"
+      provider_preset: "openai"
+
+  - id: "openrouter-fallback"
+    enabled: true
+    priority: 80
+    weight: 0.8
+    capacity_hint: 1.2
+    model_discovery: "static_only"
+    static_models:
+      - "gpt-5"
+      - "gpt-4.1"
+    upstream:
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "sk-openrouter"
+      provider_preset: "openrouter"
+      headers: {}                 # 额外上游请求头，比如 HTTP-Referer
 
 debug:
   output_dir: "./logs"
   mask_key: false
+```
+
+如果你只需要单目标代理，仍然可以继续使用旧格式：
+
+```yaml
+upstream:
+  base_url: "https://api.openai.com/v1"
+  api_key: "sk-xxx"
+  provider_preset: "openai"
 ```
 
 如果你不想从零开始写配置，直接参考这些现成样例：

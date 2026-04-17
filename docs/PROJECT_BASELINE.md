@@ -209,6 +209,8 @@ Current routing context includes:
 - routing policy
 - routing score
 - routing candidate count
+- selected upstream health context when the router is available
+- current router health thresholds used to interpret degraded/open state
 
 The trace detail page links directly from an individual request to the upstream drilldown page.
 
@@ -298,6 +300,7 @@ The following work is considered functionally complete at the baseline level:
 - upstream health and refresh tracking
 - upstream analytics list and drilldown pages
 - per-trace routing metadata recording
+- per-trace selected-upstream health context
 - trace-to-upstream navigation
 - session detail overview and filtering
 - trace/session cross-view navigation
@@ -305,6 +308,13 @@ The following work is considered functionally complete at the baseline level:
 - area-level focus in trace detail
 - timeline error-node focus
 - legacy SQLite schema upgrade for newly added session columns
+
+This means the first multi-upstream delivery target is now considered complete at the product baseline level:
+
+- one proxy config can keep multiple upstreams online at once
+- provider/model availability is remembered locally
+- request routing is request-scoped rather than config-scoped
+- failures and routing decisions are explainable from monitor views without changing replay semantics
 
 ## Reasonable Follow-Up Work
 
