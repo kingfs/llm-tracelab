@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -80,8 +81,20 @@ type sessionListItem struct {
 }
 
 type sessionDetailResponse struct {
-	Summary sessionListItem `json:"summary"`
-	Traces  []traceListItem `json:"traces"`
+	Summary   sessionListItem      `json:"summary"`
+	Breakdown sessionBreakdownView `json:"breakdown"`
+	Traces    []traceListItem      `json:"traces"`
+}
+
+type sessionBreakdownView struct {
+	Models       []sessionCountItem `json:"models"`
+	Endpoints    []sessionCountItem `json:"endpoints"`
+	FailedTraces int                `json:"failed_traces"`
+}
+
+type sessionCountItem struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
 }
 
 type detailResponse struct {
@@ -346,6 +359,7 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				Error:            entry.Header.Meta.Error,
 			})
 		}
+		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -563,6 +577,40 @@ func parseListFilter(r *http.Request) store.ListFilter {
 		Provider: strings.TrimSpace(query.Get("provider")),
 		Model:    strings.TrimSpace(query.Get("model")),
 	}
+}
+
+func buildSessionBreakdown(traces []traceListItem) sessionBreakdownView {
+	modelCounts := map[string]int{}
+	endpointCounts := map[string]int{}
+	failed := 0
+	for _, trace := range traces {
+		model := firstNonEmpty(trace.Model, "unknown-model")
+		endpoint := firstNonEmpty(trace.Endpoint, trace.Operation, trace.URL, "unknown-endpoint")
+		modelCounts[model]++
+		endpointCounts[endpoint]++
+		if trace.StatusCode < 200 || trace.StatusCode >= 300 {
+			failed++
+		}
+	}
+	return sessionBreakdownView{
+		Models:       sortSessionCounts(modelCounts),
+		Endpoints:    sortSessionCounts(endpointCounts),
+		FailedTraces: failed,
+	}
+}
+
+func sortSessionCounts(counts map[string]int) []sessionCountItem {
+	items := make([]sessionCountItem, 0, len(counts))
+	for label, count := range counts {
+		items = append(items, sessionCountItem{Label: label, Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		return items[i].Label < items[j].Label
+	})
+	return items
 }
 
 func filterTimelineEvents(events []recordfile.RecordEvent) []recordfile.RecordEvent {

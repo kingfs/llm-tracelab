@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -211,6 +212,68 @@ func TestSessionDetailAPIHandlerReturnsTraceList(t *testing.T) {
 	}
 	if payload.Traces[0].SessionID != sessionID {
 		t.Fatalf("trace session id = %q, want %q", payload.Traces[0].SessionID, sessionID)
+	}
+}
+
+func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	traceA := filepath.Join(outputDir, "trace-a.http")
+	traceB := filepath.Join(outputDir, "trace-b.http")
+	sessionID := "sess-breakdown"
+	contentA := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		false,
+		[]string{"Session_id: " + sessionID},
+		`{"input":"hello"}`,
+		`{"output_text":"done"}`,
+	)
+	contentB := buildRecordFixtureWithStatusAndHeaders(
+		t,
+		"/v1/chat/completions",
+		false,
+		"500 Internal Server Error",
+		[]string{"Session_id: " + sessionID},
+		`{"messages":[{"role":"user","content":"boom"}]}`,
+		`{"error":"failed"}`,
+	)
+	if err := os.WriteFile(traceA, contentA, 0o644); err != nil {
+		t.Fatalf("WriteFile(traceA) error = %v", err)
+	}
+	if err := os.WriteFile(traceB, contentB, 0o644); err != nil {
+		t.Fatalf("WriteFile(traceB) error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
+	rr := httptest.NewRecorder()
+	sessionDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload sessionDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Breakdown.FailedTraces != 1 {
+		t.Fatalf("FailedTraces = %d, want 1", payload.Breakdown.FailedTraces)
+	}
+	if len(payload.Breakdown.Models) != 1 {
+		t.Fatalf("len(models) = %d, want 1", len(payload.Breakdown.Models))
+	}
+	if payload.Breakdown.Models[0].Count != 2 {
+		t.Fatalf("model count = %d, want 2", payload.Breakdown.Models[0].Count)
+	}
+	if len(payload.Breakdown.Endpoints) != 2 {
+		t.Fatalf("len(endpoints) = %d, want 2", len(payload.Breakdown.Endpoints))
 	}
 }
 
@@ -876,6 +939,11 @@ func buildRecordHeader(url string, isStream bool, reqBody string, resBody string
 
 func buildRecordFixtureWithRequestHeaders(t *testing.T, url string, isStream bool, extraHeaders []string, reqBody string, resBody string) []byte {
 	t.Helper()
+	return buildRecordFixtureWithStatusAndHeaders(t, url, isStream, "200 OK", extraHeaders, reqBody, resBody)
+}
+
+func buildRecordFixtureWithStatusAndHeaders(t *testing.T, url string, isStream bool, status string, extraHeaders []string, reqBody string, resBody string) []byte {
+	t.Helper()
 
 	requestHeaderLines := []string{
 		"POST " + url + " HTTP/1.1",
@@ -884,11 +952,12 @@ func buildRecordFixtureWithRequestHeaders(t *testing.T, url string, isStream boo
 	}
 	requestHeaderLines = append(requestHeaderLines, extraHeaders...)
 	request := strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n" + reqBody
-	responseHeader := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	responseHeader := "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n\r\n"
 	if isStream {
-		responseHeader = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+		responseHeader = "HTTP/1.1 " + status + "\r\nContent-Type: text/event-stream\r\n\r\n"
 	}
 	header := buildRecordHeader(url, isStream, reqBody, resBody)
+	header.Meta.StatusCode = parseStatusCode(status)
 	header.Layout.ReqHeaderLen = int64(len(strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n"))
 	header.Layout.ResHeaderLen = int64(len(responseHeader))
 	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
@@ -897,4 +966,16 @@ func buildRecordFixtureWithRequestHeaders(t *testing.T, url string, isStream boo
 	}
 	payload := request + "\n" + responseHeader + resBody
 	return append(prelude, []byte(payload)...)
+}
+
+func parseStatusCode(status string) int {
+	parts := strings.SplitN(status, " ", 2)
+	if len(parts) == 0 {
+		return 200
+	}
+	code, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 200
+	}
+	return code
 }

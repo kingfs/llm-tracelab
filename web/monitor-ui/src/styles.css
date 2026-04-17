@@ -118,6 +118,10 @@ a {
   margin-bottom: 18px;
 }
 
+.hero-grid-compact {
+  margin-bottom: 0;
+}
+
 .stat-card,
 .panel,
 .message-card,
@@ -291,6 +295,10 @@ a {
   border-color: rgba(30, 107, 65, 0.4);
 }
 
+.accent-red {
+  border-color: rgba(161, 54, 42, 0.35);
+}
+
 .panel {
   border-radius: var(--radius-panel);
   padding: 22px;
@@ -384,6 +392,14 @@ a {
 .trace-row:hover,
 .session-row:hover {
   background: rgba(255, 255, 255, 0.68);
+}
+
+.trace-row-failed {
+  background: rgba(161, 54, 42, 0.06);
+}
+
+.trace-row-failed:hover {
+  background: rgba(161, 54, 42, 0.1);
 }
 
 .trace-row strong,
@@ -603,6 +619,52 @@ a {
   grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.detail-grid-compact {
+  margin-bottom: 18px;
+}
+
+.session-breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.breakdown-card {
+  border: 1px solid rgba(34, 40, 49, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.breakdown-title,
+.breakdown-label {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.breakdown-title {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.breakdown-list {
+  display: grid;
+  gap: 8px;
+}
+
+.breakdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.breakdown-label {
+  color: var(--muted);
 }
 
 .payload-grid {
@@ -1049,6 +1111,7 @@ a {
 @media (max-width: 1100px) {
   .hero-grid,
   .detail-grid,
+  .session-breakdown-grid,
   .payload-grid,
   .raw-grid,
   .trace-table-head,

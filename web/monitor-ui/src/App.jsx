@@ -240,7 +240,7 @@ function RequestList({ items, fromView = "", fromSessionID = "" }) {
         <span>Actions</span>
       </div>
       {items.map((item) => (
-        <article key={item.id} className="trace-row">
+        <article key={item.id} className={item.status_code >= 200 && item.status_code < 300 ? "trace-row" : "trace-row trace-row-failed"}>
           <div>
             <div className="trace-title-row">
               <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
@@ -341,6 +341,7 @@ function SessionDetailPage() {
   const { sessionID = "" } = useParams();
   const detail = useJSON(`/api/sessions/${encodeURIComponent(sessionID)}`, [sessionID]);
   const summary = detail.data?.summary;
+  const breakdown = detail.data?.breakdown;
   const traces = detail.data?.traces ?? [];
 
   return (
@@ -381,6 +382,37 @@ function SessionDetailPage() {
       {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
       {detail.loading && !detail.data ? <div className="empty-state">Loading session...</div> : null}
 
+      {detail.data ? (
+        <div className="detail-grid detail-grid-compact">
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Failure surface</p>
+                <h2>Session health</h2>
+              </div>
+            </div>
+            <div className="hero-grid hero-grid-compact">
+              <StatCard label="Failed" value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
+              <StatCard label="Success" value={summary?.success_request ?? 0} />
+              <StatCard label="Streams" value={summary?.stream_count ?? 0} />
+              <StatCard label="Duration" value={`${summary?.total_duration_ms ?? 0} ms`} />
+            </div>
+          </section>
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Distribution</p>
+                <h2>Models and endpoints</h2>
+              </div>
+            </div>
+            <div className="session-breakdown-grid">
+              <BreakdownList title="Models" items={breakdown?.models || []} formatter={(item) => item.label} />
+              <BreakdownList title="Endpoints" items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -391,6 +423,26 @@ function SessionDetailPage() {
         <RequestList items={traces} fromSessionID={summary?.session_id || sessionID} />
       </section>
     </div>
+  );
+}
+
+function BreakdownList({ title, items, formatter }) {
+  return (
+    <section className="breakdown-card">
+      <div className="breakdown-title">{title}</div>
+      {items.length ? (
+        <div className="breakdown-list">
+          {items.map((item) => (
+            <div key={`${title}-${item.label}`} className="breakdown-row">
+              <span className="breakdown-label">{formatter(item)}</span>
+              <strong>{item.count}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state">No data</div>
+      )}
+    </section>
   );
 }
 
