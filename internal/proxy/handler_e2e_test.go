@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
+
+func boolPtr(v bool) *bool { return &v }
 
 func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 	tests := []struct {
@@ -154,6 +157,95 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 				t.Fatalf("indexed total tokens = %d, want %d", entries[0].Header.Usage.TotalTokens, tt.wantTotalTokens)
 			}
 		})
+	}
+}
+
+func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "openrouter-fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-4.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"claude-3-7-sonnet","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("resp.StatusCode = %d, want 502", resp.StatusCode)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.RoutingFailureReason != router.SelectionFailureNoSupportingTarget {
+		t.Fatalf("RoutingFailureReason = %q, want %q", parsed.Header.Meta.RoutingFailureReason, router.SelectionFailureNoSupportingTarget)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "" {
+		t.Fatalf("SelectedUpstreamID = %q, want empty", parsed.Header.Meta.SelectedUpstreamID)
+	}
+	if parsed.Header.Meta.StatusCode != http.StatusBadGateway {
+		t.Fatalf("StatusCode = %d, want 502", parsed.Header.Meta.StatusCode)
+	}
+
+	entries, err := waitForRecentEntries(st, 1, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+	}
+	if entries[0].Header.Meta.RoutingFailureReason != router.SelectionFailureNoSupportingTarget {
+		t.Fatalf("indexed RoutingFailureReason = %q, want %q", entries[0].Header.Meta.RoutingFailureReason, router.SelectionFailureNoSupportingTarget)
 	}
 }
 

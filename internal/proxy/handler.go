@@ -301,6 +301,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	selection, err := h.router.Select(r)
 	if err != nil {
 		slog.Error("Failed to select upstream target", "error", err)
+		h.recordSelectionFailure(r, start, http.StatusBadGateway, err)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -390,4 +391,65 @@ func (h *Handler) routerPolicy() string {
 		return ""
 	}
 	return h.router.Policy()
+}
+
+func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statusCode int, selectErr error) {
+	if h == nil || h.recorder == nil || r == nil {
+		return
+	}
+	reason := router.SelectionFailureReason(selectErr)
+	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
+		RoutingPolicy:        h.routerPolicy(),
+		RoutingFailureReason: reason,
+	})
+	if err != nil {
+		slog.Error("Failed to prepare selection-failure log file", "err", err)
+		return
+	}
+
+	body := []byte("Proxy Error: " + selectErr.Error() + "\n")
+	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode)))
+	headerBuf.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	headerBuf.WriteString("X-Content-Type-Options: nosniff\r\n")
+	headerBuf.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	headerBuf.WriteString("\r\n")
+
+	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
+		slog.Error("Failed to write selection-failure separator", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+	nHead, err := logInfo.File.Write(headerBuf.Bytes())
+	if err != nil {
+		slog.Error("Failed to write selection-failure response header", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+	nBody, err := logInfo.File.Write(body)
+	if err != nil {
+		slog.Error("Failed to write selection-failure response body", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+
+	logInfo.Header.Meta.Error = selectErr.Error()
+	logInfo.Header.Meta.StatusCode = statusCode
+	logInfo.Header.Meta.DurationMs = time.Since(start).Milliseconds()
+	logInfo.Header.Meta.ContentLength = int64(len(body))
+	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
+	logInfo.Header.Layout.ResBodyLen = int64(nBody)
+	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+		Type:    "routing.failure",
+		Time:    time.Now().UTC(),
+		Message: selectErr.Error(),
+		Attributes: map[string]interface{}{
+			"routing_policy":         h.routerPolicy(),
+			"routing_failure_reason": reason,
+			"http_status":            statusCode,
+		},
+	})
+
+	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+		slog.Error("Failed to update selection-failure log file", "path", logInfo.Path, "err", err)
+	}
 }

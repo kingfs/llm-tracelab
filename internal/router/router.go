@@ -3,6 +3,7 @@ package router
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -147,6 +148,36 @@ type Selection struct {
 	CandidateCount int
 	Candidates     []string
 	Request        RequestFeatures
+}
+
+type SelectionError struct {
+	Reason  string
+	Message string
+}
+
+func (e *SelectionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return e.Reason
+}
+
+const (
+	SelectionFailureNilRequest         = "nil_request"
+	SelectionFailureNoSupportingTarget = "no_supporting_target"
+	SelectionFailureAllTargetsOpen     = "all_targets_open"
+	SelectionFailureUnknown            = "unknown"
+)
+
+func SelectionFailureReason(err error) string {
+	var selectionErr *SelectionError
+	if errors.As(err, &selectionErr) && strings.TrimSpace(selectionErr.Reason) != "" {
+		return selectionErr.Reason
+	}
+	return SelectionFailureUnknown
 }
 
 type RequestFeatures struct {
@@ -329,7 +360,10 @@ func (r *Router) Snapshots() []Snapshot {
 
 func (r *Router) Select(req *http.Request) (*Selection, error) {
 	if req == nil {
-		return nil, fmt.Errorf("nil request")
+		return nil, &SelectionError{
+			Reason:  SelectionFailureNilRequest,
+			Message: "nil request",
+		}
 	}
 	body, err := readAndRestoreBody(req)
 	if err != nil {
@@ -343,7 +377,10 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 
 	candidates := r.candidatesForRequest(req.URL.Path, model)
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(req.URL.Path))
+		return nil, &SelectionError{
+			Reason:  SelectionFailureNoSupportingTarget,
+			Message: fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(req.URL.Path)),
+		}
 	}
 	available := make([]*Target, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -353,7 +390,10 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 		available = append(available, candidate)
 	}
 	if len(available) == 0 {
-		return nil, fmt.Errorf("all upstream targets are temporarily unavailable for model %q", model)
+		return nil, &SelectionError{
+			Reason:  SelectionFailureAllTargetsOpen,
+			Message: fmt.Sprintf("all upstream targets are temporarily unavailable for model %q", model),
+		}
 	}
 
 	selected, score := r.pick(available, features)

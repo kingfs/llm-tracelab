@@ -319,7 +319,7 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
 		WHERE selected_upstream_id = ?`+whereSQL+`
 		ORDER BY recorded_at DESC, trace_id DESC
@@ -588,7 +588,8 @@ func (s *Store) initSchema() error {
 			selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
 			routing_policy TEXT NOT NULL DEFAULT '',
 			routing_score REAL NOT NULL DEFAULT 0,
-			routing_candidate_count INTEGER NOT NULL DEFAULT 0
+			routing_candidate_count INTEGER NOT NULL DEFAULT 0,
+			routing_failure_reason TEXT NOT NULL DEFAULT ''
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_recorded_at ON logs(recorded_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_model_recorded_at ON logs(model, recorded_at DESC);`,
@@ -661,6 +662,9 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "routing_candidate_count", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	postColumnStmts := []string{
@@ -899,8 +903,8 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -938,7 +942,8 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			selected_upstream_provider_preset=excluded.selected_upstream_provider_preset,
 			routing_policy=excluded.routing_policy,
 			routing_score=excluded.routing_score,
-			routing_candidate_count=excluded.routing_candidate_count
+			routing_candidate_count=excluded.routing_candidate_count,
+			routing_failure_reason=excluded.routing_failure_reason
 	`,
 		path,
 		traceID,
@@ -978,6 +983,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Meta.RoutingPolicy,
 		header.Meta.RoutingScore,
 		header.Meta.RoutingCandidateCount,
+		header.Meta.RoutingFailureReason,
 	)
 
 	return err
@@ -1126,7 +1132,7 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
 		ORDER BY recorded_at DESC
 		LIMIT ?
@@ -1177,7 +1183,7 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
 	`
 	if whereSQL != "" {
@@ -1225,7 +1231,7 @@ func (s *Store) GetByID(traceID string) (LogEntry, error) {
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
 		WHERE trace_id = ?
 	`, traceID)
@@ -1350,7 +1356,7 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
 		WHERE session_id = ?
 		ORDER BY recorded_at DESC, trace_id DESC
@@ -1458,6 +1464,7 @@ func scanEntry(scanner interface {
 		&entry.Header.Meta.RoutingPolicy,
 		&routingScore,
 		&entry.Header.Meta.RoutingCandidateCount,
+		&entry.Header.Meta.RoutingFailureReason,
 	)
 	if err != nil {
 		return LogEntry{}, err

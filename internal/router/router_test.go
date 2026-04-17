@@ -101,6 +101,57 @@ func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 	}
 }
 
+func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-4.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"claude-3-7-sonnet","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err = rtr.Select(req)
+	if err == nil {
+		t.Fatalf("Select() error = nil, want structured error")
+	}
+	if SelectionFailureReason(err) != SelectionFailureNoSupportingTarget {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureNoSupportingTarget)
+	}
+}
+
 func TestRouterSnapshotsExposeHealthAndModels(t *testing.T) {
 	cfg := &config.Config{
 		Router: config.RouterConfig{},
@@ -302,5 +353,64 @@ func TestRouterCostAwareSelectionAvoidsDegradedTarget(t *testing.T) {
 	}
 	if flakySnapshot.HealthState != HealthOpen && flakySnapshot.HealthState != HealthDegraded {
 		t.Fatalf("flaky health = %q, want open/degraded", flakySnapshot.HealthState)
+	}
+}
+
+func TestRouterSelectReturnsStructuredAllTargetsOpenError(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Minute
+	cfg.Router.Selection.Epsilon = 0
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	reqFeatures := RequestFeatures{ModelName: "gpt-5", RequestBytes: 256, EstPromptTokens: 64, MaxTokens: 256}
+	for _, target := range rtr.targets {
+		target.onFinish(reqFeatures, Outcome{Success: false, StatusCode: 503, DurationMs: 1000, TTFTMs: 0}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	_, err = rtr.Select(req)
+	if err == nil {
+		t.Fatalf("Select() error = nil, want structured error")
+	}
+	if SelectionFailureReason(err) != SelectionFailureAllTargetsOpen {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureAllTargetsOpen)
 	}
 }

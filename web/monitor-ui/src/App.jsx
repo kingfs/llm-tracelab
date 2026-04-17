@@ -1047,6 +1047,7 @@ function TraceDetailPage() {
   const routingPolicy = header?.routing_policy || "";
   const routingScore = Number(header?.routing_score || 0);
   const routingCandidateCount = Number(header?.routing_candidate_count || 0);
+  const routingFailureReason = header?.routing_failure_reason || "";
   const focusTarget = searchParams.get("focus") || "";
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
   const fromSessionID = searchParams.get("from_session") || "";
@@ -1199,36 +1200,41 @@ function TraceDetailPage() {
 
       {tab === "summary" && detail.data ? (
         <div className="detail-grid">
-          {selectedUpstreamID ? (
+          {selectedUpstreamID || routingFailureReason ? (
             <section className="panel">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">Routing decision</p>
-                  <h2>Selected upstream</h2>
+                  <h2>{selectedUpstreamID ? "Selected upstream" : "Routing failure"}</h2>
                 </div>
                 <div className="panel-head-actions">
-                  <Link className="ghost-button" to={buildUpstreamLink(selectedUpstreamID)}>
-                    Open Upstream
-                  </Link>
+                  {selectedUpstreamID ? (
+                    <Link className="ghost-button" to={buildUpstreamLink(selectedUpstreamID)}>
+                      Open Upstream
+                    </Link>
+                  ) : null}
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMetaPill label="upstream" value={selectedUpstreamID} mono />
+                <DetailMetaPill label="upstream" value={selectedUpstreamID || "-"} mono />
                 <DetailMetaPill label="provider" value={selectedUpstreamProviderPreset || "-"} />
                 <DetailMetaPill label="policy" value={routingPolicy || "-"} />
                 <DetailMetaPill label="score" value={formatRoutingScore(routingScore)} />
                 <DetailMetaPill label="candidates" value={routingCandidateCount || 0} />
+                {routingFailureReason ? <DetailMetaPill label="failure" value={formatFailureReason(routingFailureReason)} /> : null}
               </div>
               <div className="routing-summary-grid">
                 <section className="breakdown-card">
-                  <div className="breakdown-title">Resolved upstream</div>
+                  <div className="breakdown-title">{selectedUpstreamID ? "Resolved upstream" : "Failure class"}</div>
                   <div className="routing-summary-stack">
-                    <strong className="trace-model-name">{selectedUpstreamID}</strong>
+                    <strong className="trace-model-name">{selectedUpstreamID || formatFailureReason(routingFailureReason) || "routing failure"}</strong>
                     <span className="trace-subline mono">{selectedUpstreamBaseURL || "-"}</span>
-                    <div className="trace-tag-group">
-                      <InlineTag tone="accent">{selectedUpstreamProviderPreset || "custom"}</InlineTag>
-                      {routingPolicy ? <InlineTag>{routingPolicy}</InlineTag> : null}
-                    </div>
+                    {selectedUpstreamID || routingPolicy ? (
+                      <div className="trace-tag-group">
+                        {selectedUpstreamProviderPreset ? <InlineTag tone="accent">{selectedUpstreamProviderPreset}</InlineTag> : null}
+                        {routingPolicy ? <InlineTag>{routingPolicy}</InlineTag> : null}
+                      </div>
+                    ) : null}
                   </div>
                 </section>
                 <section className="breakdown-card">
@@ -1240,6 +1246,7 @@ function TraceDetailPage() {
                         policy: routingPolicy,
                         score: routingScore,
                         candidateCount: routingCandidateCount,
+                        failureReason: routingFailureReason,
                       })}
                     </span>
                   </div>
@@ -1963,13 +1970,23 @@ function formatRoutingScore(value = 0) {
   return Number(value || 0).toFixed(2);
 }
 
-function buildRoutingDecisionSummary({ upstreamID = "", policy = "", score = 0, candidateCount = 0 }) {
+function buildRoutingDecisionSummary({ upstreamID = "", policy = "", score = 0, candidateCount = 0, failureReason = "" }) {
   const target = upstreamID || "unknown upstream";
   const policyLabel = policy || "selected";
+  if (!upstreamID && failureReason) {
+    return `The router did not pick an upstream because it failed with ${formatFailureReason(failureReason)}.`;
+  }
   if (candidateCount > 0) {
     return `${target} was chosen by ${policyLabel} from ${candidateCount} candidate${candidateCount > 1 ? "s" : ""} with score ${formatRoutingScore(score)}.`;
   }
   return `${target} was chosen by ${policyLabel} with score ${formatRoutingScore(score)}.`;
+}
+
+function formatFailureReason(value = "") {
+  if (!value) {
+    return "-";
+  }
+  return String(value).replaceAll("_", " ");
 }
 
 function summarizeTraceFailure(detail) {

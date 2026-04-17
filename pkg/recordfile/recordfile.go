@@ -56,6 +56,7 @@ type MetaData struct {
 	RoutingPolicy                  string    `json:"routing_policy,omitempty"`
 	RoutingScore                   float64   `json:"routing_score,omitempty"`
 	RoutingCandidateCount          int       `json:"routing_candidate_count,omitempty"`
+	RoutingFailureReason           string    `json:"routing_failure_reason,omitempty"`
 }
 
 type RecordHeader struct {

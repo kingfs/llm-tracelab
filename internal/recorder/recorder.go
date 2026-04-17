@@ -43,6 +43,7 @@ type PrepareOptions struct {
 	RoutingPolicy                  string
 	RoutingScore                   float64
 	RoutingCandidateCount          int
+	RoutingFailureReason           string
 }
 
 type Recorder struct {
@@ -175,6 +176,7 @@ func (r *Recorder) PrepareLogFileWithOptions(req *http.Request, opts PrepareOpti
 			RoutingPolicy:                  opts.RoutingPolicy,
 			RoutingScore:                   opts.RoutingScore,
 			RoutingCandidateCount:          opts.RoutingCandidateCount,
+			RoutingFailureReason:           opts.RoutingFailureReason,
 		},
 		Layout: LayoutInfo{
 			ReqHeaderLen: int64(nHead),
