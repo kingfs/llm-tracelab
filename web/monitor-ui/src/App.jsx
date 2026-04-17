@@ -339,10 +339,12 @@ function SessionList({ items }) {
 
 function SessionDetailPage() {
   const { sessionID = "" } = useParams();
+  const [traceFilter, setTraceFilter] = useState("all");
   const detail = useJSON(`/api/sessions/${encodeURIComponent(sessionID)}`, [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
   const traces = detail.data?.traces ?? [];
+  const visibleTraces = traceFilter === "failed" ? traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300) : traces;
 
   return (
     <div className="shell shell-detail">
@@ -417,10 +419,27 @@ function SessionDetailPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Session traces</p>
-            <h2>Grouped request list</h2>
+            <h2>{traceFilter === "failed" ? "Failed request list" : "Grouped request list"}</h2>
+          </div>
+          <div className="panel-head-actions">
+            <div className="view-toggle" role="tablist" aria-label="Session trace filter">
+              <button className={traceFilter === "all" ? "ghost-button active" : "ghost-button"} onClick={() => setTraceFilter("all")}>
+                All
+              </button>
+              <button className={traceFilter === "failed" ? "ghost-button active" : "ghost-button"} onClick={() => setTraceFilter("failed")}>
+                Failed only
+              </button>
+            </div>
+            <span className="session-filter-count">
+              {visibleTraces.length} / {traces.length} traces
+            </span>
           </div>
         </div>
-        <RequestList items={traces} fromSessionID={summary?.session_id || sessionID} />
+        {traceFilter === "failed" && visibleTraces.length === 0 ? (
+          <div className="empty-state">No failed traces in this session.</div>
+        ) : (
+          <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} />
+        )}
       </section>
     </div>
   );

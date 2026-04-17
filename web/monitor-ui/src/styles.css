@@ -320,6 +320,12 @@ a {
   flex-wrap: wrap;
 }
 
+.session-filter-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
 .filter-bar {
   display: flex;
   align-items: center;
