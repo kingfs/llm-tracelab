@@ -317,7 +317,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("Failed to prepare log file", "err", err)
 		http.Error(w, "Internal Logging Error", 500)
-		h.router.Complete(selection, router.Outcome{})
+		h.router.Complete(selection, router.Outcome{
+			Success:    false,
+			StatusCode: http.StatusInternalServerError,
+			Stream:     selection.Request.Stream,
+		})
 		return
 	}
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
@@ -348,7 +352,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if uErr := h.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
 		}
-		h.router.Complete(selection, router.Outcome{Success: code >= 200 && code < 300 && logInfo.Header.Meta.Error == ""})
+		h.router.Complete(selection, router.Outcome{
+			Success:        code >= 200 && code < 300 && logInfo.Header.Meta.Error == "",
+			ClientCanceled: r.Context().Err() != nil,
+			StatusCode:     code,
+			DurationMs:     float64(duration.Milliseconds()),
+			TTFTMs:         float64(ttft),
+			Stream:         logInfo.Header.Layout.IsStream || selection.Request.Stream,
+		})
 
 		slog.Info("Request completed",
 			"model", logInfo.Header.Meta.Model,

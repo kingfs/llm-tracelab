@@ -2,6 +2,7 @@ package router
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -29,6 +30,39 @@ const (
 	FallbackReject = "reject"
 )
 
+const (
+	HealthHealthy   = "healthy"
+	HealthDegraded  = "degraded"
+	HealthOpen      = "open"
+	HealthProbation = "probation"
+)
+
+type costConfig struct {
+	FastAlpha           float64
+	SlowAlpha           float64
+	Epsilon             float64
+	MinCostFloor        float64
+	TTFTDegradedRatio   float64
+	ErrorRateDegraded   float64
+	TimeoutRateDegraded float64
+	ErrorRateOpen       float64
+	TimeoutRateOpen     float64
+}
+
+func defaultCostConfig() costConfig {
+	return costConfig{
+		FastAlpha:           0.30,
+		SlowAlpha:           0.05,
+		Epsilon:             0.02,
+		MinCostFloor:        0.001,
+		TTFTDegradedRatio:   1.5,
+		ErrorRateDegraded:   0.15,
+		TimeoutRateDegraded: 0.10,
+		ErrorRateOpen:       0.35,
+		TimeoutRateOpen:     0.25,
+	}
+}
+
 type Router struct {
 	mu               sync.RWMutex
 	targets          []*Target
@@ -39,6 +73,7 @@ type Router struct {
 	fallbackPolicy   string
 	refreshInterval  time.Duration
 	discoveryEnabled bool
+	costs            costConfig
 	store            *store.Store
 	random           *rand.Rand
 	stopCh           chan struct{}
@@ -59,12 +94,22 @@ type Target struct {
 
 	mu                  sync.Mutex
 	inflight            int64
+	inflightStreaming   int64
+	inflightNonStream   int64
 	consecutiveFailures int64
 	openUntil           time.Time
 	models              map[string]struct{}
 	lastRefreshAt       time.Time
 	lastRefreshStatus   string
 	lastRefreshError    string
+	ttftFastMs          float64
+	ttftSlowMs          float64
+	reqLatencyFastMs    float64
+	reqLatencySlowMs    float64
+	errorRate           float64
+	timeoutRate         float64
+	cancelRate          float64
+	healthState         string
 }
 
 type Snapshot struct {
@@ -80,6 +125,15 @@ type Snapshot struct {
 	RoutingProfile    string    `json:"routing_profile"`
 	HealthState       string    `json:"health_state"`
 	Inflight          int64     `json:"inflight"`
+	InflightStreaming int64     `json:"inflight_streaming"`
+	InflightNonStream int64     `json:"inflight_non_stream"`
+	TTFTFastMs        float64   `json:"ttft_fast_ms"`
+	TTFTSlowMs        float64   `json:"ttft_slow_ms"`
+	LatencyFastMs     float64   `json:"latency_fast_ms"`
+	LatencySlowMs     float64   `json:"latency_slow_ms"`
+	ErrorRate         float64   `json:"error_rate"`
+	TimeoutRate       float64   `json:"timeout_rate"`
+	CancelRate        float64   `json:"cancel_rate"`
 	LastRefreshAt     time.Time `json:"last_refresh_at"`
 	LastRefreshStatus string    `json:"last_refresh_status"`
 	LastRefreshError  string    `json:"last_refresh_error,omitempty"`
@@ -87,20 +141,31 @@ type Snapshot struct {
 	Models            []string  `json:"models"`
 }
 
-const (
-	HealthHealthy = "healthy"
-	HealthOpen    = "open"
-)
-
 type Selection struct {
 	Target         *Target
 	Score          float64
 	CandidateCount int
 	Candidates     []string
+	Request        RequestFeatures
+}
+
+type RequestFeatures struct {
+	ModelName           string
+	RequestBytes        int64
+	EstPromptTokens     float64
+	MaxTokens           float64
+	Stream              bool
+	HasTools            bool
+	HasStructuredOutput bool
 }
 
 type Outcome struct {
-	Success bool
+	Success        bool
+	ClientCanceled bool
+	StatusCode     int
+	DurationMs     float64
+	TTFTMs         float64
+	Stream         bool
 }
 
 func New(cfg *config.Config, st *store.Store) (*Router, error) {
@@ -120,9 +185,13 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		fallbackPolicy:   normalizeFallback(cfg.Router.Fallback.OnMissingModel),
 		refreshInterval:  cfg.Router.ModelDiscovery.RefreshInterval,
 		discoveryEnabled: cfg.Router.ModelDiscovery.Enabled == nil || *cfg.Router.ModelDiscovery.Enabled,
+		costs:            defaultCostConfig(),
 		store:            st,
 		random:           rand.New(rand.NewSource(time.Now().UnixNano())),
 		stopCh:           make(chan struct{}),
+	}
+	if cfg.Router.Selection.Epsilon > 0 {
+		r.costs.Epsilon = cfg.Router.Selection.Epsilon
 	}
 	if r.openWindow <= 0 {
 		r.openWindow = 15 * time.Second
@@ -160,6 +229,11 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 			Upstream:           resolved,
 			allowUnknownModels: len(targetCfgs) == 1,
 			models:             map[string]struct{}{},
+			ttftFastMs:         500,
+			ttftSlowMs:         500,
+			reqLatencyFastMs:   800,
+			reqLatencySlowMs:   800,
+			healthState:        HealthHealthy,
 		}
 		if _, exists := seenIDs[target.ID]; exists {
 			return nil, fmt.Errorf("duplicate upstream target id %q", target.ID)
@@ -261,7 +335,8 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 	if err != nil {
 		return nil, err
 	}
-	model := requestModel(req.URL.Path, body)
+	features := extractRequestFeatures(req.URL.Path, body)
+	model := features.ModelName
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -281,8 +356,8 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 		return nil, fmt.Errorf("all upstream targets are temporarily unavailable for model %q", model)
 	}
 
-	selected, score := r.pick(available)
-	selected.onStart()
+	selected, score := r.pick(available, features)
+	selected.onStart(features)
 
 	candidateIDs := make([]string, 0, len(available))
 	for _, candidate := range available {
@@ -293,6 +368,7 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 		Score:          score,
 		CandidateCount: len(available),
 		Candidates:     candidateIDs,
+		Request:        features,
 	}, nil
 }
 
@@ -300,20 +376,33 @@ func (r *Router) Complete(selection *Selection, outcome Outcome) {
 	if selection == nil || selection.Target == nil {
 		return
 	}
-	selection.Target.onFinish(outcome.Success, r.failureThreshold, r.openWindow)
+	selection.Target.onFinish(selection.Request, outcome, r.costs, r.failureThreshold, r.openWindow)
 }
 
-func (r *Router) pick(candidates []*Target) (*Target, float64) {
+func (r *Router) pick(candidates []*Target, req RequestFeatures) (*Target, float64) {
 	if len(candidates) == 1 || r.policy == PolicyFirstAvailable {
 		best := candidates[0]
-		bestScore := scoreTarget(best)
+		bestScore := r.expectedCost(best, req)
 		for _, candidate := range candidates[1:] {
-			if compareCandidate(candidate, best) < 0 {
+			candidateScore := r.expectedCost(candidate, req)
+			if compareScore(candidate, candidateScore, best, bestScore) < 0 {
 				best = candidate
-				bestScore = scoreTarget(candidate)
+				bestScore = candidateScore
 			}
 		}
 		return best, bestScore
+	}
+
+	return r.pickCostAware(candidates, req)
+}
+
+func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Target, float64) {
+	if len(candidates) == 1 {
+		return candidates[0], r.expectedCost(candidates[0], req)
+	}
+	if r.random.Float64() < r.costs.Epsilon {
+		idx := r.random.Intn(len(candidates))
+		return candidates[idx], r.expectedCost(candidates[idx], req)
 	}
 
 	aIdx := r.random.Intn(len(candidates))
@@ -323,8 +412,8 @@ func (r *Router) pick(candidates []*Target) (*Target, float64) {
 	}
 	a := candidates[aIdx]
 	b := candidates[bIdx]
-	scoreA := scoreTarget(a)
-	scoreB := scoreTarget(b)
+	scoreA := r.expectedCost(a, req)
+	scoreB := r.expectedCost(b, req)
 	if compareScore(a, scoreA, b, scoreB) <= 0 {
 		return a, scoreA
 	}
@@ -451,7 +540,7 @@ func (r *Router) rebuildCatalog() {
 	}
 	for _, targets := range catalog {
 		slices.SortFunc(targets, func(a, b *Target) int {
-			return compareCandidate(a, b)
+			return compareScore(a, r.expectedCost(a, RequestFeatures{}), b, r.expectedCost(b, RequestFeatures{}))
 		})
 	}
 	r.modelToTargets = catalog
@@ -494,9 +583,9 @@ func (t *Target) snapshot() Snapshot {
 		models = append(models, model)
 	}
 	slices.Sort(models)
-	health := HealthHealthy
-	if !t.openUntil.IsZero() && time.Now().Before(t.openUntil) {
-		health = HealthOpen
+	health := t.healthState
+	if health == "" {
+		health = HealthHealthy
 	}
 	return Snapshot{
 		ID:                t.ID,
@@ -511,6 +600,15 @@ func (t *Target) snapshot() Snapshot {
 		RoutingProfile:    t.Upstream.RoutingProfile,
 		HealthState:       health,
 		Inflight:          t.inflight,
+		InflightStreaming: t.inflightStreaming,
+		InflightNonStream: t.inflightNonStream,
+		TTFTFastMs:        t.ttftFastMs,
+		TTFTSlowMs:        t.ttftSlowMs,
+		LatencyFastMs:     t.reqLatencyFastMs,
+		LatencySlowMs:     t.reqLatencySlowMs,
+		ErrorRate:         t.errorRate,
+		TimeoutRate:       t.timeoutRate,
+		CancelRate:        t.cancelRate,
 		LastRefreshAt:     t.lastRefreshAt,
 		LastRefreshStatus: t.lastRefreshStatus,
 		LastRefreshError:  t.lastRefreshError,
@@ -522,43 +620,132 @@ func (t *Target) snapshot() Snapshot {
 func (t *Target) isOpen(now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return !t.openUntil.IsZero() && now.Before(t.openUntil)
+	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.After(t.openUntil) {
+		t.healthState = HealthProbation
+	}
+	return t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil)
 }
 
-func (t *Target) onStart() {
+func (t *Target) onStart(req RequestFeatures) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.inflight++
+	if req.Stream {
+		t.inflightStreaming++
+	} else {
+		t.inflightNonStream++
+	}
 }
 
-func (t *Target) onFinish(success bool, failureThreshold int64, openWindow time.Duration) {
+func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig, failureThreshold int64, openWindow time.Duration) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.inflight > 0 {
 		t.inflight--
 	}
-	if success {
-		t.consecutiveFailures = 0
-		return
+	if req.Stream {
+		if t.inflightStreaming > 0 {
+			t.inflightStreaming--
+		}
+	} else if t.inflightNonStream > 0 {
+		t.inflightNonStream--
 	}
-	t.consecutiveFailures++
-	if t.consecutiveFailures >= failureThreshold {
+
+	if outcome.DurationMs > 0 {
+		t.reqLatencyFastMs = ewma(t.reqLatencyFastMs, outcome.DurationMs, costs.FastAlpha)
+		t.reqLatencySlowMs = ewma(t.reqLatencySlowMs, outcome.DurationMs, costs.SlowAlpha)
+	}
+	if outcome.TTFTMs > 0 {
+		t.ttftFastMs = ewma(t.ttftFastMs, outcome.TTFTMs, costs.FastAlpha)
+		t.ttftSlowMs = ewma(t.ttftSlowMs, outcome.TTFTMs, costs.SlowAlpha)
+	}
+
+	if outcome.Success {
+		t.errorRate = ewma(t.errorRate, 0, costs.FastAlpha)
+		t.timeoutRate = ewma(t.timeoutRate, 0, costs.FastAlpha)
+		t.consecutiveFailures = 0
+	} else {
+		t.errorRate = ewma(t.errorRate, 1, costs.FastAlpha)
+		t.consecutiveFailures++
+		if outcome.StatusCode == http.StatusRequestTimeout || outcome.StatusCode == http.StatusGatewayTimeout || (outcome.Stream && outcome.TTFTMs <= 0) {
+			t.timeoutRate = ewma(t.timeoutRate, 1, costs.FastAlpha)
+		} else {
+			t.timeoutRate = ewma(t.timeoutRate, 0, costs.FastAlpha)
+		}
+	}
+	if outcome.ClientCanceled {
+		t.cancelRate = ewma(t.cancelRate, 1, costs.FastAlpha)
+	} else {
+		t.cancelRate = ewma(t.cancelRate, 0, costs.FastAlpha)
+	}
+
+	ttftRatio := ratio(t.ttftFastMs, t.ttftSlowMs)
+	switch {
+	case t.consecutiveFailures >= failureThreshold || t.errorRate >= costs.ErrorRateOpen || t.timeoutRate >= costs.TimeoutRateOpen:
+		t.healthState = HealthOpen
 		t.openUntil = time.Now().Add(openWindow)
 		t.consecutiveFailures = 0
+	case t.healthState == HealthProbation && outcome.Success:
+		t.healthState = HealthHealthy
+	case t.errorRate >= costs.ErrorRateDegraded || t.timeoutRate >= costs.TimeoutRateDegraded || ttftRatio >= costs.TTFTDegradedRatio:
+		if t.healthState != HealthProbation {
+			t.healthState = HealthDegraded
+		}
+	default:
+		if t.healthState != HealthOpen {
+			t.healthState = HealthHealthy
+		}
 	}
 }
 
-func scoreTarget(target *Target) float64 {
+func (r *Router) expectedCost(target *Target, req RequestFeatures) float64 {
 	target.mu.Lock()
 	defer target.mu.Unlock()
+	prefillCost := estimatePrefillCost(req)
+	decodeCost := estimateDecodeCost(req)
+	queuePressure := 0.35*norm(float64(target.inflight), 8) +
+		0.35*norm(target.ttftFastMs, 1200) +
+		0.20*maxFloat(0, norm(target.ttftFastMs, 1200)-norm(target.ttftSlowMs, 1200))
+	decodePressure := 0.40*norm(float64(target.inflightStreaming), 6) +
+		0.35*norm(target.reqLatencyFastMs, 4000) +
+		0.25*maxFloat(0, norm(target.reqLatencyFastMs, 4000)-norm(target.reqLatencySlowMs, 4000))
+	healthPenalty := 0.45*target.errorRate + 0.35*target.timeoutRate + 0.10*norm(float64(target.consecutiveFailures), 4)
+	switch target.healthState {
+	case HealthDegraded:
+		healthPenalty += 0.25
+	case HealthProbation:
+		healthPenalty += 0.15
+	case HealthOpen:
+		healthPenalty += 10
+	}
+	occupancy := 0.45*norm(float64(target.inflight), 8) + 0.55*norm(float64(target.inflightStreaming), 6)
 	capacity := math.Max(1, target.Weight*target.CapacityHint)
-	return float64(target.inflight+1) / capacity
+	cost := (queuePressure*prefillCost + decodePressure*decodeCost + occupancy + healthPenalty) / capacity
+	if cost < r.costs.MinCostFloor {
+		return r.costs.MinCostFloor
+	}
+	return cost
 }
 
-func compareCandidate(a, b *Target) int {
-	scoreA := scoreTarget(a)
-	scoreB := scoreTarget(b)
-	return compareScore(a, scoreA, b, scoreB)
+func estimatePrefillCost(req RequestFeatures) float64 {
+	cost := 0.70*norm(req.EstPromptTokens, 512) + 0.30*norm(float64(req.RequestBytes), 4096)
+	if req.HasTools {
+		cost += 0.2
+	}
+	return maxFloat(cost, 0.05)
+}
+
+func estimateDecodeCost(req RequestFeatures) float64 {
+	streamFlag := 0.0
+	if req.Stream {
+		streamFlag = 1.0
+	}
+	structuredPenalty := 0.0
+	if req.HasStructuredOutput {
+		structuredPenalty = 0.2
+	}
+	cost := 0.70*norm(req.MaxTokens, 512) + 0.20*streamFlag + 0.10*structuredPenalty
+	return maxFloat(cost, 0.05)
 }
 
 func compareScore(a *Target, scoreA float64, b *Target, scoreB float64) int {
@@ -593,6 +780,51 @@ func requestModel(rawPath string, body []byte) string {
 		return "list_models"
 	}
 	return ""
+}
+
+func extractRequestFeatures(rawPath string, body []byte) RequestFeatures {
+	features := RequestFeatures{
+		ModelName:       requestModel(rawPath, body),
+		RequestBytes:    int64(len(body)),
+		EstPromptTokens: maxFloat(float64(len(body))/4.0, 1),
+		MaxTokens:       256,
+	}
+	if len(body) == 0 {
+		return features
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return features
+	}
+	if stream, ok := payload["stream"].(bool); ok {
+		features.Stream = stream
+	}
+	if tools, ok := payload["tools"].([]any); ok && len(tools) > 0 {
+		features.HasTools = true
+	}
+	if _, ok := payload["response_format"]; ok {
+		features.HasStructuredOutput = true
+	}
+	for _, key := range []string{"max_output_tokens", "max_completion_tokens", "max_tokens"} {
+		if value, ok := parseNumber(payload[key]); ok && value > 0 {
+			features.MaxTokens = value
+			break
+		}
+	}
+	return features
+}
+
+func parseNumber(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
 }
 
 func inferConfiguredModel(resolved upstream.ResolvedUpstream) string {
@@ -678,4 +910,38 @@ func defaultFloat(v float64, fallback float64) float64 {
 		return fallback
 	}
 	return v
+}
+
+func ewma(old, sample, alpha float64) float64 {
+	if sample <= 0 {
+		return old
+	}
+	if old <= 0 {
+		return sample
+	}
+	return alpha*sample + (1-alpha)*old
+}
+
+func norm(v, scale float64) float64 {
+	if scale <= 0 {
+		return v
+	}
+	if v <= 0 {
+		return 0
+	}
+	return v / scale
+}
+
+func ratio(a, b float64) float64 {
+	if b <= 0 {
+		return 1
+	}
+	return a / b
+}
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }

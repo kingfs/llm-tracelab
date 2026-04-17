@@ -154,3 +154,153 @@ func TestRouterSnapshotsExposeHealthAndModels(t *testing.T) {
 		t.Fatalf("LastRefreshStatus is empty")
 	}
 }
+
+func TestRouterCostAwareSelectionPrefersLowerObservedCost(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "fast",
+				Enabled:        boolPtr(true),
+				Priority:       50,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "slow",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Epsilon = 0
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	reqFeatures := RequestFeatures{ModelName: "gpt-5", RequestBytes: 256, EstPromptTokens: 64, MaxTokens: 256}
+	var fast *Target
+	var slow *Target
+	for _, target := range rtr.targets {
+		switch target.ID {
+		case "fast":
+			fast = target
+		case "slow":
+			slow = target
+		}
+	}
+	if fast == nil || slow == nil {
+		t.Fatalf("missing test targets fast=%v slow=%v", fast, slow)
+	}
+	fast.onFinish(reqFeatures, Outcome{Success: true, StatusCode: 200, DurationMs: 400, TTFTMs: 80}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	slow.onFinish(reqFeatures, Outcome{Success: true, StatusCode: 200, DurationMs: 5000, TTFTMs: 1800}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "fast" {
+		t.Fatalf("selected target = %q, want fast", selection.Target.ID)
+	}
+}
+
+func TestRouterCostAwareSelectionAvoidsDegradedTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "stable",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "flaky",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Epsilon = 0
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	reqFeatures := RequestFeatures{ModelName: "gpt-5", RequestBytes: 256, EstPromptTokens: 64, MaxTokens: 256}
+	var stable *Target
+	var flaky *Target
+	for _, target := range rtr.targets {
+		switch target.ID {
+		case "stable":
+			stable = target
+		case "flaky":
+			flaky = target
+		}
+	}
+	if stable == nil || flaky == nil {
+		t.Fatalf("missing test targets stable=%v flaky=%v", stable, flaky)
+	}
+	stable.onFinish(reqFeatures, Outcome{Success: true, StatusCode: 200, DurationMs: 700, TTFTMs: 120}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	for i := 0; i < 3; i++ {
+		flaky.onFinish(reqFeatures, Outcome{Success: false, StatusCode: 500, DurationMs: 1200, TTFTMs: 0}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "stable" {
+		t.Fatalf("selected target = %q, want stable", selection.Target.ID)
+	}
+	snapshots := rtr.Snapshots()
+	var flakySnapshot Snapshot
+	for _, snapshot := range snapshots {
+		if snapshot.ID == "flaky" {
+			flakySnapshot = snapshot
+		}
+	}
+	if flakySnapshot.HealthState != HealthOpen && flakySnapshot.HealthState != HealthDegraded {
+		t.Fatalf("flaky health = %q, want open/degraded", flakySnapshot.HealthState)
+	}
+}
