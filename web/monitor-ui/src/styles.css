@@ -460,6 +460,10 @@ a {
   justify-content: flex-end;
 }
 
+.action-group-start {
+  justify-content: flex-start;
+}
+
 .icon-button {
   display: inline-flex;
   align-items: center;
@@ -913,6 +917,11 @@ a {
   box-shadow: 0 0 0 6px rgba(25, 93, 77, 0.12);
 }
 
+.timeline-dot-danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 6px rgba(161, 54, 42, 0.12);
+}
+
 .timeline-card {
   border: 1px solid rgba(34, 40, 49, 0.1);
   border-radius: 20px;
@@ -951,6 +960,17 @@ a {
   font-family: SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.84rem;
   line-height: 1.55;
+}
+
+.session-timeline-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .timeline-tree {

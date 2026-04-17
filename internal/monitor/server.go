@@ -81,9 +81,10 @@ type sessionListItem struct {
 }
 
 type sessionDetailResponse struct {
-	Summary   sessionListItem      `json:"summary"`
-	Breakdown sessionBreakdownView `json:"breakdown"`
-	Traces    []traceListItem      `json:"traces"`
+	Summary   sessionListItem       `json:"summary"`
+	Breakdown sessionBreakdownView  `json:"breakdown"`
+	Timeline  []sessionTimelineItem `json:"timeline"`
+	Traces    []traceListItem       `json:"traces"`
 }
 
 type sessionBreakdownView struct {
@@ -95,6 +96,20 @@ type sessionBreakdownView struct {
 type sessionCountItem struct {
 	Label string `json:"label"`
 	Count int    `json:"count"`
+}
+
+type sessionTimelineItem struct {
+	TraceID     string    `json:"trace_id"`
+	Time        time.Time `json:"time"`
+	Model       string    `json:"model"`
+	Provider    string    `json:"provider"`
+	Endpoint    string    `json:"endpoint"`
+	StatusCode  int       `json:"status_code"`
+	DurationMs  int64     `json:"duration_ms"`
+	TTFTMs      int64     `json:"ttft_ms"`
+	TotalTokens int       `json:"total_tokens"`
+	IsStream    bool      `json:"is_stream"`
+	Error       string    `json:"error,omitempty"`
 }
 
 type detailResponse struct {
@@ -360,6 +375,7 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			})
 		}
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
+		resp.Timeline = buildSessionTimeline(resp.Traces)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -609,6 +625,32 @@ func sortSessionCounts(counts map[string]int) []sessionCountItem {
 			return items[i].Count > items[j].Count
 		}
 		return items[i].Label < items[j].Label
+	})
+	return items
+}
+
+func buildSessionTimeline(traces []traceListItem) []sessionTimelineItem {
+	items := make([]sessionTimelineItem, 0, len(traces))
+	for _, trace := range traces {
+		items = append(items, sessionTimelineItem{
+			TraceID:     trace.ID,
+			Time:        trace.RecordedAt,
+			Model:       trace.Model,
+			Provider:    trace.Provider,
+			Endpoint:    trace.Endpoint,
+			StatusCode:  trace.StatusCode,
+			DurationMs:  trace.DurationMs,
+			TTFTMs:      trace.TTFTMs,
+			TotalTokens: trace.TotalTokens,
+			IsStream:    trace.IsStream,
+			Error:       trace.Error,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if !items[i].Time.Equal(items[j].Time) {
+			return items[i].Time.Before(items[j].Time)
+		}
+		return items[i].TraceID < items[j].TraceID
 	})
 	return items
 }

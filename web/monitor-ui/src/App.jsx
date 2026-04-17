@@ -343,6 +343,7 @@ function SessionDetailPage() {
   const detail = useJSON(`/api/sessions/${encodeURIComponent(sessionID)}`, [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
+  const timeline = detail.data?.timeline ?? [];
   const traces = detail.data?.traces ?? [];
   const visibleTraces = traceFilter === "failed" ? traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300) : traces;
 
@@ -413,6 +414,51 @@ function SessionDetailPage() {
             </div>
           </section>
         </div>
+      ) : null}
+
+      {timeline.length ? (
+        <section className="panel timeline-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Session timeline</p>
+              <h2>Request sequence</h2>
+            </div>
+          </div>
+          <div className="timeline-list">
+            {timeline.map((item) => (
+              <article key={item.trace_id} className="timeline-item">
+                <div className="timeline-rail">
+                  <span className={item.status_code >= 200 && item.status_code < 300 ? "timeline-dot" : "timeline-dot timeline-dot-danger"} />
+                </div>
+                <div className="timeline-card">
+                  <div className="timeline-head">
+                    <div>
+                      <strong>{item.model || "unknown-model"}</strong>
+                      <span>{formatDateTime(item.time)}</span>
+                    </div>
+                    <span className="timeline-badge">{item.is_stream ? "stream" : "request"}</span>
+                  </div>
+                  <div className="trace-tag-group">
+                    <InlineTag tone="accent">{formatEndpointTag(item.endpoint)}</InlineTag>
+                    <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
+                    <InlineTag tone={item.status_code >= 200 && item.status_code < 300 ? "green" : "danger"}>{item.status_code}</InlineTag>
+                  </div>
+                  <div className="session-timeline-meta">
+                    <span>duration {item.duration_ms} ms</span>
+                    <span>ttft {item.ttft_ms} ms</span>
+                    <span>tokens {item.total_tokens}</span>
+                  </div>
+                  {item.error ? <div className="timeline-message">{item.error}</div> : null}
+                  <div className="action-group action-group-start">
+                    <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID)} title="View trace" aria-label="View trace">
+                      <ViewIcon />
+                    </Link>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       ) : null}
 
       <section className="panel">

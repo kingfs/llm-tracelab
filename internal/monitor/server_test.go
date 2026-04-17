@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -274,6 +275,17 @@ func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
 	}
 	if len(payload.Breakdown.Endpoints) != 2 {
 		t.Fatalf("len(endpoints) = %d, want 2", len(payload.Breakdown.Endpoints))
+	}
+	if len(payload.Timeline) != 2 {
+		t.Fatalf("len(timeline) = %d, want 2", len(payload.Timeline))
+	}
+	if payload.Timeline[0].Time.After(payload.Timeline[1].Time) {
+		t.Fatalf("timeline not sorted ascending: %+v", payload.Timeline)
+	}
+	statusCodes := []int{payload.Timeline[0].StatusCode, payload.Timeline[1].StatusCode}
+	sort.Ints(statusCodes)
+	if statusCodes[0] != 200 || statusCodes[1] != 500 {
+		t.Fatalf("timeline status codes = %+v, want [200 500]", statusCodes)
 	}
 }
 
