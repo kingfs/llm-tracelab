@@ -625,6 +625,12 @@ function TraceDetailPage() {
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/?view=${fromView}`;
+  const applyTraceFocus = (nextTab, nextFocus = "") => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "tab", nextTab === "timeline" ? "" : nextTab);
+    setOrDeleteParam(next, "focus", nextFocus);
+    setSearchParams(next, { replace: true });
+  };
 
   useEffect(() => {
     const requestedTab = normalizeTraceTab(searchParams.get("tab"));
@@ -719,10 +725,16 @@ function TraceDetailPage() {
             <span>tokens {usage?.total_tokens || 0}</span>
           </div>
           <div className="trace-failure-actions">
-            <button className={tab === "timeline" ? "ghost-button active" : "ghost-button"} onClick={() => setTab("timeline")}>
+            <button
+              className={tab === "timeline" ? "ghost-button active" : "ghost-button"}
+              onClick={() => applyTraceFocus("timeline", "timeline_error")}
+            >
               Open Timeline
             </button>
-            <button className={tab === "raw" ? "ghost-button active" : "ghost-button"} onClick={() => setTab("raw")}>
+            <button
+              className={tab === "raw" ? "ghost-button active" : "ghost-button"}
+              onClick={() => applyTraceFocus("raw", "response")}
+            >
               Open Raw Protocol
             </button>
             {session?.session_id ? (
