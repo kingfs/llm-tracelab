@@ -451,6 +451,12 @@ function SessionDetailPage() {
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
                   <div className="action-group action-group-start">
+                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "timeline")}>
+                      Timeline
+                    </Link>
+                    <Link className="ghost-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID, "raw")}>
+                      Raw
+                    </Link>
                     <Link className="icon-button" to={buildTraceLink(item.trace_id, "", summary?.session_id || sessionID)} title="View trace" aria-label="View trace">
                       <ViewIcon />
                     </Link>
@@ -527,6 +533,10 @@ function SessionDetailPage() {
 }
 
 function FailureContextNode({ label, item, tone = "default", sessionID = "", delta = null, detail = "" }) {
+  const traceLink = buildTraceLink(item.trace_id, "", sessionID);
+  const timelineLink = buildTraceLink(item.trace_id, "", sessionID, "timeline");
+  const rawLink = buildTraceLink(item.trace_id, "", sessionID, "raw");
+
   return (
     <div className={`failure-node failure-node-${tone}`}>
       <div className="failure-node-label">{label}</div>
@@ -546,7 +556,13 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
       ) : null}
       {detail ? <div className="failure-node-detail">{detail}</div> : null}
       <div className="action-group action-group-start">
-        <Link className="icon-button" to={buildTraceLink(item.trace_id, "", sessionID)} title="View trace" aria-label="View trace">
+        <Link className="ghost-button" to={timelineLink}>
+          Timeline
+        </Link>
+        <Link className="ghost-button" to={rawLink}>
+          Raw
+        </Link>
+        <Link className="icon-button" to={traceLink} title="View trace" aria-label="View trace">
           <ViewIcon />
         </Link>
       </div>
