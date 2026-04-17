@@ -261,6 +261,38 @@ a {
   gap: 8px;
 }
 
+.upstream-failure-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.upstream-failure-card {
+  display: grid;
+  gap: 8px;
+  border-radius: 16px;
+  padding: 12px;
+  border: 1px solid rgba(34, 40, 49, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.upstream-failure-card strong {
+  font-size: 0.92rem;
+  line-height: 1.2;
+}
+
+.upstream-failure-card span,
+.upstream-failure-detail {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.upstream-failure-detail {
+  color: var(--danger);
+}
+
 .upstream-error-item {
   border-radius: 14px;
   padding: 10px 12px;
@@ -1422,6 +1454,7 @@ a {
   .payload-grid,
   .raw-grid,
   .upstream-grid,
+  .upstream-failure-list,
   .trace-table-head,
   .trace-row,
   .session-table-head,

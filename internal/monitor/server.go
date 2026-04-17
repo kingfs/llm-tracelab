@@ -176,36 +176,48 @@ type RouteOptions struct {
 type upstreamListResponse struct {
 	Items       []upstreamItem `json:"items"`
 	RefreshedAt time.Time      `json:"refreshed_at"`
+	Window      string         `json:"window"`
+	Model       string         `json:"model"`
 }
 
 type upstreamItem struct {
-	ID                string    `json:"id"`
-	Enabled           bool      `json:"enabled"`
-	Priority          int       `json:"priority"`
-	Weight            float64   `json:"weight"`
-	CapacityHint      float64   `json:"capacity_hint"`
-	ModelDiscovery    string    `json:"model_discovery"`
-	BaseURL           string    `json:"base_url"`
-	ProviderPreset    string    `json:"provider_preset"`
-	ProtocolFamily    string    `json:"protocol_family"`
-	RoutingProfile    string    `json:"routing_profile"`
-	HealthState       string    `json:"health_state"`
-	Inflight          int64     `json:"inflight"`
-	LastRefreshAt     time.Time `json:"last_refresh_at"`
-	LastRefreshStatus string    `json:"last_refresh_status"`
-	LastRefreshError  string    `json:"last_refresh_error,omitempty"`
-	OpenUntil         time.Time `json:"open_until,omitempty"`
-	Models            []string  `json:"models"`
-	RequestCount      int       `json:"request_count"`
-	SuccessRequest    int       `json:"success_request"`
-	FailedRequest     int       `json:"failed_request"`
-	SuccessRate       float64   `json:"success_rate"`
-	TotalTokens       int       `json:"total_tokens"`
-	AvgTTFT           int       `json:"avg_ttft"`
-	LastSeen          time.Time `json:"last_seen"`
-	RecentModels      []string  `json:"recent_models"`
-	LastModel         string    `json:"last_model"`
-	RecentErrors      []string  `json:"recent_errors"`
+	ID                string                `json:"id"`
+	Enabled           bool                  `json:"enabled"`
+	Priority          int                   `json:"priority"`
+	Weight            float64               `json:"weight"`
+	CapacityHint      float64               `json:"capacity_hint"`
+	ModelDiscovery    string                `json:"model_discovery"`
+	BaseURL           string                `json:"base_url"`
+	ProviderPreset    string                `json:"provider_preset"`
+	ProtocolFamily    string                `json:"protocol_family"`
+	RoutingProfile    string                `json:"routing_profile"`
+	HealthState       string                `json:"health_state"`
+	Inflight          int64                 `json:"inflight"`
+	LastRefreshAt     time.Time             `json:"last_refresh_at"`
+	LastRefreshStatus string                `json:"last_refresh_status"`
+	LastRefreshError  string                `json:"last_refresh_error,omitempty"`
+	OpenUntil         time.Time             `json:"open_until,omitempty"`
+	Models            []string              `json:"models"`
+	RequestCount      int                   `json:"request_count"`
+	SuccessRequest    int                   `json:"success_request"`
+	FailedRequest     int                   `json:"failed_request"`
+	SuccessRate       float64               `json:"success_rate"`
+	TotalTokens       int                   `json:"total_tokens"`
+	AvgTTFT           int                   `json:"avg_ttft"`
+	LastSeen          time.Time             `json:"last_seen"`
+	RecentModels      []string              `json:"recent_models"`
+	LastModel         string                `json:"last_model"`
+	RecentErrors      []string              `json:"recent_errors"`
+	RecentFailures    []upstreamFailureItem `json:"recent_failures"`
+}
+
+type upstreamFailureItem struct {
+	TraceID    string    `json:"trace_id"`
+	Model      string    `json:"model"`
+	Endpoint   string    `json:"endpoint"`
+	StatusCode int       `json:"status_code"`
+	RecordedAt time.Time `json:"recorded_at"`
+	ErrorText  string    `json:"error_text,omitempty"`
 }
 
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
@@ -251,10 +263,12 @@ func appHandler() http.Handler {
 
 func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
+		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
 		var items []upstreamItem
 		analyticsByID := map[string]store.UpstreamAnalyticsRecord{}
 		if st != nil {
-			analytics, err := st.ListUpstreamAnalytics(5, 3)
+			analytics, err := st.ListUpstreamAnalytics(5, 3, since, modelFilter)
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream analytics: " + err.Error()})
 				return
@@ -295,6 +309,7 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 					RecentModels:      analytics.Models,
 					LastModel:         analytics.LastModel,
 					RecentErrors:      analytics.RecentErrors,
+					RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
 				})
 			}
 		case st != nil:
@@ -340,6 +355,7 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 					RecentModels:      analytics.Models,
 					LastModel:         analytics.LastModel,
 					RecentErrors:      analytics.RecentErrors,
+					RecentFailures:    toUpstreamFailureItems(analytics.RecentFailures),
 				})
 			}
 		default:
@@ -350,7 +366,40 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 		writeJSON(w, http.StatusOK, upstreamListResponse{
 			Items:       items,
 			RefreshedAt: time.Now().UTC(),
+			Window:      windowLabel,
+			Model:       modelFilter,
 		})
+	}
+}
+
+func toUpstreamFailureItems(records []store.UpstreamFailureRecord) []upstreamFailureItem {
+	out := make([]upstreamFailureItem, 0, len(records))
+	for _, record := range records {
+		out = append(out, upstreamFailureItem{
+			TraceID:    record.TraceID,
+			Model:      record.Model,
+			Endpoint:   record.Endpoint,
+			StatusCode: record.StatusCode,
+			RecordedAt: record.RecordedAt,
+			ErrorText:  record.ErrorText,
+		})
+	}
+	return out
+}
+
+func parseUpstreamWindow(value string) (string, time.Time) {
+	now := time.Now().UTC()
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1h":
+		return "1h", now.Add(-1 * time.Hour)
+	case "7d":
+		return "7d", now.Add(-7 * 24 * time.Hour)
+	case "all":
+		return "all", time.Time{}
+	case "", "24h":
+		return "24h", now.Add(-24 * time.Hour)
+	default:
+		return "24h", now.Add(-24 * time.Hour)
 	}
 }
 

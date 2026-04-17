@@ -66,9 +66,12 @@ function TraceListPage() {
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
+  const upstreamWindow = normalizeUpstreamWindow(searchParams.get("upstream_window"));
+  const upstreamModel = searchParams.get("upstream_model") || "";
   const [refreshTick, setRefreshTick] = useState(0);
   const endpoint = view === "sessions" ? "/api/sessions" : "/api/traces";
   const [filters, setFilters] = useState({ query, provider, model });
+  const [upstreamFilters, setUpstreamFilters] = useState({ model: upstreamModel });
   const requestParams = new URLSearchParams({
     page: String(page),
     page_size: String(PAGE_SIZE),
@@ -83,7 +86,12 @@ function TraceListPage() {
     requestParams.set("model", model);
   }
   const { loading, data, error } = useJSON(`${endpoint}?${requestParams.toString()}`, [endpoint, page, query, provider, model, refreshTick]);
-  const upstreams = useJSON("/api/upstreams", [refreshTick]);
+  const upstreamParams = new URLSearchParams();
+  upstreamParams.set("window", upstreamWindow);
+  if (upstreamModel) {
+    upstreamParams.set("model", upstreamModel);
+  }
+  const upstreams = useJSON(`/api/upstreams?${upstreamParams.toString()}`, [refreshTick, upstreamWindow, upstreamModel]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -95,6 +103,10 @@ function TraceListPage() {
   useEffect(() => {
     setFilters({ query, provider, model });
   }, [query, provider, model]);
+
+  useEffect(() => {
+    setUpstreamFilters({ model: upstreamModel });
+  }, [upstreamModel]);
 
   const items = data?.items ?? [];
   const stats = data?.stats ?? {};
@@ -129,6 +141,17 @@ function TraceListPage() {
     next.delete("q");
     next.delete("provider");
     next.delete("model");
+    setSearchParams(next);
+  };
+  const setUpstreamWindow = (nextWindow) => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "upstream_window", nextWindow === "24h" ? "" : nextWindow);
+    setSearchParams(next);
+  };
+  const applyUpstreamModel = (event) => {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "upstream_model", upstreamFilters.model);
     setSearchParams(next);
   };
 
@@ -170,12 +193,44 @@ function TraceListPage() {
             <h2>Active upstream targets</h2>
           </div>
           <div className="panel-head-actions">
+            <div className="view-toggle" role="tablist" aria-label="Upstream analytics window">
+              {["1h", "24h", "7d", "all"].map((window) => (
+                <button
+                  key={window}
+                  className={upstreamWindow === window ? "ghost-button active" : "ghost-button"}
+                  onClick={() => setUpstreamWindow(window)}
+                >
+                  {window}
+                </button>
+              ))}
+            </div>
             <span className="badge">{upstreams.data?.refreshed_at ? formatTime(upstreams.data.refreshed_at) : "..."}</span>
           </div>
         </div>
+        <form className="filter-bar" onSubmit={applyUpstreamModel}>
+          <input
+            className="filter-input filter-input-wide"
+            type="search"
+            name="upstream_model"
+            placeholder="Filter upstream analytics by model"
+            value={upstreamFilters.model}
+            onChange={(event) => setUpstreamFilters({ model: event.target.value })}
+          />
+          <button className="ghost-button" type="submit">
+            Apply
+          </button>
+          <button className="ghost-button" type="button" onClick={() => {
+            setUpstreamFilters({ model: "" });
+            const next = new URLSearchParams(searchParams);
+            next.delete("upstream_model");
+            setSearchParams(next);
+          }}>
+            Reset
+          </button>
+        </form>
         {upstreams.error ? <div className="empty-state error-box">{upstreams.error}</div> : null}
         {upstreams.loading && !upstreams.data ? <div className="empty-state">Loading upstream targets...</div> : null}
-        {upstreams.data ? <UpstreamOverview items={upstreams.data.items || []} /> : null}
+        {upstreams.data ? <UpstreamOverview items={upstreams.data.items || []} analyticsWindow={upstreams.data.window || upstreamWindow} analyticsModel={upstreams.data.model || upstreamModel} /> : null}
       </section>
 
       <section className="panel">
@@ -245,7 +300,7 @@ function TraceListPage() {
   );
 }
 
-function UpstreamOverview({ items }) {
+function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "" }) {
   if (!items.length) {
     return <div className="empty-state">No upstream targets discovered.</div>;
   }
@@ -261,6 +316,10 @@ function UpstreamOverview({ items }) {
         <StatCard label="Healthy" value={healthyCount} accent="accent-green" />
         <StatCard label="Attention" value={attentionCount} accent={attentionCount > 0 ? "accent-red" : ""} />
         <StatCard label="Models" value={modelCount} accent="accent-gold" />
+      </div>
+      <div className="upstream-routing-strip">
+        <span>window {analyticsWindow}</span>
+        <span>model filter {analyticsModel || "all"}</span>
       </div>
       <div className="upstream-grid">
         {items.map((item) => (
@@ -365,6 +424,21 @@ function UpstreamOverview({ items }) {
                     <div key={`${item.id}-error-${index}`} className="upstream-error-item">
                       {errorText}
                     </div>
+                  ))}
+                </div>
+              ) : null}
+              {(item.recent_failures || []).length ? (
+                <div className="upstream-failure-list">
+                  {item.recent_failures.map((failure) => (
+                    <Link key={`${item.id}-${failure.trace_id}`} className="upstream-failure-card" to={buildTraceLink(failure.trace_id, "", "", "", "failure")}>
+                      <div className="trace-tag-group">
+                        <InlineTag tone="danger">{failure.status_code}</InlineTag>
+                        <InlineTag tone="accent">{formatEndpointTag(failure.endpoint)}</InlineTag>
+                      </div>
+                      <strong>{failure.model || "unknown-model"}</strong>
+                      <span>{formatDateTime(failure.recorded_at)}</span>
+                      {failure.error_text ? <div className="upstream-failure-detail">{failure.error_text}</div> : null}
+                    </Link>
                   ))}
                 </div>
               ) : null}
@@ -1731,6 +1805,17 @@ function setOrDeleteParam(params, key, value) {
     return;
   }
   params.delete(key);
+}
+
+function normalizeUpstreamWindow(value = "") {
+  switch (value) {
+    case "1h":
+    case "7d":
+    case "all":
+      return value;
+    default:
+      return "24h";
+  }
 }
 
 function buildFailureContexts(timeline = []) {

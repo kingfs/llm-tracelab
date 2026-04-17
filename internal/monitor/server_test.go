@@ -485,6 +485,101 @@ func TestUpstreamListAPIHandlerIncludesAnalytics(t *testing.T) {
 	if len(item.RecentModels) != 1 || item.RecentModels[0] != "gpt-5" {
 		t.Fatalf("RecentModels = %#v, want [gpt-5]", item.RecentModels)
 	}
+	if payload.Window != "24h" {
+		t.Fatalf("Window = %q, want 24h", payload.Window)
+	}
+	if payload.Model != "" {
+		t.Fatalf("Model = %q, want empty", payload.Model)
+	}
+}
+
+func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, recordedAt time.Time, model string, statusCode int) {
+		path := filepath.Join(outputDir, name)
+		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:                      name,
+				Time:                           recordedAt,
+				Model:                          model,
+				Provider:                       "openai_compatible",
+				Operation:                      "responses",
+				Endpoint:                       "/v1/responses",
+				URL:                            "/v1/responses",
+				Method:                         "POST",
+				StatusCode:                     statusCode,
+				DurationMs:                     40,
+				TTFTMs:                         90,
+				ClientIP:                       "127.0.0.1",
+				ContentLength:                  6,
+				Error:                          map[bool]string{true: "upstream overloaded", false: ""}[statusCode >= 400],
+				SelectedUpstreamID:             "openai-primary",
+				SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+				SelectedUpstreamProviderPreset: "openai",
+				RoutingPolicy:                  "p2c",
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	now := time.Now().UTC()
+	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
+		ID:                "openai-primary",
+		BaseURL:           "https://api.openai.com/v1",
+		ProviderPreset:    "openai",
+		ProtocolFamily:    "openai_compatible",
+		RoutingProfile:    "openai_default",
+		Enabled:           true,
+		Priority:          100,
+		Weight:            1,
+		CapacityHint:      1,
+		LastRefreshAt:     now,
+		LastRefreshStatus: "ready",
+	}); err != nil {
+		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
+	}
+	writeLog("recent-match.http", now.Add(-30*time.Minute), "gpt-5", 503)
+	writeLog("old-match.http", now.Add(-48*time.Hour), "gpt-5", 200)
+	writeLog("recent-other.http", now.Add(-20*time.Minute), "gemini-2.5-flash", 200)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=1h&model=gpt-5", nil)
+	rr := httptest.NewRecorder()
+	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload upstreamListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Window != "1h" || payload.Model != "gpt-5" {
+		t.Fatalf("payload filters = window:%q model:%q", payload.Window, payload.Model)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	item := payload.Items[0]
+	if item.RequestCount != 1 || item.FailedRequest != 1 {
+		t.Fatalf("filtered analytics = %+v", item)
+	}
+	if len(item.RecentFailures) != 1 || item.RecentFailures[0].Model != "gpt-5" {
+		t.Fatalf("RecentFailures = %#v, want one gpt-5 failure", item.RecentFailures)
+	}
 }
 
 func boolPtr(v bool) *bool {

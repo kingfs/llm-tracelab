@@ -124,6 +124,16 @@ type UpstreamAnalyticsRecord struct {
 	Models         []string
 	LastModel      string
 	RecentErrors   []string
+	RecentFailures []UpstreamFailureRecord
+}
+
+type UpstreamFailureRecord struct {
+	TraceID    string
+	Model      string
+	Endpoint   string
+	StatusCode int
+	RecordedAt time.Time
+	ErrorText  string
 }
 
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
@@ -202,7 +212,8 @@ func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int) ([]UpstreamAnalyticsRecord, error) {
+func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	rows, err := s.db.Query(`
 		SELECT
 			selected_upstream_id,
@@ -216,10 +227,10 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int) ([]Upstr
 			COALESCE(AVG(CASE WHEN status_code BETWEEN 200 AND 299 THEN ttft_ms END), 0) AS avg_ttft,
 			MAX(recorded_at) AS last_seen
 		FROM logs
-		WHERE selected_upstream_id <> ''
+		WHERE selected_upstream_id <> ''`+whereSQL+`
 		GROUP BY selected_upstream_id
 		ORDER BY request_count DESC, selected_upstream_id ASC
-	`)
+	`, whereArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -249,11 +260,15 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int) ([]Upstr
 		if err != nil {
 			return nil, err
 		}
-		record.Models, record.LastModel, err = s.upstreamModelCoverage(record.UpstreamID, limitModels)
+		record.Models, record.LastModel, err = s.upstreamModelCoverage(record.UpstreamID, limitModels, since, modelFilter)
 		if err != nil {
 			return nil, err
 		}
-		record.RecentErrors, err = s.upstreamRecentErrors(record.UpstreamID, limitErrors)
+		record.RecentErrors, err = s.upstreamRecentErrors(record.UpstreamID, limitErrors, since, modelFilter)
+		if err != nil {
+			return nil, err
+		}
+		record.RecentFailures, err = s.upstreamRecentFailures(record.UpstreamID, limitErrors, since, modelFilter)
 		if err != nil {
 			return nil, err
 		}
@@ -262,18 +277,21 @@ func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int) ([]Upstr
 	return out, rows.Err()
 }
 
-func (s *Store) upstreamModelCoverage(upstreamID string, limit int) ([]string, string, error) {
+func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.Time, modelFilter string) ([]string, string, error) {
 	if limit <= 0 {
 		limit = 5
 	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	args := append([]any{upstreamID}, whereArgs...)
+	args = append(args, limit)
 	rows, err := s.db.Query(`
 		SELECT model, COUNT(*) AS count
 		FROM logs
-		WHERE selected_upstream_id = ? AND model <> ''
+		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
 		GROUP BY model
 		ORDER BY count DESC, model ASC
 		LIMIT ?
-	`, upstreamID, limit)
+	`, args...)
 	if err != nil {
 		return nil, "", err
 	}
@@ -293,31 +311,36 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int) ([]string, s
 	}
 
 	var lastModel string
+	lastModelArgs := append([]any{upstreamID}, whereArgs...)
 	if err := s.db.QueryRow(`
 		SELECT model
 		FROM logs
-		WHERE selected_upstream_id = ? AND model <> ''
+		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
 		ORDER BY recorded_at DESC, trace_id DESC
 		LIMIT 1
-	`, upstreamID).Scan(&lastModel); err != nil && err != sql.ErrNoRows {
+	`, lastModelArgs...).Scan(&lastModel); err != nil && err != sql.ErrNoRows {
 		return nil, "", err
 	}
 
 	return models, lastModel, nil
 }
 
-func (s *Store) upstreamRecentErrors(upstreamID string, limit int) ([]string, error) {
+func (s *Store) upstreamRecentErrors(upstreamID string, limit int, since time.Time, modelFilter string) ([]string, error) {
 	if limit <= 0 {
 		limit = 3
 	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	args := append([]any{upstreamID}, whereArgs...)
+	args = append(args, limit)
 	rows, err := s.db.Query(`
 		SELECT error_text, status_code, endpoint
 		FROM logs
 		WHERE selected_upstream_id = ?
+		  `+whereSQL+`
 		  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
 		ORDER BY recorded_at DESC, trace_id DESC
 		LIMIT ?
-	`, upstreamID, limit)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -343,6 +366,64 @@ func (s *Store) upstreamRecentErrors(upstreamID string, limit int) ([]string, er
 		}
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) upstreamRecentFailures(upstreamID string, limit int, since time.Time, modelFilter string) ([]UpstreamFailureRecord, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
+	args := append([]any{upstreamID}, whereArgs...)
+	args = append(args, limit)
+	rows, err := s.db.Query(`
+		SELECT trace_id, model, endpoint, status_code, recorded_at, error_text
+		FROM logs
+		WHERE selected_upstream_id = ?
+		  `+whereSQL+`
+		  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT ?
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []UpstreamFailureRecord
+	for rows.Next() {
+		var (
+			record     UpstreamFailureRecord
+			recordedAt string
+		)
+		if err := rows.Scan(&record.TraceID, &record.Model, &record.Endpoint, &record.StatusCode, &recordedAt, &record.ErrorText); err != nil {
+			return nil, err
+		}
+		record.RecordedAt, err = timeParse(recordedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, []any) {
+	var (
+		clauses []string
+		args    []any
+	)
+	if !since.IsZero() {
+		clauses = append(clauses, `recorded_at >= ?`)
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	if model := strings.TrimSpace(modelFilter); model != "" {
+		clauses = append(clauses, `LOWER(model) LIKE LOWER(?) ESCAPE '\'`)
+		args = append(args, "%"+escapeLike(model)+"%")
+	}
+	if len(clauses) == 0 {
+		return "", nil
+	}
+	return " AND " + strings.Join(clauses, " AND "), args
 }
 
 func New(outputDir string) (*Store, error) {

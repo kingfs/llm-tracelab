@@ -591,7 +591,7 @@ func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
 	writeLog("ok-b.http", 200, "gpt-5", 30, 120, "")
 	writeLog("fail.http", 503, "gpt-4.1", 0, 0, "upstream overloaded")
 
-	analytics, err := st.ListUpstreamAnalytics(5, 3)
+	analytics, err := st.ListUpstreamAnalytics(5, 3, time.Time{}, "")
 	if err != nil {
 		t.Fatalf("ListUpstreamAnalytics() error = %v", err)
 	}
@@ -616,6 +616,9 @@ func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
 	}
 	if len(got.RecentErrors) != 1 {
 		t.Fatalf("RecentErrors = %#v, want 1 error", got.RecentErrors)
+	}
+	if len(got.RecentFailures) != 1 || got.RecentFailures[0].TraceID == "" {
+		t.Fatalf("RecentFailures = %#v, want 1 traced failure", got.RecentFailures)
 	}
 }
 
