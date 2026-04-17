@@ -285,12 +285,20 @@ function UpstreamOverview({ items }) {
 
             <div className="upstream-meta-grid">
               <div className="detail-meta-pill">
+                <span className="detail-meta-label">requests</span>
+                <strong>{item.request_count ?? 0}</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">success</span>
+                <strong>{Number(item.success_rate || 0).toFixed(1)}%</strong>
+              </div>
+              <div className="detail-meta-pill">
                 <span className="detail-meta-label">refresh</span>
                 <strong>{item.last_refresh_status || "unknown"}</strong>
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">ttft</span>
-                <strong>{Math.round(item.ttft_fast_ms || 0)} ms</strong>
+                <strong>{Math.round(item.ttft_fast_ms || item.avg_ttft || 0)} ms</strong>
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">latency</span>
@@ -303,6 +311,10 @@ function UpstreamOverview({ items }) {
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">timeout</span>
                 <strong>{formatRatio(item.timeout_rate)}</strong>
+              </div>
+              <div className="detail-meta-pill">
+                <span className="detail-meta-label">tokens</span>
+                <strong>{item.total_tokens ?? 0}</strong>
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">capacity</span>
@@ -326,6 +338,36 @@ function UpstreamOverview({ items }) {
                   <span className="upstream-model-pill upstream-model-pill-more">+{item.models.length - 12} more</span>
                 ) : null}
               </div>
+            </div>
+
+            <div className="upstream-card-section">
+              <div className="upstream-card-label">Recent routing</div>
+              <div className="upstream-model-list">
+                {(item.recent_models || []).length ? (
+                  (item.recent_models || []).map((model) => (
+                    <span key={`${item.id}-recent-${model}`} className="upstream-model-pill">
+                      {model}
+                    </span>
+                  ))
+                ) : (
+                  <span className="trace-subline">No routed models yet</span>
+                )}
+              </div>
+              <div className="upstream-routing-strip">
+                <span>success {item.success_request ?? 0}</span>
+                <span>failed {item.failed_request ?? 0}</span>
+                <span>last model {item.last_model || "-"}</span>
+                <span>last seen {formatDateTime(item.last_seen)}</span>
+              </div>
+              {(item.recent_errors || []).length ? (
+                <div className="upstream-error-list">
+                  {(item.recent_errors || []).map((errorText, index) => (
+                    <div key={`${item.id}-error-${index}`} className="upstream-error-item">
+                      {errorText}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <div className="upstream-card-footer">

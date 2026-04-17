@@ -112,6 +112,20 @@ type UpstreamModelRecord struct {
 	SeenAt     time.Time
 }
 
+type UpstreamAnalyticsRecord struct {
+	UpstreamID     string
+	RequestCount   int
+	SuccessRequest int
+	FailedRequest  int
+	SuccessRate    float64
+	TotalTokens    int
+	AvgTTFT        int
+	LastSeen       time.Time
+	Models         []string
+	LastModel      string
+	RecentErrors   []string
+}
+
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
@@ -184,6 +198,149 @@ func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
 			return nil, err
 		}
 		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int) ([]UpstreamAnalyticsRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			selected_upstream_id,
+			COUNT(*) AS request_count,
+			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
+				100.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+			END AS success_rate,
+			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN total_tokens ELSE 0 END), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN status_code BETWEEN 200 AND 299 THEN ttft_ms END), 0) AS avg_ttft,
+			MAX(recorded_at) AS last_seen
+		FROM logs
+		WHERE selected_upstream_id <> ''
+		GROUP BY selected_upstream_id
+		ORDER BY request_count DESC, selected_upstream_id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []UpstreamAnalyticsRecord
+	for rows.Next() {
+		var (
+			record   UpstreamAnalyticsRecord
+			lastSeen string
+			avgTTFT  float64
+		)
+		if err := rows.Scan(
+			&record.UpstreamID,
+			&record.RequestCount,
+			&record.SuccessRequest,
+			&record.FailedRequest,
+			&record.SuccessRate,
+			&record.TotalTokens,
+			&avgTTFT,
+			&lastSeen,
+		); err != nil {
+			return nil, err
+		}
+		record.AvgTTFT = int(math.Round(avgTTFT))
+		record.LastSeen, err = timeParse(lastSeen)
+		if err != nil {
+			return nil, err
+		}
+		record.Models, record.LastModel, err = s.upstreamModelCoverage(record.UpstreamID, limitModels)
+		if err != nil {
+			return nil, err
+		}
+		record.RecentErrors, err = s.upstreamRecentErrors(record.UpstreamID, limitErrors)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) upstreamModelCoverage(upstreamID string, limit int) ([]string, string, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	rows, err := s.db.Query(`
+		SELECT model, COUNT(*) AS count
+		FROM logs
+		WHERE selected_upstream_id = ? AND model <> ''
+		GROUP BY model
+		ORDER BY count DESC, model ASC
+		LIMIT ?
+	`, upstreamID, limit)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+
+	var models []string
+	for rows.Next() {
+		var model string
+		var count int
+		if err := rows.Scan(&model, &count); err != nil {
+			return nil, "", err
+		}
+		models = append(models, model)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+
+	var lastModel string
+	if err := s.db.QueryRow(`
+		SELECT model
+		FROM logs
+		WHERE selected_upstream_id = ? AND model <> ''
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT 1
+	`, upstreamID).Scan(&lastModel); err != nil && err != sql.ErrNoRows {
+		return nil, "", err
+	}
+
+	return models, lastModel, nil
+}
+
+func (s *Store) upstreamRecentErrors(upstreamID string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 3
+	}
+	rows, err := s.db.Query(`
+		SELECT error_text, status_code, endpoint
+		FROM logs
+		WHERE selected_upstream_id = ?
+		  AND (status_code NOT BETWEEN 200 AND 299 OR error_text <> '')
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT ?
+	`, upstreamID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var (
+			errorText  string
+			statusCode int
+			endpoint   string
+		)
+		if err := rows.Scan(&errorText, &statusCode, &endpoint); err != nil {
+			return nil, err
+		}
+		switch {
+		case strings.TrimSpace(errorText) != "":
+			out = append(out, errorText)
+		case strings.TrimSpace(endpoint) != "":
+			out = append(out, fmt.Sprintf("%s HTTP %d", endpoint, statusCode))
+		default:
+			out = append(out, fmt.Sprintf("HTTP %d", statusCode))
+		}
 	}
 	return out, rows.Err()
 }

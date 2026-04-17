@@ -395,6 +395,98 @@ func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
 	}
 }
 
+func TestUpstreamListAPIHandlerIncludesAnalytics(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
+		ID:                "openai-primary",
+		BaseURL:           "https://api.openai.com/v1",
+		ProviderPreset:    "openai",
+		ProtocolFamily:    "openai_compatible",
+		RoutingProfile:    "openai_default",
+		Enabled:           true,
+		Priority:          100,
+		Weight:            1,
+		CapacityHint:      1,
+		LastRefreshAt:     time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC),
+		LastRefreshStatus: "ready",
+	}); err != nil {
+		t.Fatalf("UpsertUpstreamTarget() error = %v", err)
+	}
+	if err := st.ReplaceUpstreamModels("openai-primary", []store.UpstreamModelRecord{
+		{UpstreamID: "openai-primary", Model: "gpt-5", Source: "catalog", SeenAt: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
+	}
+
+	logPath := filepath.Join(outputDir, "trace.http")
+	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:                      "req-1",
+			Time:                           time.Date(2026, 4, 18, 8, 1, 0, 0, time.UTC),
+			Model:                          "gpt-5",
+			Provider:                       "openai_compatible",
+			Operation:                      "responses",
+			Endpoint:                       "/v1/responses",
+			URL:                            "/v1/responses",
+			Method:                         "POST",
+			StatusCode:                     200,
+			DurationMs:                     40,
+			TTFTMs:                         90,
+			ClientIP:                       "127.0.0.1",
+			ContentLength:                  6,
+			SelectedUpstreamID:             "openai-primary",
+			SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+			SelectedUpstreamProviderPreset: "openai",
+			RoutingPolicy:                  "p2c",
+		},
+		Usage: recordfile.UsageInfo{
+			PromptTokens:     10,
+			CompletionTokens: 6,
+			TotalTokens:      16,
+		},
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	rr := httptest.NewRecorder()
+	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload upstreamListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	item := payload.Items[0]
+	if item.RequestCount != 1 || item.SuccessRequest != 1 || item.TotalTokens != 16 {
+		t.Fatalf("analytics = %+v", item)
+	}
+	if item.LastModel != "gpt-5" {
+		t.Fatalf("LastModel = %q, want gpt-5", item.LastModel)
+	}
+	if len(item.RecentModels) != 1 || item.RecentModels[0] != "gpt-5" {
+		t.Fatalf("RecentModels = %#v, want [gpt-5]", item.RecentModels)
+	}
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }

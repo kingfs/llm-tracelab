@@ -196,6 +196,16 @@ type upstreamItem struct {
 	LastRefreshError  string    `json:"last_refresh_error,omitempty"`
 	OpenUntil         time.Time `json:"open_until,omitempty"`
 	Models            []string  `json:"models"`
+	RequestCount      int       `json:"request_count"`
+	SuccessRequest    int       `json:"success_request"`
+	FailedRequest     int       `json:"failed_request"`
+	SuccessRate       float64   `json:"success_rate"`
+	TotalTokens       int       `json:"total_tokens"`
+	AvgTTFT           int       `json:"avg_ttft"`
+	LastSeen          time.Time `json:"last_seen"`
+	RecentModels      []string  `json:"recent_models"`
+	LastModel         string    `json:"last_model"`
+	RecentErrors      []string  `json:"recent_errors"`
 }
 
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
@@ -242,9 +252,21 @@ func appHandler() http.Handler {
 func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var items []upstreamItem
+		analyticsByID := map[string]store.UpstreamAnalyticsRecord{}
+		if st != nil {
+			analytics, err := st.ListUpstreamAnalytics(5, 3)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query upstream analytics: " + err.Error()})
+				return
+			}
+			for _, item := range analytics {
+				analyticsByID[item.UpstreamID] = item
+			}
+		}
 		switch {
 		case rtr != nil:
 			for _, snapshot := range rtr.Snapshots() {
+				analytics := analyticsByID[snapshot.ID]
 				items = append(items, upstreamItem{
 					ID:                snapshot.ID,
 					Enabled:           snapshot.Enabled,
@@ -263,6 +285,16 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 					LastRefreshError:  snapshot.LastRefreshError,
 					OpenUntil:         snapshot.OpenUntil,
 					Models:            snapshot.Models,
+					RequestCount:      analytics.RequestCount,
+					SuccessRequest:    analytics.SuccessRequest,
+					FailedRequest:     analytics.FailedRequest,
+					SuccessRate:       analytics.SuccessRate,
+					TotalTokens:       analytics.TotalTokens,
+					AvgTTFT:           analytics.AvgTTFT,
+					LastSeen:          analytics.LastSeen,
+					RecentModels:      analytics.Models,
+					LastModel:         analytics.LastModel,
+					RecentErrors:      analytics.RecentErrors,
 				})
 			}
 		case st != nil:
@@ -281,6 +313,7 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 				modelMap[model.UpstreamID] = append(modelMap[model.UpstreamID], model.Model)
 			}
 			for _, target := range targets {
+				analytics := analyticsByID[target.ID]
 				sort.Strings(modelMap[target.ID])
 				items = append(items, upstreamItem{
 					ID:                target.ID,
@@ -297,6 +330,16 @@ func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFun
 					LastRefreshStatus: target.LastRefreshStatus,
 					LastRefreshError:  target.LastRefreshError,
 					Models:            modelMap[target.ID],
+					RequestCount:      analytics.RequestCount,
+					SuccessRequest:    analytics.SuccessRequest,
+					FailedRequest:     analytics.FailedRequest,
+					SuccessRate:       analytics.SuccessRate,
+					TotalTokens:       analytics.TotalTokens,
+					AvgTTFT:           analytics.AvgTTFT,
+					LastSeen:          analytics.LastSeen,
+					RecentModels:      analytics.Models,
+					LastModel:         analytics.LastModel,
+					RecentErrors:      analytics.RecentErrors,
 				})
 			}
 		default:

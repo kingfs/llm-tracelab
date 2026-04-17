@@ -540,6 +540,85 @@ func TestUpstreamCatalogPersistenceAndRoutingMetadata(t *testing.T) {
 	}
 }
 
+func TestListUpstreamAnalyticsAggregatesLogs(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, statusCode int, model string, tokens int, ttft int64, errText string) {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:                      name,
+				Time:                           time.Date(2026, 4, 18, 10, 0, 0, 0, time.UTC).Add(time.Duration(len(name)) * time.Minute),
+				Model:                          model,
+				Provider:                       "openai_compatible",
+				Operation:                      "responses",
+				Endpoint:                       "/v1/responses",
+				URL:                            "/v1/responses",
+				Method:                         "POST",
+				StatusCode:                     statusCode,
+				DurationMs:                     40,
+				TTFTMs:                         ttft,
+				ClientIP:                       "127.0.0.1",
+				ContentLength:                  8,
+				Error:                          errText,
+				SelectedUpstreamID:             "openai-primary",
+				SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+				SelectedUpstreamProviderPreset: "openai",
+				RoutingPolicy:                  "p2c",
+				RoutingCandidateCount:          2,
+			},
+			Usage: recordfile.UsageInfo{
+				PromptTokens:     tokens / 2,
+				CompletionTokens: tokens / 2,
+				TotalTokens:      tokens,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+
+	writeLog("ok-a.http", 200, "gpt-5", 20, 100, "")
+	writeLog("ok-b.http", 200, "gpt-5", 30, 120, "")
+	writeLog("fail.http", 503, "gpt-4.1", 0, 0, "upstream overloaded")
+
+	analytics, err := st.ListUpstreamAnalytics(5, 3)
+	if err != nil {
+		t.Fatalf("ListUpstreamAnalytics() error = %v", err)
+	}
+	if len(analytics) != 1 {
+		t.Fatalf("len(analytics) = %d, want 1", len(analytics))
+	}
+	got := analytics[0]
+	if got.UpstreamID != "openai-primary" {
+		t.Fatalf("UpstreamID = %q, want openai-primary", got.UpstreamID)
+	}
+	if got.RequestCount != 3 || got.SuccessRequest != 2 || got.FailedRequest != 1 {
+		t.Fatalf("counts = %+v", got)
+	}
+	if got.TotalTokens != 50 {
+		t.Fatalf("TotalTokens = %d, want 50", got.TotalTokens)
+	}
+	if got.AvgTTFT != 110 {
+		t.Fatalf("AvgTTFT = %d, want 110", got.AvgTTFT)
+	}
+	if got.LastModel == "" || len(got.Models) == 0 {
+		t.Fatalf("model coverage missing: %+v", got)
+	}
+	if len(got.RecentErrors) != 1 {
+		t.Fatalf("RecentErrors = %#v, want 1 error", got.RecentErrors)
+	}
+}
+
 func mustTraceID(t *testing.T, st *Store, path string) string {
 	t.Helper()
 	var traceID string
