@@ -28,7 +28,7 @@ Its current baseline workflow is:
 3. index request metadata into SQLite for fast monitor queries
 4. replay the cassette in tests without upstream network access
 5. inspect traces in the monitor from request-centric, session-centric, and upstream-centric perspectives
-6. expose read-only trace/session/upstream inspection to AI agents through MCP over `stdio`
+6. expose trace/session/upstream inspection, replay, dataset curation, eval, and experiment analysis to AI agents through MCP over `stdio`
 
 ## Current Provider Coverage
 

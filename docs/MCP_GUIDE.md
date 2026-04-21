@@ -23,7 +23,6 @@ Current MCP support is:
 Current MCP support is not:
 
 - a hosted control plane
-- a write-capable mutation API
 - a replacement for replay or monitor storage
 
 ## Run

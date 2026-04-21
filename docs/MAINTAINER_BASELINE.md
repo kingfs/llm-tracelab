@@ -130,7 +130,7 @@ Current MCP baseline is intentionally narrow:
 
 - transport is `stdio`
 - implementation uses the official Go MCP SDK
-- tool surface is read-only
+- tool surface is local-first and bounded, with both read tools and narrow additive mutation tools
 - MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
 - eval-run comparison is computed from stored scores
 - persisted experiments store linkage and aggregate summary, not duplicated score payloads
