@@ -191,7 +191,7 @@ Allow an external AI agent to inspect traces, sessions, failures, and upstream r
 Scope:
 
 - add an MCP server built with `modelcontextprotocol/go-sdk`
-- support `stdio` transport first
+- support streamable HTTP on the management server
 - expose read-only tools backed by existing Go services
 - keep tool outputs concise, structured, and paginated
 

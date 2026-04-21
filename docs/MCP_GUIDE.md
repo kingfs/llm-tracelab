@@ -16,7 +16,7 @@ This is the `M1` slice from [Agent Evolution Roadmap](./AGENT_EVOLUTION_ROADMAP.
 
 Current MCP support is:
 
-- transport: `stdio`
+- transport: streamable HTTP
 - implementation library: official `github.com/modelcontextprotocol/go-sdk`
 - scope: local inspection, replay, dataset curation, deterministic eval, and experiment analysis tools
 
@@ -27,13 +27,28 @@ Current MCP support is not:
 
 ## Run
 
-Start the MCP server with the same config file used by the main proxy:
+Start the main server with the same config file used by the proxy and monitor:
 
 ```bash
-go run ./cmd/server mcp -c config/config.yaml
+go run ./cmd/server serve -c config/config.yaml
 ```
 
-The server reads the local `output_dir` and exposes tools over standard input/output.
+When `mcp.enabled: true`, the server exposes MCP over streamable HTTP on `monitor.port`.
+
+Default endpoint:
+
+- `http://localhost:<monitor.port>/mcp`
+
+Recommended config:
+
+```yaml
+monitor:
+  port: "8081"
+
+mcp:
+  enabled: true
+  path: "/mcp"
+```
 
 ## Tool Surface
 

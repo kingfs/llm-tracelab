@@ -4,6 +4,10 @@ server:
 monitor:
   port: "8081" # 访问 http://localhost:8081 查看看板
 
+mcp:
+  enabled: true
+  path: "/mcp" # MCP streamable HTTP endpoint, 例如 http://localhost:8081/mcp
+
 upstream:
   base_url: "http://localhost:30080/v1"
   api_key: "sk-test"

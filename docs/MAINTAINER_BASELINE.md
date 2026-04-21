@@ -128,7 +128,7 @@ Changes to these surfaces should be treated as product-facing changes and should
 
 Current MCP baseline is intentionally narrow:
 
-- transport is `stdio`
+- transport is streamable HTTP on the management server
 - implementation uses the official Go MCP SDK
 - tool surface is local-first and bounded, with both read tools and narrow additive mutation tools
 - MCP handlers reuse current monitor/store behavior rather than introducing a second query stack

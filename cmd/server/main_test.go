@@ -2,13 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
@@ -139,5 +144,78 @@ debug:
 		if !strings.Contains(output, want) {
 			t.Fatalf("log output = %q, want contain %q", output, want)
 		}
+	}
+}
+
+func TestRunServeRejectsMCPWithoutMonitorPort(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	prev := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+	})
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+mcp:
+  enabled: true
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	code := runServe([]string{"-c", configPath})
+	if code != 1 {
+		t.Fatalf("runServe() = %d, want 1", code)
+	}
+	if output := buf.String(); !strings.Contains(output, "monitor.port is required when mcp.enabled=true") {
+		t.Fatalf("log output = %q, want monitor.port requirement", output)
+	}
+}
+
+func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Monitor.Port = "8081"
+	cfg.MCP.Enabled = true
+	cfg.MCP.Path = "/mcp"
+
+	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg))
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint: httpServer.URL + "/mcp",
+	}, nil)
+	if err != nil {
+		t.Fatalf("client.Connect() error = %v", err)
+	}
+	defer session.Close()
+
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("session.ListTools() error = %v", err)
+	}
+	if len(tools.Tools) != 28 {
+		t.Fatalf("len(tools.Tools) = %d, want 28", len(tools.Tools))
 	}
 }

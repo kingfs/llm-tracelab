@@ -17,6 +17,11 @@ type Config struct {
 		Port string `yaml:"port"`
 	} `yaml:"monitor"`
 
+	MCP struct {
+		Enabled bool   `yaml:"enabled"`
+		Path    string `yaml:"path"`
+	} `yaml:"mcp"`
+
 	Upstream  UpstreamConfig         `yaml:"upstream"`
 	Upstreams []UpstreamTargetConfig `yaml:"upstreams"`
 
@@ -104,6 +109,14 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_MONITOR_PORT"); v != "" {
 		cfg.Monitor.Port = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_MCP_ENABLED"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.MCP.Enabled = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_MCP_PATH"); v != "" {
+		cfg.MCP.Path = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
 		cfg.Upstream.BaseURL = v

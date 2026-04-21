@@ -106,7 +106,7 @@ Implemented MCP tools on this branch:
 
 Implementation constraints:
 
-- transport is `stdio`
+- transport is streamable HTTP on the management server
 - implementation uses the official `github.com/modelcontextprotocol/go-sdk`
 - MCP remains a thin control plane over existing monitor/store behavior
 - MCP is not a new storage source of truth

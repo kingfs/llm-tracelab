@@ -159,6 +159,8 @@ upstream:
 
 - `LLM_TRACELAB_SERVER_PORT`
 - `LLM_TRACELAB_MONITOR_PORT`
+- `LLM_TRACELAB_MCP_ENABLED`
+- `LLM_TRACELAB_MCP_PATH`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
 - `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
@@ -174,13 +176,13 @@ upstream:
 
 ### MCP Server
 
-如果你希望 AI agent 直接查询本地 traces / sessions / upstreams，而不是抓取 Monitor HTML，可以启动只读 MCP server：
+如果你希望 AI agent 直接查询本地 traces / sessions / upstreams，而不是抓取 Monitor HTML，可以在主服务里启用 MCP streamable HTTP 端点：
 
 ```bash
-go run ./cmd/server mcp -c config/config.yaml
+go run ./cmd/server serve -c config/config.yaml
 ```
 
-当前 MCP server 基于官方 `github.com/modelcontextprotocol/go-sdk`，默认走 `stdio`，工具面包括：
+当前 MCP server 基于官方 `github.com/modelcontextprotocol/go-sdk`，挂在 `monitor.port` 对应的 HTTP 服务下，默认路径是 `/mcp`，例如 `http://localhost:8081/mcp`。工具面包括：
 
 - `list_traces`
 - `get_trace`

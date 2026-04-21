@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -42,8 +42,6 @@ func run(args []string) int {
 	switch args[0] {
 	case "migrate":
 		return runMigrate(args[1:])
-	case "mcp":
-		return runMCP(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", args[0])
 		printUsage(os.Stderr)
@@ -62,6 +60,10 @@ func runServe(args []string) int {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		slog.Error("Failed to load config", "path", *configPath, "error", err)
+		return 1
+	}
+	if err := validateServeConfig(cfg); err != nil {
+		slog.Error("Invalid serve config", "error", err)
 		return 1
 	}
 
@@ -87,14 +89,12 @@ func runServe(args []string) int {
 	rtr.StartBackgroundRefresh()
 	logResolvedTargets(rtr)
 
-	// --- 启动 Monitor (新增) ---
 	if cfg.Monitor.Port != "" {
 		go func() {
-			mux := http.NewServeMux()
-			monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: rtr})
+			mux := newManagementMux(traceStore, rtr, cfg)
 
 			addr := ":" + cfg.Monitor.Port
-			slog.Info("Monitor dashboard started", "addr", addr, "url", "http://localhost"+addr)
+			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
 			if err := http.ListenAndServe(addr, mux); err != nil {
 				slog.Error("Monitor server failed", "error", err)
 			}
@@ -169,41 +169,67 @@ func runMigrate(args []string) int {
 	return 0
 }
 
-func runMCP(args []string) int {
-	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		slog.Error("Failed to load config", "path", *configPath, "error", err)
-		return 1
-	}
-
-	traceStore, err := store.New(cfg.Debug.OutputDir)
-	if err != nil {
-		slog.Error("Failed to initialize trace store", "error", err)
-		return 1
-	}
-	defer traceStore.Close()
-
-	slog.Info("Starting MCP server", "transport", "stdio", "output_dir", cfg.Debug.OutputDir)
-	server := mcpserver.New(traceStore, mcpserver.Options{})
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		slog.Error("MCP server failed", "error", err)
-		return 1
-	}
-	return 0
-}
-
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  llm-tracelab serve -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab migrate -c config.yaml [-rewrite-v2=true] [-rebuild-index=true]")
-	fmt.Fprintln(w, "  llm-tracelab mcp -c config.yaml")
+}
+
+func validateServeConfig(cfg *config.Config) error {
+	if cfg.MCP.Enabled && cfg.Monitor.Port == "" {
+		return fmt.Errorf("monitor.port is required when mcp.enabled=true")
+	}
+	if cfg.MCP.Enabled {
+		if _, err := normalizeMCPPath(cfg.MCP.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.Config) *http.ServeMux {
+	mux := http.NewServeMux()
+	if cfg.MCP.Enabled {
+		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr})
+		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+			return server
+		}, nil))
+	}
+	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: rtr})
+	return mux
+}
+
+func effectiveMCPPath(cfg *config.Config) string {
+	if !cfg.MCP.Enabled {
+		return ""
+	}
+	return normalizeMCPPathMust(cfg.MCP.Path)
+}
+
+func normalizeMCPPathMust(path string) string {
+	normalized, err := normalizeMCPPath(path)
+	if err != nil {
+		panic(err)
+	}
+	return normalized
+}
+
+func normalizeMCPPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "/mcp", nil
+	}
+	if path == "/" {
+		return "", fmt.Errorf("mcp.path must not be /")
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	path = strings.TrimRight(path, "/")
+	if path == "" {
+		return "", fmt.Errorf("mcp.path must not be empty")
+	}
+	return path, nil
 }
 
 func logResolvedTargets(rtr *router.Router) {
