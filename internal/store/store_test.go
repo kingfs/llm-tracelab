@@ -266,6 +266,102 @@ func TestExtractGroupingInfoFallsBackToCodexMetadata(t *testing.T) {
 	}
 }
 
+func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, requestID string) string {
+		t.Helper()
+
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:     requestID,
+				Time:          time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
+				Model:         "gpt-5.1-codex",
+				Provider:      "openai_compatible",
+				Operation:     "responses.create",
+				Endpoint:      "v1/responses",
+				URL:           "/v1/responses",
+				Method:        "POST",
+				StatusCode:    200,
+				DurationMs:    100,
+				TTFTMs:        10,
+				ClientIP:      "127.0.0.1",
+				ContentLength: 4,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		}
+		entry, err := st.GetByRequestID(requestID)
+		if err != nil {
+			t.Fatalf("GetByRequestID(%q) error = %v", requestID, err)
+		}
+		return entry.ID
+	}
+
+	traceA := writeLog("a.http", "req-a")
+	traceB := writeLog("b.http", "req-b")
+
+	dataset, err := st.CreateDataset("smoke", "dataset desc")
+	if err != nil {
+		t.Fatalf("CreateDataset() error = %v", err)
+	}
+	added, skipped, err := st.AppendDatasetExamples(dataset.ID, []string{traceA, traceB, traceA}, "trace_list", "", "note")
+	if err != nil {
+		t.Fatalf("AppendDatasetExamples() error = %v", err)
+	}
+	if added != 2 || skipped != 0 {
+		t.Fatalf("AppendDatasetExamples() added/skipped = %d/%d, want 2/0", added, skipped)
+	}
+	added, skipped, err = st.AppendDatasetExamples(dataset.ID, []string{traceB}, "trace_list", "", "")
+	if err != nil {
+		t.Fatalf("AppendDatasetExamples() second error = %v", err)
+	}
+	if added != 0 || skipped != 1 {
+		t.Fatalf("second append added/skipped = %d/%d, want 0/1", added, skipped)
+	}
+
+	got, err := st.GetDataset(dataset.ID)
+	if err != nil {
+		t.Fatalf("GetDataset() error = %v", err)
+	}
+	if got.ExampleCount != 2 {
+		t.Fatalf("GetDataset().ExampleCount = %d, want 2", got.ExampleCount)
+	}
+
+	items, err := st.GetDatasetExamples(dataset.ID)
+	if err != nil {
+		t.Fatalf("GetDatasetExamples() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(GetDatasetExamples()) = %d, want 2", len(items))
+	}
+	if items[0].Position != 1 || items[1].Position != 2 {
+		t.Fatalf("positions = %d,%d, want 1,2", items[0].Position, items[1].Position)
+	}
+	if items[0].TraceID != traceA || items[1].TraceID != traceB {
+		t.Fatalf("trace order = %q,%q, want %q,%q", items[0].TraceID, items[1].TraceID, traceA, traceB)
+	}
+
+	list, err := st.ListDatasets()
+	if err != nil {
+		t.Fatalf("ListDatasets() error = %v", err)
+	}
+	if len(list) != 1 || list[0].ID != dataset.ID {
+		t.Fatalf("ListDatasets() = %#v, want one dataset %q", list, dataset.ID)
+	}
+}
+
 func TestListSessionPageAggregatesBySession(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

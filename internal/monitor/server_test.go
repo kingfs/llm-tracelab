@@ -317,7 +317,7 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=all", nil)
 	rr := httptest.NewRecorder()
 	upstreamListAPIHandler(nil, rtr).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -373,7 +373,7 @@ func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
 		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=all", nil)
 	rr := httptest.NewRecorder()
 	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -461,7 +461,7 @@ func TestUpstreamListAPIHandlerIncludesAnalytics(t *testing.T) {
 		t.Fatalf("UpsertLog() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/upstreams", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=all", nil)
 	rr := httptest.NewRecorder()
 	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -485,8 +485,8 @@ func TestUpstreamListAPIHandlerIncludesAnalytics(t *testing.T) {
 	if len(item.RecentModels) != 1 || item.RecentModels[0] != "gpt-5" {
 		t.Fatalf("RecentModels = %#v, want [gpt-5]", item.RecentModels)
 	}
-	if payload.Window != "24h" {
-		t.Fatalf("Window = %q, want 24h", payload.Window)
+	if payload.Window != "all" {
+		t.Fatalf("Window = %q, want all", payload.Window)
 	}
 	if payload.Model != "" {
 		t.Fatalf("Model = %q, want empty", payload.Model)

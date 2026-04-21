@@ -90,8 +90,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 9 {
-		t.Fatalf("len(tools.Tools) = %d, want 9", len(tools.Tools))
+	if len(tools.Tools) != 14 {
+		t.Fatalf("len(tools.Tools) = %d, want 14", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -215,6 +215,62 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	replayedSessionPayload := replayedSession.StructuredContent.(map[string]any)
 	if got := int(replayedSessionPayload["replayed"].(float64)); got != 2 {
 		t.Fatalf("replay_session.replayed = %d, want 2", got)
+	}
+
+	createdDataset, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "create_dataset_from_session",
+		Arguments: map[string]any{
+			"name":        "session-dataset",
+			"description": "from session",
+			"session_id":  sessionID,
+			"limit":       10,
+			"note":        "captured",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(create_dataset_from_session) error = %v", err)
+	}
+	createdPayload := createdDataset.StructuredContent.(map[string]any)
+	dataset := createdPayload["dataset"].(map[string]any)
+	datasetID := dataset["id"].(string)
+	if got := int(createdPayload["added"].(float64)); got != 2 {
+		t.Fatalf("create_dataset_from_session.added = %d, want 2", got)
+	}
+
+	appendResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "append_dataset_examples",
+		Arguments: map[string]any{"dataset_id": datasetID, "trace_ids": []string{traceID}},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(append_dataset_examples) error = %v", err)
+	}
+	if got := int(appendResult.StructuredContent.(map[string]any)["skipped"].(float64)); got != 1 {
+		t.Fatalf("append_dataset_examples.skipped = %d, want 1", got)
+	}
+
+	listedDatasets, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_datasets",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_datasets) error = %v", err)
+	}
+	listedItems := listedDatasets.StructuredContent.(map[string]any)["items"].([]any)
+	if len(listedItems) != 1 {
+		t.Fatalf("len(list_datasets.items) = %d, want 1", len(listedItems))
+	}
+
+	gotDataset, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_dataset",
+		Arguments: map[string]any{"dataset_id": datasetID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(get_dataset) error = %v", err)
+	}
+	gotPayload := gotDataset.StructuredContent.(map[string]any)
+	examples := gotPayload["examples"].([]any)
+	if len(examples) != 2 {
+		t.Fatalf("len(get_dataset.examples) = %d, want 2", len(examples))
 	}
 }
 

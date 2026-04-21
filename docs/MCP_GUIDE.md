@@ -121,6 +121,47 @@ Inputs:
 - `limit`
 - `body_limit`
 
+### `create_dataset_from_traces`
+
+Create a local dataset from explicit trace IDs.
+
+Inputs:
+
+- `name`
+- `description`
+- `trace_ids`
+- `note`
+
+### `create_dataset_from_session`
+
+Create a local dataset from traces in one session.
+
+Inputs:
+
+- `name`
+- `description`
+- `session_id`
+- `limit`
+- `note`
+
+### `append_dataset_examples`
+
+Append more trace IDs to an existing dataset.
+
+Inputs:
+
+- `dataset_id`
+- `trace_ids`
+- `note`
+
+### `list_datasets`
+
+List curated local datasets.
+
+### `get_dataset`
+
+Return one dataset and its ordered examples.
+
 ## Design Notes
 
 The MCP server intentionally reuses existing monitor JSON APIs in-process rather than adding a parallel query stack.
@@ -138,4 +179,4 @@ The next MCP-focused step should be:
 
 1. preserve the current read-only tools
 2. use replay-backed tools as the bridge into dataset curation
-3. add dataset curation only after replay-backed tests are in place
+3. add score and eval layers only after dataset workflows prove useful

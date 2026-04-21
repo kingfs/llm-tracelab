@@ -78,6 +78,11 @@ Stable API surface:
 - MCP `query_failures`
 - MCP `replay_trace`
 - MCP `replay_session`
+- MCP `create_dataset_from_traces`
+- MCP `create_dataset_from_session`
+- MCP `append_dataset_examples`
+- MCP `list_datasets`
+- MCP `get_dataset`
 
 Stable UI perspectives:
 

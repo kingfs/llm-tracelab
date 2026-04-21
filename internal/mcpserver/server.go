@@ -83,6 +83,31 @@ type replaySessionInput struct {
 	BodyLimit int    `json:"body_limit,omitempty" jsonschema:"maximum response body bytes to include per trace, max 20000"`
 }
 
+type createDatasetFromTracesInput struct {
+	Name        string   `json:"name" jsonschema:"dataset name"`
+	Description string   `json:"description,omitempty" jsonschema:"dataset description"`
+	TraceIDs    []string `json:"trace_ids" jsonschema:"trace identifiers to include"`
+	Note        string   `json:"note,omitempty" jsonschema:"optional note stored on appended examples"`
+}
+
+type createDatasetFromSessionInput struct {
+	Name        string `json:"name" jsonschema:"dataset name"`
+	Description string `json:"description,omitempty" jsonschema:"dataset description"`
+	SessionID   string `json:"session_id" jsonschema:"session identifier to source from"`
+	Limit       int    `json:"limit,omitempty" jsonschema:"maximum traces to include from the session, max 100"`
+	Note        string `json:"note,omitempty" jsonschema:"optional note stored on appended examples"`
+}
+
+type appendDatasetExamplesInput struct {
+	DatasetID string   `json:"dataset_id" jsonschema:"dataset identifier"`
+	TraceIDs  []string `json:"trace_ids" jsonschema:"trace identifiers to append"`
+	Note      string   `json:"note,omitempty" jsonschema:"optional note stored on appended examples"`
+}
+
+type getDatasetInput struct {
+	DatasetID string `json:"dataset_id" jsonschema:"dataset identifier"`
+}
+
 type traceListOutput struct {
 	Items       []map[string]any `json:"items"`
 	Stats       map[string]any   `json:"stats"`
@@ -150,6 +175,48 @@ type replaySessionOutput struct {
 	RefreshedAt time.Time           `json:"refreshed_at"`
 }
 
+type datasetSummary struct {
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	Description  string    `json:"description,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ExampleCount int       `json:"example_count"`
+}
+
+type datasetExample struct {
+	TraceID    string    `json:"trace_id"`
+	Position   int       `json:"position"`
+	AddedAt    time.Time `json:"added_at"`
+	SourceType string    `json:"source_type,omitempty"`
+	SourceID   string    `json:"source_id,omitempty"`
+	Note       string    `json:"note,omitempty"`
+	RecordedAt time.Time `json:"recorded_at"`
+	Model      string    `json:"model"`
+	Provider   string    `json:"provider"`
+	Endpoint   string    `json:"endpoint"`
+	StatusCode int       `json:"status_code"`
+	IsStream   bool      `json:"is_stream"`
+	SessionID  string    `json:"session_id,omitempty"`
+}
+
+type datasetMutationOutput struct {
+	Dataset datasetSummary `json:"dataset"`
+	Added   int            `json:"added"`
+	Skipped int            `json:"skipped"`
+}
+
+type listDatasetsOutput struct {
+	Items       []datasetSummary `json:"items"`
+	RefreshedAt time.Time        `json:"refreshed_at"`
+}
+
+type getDatasetOutput struct {
+	Dataset     datasetSummary   `json:"dataset"`
+	Examples    []datasetExample `json:"examples"`
+	RefreshedAt time.Time        `json:"refreshed_at"`
+}
+
 type serverAPI struct {
 	handler http.Handler
 	store   *store.Store
@@ -206,6 +273,26 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "replay_session",
 		Description: "Replay multiple traces from one session locally and return bounded response summaries.",
 	}, api.replaySession)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_dataset_from_traces",
+		Description: "Create a local dataset from a list of trace IDs.",
+	}, api.createDatasetFromTraces)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_dataset_from_session",
+		Description: "Create a local dataset from traces in one session.",
+	}, api.createDatasetFromSession)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "append_dataset_examples",
+		Description: "Append more trace IDs to an existing local dataset.",
+	}, api.appendDatasetExamples)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_datasets",
+		Description: "List local datasets curated from recorded traces.",
+	}, api.listDatasets)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_dataset",
+		Description: "Get one dataset and its ordered examples.",
+	}, api.getDataset)
 
 	return server
 }
@@ -408,6 +495,143 @@ func (a *serverAPI) replaySession(ctx context.Context, req *mcp.CallToolRequest,
 	return nil, out, nil
 }
 
+func (a *serverAPI) createDatasetFromTraces(ctx context.Context, req *mcp.CallToolRequest, in *createDatasetFromTracesInput) (*mcp.CallToolResult, *datasetMutationOutput, error) {
+	dataset, err := a.createDataset(in.Name, in.Description)
+	if err != nil {
+		return nil, nil, err
+	}
+	added, skipped, err := a.store.AppendDatasetExamples(dataset.ID, in.TraceIDs, "trace_list", "", in.Note)
+	if err != nil {
+		return nil, nil, err
+	}
+	updated, err := a.store.GetDataset(dataset.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &datasetMutationOutput{
+		Dataset: toDatasetSummary(updated),
+		Added:   added,
+		Skipped: skipped,
+	}, nil
+}
+
+func (a *serverAPI) createDatasetFromSession(ctx context.Context, req *mcp.CallToolRequest, in *createDatasetFromSessionInput) (*mcp.CallToolResult, *datasetMutationOutput, error) {
+	sessionID := strings.TrimSpace(in.SessionID)
+	if sessionID == "" {
+		return nil, nil, fmt.Errorf("session_id is required")
+	}
+	sessionDetail, err := a.lookupSession(sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = len(sessionDetail.Traces)
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	traceIDs := make([]string, 0, min(limit, len(sessionDetail.Traces)))
+	for i, entry := range sessionDetail.Traces {
+		if i >= limit {
+			break
+		}
+		traceIDs = append(traceIDs, entry.ID)
+	}
+	dataset, err := a.createDataset(in.Name, in.Description)
+	if err != nil {
+		return nil, nil, err
+	}
+	added, skipped, err := a.store.AppendDatasetExamples(dataset.ID, traceIDs, "session", sessionID, in.Note)
+	if err != nil {
+		return nil, nil, err
+	}
+	updated, err := a.store.GetDataset(dataset.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &datasetMutationOutput{
+		Dataset: toDatasetSummary(updated),
+		Added:   added,
+		Skipped: skipped,
+	}, nil
+}
+
+func (a *serverAPI) appendDatasetExamples(ctx context.Context, req *mcp.CallToolRequest, in *appendDatasetExamplesInput) (*mcp.CallToolResult, *datasetMutationOutput, error) {
+	datasetID := strings.TrimSpace(in.DatasetID)
+	if datasetID == "" {
+		return nil, nil, fmt.Errorf("dataset_id is required")
+	}
+	added, skipped, err := a.store.AppendDatasetExamples(datasetID, in.TraceIDs, "trace_list", "", in.Note)
+	if err != nil {
+		return nil, nil, err
+	}
+	updated, err := a.store.GetDataset(datasetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &datasetMutationOutput{
+		Dataset: toDatasetSummary(updated),
+		Added:   added,
+		Skipped: skipped,
+	}, nil
+}
+
+func (a *serverAPI) listDatasets(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, *listDatasetsOutput, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	records, err := a.store.ListDatasets()
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &listDatasetsOutput{RefreshedAt: time.Now().UTC()}
+	for _, record := range records {
+		out.Items = append(out.Items, toDatasetSummary(record))
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) getDataset(ctx context.Context, req *mcp.CallToolRequest, in *getDatasetInput) (*mcp.CallToolResult, *getDatasetOutput, error) {
+	datasetID := strings.TrimSpace(in.DatasetID)
+	if datasetID == "" {
+		return nil, nil, fmt.Errorf("dataset_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	record, err := a.store.GetDataset(datasetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	examples, err := a.store.GetDatasetExamples(datasetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &getDatasetOutput{
+		Dataset:     toDatasetSummary(record),
+		RefreshedAt: time.Now().UTC(),
+	}
+	for _, example := range examples {
+		out.Examples = append(out.Examples, datasetExample{
+			TraceID:    example.TraceID,
+			Position:   example.Position,
+			AddedAt:    example.AddedAt,
+			SourceType: example.SourceType,
+			SourceID:   example.SourceID,
+			Note:       example.Note,
+			RecordedAt: example.Trace.Header.Meta.Time,
+			Model:      example.Trace.Header.Meta.Model,
+			Provider:   example.Trace.Header.Meta.Provider,
+			Endpoint:   firstNonEmpty(example.Trace.Header.Meta.Endpoint, example.Trace.Header.Meta.URL),
+			StatusCode: example.Trace.Header.Meta.StatusCode,
+			IsStream:   example.Trace.Header.Layout.IsStream,
+			SessionID:  example.Trace.SessionID,
+		})
+	}
+	return nil, out, nil
+}
+
 func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, out interface{}) error {
 	target := path
 	if encoded := query.Encode(); encoded != "" {
@@ -435,11 +659,8 @@ func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, 
 }
 
 func (a *serverAPI) lookupTrace(traceID string) (store.LogEntry, error) {
-	if a.store == nil {
-		return store.LogEntry{}, fmt.Errorf("store not configured")
-	}
-	if err := a.store.Sync(); err != nil {
-		return store.LogEntry{}, fmt.Errorf("sync error: %w", err)
+	if err := a.requireStoreSync(); err != nil {
+		return store.LogEntry{}, err
 	}
 	entry, err := a.store.GetByID(traceID)
 	if err != nil {
@@ -449,11 +670,8 @@ func (a *serverAPI) lookupTrace(traceID string) (store.LogEntry, error) {
 }
 
 func (a *serverAPI) lookupSession(sessionID string) (*sessionLookupResult, error) {
-	if a.store == nil {
-		return nil, fmt.Errorf("store not configured")
-	}
-	if err := a.store.Sync(); err != nil {
-		return nil, fmt.Errorf("sync error: %w", err)
+	if err := a.requireStoreSync(); err != nil {
+		return nil, err
 	}
 	summary, err := a.store.GetSession(sessionID)
 	if err != nil {
@@ -467,6 +685,23 @@ func (a *serverAPI) lookupSession(sessionID string) (*sessionLookupResult, error
 		Summary: summary,
 		Traces:  traces,
 	}, nil
+}
+
+func (a *serverAPI) requireStoreSync() error {
+	if a.store == nil {
+		return fmt.Errorf("store not configured")
+	}
+	if err := a.store.Sync(); err != nil {
+		return fmt.Errorf("sync error: %w", err)
+	}
+	return nil
+}
+
+func (a *serverAPI) createDataset(name string, description string) (store.DatasetRecord, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return store.DatasetRecord{}, err
+	}
+	return a.store.CreateDataset(name, description)
 }
 
 func normalizePage(page int) int {
@@ -501,4 +736,22 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func min(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func toDatasetSummary(record store.DatasetRecord) datasetSummary {
+	return datasetSummary{
+		ID:           record.ID,
+		Name:         record.Name,
+		Description:  record.Description,
+		CreatedAt:    record.CreatedAt,
+		UpdatedAt:    record.UpdatedAt,
+		ExampleCount: record.ExampleCount,
+	}
 }

@@ -190,6 +190,11 @@ go run ./cmd/server mcp -c config/config.yaml
 - `query_failures`
 - `replay_trace`
 - `replay_session`
+- `create_dataset_from_traces`
+- `create_dataset_from_session`
+- `append_dataset_examples`
+- `list_datasets`
+- `get_dataset`
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 

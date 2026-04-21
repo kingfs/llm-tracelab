@@ -173,6 +173,26 @@ type TimeCountItem struct {
 	Count int
 }
 
+type DatasetRecord struct {
+	ID           string
+	Name         string
+	Description  string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ExampleCount int
+}
+
+type DatasetExampleRecord struct {
+	DatasetID  string
+	TraceID    string
+	Position   int
+	AddedAt    time.Time
+	SourceType string
+	SourceID   string
+	Note       string
+	Trace      LogEntry
+}
+
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
@@ -405,9 +425,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 		if err != nil {
 			return RoutingFailureAnalytics{}, err
 		}
-		if latestTime.After(referenceTime) {
-			referenceTime = latestTime
-		}
+		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	timelineArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
@@ -547,9 +565,7 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 		if err != nil {
 			return UpstreamDetail{}, err
 		}
-		if latestTime.After(referenceTime) {
-			referenceTime = latestTime
-		}
+		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	buckets := make(map[time.Time]int, bucketCount)
@@ -924,6 +940,24 @@ func (s *Store) initSchema() error {
 			PRIMARY KEY (upstream_id, model)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_upstream_models_model ON upstream_models(model);`,
+		`CREATE TABLE IF NOT EXISTS datasets (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS dataset_examples (
+			dataset_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			added_at TEXT NOT NULL,
+			source_type TEXT NOT NULL DEFAULT '',
+			source_id TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (dataset_id, trace_id)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC);`,
 	}
 
 	for _, stmt := range stmts {
@@ -1143,6 +1177,199 @@ func (s *Store) UpsertUpstreamTarget(record UpstreamTargetRecord) error {
 		record.LastRefreshError,
 	)
 	return err
+}
+
+func (s *Store) CreateDataset(name string, description string) (DatasetRecord, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return DatasetRecord{}, fmt.Errorf("dataset name is required")
+	}
+	now := time.Now().UTC()
+	record := DatasetRecord{
+		ID:          uuid.NewString(),
+		Name:        name,
+		Description: strings.TrimSpace(description),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO datasets (id, name, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`,
+		record.ID,
+		record.Name,
+		record.Description,
+		record.CreatedAt.Format(timeLayout),
+		record.UpdatedAt.Format(timeLayout),
+	)
+	if err != nil {
+		return DatasetRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *Store) ListDatasets() ([]DatasetRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			d.id,
+			d.name,
+			d.description,
+			d.created_at,
+			d.updated_at,
+			COUNT(de.trace_id) AS example_count
+		FROM datasets d
+		LEFT JOIN dataset_examples de ON de.dataset_id = d.id
+		GROUP BY d.id, d.name, d.description, d.created_at, d.updated_at
+		ORDER BY d.updated_at DESC, d.id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []DatasetRecord
+	for rows.Next() {
+		record, err := scanDatasetRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetDataset(datasetID string) (DatasetRecord, error) {
+	row := s.db.QueryRow(`
+		SELECT
+			d.id,
+			d.name,
+			d.description,
+			d.created_at,
+			d.updated_at,
+			COUNT(de.trace_id) AS example_count
+		FROM datasets d
+		LEFT JOIN dataset_examples de ON de.dataset_id = d.id
+		WHERE d.id = ?
+		GROUP BY d.id, d.name, d.description, d.created_at, d.updated_at
+	`, datasetID)
+	return scanDatasetRecord(row)
+}
+
+func (s *Store) AppendDatasetExamples(datasetID string, traceIDs []string, sourceType string, sourceID string, note string) (int, int, error) {
+	datasetID = strings.TrimSpace(datasetID)
+	if datasetID == "" {
+		return 0, 0, fmt.Errorf("dataset id is required")
+	}
+	if _, err := s.GetDataset(datasetID); err != nil {
+		return 0, 0, err
+	}
+
+	seen := map[string]struct{}{}
+	ordered := make([]string, 0, len(traceIDs))
+	for _, traceID := range traceIDs {
+		traceID = strings.TrimSpace(traceID)
+		if traceID == "" {
+			continue
+		}
+		if _, ok := seen[traceID]; ok {
+			continue
+		}
+		seen[traceID] = struct{}{}
+		ordered = append(ordered, traceID)
+	}
+	if len(ordered) == 0 {
+		return 0, 0, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	var nextPosition int
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM dataset_examples WHERE dataset_id = ?`, datasetID).Scan(&nextPosition); err != nil {
+		return 0, 0, err
+	}
+	now := time.Now().UTC().Format(timeLayout)
+	added := 0
+	skipped := 0
+	for _, traceID := range ordered {
+		if _, err := s.GetByID(traceID); err != nil {
+			return 0, 0, err
+		}
+		res, err := tx.Exec(`
+			INSERT OR IGNORE INTO dataset_examples (
+				dataset_id, trace_id, position, added_at, source_type, source_id, note
+			) VALUES (?, ?, ?, ?, ?, ?, ?)
+		`,
+			datasetID,
+			traceID,
+			nextPosition+1,
+			now,
+			strings.TrimSpace(sourceType),
+			strings.TrimSpace(sourceID),
+			strings.TrimSpace(note),
+		)
+		if err != nil {
+			return 0, 0, err
+		}
+		rowsAffected, err := res.RowsAffected()
+		if err != nil {
+			return 0, 0, err
+		}
+		if rowsAffected == 0 {
+			skipped++
+			continue
+		}
+		nextPosition++
+		added++
+	}
+	if _, err := tx.Exec(`UPDATE datasets SET updated_at = ? WHERE id = ?`, now, datasetID); err != nil {
+		return 0, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return added, skipped, nil
+}
+
+func (s *Store) GetDatasetExamples(datasetID string) ([]DatasetExampleRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			de.dataset_id,
+			de.trace_id,
+			de.position,
+			de.added_at,
+			de.source_type,
+			de.source_id,
+			de.note,
+			l.trace_id, l.path, l.version, l.request_id, l.recorded_at, l.model, l.provider, l.operation, l.endpoint, l.url, l.method, l.status_code,
+			l.duration_ms, l.ttft_ms, l.client_ip, l.content_length, l.error_text,
+			l.prompt_tokens, l.completion_tokens, l.total_tokens, l.cached_tokens,
+			l.req_header_len, l.req_body_len, l.res_header_len, l.res_body_len, l.is_stream,
+			l.session_id, l.session_source, l.window_id, l.client_request_id,
+			l.selected_upstream_id, l.selected_upstream_base_url, l.selected_upstream_provider_preset,
+			l.routing_policy, l.routing_score, l.routing_candidate_count, l.routing_failure_reason
+		FROM dataset_examples de
+		JOIN logs l ON l.trace_id = de.trace_id
+		WHERE de.dataset_id = ?
+		ORDER BY de.position ASC, de.trace_id ASC
+	`, datasetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []DatasetExampleRecord
+	for rows.Next() {
+		record, err := scanDatasetExampleRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModelRecord) error {
@@ -1547,6 +1774,24 @@ func (s *Store) GetByID(traceID string) (LogEntry, error) {
 	return scanEntry(row)
 }
 
+func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
+	row := s.db.QueryRow(`
+		SELECT
+			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
+			duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		FROM logs
+		WHERE request_id = ?
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT 1
+	`, requestID)
+	return scanEntry(row)
+}
+
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
 	if page < 1 {
 		page = 1
@@ -1791,6 +2036,114 @@ func scanEntry(scanner interface {
 	}
 
 	return entry, nil
+}
+
+func scanDatasetRecord(scanner interface {
+	Scan(dest ...any) error
+}) (DatasetRecord, error) {
+	var (
+		record    DatasetRecord
+		createdAt string
+		updatedAt string
+		err       error
+	)
+	if err := scanner.Scan(
+		&record.ID,
+		&record.Name,
+		&record.Description,
+		&createdAt,
+		&updatedAt,
+		&record.ExampleCount,
+	); err != nil {
+		return DatasetRecord{}, err
+	}
+	record.CreatedAt, err = timeParse(createdAt)
+	if err != nil {
+		return DatasetRecord{}, err
+	}
+	record.UpdatedAt, err = timeParse(updatedAt)
+	if err != nil {
+		return DatasetRecord{}, err
+	}
+	return record, nil
+}
+
+func scanDatasetExampleRecord(scanner interface {
+	Scan(dest ...any) error
+}) (DatasetExampleRecord, error) {
+	var (
+		record       DatasetExampleRecord
+		addedAt      string
+		recordedAt   string
+		errorText    string
+		cached       int
+		isStream     int
+		routingScore float64
+		err          error
+	)
+	if err := scanner.Scan(
+		&record.DatasetID,
+		&record.TraceID,
+		&record.Position,
+		&addedAt,
+		&record.SourceType,
+		&record.SourceID,
+		&record.Note,
+		&record.Trace.ID,
+		&record.Trace.LogPath,
+		&record.Trace.Header.Version,
+		&record.Trace.Header.Meta.RequestID,
+		&recordedAt,
+		&record.Trace.Header.Meta.Model,
+		&record.Trace.Header.Meta.Provider,
+		&record.Trace.Header.Meta.Operation,
+		&record.Trace.Header.Meta.Endpoint,
+		&record.Trace.Header.Meta.URL,
+		&record.Trace.Header.Meta.Method,
+		&record.Trace.Header.Meta.StatusCode,
+		&record.Trace.Header.Meta.DurationMs,
+		&record.Trace.Header.Meta.TTFTMs,
+		&record.Trace.Header.Meta.ClientIP,
+		&record.Trace.Header.Meta.ContentLength,
+		&errorText,
+		&record.Trace.Header.Usage.PromptTokens,
+		&record.Trace.Header.Usage.CompletionTokens,
+		&record.Trace.Header.Usage.TotalTokens,
+		&cached,
+		&record.Trace.Header.Layout.ReqHeaderLen,
+		&record.Trace.Header.Layout.ReqBodyLen,
+		&record.Trace.Header.Layout.ResHeaderLen,
+		&record.Trace.Header.Layout.ResBodyLen,
+		&isStream,
+		&record.Trace.SessionID,
+		&record.Trace.SessionSource,
+		&record.Trace.WindowID,
+		&record.Trace.ClientRequestID,
+		&record.Trace.Header.Meta.SelectedUpstreamID,
+		&record.Trace.Header.Meta.SelectedUpstreamBaseURL,
+		&record.Trace.Header.Meta.SelectedUpstreamProviderPreset,
+		&record.Trace.Header.Meta.RoutingPolicy,
+		&routingScore,
+		&record.Trace.Header.Meta.RoutingCandidateCount,
+		&record.Trace.Header.Meta.RoutingFailureReason,
+	); err != nil {
+		return DatasetExampleRecord{}, err
+	}
+	record.AddedAt, err = timeParse(addedAt)
+	if err != nil {
+		return DatasetExampleRecord{}, err
+	}
+	record.Trace.Header.Meta.Time, err = timeParse(recordedAt)
+	if err != nil {
+		return DatasetExampleRecord{}, err
+	}
+	record.Trace.Header.Meta.Error = errorText
+	record.Trace.Header.Meta.RoutingScore = routingScore
+	record.Trace.Header.Layout.IsStream = isStream == 1
+	if cached > 0 {
+		record.Trace.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
+	}
+	return record, nil
 }
 
 func scanSessionSummary(scanner interface {

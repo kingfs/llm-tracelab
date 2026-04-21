@@ -243,6 +243,11 @@ Current MCP tool surface includes:
 - `query_failures`
 - `replay_trace`
 - `replay_session`
+- `create_dataset_from_traces`
+- `create_dataset_from_session`
+- `append_dataset_examples`
+- `list_datasets`
+- `get_dataset`
 
 Important constraint:
 
