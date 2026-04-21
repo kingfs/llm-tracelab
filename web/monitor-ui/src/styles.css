@@ -699,7 +699,7 @@ a:focus-visible {
 .session-table-head,
 .session-row {
   display: grid;
-  grid-template-columns: minmax(0, 2.1fr) minmax(84px, 0.68fr) minmax(126px, 0.82fr) minmax(420px, 1.95fr) minmax(108px, 0.56fr);
+  grid-template-columns: minmax(0, 2.05fr) minmax(84px, 0.66fr) minmax(126px, 0.8fr) minmax(360px, 1.8fr) minmax(160px, 0.9fr);
   gap: 12px;
   align-items: center;
 }
@@ -765,6 +765,13 @@ a:focus-visible {
   color: var(--muted);
 }
 
+.trace-subline-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .trace-row span,
 .detail-subtitle,
 .message-kind,
@@ -793,6 +800,11 @@ a:focus-visible {
 
 .action-group-start {
   justify-content: flex-start;
+}
+
+.trace-row-actions {
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .icon-button {
@@ -1321,6 +1333,14 @@ a:focus-visible {
   line-height: 1.05;
 }
 
+.tool-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
 .tool-summary-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1331,6 +1351,50 @@ a:focus-visible {
 .tool-message-summary,
 .tool-message-placeholder {
   margin-top: 10px;
+}
+
+.tool-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(26, 31, 29, 0.46);
+  backdrop-filter: blur(8px);
+}
+
+.tool-modal {
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(82vh, 920px);
+  overflow: auto;
+  border-radius: 24px;
+  border: 1px solid rgba(34, 40, 49, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(255, 252, 245, 0.98));
+  box-shadow: 0 28px 90px rgba(26, 31, 29, 0.24);
+  padding: 22px;
+}
+
+.tool-modal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.tool-modal-head h3 {
+  margin: 0;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.tool-modal-close {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .tool-call-title,
@@ -1891,6 +1955,10 @@ a:focus-visible {
     background: transparent;
   }
 
+  .trace-row-actions {
+    flex-wrap: wrap;
+  }
+
   .shell {
     width: min(100vw - 20px, 1680px);
   }
@@ -1942,6 +2010,12 @@ a:focus-visible {
   .detail-tabs {
     top: 78px;
     overflow: auto;
+  }
+
+  .trace-subline-group,
+  .tool-detail-actions,
+  .tool-modal-head {
+    align-items: stretch;
   }
 
   .upstream-meta-grid {

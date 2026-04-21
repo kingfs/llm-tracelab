@@ -28,6 +28,7 @@ import {
   collectTraceToolCalls,
   countToolMatches,
   findDeclaredToolForCall,
+  normalizeDeclaredTool,
   isSameToolName,
 } from "../lib/traceTools";
 
@@ -51,7 +52,7 @@ export function TraceDetailPage() {
   const routingCandidateCount = Number(header?.routing_candidate_count || 0);
   const routingFailureReason = header?.routing_failure_reason || "";
   const selectedUpstreamHealth = detail.data?.selected_upstream_health;
-  const declaredTools = detail.data?.tools || [];
+  const declaredTools = (detail.data?.tools || []).map((tool, index) => normalizeDeclaredTool(tool, index)).filter((tool) => tool.name || tool.description || tool.parameters);
   const traceToolCalls = collectTraceToolCalls(detail.data);
   const focusTarget = searchParams.get("focus") || "";
   const hasDeclaredToolsTab = Boolean(declaredTools.length);
@@ -377,6 +378,7 @@ export function TraceDetailPage() {
 
 function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
   const [selectedToolName, setSelectedToolName] = useState(() => tools[0]?.name || "");
+  const [schemaToolName, setSchemaToolName] = useState("");
 
   useEffect(() => {
     if (!tools.length) {
@@ -391,96 +393,105 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
 
   const selectedTool = tools.find((tool) => tool.name === selectedToolName) || tools[0] || null;
   const selectedToolCalls = selectedTool ? toolCalls.filter((call) => isSameToolName(call.function?.name, selectedTool.name)) : [];
+  const schemaTool = tools.find((tool) => tool.name === schemaToolName) || null;
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">Declared tools</p>
-          <h2>Request tools</h2>
-        </div>
-      </div>
-      {tools.length ? (
-        <div className="tool-layout">
-          <div className="tool-list-column">
-            {tools.map((tool, index) => {
-              const count = countToolMatches(toolCalls, tool.name);
-              const isSelected = selectedTool?.name === tool.name;
-              return (
-                <button
-                  key={`${tool.name}-${index}`}
-                  className={isSelected ? "tool-list-item tool-list-item-active" : "tool-list-item"}
-                  onClick={() => setSelectedToolName(tool.name)}
-                >
-                  <div className="tool-list-item-head">
-                    <strong>{tool.name}</strong>
-                    <InlineTag tone={count > 0 ? "green" : "default"}>{count > 0 ? `${count} call${count > 1 ? "s" : ""}` : "not invoked"}</InlineTag>
-                  </div>
-                  <div className="tool-list-item-meta">
-                    <span>{tool.source || tool.type || "tool"}</span>
-                    <span>{buildToolSchemaSummary(tool.parameters)}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <div className="tool-detail-column">
-            {selectedTool ? (
-              <>
-                <div className="tool-detail-header">
-                  <div>
-                    <p className="eyebrow">Tool definition</p>
-                    <h3>{selectedTool.name}</h3>
-                  </div>
-                  <div className="trace-tag-group">
-                    <InlineTag tone="accent">{selectedTool.source || selectedTool.type || "tool"}</InlineTag>
-                    <InlineTag tone={selectedToolCalls.length ? "green" : "default"}>
-                      {selectedToolCalls.length ? `${selectedToolCalls.length} matched call${selectedToolCalls.length > 1 ? "s" : ""}` : "unused"}
-                    </InlineTag>
-                  </div>
-                </div>
-                <p className="tool-description">{selectedTool.description || "No description"}</p>
-                <div className="tool-summary-grid">
-                  <section className="breakdown-card">
-                    <div className="breakdown-title">Schema summary</div>
-                    <div className="tool-schema-summary">{buildToolSchemaSummary(selectedTool.parameters)}</div>
-                  </section>
-                  <section className="breakdown-card">
-                    <div className="breakdown-title">Matched calls</div>
-                    {selectedToolCalls.length ? (
-                      <div className="tool-call-summary-list">
-                        {selectedToolCalls.map((call, index) => (
-                          <div key={`${call.id || call.function?.name}-${index}`} className="tool-call-summary-row">
-                            <strong>{call.function?.name || "tool"}</strong>
-                            <span>{call.id || "no call id"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <EmptyState title="Tool not invoked" detail="This request declared the tool but did not execute a matching call." compact />
-                    )}
-                  </section>
-                </div>
-                <section className="breakdown-card">
-                  <div className="breakdown-title">Raw schema</div>
-                  <CodeBlock value={selectedTool.parameters || "{}"} />
-                </section>
-                {selectedToolCalls.length ? (
-                  <section className="breakdown-card">
-                    <div className="breakdown-title">Call arguments</div>
-                    {selectedToolCalls.map((call, index) => (
-                      <ToolCallView key={`${call.id || call.function?.name}-${index}`} call={call} match={selectedTool} CodeBlock={CodeBlock} InlineTag={InlineTag} />
-                    ))}
-                  </section>
-                ) : null}
-              </>
-            ) : null}
+    <>
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Declared tools</p>
+            <h2>Request tools</h2>
           </div>
         </div>
-      ) : (
-        <EmptyState title="No declared tools" detail="This request did not include tool definitions in its captured payload." />
-      )}
-    </section>
+        {tools.length ? (
+          <div className="tool-layout">
+            <div className="tool-list-column">
+              {tools.map((tool, index) => {
+                const count = countToolMatches(toolCalls, tool.name);
+                const isSelected = selectedTool?.name === tool.name;
+                return (
+                  <button
+                    key={`${tool.name || "tool"}-${index}`}
+                    className={isSelected ? "tool-list-item tool-list-item-active" : "tool-list-item"}
+                    onClick={() => {
+                      setSelectedToolName(tool.name);
+                      setSchemaToolName(tool.name);
+                    }}
+                  >
+                    <div className="tool-list-item-head">
+                      <strong>{tool.name || `tool ${index + 1}`}</strong>
+                      <InlineTag tone={count > 0 ? "green" : "default"}>{count > 0 ? `${count} call${count > 1 ? "s" : ""}` : "not invoked"}</InlineTag>
+                    </div>
+                    <div className="tool-list-item-meta">
+                      <span>{tool.source || tool.type || "tool"}</span>
+                      <span>{tool.description || "Click to inspect the tool definition."}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="tool-detail-column">
+              {selectedTool ? (
+                <>
+                  <div className="tool-detail-header">
+                    <div>
+                      <p className="eyebrow">Tool overview</p>
+                      <h3>{selectedTool.name}</h3>
+                    </div>
+                    <div className="trace-tag-group">
+                      <InlineTag tone="accent">{selectedTool.source || selectedTool.type || "tool"}</InlineTag>
+                      <InlineTag tone={selectedToolCalls.length ? "green" : "default"}>
+                        {selectedToolCalls.length ? `${selectedToolCalls.length} matched call${selectedToolCalls.length > 1 ? "s" : ""}` : "unused"}
+                      </InlineTag>
+                    </div>
+                  </div>
+                  <p className="tool-description">{selectedTool.description || "No description"}</p>
+                  <div className="tool-detail-actions">
+                    <button className="ghost-button" onClick={() => setSchemaToolName(selectedTool.name)}>
+                      View Definition
+                    </button>
+                  </div>
+                  {selectedToolCalls.length ? (
+                    <section className="breakdown-card">
+                      <div className="breakdown-title">Call arguments</div>
+                      {selectedToolCalls.map((call, index) => (
+                        <ToolCallView key={`${call.id || call.function?.name}-${index}`} call={call} match={selectedTool} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+                      ))}
+                    </section>
+                  ) : (
+                    <EmptyState title="Tool not invoked" detail="This request declared the tool but did not execute a matching call." compact />
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="No declared tools" detail="This request did not include tool definitions in its captured payload." />
+        )}
+      </section>
+      {schemaTool ? (
+        <div className="tool-modal-backdrop" role="presentation" onClick={() => setSchemaToolName("")}>
+          <div className="tool-modal" role="dialog" aria-modal="true" aria-label={`${schemaTool.name} definition`} onClick={(event) => event.stopPropagation()}>
+            <div className="tool-modal-head">
+              <div>
+                <p className="eyebrow">Tool definition</p>
+                <h3>{schemaTool.name}</h3>
+              </div>
+              <button className="icon-button" onClick={() => setSchemaToolName("")} aria-label="Close tool definition">
+                <span className="tool-modal-close">x</span>
+              </button>
+            </div>
+            <div className="trace-tag-group">
+              <InlineTag tone="accent">{schemaTool.source || schemaTool.type || "tool"}</InlineTag>
+              <InlineTag>{buildToolSchemaSummary(schemaTool.parameters)}</InlineTag>
+            </div>
+            {schemaTool.description ? <p className="tool-description">{schemaTool.description}</p> : null}
+            <CodeBlock value={schemaTool.parameters || "{}"} />
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

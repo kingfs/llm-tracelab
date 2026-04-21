@@ -30,8 +30,10 @@ export function SessionList({ items }) {
                 ))}
               </div>
             </div>
-            <span className="trace-subline mono">{item.session_id}</span>
-            <span className="trace-subline">last {formatDateTime(item.last_seen)}</span>
+            <div className="trace-subline-group">
+              <span className="trace-subline mono">{item.session_id}</span>
+              <span className="trace-subline">last {formatDateTime(item.last_seen)}</span>
+            </div>
           </div>
           <div className="trace-metric-stack">
             <strong>{item.request_count}</strong>

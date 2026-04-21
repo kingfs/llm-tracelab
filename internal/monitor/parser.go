@@ -263,7 +263,21 @@ func parseRequestToolsViaAdapter(provider string, endpoint string, reqBodyBytes 
 			Parameters:  marshalCompact(tool.Parameters),
 		})
 	}
+	if hasUnnamedRequestTools(tools) {
+		if rawTools := parseRequestTools(reqBodyBytes); len(rawTools) > 0 {
+			return rawTools
+		}
+	}
 	return tools
+}
+
+func hasUnnamedRequestTools(tools []RequestTool) bool {
+	for _, tool := range tools {
+		if strings.TrimSpace(tool.Name) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func parseResponseViaAdapter(provider string, endpoint string, data []byte, isStream bool) (string, string, []ContentBlock, []ToolCall) {

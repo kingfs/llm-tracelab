@@ -14,6 +14,45 @@ export function buildToolMessageSummary(message, declaredTools = []) {
   return "";
 }
 
+export function getDeclaredToolName(tool = {}) {
+  return (
+    tool.name ||
+    tool.function?.name ||
+    tool.function_name ||
+    tool.tool_name ||
+    tool.title ||
+    ""
+  );
+}
+
+export function getDeclaredToolDescription(tool = {}) {
+  return tool.description || tool.function?.description || "";
+}
+
+export function getDeclaredToolParameters(tool = {}) {
+  return (
+    tool.parameters ||
+    tool.function?.parameters ||
+    tool.input_schema ||
+    tool.inputSchema ||
+    ""
+  );
+}
+
+export function normalizeDeclaredTool(tool = {}, index = 0) {
+  const name = getDeclaredToolName(tool) || `tool_${index + 1}`;
+  const source = tool.source || (tool.input_schema || tool.inputSchema ? "anthropic" : tool.function ? "openai" : tool.type || "tool");
+  return {
+    ...tool,
+    id: tool.id || `${name || "tool"}-${index}`,
+    type: tool.type || "function",
+    source,
+    name,
+    description: getDeclaredToolDescription(tool),
+    parameters: getDeclaredToolParameters(tool),
+  };
+}
+
 export function collectTraceToolCalls(detail) {
   if (!detail) {
     return [];
@@ -40,7 +79,7 @@ export function isSameToolName(left = "", right = "") {
 
 export function findDeclaredToolForCall(call, declaredTools = []) {
   const name = call?.function?.name || "";
-  return declaredTools.find((tool) => isSameToolName(tool.name, name)) || null;
+  return declaredTools.find((tool) => isSameToolName(getDeclaredToolName(tool), name)) || null;
 }
 
 export function countToolMatches(toolCalls = [], toolName = "") {

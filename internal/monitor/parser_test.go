@@ -116,6 +116,21 @@ func TestParseLogFileChatCompletionsRequestRendersStructuredMessages(t *testing.
 	}
 }
 
+func TestParseRequestToolsViaAdapterFallsBackWhenToolNameIsMissing(t *testing.T) {
+	reqBody := []byte(`{"messages":[{"role":"user","content":"Inspect this request."}],"tools":[{"type":"function","function":{"name":"read","description":"Read the contents of a file.","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}}]}`)
+
+	tools := parseRequestToolsViaAdapter("", "/v1/chat/completions", reqBody)
+	if len(tools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(tools))
+	}
+	if tools[0].Name != "read" {
+		t.Fatalf("tools[0].Name = %q, want read", tools[0].Name)
+	}
+	if !strings.Contains(tools[0].Parameters, `"file_path"`) {
+		t.Fatalf("tools[0].Parameters = %q", tools[0].Parameters)
+	}
+}
+
 func TestParseLogFileAnthropicMessagesRendersConversationAndStreamOutput(t *testing.T) {
 	reqBody := `{"system":"You are helpful.","messages":[{"role":"user","content":[{"type":"text","text":"inspect this repo"}]},{"role":"assistant","content":[{"type":"text","text":"Reading files."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"/tmp/README.md"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"# read ok"}]}]}`
 	resBody := strings.Join([]string{

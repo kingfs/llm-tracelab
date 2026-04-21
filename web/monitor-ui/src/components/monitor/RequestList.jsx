@@ -21,7 +21,7 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
       {items.map((item) => {
         const focus = focusFailures && (item.status_code < 200 || item.status_code >= 300) ? "failure" : "";
 
-        return (
+      return (
           <article key={item.id} className={item.status_code >= 200 && item.status_code < 300 ? "trace-row" : "trace-row trace-row-failed"}>
             <div>
               <div className="trace-title-row">
@@ -33,8 +33,10 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
                   {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
                 </div>
               </div>
-              <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
-              {item.session_id ? <span className="trace-subline mono">session {item.session_id}</span> : null}
+              <div className="trace-subline-group">
+                <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
+                {item.session_id ? <span className="trace-subline mono">session {item.session_id}</span> : null}
+              </div>
             </div>
             <div className="trace-metric-stack">
               <strong className={item.status_code >= 200 && item.status_code < 300 ? "status-ok" : "status-err"}>{item.status_code}</strong>
@@ -52,7 +54,7 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
                 <MiniToken metric="cached" value={item.cached_tokens} tone="gold" icon="cached" />
               </div>
             </div>
-            <div className="action-group">
+            <div className="action-group trace-row-actions">
               {item.session_id ? (
                 <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title="View session" aria-label="View session">
                   <StackIcon />
