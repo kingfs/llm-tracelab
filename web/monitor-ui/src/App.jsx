@@ -1,53 +1,10 @@
-import React, { startTransition, useEffect, useRef, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import { PrimaryNav } from "./components/PrimaryNav";
+import { useJSON } from "./hooks/useJSON";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
-
-function useJSON(url, deps = []) {
-  const [state, setState] = useState({ loading: true, data: null, error: "" });
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-
-    startTransition(() => {
-      setState((current) => ({ ...current, loading: true, error: "" }));
-    });
-
-    fetch(url, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(payload.error || `request failed: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then((data) => {
-        if (cancelled) {
-          return;
-        }
-        startTransition(() => {
-          setState({ loading: false, data, error: "" });
-        });
-      })
-      .catch((error) => {
-        if (cancelled || error.name === "AbortError") {
-          return;
-        }
-        startTransition(() => {
-          setState({ loading: false, data: null, error: error.message || "unknown error" });
-        });
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [url, ...deps]);
-
-  return state;
-}
 
 function App() {
   return (
@@ -60,22 +17,6 @@ function App() {
       <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
       <Route path="/traces/:traceID" element={<TraceDetailPage />} />
     </Routes>
-  );
-}
-
-function PrimaryNav() {
-  return (
-    <nav className="primary-nav" aria-label="Primary">
-      <NavLink to="/requests" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
-        Requests
-      </NavLink>
-      <NavLink to="/sessions" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
-        Sessions
-      </NavLink>
-      <NavLink to="/routing" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
-        Routing
-      </NavLink>
-    </nav>
   );
 }
 
