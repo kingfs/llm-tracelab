@@ -3,6 +3,7 @@ package evals
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,12 +29,13 @@ func TestEvaluateBaselineIncludesLatencyAndTokenBudgetChecks(t *testing.T) {
 	summary := &replay.Summary{BodyBytes: 32}
 
 	results := EvaluateBaseline(entry, summary)
-	if len(results) != 6 {
-		t.Fatalf("len(EvaluateBaseline()) = %d, want 6", len(results))
+	if len(results) != 7 {
+		t.Fatalf("len(EvaluateBaseline()) = %d, want 7", len(results))
 	}
 	assertResultStatus(t, results, "ttft_le_2000ms", "pass")
 	assertResultStatus(t, results, "total_tokens_le_32000", "pass")
 	assertResultStatus(t, results, "tool_calls_declared", "fail")
+	assertResultStatus(t, results, "tool_call_arguments_json", "fail")
 }
 
 func TestEvaluateBaselineFailsBudgetChecksWhenExceeded(t *testing.T) {
@@ -78,6 +80,14 @@ func TestEvaluateSupportsVersionedProfiles(t *testing.T) {
 		t.Fatalf("len(Evaluate(baseline_v3)) = %d, want 6", len(v3))
 	}
 
+	v4, err := Evaluate(entry, &replay.Summary{BodyBytes: 1}, "baseline_v4")
+	if err != nil {
+		t.Fatalf("Evaluate(baseline_v4) error = %v", err)
+	}
+	if len(v4) != 7 {
+		t.Fatalf("len(Evaluate(baseline_v4)) = %d, want 7", len(v4))
+	}
+
 	if _, err := Evaluate(entry, &replay.Summary{BodyBytes: 1}, "missing_profile"); err == nil {
 		t.Fatalf("Evaluate(missing_profile) error = nil, want error")
 	}
@@ -105,6 +115,28 @@ func TestToolCallsDeclaredConformance(t *testing.T) {
 	}
 }
 
+func TestToolCallArgumentsJSONConformance(t *testing.T) {
+	dir := t.TempDir()
+	goodPath := filepath.Join(dir, "args-valid.http")
+	badPath := filepath.Join(dir, "args-invalid.http")
+
+	if err := os.WriteFile(goodPath, buildToolCallRecordFixtureWithArgs(t, "weather", "weather", `{"city":"Shanghai"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(goodPath) error = %v", err)
+	}
+	if err := os.WriteFile(badPath, buildToolCallRecordFixtureWithArgs(t, "weather", "weather", `{"city":"Shanghai"`), 0o644); err != nil {
+		t.Fatalf("WriteFile(badPath) error = %v", err)
+	}
+
+	good := toolCallArgumentsJSON(store.LogEntry{LogPath: goodPath})
+	if good.Status != "pass" {
+		t.Fatalf("toolCallArgumentsJSON(good) = %#v, want pass", good)
+	}
+	bad := toolCallArgumentsJSON(store.LogEntry{LogPath: badPath})
+	if bad.Status != "fail" || !strings.Contains(bad.Explanation, "weather") {
+		t.Fatalf("toolCallArgumentsJSON(bad) = %#v, want fail mentioning weather", bad)
+	}
+}
+
 func assertResultStatus(t *testing.T, results []Result, evaluatorKey string, want string) {
 	t.Helper()
 	for _, result := range results {
@@ -120,9 +152,13 @@ func assertResultStatus(t *testing.T, results []Result, evaluatorKey string, wan
 
 func buildToolCallRecordFixture(t *testing.T, declaredTool string, calledTool string) []byte {
 	t.Helper()
+	return buildToolCallRecordFixtureWithArgs(t, declaredTool, calledTool, `{"city":"Shanghai"}`)
+}
 
+func buildToolCallRecordFixtureWithArgs(t *testing.T, declaredTool string, calledTool string, args string) []byte {
+	t.Helper()
 	reqBody := `{"model":"gpt-5","messages":[{"role":"user","content":"check weather"}],"tools":[{"type":"function","function":{"name":"` + declaredTool + `","description":"lookup","parameters":{"type":"object"}}}]}`
-	resBody := `{"id":"chatcmpl_1","object":"chat.completion","created":1710000000,"model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"` + calledTool + `","arguments":"{\"city\":\"Shanghai\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+	resBody := `{"id":"chatcmpl_1","object":"chat.completion","created":1710000000,"model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"` + calledTool + `","arguments":` + strconv.Quote(args) + `}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
 	request := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" + reqBody
 	response := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + resBody
 

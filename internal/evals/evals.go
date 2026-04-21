@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -11,7 +12,7 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/replay"
 )
 
-const BaselineEvaluatorSet = "baseline_v3"
+const BaselineEvaluatorSet = "baseline_v4"
 
 type Result struct {
 	EvaluatorKey string  `json:"evaluator_key"`
@@ -28,6 +29,7 @@ type Profile struct {
 	TTFTBudgetMS            int      `json:"ttft_budget_ms,omitempty"`
 	TotalTokenBudget        int      `json:"total_token_budget,omitempty"`
 	RequireDeclaredToolCall bool     `json:"require_declared_tool_call,omitempty"`
+	RequireToolArgsJSON     bool     `json:"require_tool_args_json,omitempty"`
 	EvaluatorKeys           []string `json:"evaluator_keys"`
 }
 
@@ -72,6 +74,24 @@ var profiles = map[string]Profile{
 			"tool_calls_declared",
 		},
 	},
+	"baseline_v4": {
+		Name:                    "baseline_v4",
+		Description:             "Deterministic baseline checks plus TTFT, total-token budgets, declared tool-call conformance, and tool-call argument JSON validation.",
+		Deterministic:           true,
+		TTFTBudgetMS:            2000,
+		TotalTokenBudget:        32000,
+		RequireDeclaredToolCall: true,
+		RequireToolArgsJSON:     true,
+		EvaluatorKeys: []string{
+			"http_status_2xx",
+			"no_recorded_error",
+			"response_has_body",
+			"ttft_le_2000ms",
+			"total_tokens_le_32000",
+			"tool_calls_declared",
+			"tool_call_arguments_json",
+		},
+	},
 }
 
 func ListProfiles() []Profile {
@@ -112,6 +132,9 @@ func Evaluate(entry store.LogEntry, summary *replay.Summary, evaluatorSet string
 	}
 	if profile.RequireDeclaredToolCall {
 		results = append(results, toolCallsDeclared(entry))
+	}
+	if profile.RequireToolArgsJSON {
+		results = append(results, toolCallArgumentsJSON(entry))
 	}
 	return results, nil
 }
@@ -342,4 +365,78 @@ func dedupeAdjacentStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func toolCallArgumentsJSON(entry store.LogEntry) Result {
+	if strings.TrimSpace(entry.LogPath) == "" {
+		return Result{
+			EvaluatorKey: "tool_call_arguments_json",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  "trace log path is missing",
+		}
+	}
+	content, err := os.ReadFile(entry.LogPath)
+	if err != nil {
+		return Result{
+			EvaluatorKey: "tool_call_arguments_json",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  fmt.Sprintf("read trace log: %v", err),
+		}
+	}
+	parsed, err := monitor.ParseLogFile(content)
+	if err != nil {
+		return Result{
+			EvaluatorKey: "tool_call_arguments_json",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  fmt.Sprintf("parse trace log: %v", err),
+		}
+	}
+	if len(parsed.ResponseToolCalls) == 0 {
+		return Result{
+			EvaluatorKey: "tool_call_arguments_json",
+			Value:        1,
+			Status:       "pass",
+			Label:        "pass",
+			Explanation:  "no response tool calls recorded",
+		}
+	}
+
+	var invalid []string
+	for _, call := range parsed.ResponseToolCalls {
+		args := strings.TrimSpace(call.Function.Arguments)
+		if args == "" {
+			continue
+		}
+		var value any
+		if err := json.Unmarshal([]byte(args), &value); err != nil {
+			name := strings.TrimSpace(call.Function.Name)
+			if name == "" {
+				name = "<unnamed>"
+			}
+			invalid = append(invalid, name)
+		}
+	}
+	if len(invalid) == 0 {
+		return Result{
+			EvaluatorKey: "tool_call_arguments_json",
+			Value:        1,
+			Status:       "pass",
+			Label:        "pass",
+			Explanation:  fmt.Sprintf("%d response tool calls had valid JSON arguments", len(parsed.ResponseToolCalls)),
+		}
+	}
+	sort.Strings(invalid)
+	return Result{
+		EvaluatorKey: "tool_call_arguments_json",
+		Value:        0,
+		Status:       "fail",
+		Label:        "fail",
+		Explanation:  fmt.Sprintf("response tool calls have invalid JSON arguments: %s", strings.Join(dedupeAdjacentStrings(invalid), ", ")),
+	}
 }
