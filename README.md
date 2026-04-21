@@ -205,6 +205,7 @@ go run ./cmd/server mcp -c config/config.yaml
 - `create_experiment_from_eval_runs`
 - `list_experiment_runs`
 - `get_experiment_run`
+- `summarize_experiment_regressions`
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 

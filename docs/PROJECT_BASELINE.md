@@ -258,6 +258,7 @@ Current MCP tool surface includes:
 - `create_experiment_from_eval_runs`
 - `list_experiment_runs`
 - `get_experiment_run`
+- `summarize_experiment_regressions`
 
 Important constraint:
 

@@ -159,6 +159,11 @@ type getExperimentRunInput struct {
 	ExperimentRunID string `json:"experiment_run_id" jsonschema:"experiment run identifier"`
 }
 
+type summarizeExperimentRegressionsInput struct {
+	ExperimentRunID string `json:"experiment_run_id" jsonschema:"experiment run identifier"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"maximum grouped items per section, default 10"`
+}
+
 type traceListOutput struct {
 	Items       []map[string]any `json:"items"`
 	Stats       map[string]any   `json:"stats"`
@@ -409,6 +414,34 @@ type listEvaluatorProfilesOutput struct {
 	RefreshedAt time.Time              `json:"refreshed_at"`
 }
 
+type regressionSummaryItem struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+type regressionTraceItem struct {
+	TraceID       string    `json:"trace_id"`
+	SessionID     string    `json:"session_id,omitempty"`
+	Model         string    `json:"model"`
+	Provider      string    `json:"provider"`
+	Endpoint      string    `json:"endpoint"`
+	RecordedAt    time.Time `json:"recorded_at"`
+	Regressions   int       `json:"regressions"`
+	EvaluatorKeys []string  `json:"evaluator_keys"`
+}
+
+type summarizeExperimentRegressionsOutput struct {
+	Experiment  experimentRunView       `json:"experiment"`
+	Comparison  compareEvalRunsOutput   `json:"comparison"`
+	ByEvaluator []regressionSummaryItem `json:"by_evaluator"`
+	ByModel     []regressionSummaryItem `json:"by_model"`
+	ByProvider  []regressionSummaryItem `json:"by_provider"`
+	ByEndpoint  []regressionSummaryItem `json:"by_endpoint"`
+	BySession   []regressionSummaryItem `json:"by_session"`
+	TopTraces   []regressionTraceItem   `json:"top_traces"`
+	RefreshedAt time.Time               `json:"refreshed_at"`
+}
+
 type evaluatorAggregate struct {
 	EvaluatorKey     string
 	BaselineTotal    int
@@ -536,6 +569,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "get_experiment_run",
 		Description: "Get one persisted experiment run plus its derived comparison detail.",
 	}, api.getExperimentRun)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "summarize_experiment_regressions",
+		Description: "Summarize persisted experiment regressions by evaluator, model, provider, endpoint, session, and top affected traces.",
+	}, api.summarizeExperimentRegressions)
 
 	return server
 }
@@ -1121,6 +1158,92 @@ func (a *serverAPI) getExperimentRun(ctx context.Context, req *mcp.CallToolReque
 	}, nil
 }
 
+func (a *serverAPI) summarizeExperimentRegressions(ctx context.Context, req *mcp.CallToolRequest, in *summarizeExperimentRegressionsInput) (*mcp.CallToolResult, *summarizeExperimentRegressionsOutput, error) {
+	experimentRunID := strings.TrimSpace(in.ExperimentRunID)
+	if experimentRunID == "" {
+		return nil, nil, fmt.Errorf("experiment_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	record, err := a.store.GetExperimentRun(experimentRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	comparison, err := a.compareEvalRunIDs(record.BaselineEvalRunID, record.CandidateEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	traceCounts := map[string]int{}
+	traceEvaluators := map[string]map[string]struct{}{}
+	byEvaluator := map[string]int{}
+	byModel := map[string]int{}
+	byProvider := map[string]int{}
+	byEndpoint := map[string]int{}
+	bySession := map[string]int{}
+
+	for _, item := range comparison.Regressions {
+		traceCounts[item.TraceID]++
+		if _, ok := traceEvaluators[item.TraceID]; !ok {
+			traceEvaluators[item.TraceID] = map[string]struct{}{}
+		}
+		traceEvaluators[item.TraceID][item.EvaluatorKey] = struct{}{}
+		byEvaluator[item.EvaluatorKey]++
+
+		entry, err := a.lookupTrace(item.TraceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		incrementCount(byModel, entry.Header.Meta.Model)
+		incrementCount(byProvider, entry.Header.Meta.Provider)
+		incrementCount(byEndpoint, firstNonEmpty(entry.Header.Meta.Endpoint, entry.Header.Meta.URL))
+		incrementCount(bySession, entry.SessionID)
+	}
+
+	out := &summarizeExperimentRegressionsOutput{
+		Experiment:  toExperimentRunView(record),
+		Comparison:  *comparison,
+		ByEvaluator: topSummaryItems(byEvaluator, limit),
+		ByModel:     topSummaryItems(byModel, limit),
+		ByProvider:  topSummaryItems(byProvider, limit),
+		ByEndpoint:  topSummaryItems(byEndpoint, limit),
+		BySession:   topSummaryItems(bySession, limit),
+		RefreshedAt: time.Now().UTC(),
+	}
+
+	for traceID, count := range traceCounts {
+		entry, err := a.lookupTrace(traceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		out.TopTraces = append(out.TopTraces, regressionTraceItem{
+			TraceID:       traceID,
+			SessionID:     entry.SessionID,
+			Model:         entry.Header.Meta.Model,
+			Provider:      entry.Header.Meta.Provider,
+			Endpoint:      firstNonEmpty(entry.Header.Meta.Endpoint, entry.Header.Meta.URL),
+			RecordedAt:    entry.Header.Meta.Time,
+			Regressions:   count,
+			EvaluatorKeys: sortedKeys(traceEvaluators[traceID]),
+		})
+	}
+	sort.Slice(out.TopTraces, func(i, j int) bool {
+		if out.TopTraces[i].Regressions != out.TopTraces[j].Regressions {
+			return out.TopTraces[i].Regressions > out.TopTraces[j].Regressions
+		}
+		return out.TopTraces[i].TraceID < out.TopTraces[j].TraceID
+	})
+	if len(out.TopTraces) > limit {
+		out.TopTraces = out.TopTraces[:limit]
+	}
+	return nil, out, nil
+}
+
 func (a *serverAPI) compareEvalRunIDs(baselineEvalRunID string, candidateEvalRunID string) (*compareEvalRunsOutput, error) {
 	baselineRun, err := a.store.GetEvalRun(baselineEvalRunID)
 	if err != nil {
@@ -1553,6 +1676,40 @@ func matchedScoreCount(items []evaluatorComparison) int {
 		total += item.MatchedCount
 	}
 	return total
+}
+
+func incrementCount(counts map[string]int, label string) {
+	key := strings.TrimSpace(label)
+	if key == "" {
+		key = "(empty)"
+	}
+	counts[key]++
+}
+
+func topSummaryItems(counts map[string]int, limit int) []regressionSummaryItem {
+	items := make([]regressionSummaryItem, 0, len(counts))
+	for label, count := range counts {
+		items = append(items, regressionSummaryItem{Label: label, Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		return items[i].Label < items[j].Label
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items
+}
+
+func sortedKeys(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func dedupeStrings(values []string) []string {

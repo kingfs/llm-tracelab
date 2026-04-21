@@ -259,10 +259,20 @@ Input:
 
 - `experiment_run_id`
 
+### `summarize_experiment_regressions`
+
+Summarize one persisted experiment's regressions by evaluator, model, provider, endpoint, session, and top affected traces.
+
+Inputs:
+
+- `experiment_run_id`
+- `limit`
+
 Notes:
 
 - the persisted experiment stores only linkage and aggregate summary fields
 - detailed evaluator/improvement/regression views are derived from existing scores at read time
+- regression summaries are also derived on demand and do not persist a second analysis layer
 
 ## Design Notes
 
