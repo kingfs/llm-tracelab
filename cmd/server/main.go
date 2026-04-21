@@ -191,9 +191,10 @@ func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.C
 	mux := http.NewServeMux()
 	if cfg.MCP.Enabled {
 		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr})
-		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 			return server
-		}, nil))
+		}, nil)
+		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), withMCPAuth(mcpHandler, cfg.MCP.AuthToken))
 	}
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: rtr})
 	return mux
@@ -230,6 +231,33 @@ func normalizeMCPPath(path string) (string, error) {
 		return "", fmt.Errorf("mcp.path must not be empty")
 	}
 	return path, nil
+}
+
+func withMCPAuth(next http.Handler, authToken string) http.Handler {
+	expected := strings.TrimSpace(authToken)
+	if expected == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if provided, ok := extractBearerToken(r.Header.Get("Authorization")); !ok || provided != expected {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-mcp"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func extractBearerToken(header string) (string, bool) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return "", false
+	}
+	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
+		token := strings.TrimSpace(header[len("bearer "):])
+		return token, token != ""
+	}
+	return header, true
 }
 
 func logResolvedTargets(rtr *router.Router) {

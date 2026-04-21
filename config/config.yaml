@@ -7,6 +7,7 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp" # MCP streamable HTTP endpoint, 例如 http://localhost:8081/mcp
+  auth_token: "" # 可选；配置后要求 Authorization: Bearer <token>
 
 upstream:
   base_url: "http://localhost:30080/v1"

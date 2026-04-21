@@ -161,6 +161,7 @@ upstream:
 - `LLM_TRACELAB_MONITOR_PORT`
 - `LLM_TRACELAB_MCP_ENABLED`
 - `LLM_TRACELAB_MCP_PATH`
+- `LLM_TRACELAB_MCP_AUTH_TOKEN`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
 - `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
@@ -211,6 +212,8 @@ go run ./cmd/server serve -c config/config.yaml
 - `get_experiment_run`
 - `summarize_experiment_regressions`
 - `explain_experiment_regressions`
+
+如果设置了 `mcp.auth_token`，客户端需要携带 `Authorization: Bearer <token>`。
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 

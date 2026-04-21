@@ -48,7 +48,12 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp"
+  auth_token: ""
 ```
+
+Optional authentication:
+
+- when `mcp.auth_token` is non-empty, clients must send `Authorization: Bearer <token>`
 
 ## Tool Surface
 

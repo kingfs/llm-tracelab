@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -218,4 +219,84 @@ func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 	if len(tools.Tools) != 28 {
 		t.Fatalf("len(tools.Tools) = %d, want 28", len(tools.Tools))
 	}
+}
+
+func TestNewManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Monitor.Port = "8081"
+	cfg.MCP.Enabled = true
+	cfg.MCP.Path = "/mcp"
+	cfg.MCP.AuthToken = "secret-token"
+
+	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg))
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	_, err = client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint: httpServer.URL + "/mcp",
+	}, nil)
+	if err == nil {
+		t.Fatalf("client.Connect() error = nil, want unauthorized error")
+	}
+	if !strings.Contains(err.Error(), "401") && !strings.Contains(strings.ToLower(err.Error()), "unauthorized") {
+		t.Fatalf("client.Connect() error = %v, want unauthorized", err)
+	}
+}
+
+func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Monitor.Port = "8081"
+	cfg.MCP.Enabled = true
+	cfg.MCP.Path = "/mcp"
+	cfg.MCP.AuthToken = "secret-token"
+
+	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg))
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:   httpServer.URL + "/mcp",
+		HTTPClient: &http.Client{Transport: authTransport{Token: "secret-token"}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("client.Connect() error = %v", err)
+	}
+	defer session.Close()
+
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("session.ListTools() error = %v", err)
+	}
+	if len(tools.Tools) != 28 {
+		t.Fatalf("len(tools.Tools) = %d, want 28", len(tools.Tools))
+	}
+}
+
+type authTransport struct {
+	Token string
+}
+
+func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	clone.Header = req.Header.Clone()
+	clone.Header.Set("Authorization", "Bearer "+t.Token)
+	return http.DefaultTransport.RoundTrip(clone)
 }

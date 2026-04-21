@@ -18,8 +18,9 @@ type Config struct {
 	} `yaml:"monitor"`
 
 	MCP struct {
-		Enabled bool   `yaml:"enabled"`
-		Path    string `yaml:"path"`
+		Enabled   bool   `yaml:"enabled"`
+		Path      string `yaml:"path"`
+		AuthToken string `yaml:"auth_token"`
 	} `yaml:"mcp"`
 
 	Upstream  UpstreamConfig         `yaml:"upstream"`
@@ -117,6 +118,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_MCP_PATH"); v != "" {
 		cfg.MCP.Path = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_MCP_AUTH_TOKEN"); v != "" {
+		cfg.MCP.AuthToken = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
 		cfg.Upstream.BaseURL = v

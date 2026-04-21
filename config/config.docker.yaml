@@ -4,6 +4,11 @@ server:
 monitor:
   port: "8081"
 
+mcp:
+  enabled: true
+  path: "/mcp"
+  auth_token: ""
+
 upstream:
   base_url: "https://api.openai.com/v1"
   api_key: "sk-placeholder"
