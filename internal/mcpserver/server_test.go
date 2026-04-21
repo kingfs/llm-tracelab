@@ -163,8 +163,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 27 {
-		t.Fatalf("len(tools.Tools) = %d, want 27", len(tools.Tools))
+	if len(tools.Tools) != 28 {
+		t.Fatalf("len(tools.Tools) = %d, want 28", len(tools.Tools))
 	}
 
 	profiles, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -550,6 +550,37 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := len(explainPayload["items"].([]any)); got != 1 {
 		t.Fatalf("len(explain_experiment_regressions.items) = %d, want 1", got)
+	}
+
+	regressionDataset, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "create_dataset_from_experiment_regressions",
+		Arguments: map[string]any{
+			"name":              "regression-dataset",
+			"description":       "from experiment regressions",
+			"experiment_run_id": experimentID,
+			"limit":             10,
+			"note":              "candidate regressions",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(create_dataset_from_experiment_regressions) error = %v", err)
+	}
+	regressionDatasetPayload := regressionDataset.StructuredContent.(map[string]any)
+	if got := int(regressionDatasetPayload["added"].(float64)); got != 1 {
+		t.Fatalf("create_dataset_from_experiment_regressions.added = %d, want 1", got)
+	}
+	regressionDatasetID := regressionDatasetPayload["dataset"].(map[string]any)["id"].(string)
+
+	regressionDatasetDetail, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_dataset",
+		Arguments: map[string]any{"dataset_id": regressionDatasetID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(get_dataset regression dataset) error = %v", err)
+	}
+	regressionExamples := regressionDatasetDetail.StructuredContent.(map[string]any)["examples"].([]any)
+	if len(regressionExamples) != 1 {
+		t.Fatalf("len(get_dataset regression examples) = %d, want 1", len(regressionExamples))
 	}
 
 	v1EvalRunRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{

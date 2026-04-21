@@ -80,6 +80,7 @@ Stable API surface:
 - MCP `replay_session`
 - MCP `create_dataset_from_traces`
 - MCP `create_dataset_from_session`
+- MCP `create_dataset_from_experiment_regressions`
 - MCP `append_dataset_examples`
 - MCP `list_datasets`
 - MCP `get_dataset`

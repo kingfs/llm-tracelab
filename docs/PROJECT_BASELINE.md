@@ -245,6 +245,7 @@ Current MCP tool surface includes:
 - `replay_session`
 - `create_dataset_from_traces`
 - `create_dataset_from_session`
+- `create_dataset_from_experiment_regressions`
 - `append_dataset_examples`
 - `list_datasets`
 - `get_dataset`

@@ -115,6 +115,14 @@ type appendDatasetExamplesInput struct {
 	Note      string   `json:"note,omitempty" jsonschema:"optional note stored on appended examples"`
 }
 
+type createDatasetFromExperimentRegressionsInput struct {
+	Name            string `json:"name" jsonschema:"dataset name"`
+	Description     string `json:"description,omitempty" jsonschema:"dataset description"`
+	ExperimentRunID string `json:"experiment_run_id" jsonschema:"experiment run identifier"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"maximum regressed traces to include, default 50, max 100"`
+	Note            string `json:"note,omitempty" jsonschema:"optional note stored on appended examples"`
+}
+
 type getDatasetInput struct {
 	DatasetID string `json:"dataset_id" jsonschema:"dataset identifier"`
 }
@@ -601,6 +609,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Description: "Append more trace IDs to an existing local dataset.",
 	}, api.appendDatasetExamples)
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_dataset_from_experiment_regressions",
+		Description: "Create a local dataset from regressed traces in one persisted experiment run.",
+	}, api.createDatasetFromExperimentRegressions)
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_datasets",
 		Description: "List local datasets curated from recorded traces.",
 	}, api.listDatasets)
@@ -992,6 +1004,66 @@ func (a *serverAPI) createDatasetFromSession(ctx context.Context, req *mcp.CallT
 		return nil, nil, err
 	}
 	added, skipped, err := a.store.AppendDatasetExamples(dataset.ID, traceIDs, "session", sessionID, in.Note)
+	if err != nil {
+		return nil, nil, err
+	}
+	updated, err := a.store.GetDataset(dataset.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &datasetMutationOutput{
+		Dataset: toDatasetSummary(updated),
+		Added:   added,
+		Skipped: skipped,
+	}, nil
+}
+
+func (a *serverAPI) createDatasetFromExperimentRegressions(ctx context.Context, req *mcp.CallToolRequest, in *createDatasetFromExperimentRegressionsInput) (*mcp.CallToolResult, *datasetMutationOutput, error) {
+	experimentRunID := strings.TrimSpace(in.ExperimentRunID)
+	if experimentRunID == "" {
+		return nil, nil, fmt.Errorf("experiment_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	record, err := a.store.GetExperimentRun(experimentRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	comparison, err := a.compareEvalRunIDs(record.BaselineEvalRunID, record.CandidateEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	seen := map[string]struct{}{}
+	traceIDs := make([]string, 0, min(limit, len(comparison.Regressions)))
+	for _, item := range comparison.Regressions {
+		if strings.TrimSpace(item.TraceID) == "" {
+			continue
+		}
+		if _, ok := seen[item.TraceID]; ok {
+			continue
+		}
+		seen[item.TraceID] = struct{}{}
+		traceIDs = append(traceIDs, item.TraceID)
+		if len(traceIDs) >= limit {
+			break
+		}
+	}
+
+	dataset, err := a.createDataset(in.Name, in.Description)
+	if err != nil {
+		return nil, nil, err
+	}
+	added, skipped, err := a.store.AppendDatasetExamples(dataset.ID, traceIDs, "experiment_regressions", experimentRunID, in.Note)
 	if err != nil {
 		return nil, nil, err
 	}

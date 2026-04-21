@@ -7,8 +7,8 @@ This document describes the current `llm-tracelab` MCP server surface.
 The current goal is narrow and deliberate:
 
 - expose local trace/session/upstream inspection to AI agents
+- let agents curate datasets and run local deterministic eval loops
 - reuse existing monitor/store behavior
-- keep the first MCP surface read-only
 
 This is the `M1` slice from [Agent Evolution Roadmap](./AGENT_EVOLUTION_ROADMAP.md).
 
@@ -18,7 +18,7 @@ Current MCP support is:
 
 - transport: `stdio`
 - implementation library: official `github.com/modelcontextprotocol/go-sdk`
-- scope: read-only inspection and replay tools
+- scope: local inspection, replay, dataset curation, deterministic eval, and experiment analysis tools
 
 Current MCP support is not:
 
@@ -141,6 +141,18 @@ Inputs:
 - `name`
 - `description`
 - `session_id`
+- `limit`
+- `note`
+
+### `create_dataset_from_experiment_regressions`
+
+Create a local dataset from the unique regressed traces in one persisted experiment run.
+
+Inputs:
+
+- `name`
+- `description`
+- `experiment_run_id`
 - `limit`
 - `note`
 
@@ -283,6 +295,7 @@ Notes:
 - detailed evaluator/improvement/regression views are derived from existing scores at read time
 - regression summaries are also derived on demand and do not persist a second analysis layer
 - regression explanations add trace-level failure context rather than a new persisted diagnosis entity
+- regression datasets let an agent turn persisted experiment regressions into a reusable follow-up eval set
 
 ## Design Notes
 

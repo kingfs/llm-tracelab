@@ -192,6 +192,7 @@ go run ./cmd/server mcp -c config/config.yaml
 - `replay_session`
 - `create_dataset_from_traces`
 - `create_dataset_from_session`
+- `create_dataset_from_experiment_regressions`
 - `append_dataset_examples`
 - `list_datasets`
 - `get_dataset`
