@@ -69,6 +69,13 @@ Stable API surface:
 - `GET /api/traces/:traceID`
 - `GET /api/sessions`
 - `GET /api/sessions/:sessionID`
+- MCP `list_traces`
+- MCP `get_trace`
+- MCP `list_sessions`
+- MCP `get_session`
+- MCP `list_upstreams`
+- MCP `get_upstream`
+- MCP `query_failures`
 
 Stable UI perspectives:
 
@@ -97,6 +104,21 @@ Stable focus targets:
 - `timeline_error`
 
 Changes to these surfaces should be treated as product-facing changes and should be documented explicitly.
+
+## MCP Baseline
+
+Current MCP baseline is intentionally narrow:
+
+- transport is `stdio`
+- implementation uses the official Go MCP SDK
+- tool surface is read-only
+- MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
+
+Do not:
+
+- make MCP the source of truth for replay or storage
+- add broad write-capable mutation tools without an explicit milestone
+- fork monitor semantics into a divergent MCP-only query model unless there is a strong reason
 
 ## SQLite Upgrade Constraints
 

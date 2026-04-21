@@ -14,6 +14,7 @@ This is not a roadmap. It describes the current implemented state.
 Related documents:
 
 - [Monitor Guide](./MONITOR_GUIDE.md) for user-facing monitor workflows
+- [MCP Guide](./MCP_GUIDE.md) for agent-facing MCP workflows
 - [Maintainer Baseline](./MAINTAINER_BASELINE.md) for implementation constraints and upgrade expectations
 
 ## Product Scope
@@ -27,6 +28,7 @@ Its current baseline workflow is:
 3. index request metadata into SQLite for fast monitor queries
 4. replay the cassette in tests without upstream network access
 5. inspect traces in the monitor from request-centric, session-centric, and upstream-centric perspectives
+6. expose read-only trace/session/upstream inspection to AI agents through MCP over `stdio`
 
 ## Current Provider Coverage
 
@@ -217,6 +219,33 @@ The trace detail page links directly from an individual request to the upstream 
 ### Cross-View Navigation
 
 The current baseline includes deep links from session pages into trace detail.
+
+## MCP Baseline
+
+Read-only MCP support is now an implemented feature.
+
+Current MCP transport baseline:
+
+- `stdio`
+
+Current implementation baseline:
+
+- official `github.com/modelcontextprotocol/go-sdk`
+
+Current MCP tool surface includes:
+
+- `list_traces`
+- `get_trace`
+- `list_sessions`
+- `get_session`
+- `list_upstreams`
+- `get_upstream`
+- `query_failures`
+
+Important constraint:
+
+- the MCP server currently reuses the existing monitor/store query behavior
+- it does not introduce a second source of truth or a separate query engine
 
 Supported query parameters now include:
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -10,12 +11,14 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/mcpserver"
 	"github.com/kingfs/llm-tracelab/internal/migrate"
 	"github.com/kingfs/llm-tracelab/internal/monitor"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func main() {
@@ -39,6 +42,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "migrate":
 		return runMigrate(args[1:])
+	case "mcp":
+		return runMCP(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", args[0])
 		printUsage(os.Stderr)
@@ -164,10 +169,41 @@ func runMigrate(args []string) int {
 	return 0
 }
 
+func runMCP(args []string) int {
+	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+	configPath := fs.String("c", "config.yaml", "Path to configuration file")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", *configPath, "error", err)
+		return 1
+	}
+
+	traceStore, err := store.New(cfg.Debug.OutputDir)
+	if err != nil {
+		slog.Error("Failed to initialize trace store", "error", err)
+		return 1
+	}
+	defer traceStore.Close()
+
+	slog.Info("Starting MCP server", "transport", "stdio", "output_dir", cfg.Debug.OutputDir)
+	server := mcpserver.New(traceStore, mcpserver.Options{})
+	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
+		slog.Error("MCP server failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  llm-tracelab serve -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab migrate -c config.yaml [-rewrite-v2=true] [-rebuild-index=true]")
+	fmt.Fprintln(w, "  llm-tracelab mcp -c config.yaml")
 }
 
 func logResolvedTargets(rtr *router.Router) {
