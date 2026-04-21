@@ -221,6 +221,23 @@ type ScoreRecord struct {
 	CreatedAt    time.Time
 }
 
+type ExperimentRunRecord struct {
+	ID                  string
+	Name                string
+	Description         string
+	BaselineEvalRunID   string
+	CandidateEvalRunID  string
+	CreatedAt           time.Time
+	BaselineScoreCount  int
+	CandidateScoreCount int
+	BaselinePassRate    float64
+	CandidatePassRate   float64
+	PassRateDelta       float64
+	MatchedScoreCount   int
+	ImprovementCount    int
+	RegressionCount     int
+}
+
 type ScoreFilter struct {
 	TraceID   string
 	SessionID string
@@ -1023,6 +1040,23 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_scores_session_id ON scores(session_id, created_at DESC) WHERE session_id <> '';`,
 		`CREATE INDEX IF NOT EXISTS idx_scores_dataset_id ON scores(dataset_id, created_at DESC) WHERE dataset_id <> '';`,
 		`CREATE INDEX IF NOT EXISTS idx_scores_eval_run_id ON scores(eval_run_id, created_at DESC) WHERE eval_run_id <> '';`,
+		`CREATE TABLE IF NOT EXISTS experiment_runs (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			baseline_eval_run_id TEXT NOT NULL,
+			candidate_eval_run_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			baseline_score_count INTEGER NOT NULL DEFAULT 0,
+			candidate_score_count INTEGER NOT NULL DEFAULT 0,
+			baseline_pass_rate REAL NOT NULL DEFAULT 0,
+			candidate_pass_rate REAL NOT NULL DEFAULT 0,
+			pass_rate_delta REAL NOT NULL DEFAULT 0,
+			matched_score_count INTEGER NOT NULL DEFAULT 0,
+			improvement_count INTEGER NOT NULL DEFAULT 0,
+			regression_count INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_experiment_runs_created_at ON experiment_runs(created_at DESC, id DESC);`,
 	}
 
 	for _, stmt := range stmts {
@@ -1594,6 +1628,81 @@ func (s *Store) ListScores(filter ScoreFilter, limit int) ([]ScoreRecord, error)
 	var out []ScoreRecord
 	for rows.Next() {
 		record, err := scanScoreRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateExperimentRun(record ExperimentRunRecord) (ExperimentRunRecord, error) {
+	if strings.TrimSpace(record.BaselineEvalRunID) == "" {
+		return ExperimentRunRecord{}, fmt.Errorf("baseline eval run id is required")
+	}
+	if strings.TrimSpace(record.CandidateEvalRunID) == "" {
+		return ExperimentRunRecord{}, fmt.Errorf("candidate eval run id is required")
+	}
+	record.ID = uuid.NewString()
+	record.CreatedAt = time.Now().UTC()
+	_, err := s.db.Exec(`
+		INSERT INTO experiment_runs (
+			id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
+			baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate,
+			pass_rate_delta, matched_score_count, improvement_count, regression_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		record.ID,
+		strings.TrimSpace(record.Name),
+		strings.TrimSpace(record.Description),
+		strings.TrimSpace(record.BaselineEvalRunID),
+		strings.TrimSpace(record.CandidateEvalRunID),
+		record.CreatedAt.Format(timeLayout),
+		record.BaselineScoreCount,
+		record.CandidateScoreCount,
+		record.BaselinePassRate,
+		record.CandidatePassRate,
+		record.PassRateDelta,
+		record.MatchedScoreCount,
+		record.ImprovementCount,
+		record.RegressionCount,
+	)
+	if err != nil {
+		return ExperimentRunRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *Store) GetExperimentRun(experimentRunID string) (ExperimentRunRecord, error) {
+	row := s.db.QueryRow(`
+		SELECT id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
+		       baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate,
+		       pass_rate_delta, matched_score_count, improvement_count, regression_count
+		FROM experiment_runs
+		WHERE id = ?
+	`, experimentRunID)
+	return scanExperimentRunRecord(row)
+}
+
+func (s *Store) ListExperimentRuns(limit int) ([]ExperimentRunRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`
+		SELECT id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
+		       baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate,
+		       pass_rate_delta, matched_score_count, improvement_count, regression_count
+		FROM experiment_runs
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExperimentRunRecord
+	for rows.Next() {
+		record, err := scanExperimentRunRecord(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -2437,6 +2546,39 @@ func scanScoreRecord(scanner interface {
 	record.CreatedAt, err = timeParse(createdAt)
 	if err != nil {
 		return ScoreRecord{}, err
+	}
+	return record, nil
+}
+
+func scanExperimentRunRecord(scanner interface {
+	Scan(dest ...any) error
+}) (ExperimentRunRecord, error) {
+	var (
+		record    ExperimentRunRecord
+		createdAt string
+		err       error
+	)
+	if err := scanner.Scan(
+		&record.ID,
+		&record.Name,
+		&record.Description,
+		&record.BaselineEvalRunID,
+		&record.CandidateEvalRunID,
+		&createdAt,
+		&record.BaselineScoreCount,
+		&record.CandidateScoreCount,
+		&record.BaselinePassRate,
+		&record.CandidatePassRate,
+		&record.PassRateDelta,
+		&record.MatchedScoreCount,
+		&record.ImprovementCount,
+		&record.RegressionCount,
+	); err != nil {
+		return ExperimentRunRecord{}, err
+	}
+	record.CreatedAt, err = timeParse(createdAt)
+	if err != nil {
+		return ExperimentRunRecord{}, err
 	}
 	return record, nil
 }

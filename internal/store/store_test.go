@@ -459,6 +459,61 @@ func TestEvalRunAndScoresRoundTrip(t *testing.T) {
 	}
 }
 
+func TestExperimentRunRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	baselineRun, err := st.CreateEvalRun("", "trace_list", "", "baseline_v1", 2)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(baseline) error = %v", err)
+	}
+	candidateRun, err := st.CreateEvalRun("", "trace_list", "", "baseline_v1", 2)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(candidate) error = %v", err)
+	}
+
+	experiment, err := st.CreateExperimentRun(ExperimentRunRecord{
+		Name:                "baseline-vs-candidate",
+		Description:         "first experiment",
+		BaselineEvalRunID:   baselineRun.ID,
+		CandidateEvalRunID:  candidateRun.ID,
+		BaselineScoreCount:  6,
+		CandidateScoreCount: 6,
+		BaselinePassRate:    50,
+		CandidatePassRate:   66.67,
+		PassRateDelta:       16.67,
+		MatchedScoreCount:   6,
+		ImprovementCount:    2,
+		RegressionCount:     1,
+	})
+	if err != nil {
+		t.Fatalf("CreateExperimentRun() error = %v", err)
+	}
+
+	got, err := st.GetExperimentRun(experiment.ID)
+	if err != nil {
+		t.Fatalf("GetExperimentRun() error = %v", err)
+	}
+	if got.BaselineEvalRunID != baselineRun.ID || got.CandidateEvalRunID != candidateRun.ID {
+		t.Fatalf("GetExperimentRun() = %#v, want eval runs %q and %q", got, baselineRun.ID, candidateRun.ID)
+	}
+	if got.ImprovementCount != 2 || got.RegressionCount != 1 || got.MatchedScoreCount != 6 {
+		t.Fatalf("GetExperimentRun() = %#v, want counts 2/1/6", got)
+	}
+
+	runs, err := st.ListExperimentRuns(10)
+	if err != nil {
+		t.Fatalf("ListExperimentRuns() error = %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != experiment.ID {
+		t.Fatalf("ListExperimentRuns() = %#v, want experiment %q", runs, experiment.ID)
+	}
+}
+
 func TestListSessionPageAggregatesBySession(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

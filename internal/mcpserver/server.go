@@ -127,16 +127,32 @@ type getEvalRunInput struct {
 }
 
 type listScoresInput struct {
-	TraceID   string `json:"trace_id,omitempty" jsonschema:"optional trace filter"`
-	SessionID string `json:"session_id,omitempty" jsonschema:"optional session filter"`
-	DatasetID string `json:"dataset_id,omitempty" jsonschema:"optional dataset filter"`
-	EvalRunID string `json:"eval_run_id,omitempty" jsonschema:"optional eval run filter"`
-	Limit     int    `json:"limit,omitempty" jsonschema:"maximum scores to return, default 200"`
+	TraceID         string `json:"trace_id,omitempty" jsonschema:"optional trace filter"`
+	SessionID       string `json:"session_id,omitempty" jsonschema:"optional session filter"`
+	DatasetID       string `json:"dataset_id,omitempty" jsonschema:"optional dataset filter"`
+	EvalRunID       string `json:"eval_run_id,omitempty" jsonschema:"optional eval run filter"`
+	ExperimentRunID string `json:"experiment_run_id,omitempty" jsonschema:"optional experiment run filter"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"maximum scores to return, default 200"`
 }
 
 type compareEvalRunsInput struct {
 	BaselineEvalRunID  string `json:"baseline_eval_run_id" jsonschema:"baseline evaluation run identifier"`
 	CandidateEvalRunID string `json:"candidate_eval_run_id" jsonschema:"candidate evaluation run identifier"`
+}
+
+type createExperimentFromEvalRunsInput struct {
+	Name               string `json:"name,omitempty" jsonschema:"optional experiment name"`
+	Description        string `json:"description,omitempty" jsonschema:"optional experiment description"`
+	BaselineEvalRunID  string `json:"baseline_eval_run_id" jsonschema:"baseline evaluation run identifier"`
+	CandidateEvalRunID string `json:"candidate_eval_run_id" jsonschema:"candidate evaluation run identifier"`
+}
+
+type listExperimentRunsInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"maximum runs to return, default 20"`
+}
+
+type getExperimentRunInput struct {
+	ExperimentRunID string `json:"experiment_run_id" jsonschema:"experiment run identifier"`
 }
 
 type traceListOutput struct {
@@ -254,6 +270,7 @@ type scoreView struct {
 	SessionID    string    `json:"session_id,omitempty"`
 	DatasetID    string    `json:"dataset_id,omitempty"`
 	EvalRunID    string    `json:"eval_run_id,omitempty"`
+	RunRole      string    `json:"run_role,omitempty"`
 	EvaluatorKey string    `json:"evaluator_key"`
 	Value        float64   `json:"value"`
 	Status       string    `json:"status"`
@@ -339,6 +356,39 @@ type compareEvalRunsOutput struct {
 	Improvements     []scoreDeltaView         `json:"improvements"`
 	Regressions      []scoreDeltaView         `json:"regressions"`
 	RefreshedAt      time.Time                `json:"refreshed_at"`
+}
+
+type experimentRunView struct {
+	ID                  string    `json:"id"`
+	Name                string    `json:"name,omitempty"`
+	Description         string    `json:"description,omitempty"`
+	BaselineEvalRunID   string    `json:"baseline_eval_run_id"`
+	CandidateEvalRunID  string    `json:"candidate_eval_run_id"`
+	CreatedAt           time.Time `json:"created_at"`
+	BaselineScoreCount  int       `json:"baseline_score_count"`
+	CandidateScoreCount int       `json:"candidate_score_count"`
+	BaselinePassRate    float64   `json:"baseline_pass_rate"`
+	CandidatePassRate   float64   `json:"candidate_pass_rate"`
+	PassRateDelta       float64   `json:"pass_rate_delta"`
+	MatchedScoreCount   int       `json:"matched_score_count"`
+	ImprovementCount    int       `json:"improvement_count"`
+	RegressionCount     int       `json:"regression_count"`
+}
+
+type createExperimentOutput struct {
+	Experiment experimentRunView     `json:"experiment"`
+	Comparison compareEvalRunsOutput `json:"comparison"`
+}
+
+type listExperimentRunsOutput struct {
+	Items       []experimentRunView `json:"items"`
+	RefreshedAt time.Time           `json:"refreshed_at"`
+}
+
+type getExperimentRunOutput struct {
+	Experiment  experimentRunView     `json:"experiment"`
+	Comparison  compareEvalRunsOutput `json:"comparison"`
+	RefreshedAt time.Time             `json:"refreshed_at"`
 }
 
 type evaluatorAggregate struct {
@@ -452,6 +502,18 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "compare_eval_runs",
 		Description: "Compare two evaluation runs and return aggregate pass-rate deltas plus per-trace improvements and regressions.",
 	}, api.compareEvalRuns)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_experiment_from_eval_runs",
+		Description: "Persist a local experiment run that links one baseline eval run and one candidate eval run.",
+	}, api.createExperimentFromEvalRuns)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_experiment_runs",
+		Description: "List recent persisted experiment runs.",
+	}, api.listExperimentRuns)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_experiment_run",
+		Description: "Get one persisted experiment run plus its derived comparison detail.",
+	}, api.getExperimentRun)
 
 	return server
 }
@@ -870,6 +932,47 @@ func (a *serverAPI) listScores(ctx context.Context, req *mcp.CallToolRequest, in
 	if err := a.requireStoreSync(); err != nil {
 		return nil, nil, err
 	}
+	if strings.TrimSpace(in.ExperimentRunID) != "" && strings.TrimSpace(in.EvalRunID) != "" {
+		return nil, nil, fmt.Errorf("experiment_run_id and eval_run_id cannot be combined")
+	}
+	out := &listScoresOutput{RefreshedAt: time.Now().UTC()}
+	if experimentRunID := strings.TrimSpace(in.ExperimentRunID); experimentRunID != "" {
+		experiment, err := a.store.GetExperimentRun(experimentRunID)
+		if err != nil {
+			return nil, nil, err
+		}
+		baselineScores, err := a.store.ListScores(store.ScoreFilter{
+			TraceID:   in.TraceID,
+			SessionID: in.SessionID,
+			DatasetID: in.DatasetID,
+			EvalRunID: experiment.BaselineEvalRunID,
+		}, in.Limit)
+		if err != nil {
+			return nil, nil, err
+		}
+		candidateScores, err := a.store.ListScores(store.ScoreFilter{
+			TraceID:   in.TraceID,
+			SessionID: in.SessionID,
+			DatasetID: in.DatasetID,
+			EvalRunID: experiment.CandidateEvalRunID,
+		}, in.Limit)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, score := range baselineScores {
+			out.Items = append(out.Items, toScoreViewWithRole(score, "baseline"))
+		}
+		for _, score := range candidateScores {
+			out.Items = append(out.Items, toScoreViewWithRole(score, "candidate"))
+		}
+		sort.Slice(out.Items, func(i, j int) bool {
+			if !out.Items[i].CreatedAt.Equal(out.Items[j].CreatedAt) {
+				return out.Items[i].CreatedAt.After(out.Items[j].CreatedAt)
+			}
+			return out.Items[i].ID > out.Items[j].ID
+		})
+		return nil, out, nil
+	}
 	scores, err := a.store.ListScores(store.ScoreFilter{
 		TraceID:   in.TraceID,
 		SessionID: in.SessionID,
@@ -879,7 +982,6 @@ func (a *serverAPI) listScores(ctx context.Context, req *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, nil, err
 	}
-	out := &listScoresOutput{RefreshedAt: time.Now().UTC()}
 	for _, score := range scores {
 		out.Items = append(out.Items, toScoreView(score))
 	}
@@ -898,22 +1000,106 @@ func (a *serverAPI) compareEvalRuns(ctx context.Context, req *mcp.CallToolReques
 	if err := a.requireStoreSync(); err != nil {
 		return nil, nil, err
 	}
-
-	baselineRun, err := a.store.GetEvalRun(baselineEvalRunID)
+	out, err := a.compareEvalRunIDs(baselineEvalRunID, candidateEvalRunID)
 	if err != nil {
 		return nil, nil, err
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) createExperimentFromEvalRuns(ctx context.Context, req *mcp.CallToolRequest, in *createExperimentFromEvalRunsInput) (*mcp.CallToolResult, *createExperimentOutput, error) {
+	baselineEvalRunID := strings.TrimSpace(in.BaselineEvalRunID)
+	candidateEvalRunID := strings.TrimSpace(in.CandidateEvalRunID)
+	if baselineEvalRunID == "" {
+		return nil, nil, fmt.Errorf("baseline_eval_run_id is required")
+	}
+	if candidateEvalRunID == "" {
+		return nil, nil, fmt.Errorf("candidate_eval_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	comparison, err := a.compareEvalRunIDs(baselineEvalRunID, candidateEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	experiment, err := a.store.CreateExperimentRun(store.ExperimentRunRecord{
+		Name:                strings.TrimSpace(in.Name),
+		Description:         strings.TrimSpace(in.Description),
+		BaselineEvalRunID:   baselineEvalRunID,
+		CandidateEvalRunID:  candidateEvalRunID,
+		BaselineScoreCount:  comparison.BaselineSummary.ScoreCount,
+		CandidateScoreCount: comparison.CandidateSummary.ScoreCount,
+		BaselinePassRate:    comparison.BaselineSummary.PassRate,
+		CandidatePassRate:   comparison.CandidateSummary.PassRate,
+		PassRateDelta:       comparison.PassRateDelta,
+		MatchedScoreCount:   comparison.BaselineSummary.MatchedCount,
+		ImprovementCount:    len(comparison.Improvements),
+		RegressionCount:     len(comparison.Regressions),
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &createExperimentOutput{
+		Experiment: toExperimentRunView(experiment),
+		Comparison: *comparison,
+	}, nil
+}
+
+func (a *serverAPI) listExperimentRuns(ctx context.Context, req *mcp.CallToolRequest, in *listExperimentRunsInput) (*mcp.CallToolResult, *listExperimentRunsOutput, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	records, err := a.store.ListExperimentRuns(in.Limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &listExperimentRunsOutput{RefreshedAt: time.Now().UTC()}
+	for _, record := range records {
+		out.Items = append(out.Items, toExperimentRunView(record))
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) getExperimentRun(ctx context.Context, req *mcp.CallToolRequest, in *getExperimentRunInput) (*mcp.CallToolResult, *getExperimentRunOutput, error) {
+	experimentRunID := strings.TrimSpace(in.ExperimentRunID)
+	if experimentRunID == "" {
+		return nil, nil, fmt.Errorf("experiment_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	record, err := a.store.GetExperimentRun(experimentRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	comparison, err := a.compareEvalRunIDs(record.BaselineEvalRunID, record.CandidateEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, &getExperimentRunOutput{
+		Experiment:  toExperimentRunView(record),
+		Comparison:  *comparison,
+		RefreshedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (a *serverAPI) compareEvalRunIDs(baselineEvalRunID string, candidateEvalRunID string) (*compareEvalRunsOutput, error) {
+	baselineRun, err := a.store.GetEvalRun(baselineEvalRunID)
+	if err != nil {
+		return nil, err
 	}
 	candidateRun, err := a.store.GetEvalRun(candidateEvalRunID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	baselineScores, err := a.store.ListScores(store.ScoreFilter{EvalRunID: baselineEvalRunID}, 5000)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	candidateScores, err := a.store.ListScores(store.ScoreFilter{EvalRunID: candidateEvalRunID}, 5000)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	out := &compareEvalRunsOutput{
@@ -932,7 +1118,7 @@ func (a *serverAPI) compareEvalRuns(ctx context.Context, req *mcp.CallToolReques
 	out.BaselineSummary.MatchedCount = matchedScoreCount(evaluators)
 	out.CandidateSummary.MatchedCount = out.BaselineSummary.MatchedCount
 
-	return nil, out, nil
+	return out, nil
 }
 
 func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, out interface{}) error {
@@ -1128,18 +1314,42 @@ func toEvalRunView(record store.EvalRunRecord) evalRunView {
 }
 
 func toScoreView(record store.ScoreRecord) scoreView {
+	return toScoreViewWithRole(record, "")
+}
+
+func toScoreViewWithRole(record store.ScoreRecord, runRole string) scoreView {
 	return scoreView{
 		ID:           record.ID,
 		TraceID:      record.TraceID,
 		SessionID:    record.SessionID,
 		DatasetID:    record.DatasetID,
 		EvalRunID:    record.EvalRunID,
+		RunRole:      strings.TrimSpace(runRole),
 		EvaluatorKey: record.EvaluatorKey,
 		Value:        record.Value,
 		Status:       record.Status,
 		Label:        record.Label,
 		Explanation:  record.Explanation,
 		CreatedAt:    record.CreatedAt,
+	}
+}
+
+func toExperimentRunView(record store.ExperimentRunRecord) experimentRunView {
+	return experimentRunView{
+		ID:                  record.ID,
+		Name:                record.Name,
+		Description:         record.Description,
+		BaselineEvalRunID:   record.BaselineEvalRunID,
+		CandidateEvalRunID:  record.CandidateEvalRunID,
+		CreatedAt:           record.CreatedAt,
+		BaselineScoreCount:  record.BaselineScoreCount,
+		CandidateScoreCount: record.CandidateScoreCount,
+		BaselinePassRate:    record.BaselinePassRate,
+		CandidatePassRate:   record.CandidatePassRate,
+		PassRateDelta:       record.PassRateDelta,
+		MatchedScoreCount:   record.MatchedScoreCount,
+		ImprovementCount:    record.ImprovementCount,
+		RegressionCount:     record.RegressionCount,
 	}
 }
 

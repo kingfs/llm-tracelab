@@ -89,6 +89,9 @@ Stable API surface:
 - MCP `get_eval_run`
 - MCP `list_scores`
 - MCP `compare_eval_runs`
+- MCP `create_experiment_from_eval_runs`
+- MCP `list_experiment_runs`
+- MCP `get_experiment_run`
 
 Stable UI perspectives:
 
@@ -126,7 +129,8 @@ Current MCP baseline is intentionally narrow:
 - implementation uses the official Go MCP SDK
 - tool surface is read-only
 - MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
-- eval-run comparison is computed from stored scores and is not yet a persisted experiment workflow
+- eval-run comparison is computed from stored scores
+- persisted experiments store linkage and aggregate summary, not duplicated score payloads
 
 Do not:
 

@@ -163,8 +163,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 20 {
-		t.Fatalf("len(tools.Tools) = %d, want 20", len(tools.Tools))
+	if len(tools.Tools) != 23 {
+		t.Fatalf("len(tools.Tools) = %d, want 23", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -427,6 +427,68 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := len(comparePayload["regressions"].([]any)); got != 1 {
 		t.Fatalf("len(compare_eval_runs.regressions) = %d, want 1", got)
+	}
+
+	createdExperiment, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "create_experiment_from_eval_runs",
+		Arguments: map[string]any{
+			"name":                  "baseline-vs-candidate",
+			"description":           "saved comparison",
+			"baseline_eval_run_id":  baselineRun.ID,
+			"candidate_eval_run_id": candidateRun.ID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(create_experiment_from_eval_runs) error = %v", err)
+	}
+	experimentPayload := createdExperiment.StructuredContent.(map[string]any)
+	experiment := experimentPayload["experiment"].(map[string]any)
+	experimentID := experiment["id"].(string)
+	if got := int(experiment["improvement_count"].(float64)); got != 1 {
+		t.Fatalf("create_experiment_from_eval_runs.improvement_count = %d, want 1", got)
+	}
+
+	listedExperiments, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_experiment_runs",
+		Arguments: map[string]any{"limit": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_experiment_runs) error = %v", err)
+	}
+	if got := len(listedExperiments.StructuredContent.(map[string]any)["items"].([]any)); got != 1 {
+		t.Fatalf("len(list_experiment_runs.items) = %d, want 1", got)
+	}
+
+	gotExperiment, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_experiment_run",
+		Arguments: map[string]any{"experiment_run_id": experimentID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(get_experiment_run) error = %v", err)
+	}
+	gotExperimentPayload := gotExperiment.StructuredContent.(map[string]any)
+	gotComparison := gotExperimentPayload["comparison"].(map[string]any)
+	if got := len(gotComparison["improvements"].([]any)); got != 1 {
+		t.Fatalf("len(get_experiment_run.comparison.improvements) = %d, want 1", got)
+	}
+
+	experimentScores, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_scores",
+		Arguments: map[string]any{"experiment_run_id": experimentID, "limit": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_scores by experiment) error = %v", err)
+	}
+	scoreItems := experimentScores.StructuredContent.(map[string]any)["items"].([]any)
+	if len(scoreItems) != 4 {
+		t.Fatalf("len(list_scores by experiment.items) = %d, want 4", len(scoreItems))
+	}
+	runRoles := map[string]int{}
+	for _, item := range scoreItems {
+		runRoles[item.(map[string]any)["run_role"].(string)]++
+	}
+	if runRoles["baseline"] != 2 || runRoles["candidate"] != 2 {
+		t.Fatalf("list_scores by experiment run roles = %#v, want 2 baseline and 2 candidate", runRoles)
 	}
 }
 

@@ -254,13 +254,16 @@ Current MCP tool surface includes:
 - `get_eval_run`
 - `list_scores`
 - `compare_eval_runs`
+- `create_experiment_from_eval_runs`
+- `list_experiment_runs`
+- `get_experiment_run`
 
 Important constraint:
 
 - the MCP server currently reuses the existing monitor/store query behavior
 - it does not introduce a second source of truth or a separate query engine
-- eval comparison is currently derived on demand from existing `eval_runs` and `scores`
-- there is no persisted `experiment_runs` layer yet
+- eval comparison is still derived from existing `eval_runs` and `scores`
+- persisted `experiment_runs` store linkage and aggregate summary only
 
 Supported query parameters now include:
 

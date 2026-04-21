@@ -204,6 +204,7 @@ Inputs:
 - `session_id`
 - `dataset_id`
 - `eval_run_id`
+- `experiment_run_id`
 - `limit`
 
 ### `compare_eval_runs`
@@ -219,7 +220,38 @@ Notes:
 
 - comparison is derived from already-recorded `scores`
 - matching is keyed by `trace_id + evaluator_key`
-- this tool does not persist a new experiment entity yet
+
+### `create_experiment_from_eval_runs`
+
+Persist one experiment run that links a baseline eval run and a candidate eval run.
+
+Inputs:
+
+- `name`
+- `description`
+- `baseline_eval_run_id`
+- `candidate_eval_run_id`
+
+### `list_experiment_runs`
+
+List recent persisted experiment runs.
+
+Input:
+
+- `limit`
+
+### `get_experiment_run`
+
+Return one persisted experiment run plus its derived comparison detail.
+
+Input:
+
+- `experiment_run_id`
+
+Notes:
+
+- the persisted experiment stores only linkage and aggregate summary fields
+- detailed evaluator/improvement/regression views are derived from existing scores at read time
 
 ## Design Notes
 
@@ -237,8 +269,8 @@ This keeps the first MCP slice:
 The next MCP-focused step should be:
 
 1. keep comparison local and deterministic
-2. add a persisted experiment layer only after the compare shape proves useful
-3. add score and eval layers only after dataset workflows prove useful
+2. keep experiment persistence lightweight and additive
+3. add richer evaluators only after current score signals prove actionable
 
 ## Current Evaluator Set
 
