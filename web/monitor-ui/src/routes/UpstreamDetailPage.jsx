@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { StatCard } from "../components/common/Display";
+import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge } from "../components/common/Badges";
+import { BreakdownList } from "../components/monitor/BreakdownList";
+import { RequestList } from "../components/monitor/RequestList";
+import { RoutingFailureTimeline } from "../components/monitor/RoutingFailureTimeline";
 import { useJSON } from "../hooks/useJSON";
 import {
   buildRoutingLink,
@@ -20,16 +25,7 @@ import {
   setOrDeleteParam,
 } from "../lib/monitor";
 
-export function UpstreamDetailPage({
-  BreakdownList,
-  DetailMetaPill,
-  HomeIcon,
-  InlineTag,
-  RequestList,
-  RoutingFailureTimeline,
-  StatCard,
-  TokenBadge,
-}) {
+export function UpstreamDetailPage() {
   const { upstreamID = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeUpstreamWindow(searchParams.get("window"));

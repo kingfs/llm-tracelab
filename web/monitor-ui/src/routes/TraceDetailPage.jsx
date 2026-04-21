@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { CollapsibleCard, CodeBlock, MessageContent } from "../components/common/Display";
+import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { useJSON } from "../hooks/useJSON";
 import {
   buildRoutingDecisionSummary,
@@ -28,17 +30,7 @@ import {
   isSameToolName,
 } from "../lib/traceTools";
 
-export function TraceDetailPage({
-  CollapsibleCard,
-  CodeBlock,
-  DetailMetaPill,
-  DownloadIcon,
-  HomeIcon,
-  InlineTag,
-  MessageContent,
-  StackIcon,
-  TokenBadge,
-}) {
+export function TraceDetailPage() {
   const { traceID = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(() => normalizeTraceTab(searchParams.get("tab")));
