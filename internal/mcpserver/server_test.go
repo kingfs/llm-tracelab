@@ -163,8 +163,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 26 {
-		t.Fatalf("len(tools.Tools) = %d, want 26", len(tools.Tools))
+	if len(tools.Tools) != 27 {
+		t.Fatalf("len(tools.Tools) = %d, want 27", len(tools.Tools))
 	}
 
 	profiles, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -535,6 +535,21 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	topTrace := regressionPayload["top_traces"].([]any)[0].(map[string]any)
 	if got := int(topTrace["regressions"].(float64)); got != 1 {
 		t.Fatalf("summarize_experiment_regressions.top_traces[0].regressions = %d, want 1", got)
+	}
+
+	regressionExplain, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "explain_experiment_regressions",
+		Arguments: map[string]any{"experiment_run_id": experimentID, "limit": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(explain_experiment_regressions) error = %v", err)
+	}
+	explainPayload := regressionExplain.StructuredContent.(map[string]any)
+	if got := len(explainPayload["by_reason"].([]any)); got != 1 {
+		t.Fatalf("len(explain_experiment_regressions.by_reason) = %d, want 1", got)
+	}
+	if got := len(explainPayload["items"].([]any)); got != 1 {
+		t.Fatalf("len(explain_experiment_regressions.items) = %d, want 1", got)
 	}
 
 	v1EvalRunRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{

@@ -173,6 +173,11 @@ type summarizeExperimentRegressionsInput struct {
 	Limit           int    `json:"limit,omitempty" jsonschema:"maximum grouped items per section, default 10"`
 }
 
+type explainExperimentRegressionsInput struct {
+	ExperimentRunID string `json:"experiment_run_id" jsonschema:"experiment run identifier"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"maximum grouped items per section, default 10"`
+}
+
 type traceListOutput struct {
 	Items       []map[string]any `json:"items"`
 	Stats       map[string]any   `json:"stats"`
@@ -487,6 +492,31 @@ type summarizeExperimentRegressionsOutput struct {
 	RefreshedAt time.Time               `json:"refreshed_at"`
 }
 
+type regressionExplanationItem struct {
+	TraceID            string    `json:"trace_id"`
+	SessionID          string    `json:"session_id,omitempty"`
+	Model              string    `json:"model"`
+	Provider           string    `json:"provider"`
+	Endpoint           string    `json:"endpoint"`
+	RecordedAt         time.Time `json:"recorded_at"`
+	Reason             string    `json:"reason"`
+	StatusCode         int       `json:"status_code"`
+	Error              string    `json:"error,omitempty"`
+	SelectedUpstreamID string    `json:"selected_upstream_id,omitempty"`
+	EvaluatorKeys      []string  `json:"evaluator_keys"`
+}
+
+type explainExperimentRegressionsOutput struct {
+	Experiment  experimentRunView           `json:"experiment"`
+	Comparison  compareEvalRunsOutput       `json:"comparison"`
+	ByReason    []regressionSummaryItem     `json:"by_reason"`
+	ByErrorText []regressionSummaryItem     `json:"by_error_text"`
+	ByUpstream  []regressionSummaryItem     `json:"by_upstream"`
+	BySession   []regressionSummaryItem     `json:"by_session"`
+	Items       []regressionExplanationItem `json:"items"`
+	RefreshedAt time.Time                   `json:"refreshed_at"`
+}
+
 type evaluatorAggregate struct {
 	EvaluatorKey     string
 	BaselineTotal    int
@@ -622,6 +652,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "summarize_experiment_regressions",
 		Description: "Summarize persisted experiment regressions by evaluator, model, provider, endpoint, session, and top affected traces.",
 	}, api.summarizeExperimentRegressions)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "explain_experiment_regressions",
+		Description: "Explain persisted experiment regressions with failure reasons, error clusters, upstreams, sessions, and affected traces.",
+	}, api.explainExperimentRegressions)
 
 	return server
 }
@@ -1375,6 +1409,88 @@ func (a *serverAPI) summarizeExperimentRegressions(ctx context.Context, req *mcp
 	})
 	if len(out.TopTraces) > limit {
 		out.TopTraces = out.TopTraces[:limit]
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) explainExperimentRegressions(ctx context.Context, req *mcp.CallToolRequest, in *explainExperimentRegressionsInput) (*mcp.CallToolResult, *explainExperimentRegressionsOutput, error) {
+	experimentRunID := strings.TrimSpace(in.ExperimentRunID)
+	if experimentRunID == "" {
+		return nil, nil, fmt.Errorf("experiment_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	record, err := a.store.GetExperimentRun(experimentRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	comparison, err := a.compareEvalRunIDs(record.BaselineEvalRunID, record.CandidateEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	traceEvaluators := map[string]map[string]struct{}{}
+	byReason := map[string]int{}
+	byErrorText := map[string]int{}
+	byUpstream := map[string]int{}
+	bySession := map[string]int{}
+
+	for _, item := range comparison.Regressions {
+		if _, ok := traceEvaluators[item.TraceID]; !ok {
+			traceEvaluators[item.TraceID] = map[string]struct{}{}
+		}
+		traceEvaluators[item.TraceID][item.EvaluatorKey] = struct{}{}
+	}
+
+	out := &explainExperimentRegressionsOutput{
+		Experiment:  toExperimentRunView(record),
+		Comparison:  *comparison,
+		RefreshedAt: time.Now().UTC(),
+	}
+	for traceID, evaluatorSet := range traceEvaluators {
+		entry, err := a.lookupTrace(traceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		reason := classifyFailureReason(entry.Header.Meta.StatusCode, entry.Header.Meta.Error)
+		incrementCount(byReason, reason)
+		incrementCount(byErrorText, entry.Header.Meta.Error)
+		incrementCount(byUpstream, entry.Header.Meta.SelectedUpstreamID)
+		incrementCount(bySession, entry.SessionID)
+		out.Items = append(out.Items, regressionExplanationItem{
+			TraceID:            entry.ID,
+			SessionID:          entry.SessionID,
+			Model:              entry.Header.Meta.Model,
+			Provider:           entry.Header.Meta.Provider,
+			Endpoint:           firstNonEmpty(entry.Header.Meta.Endpoint, entry.Header.Meta.URL),
+			RecordedAt:         entry.Header.Meta.Time,
+			Reason:             reason,
+			StatusCode:         entry.Header.Meta.StatusCode,
+			Error:              entry.Header.Meta.Error,
+			SelectedUpstreamID: entry.Header.Meta.SelectedUpstreamID,
+			EvaluatorKeys:      sortedKeys(evaluatorSet),
+		})
+	}
+	out.ByReason = topSummaryItems(byReason, limit)
+	out.ByErrorText = topSummaryItems(byErrorText, limit)
+	out.ByUpstream = topSummaryItems(byUpstream, limit)
+	out.BySession = topSummaryItems(bySession, limit)
+	sort.Slice(out.Items, func(i, j int) bool {
+		if out.Items[i].Reason != out.Items[j].Reason {
+			return out.Items[i].Reason < out.Items[j].Reason
+		}
+		if !out.Items[i].RecordedAt.Equal(out.Items[j].RecordedAt) {
+			return out.Items[i].RecordedAt.After(out.Items[j].RecordedAt)
+		}
+		return out.Items[i].TraceID < out.Items[j].TraceID
+	})
+	if len(out.Items) > limit {
+		out.Items = out.Items[:limit]
 	}
 	return nil, out, nil
 }

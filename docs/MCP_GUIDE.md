@@ -268,11 +268,21 @@ Inputs:
 - `experiment_run_id`
 - `limit`
 
+### `explain_experiment_regressions`
+
+Explain one persisted experiment's regressions with failure reasons, error text clusters, upstreams, sessions, and affected traces.
+
+Inputs:
+
+- `experiment_run_id`
+- `limit`
+
 Notes:
 
 - the persisted experiment stores only linkage and aggregate summary fields
 - detailed evaluator/improvement/regression views are derived from existing scores at read time
 - regression summaries are also derived on demand and do not persist a second analysis layer
+- regression explanations add trace-level failure context rather than a new persisted diagnosis entity
 
 ## Design Notes
 
