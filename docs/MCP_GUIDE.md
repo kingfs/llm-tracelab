@@ -279,7 +279,13 @@ Current deterministic evaluator set:
 - `http_status_2xx`
 - `no_recorded_error`
 - `response_has_body`
+- `ttft_le_2000ms`
+- `total_tokens_le_32000`
 
 This set is intentionally objective and cheap.
+
+Current baseline evaluator version is `baseline_v2`.
+
+The latency and token thresholds are currently hard-coded so results stay deterministic and easy to compare across runs.
 
 It is not intended to replace human judgment or model-graded quality review.

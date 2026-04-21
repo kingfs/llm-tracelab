@@ -131,6 +131,7 @@ Current MCP baseline is intentionally narrow:
 - MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
 - eval-run comparison is computed from stored scores
 - persisted experiments store linkage and aggregate summary, not duplicated score payloads
+- baseline evaluator keys and built-in threshold semantics should be treated as versioned contract surface once recorded scores depend on them
 
 Do not:
 
