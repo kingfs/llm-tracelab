@@ -1,9 +1,14 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { InlineTag, StackIcon } from "../common/Badges";
+import { EmptyState } from "../common/EmptyState";
 import { formatDateTime, formatProviderTag } from "../../lib/monitor";
 
 export function SessionList({ items }) {
+  if (!items.length) {
+    return <EmptyState title="No sessions found" detail="No sessions matched the current filter or page range." />;
+  }
+
   return (
     <div className="session-table">
       <div className="session-table-head">

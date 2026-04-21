@@ -45,6 +45,7 @@ export function UpstreamDetailPage() {
   const timeline = detail.data?.timeline ?? [];
   const failureTimeline = detail.data?.failure_timeline ?? [];
   const thresholds = detail.data?.health_thresholds;
+  const topFailureReason = breakdown?.failure_reasons?.[0]?.label || "";
   const catalogModels = target?.models || [];
   const recentModels = target?.recent_models || [];
   const normalizedCatalogQuery = catalogQuery.trim().toLowerCase();
@@ -183,7 +184,7 @@ export function UpstreamDetailPage() {
                   <strong className="trace-model-name">{formatHealthLabel(target?.health_state)}</strong>
                   <div className="trace-tag-group">
                     <InlineTag tone={healthTone(target?.health_state)}>{formatHealthLabel(target?.health_state)}</InlineTag>
-                    <InlineTag tone="accent">{formatFailureReason(breakdown?.failure_reasons?.[0]?.label || "unknown_failure")}</InlineTag>
+                    {topFailureReason ? <InlineTag tone="accent">{formatFailureReason(topFailureReason)}</InlineTag> : null}
                   </div>
                   <span className="trace-subline">{buildUpstreamHealthSummary(target, breakdown?.failure_reasons || [], thresholds)}</span>
                 </div>

@@ -100,7 +100,7 @@ export function SessionDetailPage() {
         </div>
       ) : null}
 
-      {timeline.length ? (
+      {detail.data && timeline.length ? (
         <section className="panel timeline-panel">
           <div className="panel-head">
             <div>
@@ -152,9 +152,11 @@ export function SessionDetailPage() {
             ))}
           </div>
         </section>
+      ) : detail.data ? (
+        <EmptyState title="No session timeline" detail="This session does not yet have a timeline of recorded requests." />
       ) : null}
 
-      {failureContexts.length ? (
+      {detail.data && failureContexts.length ? (
         <section className="panel">
           <div className="panel-head">
             <div>
@@ -186,6 +188,8 @@ export function SessionDetailPage() {
             ))}
           </div>
         </section>
+      ) : detail.data ? (
+        <EmptyState title="No failure context" detail="This session has no failed requests, so no adjacent context needs review." />
       ) : null}
 
       <section className="panel">

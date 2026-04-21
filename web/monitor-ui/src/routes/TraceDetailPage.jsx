@@ -457,7 +457,7 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
                         ))}
                       </div>
                     ) : (
-                      <div className="empty-state empty-state-inline">This request declared the tool but did not call it.</div>
+                      <EmptyState title="Tool not invoked" detail="This request declared the tool but did not execute a matching call." compact />
                     )}
                   </section>
                 </div>

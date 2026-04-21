@@ -1,9 +1,14 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { DownloadIcon, InlineTag, MiniToken, StackIcon, ViewIcon } from "../common/Badges";
+import { EmptyState } from "../common/EmptyState";
 import { buildTraceLink, formatDateTime, formatEndpointTag, formatProviderTag } from "../../lib/monitor";
 
 export function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false }) {
+  if (!items.length) {
+    return <EmptyState title="No traces found" detail="No trace records matched the current filter or page range." />;
+  }
+
   return (
     <div className="trace-table">
       <div className="trace-table-head">
