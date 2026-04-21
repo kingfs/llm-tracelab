@@ -197,6 +197,7 @@ go run ./cmd/server mcp -c config/config.yaml
 - `get_dataset`
 - `run_eval_on_dataset`
 - `run_eval_on_traces`
+- `list_evaluator_profiles`
 - `list_eval_runs`
 - `get_eval_run`
 - `list_scores`

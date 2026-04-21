@@ -111,12 +111,16 @@ type getDatasetInput struct {
 }
 
 type runEvalOnDatasetInput struct {
-	DatasetID string `json:"dataset_id" jsonschema:"dataset identifier"`
+	DatasetID    string `json:"dataset_id" jsonschema:"dataset identifier"`
+	EvaluatorSet string `json:"evaluator_set,omitempty" jsonschema:"optional evaluator profile name, default baseline_v2"`
 }
 
 type runEvalOnTracesInput struct {
-	TraceIDs []string `json:"trace_ids" jsonschema:"trace identifiers to evaluate"`
+	TraceIDs     []string `json:"trace_ids" jsonschema:"trace identifiers to evaluate"`
+	EvaluatorSet string   `json:"evaluator_set,omitempty" jsonschema:"optional evaluator profile name, default baseline_v2"`
 }
+
+type evaluatorProfilesInput struct{}
 
 type listEvalRunsInput struct {
 	Limit int `json:"limit,omitempty" jsonschema:"maximum runs to return, default 20"`
@@ -391,6 +395,20 @@ type getExperimentRunOutput struct {
 	RefreshedAt time.Time             `json:"refreshed_at"`
 }
 
+type evaluatorProfileView struct {
+	Name             string   `json:"name"`
+	Description      string   `json:"description"`
+	Deterministic    bool     `json:"deterministic"`
+	TTFTBudgetMS     int      `json:"ttft_budget_ms,omitempty"`
+	TotalTokenBudget int      `json:"total_token_budget,omitempty"`
+	EvaluatorKeys    []string `json:"evaluator_keys"`
+}
+
+type listEvaluatorProfilesOutput struct {
+	Items       []evaluatorProfileView `json:"items"`
+	RefreshedAt time.Time              `json:"refreshed_at"`
+}
+
 type evaluatorAggregate struct {
 	EvaluatorKey     string
 	BaselineTotal    int
@@ -486,6 +504,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "run_eval_on_traces",
 		Description: "Run the baseline deterministic evaluator set on explicit trace IDs.",
 	}, api.runEvalOnTraces)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_evaluator_profiles",
+		Description: "List built-in deterministic evaluator profiles and their thresholds.",
+	}, api.listEvaluatorProfiles)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_eval_runs",
 		Description: "List recent evaluation runs.",
@@ -869,7 +891,7 @@ func (a *serverAPI) runEvalOnDataset(ctx context.Context, req *mcp.CallToolReque
 	for _, example := range examples {
 		entries = append(entries, example.Trace)
 	}
-	return a.runEval(entries, datasetID, "dataset", datasetID)
+	return a.runEval(entries, datasetID, "dataset", datasetID, in.EvaluatorSet)
 }
 
 func (a *serverAPI) runEvalOnTraces(ctx context.Context, req *mcp.CallToolRequest, in *runEvalOnTracesInput) (*mcp.CallToolResult, *runEvalOutput, error) {
@@ -884,7 +906,22 @@ func (a *serverAPI) runEvalOnTraces(ctx context.Context, req *mcp.CallToolReques
 		}
 		entries = append(entries, entry)
 	}
-	return a.runEval(entries, "", "trace_list", "")
+	return a.runEval(entries, "", "trace_list", "", in.EvaluatorSet)
+}
+
+func (a *serverAPI) listEvaluatorProfiles(ctx context.Context, req *mcp.CallToolRequest, _ *evaluatorProfilesInput) (*mcp.CallToolResult, *listEvaluatorProfilesOutput, error) {
+	out := &listEvaluatorProfilesOutput{RefreshedAt: time.Now().UTC()}
+	for _, profile := range evals.ListProfiles() {
+		out.Items = append(out.Items, evaluatorProfileView{
+			Name:             profile.Name,
+			Description:      profile.Description,
+			Deterministic:    profile.Deterministic,
+			TTFTBudgetMS:     profile.TTFTBudgetMS,
+			TotalTokenBudget: profile.TotalTokenBudget,
+			EvaluatorKeys:    append([]string(nil), profile.EvaluatorKeys...),
+		})
+	}
+	return nil, out, nil
 }
 
 func (a *serverAPI) listEvalRuns(ctx context.Context, req *mcp.CallToolRequest, in *listEvalRunsInput) (*mcp.CallToolResult, *listEvalRunsOutput, error) {
@@ -1193,11 +1230,18 @@ func (a *serverAPI) createDataset(name string, description string) (store.Datase
 	return a.store.CreateDataset(name, description)
 }
 
-func (a *serverAPI) runEval(entries []store.LogEntry, datasetID string, sourceType string, sourceID string) (*mcp.CallToolResult, *runEvalOutput, error) {
+func (a *serverAPI) runEval(entries []store.LogEntry, datasetID string, sourceType string, sourceID string, evaluatorSet string) (*mcp.CallToolResult, *runEvalOutput, error) {
 	if len(entries) == 0 {
 		return nil, nil, fmt.Errorf("no traces to evaluate")
 	}
-	run, err := a.store.CreateEvalRun(datasetID, sourceType, sourceID, evals.BaselineEvaluatorSet, len(entries))
+	selectedSet := strings.TrimSpace(evaluatorSet)
+	if selectedSet == "" {
+		selectedSet = evals.BaselineEvaluatorSet
+	}
+	if _, ok := evals.GetProfile(selectedSet); !ok {
+		return nil, nil, fmt.Errorf("unknown evaluator_set %q", selectedSet)
+	}
+	run, err := a.store.CreateEvalRun(datasetID, sourceType, sourceID, selectedSet, len(entries))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1210,7 +1254,11 @@ func (a *serverAPI) runEval(entries []store.LogEntry, datasetID string, sourceTy
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, result := range evals.EvaluateBaseline(entry, summary) {
+		results, err := evals.Evaluate(entry, summary, selectedSet)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, result := range results {
 			score, err := a.store.AddScore(store.ScoreRecord{
 				TraceID:      entry.ID,
 				SessionID:    entry.SessionID,

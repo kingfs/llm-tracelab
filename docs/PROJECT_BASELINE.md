@@ -250,6 +250,7 @@ Current MCP tool surface includes:
 - `get_dataset`
 - `run_eval_on_dataset`
 - `run_eval_on_traces`
+- `list_evaluator_profiles`
 - `list_eval_runs`
 - `get_eval_run`
 - `list_scores`
@@ -264,6 +265,7 @@ Important constraint:
 - it does not introduce a second source of truth or a separate query engine
 - eval comparison is still derived from existing `eval_runs` and `scores`
 - persisted `experiment_runs` store linkage and aggregate summary only
+- built-in evaluator profiles are versioned and selectable at eval time, with `baseline_v2` as the current default
 
 Supported query parameters now include:
 

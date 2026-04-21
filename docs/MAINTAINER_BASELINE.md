@@ -132,6 +132,7 @@ Current MCP baseline is intentionally narrow:
 - eval-run comparison is computed from stored scores
 - persisted experiments store linkage and aggregate summary, not duplicated score payloads
 - baseline evaluator keys and built-in threshold semantics should be treated as versioned contract surface once recorded scores depend on them
+- evaluator profile selection should stay explicit and additive; do not silently change the meaning of an existing profile name
 
 Do not:
 

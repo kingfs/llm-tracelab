@@ -163,8 +163,20 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 23 {
-		t.Fatalf("len(tools.Tools) = %d, want 23", len(tools.Tools))
+	if len(tools.Tools) != 24 {
+		t.Fatalf("len(tools.Tools) = %d, want 24", len(tools.Tools))
+	}
+
+	profiles, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_evaluator_profiles",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_evaluator_profiles) error = %v", err)
+	}
+	profileItems := profiles.StructuredContent.(map[string]any)["items"].([]any)
+	if len(profileItems) != 2 {
+		t.Fatalf("len(list_evaluator_profiles.items) = %d, want 2", len(profileItems))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -489,6 +501,25 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if runRoles["baseline"] != 2 || runRoles["candidate"] != 2 {
 		t.Fatalf("list_scores by experiment run roles = %#v, want 2 baseline and 2 candidate", runRoles)
+	}
+
+	v1EvalRunRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "run_eval_on_traces",
+		Arguments: map[string]any{
+			"trace_ids":     []string{successEntry.ID, failureEntry.ID},
+			"evaluator_set": "baseline_v1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(run_eval_on_traces baseline_v1) error = %v", err)
+	}
+	v1EvalPayload := v1EvalRunRes.StructuredContent.(map[string]any)
+	v1Run := v1EvalPayload["run"].(map[string]any)
+	if v1Run["evaluator_set"].(string) != "baseline_v1" {
+		t.Fatalf("run_eval_on_traces baseline_v1 evaluator_set = %q, want baseline_v1", v1Run["evaluator_set"])
+	}
+	if got := len(v1EvalPayload["scores"].([]any)); got != 6 {
+		t.Fatalf("len(run_eval_on_traces baseline_v1.scores) = %d, want 6", got)
 	}
 }
 

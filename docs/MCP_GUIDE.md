@@ -169,6 +169,7 @@ Run the deterministic baseline evaluator set on one dataset.
 Input:
 
 - `dataset_id`
+- `evaluator_set`
 
 ### `run_eval_on_traces`
 
@@ -177,6 +178,16 @@ Run the deterministic baseline evaluator set on explicit trace IDs.
 Input:
 
 - `trace_ids`
+- `evaluator_set`
+
+Notes:
+
+- `evaluator_set` defaults to `baseline_v2`
+- built-in profiles are versioned so historical eval runs remain interpretable
+
+### `list_evaluator_profiles`
+
+List built-in evaluator profiles and their thresholds.
 
 ### `list_eval_runs`
 
@@ -284,7 +295,12 @@ Current deterministic evaluator set:
 
 This set is intentionally objective and cheap.
 
-Current baseline evaluator version is `baseline_v2`.
+Default baseline evaluator version is `baseline_v2`.
+
+Current built-in profiles:
+
+- `baseline_v1`: status/error/body checks only
+- `baseline_v2`: `baseline_v1` plus TTFT and total-token budgets
 
 The latency and token thresholds are currently hard-coded so results stay deterministic and easy to compare across runs.
 

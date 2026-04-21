@@ -50,6 +50,27 @@ func TestEvaluateBaselineFailsBudgetChecksWhenExceeded(t *testing.T) {
 	assertResultStatus(t, results, "total_tokens_le_32000", "fail")
 }
 
+func TestEvaluateSupportsVersionedProfiles(t *testing.T) {
+	entry := store.LogEntry{
+		Header: recordfile.RecordHeader{
+			Meta:  recordfile.MetaData{StatusCode: 200, TTFTMs: 5000},
+			Usage: recordfile.UsageInfo{TotalTokens: 999999},
+		},
+	}
+
+	v1, err := Evaluate(entry, &replay.Summary{BodyBytes: 1}, "baseline_v1")
+	if err != nil {
+		t.Fatalf("Evaluate(baseline_v1) error = %v", err)
+	}
+	if len(v1) != 3 {
+		t.Fatalf("len(Evaluate(baseline_v1)) = %d, want 3", len(v1))
+	}
+
+	if _, err := Evaluate(entry, &replay.Summary{BodyBytes: 1}, "missing_profile"); err == nil {
+		t.Fatalf("Evaluate(missing_profile) error = nil, want error")
+	}
+}
+
 func assertResultStatus(t *testing.T, results []Result, evaluatorKey string, want string) {
 	t.Helper()
 	for _, result := range results {
