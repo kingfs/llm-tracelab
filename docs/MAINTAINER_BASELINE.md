@@ -76,6 +76,8 @@ Stable API surface:
 - MCP `list_upstreams`
 - MCP `get_upstream`
 - MCP `query_failures`
+- MCP `replay_trace`
+- MCP `replay_session`
 
 Stable UI perspectives:
 

@@ -241,6 +241,8 @@ Current MCP tool surface includes:
 - `list_upstreams`
 - `get_upstream`
 - `query_failures`
+- `replay_trace`
+- `replay_session`
 
 Important constraint:
 

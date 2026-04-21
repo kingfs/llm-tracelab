@@ -188,6 +188,8 @@ go run ./cmd/server mcp -c config/config.yaml
 - `list_upstreams`
 - `get_upstream`
 - `query_failures`
+- `replay_trace`
+- `replay_session`
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 

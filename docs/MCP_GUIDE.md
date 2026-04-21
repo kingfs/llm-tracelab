@@ -18,7 +18,7 @@ Current MCP support is:
 
 - transport: `stdio`
 - implementation library: official `github.com/modelcontextprotocol/go-sdk`
-- scope: read-only inspection tools
+- scope: read-only inspection and replay tools
 
 Current MCP support is not:
 
@@ -102,6 +102,25 @@ Important limitation:
 - this tool currently filters one paginated `list_traces` result
 - it is not yet a dedicated failure index
 
+### `replay_trace`
+
+Replay one recorded trace locally and return a bounded HTTP response summary.
+
+Inputs:
+
+- `trace_id`
+- `body_limit`
+
+### `replay_session`
+
+Replay multiple traces from one session locally and return bounded HTTP response summaries.
+
+Inputs:
+
+- `session_id`
+- `limit`
+- `body_limit`
+
 ## Design Notes
 
 The MCP server intentionally reuses existing monitor JSON APIs in-process rather than adding a parallel query stack.
@@ -118,5 +137,5 @@ This keeps the first MCP slice:
 The next MCP-focused step should be:
 
 1. preserve the current read-only tools
-2. add replay-oriented tools
+2. use replay-backed tools as the bridge into dataset curation
 3. add dataset curation only after replay-backed tests are in place

@@ -14,6 +14,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/monitor"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/replay"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -71,6 +72,17 @@ type queryFailuresInput struct {
 	Query    string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
 }
 
+type replayTraceInput struct {
+	TraceID   string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
+	BodyLimit int    `json:"body_limit,omitempty" jsonschema:"maximum response body bytes to include, max 20000"`
+}
+
+type replaySessionInput struct {
+	SessionID string `json:"session_id" jsonschema:"session identifier from list_sessions"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"maximum traces to replay from the session, max 50"`
+	BodyLimit int    `json:"body_limit,omitempty" jsonschema:"maximum response body bytes to include per trace, max 20000"`
+}
+
 type traceListOutput struct {
 	Items       []map[string]any `json:"items"`
 	Stats       map[string]any   `json:"stats"`
@@ -110,15 +122,49 @@ type queryFailuresOutput struct {
 	RefreshedAt time.Time        `json:"refreshed_at"`
 }
 
+type replayTraceOutput struct {
+	TraceID    string         `json:"trace_id"`
+	SessionID  string         `json:"session_id,omitempty"`
+	RecordedAt time.Time      `json:"recorded_at"`
+	Model      string         `json:"model"`
+	Provider   string         `json:"provider"`
+	Endpoint   string         `json:"endpoint"`
+	Replay     replay.Summary `json:"replay"`
+}
+
+type replaySessionItem struct {
+	TraceID    string         `json:"trace_id"`
+	RecordedAt time.Time      `json:"recorded_at"`
+	Model      string         `json:"model"`
+	Provider   string         `json:"provider"`
+	Endpoint   string         `json:"endpoint"`
+	Replay     replay.Summary `json:"replay"`
+}
+
+type replaySessionOutput struct {
+	SessionID   string              `json:"session_id"`
+	Requested   int                 `json:"requested"`
+	Replayed    int                 `json:"replayed"`
+	Truncated   bool                `json:"truncated"`
+	Items       []replaySessionItem `json:"items"`
+	RefreshedAt time.Time           `json:"refreshed_at"`
+}
+
 type serverAPI struct {
 	handler http.Handler
+	store   *store.Store
+}
+
+type sessionLookupResult struct {
+	Summary store.SessionSummary
+	Traces  []store.LogEntry
 }
 
 func New(traceStore *store.Store, opts Options) *mcp.Server {
 	mux := http.NewServeMux()
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{Router: opts.Router})
 
-	api := &serverAPI{handler: mux}
+	api := &serverAPI{handler: mux, store: traceStore}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "llm-tracelab",
 		Version: "1.0.0",
@@ -152,6 +198,14 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "query_failures",
 		Description: "Return failed traces from a paginated trace scan using the same filters as list_traces.",
 	}, api.queryFailures)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "replay_trace",
+		Description: "Replay one recorded trace locally and return a structured HTTP response summary.",
+	}, api.replayTrace)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "replay_session",
+		Description: "Replay multiple traces from one session locally and return bounded response summaries.",
+	}, api.replaySession)
 
 	return server
 }
@@ -281,6 +335,79 @@ func (a *serverAPI) queryFailures(ctx context.Context, req *mcp.CallToolRequest,
 	return nil, out, nil
 }
 
+func (a *serverAPI) replayTrace(ctx context.Context, req *mcp.CallToolRequest, in *replayTraceInput) (*mcp.CallToolResult, *replayTraceOutput, error) {
+	traceID := strings.TrimSpace(in.TraceID)
+	if traceID == "" {
+		return nil, nil, fmt.Errorf("trace_id is required")
+	}
+
+	entry, err := a.lookupTrace(traceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	summary, err := replay.ReplayFile(entry.LogPath, replay.SummaryOptions{BodyLimit: in.BodyLimit})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return nil, &replayTraceOutput{
+		TraceID:    entry.ID,
+		SessionID:  entry.SessionID,
+		RecordedAt: entry.Header.Meta.Time,
+		Model:      entry.Header.Meta.Model,
+		Provider:   entry.Header.Meta.Provider,
+		Endpoint:   firstNonEmpty(entry.Header.Meta.Endpoint, entry.Header.Meta.URL),
+		Replay:     *summary,
+	}, nil
+}
+
+func (a *serverAPI) replaySession(ctx context.Context, req *mcp.CallToolRequest, in *replaySessionInput) (*mcp.CallToolResult, *replaySessionOutput, error) {
+	sessionID := strings.TrimSpace(in.SessionID)
+	if sessionID == "" {
+		return nil, nil, fmt.Errorf("session_id is required")
+	}
+
+	sessionDetail, err := a.lookupSession(sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	out := &replaySessionOutput{
+		SessionID:   sessionID,
+		Requested:   limit,
+		RefreshedAt: time.Now().UTC(),
+	}
+
+	for i, entry := range sessionDetail.Traces {
+		if i >= limit {
+			out.Truncated = true
+			break
+		}
+		summary, err := replay.ReplayFile(entry.LogPath, replay.SummaryOptions{BodyLimit: in.BodyLimit})
+		if err != nil {
+			return nil, nil, fmt.Errorf("replay trace %s: %w", entry.ID, err)
+		}
+		out.Items = append(out.Items, replaySessionItem{
+			TraceID:    entry.ID,
+			RecordedAt: entry.Header.Meta.Time,
+			Model:      entry.Header.Meta.Model,
+			Provider:   entry.Header.Meta.Provider,
+			Endpoint:   firstNonEmpty(entry.Header.Meta.Endpoint, entry.Header.Meta.URL),
+			Replay:     *summary,
+		})
+	}
+	out.Replayed = len(out.Items)
+	return nil, out, nil
+}
+
 func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, out interface{}) error {
 	target := path
 	if encoded := query.Encode(); encoded != "" {
@@ -307,6 +434,41 @@ func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, 
 	return nil
 }
 
+func (a *serverAPI) lookupTrace(traceID string) (store.LogEntry, error) {
+	if a.store == nil {
+		return store.LogEntry{}, fmt.Errorf("store not configured")
+	}
+	if err := a.store.Sync(); err != nil {
+		return store.LogEntry{}, fmt.Errorf("sync error: %w", err)
+	}
+	entry, err := a.store.GetByID(traceID)
+	if err != nil {
+		return store.LogEntry{}, err
+	}
+	return entry, nil
+}
+
+func (a *serverAPI) lookupSession(sessionID string) (*sessionLookupResult, error) {
+	if a.store == nil {
+		return nil, fmt.Errorf("store not configured")
+	}
+	if err := a.store.Sync(); err != nil {
+		return nil, fmt.Errorf("sync error: %w", err)
+	}
+	summary, err := a.store.GetSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	traces, err := a.store.ListTracesBySession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &sessionLookupResult{
+		Summary: summary,
+		Traces:  traces,
+	}, nil
+}
+
 func normalizePage(page int) int {
 	if page <= 0 {
 		return defaultPage
@@ -330,4 +492,13 @@ func setIfNotEmpty(values url.Values, key string, value string) {
 	if trimmed != "" {
 		values.Set(key, trimmed)
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }

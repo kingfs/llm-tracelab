@@ -90,8 +90,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 7 {
-		t.Fatalf("len(tools.Tools) = %d, want 7", len(tools.Tools))
+	if len(tools.Tools) != 9 {
+		t.Fatalf("len(tools.Tools) = %d, want 9", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -187,6 +187,34 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	failurePayload := failures.StructuredContent.(map[string]any)
 	if got := int(failurePayload["returned"].(float64)); got != 1 {
 		t.Fatalf("query_failures.returned = %d, want 1", got)
+	}
+
+	replayedTrace, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "replay_trace",
+		Arguments: map[string]any{"trace_id": traceID, "body_limit": 100},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(replay_trace) error = %v", err)
+	}
+	replayPayload := replayedTrace.StructuredContent.(map[string]any)
+	replayResult := replayPayload["replay"].(map[string]any)
+	if replayPayload["trace_id"].(string) != traceID {
+		t.Fatalf("replay_trace.trace_id = %q, want %q", replayPayload["trace_id"], traceID)
+	}
+	if int(replayResult["status_code"].(float64)) < 200 {
+		t.Fatalf("replay_trace.replay.status_code = %v, want >= 200", replayResult["status_code"])
+	}
+
+	replayedSession, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "replay_session",
+		Arguments: map[string]any{"session_id": sessionID, "limit": 5, "body_limit": 100},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(replay_session) error = %v", err)
+	}
+	replayedSessionPayload := replayedSession.StructuredContent.(map[string]any)
+	if got := int(replayedSessionPayload["replayed"].(float64)); got != 2 {
+		t.Fatalf("replay_session.replayed = %d, want 2", got)
 	}
 }
 
