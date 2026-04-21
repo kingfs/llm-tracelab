@@ -2773,7 +2773,7 @@ func escapeLike(value string) string {
 }
 
 func (s *Store) backfillGrouping() error {
-	rows, err := s.db.Query(`SELECT path FROM logs WHERE session_source = ''`)
+	rows, err := s.db.Query(`SELECT path FROM logs WHERE session_source = '' OR session_source = 'none'`)
 	if err != nil {
 		return err
 	}

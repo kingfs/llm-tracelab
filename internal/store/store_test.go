@@ -266,6 +266,170 @@ func TestExtractGroupingInfoFallsBackToCodexMetadata(t *testing.T) {
 	}
 }
 
+func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "codex.http")
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "req-codex",
+			Time:          time.Date(2026, 4, 21, 9, 2, 55, 0, time.UTC),
+			Model:         "gpt-5.4",
+			Provider:      "openai_compatible",
+			Operation:     "responses.create",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    100,
+			TTFTMs:        20,
+			ClientIP:      "127.0.0.1",
+			ContentLength: 2,
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: len64("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession_id: sess-fixed\r\nX-Client-Request-Id: req-fixed\r\nX-Codex-Window-Id: sess-fixed:2\r\n\r\n"),
+			ReqBodyLen:   len64(`{}`),
+			ResHeaderLen: len64("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"),
+			ResBodyLen:   len64(`{}`),
+			IsStream:     true,
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	content := string(prelude) +
+		"POST /v1/responses HTTP/1.1\r\n" +
+		"Host: example.com\r\n" +
+		"Session_id: sess-fixed\r\n" +
+		"X-Client-Request-Id: req-fixed\r\n" +
+		"X-Codex-Window-Id: sess-fixed:2\r\n" +
+		"\r\n" +
+		"{}\n" +
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", logPath, err)
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("Stat(%q) error = %v", logPath, err)
+	}
+
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	legacyInsert := `
+	CREATE TABLE IF NOT EXISTS logs (
+		path TEXT PRIMARY KEY,
+		trace_id TEXT NOT NULL DEFAULT '',
+		mod_time_ns INTEGER NOT NULL,
+		file_size INTEGER NOT NULL,
+		version TEXT NOT NULL,
+		request_id TEXT NOT NULL,
+		recorded_at TEXT NOT NULL,
+		model TEXT NOT NULL,
+		provider TEXT NOT NULL DEFAULT '',
+		operation TEXT NOT NULL DEFAULT '',
+		endpoint TEXT NOT NULL DEFAULT '',
+		url TEXT NOT NULL,
+		method TEXT NOT NULL,
+		status_code INTEGER NOT NULL,
+		duration_ms INTEGER NOT NULL,
+		ttft_ms INTEGER NOT NULL,
+		client_ip TEXT NOT NULL,
+		content_length INTEGER NOT NULL,
+		error_text TEXT NOT NULL,
+		prompt_tokens INTEGER NOT NULL,
+		completion_tokens INTEGER NOT NULL,
+		total_tokens INTEGER NOT NULL,
+		cached_tokens INTEGER NOT NULL,
+		req_header_len INTEGER NOT NULL,
+		req_body_len INTEGER NOT NULL,
+		res_header_len INTEGER NOT NULL,
+		res_body_len INTEGER NOT NULL,
+		is_stream INTEGER NOT NULL,
+		session_id TEXT NOT NULL DEFAULT '',
+		session_source TEXT NOT NULL DEFAULT '',
+		window_id TEXT NOT NULL DEFAULT '',
+		client_request_id TEXT NOT NULL DEFAULT ''
+	);`
+	if _, err := db.Exec(legacyInsert); err != nil {
+		t.Fatalf("db.Exec(schema) error = %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO logs (
+			path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
+			status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		logPath,
+		"trace-legacy",
+		info.ModTime().UnixNano(),
+		info.Size(),
+		header.Version,
+		header.Meta.RequestID,
+		header.Meta.Time.UTC().Format(timeLayout),
+		header.Meta.Model,
+		header.Meta.Provider,
+		header.Meta.Operation,
+		header.Meta.Endpoint,
+		header.Meta.URL,
+		header.Meta.Method,
+		header.Meta.StatusCode,
+		header.Meta.DurationMs,
+		header.Meta.TTFTMs,
+		header.Meta.ClientIP,
+		header.Meta.ContentLength,
+		"",
+		0,
+		0,
+		0,
+		0,
+		header.Layout.ReqHeaderLen,
+		header.Layout.ReqBodyLen,
+		header.Layout.ResHeaderLen,
+		header.Layout.ResBodyLen,
+		boolToInt(header.Layout.IsStream),
+		"",
+		"none",
+		"",
+		"",
+	); err != nil {
+		t.Fatalf("db.Exec(insert) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	entry, err := st.GetByID("trace-legacy")
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if entry.SessionID != "sess-fixed" {
+		t.Fatalf("SessionID = %q, want sess-fixed", entry.SessionID)
+	}
+	if entry.SessionSource != "header.session_id" {
+		t.Fatalf("SessionSource = %q, want header.session_id", entry.SessionSource)
+	}
+	if entry.WindowID != "sess-fixed:2" {
+		t.Fatalf("WindowID = %q, want sess-fixed:2", entry.WindowID)
+	}
+	if entry.ClientRequestID != "req-fixed" {
+		t.Fatalf("ClientRequestID = %q, want req-fixed", entry.ClientRequestID)
+	}
+}
+
 func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
