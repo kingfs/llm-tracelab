@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { StatCard } from "../common/Display";
+import { EmptyState } from "../common/EmptyState";
 import { InlineTag } from "../common/Badges";
 import { BreakdownList } from "../monitor/BreakdownList";
 import { RoutingFailureTimeline } from "../monitor/RoutingFailureTimeline";
@@ -62,7 +63,7 @@ export function UpstreamOverview({ items, analyticsWindow = "24h", analyticsMode
             </section>
           </div>
         ) : (
-          <div className="empty-state">No routing failures in this window.</div>
+          <EmptyState title="No routing failures" detail="The router has not produced selection-stage failures in this analytics window." />
         )}
         {(routingFailures.timeline || []).length ? (
           <section className="breakdown-card">
@@ -71,7 +72,7 @@ export function UpstreamOverview({ items, analyticsWindow = "24h", analyticsMode
           </section>
         ) : null}
       </div>
-      {!items.length ? <div className="empty-state">No upstream targets discovered.</div> : null}
+      {!items.length ? <EmptyState title="No upstream targets discovered" detail="No upstream routing targets have been indexed for the current window and model filter." /> : null}
       <div className="upstream-grid">
         {items.map((item) => (
           <article key={item.id} className="upstream-card">

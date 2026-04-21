@@ -1039,6 +1039,66 @@ a:focus-visible {
   margin-bottom: 18px;
 }
 
+.trace-reading-panel {
+  margin-bottom: 18px;
+}
+
+.trace-reading-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trace-reading-card {
+  border: 1px solid rgba(34, 40, 49, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+
+.trace-reading-card:hover {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(34, 40, 49, 0.16);
+  transform: translateY(-1px);
+}
+
+.trace-reading-card-active {
+  border-color: rgba(25, 93, 77, 0.24);
+  background: rgba(213, 228, 218, 0.56);
+  box-shadow: 0 0 0 3px rgba(25, 93, 77, 0.08);
+}
+
+.trace-reading-card strong,
+.empty-state-title {
+  display: block;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.trace-reading-card span,
+.trace-reading-card p,
+.empty-state-detail {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.trace-reading-card span {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.trace-reading-card p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
 .session-breakdown-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1737,9 +1797,29 @@ a:focus-visible {
   background: rgba(255, 255, 255, 0.36);
 }
 
+.empty-state-title {
+  margin-bottom: 6px;
+}
+
+.empty-state-detail {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
 .empty-state-inline {
   padding: 14px;
   border-radius: 16px;
+}
+
+.empty-state-danger {
+  border-color: rgba(161, 54, 42, 0.22);
+  background: rgba(253, 235, 232, 0.5);
+}
+
+.empty-state-danger .empty-state-detail,
+.empty-state-danger .empty-state-title {
+  color: var(--danger);
 }
 
 .model-catalog-list {
@@ -1782,6 +1862,7 @@ a:focus-visible {
   .failure-context-strip,
   .payload-grid,
   .raw-grid,
+  .trace-reading-grid,
   .upstream-grid,
   .upstream-failure-list,
   .trace-table-head,

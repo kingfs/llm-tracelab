@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent } from "../components/common/Display";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
+import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
 import {
   buildRoutingDecisionSummary,
@@ -57,6 +58,10 @@ export function TraceDetailPage() {
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/${fromView}`;
+  const conversation = hasConversation(detail.data);
+  const timelineCount = detail.data?.events?.length || 0;
+  const messageCount = detail.data?.messages?.length || 0;
+  const toolCount = declaredTools.length;
 
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
@@ -184,8 +189,43 @@ export function TraceDetailPage() {
         ) : null}
       </nav>
 
-      {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
-      {detail.loading && !detail.data ? <div className="empty-state">Loading trace...</div> : null}
+      {detail.data ? (
+        <section className="panel trace-reading-panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Reading guide</p>
+              <h2>Where to inspect this trace</h2>
+            </div>
+          </div>
+          <div className="trace-reading-grid">
+            <button className={tab === "timeline" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("timeline")}>
+              <strong>Timeline</strong>
+              <span>{timelineCount ? `${timelineCount} event record${timelineCount > 1 ? "s" : ""}` : "No timeline events"}</span>
+              <p>Use this first when you need execution order, nested tool activity, or the first failing node.</p>
+            </button>
+            <button className={tab === "summary" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("summary")}>
+              <strong>Summary</strong>
+              <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : "Request / response body view"}</span>
+              <p>Use this for the high-level routing decision, conversation payloads, and final model output.</p>
+            </button>
+            <button className={tab === "raw" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("raw")}>
+              <strong>Raw Protocol</strong>
+              <span>Original HTTP exchange</span>
+              <p>Use this when you need exact request or response bytes, headers, and provider-facing payloads.</p>
+            </button>
+            {hasDeclaredToolsTab ? (
+              <button className={tab === "tools" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("tools")}>
+                <strong>Declared Tools</strong>
+                <span>{toolCount} declared tool{toolCount > 1 ? "s" : ""}</span>
+                <p>Use this to compare declared tool definitions with the calls that were actually executed.</p>
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {detail.error ? <EmptyState title="Unable to load trace detail" detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title="Loading trace detail" detail="Resolving timeline, routing, payload, and tool information for this trace." /> : null}
 
       {tab === "timeline" && detail.data ? <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
 
@@ -438,7 +478,7 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
           </div>
         </div>
       ) : (
-        <div className="empty-state">No tool definitions in request.</div>
+        <EmptyState title="No declared tools" detail="This request did not include tool definitions in its captured payload." />
       )}
     </section>
   );
@@ -460,10 +500,10 @@ function RawProtocolPanel({ raw, focusTarget = "" }) {
   }, [focusTarget]);
 
   if (raw.error) {
-    return <div className="empty-state error-box">{raw.error}</div>;
+    return <EmptyState title="Unable to load raw protocol" detail={raw.error} tone="danger" />;
   }
   if (raw.loading && !raw.data) {
-    return <div className="empty-state">Loading raw protocol...</div>;
+    return <EmptyState title="Loading raw protocol" detail="Fetching the original request and response exchange for this trace." />;
   }
 
   return (
@@ -498,7 +538,7 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag }) {
   }, [focusTarget]);
 
   if (!events.length) {
-    return <div className="empty-state">No timeline events recorded for this trace.</div>;
+    return <EmptyState title="No timeline events" detail="This trace does not include a structured llm event timeline." />;
   }
 
   return (

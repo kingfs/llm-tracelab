@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PrimaryNav } from "../components/PrimaryNav";
 import { StatCard } from "../components/common/Display";
+import { EmptyState } from "../components/common/EmptyState";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { formatTime, setOrDeleteParam } from "../lib/monitor";
@@ -140,8 +141,8 @@ export function RequestsPage() {
           </button>
         </form>
 
-        {error ? <div className="empty-state error-box">{error}</div> : null}
-        {loading && !data ? <div className="empty-state">Loading requests...</div> : null}
+        {error ? <EmptyState title="Unable to load requests" detail={error} tone="danger" /> : null}
+        {loading && !data ? <EmptyState title="Loading requests" detail="Refreshing the latest trace index for this request list." /> : null}
 
         <RequestList items={items} fromView="requests" />
       </section>

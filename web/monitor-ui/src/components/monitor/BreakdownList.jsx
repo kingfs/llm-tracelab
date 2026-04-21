@@ -1,4 +1,5 @@
 import React from "react";
+import { EmptyState } from "../common/EmptyState";
 
 export function BreakdownList({ title, items, formatter }) {
   return (
@@ -14,7 +15,7 @@ export function BreakdownList({ title, items, formatter }) {
           ))}
         </div>
       ) : (
-        <div className="empty-state">No data</div>
+        <EmptyState title="No distribution data" detail="This section has nothing to aggregate in the current filter window." compact />
       )}
     </section>
   );

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PrimaryNav } from "../components/PrimaryNav";
+import { EmptyState } from "../components/common/EmptyState";
 import { UpstreamOverview } from "../components/routing/UpstreamOverview";
 import { useJSON } from "../hooks/useJSON";
 import { formatTime, normalizeUpstreamWindow, setOrDeleteParam } from "../lib/monitor";
@@ -99,8 +100,8 @@ export function RoutingPage() {
             Reset
           </button>
         </form>
-        {upstreams.error ? <div className="empty-state error-box">{upstreams.error}</div> : null}
-        {upstreams.loading && !upstreams.data ? <div className="empty-state">Loading upstream targets...</div> : null}
+        {upstreams.error ? <EmptyState title="Unable to load routing targets" detail={upstreams.error} tone="danger" /> : null}
+        {upstreams.loading && !upstreams.data ? <EmptyState title="Loading routing surface" detail="Collecting indexed upstream health and routing statistics." /> : null}
         {upstreams.data ? (
           <UpstreamOverview
             items={upstreams.data.items || []}

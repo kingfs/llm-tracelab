@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PrimaryNav } from "../components/PrimaryNav";
 import { StatCard } from "../components/common/Display";
+import { EmptyState } from "../components/common/EmptyState";
 import { SessionList } from "../components/monitor/SessionList";
 import { useJSON } from "../hooks/useJSON";
 import { formatTime, setOrDeleteParam, summarizeSessionItems } from "../lib/monitor";
@@ -140,8 +141,8 @@ export function SessionsPage() {
           </button>
         </form>
 
-        {error ? <div className="empty-state error-box">{error}</div> : null}
-        {loading && !data ? <div className="empty-state">Loading sessions...</div> : null}
+        {error ? <EmptyState title="Unable to load sessions" detail={error} tone="danger" /> : null}
+        {loading && !data ? <EmptyState title="Loading sessions" detail="Rebuilding the latest session view from the indexed trace store." /> : null}
 
         <SessionList items={items} />
       </section>

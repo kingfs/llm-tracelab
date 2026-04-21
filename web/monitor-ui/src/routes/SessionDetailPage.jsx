@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge, ViewIcon } from "../components/common/Badges";
+import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
@@ -64,8 +65,8 @@ export function SessionDetailPage() {
         </div>
       </header>
 
-      {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
-      {detail.loading && !detail.data ? <div className="empty-state">Loading session...</div> : null}
+      {detail.error ? <EmptyState title="Unable to load session detail" detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title="Loading session detail" detail="Resolving timeline, breakdown, and grouped traces for this session." /> : null}
 
       {detail.data ? (
         <div className="detail-grid detail-grid-compact">
@@ -208,7 +209,7 @@ export function SessionDetailPage() {
           </div>
         </div>
         {traceFilter === "failed" && visibleTraces.length === 0 ? (
-          <div className="empty-state">No failed traces in this session.</div>
+          <EmptyState title="No failed traces" detail="This session has no failed requests under the current filter." />
         ) : (
           <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures />
         )}

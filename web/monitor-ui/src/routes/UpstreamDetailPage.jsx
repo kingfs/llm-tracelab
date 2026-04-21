@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, HomeIcon, InlineTag, TokenBadge } from "../components/common/Badges";
+import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { RoutingFailureTimeline } from "../components/monitor/RoutingFailureTimeline";
@@ -149,8 +150,8 @@ export function UpstreamDetailPage() {
         </form>
       </section>
 
-      {detail.error ? <div className="empty-state error-box">{detail.error}</div> : null}
-      {detail.loading && !detail.data ? <div className="empty-state">Loading upstream detail...</div> : null}
+      {detail.error ? <EmptyState title="Unable to load upstream detail" detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title="Loading upstream detail" detail="Fetching routing health, model catalog, recent failures, and latest traces." /> : null}
 
       {detail.data ? (
         <div className="detail-grid detail-grid-compact">
@@ -284,7 +285,7 @@ export function UpstreamDetailPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="empty-state empty-state-inline">No recent models match this filter.</div>
+                  <EmptyState title="No recent models" detail="No recently routed model names match this filter." compact />
                 )}
               </section>
               <section className="breakdown-card">
@@ -298,7 +299,7 @@ export function UpstreamDetailPage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="empty-state empty-state-inline">No indexed models match this filter.</div>
+                  <EmptyState title="No indexed models" detail="No catalog model names match this filter." compact />
                 )}
               </section>
             </div>
@@ -316,7 +317,7 @@ export function UpstreamDetailPage() {
         {failureTimeline.length ? (
           <RoutingFailureTimeline items={failureTimeline} />
         ) : (
-          <div className="empty-state">No failure timeline available for this upstream.</div>
+          <EmptyState title="No failure timeline" detail="No time-bucketed failures are available for this upstream in the current window." />
         )}
       </section>
 
@@ -343,7 +344,7 @@ export function UpstreamDetailPage() {
             ))}
           </div>
         ) : (
-          <div className="empty-state">No recent failures for this upstream.</div>
+          <EmptyState title="No recent failures" detail="This upstream does not have recent failed traces in the current analytics window." />
         )}
       </section>
 
@@ -354,7 +355,7 @@ export function UpstreamDetailPage() {
             <h2>Latest routed traces</h2>
           </div>
         </div>
-        {traces.length ? <RequestList items={traces} focusFailures /> : <div className="empty-state">No traces for this upstream.</div>}
+        {traces.length ? <RequestList items={traces} focusFailures /> : <EmptyState title="No routed traces" detail="No trace records are currently linked to this upstream for the selected filters." />}
       </section>
     </div>
   );
