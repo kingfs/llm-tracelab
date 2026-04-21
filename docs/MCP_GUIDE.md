@@ -182,7 +182,7 @@ Input:
 
 Notes:
 
-- `evaluator_set` defaults to `baseline_v2`
+- `evaluator_set` defaults to `baseline_v3`
 - built-in profiles are versioned so historical eval runs remain interpretable
 
 ### `list_evaluator_profiles`
@@ -292,16 +292,20 @@ Current deterministic evaluator set:
 - `response_has_body`
 - `ttft_le_2000ms`
 - `total_tokens_le_32000`
+- `tool_calls_declared`
 
 This set is intentionally objective and cheap.
 
-Default baseline evaluator version is `baseline_v2`.
+Default baseline evaluator version is `baseline_v3`.
 
 Current built-in profiles:
 
 - `baseline_v1`: status/error/body checks only
 - `baseline_v2`: `baseline_v1` plus TTFT and total-token budgets
+- `baseline_v3`: `baseline_v2` plus declared tool-call conformance
 
 The latency and token thresholds are currently hard-coded so results stay deterministic and easy to compare across runs.
+
+`tool_calls_declared` checks that every recorded response tool call matches a tool name declared in the request. If no tool call occurred, the check passes.
 
 It is not intended to replace human judgment or model-graded quality review.

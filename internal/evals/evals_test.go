@@ -1,6 +1,9 @@
 package evals
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,11 +28,12 @@ func TestEvaluateBaselineIncludesLatencyAndTokenBudgetChecks(t *testing.T) {
 	summary := &replay.Summary{BodyBytes: 32}
 
 	results := EvaluateBaseline(entry, summary)
-	if len(results) != 5 {
-		t.Fatalf("len(EvaluateBaseline()) = %d, want 5", len(results))
+	if len(results) != 6 {
+		t.Fatalf("len(EvaluateBaseline()) = %d, want 6", len(results))
 	}
 	assertResultStatus(t, results, "ttft_le_2000ms", "pass")
 	assertResultStatus(t, results, "total_tokens_le_32000", "pass")
+	assertResultStatus(t, results, "tool_calls_declared", "fail")
 }
 
 func TestEvaluateBaselineFailsBudgetChecksWhenExceeded(t *testing.T) {
@@ -66,8 +70,38 @@ func TestEvaluateSupportsVersionedProfiles(t *testing.T) {
 		t.Fatalf("len(Evaluate(baseline_v1)) = %d, want 3", len(v1))
 	}
 
+	v3, err := Evaluate(entry, &replay.Summary{BodyBytes: 1}, "baseline_v3")
+	if err != nil {
+		t.Fatalf("Evaluate(baseline_v3) error = %v", err)
+	}
+	if len(v3) != 6 {
+		t.Fatalf("len(Evaluate(baseline_v3)) = %d, want 6", len(v3))
+	}
+
 	if _, err := Evaluate(entry, &replay.Summary{BodyBytes: 1}, "missing_profile"); err == nil {
 		t.Fatalf("Evaluate(missing_profile) error = nil, want error")
+	}
+}
+
+func TestToolCallsDeclaredConformance(t *testing.T) {
+	dir := t.TempDir()
+	goodPath := filepath.Join(dir, "declared.http")
+	badPath := filepath.Join(dir, "undeclared.http")
+
+	if err := os.WriteFile(goodPath, buildToolCallRecordFixture(t, "weather", "weather"), 0o644); err != nil {
+		t.Fatalf("WriteFile(goodPath) error = %v", err)
+	}
+	if err := os.WriteFile(badPath, buildToolCallRecordFixture(t, "weather", "search"), 0o644); err != nil {
+		t.Fatalf("WriteFile(badPath) error = %v", err)
+	}
+
+	good := toolCallsDeclared(store.LogEntry{LogPath: goodPath})
+	if good.Status != "pass" {
+		t.Fatalf("toolCallsDeclared(good) = %#v, want pass", good)
+	}
+	bad := toolCallsDeclared(store.LogEntry{LogPath: badPath})
+	if bad.Status != "fail" || !strings.Contains(bad.Explanation, "search") {
+		t.Fatalf("toolCallsDeclared(bad) = %#v, want fail mentioning search", bad)
 	}
 }
 
@@ -82,4 +116,48 @@ func assertResultStatus(t *testing.T, results []Result, evaluatorKey string, wan
 		}
 	}
 	t.Fatalf("missing evaluator %q in %#v", evaluatorKey, results)
+}
+
+func buildToolCallRecordFixture(t *testing.T, declaredTool string, calledTool string) []byte {
+	t.Helper()
+
+	reqBody := `{"model":"gpt-5","messages":[{"role":"user","content":"check weather"}],"tools":[{"type":"function","function":{"name":"` + declaredTool + `","description":"lookup","parameters":{"type":"object"}}}]}`
+	resBody := `{"id":"chatcmpl_1","object":"chat.completion","created":1710000000,"model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"` + calledTool + `","arguments":"{\"city\":\"Shanghai\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`
+	request := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" + reqBody
+	response := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + resBody
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "req-tool",
+			Time:          time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
+			Model:         "gpt-5",
+			Provider:      "openai_compatible",
+			Operation:     "chat.completions",
+			Endpoint:      "/v1/chat/completions",
+			URL:           "/v1/chat/completions",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    100,
+			TTFTMs:        10,
+			ClientIP:      "127.0.0.1",
+			ContentLength: int64(len(resBody)),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len("POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n")),
+			ReqBodyLen:   int64(len(reqBody)),
+			ResHeaderLen: int64(len("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")),
+			ResBodyLen:   int64(len(resBody)),
+		},
+		Usage: recordfile.UsageInfo{
+			PromptTokens:     10,
+			CompletionTokens: 5,
+			TotalTokens:      15,
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	return append(prelude, []byte(request+"\n"+response)...)
 }

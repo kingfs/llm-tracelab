@@ -175,8 +175,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("CallTool(list_evaluator_profiles) error = %v", err)
 	}
 	profileItems := profiles.StructuredContent.(map[string]any)["items"].([]any)
-	if len(profileItems) != 2 {
-		t.Fatalf("len(list_evaluator_profiles.items) = %d, want 2", len(profileItems))
+	if len(profileItems) != 3 {
+		t.Fatalf("len(list_evaluator_profiles.items) = %d, want 3", len(profileItems))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -371,8 +371,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if got := int(run["trace_count"].(float64)); got != 2 {
 		t.Fatalf("run_eval_on_dataset.trace_count = %d, want 2", got)
 	}
-	if got := len(evalRunPayload["scores"].([]any)); got != 10 {
-		t.Fatalf("len(run_eval_on_dataset.scores) = %d, want 10", got)
+	if got := len(evalRunPayload["scores"].([]any)); got != 12 {
+		t.Fatalf("len(run_eval_on_dataset.scores) = %d, want 12", got)
 	}
 
 	listedRuns, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -394,8 +394,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("CallTool(get_eval_run) error = %v", err)
 	}
 	gotRunPayload := gotRun.StructuredContent.(map[string]any)
-	if got := len(gotRunPayload["scores"].([]any)); got != 10 {
-		t.Fatalf("len(get_eval_run.scores) = %d, want 10", got)
+	if got := len(gotRunPayload["scores"].([]any)); got != 12 {
+		t.Fatalf("len(get_eval_run.scores) = %d, want 12", got)
 	}
 
 	listedScores, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -405,8 +405,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool(list_scores) error = %v", err)
 	}
-	if got := len(listedScores.StructuredContent.(map[string]any)["items"].([]any)); got != 10 {
-		t.Fatalf("len(list_scores.items) = %d, want 10", got)
+	if got := len(listedScores.StructuredContent.(map[string]any)["items"].([]any)); got != 12 {
+		t.Fatalf("len(list_scores.items) = %d, want 12", got)
 	}
 
 	comparedRuns, err := session.CallTool(context.Background(), &mcp.CallToolParams{

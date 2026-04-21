@@ -2,14 +2,16 @@ package evals
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
+	"github.com/kingfs/llm-tracelab/internal/monitor"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/replay"
 )
 
-const BaselineEvaluatorSet = "baseline_v2"
+const BaselineEvaluatorSet = "baseline_v3"
 
 type Result struct {
 	EvaluatorKey string  `json:"evaluator_key"`
@@ -20,12 +22,13 @@ type Result struct {
 }
 
 type Profile struct {
-	Name             string   `json:"name"`
-	Description      string   `json:"description"`
-	Deterministic    bool     `json:"deterministic"`
-	TTFTBudgetMS     int      `json:"ttft_budget_ms,omitempty"`
-	TotalTokenBudget int      `json:"total_token_budget,omitempty"`
-	EvaluatorKeys    []string `json:"evaluator_keys"`
+	Name                    string   `json:"name"`
+	Description             string   `json:"description"`
+	Deterministic           bool     `json:"deterministic"`
+	TTFTBudgetMS            int      `json:"ttft_budget_ms,omitempty"`
+	TotalTokenBudget        int      `json:"total_token_budget,omitempty"`
+	RequireDeclaredToolCall bool     `json:"require_declared_tool_call,omitempty"`
+	EvaluatorKeys           []string `json:"evaluator_keys"`
 }
 
 var profiles = map[string]Profile{
@@ -51,6 +54,22 @@ var profiles = map[string]Profile{
 			"response_has_body",
 			"ttft_le_2000ms",
 			"total_tokens_le_32000",
+		},
+	},
+	"baseline_v3": {
+		Name:                    "baseline_v3",
+		Description:             "Deterministic baseline checks plus TTFT, total-token budgets, and declared tool-call conformance.",
+		Deterministic:           true,
+		TTFTBudgetMS:            2000,
+		TotalTokenBudget:        32000,
+		RequireDeclaredToolCall: true,
+		EvaluatorKeys: []string{
+			"http_status_2xx",
+			"no_recorded_error",
+			"response_has_body",
+			"ttft_le_2000ms",
+			"total_tokens_le_32000",
+			"tool_calls_declared",
 		},
 	},
 }
@@ -90,6 +109,9 @@ func Evaluate(entry store.LogEntry, summary *replay.Summary, evaluatorSet string
 	}
 	if profile.TotalTokenBudget > 0 {
 		results = append(results, totalTokensWithinBudget(entry, profile.TotalTokenBudget))
+	}
+	if profile.RequireDeclaredToolCall {
+		results = append(results, toolCallsDeclared(entry))
 	}
 	return results, nil
 }
@@ -219,4 +241,105 @@ func totalTokensWithinBudget(entry store.LogEntry, budget int) Result {
 			Explanation:  fmt.Sprintf("recorded total tokens %d exceed %d token budget", totalTokens, budget),
 		}
 	}
+}
+
+func toolCallsDeclared(entry store.LogEntry) Result {
+	if strings.TrimSpace(entry.LogPath) == "" {
+		return Result{
+			EvaluatorKey: "tool_calls_declared",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  "trace log path is missing",
+		}
+	}
+	content, err := os.ReadFile(entry.LogPath)
+	if err != nil {
+		return Result{
+			EvaluatorKey: "tool_calls_declared",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  fmt.Sprintf("read trace log: %v", err),
+		}
+	}
+	parsed, err := monitor.ParseLogFile(content)
+	if err != nil {
+		return Result{
+			EvaluatorKey: "tool_calls_declared",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  fmt.Sprintf("parse trace log: %v", err),
+		}
+	}
+	if len(parsed.ResponseToolCalls) == 0 {
+		return Result{
+			EvaluatorKey: "tool_calls_declared",
+			Value:        1,
+			Status:       "pass",
+			Label:        "pass",
+			Explanation:  "no response tool calls recorded",
+		}
+	}
+
+	declared := map[string]struct{}{}
+	for _, tool := range parsed.RequestTools {
+		name := strings.TrimSpace(strings.ToLower(tool.Name))
+		if name != "" {
+			declared[name] = struct{}{}
+		}
+	}
+	if len(declared) == 0 {
+		return Result{
+			EvaluatorKey: "tool_calls_declared",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  "response contains tool calls but request declared no tools",
+		}
+	}
+
+	var missing []string
+	for _, call := range parsed.ResponseToolCalls {
+		name := strings.TrimSpace(call.Function.Name)
+		if name == "" {
+			missing = append(missing, "<unnamed>")
+			continue
+		}
+		if _, ok := declared[strings.ToLower(name)]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return Result{
+			EvaluatorKey: "tool_calls_declared",
+			Value:        1,
+			Status:       "pass",
+			Label:        "pass",
+			Explanation:  fmt.Sprintf("%d response tool calls matched declared tools", len(parsed.ResponseToolCalls)),
+		}
+	}
+	sort.Strings(missing)
+	return Result{
+		EvaluatorKey: "tool_calls_declared",
+		Value:        0,
+		Status:       "fail",
+		Label:        "fail",
+		Explanation:  fmt.Sprintf("response tool calls missing request declarations: %s", strings.Join(dedupeAdjacentStrings(missing), ", ")),
+	}
+}
+
+func dedupeAdjacentStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if len(out) > 0 && out[len(out)-1] == value {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
