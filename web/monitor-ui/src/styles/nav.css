@@ -4,6 +4,15 @@
   gap: 10px;
   flex-wrap: wrap;
   margin-bottom: 18px;
+  position: sticky;
+  top: 112px;
+  z-index: 7;
+  padding: 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(34, 40, 49, 0.08);
+  background: rgba(255, 252, 245, 0.8);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(10px);
 }
 
 .nav-chip {
@@ -20,10 +29,31 @@
   font-size: 0.84rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.nav-chip:hover {
+  background: rgba(255, 255, 255, 0.84);
+  border-color: var(--line-strong);
+  color: var(--text);
+  transform: translateY(-1px);
 }
 
 .nav-chip-active {
   background: var(--text);
   border-color: var(--text);
   color: #fff7eb;
+}
+
+@media (max-width: 1100px) {
+  .primary-nav {
+    top: 92px;
+  }
+}
+
+@media (max-width: 720px) {
+  .primary-nav {
+    top: 76px;
+    overflow: auto;
+  }
 }
