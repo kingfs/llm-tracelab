@@ -248,6 +248,11 @@ Current MCP tool surface includes:
 - `append_dataset_examples`
 - `list_datasets`
 - `get_dataset`
+- `run_eval_on_dataset`
+- `run_eval_on_traces`
+- `list_eval_runs`
+- `get_eval_run`
+- `list_scores`
 
 Important constraint:
 

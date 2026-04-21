@@ -195,6 +195,11 @@ go run ./cmd/server mcp -c config/config.yaml
 - `append_dataset_examples`
 - `list_datasets`
 - `get_dataset`
+- `run_eval_on_dataset`
+- `run_eval_on_traces`
+- `list_eval_runs`
+- `get_eval_run`
+- `list_scores`
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 

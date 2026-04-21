@@ -90,8 +90,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 14 {
-		t.Fatalf("len(tools.Tools) = %d, want 14", len(tools.Tools))
+	if len(tools.Tools) != 19 {
+		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -271,6 +271,57 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	examples := gotPayload["examples"].([]any)
 	if len(examples) != 2 {
 		t.Fatalf("len(get_dataset.examples) = %d, want 2", len(examples))
+	}
+
+	evalRunRes, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "run_eval_on_dataset",
+		Arguments: map[string]any{"dataset_id": datasetID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(run_eval_on_dataset) error = %v", err)
+	}
+	evalRunPayload := evalRunRes.StructuredContent.(map[string]any)
+	run := evalRunPayload["run"].(map[string]any)
+	evalRunID := run["id"].(string)
+	if got := int(run["trace_count"].(float64)); got != 2 {
+		t.Fatalf("run_eval_on_dataset.trace_count = %d, want 2", got)
+	}
+	if got := len(evalRunPayload["scores"].([]any)); got != 6 {
+		t.Fatalf("len(run_eval_on_dataset.scores) = %d, want 6", got)
+	}
+
+	listedRuns, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_eval_runs",
+		Arguments: map[string]any{"limit": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_eval_runs) error = %v", err)
+	}
+	if got := len(listedRuns.StructuredContent.(map[string]any)["items"].([]any)); got != 1 {
+		t.Fatalf("len(list_eval_runs.items) = %d, want 1", got)
+	}
+
+	gotRun, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_eval_run",
+		Arguments: map[string]any{"eval_run_id": evalRunID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(get_eval_run) error = %v", err)
+	}
+	gotRunPayload := gotRun.StructuredContent.(map[string]any)
+	if got := len(gotRunPayload["scores"].([]any)); got != 6 {
+		t.Fatalf("len(get_eval_run.scores) = %d, want 6", got)
+	}
+
+	listedScores, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_scores",
+		Arguments: map[string]any{"eval_run_id": evalRunID, "limit": 20},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_scores) error = %v", err)
+	}
+	if got := len(listedScores.StructuredContent.(map[string]any)["items"].([]any)); got != 6 {
+		t.Fatalf("len(list_scores.items) = %d, want 6", got)
 	}
 }
 

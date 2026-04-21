@@ -162,6 +162,50 @@ List curated local datasets.
 
 Return one dataset and its ordered examples.
 
+### `run_eval_on_dataset`
+
+Run the deterministic baseline evaluator set on one dataset.
+
+Input:
+
+- `dataset_id`
+
+### `run_eval_on_traces`
+
+Run the deterministic baseline evaluator set on explicit trace IDs.
+
+Input:
+
+- `trace_ids`
+
+### `list_eval_runs`
+
+List recent evaluation runs.
+
+Input:
+
+- `limit`
+
+### `get_eval_run`
+
+Return one evaluation run and its recorded scores.
+
+Input:
+
+- `eval_run_id`
+
+### `list_scores`
+
+List recorded scores with optional filters.
+
+Inputs:
+
+- `trace_id`
+- `session_id`
+- `dataset_id`
+- `eval_run_id`
+- `limit`
+
 ## Design Notes
 
 The MCP server intentionally reuses existing monitor JSON APIs in-process rather than adding a parallel query stack.
@@ -180,3 +224,15 @@ The next MCP-focused step should be:
 1. preserve the current read-only tools
 2. use replay-backed tools as the bridge into dataset curation
 3. add score and eval layers only after dataset workflows prove useful
+
+## Current Evaluator Set
+
+Current deterministic evaluator set:
+
+- `http_status_2xx`
+- `no_recorded_error`
+- `response_has_body`
+
+This set is intentionally objective and cheap.
+
+It is not intended to replace human judgment or model-graded quality review.

@@ -83,6 +83,11 @@ Stable API surface:
 - MCP `append_dataset_examples`
 - MCP `list_datasets`
 - MCP `get_dataset`
+- MCP `run_eval_on_dataset`
+- MCP `run_eval_on_traces`
+- MCP `list_eval_runs`
+- MCP `get_eval_run`
+- MCP `list_scores`
 
 Stable UI perspectives:
 

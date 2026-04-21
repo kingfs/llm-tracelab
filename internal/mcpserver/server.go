@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/evals"
 	"github.com/kingfs/llm-tracelab/internal/monitor"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -106,6 +107,30 @@ type appendDatasetExamplesInput struct {
 
 type getDatasetInput struct {
 	DatasetID string `json:"dataset_id" jsonschema:"dataset identifier"`
+}
+
+type runEvalOnDatasetInput struct {
+	DatasetID string `json:"dataset_id" jsonschema:"dataset identifier"`
+}
+
+type runEvalOnTracesInput struct {
+	TraceIDs []string `json:"trace_ids" jsonschema:"trace identifiers to evaluate"`
+}
+
+type listEvalRunsInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"maximum runs to return, default 20"`
+}
+
+type getEvalRunInput struct {
+	EvalRunID string `json:"eval_run_id" jsonschema:"evaluation run identifier"`
+}
+
+type listScoresInput struct {
+	TraceID   string `json:"trace_id,omitempty" jsonschema:"optional trace filter"`
+	SessionID string `json:"session_id,omitempty" jsonschema:"optional session filter"`
+	DatasetID string `json:"dataset_id,omitempty" jsonschema:"optional dataset filter"`
+	EvalRunID string `json:"eval_run_id,omitempty" jsonschema:"optional eval run filter"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"maximum scores to return, default 200"`
 }
 
 type traceListOutput struct {
@@ -217,6 +242,55 @@ type getDatasetOutput struct {
 	RefreshedAt time.Time        `json:"refreshed_at"`
 }
 
+type scoreView struct {
+	ID           string    `json:"id"`
+	TraceID      string    `json:"trace_id"`
+	SessionID    string    `json:"session_id,omitempty"`
+	DatasetID    string    `json:"dataset_id,omitempty"`
+	EvalRunID    string    `json:"eval_run_id,omitempty"`
+	EvaluatorKey string    `json:"evaluator_key"`
+	Value        float64   `json:"value"`
+	Status       string    `json:"status"`
+	Label        string    `json:"label"`
+	Explanation  string    `json:"explanation"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type evalRunView struct {
+	ID           string    `json:"id"`
+	DatasetID    string    `json:"dataset_id,omitempty"`
+	SourceType   string    `json:"source_type,omitempty"`
+	SourceID     string    `json:"source_id,omitempty"`
+	EvaluatorSet string    `json:"evaluator_set"`
+	CreatedAt    time.Time `json:"created_at"`
+	CompletedAt  time.Time `json:"completed_at"`
+	TraceCount   int       `json:"trace_count"`
+	ScoreCount   int       `json:"score_count"`
+	PassCount    int       `json:"pass_count"`
+	FailCount    int       `json:"fail_count"`
+}
+
+type runEvalOutput struct {
+	Run    evalRunView `json:"run"`
+	Scores []scoreView `json:"scores"`
+}
+
+type listEvalRunsOutput struct {
+	Items       []evalRunView `json:"items"`
+	RefreshedAt time.Time     `json:"refreshed_at"`
+}
+
+type getEvalRunOutput struct {
+	Run         evalRunView `json:"run"`
+	Scores      []scoreView `json:"scores"`
+	RefreshedAt time.Time   `json:"refreshed_at"`
+}
+
+type listScoresOutput struct {
+	Items       []scoreView `json:"items"`
+	RefreshedAt time.Time   `json:"refreshed_at"`
+}
+
 type serverAPI struct {
 	handler http.Handler
 	store   *store.Store
@@ -293,6 +367,26 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "get_dataset",
 		Description: "Get one dataset and its ordered examples.",
 	}, api.getDataset)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "run_eval_on_dataset",
+		Description: "Run the baseline deterministic evaluator set on one dataset.",
+	}, api.runEvalOnDataset)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "run_eval_on_traces",
+		Description: "Run the baseline deterministic evaluator set on explicit trace IDs.",
+	}, api.runEvalOnTraces)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_eval_runs",
+		Description: "List recent evaluation runs.",
+	}, api.listEvalRuns)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_eval_run",
+		Description: "Get one evaluation run and its recorded scores.",
+	}, api.getEvalRun)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_scores",
+		Description: "List recorded scores with optional trace/session/dataset/eval_run filters.",
+	}, api.listScores)
 
 	return server
 }
@@ -632,6 +726,101 @@ func (a *serverAPI) getDataset(ctx context.Context, req *mcp.CallToolRequest, in
 	return nil, out, nil
 }
 
+func (a *serverAPI) runEvalOnDataset(ctx context.Context, req *mcp.CallToolRequest, in *runEvalOnDatasetInput) (*mcp.CallToolResult, *runEvalOutput, error) {
+	datasetID := strings.TrimSpace(in.DatasetID)
+	if datasetID == "" {
+		return nil, nil, fmt.Errorf("dataset_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	examples, err := a.store.GetDatasetExamples(datasetID)
+	if err != nil {
+		return nil, nil, err
+	}
+	entries := make([]store.LogEntry, 0, len(examples))
+	for _, example := range examples {
+		entries = append(entries, example.Trace)
+	}
+	return a.runEval(entries, datasetID, "dataset", datasetID)
+}
+
+func (a *serverAPI) runEvalOnTraces(ctx context.Context, req *mcp.CallToolRequest, in *runEvalOnTracesInput) (*mcp.CallToolResult, *runEvalOutput, error) {
+	if len(in.TraceIDs) == 0 {
+		return nil, nil, fmt.Errorf("trace_ids is required")
+	}
+	entries := make([]store.LogEntry, 0, len(in.TraceIDs))
+	for _, traceID := range dedupeStrings(in.TraceIDs) {
+		entry, err := a.lookupTrace(traceID)
+		if err != nil {
+			return nil, nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return a.runEval(entries, "", "trace_list", "")
+}
+
+func (a *serverAPI) listEvalRuns(ctx context.Context, req *mcp.CallToolRequest, in *listEvalRunsInput) (*mcp.CallToolResult, *listEvalRunsOutput, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	records, err := a.store.ListEvalRuns(in.Limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &listEvalRunsOutput{RefreshedAt: time.Now().UTC()}
+	for _, record := range records {
+		out.Items = append(out.Items, toEvalRunView(record))
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) getEvalRun(ctx context.Context, req *mcp.CallToolRequest, in *getEvalRunInput) (*mcp.CallToolResult, *getEvalRunOutput, error) {
+	evalRunID := strings.TrimSpace(in.EvalRunID)
+	if evalRunID == "" {
+		return nil, nil, fmt.Errorf("eval_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	run, err := a.store.GetEvalRun(evalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	scores, err := a.store.ListScores(store.ScoreFilter{EvalRunID: evalRunID}, 1000)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &getEvalRunOutput{
+		Run:         toEvalRunView(run),
+		RefreshedAt: time.Now().UTC(),
+	}
+	for _, score := range scores {
+		out.Scores = append(out.Scores, toScoreView(score))
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) listScores(ctx context.Context, req *mcp.CallToolRequest, in *listScoresInput) (*mcp.CallToolResult, *listScoresOutput, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	scores, err := a.store.ListScores(store.ScoreFilter{
+		TraceID:   in.TraceID,
+		SessionID: in.SessionID,
+		DatasetID: in.DatasetID,
+		EvalRunID: in.EvalRunID,
+	}, in.Limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &listScoresOutput{RefreshedAt: time.Now().UTC()}
+	for _, score := range scores {
+		out.Items = append(out.Items, toScoreView(score))
+	}
+	return nil, out, nil
+}
+
 func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, out interface{}) error {
 	target := path
 	if encoded := query.Encode(); encoded != "" {
@@ -704,6 +893,58 @@ func (a *serverAPI) createDataset(name string, description string) (store.Datase
 	return a.store.CreateDataset(name, description)
 }
 
+func (a *serverAPI) runEval(entries []store.LogEntry, datasetID string, sourceType string, sourceID string) (*mcp.CallToolResult, *runEvalOutput, error) {
+	if len(entries) == 0 {
+		return nil, nil, fmt.Errorf("no traces to evaluate")
+	}
+	run, err := a.store.CreateEvalRun(datasetID, sourceType, sourceID, evals.BaselineEvaluatorSet, len(entries))
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &runEvalOutput{Run: toEvalRunView(run)}
+	scoreCount := 0
+	passCount := 0
+	failCount := 0
+	for _, entry := range entries {
+		summary, err := replay.ReplayFile(entry.LogPath, replay.SummaryOptions{})
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, result := range evals.EvaluateBaseline(entry, summary) {
+			score, err := a.store.AddScore(store.ScoreRecord{
+				TraceID:      entry.ID,
+				SessionID:    entry.SessionID,
+				DatasetID:    datasetID,
+				EvalRunID:    run.ID,
+				EvaluatorKey: result.EvaluatorKey,
+				Value:        result.Value,
+				Status:       result.Status,
+				Label:        result.Label,
+				Explanation:  result.Explanation,
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			out.Scores = append(out.Scores, toScoreView(score))
+			scoreCount++
+			if score.Status == "pass" {
+				passCount++
+			} else {
+				failCount++
+			}
+		}
+	}
+	if err := a.store.FinalizeEvalRun(run.ID, scoreCount, passCount, failCount); err != nil {
+		return nil, nil, err
+	}
+	updated, err := a.store.GetEvalRun(run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	out.Run = toEvalRunView(updated)
+	return nil, out, nil
+}
+
 func normalizePage(page int) int {
 	if page <= 0 {
 		return defaultPage
@@ -754,4 +995,53 @@ func toDatasetSummary(record store.DatasetRecord) datasetSummary {
 		UpdatedAt:    record.UpdatedAt,
 		ExampleCount: record.ExampleCount,
 	}
+}
+
+func toEvalRunView(record store.EvalRunRecord) evalRunView {
+	return evalRunView{
+		ID:           record.ID,
+		DatasetID:    record.DatasetID,
+		SourceType:   record.SourceType,
+		SourceID:     record.SourceID,
+		EvaluatorSet: record.EvaluatorSet,
+		CreatedAt:    record.CreatedAt,
+		CompletedAt:  record.CompletedAt,
+		TraceCount:   record.TraceCount,
+		ScoreCount:   record.ScoreCount,
+		PassCount:    record.PassCount,
+		FailCount:    record.FailCount,
+	}
+}
+
+func toScoreView(record store.ScoreRecord) scoreView {
+	return scoreView{
+		ID:           record.ID,
+		TraceID:      record.TraceID,
+		SessionID:    record.SessionID,
+		DatasetID:    record.DatasetID,
+		EvalRunID:    record.EvalRunID,
+		EvaluatorKey: record.EvaluatorKey,
+		Value:        record.Value,
+		Status:       record.Status,
+		Label:        record.Label,
+		Explanation:  record.Explanation,
+		CreatedAt:    record.CreatedAt,
+	}
+}
+
+func dedupeStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return out
 }

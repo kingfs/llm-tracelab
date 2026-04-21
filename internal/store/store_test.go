@@ -362,6 +362,103 @@ func TestDatasetRoundTripAndDedupAppend(t *testing.T) {
 	}
 }
 
+func TestEvalRunAndScoresRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	path := filepath.Join(dir, "trace.http")
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "req-score",
+			Time:          time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
+			Model:         "gpt-5.1-codex",
+			Provider:      "openai_compatible",
+			Operation:     "responses.create",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    100,
+			TTFTMs:        10,
+			ClientIP:      "127.0.0.1",
+			ContentLength: 4,
+		},
+	}
+	if err := st.UpsertLog(path, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID("req-score")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+
+	dataset, err := st.CreateDataset("eval-dataset", "")
+	if err != nil {
+		t.Fatalf("CreateDataset() error = %v", err)
+	}
+	run, err := st.CreateEvalRun(dataset.ID, "dataset", dataset.ID, "baseline_v1", 1)
+	if err != nil {
+		t.Fatalf("CreateEvalRun() error = %v", err)
+	}
+	score, err := st.AddScore(ScoreRecord{
+		TraceID:      entry.ID,
+		SessionID:    entry.SessionID,
+		DatasetID:    dataset.ID,
+		EvalRunID:    run.ID,
+		EvaluatorKey: "http_status_2xx",
+		Value:        1,
+		Status:       "pass",
+		Label:        "pass",
+		Explanation:  "ok",
+	})
+	if err != nil {
+		t.Fatalf("AddScore() error = %v", err)
+	}
+	if err := st.FinalizeEvalRun(run.ID, 1, 1, 0); err != nil {
+		t.Fatalf("FinalizeEvalRun() error = %v", err)
+	}
+
+	gotRun, err := st.GetEvalRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetEvalRun() error = %v", err)
+	}
+	if gotRun.ScoreCount != 1 || gotRun.PassCount != 1 || gotRun.FailCount != 0 {
+		t.Fatalf("GetEvalRun() = %#v, want score/pass/fail = 1/1/0", gotRun)
+	}
+
+	runs, err := st.ListEvalRuns(10)
+	if err != nil {
+		t.Fatalf("ListEvalRuns() error = %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("ListEvalRuns() = %#v, want run %q", runs, run.ID)
+	}
+
+	scores, err := st.ListScores(ScoreFilter{EvalRunID: run.ID}, 10)
+	if err != nil {
+		t.Fatalf("ListScores(eval_run) error = %v", err)
+	}
+	if len(scores) != 1 || scores[0].ID != score.ID {
+		t.Fatalf("ListScores(eval_run) = %#v, want score %q", scores, score.ID)
+	}
+
+	scores, err = st.ListScores(ScoreFilter{DatasetID: dataset.ID, TraceID: entry.ID}, 10)
+	if err != nil {
+		t.Fatalf("ListScores(dataset+trace) error = %v", err)
+	}
+	if len(scores) != 1 || scores[0].EvaluatorKey != "http_status_2xx" {
+		t.Fatalf("ListScores(dataset+trace) = %#v, want http_status_2xx", scores)
+	}
+}
+
 func TestListSessionPageAggregatesBySession(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

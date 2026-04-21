@@ -193,6 +193,41 @@ type DatasetExampleRecord struct {
 	Trace      LogEntry
 }
 
+type EvalRunRecord struct {
+	ID           string
+	DatasetID    string
+	SourceType   string
+	SourceID     string
+	EvaluatorSet string
+	CreatedAt    time.Time
+	CompletedAt  time.Time
+	TraceCount   int
+	ScoreCount   int
+	PassCount    int
+	FailCount    int
+}
+
+type ScoreRecord struct {
+	ID           string
+	TraceID      string
+	SessionID    string
+	DatasetID    string
+	EvalRunID    string
+	EvaluatorKey string
+	Value        float64
+	Status       string
+	Label        string
+	Explanation  string
+	CreatedAt    time.Time
+}
+
+type ScoreFilter struct {
+	TraceID   string
+	SessionID string
+	DatasetID string
+	EvalRunID string
+}
+
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
@@ -958,6 +993,36 @@ func (s *Store) initSchema() error {
 			PRIMARY KEY (dataset_id, trace_id)
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC);`,
+		`CREATE TABLE IF NOT EXISTS eval_runs (
+			id TEXT PRIMARY KEY,
+			dataset_id TEXT NOT NULL DEFAULT '',
+			source_type TEXT NOT NULL DEFAULT '',
+			source_id TEXT NOT NULL DEFAULT '',
+			evaluator_set TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			completed_at TEXT NOT NULL,
+			trace_count INTEGER NOT NULL DEFAULT 0,
+			score_count INTEGER NOT NULL DEFAULT 0,
+			pass_count INTEGER NOT NULL DEFAULT 0,
+			fail_count INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE TABLE IF NOT EXISTS scores (
+			id TEXT PRIMARY KEY,
+			trace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL DEFAULT '',
+			dataset_id TEXT NOT NULL DEFAULT '',
+			eval_run_id TEXT NOT NULL DEFAULT '',
+			evaluator_key TEXT NOT NULL,
+			value REAL NOT NULL,
+			status TEXT NOT NULL,
+			label TEXT NOT NULL DEFAULT '',
+			explanation TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_scores_trace_id ON scores(trace_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_scores_session_id ON scores(session_id, created_at DESC) WHERE session_id <> '';`,
+		`CREATE INDEX IF NOT EXISTS idx_scores_dataset_id ON scores(dataset_id, created_at DESC) WHERE dataset_id <> '';`,
+		`CREATE INDEX IF NOT EXISTS idx_scores_eval_run_id ON scores(eval_run_id, created_at DESC) WHERE eval_run_id <> '';`,
 	}
 
 	for _, stmt := range stmts {
@@ -1364,6 +1429,171 @@ func (s *Store) GetDatasetExamples(datasetID string) ([]DatasetExampleRecord, er
 	var out []DatasetExampleRecord
 	for rows.Next() {
 		record, err := scanDatasetExampleRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) CreateEvalRun(datasetID string, sourceType string, sourceID string, evaluatorSet string, traceCount int) (EvalRunRecord, error) {
+	evaluatorSet = strings.TrimSpace(evaluatorSet)
+	if evaluatorSet == "" {
+		return EvalRunRecord{}, fmt.Errorf("evaluator set is required")
+	}
+	now := time.Now().UTC()
+	record := EvalRunRecord{
+		ID:           uuid.NewString(),
+		DatasetID:    strings.TrimSpace(datasetID),
+		SourceType:   strings.TrimSpace(sourceType),
+		SourceID:     strings.TrimSpace(sourceID),
+		EvaluatorSet: evaluatorSet,
+		CreatedAt:    now,
+		CompletedAt:  now,
+		TraceCount:   traceCount,
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO eval_runs (
+			id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at,
+			trace_count, score_count, pass_count, fail_count
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
+	`,
+		record.ID,
+		record.DatasetID,
+		record.SourceType,
+		record.SourceID,
+		record.EvaluatorSet,
+		record.CreatedAt.Format(timeLayout),
+		record.CompletedAt.Format(timeLayout),
+		record.TraceCount,
+	)
+	if err != nil {
+		return EvalRunRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *Store) FinalizeEvalRun(evalRunID string, scoreCount int, passCount int, failCount int) error {
+	now := time.Now().UTC().Format(timeLayout)
+	_, err := s.db.Exec(`
+		UPDATE eval_runs
+		SET completed_at = ?, score_count = ?, pass_count = ?, fail_count = ?
+		WHERE id = ?
+	`, now, scoreCount, passCount, failCount, evalRunID)
+	return err
+}
+
+func (s *Store) AddScore(record ScoreRecord) (ScoreRecord, error) {
+	if strings.TrimSpace(record.TraceID) == "" {
+		return ScoreRecord{}, fmt.Errorf("trace id is required")
+	}
+	if strings.TrimSpace(record.EvaluatorKey) == "" {
+		return ScoreRecord{}, fmt.Errorf("evaluator key is required")
+	}
+	now := time.Now().UTC()
+	if record.ID == "" {
+		record.ID = uuid.NewString()
+	}
+	record.CreatedAt = now
+	_, err := s.db.Exec(`
+		INSERT INTO scores (
+			id, trace_id, session_id, dataset_id, eval_run_id, evaluator_key, value, status, label, explanation, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		record.ID,
+		record.TraceID,
+		record.SessionID,
+		record.DatasetID,
+		record.EvalRunID,
+		record.EvaluatorKey,
+		record.Value,
+		record.Status,
+		record.Label,
+		record.Explanation,
+		record.CreatedAt.Format(timeLayout),
+	)
+	if err != nil {
+		return ScoreRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *Store) GetEvalRun(evalRunID string) (EvalRunRecord, error) {
+	row := s.db.QueryRow(`
+		SELECT id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at,
+		       trace_count, score_count, pass_count, fail_count
+		FROM eval_runs
+		WHERE id = ?
+	`, evalRunID)
+	return scanEvalRunRecord(row)
+}
+
+func (s *Store) ListEvalRuns(limit int) ([]EvalRunRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := s.db.Query(`
+		SELECT id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at,
+		       trace_count, score_count, pass_count, fail_count
+		FROM eval_runs
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EvalRunRecord
+	for rows.Next() {
+		record, err := scanEvalRunRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListScores(filter ScoreFilter, limit int) ([]ScoreRecord, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	whereParts := []string{}
+	args := []any{}
+	if traceID := strings.TrimSpace(filter.TraceID); traceID != "" {
+		whereParts = append(whereParts, "trace_id = ?")
+		args = append(args, traceID)
+	}
+	if sessionID := strings.TrimSpace(filter.SessionID); sessionID != "" {
+		whereParts = append(whereParts, "session_id = ?")
+		args = append(args, sessionID)
+	}
+	if datasetID := strings.TrimSpace(filter.DatasetID); datasetID != "" {
+		whereParts = append(whereParts, "dataset_id = ?")
+		args = append(args, datasetID)
+	}
+	if evalRunID := strings.TrimSpace(filter.EvalRunID); evalRunID != "" {
+		whereParts = append(whereParts, "eval_run_id = ?")
+		args = append(args, evalRunID)
+	}
+	query := `
+		SELECT id, trace_id, session_id, dataset_id, eval_run_id, evaluator_key, value, status, label, explanation, created_at
+		FROM scores
+	`
+	if len(whereParts) > 0 {
+		query += " WHERE " + strings.Join(whereParts, " AND ")
+	}
+	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ScoreRecord
+	for rows.Next() {
+		record, err := scanScoreRecord(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -2142,6 +2372,71 @@ func scanDatasetExampleRecord(scanner interface {
 	record.Trace.Header.Layout.IsStream = isStream == 1
 	if cached > 0 {
 		record.Trace.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
+	}
+	return record, nil
+}
+
+func scanEvalRunRecord(scanner interface {
+	Scan(dest ...any) error
+}) (EvalRunRecord, error) {
+	var (
+		record      EvalRunRecord
+		createdAt   string
+		completedAt string
+		err         error
+	)
+	if err := scanner.Scan(
+		&record.ID,
+		&record.DatasetID,
+		&record.SourceType,
+		&record.SourceID,
+		&record.EvaluatorSet,
+		&createdAt,
+		&completedAt,
+		&record.TraceCount,
+		&record.ScoreCount,
+		&record.PassCount,
+		&record.FailCount,
+	); err != nil {
+		return EvalRunRecord{}, err
+	}
+	record.CreatedAt, err = timeParse(createdAt)
+	if err != nil {
+		return EvalRunRecord{}, err
+	}
+	record.CompletedAt, err = timeParse(completedAt)
+	if err != nil {
+		return EvalRunRecord{}, err
+	}
+	return record, nil
+}
+
+func scanScoreRecord(scanner interface {
+	Scan(dest ...any) error
+}) (ScoreRecord, error) {
+	var (
+		record    ScoreRecord
+		createdAt string
+		err       error
+	)
+	if err := scanner.Scan(
+		&record.ID,
+		&record.TraceID,
+		&record.SessionID,
+		&record.DatasetID,
+		&record.EvalRunID,
+		&record.EvaluatorKey,
+		&record.Value,
+		&record.Status,
+		&record.Label,
+		&record.Explanation,
+		&createdAt,
+	); err != nil {
+		return ScoreRecord{}, err
+	}
+	record.CreatedAt, err = timeParse(createdAt)
+	if err != nil {
+		return ScoreRecord{}, err
 	}
 	return record, nil
 }
