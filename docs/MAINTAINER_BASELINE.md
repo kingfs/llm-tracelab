@@ -72,29 +72,9 @@ Stable API surface:
 - MCP `list_traces`
 - MCP `get_trace`
 - MCP `list_sessions`
-- MCP `get_session`
 - MCP `list_upstreams`
-- MCP `get_upstream`
 - MCP `query_failures`
-- MCP `replay_trace`
-- MCP `replay_session`
-- MCP `create_dataset_from_traces`
-- MCP `create_dataset_from_session`
-- MCP `create_dataset_from_experiment_regressions`
-- MCP `append_dataset_examples`
-- MCP `list_datasets`
-- MCP `get_dataset`
-- MCP `run_eval_on_dataset`
-- MCP `run_eval_on_traces`
-- MCP `list_eval_runs`
-- MCP `get_eval_run`
-- MCP `list_scores`
-- MCP `compare_eval_runs`
-- MCP `create_experiment_from_eval_runs`
-- MCP `list_experiment_runs`
-- MCP `get_experiment_run`
-- MCP `summarize_experiment_regressions`
-- MCP `explain_experiment_regressions`
+- MCP `summarize_failure_clusters`
 
 Stable UI perspectives:
 
@@ -130,10 +110,8 @@ Current MCP baseline is intentionally narrow:
 
 - transport is streamable HTTP on the management server
 - implementation uses the official Go MCP SDK
-- tool surface is local-first and bounded, with both read tools and narrow additive mutation tools
+- tool surface is intentionally minimal and read-only for trace/session/upstream inspection and failure triage
 - MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
-- eval-run comparison is computed from stored scores
-- persisted experiments store linkage and aggregate summary, not duplicated score payloads
 - baseline evaluator keys and built-in threshold semantics should be treated as versioned contract surface once recorded scores depend on them
 - evaluator profile selection should stay explicit and additive; do not silently change the meaning of an existing profile name
 

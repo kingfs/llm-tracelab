@@ -569,17 +569,9 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Description: "List grouped sessions with pagination and optional provider/model/query filters.",
 	}, api.listSessions)
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_session",
-		Description: "Get one grouped session detail by session_id.",
-	}, api.getSession)
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_upstreams",
 		Description: "List upstream analytics with an optional time window and model filter.",
 	}, api.listUpstreams)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_upstream",
-		Description: "Get one upstream drilldown by upstream_id with an optional time window and model filter.",
-	}, api.getUpstream)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "query_failures",
 		Description: "Return failed traces from a paginated trace scan using the same filters as list_traces.",
@@ -588,86 +580,6 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "summarize_failure_clusters",
 		Description: "Summarize clustered failures from a filtered trace scan by reason, status, model, provider, endpoint, upstream, and top failed traces.",
 	}, api.summarizeFailureClusters)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "replay_trace",
-		Description: "Replay one recorded trace locally and return a structured HTTP response summary.",
-	}, api.replayTrace)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "replay_session",
-		Description: "Replay multiple traces from one session locally and return bounded response summaries.",
-	}, api.replaySession)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_dataset_from_traces",
-		Description: "Create a local dataset from a list of trace IDs.",
-	}, api.createDatasetFromTraces)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_dataset_from_session",
-		Description: "Create a local dataset from traces in one session.",
-	}, api.createDatasetFromSession)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "append_dataset_examples",
-		Description: "Append more trace IDs to an existing local dataset.",
-	}, api.appendDatasetExamples)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_dataset_from_experiment_regressions",
-		Description: "Create a local dataset from regressed traces in one persisted experiment run.",
-	}, api.createDatasetFromExperimentRegressions)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_datasets",
-		Description: "List local datasets curated from recorded traces.",
-	}, api.listDatasets)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_dataset",
-		Description: "Get one dataset and its ordered examples.",
-	}, api.getDataset)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "run_eval_on_dataset",
-		Description: "Run the baseline deterministic evaluator set on one dataset.",
-	}, api.runEvalOnDataset)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "run_eval_on_traces",
-		Description: "Run the baseline deterministic evaluator set on explicit trace IDs.",
-	}, api.runEvalOnTraces)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_evaluator_profiles",
-		Description: "List built-in deterministic evaluator profiles and their thresholds.",
-	}, api.listEvaluatorProfiles)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_eval_runs",
-		Description: "List recent evaluation runs.",
-	}, api.listEvalRuns)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_eval_run",
-		Description: "Get one evaluation run and its recorded scores.",
-	}, api.getEvalRun)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_scores",
-		Description: "List recorded scores with optional trace/session/dataset/eval_run filters.",
-	}, api.listScores)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "compare_eval_runs",
-		Description: "Compare two evaluation runs and return aggregate pass-rate deltas plus per-trace improvements and regressions.",
-	}, api.compareEvalRuns)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_experiment_from_eval_runs",
-		Description: "Persist a local experiment run that links one baseline eval run and one candidate eval run.",
-	}, api.createExperimentFromEvalRuns)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "list_experiment_runs",
-		Description: "List recent persisted experiment runs.",
-	}, api.listExperimentRuns)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_experiment_run",
-		Description: "Get one persisted experiment run plus its derived comparison detail.",
-	}, api.getExperimentRun)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "summarize_experiment_regressions",
-		Description: "Summarize persisted experiment regressions by evaluator, model, provider, endpoint, session, and top affected traces.",
-	}, api.summarizeExperimentRegressions)
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "explain_experiment_regressions",
-		Description: "Explain persisted experiment regressions with failure reasons, error clusters, upstreams, sessions, and affected traces.",
-	}, api.explainExperimentRegressions)
 
 	return server
 }

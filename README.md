@@ -188,30 +188,9 @@ go run ./cmd/server serve -c config/config.yaml
 - `list_traces`
 - `get_trace`
 - `list_sessions`
-- `get_session`
 - `list_upstreams`
-- `get_upstream`
 - `query_failures`
-- `replay_trace`
-- `replay_session`
-- `create_dataset_from_traces`
-- `create_dataset_from_session`
-- `create_dataset_from_experiment_regressions`
-- `append_dataset_examples`
-- `list_datasets`
-- `get_dataset`
-- `run_eval_on_dataset`
-- `run_eval_on_traces`
-- `list_evaluator_profiles`
-- `list_eval_runs`
-- `get_eval_run`
-- `list_scores`
-- `compare_eval_runs`
-- `create_experiment_from_eval_runs`
-- `list_experiment_runs`
-- `get_experiment_run`
-- `summarize_experiment_regressions`
-- `explain_experiment_regressions`
+- `summarize_failure_clusters`
 
 如果设置了 `mcp.auth_token`，客户端需要携带 `Authorization: Bearer <token>`。
 

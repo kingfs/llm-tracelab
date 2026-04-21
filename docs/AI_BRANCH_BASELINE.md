@@ -25,9 +25,9 @@ The goal of this branch is to make `llm-tracelab` directly usable by AI agents f
 
 The intended loop on this branch is:
 
-`trace/session query -> replay -> dataset curation -> deterministic eval -> baseline/candidate compare -> persisted experiment -> regression analysis -> regression dataset follow-up`
+`trace/session query -> failure query -> failure clustering -> trace drilldown`
 
-This is a bounded local evaluation loop.
+This is a bounded local inspection loop.
 It is not a general autonomous code-fixing system.
 
 ## Completed Work
@@ -56,19 +56,12 @@ The following branch slices are implemented and already committed:
 An AI agent can now do all of the following locally through MCP:
 
 1. inspect traces, sessions, upstreams, and failures
-2. replay one trace or one session without upstream network access
-3. create datasets from trace IDs, sessions, or experiment regressions
-4. run deterministic evaluator profiles on traces or datasets
-5. compare two eval runs
-6. persist a baseline/candidate experiment run
-7. summarize and explain regressions from a persisted experiment
-8. turn experiment regressions into a follow-up dataset
+2. query failed traces with the same filters as `list_traces`
+3. summarize clustered failures before drilling into trace detail
 
 This is enough to support:
 
 - local regression triage
-- deterministic candidate comparison
-- reusable regression-set curation
 - agent-guided debugging loops that stay inside the local project boundary
 
 ## Current MCP Surface
@@ -78,31 +71,9 @@ Implemented MCP tools on this branch:
 - `list_traces`
 - `get_trace`
 - `list_sessions`
-- `get_session`
 - `list_upstreams`
-- `get_upstream`
 - `query_failures`
 - `summarize_failure_clusters`
-- `replay_trace`
-- `replay_session`
-- `create_dataset_from_traces`
-- `create_dataset_from_session`
-- `create_dataset_from_experiment_regressions`
-- `append_dataset_examples`
-- `list_datasets`
-- `get_dataset`
-- `run_eval_on_dataset`
-- `run_eval_on_traces`
-- `list_evaluator_profiles`
-- `list_eval_runs`
-- `get_eval_run`
-- `list_scores`
-- `compare_eval_runs`
-- `create_experiment_from_eval_runs`
-- `list_experiment_runs`
-- `get_experiment_run`
-- `summarize_experiment_regressions`
-- `explain_experiment_regressions`
 
 Implementation constraints:
 
@@ -110,30 +81,6 @@ Implementation constraints:
 - implementation uses the official `github.com/modelcontextprotocol/go-sdk`
 - MCP remains a thin control plane over existing monitor/store behavior
 - MCP is not a new storage source of truth
-
-## Current Evaluator Baseline
-
-The current default evaluator profile is `baseline_v4`.
-
-Built-in profiles:
-
-- `baseline_v1`
-- `baseline_v2`
-- `baseline_v3`
-- `baseline_v4`
-
-Current deterministic evaluator coverage includes:
-
-- `http_status_2xx`
-- `no_recorded_error`
-- `response_has_body`
-- `ttft_le_2000ms`
-- `total_tokens_le_32000`
-- `tool_calls_declared`
-- `tool_call_arguments_json`
-
-The profile system is versioned on purpose.
-Do not silently change the meaning of an existing profile name once recorded scores depend on it.
 
 ## Storage And Design Invariants
 
@@ -160,7 +107,7 @@ This branch is intentionally not:
 - an OTel-first storage architecture
 - an automatic prompt optimizer
 
-If future work needs any of the above, it should build on the current local deterministic loop rather than bypass it.
+If future work needs any of the above, it should build on the current local inspection loop rather than bypass it.
 
 ## Recommended Next Work
 
