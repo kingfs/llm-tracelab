@@ -1,5 +1,5 @@
 import React, { startTransition, useEffect, useRef, useState } from "react";
-import { Link, Route, Routes, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
@@ -52,7 +52,10 @@ function useJSON(url, deps = []) {
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<TraceListPage />} />
+      <Route path="/" element={<Navigate to="/requests" replace />} />
+      <Route path="/requests" element={<RequestsPage />} />
+      <Route path="/sessions" element={<SessionsPage />} />
+      <Route path="/routing" element={<RoutingPage />} />
       <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
       <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
       <Route path="/traces/:traceID" element={<TraceDetailPage />} />
@@ -60,19 +63,30 @@ function App() {
   );
 }
 
-function TraceListPage() {
+function PrimaryNav() {
+  return (
+    <nav className="primary-nav" aria-label="Primary">
+      <NavLink to="/requests" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
+        Requests
+      </NavLink>
+      <NavLink to="/sessions" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
+        Sessions
+      </NavLink>
+      <NavLink to="/routing" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
+        Routing
+      </NavLink>
+    </nav>
+  );
+}
+
+function RequestsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const view = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
-  const upstreamWindow = normalizeUpstreamWindow(searchParams.get("upstream_window"));
-  const upstreamModel = searchParams.get("upstream_model") || "";
   const [refreshTick, setRefreshTick] = useState(0);
-  const endpoint = view === "sessions" ? "/api/sessions" : "/api/traces";
   const [filters, setFilters] = useState({ query, provider, model });
-  const [upstreamFilters, setUpstreamFilters] = useState({ model: upstreamModel });
   const requestParams = new URLSearchParams({
     page: String(page),
     page_size: String(PAGE_SIZE),
@@ -86,13 +100,7 @@ function TraceListPage() {
   if (model) {
     requestParams.set("model", model);
   }
-  const { loading, data, error } = useJSON(`${endpoint}?${requestParams.toString()}`, [endpoint, page, query, provider, model, refreshTick]);
-  const upstreamParams = new URLSearchParams();
-  upstreamParams.set("window", upstreamWindow);
-  if (upstreamModel) {
-    upstreamParams.set("model", upstreamModel);
-  }
-  const upstreams = useJSON(`/api/upstreams?${upstreamParams.toString()}`, [refreshTick, upstreamWindow, upstreamModel]);
+  const { loading, data, error } = useJSON(`/api/traces?${requestParams.toString()}`, [page, query, provider, model, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -105,29 +113,16 @@ function TraceListPage() {
     setFilters({ query, provider, model });
   }, [query, provider, model]);
 
-  useEffect(() => {
-    setUpstreamFilters({ model: upstreamModel });
-  }, [upstreamModel]);
-
   const items = data?.items ?? [];
   const stats = data?.stats ?? {};
-  const sessionStats = summarizeSessionItems(items);
-  const setView = (nextView) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("view", nextView);
-    next.set("page", "1");
-    setSearchParams(next);
-  };
   const goToPage = (nextPage) => {
     const next = new URLSearchParams(searchParams);
-    next.set("view", view);
     next.set("page", String(nextPage));
     setSearchParams(next);
   };
   const applyFilters = (event) => {
     event.preventDefault();
     const next = new URLSearchParams(searchParams);
-    next.set("view", view);
     next.set("page", "1");
     setOrDeleteParam(next, "q", filters.query);
     setOrDeleteParam(next, "provider", filters.provider);
@@ -137,22 +132,10 @@ function TraceListPage() {
   const resetFilters = () => {
     setFilters({ query: "", provider: "", model: "" });
     const next = new URLSearchParams(searchParams);
-    next.set("view", view);
     next.set("page", "1");
     next.delete("q");
     next.delete("provider");
     next.delete("model");
-    setSearchParams(next);
-  };
-  const setUpstreamWindow = (nextWindow) => {
-    const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "upstream_window", nextWindow === "24h" ? "" : nextWindow);
-    setSearchParams(next);
-  };
-  const applyUpstreamModel = (event) => {
-    event.preventDefault();
-    const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "upstream_model", upstreamFilters.model);
     setSearchParams(next);
   };
 
@@ -161,101 +144,31 @@ function TraceListPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Local First LLM Replay Proxy</p>
-          <h1>Trace Monitor</h1>
+          <h1>Requests</h1>
         </div>
         <div className="topbar-meta">
           <span className="badge badge-live">refresh / 60s</span>
           <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
+      <PrimaryNav />
 
       <section className="hero-grid">
-        {view === "sessions" ? (
-          <>
-            <StatCard label="Sessions" value={sessionStats.totalSessions} />
-            <StatCard label="Requests" value={sessionStats.totalRequests} />
-            <StatCard label="Tokens" value={sessionStats.totalTokens} accent="accent-gold" />
-            <StatCard label="Avg Success" value={`${sessionStats.avgSuccessRate.toFixed(1)}%`} accent="accent-green" />
-          </>
-        ) : (
-          <>
-            <StatCard label="Total" value={stats.total_request ?? 0} />
-            <StatCard label="Avg TTFT" value={`${stats.avg_ttft ?? 0} ms`} />
-            <StatCard label="Tokens" value={stats.total_tokens ?? 0} accent="accent-gold" />
-            <StatCard label="Success" value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
-          </>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <p className="eyebrow">Routing surface</p>
-            <h2>Active upstream targets</h2>
-          </div>
-          <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Upstream analytics window">
-              {["1h", "24h", "7d", "all"].map((window) => (
-                <button
-                  key={window}
-                  className={upstreamWindow === window ? "ghost-button active" : "ghost-button"}
-                  onClick={() => setUpstreamWindow(window)}
-                >
-                  {window}
-                </button>
-              ))}
-            </div>
-            <span className="badge">{upstreams.data?.refreshed_at ? formatTime(upstreams.data.refreshed_at) : "..."}</span>
-          </div>
-        </div>
-        <form className="filter-bar" onSubmit={applyUpstreamModel}>
-          <input
-            className="filter-input filter-input-wide"
-            type="search"
-            name="upstream_model"
-            placeholder="Filter upstream analytics by model"
-            value={upstreamFilters.model}
-            onChange={(event) => setUpstreamFilters({ model: event.target.value })}
-          />
-          <button className="ghost-button" type="submit">
-            Apply
-          </button>
-          <button className="ghost-button" type="button" onClick={() => {
-            setUpstreamFilters({ model: "" });
-            const next = new URLSearchParams(searchParams);
-            next.delete("upstream_model");
-            setSearchParams(next);
-          }}>
-            Reset
-          </button>
-        </form>
-        {upstreams.error ? <div className="empty-state error-box">{upstreams.error}</div> : null}
-        {upstreams.loading && !upstreams.data ? <div className="empty-state">Loading upstream targets...</div> : null}
-        {upstreams.data ? (
-          <UpstreamOverview
-            items={upstreams.data.items || []}
-            analyticsWindow={upstreams.data.window || upstreamWindow}
-            analyticsModel={upstreams.data.model || upstreamModel}
-            routingFailures={upstreams.data.routing_failures || {}}
-          />
-        ) : null}
+        <>
+          <StatCard label="Total" value={stats.total_request ?? 0} />
+          <StatCard label="Avg TTFT" value={`${stats.avg_ttft ?? 0} ms`} />
+          <StatCard label="Tokens" value={stats.total_tokens ?? 0} accent="accent-gold" />
+          <StatCard label="Success" value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
+        </>
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Recent traffic</p>
-            <h2>{view === "sessions" ? "Latest 50 sessions" : "Latest 50 traces"}</h2>
+            <h2>Latest 50 traces</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Monitor view">
-              <button className={view === "sessions" ? "ghost-button active" : "ghost-button"} onClick={() => setView("sessions")}>
-                Sessions
-              </button>
-              <button className={view === "requests" ? "ghost-button active" : "ghost-button"} onClick={() => setView("requests")}>
-                Requests
-              </button>
-            </div>
             <div className="pager">
               <button className="ghost-button" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
                 Previous
@@ -273,7 +186,7 @@ function TraceListPage() {
           <input
             className="filter-input filter-input-wide"
             type="search"
-            placeholder={view === "sessions" ? "Search session id, model, provider" : "Search trace id, session id, model"}
+            placeholder="Search trace id, session id, model"
             value={filters.query}
             onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
           />
@@ -300,9 +213,256 @@ function TraceListPage() {
         </form>
 
         {error ? <div className="empty-state error-box">{error}</div> : null}
-        {loading && !data ? <div className="empty-state">Loading {view}...</div> : null}
+        {loading && !data ? <div className="empty-state">Loading requests...</div> : null}
 
-        {view === "sessions" ? <SessionList items={items} /> : <RequestList items={items} fromView={view} />}
+        <RequestList items={items} fromView="requests" />
+      </section>
+    </div>
+  );
+}
+
+function SessionsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const query = searchParams.get("q") || "";
+  const provider = searchParams.get("provider") || "";
+  const model = searchParams.get("model") || "";
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [filters, setFilters] = useState({ query, provider, model });
+  const requestParams = new URLSearchParams({
+    page: String(page),
+    page_size: String(PAGE_SIZE),
+  });
+  if (query) {
+    requestParams.set("q", query);
+  }
+  if (provider) {
+    requestParams.set("provider", provider);
+  }
+  if (model) {
+    requestParams.set("model", model);
+  }
+  const { loading, data, error } = useJSON(`/api/sessions?${requestParams.toString()}`, [page, query, provider, model, refreshTick]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRefreshTick((tick) => tick + 1);
+    }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setFilters({ query, provider, model });
+  }, [query, provider, model]);
+
+  const items = data?.items ?? [];
+  const sessionStats = summarizeSessionItems(items);
+  const goToPage = (nextPage) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("page", String(nextPage));
+    setSearchParams(next);
+  };
+  const applyFilters = (event) => {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    next.set("page", "1");
+    setOrDeleteParam(next, "q", filters.query);
+    setOrDeleteParam(next, "provider", filters.provider);
+    setOrDeleteParam(next, "model", filters.model);
+    setSearchParams(next);
+  };
+  const resetFilters = () => {
+    setFilters({ query: "", provider: "", model: "" });
+    const next = new URLSearchParams(searchParams);
+    next.set("page", "1");
+    next.delete("q");
+    next.delete("provider");
+    next.delete("model");
+    setSearchParams(next);
+  };
+
+  return (
+    <div className="shell shell-list">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Local First LLM Replay Proxy</p>
+          <h1>Sessions</h1>
+        </div>
+        <div className="topbar-meta">
+          <span className="badge badge-live">refresh / 60s</span>
+          <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
+        </div>
+      </header>
+      <PrimaryNav />
+
+      <section className="hero-grid">
+        <StatCard label="Sessions" value={sessionStats.totalSessions} />
+        <StatCard label="Requests" value={sessionStats.totalRequests} />
+        <StatCard label="Tokens" value={sessionStats.totalTokens} accent="accent-gold" />
+        <StatCard label="Avg Success" value={`${sessionStats.avgSuccessRate.toFixed(1)}%`} accent="accent-green" />
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Recent sessions</p>
+            <h2>Latest 50 sessions</h2>
+          </div>
+          <div className="panel-head-actions">
+            <div className="pager">
+              <button className="ghost-button" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
+                Previous
+              </button>
+              <span className="pager-label">
+                {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
+              </span>
+              <button className="ghost-button" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+        <form className="filter-bar" onSubmit={applyFilters}>
+          <input
+            className="filter-input filter-input-wide"
+            type="search"
+            placeholder="Search session id, model, provider"
+            value={filters.query}
+            onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+          />
+          <input
+            className="filter-input"
+            type="text"
+            placeholder="provider"
+            value={filters.provider}
+            onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
+          />
+          <input
+            className="filter-input"
+            type="text"
+            placeholder="model"
+            value={filters.model}
+            onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
+          />
+          <button className="ghost-button" type="submit">
+            Apply
+          </button>
+          <button className="ghost-button" type="button" onClick={resetFilters}>
+            Reset
+          </button>
+        </form>
+
+        {error ? <div className="empty-state error-box">{error}</div> : null}
+        {loading && !data ? <div className="empty-state">Loading sessions...</div> : null}
+
+        <SessionList items={items} />
+      </section>
+    </div>
+  );
+}
+
+function RoutingPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const upstreamWindow = normalizeUpstreamWindow(searchParams.get("window"));
+  const upstreamModel = searchParams.get("model") || "";
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [filters, setFilters] = useState({ model: upstreamModel });
+  const upstreamParams = new URLSearchParams();
+  upstreamParams.set("window", upstreamWindow);
+  if (upstreamModel) {
+    upstreamParams.set("model", upstreamModel);
+  }
+  const upstreams = useJSON(`/api/upstreams?${upstreamParams.toString()}`, [refreshTick, upstreamWindow, upstreamModel]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setRefreshTick((tick) => tick + 1);
+    }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setFilters({ model: upstreamModel });
+  }, [upstreamModel]);
+
+  const setUpstreamWindow = (nextWindow) => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setSearchParams(next);
+  };
+  const applyFilters = (event) => {
+    event.preventDefault();
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "model", filters.model);
+    setSearchParams(next);
+  };
+  const resetFilters = () => {
+    setFilters({ model: "" });
+    const next = new URLSearchParams(searchParams);
+    next.delete("model");
+    setSearchParams(next);
+  };
+
+  return (
+    <div className="shell shell-list">
+      <header className="topbar">
+        <div>
+          <p className="eyebrow">Local First LLM Replay Proxy</p>
+          <h1>Routing</h1>
+        </div>
+        <div className="topbar-meta">
+          <span className="badge badge-live">refresh / 60s</span>
+          <span className="badge">{upstreams.data?.refreshed_at ? formatTime(upstreams.data.refreshed_at) : "..."}</span>
+        </div>
+      </header>
+      <PrimaryNav />
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Routing surface</p>
+            <h2>Active upstream targets</h2>
+          </div>
+          <div className="panel-head-actions">
+            <div className="view-toggle" role="tablist" aria-label="Upstream analytics window">
+              {["1h", "24h", "7d", "all"].map((window) => (
+                <button
+                  key={window}
+                  className={upstreamWindow === window ? "ghost-button active" : "ghost-button"}
+                  onClick={() => setUpstreamWindow(window)}
+                >
+                  {window}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <form className="filter-bar" onSubmit={applyFilters}>
+          <input
+            className="filter-input filter-input-wide"
+            type="search"
+            name="upstream_model"
+            placeholder="Filter upstream analytics by model"
+            value={filters.model}
+            onChange={(event) => setFilters({ model: event.target.value })}
+          />
+          <button className="ghost-button" type="submit">
+            Apply
+          </button>
+          <button className="ghost-button" type="button" onClick={resetFilters}>
+            Reset
+          </button>
+        </form>
+        {upstreams.error ? <div className="empty-state error-box">{upstreams.error}</div> : null}
+        {upstreams.loading && !upstreams.data ? <div className="empty-state">Loading upstream targets...</div> : null}
+        {upstreams.data ? (
+          <UpstreamOverview
+            items={upstreams.data.items || []}
+            analyticsWindow={upstreams.data.window || upstreamWindow}
+            analyticsModel={upstreams.data.model || upstreamModel}
+            routingFailures={upstreams.data.routing_failures || {}}
+          />
+        ) : null}
       </section>
     </div>
   );
@@ -663,7 +823,7 @@ function SessionDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/?view=sessions" title="Back to sessions" aria-label="Back to sessions">
+            <Link className="icon-button" to="/sessions" title="Back to sessions" aria-label="Back to sessions">
               <HomeIcon />
             </Link>
           </div>
@@ -884,7 +1044,7 @@ function UpstreamDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to={buildTraceListLink("requests", windowValue, modelValue)} title="Back to monitor" aria-label="Back to monitor">
+            <Link className="icon-button" to={buildRoutingLink(windowValue, modelValue)} title="Back to routing" aria-label="Back to routing">
               <HomeIcon />
             </Link>
           </div>
@@ -1203,7 +1363,7 @@ function TraceDetailPage() {
   const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
-  const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/?view=${fromView}`;
+  const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/${fromView}`;
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
     setOrDeleteParam(next, "tab", nextTab === "timeline" ? "" : nextTab);
@@ -2263,19 +2423,16 @@ function buildUpstreamLink(upstreamID, windowValue = "24h", modelValue = "") {
   return query ? `/upstreams/${encodeURIComponent(upstreamID)}?${query}` : `/upstreams/${encodeURIComponent(upstreamID)}`;
 }
 
-function buildTraceListLink(view = "requests", upstreamWindow = "24h", upstreamModel = "") {
+function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
   const params = new URLSearchParams();
-  if (view && view !== "requests") {
-    params.set("view", view);
-  }
   if (upstreamWindow && upstreamWindow !== "24h") {
-    params.set("upstream_window", upstreamWindow);
+    params.set("window", upstreamWindow);
   }
   if (upstreamModel) {
-    params.set("upstream_model", upstreamModel);
+    params.set("model", upstreamModel);
   }
   const query = params.toString();
-  return query ? `/?${query}` : "/";
+  return query ? `/routing?${query}` : "/routing";
 }
 
 function normalizeTraceTab(value = "") {

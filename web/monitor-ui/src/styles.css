@@ -59,6 +59,36 @@ a {
   margin-bottom: 24px;
 }
 
+.primary-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.nav-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.52);
+  color: var(--muted);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 0.84rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-chip-active {
+  background: var(--text);
+  border-color: var(--text);
+  color: #fff7eb;
+}
+
 .topbar h1,
 .panel-head h2 {
   margin: 0;
