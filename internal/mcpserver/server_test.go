@@ -78,6 +78,79 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("ReplaceUpstreamModels() error = %v", err)
 	}
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	successEntry, err := st.GetByRequestID("req-success")
+	if err != nil {
+		t.Fatalf("GetByRequestID(req-success) error = %v", err)
+	}
+	failureEntry, err := st.GetByRequestID("req-failure")
+	if err != nil {
+		t.Fatalf("GetByRequestID(req-failure) error = %v", err)
+	}
+
+	baselineRun, err := st.CreateEvalRun("", "trace_list", "", "baseline_v1", 2)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(baseline) error = %v", err)
+	}
+	candidateRun, err := st.CreateEvalRun("", "trace_list", "", "baseline_v1", 2)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(candidate) error = %v", err)
+	}
+	for _, score := range []store.ScoreRecord{
+		{
+			TraceID:      successEntry.ID,
+			SessionID:    successEntry.SessionID,
+			EvalRunID:    baselineRun.ID,
+			EvaluatorKey: "http_status_2xx",
+			Value:        1,
+			Status:       "pass",
+			Label:        "pass",
+			Explanation:  "baseline success",
+		},
+		{
+			TraceID:      failureEntry.ID,
+			SessionID:    failureEntry.SessionID,
+			EvalRunID:    baselineRun.ID,
+			EvaluatorKey: "http_status_2xx",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  "baseline failure",
+		},
+		{
+			TraceID:      successEntry.ID,
+			SessionID:    successEntry.SessionID,
+			EvalRunID:    candidateRun.ID,
+			EvaluatorKey: "http_status_2xx",
+			Value:        0,
+			Status:       "fail",
+			Label:        "fail",
+			Explanation:  "candidate regressed",
+		},
+		{
+			TraceID:      failureEntry.ID,
+			SessionID:    failureEntry.SessionID,
+			EvalRunID:    candidateRun.ID,
+			EvaluatorKey: "http_status_2xx",
+			Value:        1,
+			Status:       "pass",
+			Label:        "pass",
+			Explanation:  "candidate improved",
+		},
+	} {
+		if _, err := st.AddScore(score); err != nil {
+			t.Fatalf("AddScore() error = %v", err)
+		}
+	}
+	if err := st.FinalizeEvalRun(baselineRun.ID, 2, 1, 1); err != nil {
+		t.Fatalf("FinalizeEvalRun(baseline) error = %v", err)
+	}
+	if err := st.FinalizeEvalRun(candidateRun.ID, 2, 1, 1); err != nil {
+		t.Fatalf("FinalizeEvalRun(candidate) error = %v", err)
+	}
 
 	server := New(st, Options{})
 	session, err := connectClient(context.Background(), server)
@@ -90,8 +163,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 19 {
-		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
+	if len(tools.Tools) != 20 {
+		t.Fatalf("len(tools.Tools) = %d, want 20", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -297,8 +370,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool(list_eval_runs) error = %v", err)
 	}
-	if got := len(listedRuns.StructuredContent.(map[string]any)["items"].([]any)); got != 1 {
-		t.Fatalf("len(list_eval_runs.items) = %d, want 1", got)
+	if got := len(listedRuns.StructuredContent.(map[string]any)["items"].([]any)); got != 3 {
+		t.Fatalf("len(list_eval_runs.items) = %d, want 3", got)
 	}
 
 	gotRun, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -322,6 +395,38 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := len(listedScores.StructuredContent.(map[string]any)["items"].([]any)); got != 6 {
 		t.Fatalf("len(list_scores.items) = %d, want 6", got)
+	}
+
+	comparedRuns, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "compare_eval_runs",
+		Arguments: map[string]any{
+			"baseline_eval_run_id":  baselineRun.ID,
+			"candidate_eval_run_id": candidateRun.ID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(compare_eval_runs) error = %v", err)
+	}
+	comparePayload := comparedRuns.StructuredContent.(map[string]any)
+	if got := int(comparePayload["pass_rate_delta"].(float64)); got != 0 {
+		t.Fatalf("compare_eval_runs.pass_rate_delta = %d, want 0", got)
+	}
+	evaluators := comparePayload["evaluators"].([]any)
+	if len(evaluators) != 1 {
+		t.Fatalf("len(compare_eval_runs.evaluators) = %d, want 1", len(evaluators))
+	}
+	evaluator := evaluators[0].(map[string]any)
+	if got := int(evaluator["improvement_count"].(float64)); got != 1 {
+		t.Fatalf("compare_eval_runs.improvement_count = %d, want 1", got)
+	}
+	if got := int(evaluator["regression_count"].(float64)); got != 1 {
+		t.Fatalf("compare_eval_runs.regression_count = %d, want 1", got)
+	}
+	if got := len(comparePayload["improvements"].([]any)); got != 1 {
+		t.Fatalf("len(compare_eval_runs.improvements) = %d, want 1", got)
+	}
+	if got := len(comparePayload["regressions"].([]any)); got != 1 {
+		t.Fatalf("len(compare_eval_runs.regressions) = %d, want 1", got)
 	}
 }
 

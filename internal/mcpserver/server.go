@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -131,6 +132,11 @@ type listScoresInput struct {
 	DatasetID string `json:"dataset_id,omitempty" jsonschema:"optional dataset filter"`
 	EvalRunID string `json:"eval_run_id,omitempty" jsonschema:"optional eval run filter"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"maximum scores to return, default 200"`
+}
+
+type compareEvalRunsInput struct {
+	BaselineEvalRunID  string `json:"baseline_eval_run_id" jsonschema:"baseline evaluation run identifier"`
+	CandidateEvalRunID string `json:"candidate_eval_run_id" jsonschema:"candidate evaluation run identifier"`
 }
 
 type traceListOutput struct {
@@ -291,6 +297,61 @@ type listScoresOutput struct {
 	RefreshedAt time.Time   `json:"refreshed_at"`
 }
 
+type evalRunComparisonSummary struct {
+	ScoreCount   int     `json:"score_count"`
+	PassCount    int     `json:"pass_count"`
+	FailCount    int     `json:"fail_count"`
+	PassRate     float64 `json:"pass_rate"`
+	MatchedCount int     `json:"matched_count"`
+}
+
+type evaluatorComparison struct {
+	EvaluatorKey      string  `json:"evaluator_key"`
+	BaselineTotal     int     `json:"baseline_total"`
+	BaselinePass      int     `json:"baseline_pass"`
+	BaselinePassRate  float64 `json:"baseline_pass_rate"`
+	CandidateTotal    int     `json:"candidate_total"`
+	CandidatePass     int     `json:"candidate_pass"`
+	CandidatePassRate float64 `json:"candidate_pass_rate"`
+	PassRateDelta     float64 `json:"pass_rate_delta"`
+	MatchedCount      int     `json:"matched_count"`
+	ImprovementCount  int     `json:"improvement_count"`
+	RegressionCount   int     `json:"regression_count"`
+}
+
+type scoreDeltaView struct {
+	TraceID         string  `json:"trace_id"`
+	EvaluatorKey    string  `json:"evaluator_key"`
+	BaselineStatus  string  `json:"baseline_status"`
+	CandidateStatus string  `json:"candidate_status"`
+	BaselineValue   float64 `json:"baseline_value"`
+	CandidateValue  float64 `json:"candidate_value"`
+	ValueDelta      float64 `json:"value_delta"`
+}
+
+type compareEvalRunsOutput struct {
+	Baseline         evalRunView              `json:"baseline"`
+	Candidate        evalRunView              `json:"candidate"`
+	BaselineSummary  evalRunComparisonSummary `json:"baseline_summary"`
+	CandidateSummary evalRunComparisonSummary `json:"candidate_summary"`
+	PassRateDelta    float64                  `json:"pass_rate_delta"`
+	Evaluators       []evaluatorComparison    `json:"evaluators"`
+	Improvements     []scoreDeltaView         `json:"improvements"`
+	Regressions      []scoreDeltaView         `json:"regressions"`
+	RefreshedAt      time.Time                `json:"refreshed_at"`
+}
+
+type evaluatorAggregate struct {
+	EvaluatorKey     string
+	BaselineTotal    int
+	BaselinePass     int
+	CandidateTotal   int
+	CandidatePass    int
+	MatchedCount     int
+	ImprovementCount int
+	RegressionCount  int
+}
+
 type serverAPI struct {
 	handler http.Handler
 	store   *store.Store
@@ -387,6 +448,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "list_scores",
 		Description: "List recorded scores with optional trace/session/dataset/eval_run filters.",
 	}, api.listScores)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "compare_eval_runs",
+		Description: "Compare two evaluation runs and return aggregate pass-rate deltas plus per-trace improvements and regressions.",
+	}, api.compareEvalRuns)
 
 	return server
 }
@@ -821,6 +886,55 @@ func (a *serverAPI) listScores(ctx context.Context, req *mcp.CallToolRequest, in
 	return nil, out, nil
 }
 
+func (a *serverAPI) compareEvalRuns(ctx context.Context, req *mcp.CallToolRequest, in *compareEvalRunsInput) (*mcp.CallToolResult, *compareEvalRunsOutput, error) {
+	baselineEvalRunID := strings.TrimSpace(in.BaselineEvalRunID)
+	candidateEvalRunID := strings.TrimSpace(in.CandidateEvalRunID)
+	if baselineEvalRunID == "" {
+		return nil, nil, fmt.Errorf("baseline_eval_run_id is required")
+	}
+	if candidateEvalRunID == "" {
+		return nil, nil, fmt.Errorf("candidate_eval_run_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+
+	baselineRun, err := a.store.GetEvalRun(baselineEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	candidateRun, err := a.store.GetEvalRun(candidateEvalRunID)
+	if err != nil {
+		return nil, nil, err
+	}
+	baselineScores, err := a.store.ListScores(store.ScoreFilter{EvalRunID: baselineEvalRunID}, 5000)
+	if err != nil {
+		return nil, nil, err
+	}
+	candidateScores, err := a.store.ListScores(store.ScoreFilter{EvalRunID: candidateEvalRunID}, 5000)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	out := &compareEvalRunsOutput{
+		Baseline:         toEvalRunView(baselineRun),
+		Candidate:        toEvalRunView(candidateRun),
+		BaselineSummary:  buildEvalRunComparisonSummary(baselineScores),
+		CandidateSummary: buildEvalRunComparisonSummary(candidateScores),
+		RefreshedAt:      time.Now().UTC(),
+	}
+	out.PassRateDelta = out.CandidateSummary.PassRate - out.BaselineSummary.PassRate
+
+	evaluators, improvements, regressions := compareScoreSets(baselineScores, candidateScores)
+	out.Evaluators = evaluators
+	out.Improvements = improvements
+	out.Regressions = regressions
+	out.BaselineSummary.MatchedCount = matchedScoreCount(evaluators)
+	out.CandidateSummary.MatchedCount = out.BaselineSummary.MatchedCount
+
+	return nil, out, nil
+}
+
 func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, out interface{}) error {
 	target := path
 	if encoded := query.Encode(); encoded != "" {
@@ -1027,6 +1141,160 @@ func toScoreView(record store.ScoreRecord) scoreView {
 		Explanation:  record.Explanation,
 		CreatedAt:    record.CreatedAt,
 	}
+}
+
+func buildEvalRunComparisonSummary(scores []store.ScoreRecord) evalRunComparisonSummary {
+	summary := evalRunComparisonSummary{ScoreCount: len(scores)}
+	for _, score := range scores {
+		if isPassingStatus(score.Status) {
+			summary.PassCount++
+			continue
+		}
+		summary.FailCount++
+	}
+	summary.PassRate = percent(summary.PassCount, summary.ScoreCount)
+	return summary
+}
+
+func compareScoreSets(baseline []store.ScoreRecord, candidate []store.ScoreRecord) ([]evaluatorComparison, []scoreDeltaView, []scoreDeltaView) {
+	baselineByKey := make(map[string]store.ScoreRecord, len(baseline))
+	candidateByKey := make(map[string]store.ScoreRecord, len(candidate))
+	evaluatorMap := map[string]*evaluatorAggregate{}
+
+	for _, score := range baseline {
+		key := scoreComparisonKey(score)
+		baselineByKey[key] = score
+		aggregate := ensureEvaluatorAggregate(evaluatorMap, score.EvaluatorKey)
+		aggregate.BaselineTotal++
+		if isPassingStatus(score.Status) {
+			aggregate.BaselinePass++
+		}
+	}
+	for _, score := range candidate {
+		key := scoreComparisonKey(score)
+		candidateByKey[key] = score
+		aggregate := ensureEvaluatorAggregate(evaluatorMap, score.EvaluatorKey)
+		aggregate.CandidateTotal++
+		if isPassingStatus(score.Status) {
+			aggregate.CandidatePass++
+		}
+	}
+
+	var improvements []scoreDeltaView
+	var regressions []scoreDeltaView
+	for key, baselineScore := range baselineByKey {
+		candidateScore, ok := candidateByKey[key]
+		if !ok {
+			continue
+		}
+		aggregate := ensureEvaluatorAggregate(evaluatorMap, baselineScore.EvaluatorKey)
+		aggregate.MatchedCount++
+		delta := scoreDeltaView{
+			TraceID:         baselineScore.TraceID,
+			EvaluatorKey:    baselineScore.EvaluatorKey,
+			BaselineStatus:  baselineScore.Status,
+			CandidateStatus: candidateScore.Status,
+			BaselineValue:   baselineScore.Value,
+			CandidateValue:  candidateScore.Value,
+			ValueDelta:      candidateScore.Value - baselineScore.Value,
+		}
+		switch compareScoreOutcome(baselineScore, candidateScore) {
+		case 1:
+			aggregate.ImprovementCount++
+			improvements = append(improvements, delta)
+		case -1:
+			aggregate.RegressionCount++
+			regressions = append(regressions, delta)
+		}
+	}
+
+	keys := make([]string, 0, len(evaluatorMap))
+	for key := range evaluatorMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	out := make([]evaluatorComparison, 0, len(keys))
+	for _, key := range keys {
+		item := evaluatorMap[key]
+		out = append(out, evaluatorComparison{
+			EvaluatorKey:      item.EvaluatorKey,
+			BaselineTotal:     item.BaselineTotal,
+			BaselinePass:      item.BaselinePass,
+			BaselinePassRate:  percent(item.BaselinePass, item.BaselineTotal),
+			CandidateTotal:    item.CandidateTotal,
+			CandidatePass:     item.CandidatePass,
+			CandidatePassRate: percent(item.CandidatePass, item.CandidateTotal),
+			PassRateDelta:     percent(item.CandidatePass, item.CandidateTotal) - percent(item.BaselinePass, item.BaselineTotal),
+			MatchedCount:      item.MatchedCount,
+			ImprovementCount:  item.ImprovementCount,
+			RegressionCount:   item.RegressionCount,
+		})
+	}
+
+	sort.Slice(improvements, func(i, j int) bool {
+		if improvements[i].TraceID != improvements[j].TraceID {
+			return improvements[i].TraceID < improvements[j].TraceID
+		}
+		return improvements[i].EvaluatorKey < improvements[j].EvaluatorKey
+	})
+	sort.Slice(regressions, func(i, j int) bool {
+		if regressions[i].TraceID != regressions[j].TraceID {
+			return regressions[i].TraceID < regressions[j].TraceID
+		}
+		return regressions[i].EvaluatorKey < regressions[j].EvaluatorKey
+	})
+
+	return out, improvements, regressions
+}
+
+func ensureEvaluatorAggregate(aggregates map[string]*evaluatorAggregate, evaluatorKey string) *evaluatorAggregate {
+	if item, ok := aggregates[evaluatorKey]; ok {
+		return item
+	}
+	item := &evaluatorAggregate{EvaluatorKey: evaluatorKey}
+	aggregates[evaluatorKey] = item
+	return item
+}
+
+func scoreComparisonKey(score store.ScoreRecord) string {
+	return score.TraceID + "\x00" + score.EvaluatorKey
+}
+
+func compareScoreOutcome(baseline store.ScoreRecord, candidate store.ScoreRecord) int {
+	baselinePass := isPassingStatus(baseline.Status)
+	candidatePass := isPassingStatus(candidate.Status)
+	switch {
+	case !baselinePass && candidatePass:
+		return 1
+	case baselinePass && !candidatePass:
+		return -1
+	case candidate.Value > baseline.Value:
+		return 1
+	case candidate.Value < baseline.Value:
+		return -1
+	default:
+		return 0
+	}
+}
+
+func isPassingStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "pass")
+}
+
+func percent(numerator int, denominator int) float64 {
+	if denominator <= 0 {
+		return 0
+	}
+	return float64(numerator) * 100 / float64(denominator)
+}
+
+func matchedScoreCount(items []evaluatorComparison) int {
+	total := 0
+	for _, item := range items {
+		total += item.MatchedCount
+	}
+	return total
 }
 
 func dedupeStrings(values []string) []string {

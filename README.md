@@ -200,6 +200,7 @@ go run ./cmd/server mcp -c config/config.yaml
 - `list_eval_runs`
 - `get_eval_run`
 - `list_scores`
+- `compare_eval_runs`
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 

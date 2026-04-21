@@ -206,6 +206,21 @@ Inputs:
 - `eval_run_id`
 - `limit`
 
+### `compare_eval_runs`
+
+Compare two recorded eval runs and return aggregate pass-rate deltas plus per-trace improvements and regressions.
+
+Inputs:
+
+- `baseline_eval_run_id`
+- `candidate_eval_run_id`
+
+Notes:
+
+- comparison is derived from already-recorded `scores`
+- matching is keyed by `trace_id + evaluator_key`
+- this tool does not persist a new experiment entity yet
+
 ## Design Notes
 
 The MCP server intentionally reuses existing monitor JSON APIs in-process rather than adding a parallel query stack.
@@ -221,8 +236,8 @@ This keeps the first MCP slice:
 
 The next MCP-focused step should be:
 
-1. preserve the current read-only tools
-2. use replay-backed tools as the bridge into dataset curation
+1. keep comparison local and deterministic
+2. add a persisted experiment layer only after the compare shape proves useful
 3. add score and eval layers only after dataset workflows prove useful
 
 ## Current Evaluator Set
