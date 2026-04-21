@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
@@ -95,5 +96,60 @@ func TestUpdateLogFilePersistsPipelineEvents(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "# event:") {
 		t.Fatalf("recorded file missing event lines")
+	}
+}
+
+func TestUpdateLogFileIndexesGroupingFromCodexHeaders(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	rec := New(dir, false, st)
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.4","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Session_id", "sess-codex-live")
+	req.Header.Set("X-Client-Request-Id", "req-codex-live")
+	req.Header.Set("X-Codex-Window-Id", "sess-codex-live:3")
+
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+
+	info.Header.Meta.StatusCode = 200
+	info.Header.Meta.DurationMs = 42
+	info.Header.Meta.TTFTMs = 10
+	info.Header.Layout.ResHeaderLen = int64(len("HTTP/1.1 200 OK\r\n\r\n"))
+	info.Header.Layout.ResBodyLen = int64(len(`{"ok":true}`))
+	if _, err := info.File.Write([]byte("\nHTTP/1.1 200 OK\r\n\r\n{\"ok\":true}")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	if err := rec.UpdateLogFile(info); err != nil {
+		t.Fatalf("UpdateLogFile() error = %v", err)
+	}
+
+	entry, err := st.GetByRequestID(info.Header.Meta.RequestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if entry.SessionID != "sess-codex-live" {
+		t.Fatalf("SessionID = %q, want sess-codex-live", entry.SessionID)
+	}
+	if entry.SessionSource != "header.session_id" {
+		t.Fatalf("SessionSource = %q, want header.session_id", entry.SessionSource)
+	}
+	if entry.WindowID != "sess-codex-live:3" {
+		t.Fatalf("WindowID = %q, want sess-codex-live:3", entry.WindowID)
+	}
+	if entry.ClientRequestID != "req-codex-live" {
+		t.Fatalf("ClientRequestID = %q, want req-codex-live", entry.ClientRequestID)
 	}
 }

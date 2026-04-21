@@ -225,7 +225,16 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 	}
 
 	if r.store != nil {
-		if err := r.store.UpsertLog(info.Path, info.Header); err != nil {
+		fullContent := append(append([]byte{}, prelude...), payload...)
+		parsed, err := recordfile.ParsePrelude(fullContent)
+		if err != nil {
+			return err
+		}
+		grouping, err := store.ExtractGroupingInfo(fullContent, parsed)
+		if err != nil {
+			return err
+		}
+		if err := r.store.UpsertLogWithGrouping(info.Path, info.Header, grouping); err != nil {
 			return err
 		}
 	}
