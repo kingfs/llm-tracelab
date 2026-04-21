@@ -588,32 +588,42 @@ function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "",
               <div className="upstream-card-label">Catalog</div>
               <div className="upstream-model-list">
                 {(item.models || []).length ? (
-                  (item.models || []).slice(0, 12).map((model) => (
-                    <span key={`${item.id}-${model}`} className="upstream-model-pill">
+                  (item.models || []).slice(0, 8).map((model) => (
+                    <span key={`${item.id}-${model}`} className="upstream-model-pill" title={model}>
                       {model}
                     </span>
                   ))
                 ) : (
                   <span className="trace-subline">No models indexed</span>
                 )}
-                {(item.models || []).length > 12 ? (
-                  <span className="upstream-model-pill upstream-model-pill-more">+{item.models.length - 12} more</span>
+                {(item.models || []).length > 8 ? (
+                  <span className="upstream-model-pill upstream-model-pill-more">+{item.models.length - 8} more</span>
                 ) : null}
               </div>
+              {(item.models || []).length ? (
+                <div className="upstream-card-actions">
+                  <Link className="inline-link" to={`${buildUpstreamLink(item.id, analyticsWindow, analyticsModel)}#models`}>
+                    View all models
+                  </Link>
+                </div>
+              ) : null}
             </div>
 
             <div className="upstream-card-section">
               <div className="upstream-card-label">Recent routing</div>
               <div className="upstream-model-list">
                 {(item.recent_models || []).length ? (
-                  (item.recent_models || []).map((model) => (
-                    <span key={`${item.id}-recent-${model}`} className="upstream-model-pill">
+                  (item.recent_models || []).slice(0, 5).map((model) => (
+                    <span key={`${item.id}-recent-${model}`} className="upstream-model-pill" title={model}>
                       {model}
                     </span>
                   ))
                 ) : (
                   <span className="trace-subline">No routed models yet</span>
                 )}
+                {(item.recent_models || []).length > 5 ? (
+                  <span className="upstream-model-pill upstream-model-pill-more">+{item.recent_models.length - 5} more</span>
+                ) : null}
               </div>
               <div className="upstream-routing-strip">
                 <span>success {item.success_request ?? 0}</span>
@@ -621,6 +631,13 @@ function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "",
                 <span>last model {item.last_model || "-"}</span>
                 <span>last seen {formatDateTime(item.last_seen)}</span>
               </div>
+              {(item.recent_models || []).length ? (
+                <div className="upstream-card-actions">
+                  <Link className="inline-link" to={`${buildUpstreamLink(item.id, analyticsWindow, analyticsModel)}#models`}>
+                    Open full routing catalog
+                  </Link>
+                </div>
+              ) : null}
               {(item.recent_errors || []).length ? (
                 <div className="upstream-error-list">
                   {(item.recent_errors || []).map((errorText, index) => (
@@ -994,6 +1011,7 @@ function UpstreamDetailPage() {
   const windowValue = normalizeUpstreamWindow(searchParams.get("window"));
   const modelValue = searchParams.get("model") || "";
   const [modelDraft, setModelDraft] = useState(modelValue);
+  const [catalogQuery, setCatalogQuery] = useState("");
   const params = new URLSearchParams();
   params.set("window", windowValue);
   if (modelValue) {
@@ -1006,6 +1024,15 @@ function UpstreamDetailPage() {
   const timeline = detail.data?.timeline ?? [];
   const failureTimeline = detail.data?.failure_timeline ?? [];
   const thresholds = detail.data?.health_thresholds;
+  const catalogModels = target?.models || [];
+  const recentModels = target?.recent_models || [];
+  const normalizedCatalogQuery = catalogQuery.trim().toLowerCase();
+  const visibleCatalogModels = normalizedCatalogQuery
+    ? catalogModels.filter((model) => model.toLowerCase().includes(normalizedCatalogQuery))
+    : catalogModels;
+  const visibleRecentModels = normalizedCatalogQuery
+    ? recentModels.filter((model) => model.toLowerCase().includes(normalizedCatalogQuery))
+    : recentModels;
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -1198,6 +1225,62 @@ function UpstreamDetailPage() {
             <div className="session-breakdown-grid">
               <BreakdownList title="Models" items={breakdown?.models || []} formatter={(item) => item.label} />
               <BreakdownList title="Endpoints" items={breakdown?.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
+            </div>
+          </section>
+          <section className="panel" id="models">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Model catalog</p>
+                <h2>Full routing surface</h2>
+              </div>
+              <div className="panel-head-actions">
+                <span className="session-filter-count">
+                  {visibleCatalogModels.length} / {catalogModels.length} indexed
+                </span>
+                <span className="session-filter-count">
+                  {visibleRecentModels.length} / {recentModels.length} recent
+                </span>
+              </div>
+            </div>
+            <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
+              <input
+                className="filter-input filter-input-wide"
+                type="search"
+                value={catalogQuery}
+                onChange={(event) => setCatalogQuery(event.target.value)}
+                placeholder="Search model names"
+              />
+            </form>
+            <div className="session-breakdown-grid">
+              <section className="breakdown-card">
+                <div className="breakdown-title">Recently routed models</div>
+                {visibleRecentModels.length ? (
+                  <div className="model-catalog-list">
+                    {visibleRecentModels.map((model) => (
+                      <div key={`recent-${model}`} className="model-catalog-row" title={model}>
+                        <strong>{model}</strong>
+                        {target?.last_model === model ? <InlineTag tone="accent">last</InlineTag> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state empty-state-inline">No recent models match this filter.</div>
+                )}
+              </section>
+              <section className="breakdown-card">
+                <div className="breakdown-title">Indexed models</div>
+                {visibleCatalogModels.length ? (
+                  <div className="model-catalog-list">
+                    {visibleCatalogModels.map((model) => (
+                      <div key={`catalog-${model}`} className="model-catalog-row" title={model}>
+                        <strong>{model}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state empty-state-inline">No indexed models match this filter.</div>
+                )}
+              </section>
             </div>
           </section>
         </div>

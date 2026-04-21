@@ -326,6 +326,7 @@ a {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
+  max-width: 100%;
   padding: 0.32rem 0.58rem;
   border-radius: 999px;
   background: rgba(25, 93, 77, 0.08);
@@ -334,11 +335,27 @@ a {
   font-size: 0.76rem;
   line-height: 1.2;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .upstream-model-pill-more {
   background: rgba(184, 120, 24, 0.08);
   border-color: rgba(184, 120, 24, 0.18);
+}
+
+.upstream-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inline-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
 }
 
 .upstream-card-footer {
@@ -1560,6 +1577,36 @@ a {
   padding: 22px;
   text-align: center;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.empty-state-inline {
+  padding: 14px;
+  border-radius: 16px;
+}
+
+.model-catalog-list {
+  display: grid;
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.model-catalog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(34, 40, 49, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.model-catalog-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 1100px) {
