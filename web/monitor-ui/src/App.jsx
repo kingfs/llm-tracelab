@@ -1442,8 +1442,10 @@ function TraceDetailPage() {
   const routingCandidateCount = Number(header?.routing_candidate_count || 0);
   const routingFailureReason = header?.routing_failure_reason || "";
   const selectedUpstreamHealth = detail.data?.selected_upstream_health;
+  const declaredTools = detail.data?.tools || [];
+  const traceToolCalls = collectTraceToolCalls(detail.data);
   const focusTarget = searchParams.get("focus") || "";
-  const hasDeclaredToolsTab = Boolean(detail.data?.tool_calls?.length && detail.data?.tools?.length);
+  const hasDeclaredToolsTab = Boolean(declaredTools.length);
   const fromSessionID = searchParams.get("from_session") || "";
   const fromView = searchParams.get("view") === "sessions" ? "sessions" : "requests";
   const backLink = fromSessionID ? `/sessions/${encodeURIComponent(fromSessionID)}` : `/${fromView}`;
@@ -1687,7 +1689,7 @@ function TraceDetailPage() {
             {hasConversation(detail.data) ? (
               <div className="message-list">
                 {detail.data.messages.map((message, index) => (
-                  <MessageCard key={`${message.role}-${index}`} message={message} renderMarkdown={renderMarkdown} />
+                  <MessageCard key={`${message.role}-${index}`} message={message} renderMarkdown={renderMarkdown} declaredTools={declaredTools} />
                 ))}
                 {detail.data.ai_reasoning ? (
                   <CollapsibleCard title="Reasoning" subtitle="assistant reasoning" defaultOpen={false}>
@@ -1706,7 +1708,7 @@ function TraceDetailPage() {
                 {detail.data.tool_calls?.length ? (
                   <CollapsibleCard title="Tool Calls" subtitle={`${detail.data.tool_calls.length} call(s)`} defaultOpen={false}>
                     {detail.data.tool_calls.map((call) => (
-                      <ToolCallView key={call.id || call.function?.name} call={call} />
+                      <ToolCallView key={call.id || call.function?.name} call={call} match={findDeclaredToolForCall(call, declaredTools)} />
                     ))}
                   </CollapsibleCard>
                 ) : null}
@@ -1726,12 +1728,28 @@ function TraceDetailPage() {
       ) : null}
 
       {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} /> : null}
-      {tab === "tools" && detail.data ? <DeclaredToolsPanel tools={detail.data.tools || []} /> : null}
+      {tab === "tools" && detail.data ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} /> : null}
     </div>
   );
 }
 
-function DeclaredToolsPanel({ tools }) {
+function DeclaredToolsPanel({ tools, toolCalls = [] }) {
+  const [selectedToolName, setSelectedToolName] = useState(() => tools[0]?.name || "");
+
+  useEffect(() => {
+    if (!tools.length) {
+      setSelectedToolName("");
+      return;
+    }
+    if (tools.some((tool) => tool.name === selectedToolName)) {
+      return;
+    }
+    setSelectedToolName(tools[0].name || "");
+  }, [selectedToolName, tools]);
+
+  const selectedTool = tools.find((tool) => tool.name === selectedToolName) || tools[0] || null;
+  const selectedToolCalls = selectedTool ? toolCalls.filter((call) => isSameToolName(call.function?.name, selectedTool.name)) : [];
+
   return (
     <section className="panel">
       <div className="panel-head">
@@ -1741,12 +1759,82 @@ function DeclaredToolsPanel({ tools }) {
         </div>
       </div>
       {tools.length ? (
-        tools.map((tool, index) => (
-          <CollapsibleCard key={`${tool.name}-${index}`} title={tool.name} subtitle={tool.source || tool.type} defaultOpen={false}>
-            <p className="tool-description">{tool.description || "No description"}</p>
-            <CodeBlock value={tool.parameters || "{}"} />
-          </CollapsibleCard>
-        ))
+        <div className="tool-layout">
+          <div className="tool-list-column">
+            {tools.map((tool, index) => {
+              const count = countToolMatches(toolCalls, tool.name);
+              const isSelected = selectedTool?.name === tool.name;
+              return (
+                <button
+                  key={`${tool.name}-${index}`}
+                  className={isSelected ? "tool-list-item tool-list-item-active" : "tool-list-item"}
+                  onClick={() => setSelectedToolName(tool.name)}
+                >
+                  <div className="tool-list-item-head">
+                    <strong>{tool.name}</strong>
+                    <InlineTag tone={count > 0 ? "green" : "default"}>{count > 0 ? `${count} call${count > 1 ? "s" : ""}` : "not invoked"}</InlineTag>
+                  </div>
+                  <div className="tool-list-item-meta">
+                    <span>{tool.source || tool.type || "tool"}</span>
+                    <span>{buildToolSchemaSummary(tool.parameters)}</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="tool-detail-column">
+            {selectedTool ? (
+              <>
+                <div className="tool-detail-header">
+                  <div>
+                    <p className="eyebrow">Tool definition</p>
+                    <h3>{selectedTool.name}</h3>
+                  </div>
+                  <div className="trace-tag-group">
+                    <InlineTag tone="accent">{selectedTool.source || selectedTool.type || "tool"}</InlineTag>
+                    <InlineTag tone={selectedToolCalls.length ? "green" : "default"}>
+                      {selectedToolCalls.length ? `${selectedToolCalls.length} matched call${selectedToolCalls.length > 1 ? "s" : ""}` : "unused"}
+                    </InlineTag>
+                  </div>
+                </div>
+                <p className="tool-description">{selectedTool.description || "No description"}</p>
+                <div className="tool-summary-grid">
+                  <section className="breakdown-card">
+                    <div className="breakdown-title">Schema summary</div>
+                    <div className="tool-schema-summary">{buildToolSchemaSummary(selectedTool.parameters)}</div>
+                  </section>
+                  <section className="breakdown-card">
+                    <div className="breakdown-title">Matched calls</div>
+                    {selectedToolCalls.length ? (
+                      <div className="tool-call-summary-list">
+                        {selectedToolCalls.map((call, index) => (
+                          <div key={`${call.id || call.function?.name}-${index}`} className="tool-call-summary-row">
+                            <strong>{call.function?.name || "tool"}</strong>
+                            <span>{call.id || "no call id"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty-state empty-state-inline">This request declared the tool but did not call it.</div>
+                    )}
+                  </section>
+                </div>
+                <section className="breakdown-card">
+                  <div className="breakdown-title">Raw schema</div>
+                  <CodeBlock value={selectedTool.parameters || "{}"} />
+                </section>
+                {selectedToolCalls.length ? (
+                  <section className="breakdown-card">
+                    <div className="breakdown-title">Call arguments</div>
+                    {selectedToolCalls.map((call, index) => (
+                      <ToolCallView key={`${call.id || call.function?.name}-${index}`} call={call} match={selectedTool} />
+                    ))}
+                  </section>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </div>
       ) : (
         <div className="empty-state">No tool definitions in request.</div>
       )}
@@ -2064,9 +2152,10 @@ function StackIcon() {
   );
 }
 
-function MessageCard({ message, renderMarkdown }) {
+function MessageCard({ message, renderMarkdown, declaredTools = [] }) {
   const alignClass = message.role === "assistant" ? "message-assistant" : message.role === "tool" ? "message-tool" : "message-user";
   const isCollapsible = message.message_type === "tool_use" || message.message_type === "tool_result";
+  const toolSummary = buildToolMessageSummary(message, declaredTools);
 
   const body = (
     <article className={`message-card ${alignClass}`}>
@@ -2074,6 +2163,7 @@ function MessageCard({ message, renderMarkdown }) {
         <span className="role-pill">{message.role}</span>
         <span className="message-kind">{message.message_type || "message"}</span>
       </div>
+      {toolSummary ? <div className="tool-message-summary">{toolSummary}</div> : null}
       {message.content ? (
         <MessageContent
           value={message.content}
@@ -2082,8 +2172,17 @@ function MessageCard({ message, renderMarkdown }) {
           className="message-body"
         />
       ) : null}
-      {message.tool_calls?.length ? message.tool_calls.map((call) => <ToolCallView key={call.id || call.function?.name} call={call} />) : null}
+      {message.tool_calls?.length ? message.tool_calls.map((call) => (
+        <ToolCallView
+          key={call.id || call.function?.name}
+          call={call}
+          match={findDeclaredToolForCall(call, declaredTools)}
+        />
+      )) : null}
       {message.blocks?.length ? message.blocks.map((block, index) => <BlockView key={`${block.kind}-${index}`} block={block} />) : null}
+      {!message.content && !message.tool_calls?.length && !message.blocks?.length ? (
+        <div className="tool-message-placeholder">No structured payload was captured for this tool event.</div>
+      ) : null}
     </article>
   );
 
@@ -2094,7 +2193,7 @@ function MessageCard({ message, renderMarkdown }) {
   return (
     <CollapsibleCard
       title={`${message.role} / ${message.message_type}`}
-      subtitle={message.name || message.tool_call_id || ""}
+      subtitle={toolSummary || message.name || message.tool_call_id || ""}
       defaultOpen={false}
       bodyClassName="collapse-plain"
     >
@@ -2103,10 +2202,14 @@ function MessageCard({ message, renderMarkdown }) {
   );
 }
 
-function ToolCallView({ call }) {
+function ToolCallView({ call, match = null }) {
   return (
     <div className="tool-call-box">
-      <div className="tool-call-title">{call.function?.name || "tool"}</div>
+      <div className="tool-call-head">
+        <div className="tool-call-title">{call.function?.name || "tool"}</div>
+        {match?.name ? <InlineTag tone="accent">declared</InlineTag> : null}
+      </div>
+      {call.id ? <div className="tool-call-meta">call id {call.id}</div> : null}
       <CodeBlock value={call.function?.arguments || "{}"} />
     </div>
   );
@@ -2119,6 +2222,71 @@ function BlockView({ block }) {
       <CodeBlock value={block.text || block.meta || ""} />
     </div>
   );
+}
+
+function buildToolMessageSummary(message, declaredTools = []) {
+  if (message.tool_calls?.length) {
+    const summaries = message.tool_calls.map((call) => {
+      const name = call.function?.name || "tool";
+      const match = findDeclaredToolForCall(call, declaredTools);
+      return match?.name ? `${name} matched declared tool` : name;
+    });
+    return `Tools: ${summaries.join(", ")}`;
+  }
+  if (message.message_type === "tool_result") {
+    const label = message.name || message.tool_call_id || "tool result";
+    return `Tool result: ${label}`;
+  }
+  return "";
+}
+
+function collectTraceToolCalls(detail) {
+  if (!detail) {
+    return [];
+  }
+  const calls = [];
+  for (const message of detail.messages || []) {
+    for (const call of message.tool_calls || []) {
+      calls.push(call);
+    }
+  }
+  for (const call of detail.tool_calls || []) {
+    calls.push(call);
+  }
+  return calls;
+}
+
+function normalizeToolName(value = "") {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isSameToolName(left = "", right = "") {
+  return normalizeToolName(left) !== "" && normalizeToolName(left) === normalizeToolName(right);
+}
+
+function findDeclaredToolForCall(call, declaredTools = []) {
+  const name = call?.function?.name || "";
+  return declaredTools.find((tool) => isSameToolName(tool.name, name)) || null;
+}
+
+function countToolMatches(toolCalls = [], toolName = "") {
+  return toolCalls.filter((call) => isSameToolName(call.function?.name, toolName)).length;
+}
+
+function buildToolSchemaSummary(parameters = "") {
+  if (!parameters) {
+    return "No schema";
+  }
+  try {
+    const payload = JSON.parse(parameters);
+    const properties = payload?.properties ? Object.keys(payload.properties) : [];
+    if (properties.length) {
+      return `${properties.length} field${properties.length > 1 ? "s" : ""}: ${properties.slice(0, 3).join(", ")}${properties.length > 3 ? "..." : ""}`;
+    }
+    return payload?.type ? `Schema type ${payload.type}` : "JSON schema";
+  } catch {
+    return "Schema available";
+  }
 }
 
 function CollapsibleCard({ title, subtitle, defaultOpen = false, children, bodyClassName = "" }) {

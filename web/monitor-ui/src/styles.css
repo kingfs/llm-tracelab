@@ -1118,6 +1118,81 @@ a {
   background: rgba(255, 255, 255, 0.55);
 }
 
+.tool-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.6fr);
+  gap: 18px;
+}
+
+.tool-list-column,
+.tool-detail-column,
+.tool-call-summary-list {
+  display: grid;
+  gap: 12px;
+}
+
+.tool-list-item {
+  width: 100%;
+  border: 1px solid rgba(34, 40, 49, 0.1);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.56);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tool-list-item-active {
+  border-color: rgba(25, 93, 77, 0.28);
+  box-shadow: 0 0 0 3px rgba(25, 93, 77, 0.1);
+  background: rgba(213, 228, 218, 0.5);
+}
+
+.tool-list-item-head,
+.tool-call-head,
+.tool-detail-header,
+.tool-call-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tool-list-item-meta,
+.tool-call-meta,
+.tool-schema-summary,
+.tool-message-summary,
+.tool-message-placeholder,
+.tool-call-summary-row span {
+  color: var(--muted);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.tool-list-item-meta {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.tool-detail-header h3 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.05;
+}
+
+.tool-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.tool-call-meta,
+.tool-message-summary,
+.tool-message-placeholder {
+  margin-top: 10px;
+}
+
 .tool-call-title,
 .protocol-head {
   margin-bottom: 10px;
@@ -1614,6 +1689,8 @@ a {
   .detail-grid,
   .session-breakdown-grid,
   .routing-summary-grid,
+  .tool-layout,
+  .tool-summary-grid,
   .failure-context-strip,
   .payload-grid,
   .raw-grid,
