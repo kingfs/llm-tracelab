@@ -92,6 +92,7 @@ Stable API surface:
 - MCP `create_experiment_from_eval_runs`
 - MCP `list_experiment_runs`
 - MCP `get_experiment_run`
+- MCP `summarize_experiment_regressions`
 
 Stable UI perspectives:
 

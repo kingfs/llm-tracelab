@@ -163,8 +163,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 25 {
-		t.Fatalf("len(tools.Tools) = %d, want 25", len(tools.Tools))
+	if len(tools.Tools) != 26 {
+		t.Fatalf("len(tools.Tools) = %d, want 26", len(tools.Tools))
 	}
 
 	profiles, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -272,6 +272,21 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	failurePayload := failures.StructuredContent.(map[string]any)
 	if got := int(failurePayload["returned"].(float64)); got != 1 {
 		t.Fatalf("query_failures.returned = %d, want 1", got)
+	}
+
+	failureClusters, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "summarize_failure_clusters",
+		Arguments: map[string]any{"page_size": 10},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(summarize_failure_clusters) error = %v", err)
+	}
+	failureClustersPayload := failureClusters.StructuredContent.(map[string]any)
+	if got := len(failureClustersPayload["by_reason"].([]any)); got != 1 {
+		t.Fatalf("len(summarize_failure_clusters.by_reason) = %d, want 1", got)
+	}
+	if got := len(failureClustersPayload["top_failures"].([]any)); got != 1 {
+		t.Fatalf("len(summarize_failure_clusters.top_failures) = %d, want 1", got)
 	}
 
 	replayedTrace, err := session.CallTool(context.Background(), &mcp.CallToolParams{
