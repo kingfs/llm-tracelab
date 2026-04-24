@@ -395,6 +395,103 @@ func TestRouterSnapshotsExposeHealthAndModels(t *testing.T) {
 	}
 }
 
+func TestRouterClientCancelDoesNotOpenTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Minute
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	rtr.Complete(selection, Outcome{Success: false, ClientCanceled: true, StatusCode: http.StatusBadGateway, DurationMs: 100, Stream: true})
+
+	snapshots := rtr.Snapshots()
+	if snapshots[0].HealthState == HealthOpen {
+		t.Fatalf("HealthState = %q, want non-open after client cancellation", snapshots[0].HealthState)
+	}
+
+	req2, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello again"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req2.Header.Set("Content-Type", "application/json")
+	if _, err := rtr.Select(req2); err != nil {
+		t.Fatalf("Select() after client cancellation error = %v", err)
+	}
+}
+
+func TestRouterClientRequestErrorDoesNotOpenTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Minute
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	rtr.Complete(selection, Outcome{Success: false, StatusCode: http.StatusBadRequest, DurationMs: 100, TTFTMs: 30})
+
+	snapshots := rtr.Snapshots()
+	if snapshots[0].HealthState == HealthOpen {
+		t.Fatalf("HealthState = %q, want non-open after 400 response", snapshots[0].HealthState)
+	}
+}
+
 func TestRouterCostAwareSelectionPrefersLowerObservedCost(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

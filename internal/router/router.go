@@ -778,23 +778,25 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 		t.ttftSlowMs = ewma(t.ttftSlowMs, outcome.TTFTMs, costs.SlowAlpha)
 	}
 
+	if outcome.ClientCanceled {
+		t.cancelRate = ewma(t.cancelRate, 1, costs.FastAlpha)
+		return
+	}
+	t.cancelRate = ewma(t.cancelRate, 0, costs.FastAlpha)
+
+	healthFailure := countsAsUpstreamHealthFailure(outcome)
 	if outcome.Success {
 		t.errorRate = ewma(t.errorRate, 0, costs.FastAlpha)
 		t.timeoutRate = ewma(t.timeoutRate, 0, costs.FastAlpha)
 		t.consecutiveFailures = 0
-	} else {
+	} else if healthFailure {
 		t.errorRate = ewma(t.errorRate, 1, costs.FastAlpha)
 		t.consecutiveFailures++
-		if outcome.StatusCode == http.StatusRequestTimeout || outcome.StatusCode == http.StatusGatewayTimeout || (outcome.Stream && outcome.TTFTMs <= 0) {
+		if countsAsUpstreamTimeout(outcome) {
 			t.timeoutRate = ewma(t.timeoutRate, 1, costs.FastAlpha)
 		} else {
 			t.timeoutRate = ewma(t.timeoutRate, 0, costs.FastAlpha)
 		}
-	}
-	if outcome.ClientCanceled {
-		t.cancelRate = ewma(t.cancelRate, 1, costs.FastAlpha)
-	} else {
-		t.cancelRate = ewma(t.cancelRate, 0, costs.FastAlpha)
 	}
 
 	ttftRatio := ratio(t.ttftFastMs, t.ttftSlowMs)
@@ -814,6 +816,31 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 			t.healthState = HealthHealthy
 		}
 	}
+}
+
+func countsAsUpstreamHealthFailure(outcome Outcome) bool {
+	if outcome.Success || outcome.ClientCanceled {
+		return false
+	}
+	if outcome.StatusCode == 0 {
+		return true
+	}
+	if outcome.StatusCode == http.StatusTooManyRequests {
+		return true
+	}
+	if outcome.StatusCode == http.StatusRequestTimeout ||
+		outcome.StatusCode == http.StatusBadGateway ||
+		outcome.StatusCode == http.StatusServiceUnavailable ||
+		outcome.StatusCode == http.StatusGatewayTimeout {
+		return true
+	}
+	return outcome.StatusCode >= 500
+}
+
+func countsAsUpstreamTimeout(outcome Outcome) bool {
+	return outcome.StatusCode == http.StatusRequestTimeout ||
+		outcome.StatusCode == http.StatusGatewayTimeout ||
+		(outcome.Stream && outcome.TTFTMs <= 0)
 }
 
 func (r *Router) expectedCost(target *Target, req RequestFeatures) float64 {
