@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/textproto"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -899,10 +900,12 @@ func New(outputDir string) (*Store, error) {
 	}
 
 	dbPath := filepath.Join(outputDir, "trace_index.sqlite3")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 
 	st := &Store{
 		db:        db,
@@ -915,6 +918,24 @@ func New(outputDir string) (*Store, error) {
 	}
 
 	return st, nil
+}
+
+func sqliteDSN(dbPath string) string {
+	values := url.Values{}
+	for _, pragma := range []string{
+		"journal_mode(WAL)",
+		"synchronous(NORMAL)",
+		"busy_timeout(5000)",
+		"wal_autocheckpoint(1000)",
+	} {
+		values.Add("_pragma", pragma)
+	}
+	u := url.URL{
+		Scheme:   "file",
+		Path:     dbPath,
+		RawQuery: values.Encode(),
+	}
+	return u.String()
 }
 
 func (s *Store) Close() error {
