@@ -1,6 +1,8 @@
 package replay
 
 import (
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +40,50 @@ func TestReplayFileReturnsStructuredSummary(t *testing.T) {
 	}
 	if !strings.Contains(summary.ContentType, "application/json") {
 		t.Fatalf("ContentType = %q, want application/json", summary.ContentType)
+	}
+}
+
+func TestTransportInvalidatesCacheWhenCassetteChanges(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "trace.http")
+	if err := os.WriteFile(path, buildReplayFixture(t, "200 OK", `{"output":"done"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	tr := NewTransport(path)
+	req, err := http.NewRequest(http.MethodPost, "http://localhost/v1/responses", strings.NewReader(`{"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("StatusCode = %d, want 200", resp.StatusCode)
+	}
+
+	if err := os.WriteFile(path, buildReplayFixture(t, "201 Created", `{"output":"changed"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(changed) error = %v", err)
+	}
+	changedAt := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(path, changedAt, changedAt); err != nil {
+		t.Fatalf("Chtimes() error = %v", err)
+	}
+
+	resp, err = tr.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip() after change error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("StatusCode after change = %d, want 201", resp.StatusCode)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
@@ -14,6 +16,16 @@ import (
 // Transport 实现 http.RoundTripper 接口，用于回放本地 .http 文件
 type Transport struct {
 	Filename string
+
+	mu    sync.Mutex
+	cache *transportCache
+}
+
+type transportCache struct {
+	filename       string
+	size           int64
+	modTime        time.Time
+	responseOffset int64
 }
 
 type SummaryOptions struct {
@@ -97,25 +109,15 @@ func ReplayFile(filename string, opts SummaryOptions) (*Summary, error) {
 
 // RoundTrip 执行请求回放逻辑
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	// 1. 打开录制文件
+	respOffset, err := t.cachedResponseOffset()
+	if err != nil {
+		return nil, err
+	}
+
 	f, err := os.Open(t.Filename)
 	if err != nil {
 		return nil, fmt.Errorf("replay: failed to open file %s: %w", t.Filename, err)
 	}
-
-	content, err := os.ReadFile(t.Filename)
-	if err != nil {
-		f.Close()
-		return nil, fmt.Errorf("replay: failed to read file %s: %w", t.Filename, err)
-	}
-
-	parsed, err := recordfile.ParsePrelude(content)
-	if err != nil {
-		f.Close()
-		return nil, fmt.Errorf("replay: invalid record prelude: %w", err)
-	}
-
-	respOffset := parsed.PayloadOffset + parsed.Header.Layout.ReqHeaderLen + parsed.Header.Layout.ReqBodyLen + 1
 
 	if _, err := f.Seek(respOffset, 0); err != nil {
 		f.Close()
@@ -135,6 +137,45 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	return resp, nil
+}
+
+func (t *Transport) cachedResponseOffset() (int64, error) {
+	info, err := os.Stat(t.Filename)
+	if err != nil {
+		return 0, fmt.Errorf("replay: failed to stat file %s: %w", t.Filename, err)
+	}
+
+	t.mu.Lock()
+	if t.cache != nil &&
+		t.cache.filename == t.Filename &&
+		t.cache.size == info.Size() &&
+		t.cache.modTime.Equal(info.ModTime()) {
+		offset := t.cache.responseOffset
+		t.mu.Unlock()
+		return offset, nil
+	}
+	t.mu.Unlock()
+
+	content, err := os.ReadFile(t.Filename)
+	if err != nil {
+		return 0, fmt.Errorf("replay: failed to read file %s: %w", t.Filename, err)
+	}
+
+	parsed, err := recordfile.ParsePrelude(content)
+	if err != nil {
+		return 0, fmt.Errorf("replay: invalid record prelude: %w", err)
+	}
+
+	respOffset := parsed.PayloadOffset + parsed.Header.Layout.ReqHeaderLen + parsed.Header.Layout.ReqBodyLen + 1
+	t.mu.Lock()
+	t.cache = &transportCache{
+		filename:       t.Filename,
+		size:           info.Size(),
+		modTime:        info.ModTime(),
+		responseOffset: respOffset,
+	}
+	t.mu.Unlock()
+	return respOffset, nil
 }
 
 // fileCloser 包装器，确保 Body 关闭时文件句柄也被释放
