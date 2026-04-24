@@ -70,7 +70,10 @@ func (r *Recorder) PrepareLogFileWithOptions(req *http.Request, opts PrepareOpti
 		bodyBytes, _ = io.ReadAll(req.Body)
 		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 	}
+	return r.PrepareLogFileWithOptionsAndBody(req, opts, bodyBytes)
+}
 
+func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts PrepareOptions, bodyBytes []byte) (*LogInfo, error) {
 	modelName := "unknown-model"
 	if len(bodyBytes) > 0 {
 		if parsedReq, err := llm.ParseRequestForPath(req.URL.Path, opts.SiteURL, bodyBytes); err == nil && parsedReq.Model != "" {

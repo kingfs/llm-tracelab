@@ -43,35 +43,48 @@ const (
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
-	// 1. 只有 POST 请求且 Content-Type 为 JSON 才处理
-	if req.Method != http.MethodPost || !strings.Contains(req.Header.Get("Content-Type"), "application/json") {
-		return
-	}
-	if llm.NormalizeEndpoint(req.URL.Path) != "/v1/chat/completions" {
-		return
+	_, _ = readAndNormalizeRequestBody(req)
+}
+
+func readAndNormalizeRequestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil {
+		return nil, nil
 	}
 
-	// 2. 读取 Body
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
-		return // 读失败，放弃修改
+		return nil, err
 	}
-	// 无论是否修改，最后都要还原 Body
-	defer func() {
-		req.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-	}()
+
+	bodyBytes = injectStreamOptions(req, bodyBytes)
+	req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	req.ContentLength = int64(len(bodyBytes))
+	if len(bodyBytes) > 0 {
+		req.Header.Set("Content-Length", fmt.Sprint(len(bodyBytes)))
+	}
+	return bodyBytes, nil
+}
+
+func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
+	// 1. 只有 POST 请求且 Content-Type 为 JSON 才处理
+	if req.Method != http.MethodPost || !strings.Contains(req.Header.Get("Content-Type"), "application/json") {
+		return bodyBytes
+	}
+	if llm.NormalizeEndpoint(req.URL.Path) != "/v1/chat/completions" {
+		return bodyBytes
+	}
 
 	// 3. 解析 JSON
 	// 使用 map[string]interface{} 以保留原始结构
 	var payload map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
-		return // 不是 JSON，放弃
+		return bodyBytes // 不是 JSON，放弃
 	}
 
 	// 4. 检查 stream 字段
 	isStream, ok := payload["stream"].(bool)
 	if !ok || !isStream {
-		return // 不是 stream 模式，放弃
+		return bodyBytes // 不是 stream 模式，放弃
 	}
 
 	// 5. 检查并注入 stream_options
@@ -95,12 +108,10 @@ func ensureStreamOptions(req *http.Request) {
 	if updated {
 		newBytes, err := json.Marshal(payload)
 		if err == nil {
-			bodyBytes = newBytes // 更新外部的 bodyBytes，供 defer 还原使用
-			req.ContentLength = int64(len(newBytes))
-			req.Header.Set("Content-Length", fmt.Sprint(len(newBytes)))
-			// slog.Debug("Injected stream_options: include_usage=true")
+			return newBytes
 		}
 	}
+	return bodyBytes
 }
 
 // UsageSniffer 纯粹的嗅探器，不再做估算
@@ -323,26 +334,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// [Step 1] 自动注入 stream_options
-	ensureStreamOptions(r)
+	// [Step 1] 读取请求体并自动注入 stream_options，后续 router/recorder 复用同一份 bytes。
+	bodyBytes, err := readAndNormalizeRequestBody(r)
+	if err != nil {
+		slog.Error("Failed to read request body", "error", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
 
-	selection, err := h.router.Select(r)
+	selection, err := h.router.SelectWithBody(r, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to select upstream target", "error", err)
-		h.recordSelectionFailure(r, start, http.StatusBadGateway, err)
+		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, err, bodyBytes)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 
 	// [Step 2] 准备日志 (此时 r.Body 已经包含 injected options，Log 里会记录下来)
-	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
 		SiteURL:                        selection.Target.Upstream.BaseURL,
 		SelectedUpstreamID:             selection.Target.ID,
 		SelectedUpstreamProviderPreset: selection.Target.Upstream.ProviderPreset,
 		RoutingPolicy:                  h.routerPolicy(),
 		RoutingScore:                   selection.Score,
 		RoutingCandidateCount:          selection.CandidateCount,
-	})
+	}, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare log file", "err", err)
 		http.Error(w, "Internal Logging Error", 500)
@@ -502,14 +518,18 @@ func (h *Handler) routerPolicy() string {
 }
 
 func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statusCode int, selectErr error) {
+	h.recordSelectionFailureWithBody(r, start, statusCode, selectErr, nil)
+}
+
+func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
 	}
 	reason := router.SelectionFailureReason(selectErr)
-	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
 		RoutingPolicy:        h.routerPolicy(),
 		RoutingFailureReason: reason,
-	})
+	}, bodyBytes)
 	if err != nil {
 		slog.Error("Failed to prepare selection-failure log file", "err", err)
 		return

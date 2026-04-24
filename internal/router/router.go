@@ -437,6 +437,16 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 	if err != nil {
 		return nil, err
 	}
+	return r.SelectWithBody(req, body)
+}
+
+func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, error) {
+	if req == nil {
+		return nil, &SelectionError{
+			Reason:  SelectionFailureNilRequest,
+			Message: "nil request",
+		}
+	}
 	features := extractRequestFeatures(req.URL.Path, body)
 	model := features.ModelName
 

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +13,10 @@ import (
 )
 
 func BenchmarkHandlerNonStreamProxy(b *testing.B) {
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer slog.SetDefault(oldLogger)
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"resp_1","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15},"output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`)
