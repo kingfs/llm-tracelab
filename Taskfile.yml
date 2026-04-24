@@ -21,6 +21,13 @@ tasks:
     cmds:
       - gofmt -w ./cmd ./internal ./pkg ./unittest
 
+  fmt:check:
+    desc: Check Go formatting without modifying files
+    cmds:
+      - >-
+        sh -c 'files="$(gofmt -l ./cmd ./internal ./pkg ./unittest)";
+        test -z "$files" || { echo "$files"; exit 1; }'
+
   lint:
     desc: Run lightweight static checks
     cmds:
@@ -31,11 +38,57 @@ tasks:
     cmds:
       - go test ./...
 
-  build:
-    desc: Build server binary
+  test:short:
+    desc: Run short unit tests
+    cmds:
+      - go test -short ./...
+
+  test:race:
+    desc: Run unit tests with the Go race detector
+    cmds:
+      - go test -race ./...
+
+  test:cover:
+    desc: Run unit tests and write coverage.out
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+
+  bench:
+    desc: Run all Go benchmarks with allocation stats
+    cmds:
+      - go test -bench=. -benchmem ./...
+
+  bench:core:
+    desc: Run benchmarks for core proxy, record/replay, router, store, and LLM packages
+    cmds:
+      - go test -bench=. -benchmem ./internal/proxy ./internal/router ./internal/store ./pkg/llm ./pkg/recordfile ./pkg/replay
+
+  deps:verify:
+    desc: Verify module dependencies without editing go.mod or go.sum
+    cmds:
+      - go mod verify
+      - go list -mod=readonly ./...
+
+  deps:tidy:
+    desc: Tidy Go module files
+    cmds:
+      - go mod tidy
+
+  build:go:
+    desc: Build server binary without rebuilding the UI
+    cmds:
+      - go build -o {{.BIN}} ./cmd/server
+
+  build:all:
+    desc: Build embedded UI and server binary
     cmds:
       - task: ui:build
-      - go build -o {{.BIN}} ./cmd/server
+      - task: build:go
+
+  build:
+    desc: Build server binary and embedded UI
+    cmds:
+      - task: build:all
 
   migrate:
     desc: Rewrite legacy V2 cassettes to V3 and rebuild SQLite index
@@ -78,12 +131,24 @@ tasks:
         docker compose up --build -d
 
   check:
-    desc: Run formatting, lint, tests, and UI build
+    desc: Run the default local quality gate
     cmds:
-      - task: fmt
+      - task: check:quick
+
+  check:quick:
+    desc: Run formatting check, lint, and short tests
+    cmds:
+      - task: fmt:check
       - task: lint
-      - task: ui:build
+      - task: test:short
+
+  check:full:
+    desc: Run full validation including race tests and full build
+    cmds:
+      - task: check:quick
       - task: test
+      - task: test:race
+      - task: build:all
 
   clean:
     desc: Remove local build artifact

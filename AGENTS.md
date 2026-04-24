@@ -50,11 +50,17 @@ Compatibility note:
 ## Common Workflows
 
 - Format: `task fmt`
+- Formatting check without edits: `task fmt:check`
 - Lint: `task lint`
 - Test: `task test`
-- Build: `task build`
+- Short check: `task check:quick`
+- Full check: `task check:full`
+- Race tests: `task test:race`
+- Benchmarks: `task bench:core`
+- Build backend only: `task build:go`
+- Build everything: `task build`
 - Run locally: `task run`
-- Full check: `task check`
+- See `docs/DEVELOPMENT_COMMANDS.md` for the command matrix humans and AI agents should use.
 
 ## When Changing Storage Or Format
 
@@ -71,4 +77,5 @@ Compatibility note:
 - `docs/AI_BRANCH_BASELINE.md`: branch-specific summary of the current AI-agent evolution work and implemented closed loop
 - `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
 - `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants
+- `docs/DEVELOPMENT_COMMANDS.md`: stable test, lint, build, benchmark, and dependency command entry points
 - add focused docs under `docs/` only when they clarify architecture or storage decisions
