@@ -1,11 +1,9 @@
 package recordfile
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -144,19 +142,18 @@ func BuildEvents(header RecordHeader) []RecordEvent {
 }
 
 func ParsePrelude(content []byte) (*ParsedPrelude, error) {
-	reader := bufio.NewReader(bytes.NewReader(content))
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read prelude: %w", err)
+	lineEnd := bytes.IndexByte(content, '\n')
+	if lineEnd < 0 {
+		return nil, fmt.Errorf("failed to read prelude: missing first line")
 	}
 
-	trimmed := strings.TrimRight(line, "\r\n")
-	if trimmed == FileMagic {
+	line := bytes.TrimSuffix(content[:lineEnd], []byte("\r"))
+	if bytes.Equal(line, []byte(FileMagic)) {
 		return parseV3Prelude(content)
 	}
 
 	var header RecordHeader
-	if err := json.Unmarshal([]byte(line), &header); err != nil {
+	if err := json.Unmarshal(line, &header); err != nil {
 		return nil, fmt.Errorf("invalid record prelude: %w", err)
 	}
 
@@ -167,10 +164,6 @@ func ParsePrelude(content []byte) (*ParsedPrelude, error) {
 }
 
 func parseV3Prelude(content []byte) (*ParsedPrelude, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(content))
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
 	var (
 		offset  int64
 		header  RecordHeader
@@ -178,37 +171,41 @@ func parseV3Prelude(content []byte) (*ParsedPrelude, error) {
 		gotMeta bool
 	)
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		offset += int64(len(scanner.Bytes())) + 1
+	for len(content) > 0 {
+		lineEnd := bytes.IndexByte(content, '\n')
+		if lineEnd < 0 {
+			return nil, fmt.Errorf("scan v3 prelude: missing blank line")
+		}
 
-		if line == FileMagic {
+		rawLine := content[:lineEnd]
+		line := bytes.TrimSuffix(rawLine, []byte("\r"))
+		offset += int64(lineEnd + 1)
+		content = content[lineEnd+1:]
+
+		if bytes.Equal(line, []byte(FileMagic)) {
 			continue
 		}
-		if line == "" {
+		if len(line) == 0 {
 			break
 		}
-		if strings.HasPrefix(line, metaPrefix) {
-			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, metaPrefix)), &header); err != nil {
+		if bytes.HasPrefix(line, []byte(metaPrefix)) {
+			if err := json.Unmarshal(line[len(metaPrefix):], &header); err != nil {
 				return nil, fmt.Errorf("invalid v3 meta line: %w", err)
 			}
 			gotMeta = true
 			continue
 		}
-		if strings.HasPrefix(line, eventPrefix) {
+		if bytes.HasPrefix(line, []byte(eventPrefix)) {
 			var event RecordEvent
-			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, eventPrefix)), &event); err != nil {
+			if err := json.Unmarshal(line[len(eventPrefix):], &event); err != nil {
 				return nil, fmt.Errorf("invalid v3 event line: %w", err)
 			}
 			events = append(events, event)
 			continue
 		}
-		return nil, fmt.Errorf("invalid v3 prelude line: %q", line)
+		return nil, fmt.Errorf("invalid v3 prelude line: %q", string(line))
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan v3 prelude: %w", err)
-	}
 	if !gotMeta {
 		return nil, fmt.Errorf("missing v3 meta line")
 	}
