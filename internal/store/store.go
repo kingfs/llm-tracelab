@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"entgo.io/ent/dialect"
@@ -59,6 +60,7 @@ type Store struct {
 	client    *dao.Client
 	outputDir string
 	dbPath    string
+	syncMu    sync.Mutex
 }
 
 type ListPageResult struct {
@@ -2114,6 +2116,14 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
 
 func (s *Store) Sync() error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
+	freshness, err := s.loadFreshness()
+	if err != nil {
+		return err
+	}
+
 	return filepath.Walk(s.outputDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -2128,11 +2138,7 @@ func (s *Store) Sync() error {
 			return nil
 		}
 
-		same, err := s.isFresh(path, info)
-		if err != nil {
-			return err
-		}
-		if same {
+		if record, ok := freshness[path]; ok && record.modTimeNs == info.ModTime().UnixNano() && record.fileSize == info.Size() {
 			return nil
 		}
 
@@ -2156,6 +2162,33 @@ func (s *Store) Sync() error {
 
 		return s.UpsertLogWithGrouping(path, parsed.Header, grouping)
 	})
+}
+
+type freshnessRecord struct {
+	modTimeNs int64
+	fileSize  int64
+}
+
+func (s *Store) loadFreshness() (map[string]freshnessRecord, error) {
+	rows, err := s.db.Query(`SELECT path, mod_time_ns, file_size FROM logs`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	freshness := map[string]freshnessRecord{}
+	for rows.Next() {
+		var (
+			path      string
+			modTimeNs int64
+			fileSize  int64
+		)
+		if err := rows.Scan(&path, &modTimeNs, &fileSize); err != nil {
+			return nil, err
+		}
+		freshness[path] = freshnessRecord{modTimeNs: modTimeNs, fileSize: fileSize}
+	}
+	return freshness, rows.Err()
 }
 
 func shouldSkipIncompleteRecord(content []byte, err error) bool {
@@ -2228,20 +2261,6 @@ func (s *Store) lookupOrCreateTraceID(path string) (string, error) {
 	default:
 		return "", err
 	}
-}
-
-func (s *Store) isFresh(path string, info os.FileInfo) (bool, error) {
-	row, err := s.client.TraceLog.Query().
-		Where(tracelog.IDEQ(path)).
-		Only(context.Background())
-	if dao.IsNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-
-	return row.ModTimeNs == info.ModTime().UnixNano() && row.FileSize == info.Size(), nil
 }
 
 func (s *Store) ListRecent(limit int) ([]LogEntry, error) {

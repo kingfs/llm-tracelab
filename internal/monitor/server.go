@@ -495,10 +495,6 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
 			return
 		}
-		if err := st.Sync(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
-			return
-		}
 
 		upstreamID := strings.TrimPrefix(pathClean(r.URL.Path), "/api/upstreams/")
 		upstreamID = strings.Trim(upstreamID, "/")
@@ -820,10 +816,6 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
 			return
 		}
-		if err := st.Sync(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
-			return
-		}
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
 		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
@@ -887,10 +879,6 @@ func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
 			return
 		}
-		if err := st.Sync(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
-			return
-		}
 
 		page := parseInt(r.URL.Query().Get("page"), 1)
 		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
@@ -919,10 +907,6 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
-			return
-		}
-		if err := st.Sync(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "sync error: " + err.Error()})
 			return
 		}
 

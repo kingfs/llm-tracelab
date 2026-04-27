@@ -1575,9 +1575,6 @@ func (a *serverAPI) requireStoreSync() error {
 	if a.store == nil {
 		return fmt.Errorf("store not configured")
 	}
-	if err := a.store.Sync(); err != nil {
-		return fmt.Errorf("sync error: %w", err)
-	}
 	return nil
 }
 

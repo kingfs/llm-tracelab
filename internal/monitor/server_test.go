@@ -21,6 +21,13 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
+func syncStore(t *testing.T, st *store.Store) {
+	t.Helper()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+}
+
 func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	t.Parallel()
 
@@ -28,6 +35,45 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	tracePath := filepath.Join(outputDir, "trace.http")
 	reqBody := `{"messages":[{"role":"user","content":"Inspect this request."}],"tools":[{"type":"function","function":{"name":"read","description":"Read the contents of a file.","parameters":{"type":"object","properties":{"file_path":{"type":"string"}}}}}]}`
 	content := buildRecordFixture(t, "/v1/chat/completions", false, reqBody, `{"choices":[{"message":{"content":"done"}}]}`)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces?page=1&page_size=50", nil)
+	rr := httptest.NewRecorder()
+	listAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+
+	var payload listResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
+	}
+	if payload.Items[0].ID == "" {
+		t.Fatalf("trace id missing from list payload")
+	}
+	if payload.Items[0].Operation != "chat.completions" {
+		t.Fatalf("operation = %q, want chat.completions", payload.Items[0].Operation)
+	}
+}
+
+func TestListAPIHandlerDoesNotSyncFilesystem(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace.http")
+	content := buildRecordFixture(t, "/v1/chat/completions", false, `{"messages":[{"role":"user","content":"hello"}]}`, `{"choices":[{"message":{"content":"done"}}]}`)
 	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -49,14 +95,8 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if len(payload.Items) != 1 {
-		t.Fatalf("len(payload.Items) = %d, want 1", len(payload.Items))
-	}
-	if payload.Items[0].ID == "" {
-		t.Fatalf("trace id missing from list payload")
-	}
-	if payload.Items[0].Operation != "chat.completions" {
-		t.Fatalf("operation = %q, want chat.completions", payload.Items[0].Operation)
+	if len(payload.Items) != 0 {
+		t.Fatalf("len(payload.Items) = %d, want 0 before explicit sync", len(payload.Items))
 	}
 }
 
@@ -198,6 +238,7 @@ func TestSessionListAPIHandlerReturnsGroupedItems(t *testing.T) {
 		t.Fatalf("store.New() error = %v", err)
 	}
 	defer st.Close()
+	syncStore(t, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions?page=1&page_size=50", nil)
 	rr := httptest.NewRecorder()
@@ -255,6 +296,7 @@ func TestSessionListAPIHandlerAppliesFilters(t *testing.T) {
 		t.Fatalf("store.New() error = %v", err)
 	}
 	defer st.Close()
+	syncStore(t, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions?provider=openai_compatible&q=sess-openai", nil)
 	rr := httptest.NewRecorder()
@@ -298,6 +340,7 @@ func TestSessionDetailAPIHandlerReturnsTraceList(t *testing.T) {
 		t.Fatalf("store.New() error = %v", err)
 	}
 	defer st.Close()
+	syncStore(t, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
 	rr := httptest.NewRecorder()
@@ -360,6 +403,7 @@ func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
 		t.Fatalf("store.New() error = %v", err)
 	}
 	defer st.Close()
+	syncStore(t, st)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
 	rr := httptest.NewRecorder()

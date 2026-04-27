@@ -96,6 +96,9 @@ func runServe(args []string) int {
 		return 1
 	}
 	defer traceStore.Close()
+	syncCtx, cancelSync := context.WithCancel(context.Background())
+	defer cancelSync()
+	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute)
 
 	rtr, err := router.New(cfg, traceStore)
 	if err != nil {
@@ -154,6 +157,37 @@ func runServe(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration) {
+	if traceStore == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	go func() {
+		run := func(reason string) {
+			start := time.Now()
+			if err := traceStore.Sync(); err != nil {
+				slog.Warn("Trace index background sync failed", "reason", reason, "error", err)
+				return
+			}
+			slog.Info("Trace index background sync finished", "reason", reason, "duration", time.Since(start).String())
+		}
+
+		run("startup")
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run("periodic")
+			}
+		}
+	}()
 }
 
 func openAuthStore(cfg *config.Config) (*auth.Store, error) {
