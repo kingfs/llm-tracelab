@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,13 @@ import (
 	"strings"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
+	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
@@ -41,6 +48,7 @@ type Stats struct {
 
 type Store struct {
 	db        *sql.DB
+	client    *dao.Client
 	outputDir string
 	dbPath    string
 }
@@ -926,11 +934,12 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 
 	st := &Store{
 		db:        db,
+		client:    dao.NewClient(dao.Driver(entsql.OpenDB(dialect.SQLite, db))),
 		outputDir: outputDir,
 		dbPath:    dbPath,
 	}
 	if err := st.initSchema(); err != nil {
-		db.Close()
+		_ = st.Close()
 		return nil, err
 	}
 
@@ -956,10 +965,16 @@ func sqliteDSN(dbPath string) string {
 }
 
 func (s *Store) Close() error {
-	if s == nil || s.db == nil {
+	if s == nil {
 		return nil
 	}
-	return s.db.Close()
+	if s.client != nil {
+		return s.client.Close()
+	}
+	if s.db != nil {
+		return s.db.Close()
+	}
+	return nil
 }
 
 func (s *Store) initSchema() error {
@@ -1023,12 +1038,13 @@ func (s *Store) initSchema() error {
 			last_refresh_error TEXT NOT NULL DEFAULT ''
 		);`,
 		`CREATE TABLE IF NOT EXISTS upstream_models (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			upstream_id TEXT NOT NULL,
 			model TEXT NOT NULL,
 			source TEXT NOT NULL,
-			seen_at TEXT NOT NULL,
-			PRIMARY KEY (upstream_id, model)
+			seen_at TEXT NOT NULL
 		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS upstreammodel_upstream_id_model ON upstream_models(upstream_id, model);`,
 		`CREATE INDEX IF NOT EXISTS idx_upstream_models_model ON upstream_models(model);`,
 		`CREATE TABLE IF NOT EXISTS datasets (
 			id TEXT PRIMARY KEY,
@@ -1038,15 +1054,16 @@ func (s *Store) initSchema() error {
 			updated_at TEXT NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS dataset_examples (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			dataset_id TEXT NOT NULL,
 			trace_id TEXT NOT NULL,
 			position INTEGER NOT NULL,
 			added_at TEXT NOT NULL,
 			source_type TEXT NOT NULL DEFAULT '',
 			source_id TEXT NOT NULL DEFAULT '',
-			note TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY (dataset_id, trace_id)
+			note TEXT NOT NULL DEFAULT ''
 		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS datasetexample_dataset_id_trace_id ON dataset_examples(dataset_id, trace_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC);`,
 		`CREATE TABLE IF NOT EXISTS eval_runs (
 			id TEXT PRIMARY KEY,
@@ -1156,6 +1173,9 @@ func (s *Store) initSchema() error {
 			return err
 		}
 	}
+	if err := s.ensureEntCompatibleTables(); err != nil {
+		return err
+	}
 	if err := s.backfillTraceIDs(); err != nil {
 		return err
 	}
@@ -1168,10 +1188,97 @@ func (s *Store) initSchema() error {
 	return nil
 }
 
-func (s *Store) ensureColumn(table string, column string, definition string) error {
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+func (s *Store) ensureEntCompatibleTables() error {
+	if err := s.ensureAutoIDTable(
+		"upstream_models",
+		`CREATE TABLE upstream_models (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			upstream_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			source TEXT NOT NULL,
+			seen_at TEXT NOT NULL
+		)`,
+		`INSERT INTO upstream_models (upstream_id, model, source, seen_at)
+		 SELECT upstream_id, model, source, seen_at FROM upstream_models_old`,
+		[]string{
+			`CREATE UNIQUE INDEX IF NOT EXISTS upstreammodel_upstream_id_model ON upstream_models(upstream_id, model)`,
+			`CREATE INDEX IF NOT EXISTS idx_upstream_models_model ON upstream_models(model)`,
+		},
+	); err != nil {
+		return err
+	}
+	return s.ensureAutoIDTable(
+		"dataset_examples",
+		`CREATE TABLE dataset_examples (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			dataset_id TEXT NOT NULL,
+			trace_id TEXT NOT NULL,
+			position INTEGER NOT NULL,
+			added_at TEXT NOT NULL,
+			source_type TEXT NOT NULL DEFAULT '',
+			source_id TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT ''
+		)`,
+		`INSERT INTO dataset_examples (dataset_id, trace_id, position, added_at, source_type, source_id, note)
+		 SELECT dataset_id, trace_id, position, added_at, source_type, source_id, note FROM dataset_examples_old`,
+		[]string{
+			`CREATE UNIQUE INDEX IF NOT EXISTS datasetexample_dataset_id_trace_id ON dataset_examples(dataset_id, trace_id)`,
+			`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC)`,
+		},
+	)
+}
+
+func (s *Store) ensureAutoIDTable(table string, createSQL string, copySQL string, indexes []string) error {
+	hasID, err := s.hasColumn(table, "id")
 	if err != nil {
 		return err
+	}
+	if hasID {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE ` + table + ` RENAME TO ` + table + `_old`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(createSQL); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(copySQL); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE ` + table + `_old`); err != nil {
+		return err
+	}
+	for _, stmt := range indexes {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ensureColumn(table string, column string, definition string) error {
+	exists, err := s.hasColumn(table, column)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	return err
+}
+
+func (s *Store) hasColumn(table string, column string) (bool, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
 	}
 	defer rows.Close()
 
@@ -1185,18 +1292,16 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 	)
 	for rows.Next() {
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
-			return err
+			return false, err
 		}
 		if name == column {
-			return rows.Err()
+			return true, rows.Err()
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
-
-	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
-	return err
+	return false, nil
 }
 
 func (s *Store) backfillTraceIDs() error {
@@ -1278,42 +1383,25 @@ func (s *Store) UpsertLog(path string, header recordfile.RecordHeader) error {
 }
 
 func (s *Store) UpsertUpstreamTarget(record UpstreamTargetRecord) error {
-	lastRefreshAt := ""
+	create := s.client.UpstreamTarget.Create().
+		SetID(record.ID).
+		SetBaseURL(record.BaseURL).
+		SetProviderPreset(record.ProviderPreset).
+		SetProtocolFamily(record.ProtocolFamily).
+		SetRoutingProfile(record.RoutingProfile).
+		SetEnabled(record.Enabled).
+		SetPriority(record.Priority).
+		SetWeight(record.Weight).
+		SetCapacityHint(record.CapacityHint).
+		SetLastRefreshStatus(record.LastRefreshStatus).
+		SetLastRefreshError(record.LastRefreshError)
 	if !record.LastRefreshAt.IsZero() {
-		lastRefreshAt = record.LastRefreshAt.UTC().Format(timeLayout)
+		create.SetLastRefreshAt(record.LastRefreshAt.UTC())
 	}
-	_, err := s.db.Exec(`
-		INSERT INTO upstream_targets (
-			id, base_url, provider_preset, protocol_family, routing_profile, enabled,
-			priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			base_url=excluded.base_url,
-			provider_preset=excluded.provider_preset,
-			protocol_family=excluded.protocol_family,
-			routing_profile=excluded.routing_profile,
-			enabled=excluded.enabled,
-			priority=excluded.priority,
-			weight=excluded.weight,
-			capacity_hint=excluded.capacity_hint,
-			last_refresh_at=excluded.last_refresh_at,
-			last_refresh_status=excluded.last_refresh_status,
-			last_refresh_error=excluded.last_refresh_error
-	`,
-		record.ID,
-		record.BaseURL,
-		record.ProviderPreset,
-		record.ProtocolFamily,
-		record.RoutingProfile,
-		boolToInt(record.Enabled),
-		record.Priority,
-		record.Weight,
-		record.CapacityHint,
-		lastRefreshAt,
-		record.LastRefreshStatus,
-		record.LastRefreshError,
-	)
-	return err
+	return create.
+		OnConflictColumns(upstreamtarget.FieldID).
+		UpdateNewValues().
+		Exec(context.Background())
 }
 
 func (s *Store) CreateDataset(name string, description string) (DatasetRecord, error) {
@@ -1329,17 +1417,13 @@ func (s *Store) CreateDataset(name string, description string) (DatasetRecord, e
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	_, err := s.db.Exec(`
-		INSERT INTO datasets (id, name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-	`,
-		record.ID,
-		record.Name,
-		record.Description,
-		record.CreatedAt.Format(timeLayout),
-		record.UpdatedAt.Format(timeLayout),
-	)
-	if err != nil {
+	if err := s.client.Dataset.Create().
+		SetID(record.ID).
+		SetName(record.Name).
+		SetDescription(record.Description).
+		SetCreatedAt(record.CreatedAt).
+		SetUpdatedAt(record.UpdatedAt).
+		Exec(context.Background()); err != nil {
 		return DatasetRecord{}, err
 	}
 	return record, nil
@@ -1525,34 +1609,32 @@ func (s *Store) CreateEvalRun(datasetID string, sourceType string, sourceID stri
 		CompletedAt:  now,
 		TraceCount:   traceCount,
 	}
-	_, err := s.db.Exec(`
-		INSERT INTO eval_runs (
-			id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at,
-			trace_count, score_count, pass_count, fail_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0)
-	`,
-		record.ID,
-		record.DatasetID,
-		record.SourceType,
-		record.SourceID,
-		record.EvaluatorSet,
-		record.CreatedAt.Format(timeLayout),
-		record.CompletedAt.Format(timeLayout),
-		record.TraceCount,
-	)
-	if err != nil {
+	if err := s.client.EvalRun.Create().
+		SetID(record.ID).
+		SetDatasetID(record.DatasetID).
+		SetSourceType(record.SourceType).
+		SetSourceID(record.SourceID).
+		SetEvaluatorSet(record.EvaluatorSet).
+		SetCreatedAt(record.CreatedAt).
+		SetCompletedAt(record.CompletedAt).
+		SetTraceCount(record.TraceCount).
+		SetScoreCount(0).
+		SetPassCount(0).
+		SetFailCount(0).
+		Exec(context.Background()); err != nil {
 		return EvalRunRecord{}, err
 	}
 	return record, nil
 }
 
 func (s *Store) FinalizeEvalRun(evalRunID string, scoreCount int, passCount int, failCount int) error {
-	now := time.Now().UTC().Format(timeLayout)
-	_, err := s.db.Exec(`
-		UPDATE eval_runs
-		SET completed_at = ?, score_count = ?, pass_count = ?, fail_count = ?
-		WHERE id = ?
-	`, now, scoreCount, passCount, failCount, evalRunID)
+	_, err := s.client.EvalRun.Update().
+		Where(evalrun.IDEQ(evalRunID)).
+		SetCompletedAt(time.Now().UTC()).
+		SetScoreCount(scoreCount).
+		SetPassCount(passCount).
+		SetFailCount(failCount).
+		Save(context.Background())
 	return err
 }
 
@@ -1568,24 +1650,19 @@ func (s *Store) AddScore(record ScoreRecord) (ScoreRecord, error) {
 		record.ID = uuid.NewString()
 	}
 	record.CreatedAt = now
-	_, err := s.db.Exec(`
-		INSERT INTO scores (
-			id, trace_id, session_id, dataset_id, eval_run_id, evaluator_key, value, status, label, explanation, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		record.ID,
-		record.TraceID,
-		record.SessionID,
-		record.DatasetID,
-		record.EvalRunID,
-		record.EvaluatorKey,
-		record.Value,
-		record.Status,
-		record.Label,
-		record.Explanation,
-		record.CreatedAt.Format(timeLayout),
-	)
-	if err != nil {
+	if err := s.client.Score.Create().
+		SetID(record.ID).
+		SetTraceID(record.TraceID).
+		SetSessionID(record.SessionID).
+		SetDatasetID(record.DatasetID).
+		SetEvalRunID(record.EvalRunID).
+		SetEvaluatorKey(record.EvaluatorKey).
+		SetValue(record.Value).
+		SetStatus(record.Status).
+		SetLabel(record.Label).
+		SetExplanation(record.Explanation).
+		SetCreatedAt(record.CreatedAt).
+		Exec(context.Background()); err != nil {
 		return ScoreRecord{}, err
 	}
 	return record, nil
@@ -1683,29 +1760,26 @@ func (s *Store) CreateExperimentRun(record ExperimentRunRecord) (ExperimentRunRe
 	}
 	record.ID = uuid.NewString()
 	record.CreatedAt = time.Now().UTC()
-	_, err := s.db.Exec(`
-		INSERT INTO experiment_runs (
-			id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
-			baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate,
-			pass_rate_delta, matched_score_count, improvement_count, regression_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		record.ID,
-		strings.TrimSpace(record.Name),
-		strings.TrimSpace(record.Description),
-		strings.TrimSpace(record.BaselineEvalRunID),
-		strings.TrimSpace(record.CandidateEvalRunID),
-		record.CreatedAt.Format(timeLayout),
-		record.BaselineScoreCount,
-		record.CandidateScoreCount,
-		record.BaselinePassRate,
-		record.CandidatePassRate,
-		record.PassRateDelta,
-		record.MatchedScoreCount,
-		record.ImprovementCount,
-		record.RegressionCount,
-	)
-	if err != nil {
+	record.Name = strings.TrimSpace(record.Name)
+	record.Description = strings.TrimSpace(record.Description)
+	record.BaselineEvalRunID = strings.TrimSpace(record.BaselineEvalRunID)
+	record.CandidateEvalRunID = strings.TrimSpace(record.CandidateEvalRunID)
+	if err := s.client.ExperimentRun.Create().
+		SetID(record.ID).
+		SetName(record.Name).
+		SetDescription(record.Description).
+		SetBaselineEvalRunID(record.BaselineEvalRunID).
+		SetCandidateEvalRunID(record.CandidateEvalRunID).
+		SetCreatedAt(record.CreatedAt).
+		SetBaselineScoreCount(record.BaselineScoreCount).
+		SetCandidateScoreCount(record.CandidateScoreCount).
+		SetBaselinePassRate(record.BaselinePassRate).
+		SetCandidatePassRate(record.CandidatePassRate).
+		SetPassRateDelta(record.PassRateDelta).
+		SetMatchedScoreCount(record.MatchedScoreCount).
+		SetImprovementCount(record.ImprovementCount).
+		SetRegressionCount(record.RegressionCount).
+		Exec(context.Background()); err != nil {
 		return ExperimentRunRecord{}, err
 	}
 	return record, nil
@@ -1750,29 +1824,33 @@ func (s *Store) ListExperimentRuns(limit int) ([]ExperimentRunRecord, error) {
 }
 
 func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModelRecord) error {
-	tx, err := s.db.Begin()
+	ctx := context.Background()
+	tx, err := s.client.Tx(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM upstream_models WHERE upstream_id = ?`, upstreamID); err != nil {
+	if _, err := tx.UpstreamModel.Delete().Where(upstreammodel.UpstreamIDEQ(upstreamID)).Exec(ctx); err != nil {
 		return err
 	}
+	creates := make([]*dao.UpstreamModelCreate, 0, len(records))
 	for _, record := range records {
 		seenAt := record.SeenAt
 		if seenAt.IsZero() {
 			seenAt = time.Now().UTC()
 		}
-		if _, err := tx.Exec(`
-			INSERT INTO upstream_models (upstream_id, model, source, seen_at)
-			VALUES (?, ?, ?, ?)
-		`,
-			upstreamID,
-			record.Model,
-			record.Source,
-			seenAt.UTC().Format(timeLayout),
-		); err != nil {
+		creates = append(creates, tx.UpstreamModel.Create().
+			SetUpstreamID(upstreamID).
+			SetModel(record.Model).
+			SetSource(record.Source).
+			SetSeenAt(seenAt.UTC()))
+	}
+	if len(creates) > 0 {
+		if err := tx.UpstreamModel.CreateBulk(creates...).
+			OnConflictColumns(upstreammodel.FieldUpstreamID, upstreammodel.FieldModel).
+			UpdateNewValues().
+			Exec(ctx); err != nil {
 			return err
 		}
 	}
@@ -2664,6 +2742,16 @@ func scanSessionSummary(scanner interface {
 }
 
 func timeParse(v string) (time.Time, error) {
+	for _, layout := range []string{
+		timeLayout,
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+	} {
+		if parsed, err := time.Parse(layout, v); err == nil {
+			return parsed, nil
+		}
+	}
 	return time.Parse(timeLayout, v)
 }
 
