@@ -2466,34 +2466,45 @@ func (s *Store) PathByID(traceID string) (string, error) {
 }
 
 func (s *Store) Stats() (Stats, error) {
-	var stats Stats
-	var avgTTFT float64
-	var successRate float64
-	err := s.db.QueryRow(`
-		SELECT
-			COUNT(*),
-			COALESCE(AVG(CASE WHEN status_code BETWEEN 200 AND 299 THEN ttft_ms END), 0),
-			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN total_tokens ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0),
-			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
-				100.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
-			END
-		FROM logs
-	`).Scan(
-		&stats.TotalRequest,
-		&avgTTFT,
-		&stats.TotalTokens,
-		&stats.SuccessRequest,
-		&stats.FailedRequest,
-		&successRate,
-	)
+	ctx := context.Background()
+	total, err := s.client.TraceLog.Query().Count(ctx)
 	if err != nil {
 		return Stats{}, err
 	}
 
+	successQuery := s.client.TraceLog.Query().
+		Where(tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
+	successCount, err := successQuery.Clone().Count(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
+
+	stats := Stats{
+		TotalRequest:   total,
+		SuccessRequest: successCount,
+		FailedRequest:  total - successCount,
+	}
+	if total > 0 {
+		stats.SuccessRate = 100.0 * float64(successCount) / float64(total)
+	}
+	if successCount == 0 {
+		return stats, nil
+	}
+
+	avgTTFT, err := successQuery.Clone().
+		Aggregate(dao.Mean(tracelog.FieldTtftMs)).
+		Float64(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
+	totalTokens, err := successQuery.Clone().
+		Aggregate(dao.Sum(tracelog.FieldTotalTokens)).
+		Int(ctx)
+	if err != nil {
+		return Stats{}, err
+	}
 	stats.AvgTTFT = int(math.Round(avgTTFT))
-	stats.SuccessRate = successRate
+	stats.TotalTokens = totalTokens
 	return stats, nil
 }
 

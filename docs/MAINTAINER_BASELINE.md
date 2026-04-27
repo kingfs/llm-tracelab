@@ -18,11 +18,31 @@ Use it when changing:
 Current responsibility split:
 
 - raw `.http` cassettes are the source of truth for replay and detail reconstruction
-- SQLite is the source of truth for list pages, aggregate statistics, filtering, pagination, and session grouping
+- the configured structured database is the source of truth for list pages, aggregate statistics, filtering, pagination, auth users/tokens, datasets, evals, experiments, upstream catalog state, and session grouping
 - monitor detail pages may read raw cassettes on demand
 - monitor list pages should not depend on rescanning raw files
 
 This split is deliberate and should remain stable unless there is a strong reason to redesign replay and monitor storage together.
+
+## Structured Store Boundary
+
+The current implementation uses ent as the ORM for ordinary structured CRUD and index-maintenance paths.
+
+Keep these paths ent-first:
+
+- auth users and API tokens
+- trace list/detail lookup by indexed identity
+- dataset, eval, score, experiment, and upstream catalog records
+- simple aggregate reads that map cleanly to ent queries
+
+Raw SQL is still acceptable for compatibility upgrades, backfills, and monitor read models where the query is primarily analytical:
+
+- session grouping pages
+- upstream analytics and drilldowns
+- routing failure analytics
+- complex joins that would require artificial ent edges without improving the domain model
+
+Do not mechanically convert every SQL statement to ent. Convert paths when it improves the storage contract or removes unsafe ad hoc writes without weakening replay compatibility or query semantics.
 
 ## Record Format Invariants
 

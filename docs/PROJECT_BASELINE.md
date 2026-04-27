@@ -53,14 +53,20 @@ The raw `.http` file remains the source of truth for:
 - raw protocol inspection
 - trace detail reconstruction
 
-### SQLite Metadata Index
+### Structured Metadata Index
 
-SQLite remains the source for:
+The configured structured database remains the source for:
 
 - request/session list pages
 - aggregate statistics
 - session grouping
 - monitor filtering and pagination
+- auth users and API tokens
+- datasets, eval runs, scores, experiments, and upstream catalog state
+
+The default local driver is SQLite. The configuration is intentionally driver-oriented so the storage boundary can evolve beyond SQLite without changing the replay contract.
+
+Ordinary structured records are accessed through ent. Monitor analytics may still use focused SQL read models where that keeps grouping, bucketing, and drilldown queries clearer than forcing artificial ORM edges.
 
 Current `logs` table baseline includes both request metadata and grouping metadata such as:
 
