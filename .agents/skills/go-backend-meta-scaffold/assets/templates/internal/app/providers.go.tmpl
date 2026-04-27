@@ -1,0 +1,61 @@
+package app
+
+import (
+	"net/http"
+
+	"__MODULE_PATH__/ent/dao"
+	appcommand "__MODULE_PATH__/internal/application/command"
+	appquery "__MODULE_PATH__/internal/application/query"
+	"__MODULE_PATH__/internal/config"
+	entpersistence "__MODULE_PATH__/internal/infrastructure/persistence/ent"
+	httpiface "__MODULE_PATH__/internal/interfaces/http"
+	grpciface "__MODULE_PATH__/internal/interfaces/grpc"
+
+	"google.golang.org/grpc"
+)
+
+func newDAOClient(cfg config.Config) (*dao.Client, error) {
+	return dao.Open(cfg.Database.Driver, cfg.Database.DSN)
+}
+
+func newCommandRepository(client *dao.Client) *entpersistence.Repository {
+	return entpersistence.NewRepository(client)
+}
+
+func newQueryRepository(client *dao.Client) *entpersistence.QueryRepository {
+	return entpersistence.NewQueryRepository(client)
+}
+
+func newCommandService(repo *entpersistence.Repository) *appcommand.Service {
+	return appcommand.NewService(repo)
+}
+
+func newQueryService(repo *entpersistence.QueryRepository) *appquery.Service {
+	return appquery.NewService(repo)
+}
+
+func newGRPCService(commandApp *appcommand.Service, queryApp *appquery.Service) *grpciface.Server {
+	return grpciface.NewServer(commandApp, queryApp)
+}
+
+func newGRPCServer(service *grpciface.Server) *grpc.Server {
+	server := grpc.NewServer()
+	grpciface.Register(server, service)
+	return server
+}
+
+func newHTTPHandler(queryApp *appquery.Service) *httpiface.Handler {
+	return httpiface.NewHandler(queryApp)
+}
+
+func newHTTPRouter(handler *httpiface.Handler) http.Handler {
+	return httpiface.NewRouter(handler)
+}
+
+func newHTTPServer(cfg config.Config, router http.Handler) *http.Server {
+	return &http.Server{
+		Addr:    cfg.Server.HTTP.Address,
+		Handler: router,
+	}
+}
+

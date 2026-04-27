@@ -1,0 +1,93 @@
+version: "3"
+
+vars:
+  SERVICE_NAME: __SERVICE_NAME__
+  DIST_DIR: dist
+  BIN_PATH: "{{.DIST_DIR}}/bin/{{.SERVICE_NAME}}"
+  COVERAGE_DIR: coverage
+
+tasks:
+  default:
+    cmds:
+      - task: lint
+      - task: test
+      - task: build
+
+  generate:
+    desc: Generate proto, ent and wire artifacts after phase2 scaffold is ready.
+    cmds:
+      - task: generate:proto
+      - task: generate:ent
+      - task: generate:wire
+
+  generate:proto:
+    desc: Generate protobuf artifacts.
+    cmds:
+      - buf generate
+
+  generate:ent:
+    desc: Generate ent dao artifacts from ent/schema.
+    cmds:
+      - go generate ./ent/...
+
+  generate:wire:
+    desc: Generate wire injectors.
+    cmds:
+      - wire ./...
+
+  migrate:create:
+    desc: Generate a new ent migration diff, then update atlas.sum.
+    cmds:
+      - go run -mod=mod ent/migrate/main.go {{.CLI_ARGS}}
+      - go run -mod=mod ent/migrate/update_hash.go ent/migrations
+
+  migrate:hash:
+    desc: Recalculate atlas.sum from ent/migrations/*.sql.
+    cmds:
+      - go run -mod=mod ent/migrate/update_hash.go ent/migrations
+
+  migrate:up:
+    desc: Apply migrations through the service CLI.
+    cmds:
+      - go run ./cmd/__SERVICE_NAME__ migrate up {{.CLI_ARGS}}
+
+  migrate:down:
+    desc: Roll back migrations through the service CLI.
+    cmds:
+      - go run ./cmd/__SERVICE_NAME__ migrate down {{.CLI_ARGS}}
+
+  lint:
+    desc: Run lint suite.
+    cmds:
+      - buf lint
+      - go vet ./...
+      - golangci-lint run ./...
+
+  test:
+    desc: Run unit tests.
+    cmds:
+      - go test ./... -count=1
+
+  test:e2e:
+    desc: Run end-to-end tests.
+    cmds:
+      - go test ./tests/e2e/... -count=1
+
+  coverage:
+    desc: Generate coverage report.
+    cmds:
+      - mkdir -p {{.COVERAGE_DIR}}
+      - go test ./... -coverprofile={{.COVERAGE_DIR}}/coverage.out -covermode=atomic
+      - go tool cover -func={{.COVERAGE_DIR}}/coverage.out > {{.COVERAGE_DIR}}/summary.txt
+
+  build:
+    desc: Build service binary.
+    cmds:
+      - mkdir -p {{.DIST_DIR}}/bin
+      - go build -o {{.BIN_PATH}} ./cmd/__SERVICE_NAME__
+
+  package:
+    desc: Build Docker image from existing dist artifacts.
+    deps: [build]
+    cmds:
+      - docker build -f docker/Dockerfile -t __SERVICE_NAME__:local .

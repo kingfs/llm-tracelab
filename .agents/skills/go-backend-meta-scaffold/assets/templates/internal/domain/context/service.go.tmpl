@@ -1,0 +1,24 @@
+package __BOUNDED_CONTEXT_SNAKE__
+
+import "context"
+
+type Service struct {
+	repo Repository
+}
+
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
+}
+
+func (s *Service) Activate(ctx context.Context, id string) (*__BOUNDED_CONTEXT_PASCAL__, error) {
+	entity, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	entity.Activate()
+	if err := s.repo.Save(ctx, entity); err != nil {
+		return nil, err
+	}
+	return entity, nil
+}
+

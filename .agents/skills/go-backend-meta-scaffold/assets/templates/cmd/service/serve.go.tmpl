@@ -1,0 +1,38 @@
+package main
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"__MODULE_PATH__/internal/app"
+	"__MODULE_PATH__/internal/config"
+
+	"github.com/spf13/cobra"
+)
+
+var serveCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start __SERVICE_NAME__",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			return err
+		}
+
+		application, err := app.New(cfg)
+		if err != nil {
+			return err
+		}
+
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
+		return application.Run(ctx)
+	},
+}
+
+func init() {
+	rootCmd.AddCommand(serveCmd)
+}

@@ -1,0 +1,45 @@
+package config
+
+import "github.com/spf13/viper"
+
+type Config struct {
+	ServiceName string `mapstructure:"service_name"`
+	Server      Server `mapstructure:"server"`
+	Log         Log    `mapstructure:"log"`
+	Database    DB     `mapstructure:"database"`
+}
+
+type Server struct {
+	GRPC Listen `mapstructure:"grpc"`
+	HTTP Listen `mapstructure:"http"`
+}
+
+type Listen struct {
+	Address string `mapstructure:"address"`
+}
+
+type Log struct {
+	Level string `mapstructure:"level"`
+}
+
+type DB struct {
+	Driver string `mapstructure:"driver"`
+	DSN    string `mapstructure:"dsn"`
+}
+
+func Load(path string) (Config, error) {
+	v := viper.New()
+	v.SetConfigFile(path)
+	v.SetEnvPrefix("__ENV_PREFIX__")
+	v.AutomaticEnv()
+
+	var cfg Config
+	if err := v.ReadInConfig(); err != nil {
+		return cfg, err
+	}
+	if err := v.Unmarshal(&cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+

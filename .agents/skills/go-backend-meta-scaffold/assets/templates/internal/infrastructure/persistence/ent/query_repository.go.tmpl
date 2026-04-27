@@ -1,0 +1,38 @@
+package ent
+
+import (
+	"context"
+
+	"__MODULE_PATH__/ent/dao"
+	"__MODULE_PATH__/ent/dao/__BOUNDED_CONTEXT_SNAKE__"
+	appquery "__MODULE_PATH__/internal/application/query"
+)
+
+type QueryRepository struct {
+	client *dao.Client
+}
+
+func NewQueryRepository(client *dao.Client) *QueryRepository {
+	return &QueryRepository{client: client}
+}
+
+func (r *QueryRepository) List(ctx context.Context, limit int) ([]appquery.__BOUNDED_CONTEXT_PASCAL__View, error) {
+	rows, err := r.client.__BOUNDED_CONTEXT_PASCAL__.
+		Query().
+		Order(dao.Asc(__BOUNDED_CONTEXT_SNAKE__.FieldID)).
+		Limit(limit).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]appquery.__BOUNDED_CONTEXT_PASCAL__View, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, appquery.__BOUNDED_CONTEXT_PASCAL__View{
+			ID:     row.ID,
+			Name:   row.Name,
+			Status: row.Status,
+		})
+	}
+	return items, nil
+}
+

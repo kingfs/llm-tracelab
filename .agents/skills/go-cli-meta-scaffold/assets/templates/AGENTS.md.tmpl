@@ -1,0 +1,29 @@
+# __CLI_NAME__ AGENTS
+
+## 先读什么
+
+1. `README.md`
+2. `ARCHITECTURE.md`
+3. `cmd/__CLI_DIR_NAME__/`
+4. `internal/config/` 与 `internal/output/`
+5. 目标业务目录 `internal/__CLI_PACKAGE_NAME__/`
+
+## 工程边界
+
+- `cmd/__CLI_DIR_NAME__/` 负责命令注册、flags 与入口，不承载复杂业务逻辑
+- `internal/config/` 负责配置文件、环境变量与默认值
+- `internal/output/` 负责统一输出策略
+- `internal/version/` 负责版本信息，不在其他目录重复定义
+- `internal/__CLI_PACKAGE_NAME__/` 负责当前 CLI 的核心业务逻辑
+
+## 禁止直接修改
+
+- `dist/` 下的构建产物
+- release 压缩包、checksum、shell completion 输出
+
+## 修改建议
+
+- 新增命令时，优先在 `cmd/__CLI_DIR_NAME__/` 下新增独立文件，并通过 `init()` 注册
+- 调整配置时，优先修改 `internal/config/config.go`
+- 调整输出格式时，优先修改 `internal/output/printer.go`
+- 业务变化优先落在 `internal/__CLI_PACKAGE_NAME__/`

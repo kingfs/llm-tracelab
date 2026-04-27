@@ -1,0 +1,63 @@
+package grpc
+
+import (
+	"context"
+
+	pb "__MODULE_PATH__/gen/go/__PROTO_PACKAGE_LOWER__/__PROTO_VERSION__"
+	appcommand "__MODULE_PATH__/internal/application/command"
+	"__MODULE_PATH__/internal/application/query"
+	"__MODULE_PATH__/internal/interfaces/mapper"
+
+	"google.golang.org/grpc"
+)
+
+type Server struct {
+	pb.Unimplemented__RPC_SERVICE_NAME__Server
+	commandApp *appcommand.Service
+	queryApp *query.Service
+}
+
+func NewServer(commandApp *appcommand.Service, queryApp *query.Service) *Server {
+	return &Server{
+		commandApp: commandApp,
+		queryApp:   queryApp,
+	}
+}
+
+func Register(registrar grpc.ServiceRegistrar, server *Server) {
+	pb.Register__RPC_SERVICE_NAME__Server(registrar, server)
+}
+
+func (s *Server) Health(context.Context, *pb.HealthRequest) (*pb.HealthResponse, error) {
+	return &pb.HealthResponse{
+		Service: "__SERVICE_NAME__",
+		Status:  "ok",
+	}, nil
+}
+
+func (s *Server) Create__BOUNDED_CONTEXT_PASCAL__(ctx context.Context, req *pb.Create__BOUNDED_CONTEXT_PASCAL__Request) (*pb.__BOUNDED_CONTEXT_PASCAL__, error) {
+	entity, err := s.commandApp.Create__BOUNDED_CONTEXT_PASCAL__(ctx, appcommand.Create__BOUNDED_CONTEXT_PASCAL__Input{
+		ID:   req.GetId(),
+		Name: req.GetName(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &pb.__BOUNDED_CONTEXT_PASCAL__{
+		Id:     entity.ID,
+		Name:   entity.Name,
+		Status: string(entity.Status),
+	}, nil
+}
+
+func (s *Server) List__BOUNDED_CONTEXT_PASCAL__s(ctx context.Context, req *pb.List__BOUNDED_CONTEXT_PASCAL__sRequest) (*pb.List__BOUNDED_CONTEXT_PASCAL__sResponse, error) {
+	items, err := s.queryApp.List__BOUNDED_CONTEXT_PASCAL__(ctx, int(req.GetLimit()))
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]*pb.__BOUNDED_CONTEXT_PASCAL__, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, mapper.ToProto__BOUNDED_CONTEXT_PASCAL__(item))
+	}
+	return &pb.List__BOUNDED_CONTEXT_PASCAL__sResponse{Items: resp}, nil
+}

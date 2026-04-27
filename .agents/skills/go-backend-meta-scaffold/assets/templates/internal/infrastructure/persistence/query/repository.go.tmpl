@@ -1,0 +1,26 @@
+package query
+
+import (
+	"context"
+
+	appquery "__MODULE_PATH__/internal/application/query"
+)
+
+type Repository struct{}
+
+func NewRepository() *Repository {
+	return &Repository{}
+}
+
+func (r *Repository) List(ctx context.Context, limit int) ([]appquery.__BOUNDED_CONTEXT_PASCAL__View, error) {
+	_ = ctx
+	_ = limit
+	return []appquery.__BOUNDED_CONTEXT_PASCAL__View{
+		{
+			ID:     "sample-1",
+			Name:   "__BOUNDED_CONTEXT__ sample",
+			Status: "ACTIVE",
+		},
+	}, nil
+}
+

@@ -1,0 +1,19 @@
+package schema
+
+import (
+	"entgo.io/ent"
+	"entgo.io/ent/schema/field"
+)
+
+type __BOUNDED_CONTEXT_PASCAL__ struct {
+	ent.Schema
+}
+
+func (__BOUNDED_CONTEXT_PASCAL__) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("id").Immutable().Unique(),
+		field.String("name").NotEmpty(),
+		field.Enum("status").Values("PENDING", "ACTIVE").Default("PENDING"),
+	}
+}
+

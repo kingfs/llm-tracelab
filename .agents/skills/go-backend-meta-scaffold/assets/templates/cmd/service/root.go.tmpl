@@ -1,0 +1,27 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/spf13/cobra"
+)
+
+var (
+	configPath string
+	rootCmd    = &cobra.Command{
+		Use:          "__SERVICE_NAME__",
+		SilenceUsage: true,
+	}
+)
+
+func init() {
+	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "/app/config/config.yml", "Path to config file")
+}
+
+func execute() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}

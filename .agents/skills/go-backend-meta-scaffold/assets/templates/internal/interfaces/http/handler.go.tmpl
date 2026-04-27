@@ -1,0 +1,50 @@
+package http
+
+import (
+	"encoding/json"
+	"net/http"
+	"strconv"
+
+	"__MODULE_PATH__/internal/application/query"
+	"__MODULE_PATH__/internal/interfaces/mapper"
+)
+
+type Handler struct {
+	queryApp *query.Service
+}
+
+func NewHandler(queryApp *query.Service) *Handler {
+	return &Handler{queryApp: queryApp}
+}
+
+func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"service": "__SERVICE_NAME__",
+		"status":  "ok",
+	})
+}
+
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 20
+	}
+
+	items, err := h.queryApp.List__BOUNDED_CONTEXT_PASCAL__(r.Context(), limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp := make([]mapper.__BOUNDED_CONTEXT_PASCAL__Response, 0, len(items))
+	for _, item := range items {
+		resp = append(resp, mapper.To__BOUNDED_CONTEXT_PASCAL__Response(item))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"items": resp,
+	})
+}
+

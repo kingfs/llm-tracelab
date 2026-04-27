@@ -1,0 +1,32 @@
+package command
+
+import (
+	"context"
+
+	"__MODULE_PATH__/internal/domain/__BOUNDED_CONTEXT_SNAKE__"
+)
+
+type Create__BOUNDED_CONTEXT_PASCAL__Input struct {
+	ID   string
+	Name string
+}
+
+type Service struct {
+	repo __BOUNDED_CONTEXT_SNAKE__.Repository
+}
+
+func NewService(repo __BOUNDED_CONTEXT_SNAKE__.Repository) *Service {
+	return &Service{repo: repo}
+}
+
+func (s *Service) Create__BOUNDED_CONTEXT_PASCAL__(ctx context.Context, input Create__BOUNDED_CONTEXT_PASCAL__Input) (*__BOUNDED_CONTEXT_SNAKE__.__BOUNDED_CONTEXT_PASCAL__, error) {
+	entity, err := __BOUNDED_CONTEXT_SNAKE__.New(input.ID, input.Name)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.Save(ctx, entity); err != nil {
+		return nil, err
+	}
+	return entity, nil
+}
+

@@ -1,0 +1,76 @@
+package app
+
+import (
+	"context"
+	"log"
+	"net"
+	nethttp "net/http"
+	"time"
+
+	"__MODULE_PATH__/ent/dao"
+	"__MODULE_PATH__/internal/config"
+
+	"google.golang.org/grpc"
+)
+
+type App struct {
+	cfg        config.Config
+	daoClient  *dao.Client
+	grpcServer *grpc.Server
+	httpServer *nethttp.Server
+}
+
+func newApp(cfg config.Config, daoClient *dao.Client, grpcServer *grpc.Server, httpServer *nethttp.Server) (*App, error) {
+	return &App{
+		cfg:        cfg,
+		daoClient:  daoClient,
+		grpcServer: grpcServer,
+		httpServer: httpServer,
+	}, nil
+}
+
+func New(cfg config.Config) (*App, error) {
+	return Initialize(cfg)
+}
+
+func (a *App) Run(ctx context.Context) error {
+	log.Printf("starting %s grpc=%s http=%s", a.cfg.ServiceName, a.cfg.Server.GRPC.Address, a.cfg.Server.HTTP.Address)
+
+	grpcListener, err := net.Listen("tcp", a.cfg.Server.GRPC.Address)
+	if err != nil {
+		return err
+	}
+	defer grpcListener.Close()
+
+	grpcErrCh := make(chan error, 1)
+	go func() {
+		grpcErrCh <- a.grpcServer.Serve(grpcListener)
+	}()
+
+	httpErrCh := make(chan error, 1)
+	go func() {
+		httpErrCh <- a.httpServer.ListenAndServe()
+	}()
+
+	select {
+	case err := <-grpcErrCh:
+		if err != nil {
+			return err
+		}
+	case err := <-httpErrCh:
+		if err != nil && err != nethttp.ErrServerClosed {
+			return err
+		}
+	case <-ctx.Done():
+	}
+
+	log.Printf("stopping %s", a.cfg.ServiceName)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	a.grpcServer.GracefulStop()
+	if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	return a.daoClient.Close()
+}

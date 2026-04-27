@@ -1,0 +1,76 @@
+# __SERVICE_NAME__
+
+`__SERVICE_NAME__` 是一个基于 protobuf 契约驱动的 Go 后端服务元工程。
+
+## 特性
+
+- `proto` 作为 gRPC / REST 接口唯一事实来源
+- `buf` 管理 proto lint 与代码生成
+- `ent` 管理数据模型与 migration
+- `wire` 管理依赖注入
+- `cobra` + `viper` 管理 CLI 与配置
+- `go-task` 管理日常开发命令
+- `gitlab-ci` 管理持续集成
+
+## 快速开始
+
+```bash
+task generate:ent
+task generate
+task lint
+task test
+task build
+```
+
+## 首次初始化顺序
+
+1. 先执行 `scripts/init_scaffold.sh` 的 `phase1`，落下文档、proto、`ent/schema` 与非 dao 依赖骨架。
+2. 根据真实需求补全 `proto/**/*.proto` 与 `ent/schema/**`。
+3. 在项目目录执行 `task generate:ent`，先生成 `ent/dao/**`。
+4. 再执行 `scripts/init_scaffold.sh phase2 ...`，补齐依赖 `ent/dao` 的运行时代码、`ent/helper/tx.go` 与 `ent/migrate/*`。
+5. 最后执行 `task generate` 更新 proto、ent、wire 全部生成产物。
+6. 当 schema 稳定后，执行 `go run -mod=mod ent/migrate/main.go <migration_name>` 生成 migration。
+7. 紧接着执行 `go run -mod=mod ent/migrate/update_hash.go ent/migrations` 更新 `atlas.sum`。
+8. 提交前检查本次变更中的 migration；如果同一 commit 内存在多份尚未提交 migration，应合并为一套最终 migration。
+
+Docker 运行时约定：
+
+- 二进制：`/app/bin/__SERVICE_NAME__`
+- 配置模板：`/app/config/config.template.yaml`
+- 渲染后配置：`/app/config/config.yml`
+
+## 关键目录
+
+- `proto/`: 接口契约定义
+- `gen/`: proto 生成代码，禁止手改
+- `ent/schema/`: ent 设计源
+- `ent/dao/`: ent 生成代码，禁止手改
+- `ent/migrations/`: migration 生成产物，禁止手改
+- `internal/domain/`: 命令侧领域模型与业务规则
+- `internal/application/command/`: 命令用例
+- `internal/application/query/`: 查询用例与 read model
+- `internal/interfaces/`: gRPC/HTTP 适配与 mapper
+- `internal/infrastructure/persistence/ent/`: ent 仓储适配
+- `internal/`: 业务与基础设施实现
+- `docker/`: 镜像构建与入口脚本
+- `tests/`: e2e 与集成测试
+
+`cmd/__SERVICE_NAME__/` 默认采用多文件 `cobra` 组织：
+
+- `main.go`: 进程入口
+- `root.go`: root command 与全局 flag
+- `serve.go`: 服务启动命令
+- `migrate.go`: migration 父命令
+- `migrate_up.go`: 执行 migration up
+- `migrate_down.go`: 执行 migration down
+
+## 开发约束
+
+- 修改接口请先改 `proto/**/*.proto`
+- 修改数据模型请先改 `ent/schema/**`
+- 不要在 `phase2` 之前直接运行完整 `task generate`；先执行 `task generate:ent`
+- 修改依赖装配请先改 `wire` 源文件，不要手改 `wire_gen.go`
+- 每次生成 migration 后都要更新 `ent/migrations/atlas.sum`
+- 同一个 commit 内尽量只保留一套未提交 migration，不要让多次临时 diff 混进最终提交
+- 默认复用系统 Go 工具链缓存，不要把 `GOCACHE`、`GOMODCACHE`、`GOPATH` 指到仓库内 `.cache/` 或类似项目级目录
+- 不要在仓库内制造或提交工具链缓存目录；`dist/`、`coverage/`、`.task/` 是项目显式产物或临时目录，不等于语言工具链缓存

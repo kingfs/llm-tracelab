@@ -1,0 +1,21 @@
+package __CLI_PACKAGE_NAME__
+
+import (
+	"context"
+	"fmt"
+
+	"__MODULE_PATH__/internal/output"
+)
+
+type Runner struct {
+	printer *output.Printer
+}
+
+func NewRunner(printer *output.Printer) *Runner {
+	return &Runner{printer: printer}
+}
+
+func (r *Runner) Run(ctx context.Context) error {
+	_ = ctx
+	return r.printer.Print(fmt.Sprintf("__PRIMARY_COMMAND_USE__ executed by __CLI_NAME__"))
+}

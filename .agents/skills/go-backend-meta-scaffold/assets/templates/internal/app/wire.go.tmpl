@@ -1,0 +1,28 @@
+//go:build wireinject
+
+package app
+
+import (
+	"__MODULE_PATH__/internal/config"
+
+	"github.com/google/wire"
+)
+
+var ProviderSet = wire.NewSet(
+	newDAOClient,
+	newCommandRepository,
+	newQueryRepository,
+	newCommandService,
+	newQueryService,
+	newGRPCService,
+	newGRPCServer,
+	newHTTPHandler,
+	newHTTPRouter,
+	newHTTPServer,
+	newApp,
+)
+
+func Initialize(cfg config.Config) (*App, error) {
+	_ = cfg
+	panic(wire.Build(ProviderSet))
+}

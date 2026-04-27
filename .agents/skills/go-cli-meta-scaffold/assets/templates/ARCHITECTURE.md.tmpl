@@ -1,0 +1,34 @@
+# __CLI_NAME__ Architecture
+
+## 目标
+
+`__CLI_NAME__` 是一个基于 Go 的命令行工具，采用 `cobra` 组织命令层级，采用集中式配置与输出策略，便于 AI 与工程师持续扩展。
+
+## 目录职责
+
+- `cmd/__CLI_DIR_NAME__/`：命令行入口、全局 flags、子命令注册
+- `internal/app/`：应用装配，连接配置、输出与业务 runner
+- `internal/config/`：配置默认值、配置文件、环境变量覆盖
+- `internal/output/`：文本输出与错误输出
+- `internal/version/`：版本信息注入点
+- `internal/__CLI_PACKAGE_NAME__/`：业务命令实现
+
+## 运行链路
+
+1. `main.go` 调用根命令执行
+2. 根命令解析全局 flags 与配置路径
+3. `internal/config` 负责加载配置
+4. `internal/app` 初始化业务 runner 与输出器
+5. 子命令调用业务 runner 完成实际工作
+
+## 发布链路
+
+- 本地开发通过 `task build` 与 `task run`
+- 干跑发布通过 `task release:dry`
+- 正式发布通过 `goreleaser`
+
+## 可扩展点
+
+- 在 `cmd/__CLI_DIR_NAME__/` 新增子命令文件
+- 在 `internal/__CLI_PACKAGE_NAME__/` 扩展业务 runner
+- 在 `internal/output/` 增加 JSON 或表格输出能力

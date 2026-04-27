@@ -1,0 +1,100 @@
+stages:
+  - lint
+  - test
+  - build
+  - security
+  - coverage
+  - package
+  - deploy
+
+variables:
+  # Replace with a prebuilt builder image that already contains task, buf, wire and golangci-lint.
+  # The default value keeps the template runnable before such an image exists.
+  GO_BUILDER_IMAGE: "golang:__GO_VERSION__-alpine"
+  TASK_TEMP_DIR: "$CI_PROJECT_DIR/.task"
+  DOCKER_BUILDKIT: "1"
+
+.go_job:
+  image: $GO_BUILDER_IMAGE
+  cache:
+    key: "task-$CI_COMMIT_REF_SLUG"
+    paths:
+      - .task
+  before_script:
+    - |
+      if ! command -v task >/dev/null 2>&1 || \
+         ! command -v buf >/dev/null 2>&1 || \
+         ! command -v wire >/dev/null 2>&1 || \
+         ! command -v golangci-lint >/dev/null 2>&1; then
+        echo "bootstrap CI tools into builder image for faster pipelines; falling back to on-demand install"
+        apk add --no-cache bash git curl protobuf
+        go install github.com/go-task/task/v3/cmd/task@latest
+        go install github.com/bufbuild/buf/cmd/buf@latest
+        go install github.com/google/wire/cmd/wire@latest
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      fi
+    - export PATH="$PATH:$(go env GOPATH)/bin"
+
+lint:
+  stage: lint
+  extends: .go_job
+  script:
+    - task lint
+
+test:
+  stage: test
+  extends: .go_job
+  script:
+    - task test
+
+build:
+  stage: build
+  extends: .go_job
+  script:
+    - task build
+  artifacts:
+    expire_in: 1 day
+    paths:
+      - dist/
+
+security:
+  stage: security
+  extends: .go_job
+  script:
+    - |
+      if ! command -v govulncheck >/dev/null 2>&1; then
+        echo "add govulncheck into builder image for faster security jobs; falling back to on-demand install"
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+      fi
+    - export PATH="$PATH:$(go env GOPATH)/bin"
+    - govulncheck ./...
+
+coverage:
+  stage: coverage
+  extends: .go_job
+  script:
+    - task coverage
+  artifacts:
+    when: always
+    paths:
+      - coverage/
+
+package:
+  stage: package
+  image: docker:27
+  services:
+    - docker:27-dind
+  needs:
+    - job: build
+      artifacts: true
+  dependencies:
+    - build
+  script:
+    - docker build -f docker/Dockerfile -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA" .
+    - echo "push logic should be added per environment"
+
+deploy:
+  stage: deploy
+  script:
+    - echo "implement environment-specific deploy workflow"
+  when: manual

@@ -1,0 +1,25 @@
+# Build artifacts
+dist/
+bin/
+coverage/
+
+# Tool caches
+.cache/
+
+# Go
+*.test
+*.out
+vendor/
+
+# Generated local config
+.env
+config/*.yaml
+!config/.gitkeep
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Task
+.task/

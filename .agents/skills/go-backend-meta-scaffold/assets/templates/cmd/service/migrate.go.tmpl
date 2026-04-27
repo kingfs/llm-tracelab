@@ -1,0 +1,46 @@
+package main
+
+import (
+	"fmt"
+
+	"__MODULE_PATH__/internal/config"
+
+	"github.com/golang-migrate/migrate/v4"
+	_ "github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/spf13/cobra"
+)
+
+var (
+	migrationsDir string
+	migrateCmd    = &cobra.Command{
+		Use:   "migrate",
+		Short: "Manage database migrations",
+	}
+)
+
+func init() {
+	migrateCmd.PersistentFlags().StringVar(&migrationsDir, "dir", "ent/migrations", "Path to migration files")
+	rootCmd.AddCommand(migrateCmd)
+}
+
+func newMigrator() (*migrate.Migrate, error) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceURL := fmt.Sprintf("file://%s", migrationsDir)
+	return migrate.New(sourceURL, cfg.Database.DSN)
+}
+
+func closeMigrator(m *migrate.Migrate) error {
+	sourceErr, databaseErr := m.Close()
+	if sourceErr != nil {
+		return sourceErr
+	}
+	if databaseErr != nil {
+		return databaseErr
+	}
+	return nil
+}

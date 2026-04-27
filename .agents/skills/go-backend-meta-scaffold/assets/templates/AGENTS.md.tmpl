@@ -1,0 +1,48 @@
+# __SERVICE_NAME__ AGENTS
+
+## 仓库导航
+
+- `README.md`：面向人类的使用说明
+- `ARCHITECTURE.md`：架构边界、依赖方向、生成链
+- `proto/`：接口契约源
+- `ent/schema/`：数据模型源
+- `cmd/`：CLI 与服务入口
+- `internal/`：业务与基础设施代码
+- `internal/domain/`：命令侧领域模型与业务规则
+- `internal/application/command/`：命令用例编排
+- `internal/application/query/`：查询用例与 read model
+- `internal/interfaces/`：gRPC/HTTP 协议适配与 mapper
+- `internal/infrastructure/persistence/ent/`：基于 ent 的仓储适配
+
+## 先读什么
+
+1. `README.md`
+2. `ARCHITECTURE.md`
+3. 目标改动涉及的 `proto`、`ent/schema` 或 `internal/*`
+
+## 禁止直接修改
+
+- `gen/**`
+- `ent/dao/**`
+- `ent/migrations/**`
+- `wire_gen.go`
+- 仓库内的工具链缓存目录，例如 `.cache/**`
+
+如果需要变更这些内容，必须回到对应源文件：
+
+- 接口变更改 `proto/**/*.proto`
+- 数据模型变更改 `ent/schema/**`
+- 依赖装配变更改 `wire.go` 或 provider set
+- 工具性能优化优先改 CI、Taskfile 或 runner 配置，不要把 `GOCACHE`、`GOMODCACHE`、`GOPATH`、其他语言工具缓存重定向到仓库内
+
+## 开发原则
+
+- 以 `proto` 作为对外接口唯一事实来源
+- 首次初始化采用两阶段：先落 `ent/schema`，先生成 `ent/dao`，再补齐依赖 dao 的运行时代码与 migration 工具
+- 对复杂命令型业务应用 DDD，对纯查询场景避免僵化套用聚合
+- 纯查询场景优先改 `application/query`、`interfaces/*` 或查询仓储，不要为了查询强造聚合
+- 当 `ent/schema/**` 发生变化并完成 `go generate ./ent/...` 后，在提交前必须生成 migration，并执行 `go run -mod=mod ent/migrate/update_hash.go ent/migrations` 更新 `atlas.sum`
+- 同一个 commit 内，如果出现多份尚未提交的 migration，应合并为一套最终 migration；不要改写已提交或已发布的历史 migration
+- `cmd/<service>/` 下的 `cobra` 子命令应分文件组织，并通过 `init()` 注册到 root command；默认保留 `serve`、`migrate up`、`migrate down`
+- 优先最小改动，保持生成链与目录边界稳定
+- 允许项目内存在 `dist/`、`coverage/`、`.task/` 这类显式产物或临时目录，但不要新建或提交 `.cache/`、语言包缓存、编译缓存等仓库级工具缓存目录

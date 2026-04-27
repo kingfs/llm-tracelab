@@ -1,0 +1,31 @@
+# __CLI_NAME__
+
+## 开发
+
+```bash
+task deps
+task lint
+task test
+task build
+```
+
+## 运行
+
+```bash
+go run ./cmd/__CLI_DIR_NAME__ -- --help
+go run ./cmd/__CLI_DIR_NAME__ -- __PRIMARY_COMMAND_USE__
+```
+
+## 配置
+
+- 默认环境变量前缀：`__ENV_PREFIX___`
+- 如需配置文件，使用 `--config` 或 `-c`
+- 默认输出模式可通过 `--output` 或环境变量覆盖
+
+## 发布
+
+```bash
+task release:dry
+```
+
+正式发版时使用 `goreleaser release`。

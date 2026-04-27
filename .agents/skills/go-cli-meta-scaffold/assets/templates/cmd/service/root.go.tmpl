@@ -1,0 +1,30 @@
+package main
+
+import (
+	"__MODULE_PATH__/internal/config"
+
+	"github.com/spf13/cobra"
+)
+
+var (
+	cfgFile string
+	output  string
+	rootCmd = &cobra.Command{
+		Use:           "__CLI_DIR_NAME__",
+		Short:         "__CLI_NAME__ command line tool",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return config.Load(cfgFile, "__ENV_PREFIX__", output)
+		},
+	}
+)
+
+func init() {
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "c", "", "config file path")
+	rootCmd.PersistentFlags().StringVar(&output, "output", "text", "output mode: text or json")
+}
+
+func Execute() error {
+	return rootCmd.Execute()
+}

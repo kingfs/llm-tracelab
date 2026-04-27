@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package __PROTO_PACKAGE_LOWER__.__PROTO_VERSION__;
+
+import "google/api/annotations.proto";
+
+option go_package = "__MODULE_PATH__/gen/go/__PROTO_PACKAGE_LOWER__/__PROTO_VERSION__;__PROTO_PACKAGE_LOWER____PROTO_VERSION__";
+
+service __RPC_SERVICE_NAME__ {
+  rpc Health(HealthRequest) returns (HealthResponse) {
+    option (google.api.http) = {
+      get: "/__PROTO_VERSION__/health"
+    };
+  }
+
+  rpc Create__BOUNDED_CONTEXT_PASCAL__(Create__BOUNDED_CONTEXT_PASCAL__Request) returns (__BOUNDED_CONTEXT_PASCAL__) {
+    option (google.api.http) = {
+      post: "/__PROTO_VERSION__/__BOUNDED_CONTEXT_SNAKE__s"
+      body: "*"
+    };
+  }
+
+  rpc List__BOUNDED_CONTEXT_PASCAL__s(List__BOUNDED_CONTEXT_PASCAL__sRequest) returns (List__BOUNDED_CONTEXT_PASCAL__sResponse) {
+    option (google.api.http) = {
+      get: "/__PROTO_VERSION__/__BOUNDED_CONTEXT_SNAKE__s"
+    };
+  }
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string service = 1;
+  string status = 2;
+}
+
+message __BOUNDED_CONTEXT_PASCAL__ {
+  string id = 1;
+  string name = 2;
+  string status = 3;
+}
+
+message Create__BOUNDED_CONTEXT_PASCAL__Request {
+  string id = 1;
+  string name = 2;
+}
+
+message List__BOUNDED_CONTEXT_PASCAL__sRequest {
+  int32 limit = 1;
+}
+
+message List__BOUNDED_CONTEXT_PASCAL__sResponse {
+  repeated __BOUNDED_CONTEXT_PASCAL__ items = 1;
+}

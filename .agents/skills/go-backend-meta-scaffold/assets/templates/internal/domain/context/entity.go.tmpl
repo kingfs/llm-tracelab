@@ -1,0 +1,38 @@
+package __BOUNDED_CONTEXT_SNAKE__
+
+import (
+	"errors"
+	"strings"
+)
+
+var ErrInvalidName = errors.New("invalid __BOUNDED_CONTEXT_SNAKE__ name")
+
+type __BOUNDED_CONTEXT_PASCAL__ struct {
+	ID     string
+	Name   string
+	Status Status
+}
+
+type Status string
+
+const (
+	StatusPending Status = "PENDING"
+	StatusActive  Status = "ACTIVE"
+)
+
+func New(id, name string) (*__BOUNDED_CONTEXT_PASCAL__, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ErrInvalidName
+	}
+	return &__BOUNDED_CONTEXT_PASCAL__{
+		ID:     id,
+		Name:   name,
+		Status: StatusPending,
+	}, nil
+}
+
+func (e *__BOUNDED_CONTEXT_PASCAL__) Activate() {
+	e.Status = StatusActive
+}
+

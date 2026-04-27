@@ -1,0 +1,20 @@
+package query
+
+import "context"
+
+type Repository interface {
+	List(ctx context.Context, limit int) ([]__BOUNDED_CONTEXT_PASCAL__View, error)
+}
+
+type Service struct {
+	repo Repository
+}
+
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
+}
+
+func (s *Service) List__BOUNDED_CONTEXT_PASCAL__(ctx context.Context, limit int) ([]__BOUNDED_CONTEXT_PASCAL__View, error) {
+	return s.repo.List(ctx, limit)
+}
+

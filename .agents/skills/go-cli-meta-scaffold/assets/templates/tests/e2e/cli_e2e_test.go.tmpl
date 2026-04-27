@@ -1,0 +1,35 @@
+package e2e
+
+import (
+	"os/exec"
+	"strings"
+	"testing"
+)
+
+func TestVersionCommand(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/__CLI_DIR_NAME__", "version")
+	cmd.Dir = "../.."
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run version command: %v, output=%s", err, string(output))
+	}
+
+	if !strings.Contains(string(output), "version=") {
+		t.Fatalf("unexpected version output: %s", string(output))
+	}
+}
+
+func TestPrimaryCommand(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/__CLI_DIR_NAME__", "__PRIMARY_COMMAND_USE__")
+	cmd.Dir = "../.."
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run primary command: %v, output=%s", err, string(output))
+	}
+
+	if !strings.Contains(string(output), "__PRIMARY_COMMAND_USE__ executed") {
+		t.Fatalf("unexpected primary command output: %s", string(output))
+	}
+}

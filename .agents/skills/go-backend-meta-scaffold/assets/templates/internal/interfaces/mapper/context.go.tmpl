@@ -1,0 +1,28 @@
+package mapper
+
+import (
+	pb "__MODULE_PATH__/gen/go/__PROTO_PACKAGE_LOWER__/__PROTO_VERSION__"
+	"__MODULE_PATH__/internal/application/query"
+)
+
+type __BOUNDED_CONTEXT_PASCAL__Response struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+func To__BOUNDED_CONTEXT_PASCAL__Response(view query.__BOUNDED_CONTEXT_PASCAL__View) __BOUNDED_CONTEXT_PASCAL__Response {
+	return __BOUNDED_CONTEXT_PASCAL__Response{
+		ID:     view.ID,
+		Name:   view.Name,
+		Status: view.Status,
+	}
+}
+
+func ToProto__BOUNDED_CONTEXT_PASCAL__(view query.__BOUNDED_CONTEXT_PASCAL__View) *pb.__BOUNDED_CONTEXT_PASCAL__ {
+	return &pb.__BOUNDED_CONTEXT_PASCAL__{
+		Id:     view.ID,
+		Name:   view.Name,
+		Status: view.Status,
+	}
+}

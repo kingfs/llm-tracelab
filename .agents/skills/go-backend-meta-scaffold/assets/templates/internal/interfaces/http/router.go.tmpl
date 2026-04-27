@@ -1,0 +1,11 @@
+package http
+
+import "net/http"
+
+func NewRouter(handler *Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", handler.Health)
+	mux.HandleFunc("/__BOUNDED_CONTEXT_SNAKE__s", handler.List)
+	return mux
+}
+

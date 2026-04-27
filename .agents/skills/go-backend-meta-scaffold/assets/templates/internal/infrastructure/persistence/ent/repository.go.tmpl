@@ -1,0 +1,55 @@
+package ent
+
+import (
+	"context"
+
+	"__MODULE_PATH__/ent/dao"
+	"__MODULE_PATH__/ent/dao/__BOUNDED_CONTEXT_SNAKE__"
+	domain "__MODULE_PATH__/internal/domain/__BOUNDED_CONTEXT_SNAKE__"
+
+	entgo "entgo.io/ent"
+)
+
+type Repository struct {
+	client *dao.Client
+}
+
+func NewRepository(client *dao.Client) *Repository {
+	return &Repository{client: client}
+}
+
+func (r *Repository) Save(ctx context.Context, entity *domain.__BOUNDED_CONTEXT_PASCAL__) error {
+	err := r.client.__BOUNDED_CONTEXT_PASCAL__.
+		UpdateOneID(entity.ID).
+		SetName(entity.Name).
+		SetStatus(string(entity.Status)).
+		Exec(ctx)
+	if entgo.IsNotFound(err) {
+		return r.client.__BOUNDED_CONTEXT_PASCAL__.
+			Create().
+			SetID(entity.ID).
+			SetName(entity.Name).
+			SetStatus(string(entity.Status)).
+			Exec(ctx)
+	}
+	return err
+}
+
+func (r *Repository) GetByID(ctx context.Context, id string) (*domain.__BOUNDED_CONTEXT_PASCAL__, error) {
+	row, err := r.client.__BOUNDED_CONTEXT_PASCAL__.
+		Query().
+		Where(__BOUNDED_CONTEXT_SNAKE__.IDEQ(id)).
+		Only(ctx)
+	if entgo.IsNotFound(err) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &domain.__BOUNDED_CONTEXT_PASCAL__{
+		ID:     row.ID,
+		Name:   row.Name,
+		Status: domain.Status(row.Status),
+	}, nil
+}
+

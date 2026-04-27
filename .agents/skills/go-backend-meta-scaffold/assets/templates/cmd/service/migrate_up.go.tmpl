@@ -1,0 +1,39 @@
+package main
+
+import (
+	"errors"
+
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/spf13/cobra"
+)
+
+var migrateUpSteps int
+
+var migrateUpCmd = &cobra.Command{
+	Use:   "up",
+	Short: "Apply pending migrations",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		m, err := newMigrator()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = closeMigrator(m)
+		}()
+
+		if migrateUpSteps > 0 {
+			err = m.Steps(migrateUpSteps)
+		} else {
+			err = m.Up()
+		}
+		if err != nil && !errors.Is(err, migrate.ErrNoChange) {
+			return err
+		}
+		return nil
+	},
+}
+
+func init() {
+	migrateUpCmd.Flags().IntVar(&migrateUpSteps, "step", 0, "Apply only N migration steps")
+	migrateCmd.AddCommand(migrateUpCmd)
+}

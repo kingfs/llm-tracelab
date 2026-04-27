@@ -1,0 +1,29 @@
+package app
+
+import (
+	"context"
+
+	"__MODULE_PATH__/internal/__CLI_PACKAGE_NAME__"
+	"__MODULE_PATH__/internal/config"
+	"__MODULE_PATH__/internal/output"
+)
+
+type App struct {
+	runner  *__CLI_PACKAGE_NAME__.Runner
+	printer *output.Printer
+}
+
+func New() (*App, error) {
+	cfg := config.Current()
+	printer := output.New(cfg.Output)
+	runner := __CLI_PACKAGE_NAME__.NewRunner(printer)
+
+	return &App{
+		runner:  runner,
+		printer: printer,
+	}, nil
+}
+
+func (a *App) Run(ctx context.Context) error {
+	return a.runner.Run(ctx)
+}

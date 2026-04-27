@@ -1,0 +1,37 @@
+stages:
+  - lint
+  - test
+  - build
+  - release
+
+default:
+  image: golang:__GO_VERSION__
+
+lint:
+  stage: lint
+  script:
+    - go install github.com/go-task/task/v3/cmd/task@latest
+    - task lint
+
+test:
+  stage: test
+  script:
+    - go install github.com/go-task/task/v3/cmd/task@latest
+    - task test
+
+build:
+  stage: build
+  script:
+    - go install github.com/go-task/task/v3/cmd/task@latest
+    - task build
+  artifacts:
+    paths:
+      - dist/
+
+release:
+  stage: release
+  script:
+    - go install github.com/go-task/task/v3/cmd/task@latest
+    - task release:dry
+  dependencies:
+    - build

@@ -1,0 +1,25 @@
+package main
+
+import (
+	"context"
+
+	"__MODULE_PATH__/internal/app"
+
+	"github.com/spf13/cobra"
+)
+
+func init() {
+	rootCmd.AddCommand(runCmd)
+}
+
+var runCmd = &cobra.Command{
+	Use:   "__PRIMARY_COMMAND_USE__",
+	Short: "Execute the primary __PRIMARY_COMMAND__ workflow",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		application, err := app.New()
+		if err != nil {
+			return err
+		}
+		return application.Run(context.Background())
+	},
+}

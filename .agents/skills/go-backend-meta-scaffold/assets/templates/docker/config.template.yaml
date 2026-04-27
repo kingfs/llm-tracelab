@@ -1,0 +1,15 @@
+service_name: ${__ENV_PREFIX___SERVICE_NAME:-__SERVICE_NAME__}
+
+server:
+  grpc:
+    address: 0.0.0.0:${__ENV_PREFIX___GRPC_PORT:-__DEFAULT_GRPC_PORT__}
+  http:
+    address: 0.0.0.0:${__ENV_PREFIX___HTTP_PORT:-__DEFAULT_HTTP_PORT__}
+
+log:
+  level: ${__ENV_PREFIX___LOG_LEVEL:-info}
+
+database:
+  driver: ${__ENV_PREFIX___DB_DRIVER:-postgres}
+  dsn: ${__ENV_PREFIX___DB_DSN:-postgres://postgres:postgres@db:5432/app?sslmode=disable}
+

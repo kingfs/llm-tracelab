@@ -1,0 +1,49 @@
+package output
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+)
+
+type Printer struct {
+	mode string
+	out  io.Writer
+	err  io.Writer
+}
+
+func New(mode string) *Printer {
+	if mode == "" {
+		mode = "text"
+	}
+
+	return &Printer{
+		mode: mode,
+		out:  os.Stdout,
+		err:  os.Stderr,
+	}
+}
+
+func (p *Printer) PrintText(line string) error {
+	_, err := fmt.Fprintln(p.out, line)
+	return err
+}
+
+func (p *Printer) PrintJSON(v any) error {
+	encoder := json.NewEncoder(p.out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(v)
+}
+
+func (p *Printer) Print(v any) error {
+	if p.mode == "json" {
+		return p.PrintJSON(v)
+	}
+	return p.PrintText(fmt.Sprint(v))
+}
+
+func (p *Printer) PrintError(err error) error {
+	_, writeErr := fmt.Fprintln(p.err, err)
+	return writeErr
+}

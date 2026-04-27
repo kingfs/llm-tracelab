@@ -1,0 +1,52 @@
+package main
+
+import (
+	"errors"
+	"fmt"
+
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/spf13/cobra"
+)
+
+var (
+	migrateDownSteps int
+	migrateDownAll   bool
+)
+
+var migrateDownCmd = &cobra.Command{
+	Use:   "down",
+	Short: "Roll back migrations",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if migrateDownAll && migrateDownSteps > 0 {
+			return fmt.Errorf("use either --all or --step")
+		}
+
+		m, err := newMigrator()
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = closeMigrator(m)
+		}()
+
+		if migrateDownAll {
+			err = m.Down()
+		} else {
+			steps := migrateDownSteps
+			if steps <= 0 {
+				steps = 1
+			}
+			err = m.Steps(-steps)
+		}
+		if err != nil && !errors.Is(err, migrate.ErrNoChange) {
+			return err
+		}
+		return nil
+	},
+}
+
+func init() {
+	migrateDownCmd.Flags().IntVar(&migrateDownSteps, "step", 0, "Roll back N migration steps, defaults to 1")
+	migrateDownCmd.Flags().BoolVar(&migrateDownAll, "all", false, "Roll back all applied migrations")
+	migrateCmd.AddCommand(migrateDownCmd)
+}

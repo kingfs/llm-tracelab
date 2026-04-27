@@ -1,0 +1,59 @@
+# __SERVICE_NAME__ Architecture
+
+## 核心边界
+
+- bounded context: `__BOUNDED_CONTEXT__`
+- proto package: `__PROTO_PACKAGE_LOWER__.__PROTO_VERSION__`
+- service: `__RPC_SERVICE_NAME__`
+
+## 依赖方向
+
+- `cmd/` 只负责启动
+- `cmd/<service>/` 下的 root/sub command 分文件组织，通过 `init()` 注册
+- `internal/app/` 负责装配与生命周期
+- `internal/application/` 负责编排用例
+- `internal/domain/` 承载复杂业务规则
+- `internal/infrastructure/` 承载存储、配置、日志、传输适配
+- `internal/interfaces/` 承载协议适配
+
+## 默认分层
+
+- `internal/domain/__BOUNDED_CONTEXT_SNAKE__/`：聚合、值对象、仓储接口、领域服务
+- `internal/application/command/`：命令型用例
+- `internal/application/query/`：查询型用例与 read model
+- `internal/interfaces/grpc/`：gRPC 适配
+- `internal/interfaces/http/`：HTTP 适配
+- `internal/interfaces/mapper/`：协议 DTO 映射
+- `internal/infrastructure/persistence/ent/`：基于 ent/dao 的命令仓储与查询仓储适配
+- `internal/infrastructure/persistence/query/`：查询仓储或 query object
+
+## 生成链
+
+1. 首次初始化先执行 `scripts/init_scaffold.sh phase1 ...`
+2. 修改 `proto/**/*.proto`
+3. 修改 `ent/schema/**`
+4. 运行 `task generate:ent` 更新 `ent/dao/**`
+5. 执行 `scripts/init_scaffold.sh phase2 ...`，补齐依赖 `ent/dao` 的运行时代码与 migration 工具
+6. 运行 `task generate` 更新 `gen/**`、`ent/dao/**` 与 `wire_gen.go`
+7. 当 schema 稳定后，执行 `go run -mod=mod ent/migrate/main.go <migration_name>` 更新 `ent/migrations/**`
+8. 紧接着执行 `go run -mod=mod ent/migrate/update_hash.go ent/migrations` 更新 `atlas.sum`
+9. 如果一个 commit 内出现多份尚未提交 migration，提交前合并为一套最终 migration
+
+## DDD 使用策略
+
+- 对命令型、状态流转型、强一致性场景使用聚合、领域服务、仓储接口
+- 对列表查询、搜索、报表类场景允许直接使用 query object/read model
+- 不为形式主义增加不必要抽象层
+
+## CQRS 约束
+
+- 命令侧优先依赖 `internal/domain`
+- 查询侧允许直接返回 read model，不强制复用聚合
+- 协议层不承载业务规则，只做请求解析与响应映射
+- 持久化适配层负责把 `ent/dao` 结果映射回领域对象或 read model
+
+## 默认 CLI
+
+- `serve`：启动服务
+- `migrate up`：执行未应用 migration
+- `migrate down`：回滚 migration，默认按步数回滚，避免误清空数据库

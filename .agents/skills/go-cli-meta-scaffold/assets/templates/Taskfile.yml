@@ -1,0 +1,59 @@
+version: "3"
+
+vars:
+  CLI_NAME: __CLI_DIR_NAME__
+  DIST_DIR: dist
+  BIN_PATH: "{{.DIST_DIR}}/bin/{{.CLI_NAME}}"
+  COVERAGE_DIR: coverage
+
+tasks:
+  default:
+    cmds:
+      - task: deps
+      - task: lint
+      - task: test
+      - task: build
+
+  deps:
+    desc: Download and tidy Go module dependencies.
+    cmds:
+      - go mod tidy
+
+  lint:
+    desc: Run lint suite.
+    cmds:
+      - go vet ./...
+      - golangci-lint run ./...
+
+  test:
+    desc: Run test suite.
+    cmds:
+      - go test ./... -count=1
+
+  build:
+    desc: Build CLI binary.
+    cmds:
+      - mkdir -p {{.DIST_DIR}}/bin
+      - go build -o {{.BIN_PATH}} ./cmd/__CLI_DIR_NAME__
+
+  run:
+    desc: Run the CLI with forwarded args.
+    cmds:
+      - go run ./cmd/__CLI_DIR_NAME__ {{.CLI_ARGS}}
+
+  release:dry:
+    desc: Dry-run release with goreleaser snapshot.
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  completion:bash:
+    desc: Print bash completion.
+    cmds:
+      - go run ./cmd/__CLI_DIR_NAME__ completion bash
+
+  coverage:
+    desc: Generate coverage report.
+    cmds:
+      - mkdir -p {{.COVERAGE_DIR}}
+      - go test ./... -coverprofile={{.COVERAGE_DIR}}/coverage.out -covermode=atomic
+      - go tool cover -func={{.COVERAGE_DIR}}/coverage.out > {{.COVERAGE_DIR}}/summary.txt

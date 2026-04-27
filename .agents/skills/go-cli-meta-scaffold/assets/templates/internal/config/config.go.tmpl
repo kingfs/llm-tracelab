@@ -1,0 +1,47 @@
+package config
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+type Config struct {
+	Output string `mapstructure:"output"`
+}
+
+var current = Config{
+	Output: "text",
+}
+
+func Load(configFile, envPrefix, output string) error {
+	v := viper.New()
+	v.SetEnvPrefix(envPrefix)
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	v.AutomaticEnv()
+	v.SetDefault("output", "text")
+
+	if configFile != "" {
+		v.SetConfigFile(configFile)
+		if err := v.ReadInConfig(); err != nil {
+			return fmt.Errorf("read config: %w", err)
+		}
+	}
+
+	if output != "" {
+		v.Set("output", output)
+	}
+
+	cfg := Config{}
+	if err := v.Unmarshal(&cfg); err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
+
+	current = cfg
+	return nil
+}
+
+func Current() Config {
+	return current
+}
