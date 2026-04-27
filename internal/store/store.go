@@ -19,6 +19,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
@@ -1502,51 +1503,67 @@ func (s *Store) AppendDatasetExamples(datasetID string, traceIDs []string, sourc
 		return 0, 0, nil
 	}
 
-	tx, err := s.db.Begin()
+	ctx := context.Background()
+	tx, err := s.client.Tx(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer tx.Rollback()
 
-	var nextPosition int
-	if err := tx.QueryRow(`SELECT COALESCE(MAX(position), 0) FROM dataset_examples WHERE dataset_id = ?`, datasetID).Scan(&nextPosition); err != nil {
+	nextPosition := 0
+	existingCount, err := tx.DatasetExample.Query().
+		Where(datasetexample.DatasetIDEQ(datasetID)).
+		Count(ctx)
+	if err != nil {
 		return 0, 0, err
 	}
-	now := time.Now().UTC().Format(timeLayout)
+	if existingCount > 0 {
+		nextPosition, err = tx.DatasetExample.Query().
+			Where(datasetexample.DatasetIDEQ(datasetID)).
+			Aggregate(dao.Max(datasetexample.FieldPosition)).
+			Int(ctx)
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	now := time.Now().UTC()
 	added := 0
 	skipped := 0
+	creates := make([]*dao.DatasetExampleCreate, 0, len(ordered))
 	for _, traceID := range ordered {
 		if _, err := s.GetByID(traceID); err != nil {
 			return 0, 0, err
 		}
-		res, err := tx.Exec(`
-			INSERT OR IGNORE INTO dataset_examples (
-				dataset_id, trace_id, position, added_at, source_type, source_id, note
-			) VALUES (?, ?, ?, ?, ?, ?, ?)
-		`,
-			datasetID,
-			traceID,
-			nextPosition+1,
-			now,
-			strings.TrimSpace(sourceType),
-			strings.TrimSpace(sourceID),
-			strings.TrimSpace(note),
-		)
+		exists, err := tx.DatasetExample.Query().
+			Where(datasetexample.DatasetIDEQ(datasetID), datasetexample.TraceIDEQ(traceID)).
+			Count(ctx)
 		if err != nil {
 			return 0, 0, err
 		}
-		rowsAffected, err := res.RowsAffected()
-		if err != nil {
-			return 0, 0, err
-		}
-		if rowsAffected == 0 {
+		if exists > 0 {
 			skipped++
 			continue
 		}
 		nextPosition++
 		added++
+		creates = append(creates, tx.DatasetExample.Create().
+			SetDatasetID(datasetID).
+			SetTraceID(traceID).
+			SetPosition(nextPosition).
+			SetAddedAt(now).
+			SetSourceType(strings.TrimSpace(sourceType)).
+			SetSourceID(strings.TrimSpace(sourceID)).
+			SetNote(strings.TrimSpace(note)))
 	}
-	if _, err := tx.Exec(`UPDATE datasets SET updated_at = ? WHERE id = ?`, now, datasetID); err != nil {
+	if len(creates) > 0 {
+		if err := tx.DatasetExample.CreateBulk(creates...).
+			OnConflictColumns(datasetexample.FieldDatasetID, datasetexample.FieldTraceID).
+			DoNothing().
+			Exec(ctx); err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := tx.Dataset.UpdateOneID(datasetID).SetUpdatedAt(now).Exec(ctx); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
