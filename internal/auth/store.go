@@ -89,6 +89,7 @@ func normalizeDriver(driver string) string {
 }
 
 func sqliteDSN(dbPath string) string {
+	dbPath = normalizeSQLiteFilePath(dbPath)
 	values := url.Values{}
 	for _, pragma := range []string{
 		"foreign_keys(ON)",
@@ -101,6 +102,17 @@ func sqliteDSN(dbPath string) string {
 	}
 	u := url.URL{Scheme: "file", Path: dbPath, RawQuery: values.Encode()}
 	return u.String()
+}
+
+func normalizeSQLiteFilePath(dbPath string) string {
+	dbPath = strings.TrimSpace(dbPath)
+	if dbPath == "" || dbPath == ":memory:" || filepath.IsAbs(dbPath) {
+		return dbPath
+	}
+	if abs, err := filepath.Abs(dbPath); err == nil {
+		return abs
+	}
+	return dbPath
 }
 
 func (s *Store) Close() error {

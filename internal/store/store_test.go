@@ -59,6 +59,22 @@ func TestNewWithDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	}
 }
 
+func TestNewWithDatabaseAcceptsRelativeSQLitePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	st, err := NewWithDatabase("logs", "sqlite", filepath.Join("docker-data", "database.sqlite3"), 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(relative) error = %v", err)
+	}
+	defer st.Close()
+	if st.dbPath != filepath.Join("docker-data", "database.sqlite3") {
+		t.Fatalf("dbPath = %q, want relative config path", st.dbPath)
+	}
+	if _, err := os.Stat(filepath.Join("docker-data", "database.sqlite3")); err != nil {
+		t.Fatalf("database file stat error = %v", err)
+	}
+}
+
 func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "trace_index.sqlite3")

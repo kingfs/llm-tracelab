@@ -883,6 +883,11 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	if strings.TrimSpace(dbPath) == "" {
 		dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
 	}
+	if dbPath != ":memory:" {
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+			return nil, err
+		}
+	}
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
@@ -909,6 +914,7 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 }
 
 func sqliteDSN(dbPath string) string {
+	dbPath = normalizeSQLiteFilePath(dbPath)
 	values := url.Values{}
 	for _, pragma := range []string{
 		"journal_mode(WAL)",
@@ -924,6 +930,17 @@ func sqliteDSN(dbPath string) string {
 		RawQuery: values.Encode(),
 	}
 	return u.String()
+}
+
+func normalizeSQLiteFilePath(dbPath string) string {
+	dbPath = strings.TrimSpace(dbPath)
+	if dbPath == "" || dbPath == ":memory:" || filepath.IsAbs(dbPath) {
+		return dbPath
+	}
+	if abs, err := filepath.Abs(dbPath); err == nil {
+		return abs
+	}
+	return dbPath
 }
 
 func (s *Store) Close() error {

@@ -198,6 +198,18 @@ func TestMigrateDatabaseUpCreatesMissingSQLiteParentDir(t *testing.T) {
 	}
 }
 
+func TestMigrateDatabaseUpAcceptsRelativeSQLitePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	dbPath := filepath.Join("docker-data", "database.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp(relative) error = %v", err)
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("database file stat error = %v", err)
+	}
+}
+
 func TestStoreResetPassword(t *testing.T) {
 	t.Parallel()
 
