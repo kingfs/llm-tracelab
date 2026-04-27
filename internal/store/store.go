@@ -261,79 +261,33 @@ type ScoreFilter struct {
 }
 
 func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT id, base_url, provider_preset, protocol_family, routing_profile, enabled,
-		       priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
-		FROM upstream_targets
-		ORDER BY priority DESC, id ASC
-	`)
+	rows, err := s.client.UpstreamTarget.Query().
+		Order(upstreamtarget.ByPriority(entsql.OrderDesc()), upstreamtarget.ByID()).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var out []UpstreamTargetRecord
-	for rows.Next() {
-		var (
-			record        UpstreamTargetRecord
-			enabled       any
-			lastRefreshAt any
-		)
-		if err := rows.Scan(
-			&record.ID,
-			&record.BaseURL,
-			&record.ProviderPreset,
-			&record.ProtocolFamily,
-			&record.RoutingProfile,
-			&enabled,
-			&record.Priority,
-			&record.Weight,
-			&record.CapacityHint,
-			&lastRefreshAt,
-			&record.LastRefreshStatus,
-			&record.LastRefreshError,
-		); err != nil {
-			return nil, err
-		}
-		record.Enabled = boolValue(enabled)
-		if !isEmptyTimeValue(lastRefreshAt) {
-			record.LastRefreshAt, err = timeParseValue(lastRefreshAt)
-			if err != nil {
-				return nil, err
-			}
-		}
-		out = append(out, record)
+	out := make([]UpstreamTargetRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, upstreamTargetRecordFromEnt(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT upstream_id, model, source, seen_at
-		FROM upstream_models
-		ORDER BY upstream_id ASC, model ASC
-	`)
+	rows, err := s.client.UpstreamModel.Query().
+		Order(upstreammodel.ByUpstreamID(), upstreammodel.ByModel()).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var out []UpstreamModelRecord
-	for rows.Next() {
-		var (
-			record UpstreamModelRecord
-			seenAt any
-		)
-		if err := rows.Scan(&record.UpstreamID, &record.Model, &record.Source, &seenAt); err != nil {
-			return nil, err
-		}
-		record.SeenAt, err = timeParseValue(seenAt)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, record)
+	out := make([]UpstreamModelRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, upstreamModelRecordFromEnt(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
@@ -1199,6 +1153,9 @@ func (s *Store) initSchema() error {
 }
 
 func (s *Store) ensureEntCompatibleTables() error {
+	if err := s.ensureUpstreamTargetsEntTable(); err != nil {
+		return err
+	}
 	if err := s.ensureAutoIDTable(
 		"upstream_models",
 		`CREATE TABLE upstream_models (
@@ -1236,6 +1193,62 @@ func (s *Store) ensureEntCompatibleTables() error {
 			`CREATE INDEX IF NOT EXISTS idx_dataset_examples_dataset_position ON dataset_examples(dataset_id, position ASC)`,
 		},
 	)
+}
+
+func (s *Store) ensureUpstreamTargetsEntTable() error {
+	enabledType, err := s.columnType("upstream_targets", "enabled")
+	if err != nil {
+		return err
+	}
+	lastRefreshAtType, err := s.columnType("upstream_targets", "last_refresh_at")
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(enabledType, "bool") && strings.EqualFold(lastRefreshAtType, "datetime") {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE upstream_targets RENAME TO upstream_targets_old`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE TABLE upstream_targets (
+		id TEXT PRIMARY KEY,
+		base_url TEXT NOT NULL DEFAULT '',
+		provider_preset TEXT NOT NULL DEFAULT '',
+		protocol_family TEXT NOT NULL DEFAULT '',
+		routing_profile TEXT NOT NULL DEFAULT '',
+		enabled bool NOT NULL DEFAULT true,
+		priority INTEGER NOT NULL DEFAULT 0,
+		weight REAL NOT NULL DEFAULT 0,
+		capacity_hint REAL NOT NULL DEFAULT 0,
+		last_refresh_at datetime NULL,
+		last_refresh_status TEXT NOT NULL DEFAULT '',
+		last_refresh_error TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO upstream_targets (
+		id, base_url, provider_preset, protocol_family, routing_profile, enabled,
+		priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
+	)
+	SELECT
+		id, base_url, provider_preset, protocol_family, routing_profile,
+		CASE WHEN enabled IN (1, '1', 'true', 'TRUE') THEN true ELSE false END,
+		priority, weight, capacity_hint,
+		CASE WHEN last_refresh_at IS NULL OR TRIM(CAST(last_refresh_at AS text)) = '' THEN NULL ELSE last_refresh_at END,
+		last_refresh_status, last_refresh_error
+	FROM upstream_targets_old`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE upstream_targets_old`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ensureLogsDatetimeTable() error {
@@ -2527,6 +2540,35 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	entry.Header.Layout.ResBodyLen = row.ResBodyLen
 	entry.Header.Layout.IsStream = row.IsStream
 	return entry
+}
+
+func upstreamTargetRecordFromEnt(row *dao.UpstreamTarget) UpstreamTargetRecord {
+	record := UpstreamTargetRecord{
+		ID:                row.ID,
+		BaseURL:           row.BaseURL,
+		ProviderPreset:    row.ProviderPreset,
+		ProtocolFamily:    row.ProtocolFamily,
+		RoutingProfile:    row.RoutingProfile,
+		Enabled:           row.Enabled,
+		Priority:          row.Priority,
+		Weight:            row.Weight,
+		CapacityHint:      row.CapacityHint,
+		LastRefreshStatus: row.LastRefreshStatus,
+		LastRefreshError:  row.LastRefreshError,
+	}
+	if row.LastRefreshAt != nil {
+		record.LastRefreshAt = *row.LastRefreshAt
+	}
+	return record
+}
+
+func upstreamModelRecordFromEnt(row *dao.UpstreamModel) UpstreamModelRecord {
+	return UpstreamModelRecord{
+		UpstreamID: row.UpstreamID,
+		Model:      row.Model,
+		Source:     row.Source,
+		SeenAt:     row.SeenAt,
+	}
 }
 
 func datasetRecordFromEnt(row *dao.Dataset, exampleCount int) DatasetRecord {
