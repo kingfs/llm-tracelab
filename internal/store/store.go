@@ -21,7 +21,9 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
@@ -1809,86 +1811,64 @@ func (s *Store) AddScore(record ScoreRecord) (ScoreRecord, error) {
 }
 
 func (s *Store) GetEvalRun(evalRunID string) (EvalRunRecord, error) {
-	row := s.db.QueryRow(`
-		SELECT id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at,
-		       trace_count, score_count, pass_count, fail_count
-		FROM eval_runs
-		WHERE id = ?
-	`, evalRunID)
-	return scanEvalRunRecord(row)
+	row, err := s.client.EvalRun.Get(context.Background(), evalRunID)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return EvalRunRecord{}, sql.ErrNoRows
+		}
+		return EvalRunRecord{}, err
+	}
+	return evalRunRecordFromEnt(row), nil
 }
 
 func (s *Store) ListEvalRuns(limit int) ([]EvalRunRecord, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`
-		SELECT id, dataset_id, source_type, source_id, evaluator_set, created_at, completed_at,
-		       trace_count, score_count, pass_count, fail_count
-		FROM eval_runs
-		ORDER BY created_at DESC, id DESC
-		LIMIT ?
-	`, limit)
+	rows, err := s.client.EvalRun.Query().
+		Order(evalrun.ByCreatedAt(entsql.OrderDesc()), evalrun.ByID(entsql.OrderDesc())).
+		Limit(limit).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []EvalRunRecord
-	for rows.Next() {
-		record, err := scanEvalRunRecord(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, record)
+	out := make([]EvalRunRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, evalRunRecordFromEnt(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) ListScores(filter ScoreFilter, limit int) ([]ScoreRecord, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-	whereParts := []string{}
-	args := []any{}
+	var predicates []predicate.Score
 	if traceID := strings.TrimSpace(filter.TraceID); traceID != "" {
-		whereParts = append(whereParts, "trace_id = ?")
-		args = append(args, traceID)
+		predicates = append(predicates, score.TraceIDEQ(traceID))
 	}
 	if sessionID := strings.TrimSpace(filter.SessionID); sessionID != "" {
-		whereParts = append(whereParts, "session_id = ?")
-		args = append(args, sessionID)
+		predicates = append(predicates, score.SessionIDEQ(sessionID))
 	}
 	if datasetID := strings.TrimSpace(filter.DatasetID); datasetID != "" {
-		whereParts = append(whereParts, "dataset_id = ?")
-		args = append(args, datasetID)
+		predicates = append(predicates, score.DatasetIDEQ(datasetID))
 	}
 	if evalRunID := strings.TrimSpace(filter.EvalRunID); evalRunID != "" {
-		whereParts = append(whereParts, "eval_run_id = ?")
-		args = append(args, evalRunID)
+		predicates = append(predicates, score.EvalRunIDEQ(evalRunID))
 	}
-	query := `
-		SELECT id, trace_id, session_id, dataset_id, eval_run_id, evaluator_key, value, status, label, explanation, created_at
-		FROM scores
-	`
-	if len(whereParts) > 0 {
-		query += " WHERE " + strings.Join(whereParts, " AND ")
-	}
-	query += " ORDER BY created_at DESC, id DESC LIMIT ?"
-	args = append(args, limit)
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.client.Score.Query().
+		Where(predicates...).
+		Order(score.ByCreatedAt(entsql.OrderDesc()), score.ByID(entsql.OrderDesc())).
+		Limit(limit).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []ScoreRecord
-	for rows.Next() {
-		record, err := scanScoreRecord(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, record)
+	out := make([]ScoreRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, scoreRecordFromEnt(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) CreateExperimentRun(record ExperimentRunRecord) (ExperimentRunRecord, error) {
@@ -1926,41 +1906,32 @@ func (s *Store) CreateExperimentRun(record ExperimentRunRecord) (ExperimentRunRe
 }
 
 func (s *Store) GetExperimentRun(experimentRunID string) (ExperimentRunRecord, error) {
-	row := s.db.QueryRow(`
-		SELECT id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
-		       baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate,
-		       pass_rate_delta, matched_score_count, improvement_count, regression_count
-		FROM experiment_runs
-		WHERE id = ?
-	`, experimentRunID)
-	return scanExperimentRunRecord(row)
+	row, err := s.client.ExperimentRun.Get(context.Background(), experimentRunID)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return ExperimentRunRecord{}, sql.ErrNoRows
+		}
+		return ExperimentRunRecord{}, err
+	}
+	return experimentRunRecordFromEnt(row), nil
 }
 
 func (s *Store) ListExperimentRuns(limit int) ([]ExperimentRunRecord, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`
-		SELECT id, name, description, baseline_eval_run_id, candidate_eval_run_id, created_at,
-		       baseline_score_count, candidate_score_count, baseline_pass_rate, candidate_pass_rate,
-		       pass_rate_delta, matched_score_count, improvement_count, regression_count
-		FROM experiment_runs
-		ORDER BY created_at DESC, id DESC
-		LIMIT ?
-	`, limit)
+	rows, err := s.client.ExperimentRun.Query().
+		Order(experimentrun.ByCreatedAt(entsql.OrderDesc()), experimentrun.ByID(entsql.OrderDesc())).
+		Limit(limit).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []ExperimentRunRecord
-	for rows.Next() {
-		record, err := scanExperimentRunRecord(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, record)
+	out := make([]ExperimentRunRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, experimentRunRecordFromEnt(row))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) ReplaceUpstreamModels(upstreamID string, records []UpstreamModelRecord) error {
@@ -2562,6 +2533,57 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	entry.Header.Layout.ResBodyLen = row.ResBodyLen
 	entry.Header.Layout.IsStream = row.IsStream
 	return entry
+}
+
+func evalRunRecordFromEnt(row *dao.EvalRun) EvalRunRecord {
+	return EvalRunRecord{
+		ID:           row.ID,
+		DatasetID:    row.DatasetID,
+		SourceType:   row.SourceType,
+		SourceID:     row.SourceID,
+		EvaluatorSet: row.EvaluatorSet,
+		CreatedAt:    row.CreatedAt,
+		CompletedAt:  row.CompletedAt,
+		TraceCount:   row.TraceCount,
+		ScoreCount:   row.ScoreCount,
+		PassCount:    row.PassCount,
+		FailCount:    row.FailCount,
+	}
+}
+
+func scoreRecordFromEnt(row *dao.Score) ScoreRecord {
+	return ScoreRecord{
+		ID:           row.ID,
+		TraceID:      row.TraceID,
+		SessionID:    row.SessionID,
+		DatasetID:    row.DatasetID,
+		EvalRunID:    row.EvalRunID,
+		EvaluatorKey: row.EvaluatorKey,
+		Value:        row.Value,
+		Status:       row.Status,
+		Label:        row.Label,
+		Explanation:  row.Explanation,
+		CreatedAt:    row.CreatedAt,
+	}
+}
+
+func experimentRunRecordFromEnt(row *dao.ExperimentRun) ExperimentRunRecord {
+	return ExperimentRunRecord{
+		ID:                  row.ID,
+		Name:                row.Name,
+		Description:         row.Description,
+		BaselineEvalRunID:   row.BaselineEvalRunID,
+		CandidateEvalRunID:  row.CandidateEvalRunID,
+		CreatedAt:           row.CreatedAt,
+		BaselineScoreCount:  row.BaselineScoreCount,
+		CandidateScoreCount: row.CandidateScoreCount,
+		BaselinePassRate:    row.BaselinePassRate,
+		CandidatePassRate:   row.CandidatePassRate,
+		PassRateDelta:       row.PassRateDelta,
+		MatchedScoreCount:   row.MatchedScoreCount,
+		ImprovementCount:    row.ImprovementCount,
+		RegressionCount:     row.RegressionCount,
+	}
 }
 
 func scanEntry(scanner interface {
