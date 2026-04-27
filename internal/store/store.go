@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/textproto"
@@ -1705,41 +1706,35 @@ func (s *Store) AppendDatasetExamples(datasetID string, traceIDs []string, sourc
 }
 
 func (s *Store) GetDatasetExamples(datasetID string) ([]DatasetExampleRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT
-			de.dataset_id,
-			de.trace_id,
-			de.position,
-			de.added_at,
-			de.source_type,
-			de.source_id,
-			de.note,
-			l.trace_id, l.path, l.version, l.request_id, l.recorded_at, l.model, l.provider, l.operation, l.endpoint, l.url, l.method, l.status_code,
-			l.duration_ms, l.ttft_ms, l.client_ip, l.content_length, l.error_text,
-			l.prompt_tokens, l.completion_tokens, l.total_tokens, l.cached_tokens,
-			l.req_header_len, l.req_body_len, l.res_header_len, l.res_body_len, l.is_stream,
-			l.session_id, l.session_source, l.window_id, l.client_request_id,
-			l.selected_upstream_id, l.selected_upstream_base_url, l.selected_upstream_provider_preset,
-			l.routing_policy, l.routing_score, l.routing_candidate_count, l.routing_failure_reason
-		FROM dataset_examples de
-		JOIN logs l ON l.trace_id = de.trace_id
-		WHERE de.dataset_id = ?
-		ORDER BY de.position ASC, de.trace_id ASC
-	`, datasetID)
+	rows, err := s.client.DatasetExample.Query().
+		Where(datasetexample.DatasetIDEQ(datasetID)).
+		Order(datasetexample.ByPosition(), datasetexample.ByTraceID()).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var out []DatasetExampleRecord
-	for rows.Next() {
-		record, err := scanDatasetExampleRecord(rows)
+	out := make([]DatasetExampleRecord, 0, len(rows))
+	for _, row := range rows {
+		trace, err := s.GetByID(row.TraceID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, record)
+		out = append(out, DatasetExampleRecord{
+			DatasetID:  row.DatasetID,
+			TraceID:    row.TraceID,
+			Position:   row.Position,
+			AddedAt:    row.AddedAt,
+			SourceType: row.SourceType,
+			SourceID:   row.SourceID,
+			Note:       row.Note,
+			Trace:      trace,
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) CreateEvalRun(datasetID string, sourceType string, sourceID string, evaluatorSet string, traceCount int) (EvalRunRecord, error) {
@@ -2739,84 +2734,6 @@ func scanDatasetRecord(scanner interface {
 	record.UpdatedAt, err = timeParseValue(updatedAt)
 	if err != nil {
 		return DatasetRecord{}, err
-	}
-	return record, nil
-}
-
-func scanDatasetExampleRecord(scanner interface {
-	Scan(dest ...any) error
-}) (DatasetExampleRecord, error) {
-	var (
-		record       DatasetExampleRecord
-		addedAt      any
-		recordedAt   any
-		errorText    string
-		cached       int
-		isStream     int
-		routingScore float64
-		err          error
-	)
-	if err := scanner.Scan(
-		&record.DatasetID,
-		&record.TraceID,
-		&record.Position,
-		&addedAt,
-		&record.SourceType,
-		&record.SourceID,
-		&record.Note,
-		&record.Trace.ID,
-		&record.Trace.LogPath,
-		&record.Trace.Header.Version,
-		&record.Trace.Header.Meta.RequestID,
-		&recordedAt,
-		&record.Trace.Header.Meta.Model,
-		&record.Trace.Header.Meta.Provider,
-		&record.Trace.Header.Meta.Operation,
-		&record.Trace.Header.Meta.Endpoint,
-		&record.Trace.Header.Meta.URL,
-		&record.Trace.Header.Meta.Method,
-		&record.Trace.Header.Meta.StatusCode,
-		&record.Trace.Header.Meta.DurationMs,
-		&record.Trace.Header.Meta.TTFTMs,
-		&record.Trace.Header.Meta.ClientIP,
-		&record.Trace.Header.Meta.ContentLength,
-		&errorText,
-		&record.Trace.Header.Usage.PromptTokens,
-		&record.Trace.Header.Usage.CompletionTokens,
-		&record.Trace.Header.Usage.TotalTokens,
-		&cached,
-		&record.Trace.Header.Layout.ReqHeaderLen,
-		&record.Trace.Header.Layout.ReqBodyLen,
-		&record.Trace.Header.Layout.ResHeaderLen,
-		&record.Trace.Header.Layout.ResBodyLen,
-		&isStream,
-		&record.Trace.SessionID,
-		&record.Trace.SessionSource,
-		&record.Trace.WindowID,
-		&record.Trace.ClientRequestID,
-		&record.Trace.Header.Meta.SelectedUpstreamID,
-		&record.Trace.Header.Meta.SelectedUpstreamBaseURL,
-		&record.Trace.Header.Meta.SelectedUpstreamProviderPreset,
-		&record.Trace.Header.Meta.RoutingPolicy,
-		&routingScore,
-		&record.Trace.Header.Meta.RoutingCandidateCount,
-		&record.Trace.Header.Meta.RoutingFailureReason,
-	); err != nil {
-		return DatasetExampleRecord{}, err
-	}
-	record.AddedAt, err = timeParseValue(addedAt)
-	if err != nil {
-		return DatasetExampleRecord{}, err
-	}
-	record.Trace.Header.Meta.Time, err = timeParseValue(recordedAt)
-	if err != nil {
-		return DatasetExampleRecord{}, err
-	}
-	record.Trace.Header.Meta.Error = errorText
-	record.Trace.Header.Meta.RoutingScore = routingScore
-	record.Trace.Header.Layout.IsStream = isStream == 1
-	if cached > 0 {
-		record.Trace.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
 	}
 	return record, nil
 }
