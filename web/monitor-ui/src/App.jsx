@@ -11,6 +11,8 @@ import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 function App() {
   const [auth, setAuth] = useState({ loading: true, required: false, authorized: false, error: "" });
   const [token, setToken] = useState(() => window.localStorage.getItem(MONITOR_AUTH_TOKEN_KEY) || "");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -44,9 +46,26 @@ function App() {
 
   const submitToken = async (event) => {
     event.preventDefault();
+    if (username.trim() && password) {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!response.ok) {
+        setAuth({ loading: false, required: true, authorized: false, error: "Invalid username or password." });
+        return;
+      }
+      const payload = await response.json();
+      window.localStorage.setItem(MONITOR_AUTH_TOKEN_KEY, payload.token);
+      setToken(payload.token || "");
+      setAuth({ loading: false, required: true, authorized: true, error: "" });
+      return;
+    }
+
     const nextToken = token.trim();
     if (!nextToken) {
-      setAuth({ loading: false, required: true, authorized: false, error: "Enter the monitor token." });
+      setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password, or paste an existing token." });
       return;
     }
     window.localStorage.setItem(MONITOR_AUTH_TOKEN_KEY, nextToken);
@@ -63,11 +82,15 @@ function App() {
       <div className="auth-screen">
         <form className="auth-panel" onSubmit={submitToken}>
           <p className="eyebrow">Access control</p>
-          <h1>Monitor token required</h1>
+          <h1>Sign in to monitor</h1>
+          <label htmlFor="monitor-username">Username</label>
+          <input id="monitor-username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
+          <label htmlFor="monitor-password">Password</label>
+          <input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           <label htmlFor="monitor-token">Bearer token</label>
-          <input id="monitor-token" type="password" autoComplete="current-password" value={token} onChange={(event) => setToken(event.target.value)} autoFocus />
+          <input id="monitor-token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} />
           {auth.error ? <p className="auth-error">{auth.error}</p> : null}
-          <button className="ghost-button" type="submit">Unlock monitor</button>
+          <button className="ghost-button" type="submit">Sign in</button>
         </form>
       </div>
     );

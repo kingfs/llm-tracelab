@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -145,6 +146,45 @@ debug:
 		if !strings.Contains(output, want) {
 			t.Fatalf("log output = %q, want contain %q", output, want)
 		}
+	}
+}
+
+func TestRunAuthInitUserAndCreateToken(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+auth:
+  database_path: "` + filepath.Join(dir, "control.sqlite3") + `"
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if code := run([]string{"auth", "init-user", "-c", configPath, "--username", "admin", "--password", "change-me-123"}); code != 0 {
+		t.Fatalf("auth init-user code = %d, want 0", code)
+	}
+	if code := run([]string{"auth", "create-token", "-c", configPath, "--username", "admin", "--name", "test"}); code != 0 {
+		t.Fatalf("auth create-token code = %d, want 0", code)
+	}
+
+	st, err := auth.Open(filepath.Join(dir, "control.sqlite3"))
+	if err != nil {
+		t.Fatalf("auth.Open() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.Login(context.Background(), "admin", "change-me-123", 0); err != nil {
+		t.Fatalf("Login() error = %v", err)
 	}
 }
 

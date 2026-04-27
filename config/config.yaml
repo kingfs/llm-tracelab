@@ -11,6 +11,10 @@ mcp:
   path: "/mcp"
   auth_token: ""
 
+auth:
+  database_path: ""
+  session_ttl: 24h
+
 upstream:
   base_url: "https://api.openai.com/v1"
   api_key: "sk-placeholder"

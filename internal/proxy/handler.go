@@ -210,6 +210,7 @@ type Handler struct {
 	chaosManager *chaos.Manager
 	cfg          *config.Config
 	router       *router.Router
+	authVerifier auth.TokenVerifier
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
@@ -327,10 +328,19 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 	}, nil
 }
 
+func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier) (*Handler, error) {
+	h, err := NewHandler(cfg, st, rtr)
+	if err != nil {
+		return nil, err
+	}
+	h.authVerifier = verifier
+	return h, nil
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
-	if !auth.Authorized(r, h.cfg.Server.AuthToken) {
+	if !auth.RequestAuthorized(r, h.cfg.Server.AuthToken, h.authVerifier) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-proxy"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return

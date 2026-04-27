@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -83,6 +86,48 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenTokenConfigured(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("authenticated check code = %d, want 200", rr.Code)
+	}
+}
+
+func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := auth.MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateUp() error = %v", err)
+	}
+	authStore, err := auth.Open(dbPath)
+	if err != nil {
+		t.Fatalf("auth.Open() error = %v", err)
+	}
+	defer authStore.Close()
+	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, SessionTTL: time.Hour})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"admin","password":"change-me-123"}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("login code = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var payload loginResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Token == "" {
+		t.Fatalf("login token missing")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("check code = %d, want 200", rr.Code)
 	}
 }
 

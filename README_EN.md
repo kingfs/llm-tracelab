@@ -84,11 +84,15 @@ Edit [config/config.yaml](./config/config.yaml):
 ```yaml
 server:
   port: "8080"
-  auth_token: "dev-proxy-token" # optional; when non-empty clients must send Authorization: Bearer <token>
+  auth_token: "" # legacy static token; user-backed auth is recommended
 
 monitor:
   port: "8081"
-  auth_token: "dev-monitor-token" # optional; protects monitor APIs, trace detail, and downloads
+  auth_token: "" # legacy static token; username/password login is recommended
+
+auth:
+  database_path: "" # defaults to {{debug.output_dir}}/control.sqlite3
+  session_ttl: 24h
 
 router:
   model_discovery:
@@ -159,6 +163,8 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
 - `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
+- `LLM_TRACELAB_AUTH_DATABASE_PATH`
+- `LLM_TRACELAB_AUTH_SESSION_TTL`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
 - `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
@@ -174,9 +180,11 @@ Supported environment variable overrides:
 
 Access control notes:
 
-- `server.auth_token` protects the LLM proxy API. Once configured, SDK requests sent to the proxy must use `Authorization: Bearer <server.auth_token>`; the real provider key is still injected from `upstream.api_key` or `upstreams[].upstream.api_key`.
-- `monitor.auth_token` protects the Monitor JSON APIs, trace detail, raw protocol, and `.http` downloads. The browser UI asks for this token and sends it on later API requests.
-- Empty tokens keep local development compatibility and disable access control for that service.
+- `auth.database_path` stores users and API tokens. It defaults to `debug.output_dir/control.sqlite3`.
+- Initialize the first user with `go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`.
+- Generate a token for SDK or CLI traffic with `go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev`.
+- The LLM proxy API, Monitor API, and MCP accept `Authorization: Bearer <generated-token>`; the Monitor UI can also log in with username and password and exchange that login for a token.
+- `server.auth_token`, `monitor.auth_token`, and `mcp.auth_token` remain as legacy static-token compatibility fields. New deployments should use users and generated tokens.
 
 Recommended compatibility pattern:
 
@@ -362,6 +370,8 @@ Start it with:
 ```bash
 export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
+docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/config/config.yaml --username admin --password 'change-me-123'
+docker compose exec llm-tracelab /app/bin/llm-tracelab auth create-token -c /app/config/config.yaml --username admin --name local-dev
 ```
 
 If you only want to use the published Docker Hub image, you can run it directly without cloning the repo:

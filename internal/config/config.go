@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -24,6 +26,11 @@ type Config struct {
 		Path      string `yaml:"path"`
 		AuthToken string `yaml:"auth_token"`
 	} `yaml:"mcp"`
+
+	Auth struct {
+		DatabasePath string        `yaml:"database_path"`
+		SessionTTL   time.Duration `yaml:"session_ttl"`
+	} `yaml:"auth"`
 
 	Upstream  UpstreamConfig         `yaml:"upstream"`
 	Upstreams []UpstreamTargetConfig `yaml:"upstreams"`
@@ -130,6 +137,14 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_MCP_AUTH_TOKEN"); v != "" {
 		cfg.MCP.AuthToken = v
 	}
+	if v := os.Getenv("LLM_TRACELAB_AUTH_DATABASE_PATH"); v != "" {
+		cfg.Auth.DatabasePath = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_AUTH_SESSION_TTL"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.Auth.SessionTTL = parsed
+		}
+	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
 		cfg.Upstream.BaseURL = v
 	}
@@ -185,4 +200,18 @@ func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {
 			Upstream: c.Upstream,
 		},
 	}
+}
+
+func (c Config) AuthDatabasePath() string {
+	if strings.TrimSpace(c.Auth.DatabasePath) != "" {
+		return c.Auth.DatabasePath
+	}
+	return filepath.Join(c.Debug.OutputDir, "control.sqlite3")
+}
+
+func (c Config) AuthSessionTTL() time.Duration {
+	if c.Auth.SessionTTL > 0 {
+		return c.Auth.SessionTTL
+	}
+	return 24 * time.Hour
 }

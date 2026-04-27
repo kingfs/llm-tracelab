@@ -88,11 +88,15 @@ logs/
 ```yaml
 server:
   port: "8080"
-  auth_token: "dev-proxy-token" # 可选；非空时客户端必须发送 Authorization: Bearer <token>
+  auth_token: "" # 兼容旧静态 token；推荐改用 auth 用户 + token
 
 monitor:
   port: "8081"
-  auth_token: "dev-monitor-token" # 可选；非空时 Monitor API、详情和下载会要求 token
+  auth_token: "" # 兼容旧静态 token；推荐使用用户名密码登录
+
+auth:
+  database_path: "" # 默认 {{debug.output_dir}}/control.sqlite3
+  session_ttl: 24h
 
 router:
   model_discovery:
@@ -163,6 +167,8 @@ upstream:
 - `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
 - `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
+- `LLM_TRACELAB_AUTH_DATABASE_PATH`
+- `LLM_TRACELAB_AUTH_SESSION_TTL`
 - `LLM_TRACELAB_MCP_ENABLED`
 - `LLM_TRACELAB_MCP_PATH`
 - `LLM_TRACELAB_MCP_AUTH_TOKEN`
@@ -181,9 +187,11 @@ upstream:
 
 访问控制说明：
 
-- `server.auth_token` 保护 LLM proxy API。配置后，SDK 发到 proxy 的 `Authorization` 必须是 `Bearer <server.auth_token>`；上游 provider 的真实 key 仍由 `upstream.api_key` / `upstreams[].upstream.api_key` 注入。
-- `monitor.auth_token` 保护 Monitor JSON API、trace detail、raw protocol 和 `.http` 下载。浏览器打开 Monitor 后输入该 token，前端会在后续 API 请求里携带 bearer token。
-- token 为空时保持本地开发兼容，不启用对应服务的访问控制。
+- `auth.database_path` 存放用户和 API token，默认是 `debug.output_dir/control.sqlite3`。
+- 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
+- 为 SDK / CLI 生成 token：`go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev`。
+- LLM proxy API、Monitor API 和 MCP 都接受 `Authorization: Bearer <generated-token>`；Monitor UI 也支持用户名密码登录并自动换取 token。
+- `server.auth_token`、`monitor.auth_token`、`mcp.auth_token` 仍作为兼容旧配置的静态 token，建议新部署使用用户和 token。
 
 ### MCP Server
 
@@ -390,6 +398,8 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 ```bash
 export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
+docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/config/config.yaml --username admin --password 'change-me-123'
+docker compose exec llm-tracelab /app/bin/llm-tracelab auth create-token -c /app/config/config.yaml --username admin --name local-dev
 ```
 
 如果只想直接使用已经发布到 Docker Hub 的镜像，可以不克隆仓库，直接运行：

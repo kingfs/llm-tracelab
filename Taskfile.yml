@@ -16,6 +16,11 @@ tasks:
       - bun install --frozen-lockfile
       - bun run build
 
+  generate:ent:
+    desc: Generate ent control-plane DAO code
+    cmds:
+      - go generate ./ent/...
+
   fmt:
     desc: Format Go code
     cmds:
@@ -94,6 +99,21 @@ tasks:
     desc: Rewrite legacy V2 cassettes to V3 and rebuild SQLite index
     cmds:
       - go run ./cmd/server migrate -c {{.CONFIG}}
+
+  migrate:auth:up:
+    desc: Apply control-plane auth database migrations
+    cmds:
+      - go run ./cmd/server auth migrate up -c {{.CONFIG}}
+
+  auth:init-user:
+    desc: Initialize an auth user, pass USER and PASSWORD
+    cmds:
+      - go run ./cmd/server auth init-user -c {{.CONFIG}} --username "{{.USER}}" --password "{{.PASSWORD}}"
+
+  auth:create-token:
+    desc: Create an API token for a user, pass USER and NAME
+    cmds:
+      - go run ./cmd/server auth create-token -c {{.CONFIG}} --username "{{.USER}}" --name "{{.NAME}}"
 
   run:
     desc: Start proxy and monitor with local config
