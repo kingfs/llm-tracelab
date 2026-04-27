@@ -10,6 +10,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
 
@@ -87,6 +88,32 @@ func TestHandlerRejectsMissingProxyTokenBeforeRouting(t *testing.T) {
 	}
 	if got := rr.Header().Get("WWW-Authenticate"); got != `Bearer realm="llm-tracelab-proxy"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
+	}
+}
+
+func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = "https://api.openai.com/v1"
+	cfg.Upstream.ApiKey = "sk-test"
+	cfg.Upstream.ProviderPreset = "openai"
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	transport, ok := handler.proxy.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport type = %T, want *http.Transport", handler.proxy.Transport)
+	}
+	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("proxy transport disables upstream TLS certificate verification")
 	}
 }
 

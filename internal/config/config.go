@@ -295,6 +295,49 @@ func (c Config) DatabaseDSN() string {
 	return ""
 }
 
+func RedactDSN(dsn string) string {
+	dsn = strings.TrimSpace(dsn)
+	if dsn == "" {
+		return ""
+	}
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		return redactURLPassword(dsn)
+	}
+	if strings.HasPrefix(dsn, "mysql://") {
+		return redactURLPassword(dsn)
+	}
+	if lowerDSN := strings.ToLower(dsn); strings.Contains(lowerDSN, "password=") || strings.Contains(lowerDSN, "passwd=") {
+		parts := strings.Fields(dsn)
+		for i, part := range parts {
+			lower := strings.ToLower(part)
+			if strings.HasPrefix(lower, "password=") || strings.HasPrefix(lower, "passwd=") {
+				key, _, _ := strings.Cut(part, "=")
+				parts[i] = key + "=<redacted>"
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return dsn
+}
+
+func redactURLPassword(dsn string) string {
+	parts := strings.SplitN(dsn, "://", 2)
+	if len(parts) != 2 {
+		return dsn
+	}
+	scheme, rest := parts[0], parts[1]
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return dsn
+	}
+	userInfo := rest[:at]
+	if !strings.Contains(userInfo, ":") {
+		return dsn
+	}
+	user, _, _ := strings.Cut(userInfo, ":")
+	return scheme + "://" + user + ":<redacted>@" + rest[at+1:]
+}
+
 func (c Config) DatabaseAutoMigrate() bool {
 	if c.Database.AutoMigrate != nil {
 		return *c.Database.AutoMigrate

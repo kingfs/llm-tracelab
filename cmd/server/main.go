@@ -115,8 +115,16 @@ func runServe(args []string) int {
 			mux := newManagementMux(traceStore, rtr, cfg, authStore)
 
 			addr := ":" + cfg.Monitor.Port
+			srv := &http.Server{
+				Addr:              addr,
+				Handler:           mux,
+				ReadHeaderTimeout: 10 * time.Second,
+				ReadTimeout:       30 * time.Second,
+				WriteTimeout:      2 * time.Minute,
+				IdleTimeout:       2 * time.Minute,
+			}
 			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
-			if err := http.ListenAndServe(addr, mux); err != nil {
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("Monitor server failed", "error", err)
 			}
 		}()
@@ -132,14 +140,16 @@ func runServe(args []string) int {
 	// 4. 启动 Server
 	addr := ":" + cfg.Server.Port
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  5 * time.Minute, // 针对 LLM 长时间推理
-		WriteTimeout: 5 * time.Minute,
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       5 * time.Minute, // 针对 LLM 长时间推理
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
-	if err := srv.ListenAndServe(); err != nil {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("Server failed", "error", err)
 		return 1
 	}
@@ -331,7 +341,7 @@ func runAuthMigrate(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown auth migrate direction %q\n", direction)
 		return 2
 	}
-	slog.Info("Database migration finished", "driver", cfg.DatabaseDriver(), "dsn", cfg.DatabaseDSN(), "direction", direction)
+	slog.Info("Database migration finished", "driver", cfg.DatabaseDriver(), "dsn", config.RedactDSN(cfg.DatabaseDSN()), "direction", direction)
 	return 0
 }
 

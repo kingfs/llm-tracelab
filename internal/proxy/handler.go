@@ -3,7 +3,6 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -245,7 +244,6 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-			TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		},
 	}
 

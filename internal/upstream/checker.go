@@ -1,7 +1,6 @@
 package upstream
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -143,9 +142,6 @@ func checkConnectivity(cfg config.UpstreamConfig, client *http.Client, stdout io
 func defaultConnectivityHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
 	}
 }
 
