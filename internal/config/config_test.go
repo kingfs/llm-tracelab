@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestRedactDSN(t *testing.T) {
 	tests := []struct {
@@ -137,4 +140,50 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 	if cfg.Upstreams[1].Upstream.ApiKey != "sk-secondary" {
 		t.Fatalf("second upstream api_key = %q", cfg.Upstreams[1].Upstream.ApiKey)
 	}
+}
+
+func TestLoadExpandsEnvReferences(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "sk-test")
+	path := writeTempConfig(t, `
+server:
+  port: "8080"
+upstreams:
+  - id: "primary"
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: "$env:OPENAI_TEST_KEY"
+      provider_preset: "openai"
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Upstreams[0].Upstream.ApiKey != "sk-test" {
+		t.Fatalf("api_key = %q, want sk-test", cfg.Upstreams[0].Upstream.ApiKey)
+	}
+}
+
+func TestLoadFailsWhenEnvReferenceMissing(t *testing.T) {
+	path := writeTempConfig(t, `
+server:
+  port: "8080"
+upstream:
+  base_url: "https://api.openai.com/v1"
+  api_key: "$env:DOES_NOT_EXIST_FOR_TEST"
+  provider_preset: "openai"
+`)
+
+	if _, err := Load(path); err == nil {
+		t.Fatalf("Load() error = nil, want missing env error")
+	}
+}
+
+func writeTempConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := t.TempDir() + "/config.yaml"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return path
 }

@@ -1,16 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { MONITOR_AUTH_TOKEN_KEY, monitorAuthHeaders } from "./hooks/useJSON";
+import { MONITOR_TOKEN_KEY, monitorAuthHeaders } from "./hooks/useJSON";
 import { RequestsPage } from "./routes/RequestsPage";
 import { RoutingPage } from "./routes/RoutingPage";
 import { SessionDetailPage } from "./routes/SessionDetailPage";
 import { SessionsPage } from "./routes/SessionsPage";
+import { TokensPage } from "./routes/TokensPage";
 import { TraceDetailPage } from "./routes/TraceDetailPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 
 function App() {
   const [auth, setAuth] = useState({ loading: true, required: false, authorized: false, error: "" });
-  const [token, setToken] = useState(() => window.localStorage.getItem(MONITOR_AUTH_TOKEN_KEY) || "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -57,20 +57,11 @@ function App() {
         return;
       }
       const payload = await response.json();
-      window.localStorage.setItem(MONITOR_AUTH_TOKEN_KEY, payload.token);
-      setToken(payload.token || "");
+      window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
       setAuth({ loading: false, required: true, authorized: true, error: "" });
       return;
     }
-
-    const nextToken = token.trim();
-    if (!nextToken) {
-      setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password, or paste an existing token." });
-      return;
-    }
-    window.localStorage.setItem(MONITOR_AUTH_TOKEN_KEY, nextToken);
-    const response = await fetch("/api/auth/check", { headers: monitorAuthHeaders() });
-    setAuth({ loading: false, required: true, authorized: response.ok, error: response.ok ? "" : "Invalid monitor token." });
+    setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password." });
   };
 
   if (auth.loading) {
@@ -87,8 +78,6 @@ function App() {
           <input id="monitor-username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
           <label htmlFor="monitor-password">Password</label>
           <input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
-          <label htmlFor="monitor-token">Bearer token</label>
-          <input id="monitor-token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} />
           {auth.error ? <p className="auth-error">{auth.error}</p> : null}
           <button className="ghost-button" type="submit">Sign in</button>
         </form>
@@ -102,6 +91,7 @@ function App() {
       <Route path="/requests" element={<RequestsPage />} />
       <Route path="/sessions" element={<SessionsPage />} />
       <Route path="/routing" element={<RoutingPage />} />
+      <Route path="/tokens" element={<TokensPage />} />
       <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
       <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
       <Route path="/traces/:traceID" element={<TraceDetailPage />} />

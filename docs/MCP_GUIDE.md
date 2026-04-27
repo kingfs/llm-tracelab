@@ -47,12 +47,14 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp"
-  auth_token: ""
 ```
 
-Optional authentication:
+Authentication:
 
-- when `mcp.auth_token` is non-empty, clients must send `Authorization: Bearer <token>`
+- MCP reuses the same user-backed personal token as the proxy API
+- create the first user with `llm-tracelab auth init-user`
+- log in to Monitor and create a token from the `Tokens` page, or use `llm-tracelab auth create-token`
+- clients must send `Authorization: Bearer <token>`
 
 ## Tool Surface
 

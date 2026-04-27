@@ -79,18 +79,20 @@ The recommended baseline is now the multi-upstream shape.
 
 The legacy single `upstream` block is still supported for the simplest single-target setup, but if the same model may be served by multiple providers you should prefer `upstreams + router` so switching providers no longer requires stopping the proxy and editing config.
 
-[config/config.yaml](./config/config.yaml) is the tracked default example and should not contain real secrets. For local development, create `config/config.dev.yaml` (already ignored by `.gitignore`); for production Docker Compose, override the defaults with environment variables.
+[config/config.yaml](./config/config.yaml) is the tracked default example and should not contain real secrets. Sensitive values use `$env:VAR_NAME` references, and production Docker Compose can still override defaults with environment variables.
 
 The default config shape is:
 
 ```yaml
 server:
   port: "8080"
-  auth_token: "" # legacy static token; user-backed auth is recommended
 
 monitor:
   port: "8081"
-  auth_token: "" # legacy static token; username/password login is recommended
+
+mcp:
+  enabled: true
+  path: "/mcp"
 
 database:
   driver: "sqlite"
@@ -129,7 +131,7 @@ upstreams:
       - "gpt-4o-mini"
     upstream:
       base_url: "https://api.openai.com/v1"
-      api_key: ""
+      api_key: "$env:LLM_API_KEY"
       provider_preset: "openai"
 
   - id: "openrouter-fallback"
@@ -143,7 +145,7 @@ upstreams:
       - "gpt-4.1"
     upstream:
       base_url: "https://openrouter.ai/api/v1"
-      api_key: "sk-openrouter"
+      api_key: "$env:OPENROUTER_API_KEY"
       provider_preset: "openrouter"
       headers: {}                    # extra upstream headers such as HTTP-Referer
 
@@ -172,9 +174,7 @@ If you prefer starting from a ready-made config, use one of these examples:
 Supported environment variable overrides:
 
 - `LLM_TRACELAB_SERVER_PORT`
-- `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
-- `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
 - `LLM_TRACELAB_DATABASE_DRIVER`
 - `LLM_TRACELAB_DATABASE_DSN`
 - `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
@@ -201,9 +201,8 @@ Access control notes:
 
 - `database` is the unified structured store for users, API tokens, trace index, sessions, upstream metadata, datasets, and eval metadata. The default SQLite path is `trace.output_dir/llm_tracelab.sqlite3`.
 - Initialize the first user with `go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`.
-- Generate a token for SDK or CLI traffic with `go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev`.
-- The LLM proxy API, Monitor API, and MCP accept `Authorization: Bearer <generated-token>`; the Monitor UI can also log in with username and password and exchange that login for a token.
-- `server.auth_token`, `monitor.auth_token`, and `mcp.auth_token` remain as legacy static-token compatibility fields. New deployments should use users and generated tokens.
+- The Monitor UI uses username/password login. After login, use the `Tokens` page to generate a personal API token for the current user.
+- The same personal token works for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
 
 Recommended compatibility pattern:
 
@@ -329,17 +328,16 @@ task run
 task migrate
 ```
 
-`task run` prefers local `config/config.dev.yaml` and falls back to `config/config.yaml` when the dev file does not exist. You can also choose a config explicitly:
+The default config path is `config/config.yaml`. You can also choose a config explicitly:
 
 ```bash
 CONFIG=config/examples/openai.yaml task run
-task run:dev
 ```
 
 Direct run also works:
 
 ```bash
-go run ./cmd/server -c config/config.dev.yaml
+go run ./cmd/server -c config/config.yaml
 ```
 
 Point your SDK `base_url` to `http://localhost:8080/v1` and traffic will be recorded through the proxy.
@@ -397,8 +395,9 @@ Start it with:
 export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
 docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/config/config.yaml --username admin --password 'change-me-123'
-docker compose exec llm-tracelab /app/bin/llm-tracelab auth create-token -c /app/config/config.yaml --username admin --name local-dev
 ```
+
+Then visit `http://localhost:8081`, sign in, and create a personal token from the `Tokens` page for SDK / MCP traffic.
 
 If you only want to use the published Docker Hub image, you can run it directly without cloning the repo:
 

@@ -95,6 +95,53 @@ a {
   color: var(--danger);
 }
 
+.token-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.token-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 280px) minmax(180px, 220px) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.token-field {
+  display: grid;
+  gap: 6px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--muted);
+}
+
+.token-form input {
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 0 12px;
+  background: #fff;
+}
+
+.token-result {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.token-result span {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--muted);
+}
+
+.token-result code {
+  overflow-wrap: anywhere;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.86rem;
+}
+
 .shell {
   width: min(1680px, calc(100vw - 32px));
   margin: 0 auto;

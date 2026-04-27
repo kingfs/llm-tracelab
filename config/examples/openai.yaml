@@ -7,7 +7,6 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp"
-  auth_token: ""
 
 auth:
   session_ttl: 24h
@@ -45,7 +44,7 @@ upstreams:
     static_models: []
     upstream:
       base_url: "https://api.openai.com/v1"
-      api_key: "sk-xxx"
+      api_key: "$env:OPENAI_API_KEY"
       provider_preset: "openai"
       protocol_family: ""
       routing_profile: ""

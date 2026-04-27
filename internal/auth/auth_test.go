@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,12 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
 )
+
+type verifierFunc func(context.Context, string) (Principal, bool, error)
+
+func (f verifierFunc) VerifyToken(ctx context.Context, token string) (Principal, bool, error) {
+	return f(ctx, token)
+}
 
 func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 	t.Parallel()
@@ -85,15 +92,40 @@ func TestStoreRejectsExpiredTokensAndDisabledUsers(t *testing.T) {
 	}
 }
 
-func TestAuthorizedAllowsEmptyConfiguredToken(t *testing.T) {
+func TestRequestAuthorizedAllowsMissingVerifier(t *testing.T) {
 	t.Parallel()
 
 	req, err := http.NewRequest(http.MethodGet, "/", nil)
 	if err != nil {
 		t.Fatalf("NewRequest() error = %v", err)
 	}
-	if !Authorized(req, "") {
-		t.Fatalf("Authorized() = false, want true for empty configured token")
+	if !RequestAuthorized(req, nil) {
+		t.Fatalf("RequestAuthorized() = false, want true when verifier is nil")
+	}
+}
+
+func TestMiddlewareStoresVerifiedPrincipal(t *testing.T) {
+	t.Parallel()
+
+	verifier := verifierFunc(func(_ context.Context, token string) (Principal, bool, error) {
+		return Principal{Username: "admin"}, token == "valid", nil
+	})
+	var got Principal
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got, _ = PrincipalFromContext(r.Context())
+	})
+	handler := Middleware(next, "test", verifier)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer valid")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if got.Username != "admin" {
+		t.Fatalf("principal = %+v, want username admin", got)
 	}
 }
 

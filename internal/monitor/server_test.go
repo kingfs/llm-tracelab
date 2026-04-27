@@ -60,11 +60,28 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesProtectsMonitorAPIsWhenTokenConfigured(t *testing.T) {
+func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	t.Parallel()
 
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := auth.MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateUp() error = %v", err)
+	}
+	authStore, err := auth.Open(dbPath)
+	if err != nil {
+		t.Fatalf("auth.Open() error = %v", err)
+	}
+	defer authStore.Close()
+	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	token, err := authStore.CreateToken(context.Background(), "admin", "test", auth.DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
+
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthToken: "monitor-token"})
+	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore})
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
 	statusRR := httptest.NewRecorder()
@@ -81,7 +98,7 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenTokenConfigured(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-	req.Header.Set("Authorization", "Bearer monitor-token")
+	req.Header.Set("Authorization", "Bearer "+token.Token)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -128,6 +145,21 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("check code = %d, want 200", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/tokens", bytes.NewBufferString(`{"name":"sdk","ttl":"1h"}`))
+	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create token code = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var created createTokenResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("json.Unmarshal(create token) error = %v", err)
+	}
+	if created.Token == "" {
+		t.Fatalf("created token missing")
 	}
 }
 

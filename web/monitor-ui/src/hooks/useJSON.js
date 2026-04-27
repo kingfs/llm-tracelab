@@ -1,9 +1,9 @@
 import { startTransition, useEffect, useState } from "react";
 
-export const MONITOR_AUTH_TOKEN_KEY = "llm-tracelab.monitor.auth_token";
+export const MONITOR_TOKEN_KEY = "llm-tracelab.monitor.token";
 
 export function monitorAuthHeaders() {
-  const token = window.localStorage.getItem(MONITOR_AUTH_TOKEN_KEY) || "";
+  const token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

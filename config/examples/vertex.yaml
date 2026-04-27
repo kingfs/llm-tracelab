@@ -7,7 +7,6 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp"
-  auth_token: ""
 
 auth:
   session_ttl: 24h
@@ -46,7 +45,7 @@ upstreams:
       - "gemini-2.5-flash"
     upstream:
       base_url: "https://us-central1-aiplatform.googleapis.com"
-      api_key: "ya29..."
+      api_key: "$env:VERTEX_API_TOKEN"
       provider_preset: "vertex"
       protocol_family: ""
       routing_profile: ""

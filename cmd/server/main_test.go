@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -374,9 +375,10 @@ func TestNewManagementMuxRejectsUnauthorizedMCP(t *testing.T) {
 	cfg.Monitor.Port = "8081"
 	cfg.MCP.Enabled = true
 	cfg.MCP.Path = "/mcp"
-	cfg.MCP.AuthToken = "secret-token"
+	authStore := newTestAuthStore(t)
+	defer authStore.Close()
 
-	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg))
+	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
@@ -405,15 +407,20 @@ func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 	cfg.Monitor.Port = "8081"
 	cfg.MCP.Enabled = true
 	cfg.MCP.Path = "/mcp"
-	cfg.MCP.AuthToken = "secret-token"
+	authStore := newTestAuthStore(t)
+	defer authStore.Close()
+	token, err := authStore.CreateToken(context.Background(), "admin", "mcp", auth.DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken() error = %v", err)
+	}
 
-	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg))
+	httpServer := httptest.NewServer(newManagementMux(st, nil, cfg, authStore))
 	defer httpServer.Close()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
 		Endpoint:   httpServer.URL + "/mcp",
-		HTTPClient: &http.Client{Transport: authTransport{Token: "secret-token"}},
+		HTTPClient: &http.Client{Transport: authTransport{Token: token.Token}},
 	}, nil)
 	if err != nil {
 		t.Fatalf("client.Connect() error = %v", err)
@@ -427,6 +434,23 @@ func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 	if len(tools.Tools) != 6 {
 		t.Fatalf("len(tools.Tools) = %d, want 6", len(tools.Tools))
 	}
+}
+
+func newTestAuthStore(t *testing.T) *auth.Store {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "auth.sqlite3")
+	if err := auth.MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateUp() error = %v", err)
+	}
+	authStore, err := auth.Open(dbPath)
+	if err != nil {
+		t.Fatalf("auth.Open() error = %v", err)
+	}
+	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
+		_ = authStore.Close()
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	return authStore
 }
 
 type authTransport struct {

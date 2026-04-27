@@ -13,6 +13,9 @@ export function PrimaryNav() {
       <NavLink to="/routing" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
         Routing
       </NavLink>
+      <NavLink to="/tokens" className={({ isActive }) => isActive ? "nav-chip nav-chip-active" : "nav-chip"}>
+        Tokens
+      </NavLink>
     </nav>
   );
 }

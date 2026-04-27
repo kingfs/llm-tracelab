@@ -187,7 +187,6 @@ type LogStats struct {
 
 type RouteOptions struct {
 	Router       *router.Router
-	AuthToken    string
 	AuthVerifier auth.TokenVerifier
 	AuthStore    *auth.Store
 	SessionTTL   time.Duration
@@ -199,6 +198,17 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
+	Token  string `json:"token"`
+	Prefix string `json:"prefix"`
+}
+
+type createTokenRequest struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+	TTL   string `json:"ttl"`
+}
+
+type createTokenResponse struct {
 	Token  string `json:"token"`
 	Prefix string `json:"prefix"`
 }
@@ -313,21 +323,22 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
-	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthToken, opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.SessionTTL))
-	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthToken, opt.AuthVerifier))
-	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthToken, opt.AuthVerifier))
-	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthToken, opt.AuthVerifier))
-	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthToken, opt.AuthVerifier))
-	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthToken, opt.AuthVerifier))
-	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthToken, opt.AuthVerifier))
-	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthToken, opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authCreateTokenAPIHandler(opt.AuthStore), opt.AuthVerifier))
+	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
+	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
+	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.Handle("/", appHandler())
 }
 
-func authStatusAPIHandler(authToken string, verifier auth.TokenVerifier) http.HandlerFunc {
+func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": auth.Required(authToken) || verifier != nil})
+		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": verifier != nil})
 	}
 }
 
@@ -361,17 +372,56 @@ func authCheckAPIHandler() http.HandlerFunc {
 	}
 }
 
-func monitorAuthRequired(next http.HandlerFunc, authToken string, verifier auth.TokenVerifier) http.HandlerFunc {
-	if !auth.Required(authToken) && verifier == nil {
+func authCreateTokenAPIHandler(authStore *auth.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if authStore == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth store not configured"})
+			return
+		}
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		if !ok || strings.TrimSpace(principal.Username) == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		var req createTokenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid token payload"})
+			return
+		}
+		var ttl time.Duration
+		if strings.TrimSpace(req.TTL) != "" {
+			parsed, err := time.ParseDuration(req.TTL)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ttl"})
+				return
+			}
+			ttl = parsed
+		}
+		token, err := authStore.CreateToken(r.Context(), principal.Username, req.Name, req.Scope, ttl)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, createTokenResponse{Token: token.Token, Prefix: token.Prefix})
+	}
+}
+
+func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) http.HandlerFunc {
+	if verifier == nil {
 		return next
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !auth.RequestAuthorized(r, authToken, verifier) {
+		principal, ok := auth.VerifyRequest(r, verifier)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-monitor"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
-		next(w, r)
+		next(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	}
 }
 

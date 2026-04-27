@@ -2,10 +2,11 @@ package auth
 
 import (
 	"context"
-	"crypto/subtle"
 	"net/http"
 	"strings"
 )
+
+type principalContextKey struct{}
 
 type TokenVerifier interface {
 	VerifyToken(ctx context.Context, token string) (Principal, bool, error)
@@ -16,10 +17,6 @@ type Principal struct {
 	Username string
 	Role     string
 	Scope    string
-}
-
-func Required(token string) bool {
-	return strings.TrimSpace(token) != ""
 }
 
 func BearerToken(header string) (string, bool) {
@@ -34,53 +31,46 @@ func BearerToken(header string) (string, bool) {
 	return token, token != ""
 }
 
-func Authorized(r *http.Request, token string) bool {
-	expected := strings.TrimSpace(token)
-	if expected == "" {
-		return true
-	}
-	provided, ok := BearerToken(r.Header.Get("Authorization"))
-	if !ok {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
-}
-
-func RequestAuthorized(r *http.Request, staticToken string, verifier TokenVerifier) bool {
-	if !Required(staticToken) && verifier == nil {
-		return true
-	}
-	provided, ok := BearerToken(r.Header.Get("Authorization"))
-	if !ok {
-		return false
-	}
-	if Required(staticToken) && subtle.ConstantTimeCompare([]byte(provided), []byte(strings.TrimSpace(staticToken))) == 1 {
-		return true
-	}
+func VerifyRequest(r *http.Request, verifier TokenVerifier) (Principal, bool) {
 	if verifier == nil {
-		return false
+		return Principal{}, true
 	}
-	_, verified, err := verifier.VerifyToken(r.Context(), provided)
-	return err == nil && verified
+	provided, ok := BearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		return Principal{}, false
+	}
+	principal, verified, err := verifier.VerifyToken(r.Context(), provided)
+	return principal, err == nil && verified
 }
 
-func Middleware(next http.Handler, token string, realm string, verifiers ...TokenVerifier) http.Handler {
-	var verifier TokenVerifier
-	if len(verifiers) > 0 {
-		verifier = verifiers[0]
-	}
-	if !Required(token) && verifier == nil {
+func RequestAuthorized(r *http.Request, verifier TokenVerifier) bool {
+	_, ok := VerifyRequest(r, verifier)
+	return ok
+}
+
+func WithPrincipal(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, principalContextKey{}, principal)
+}
+
+func PrincipalFromContext(ctx context.Context) (Principal, bool) {
+	principal, ok := ctx.Value(principalContextKey{}).(Principal)
+	return principal, ok
+}
+
+func Middleware(next http.Handler, realm string, verifier TokenVerifier) http.Handler {
+	if verifier == nil {
 		return next
 	}
 	if strings.TrimSpace(realm) == "" {
 		realm = "llm-tracelab"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !RequestAuthorized(r, token, verifier) {
+		principal, ok := VerifyRequest(r, verifier)
+		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="`+realm+`"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(WithPrincipal(r.Context(), principal)))
 	})
 }

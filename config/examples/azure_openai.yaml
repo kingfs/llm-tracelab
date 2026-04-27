@@ -7,7 +7,6 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp"
-  auth_token: ""
 
 auth:
   session_ttl: 24h
@@ -46,7 +45,7 @@ upstreams:
       - "gpt-4o-mini"
     upstream:
       base_url: "https://demo-resource.openai.azure.com"
-      api_key: "azure-key"
+      api_key: "$env:AZURE_OPENAI_API_KEY"
       provider_preset: "azure"
       protocol_family: ""
       routing_profile: ""

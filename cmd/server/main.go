@@ -486,15 +486,10 @@ func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.C
 		mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 			return server
 		}, nil)
-		if verifier != nil {
-			mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, cfg.MCP.AuthToken, "llm-tracelab-mcp", verifier))
-		} else {
-			mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, cfg.MCP.AuthToken, "llm-tracelab-mcp"))
-		}
+		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier))
 	}
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
 		Router:       rtr,
-		AuthToken:    cfg.Monitor.AuthToken,
 		AuthVerifier: verifier,
 		AuthStore:    authStorePtr,
 		SessionTTL:   cfg.AuthSessionTTL(),

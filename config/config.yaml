@@ -1,15 +1,12 @@
 server:
   port: "8080"
-  auth_token: ""
 
 monitor:
   port: "8081"
-  auth_token: ""
 
 mcp:
   enabled: true
   path: "/mcp"
-  auth_token: ""
 
 auth:
   session_ttl: 24h
@@ -48,7 +45,7 @@ upstreams:
       - "gpt-4o-mini"
     upstream:
       base_url: "https://api.openai.com/v1"
-      api_key: ""
+      api_key: "$env:LLM_API_KEY"
       provider_preset: "openai"
       protocol_family: ""
       routing_profile: ""

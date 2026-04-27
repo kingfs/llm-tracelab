@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -12,19 +14,16 @@ import (
 
 type Config struct {
 	Server struct {
-		Port      string `yaml:"port"`
-		AuthToken string `yaml:"auth_token"`
+		Port string `yaml:"port"`
 	} `yaml:"server"`
 
 	Monitor struct {
-		Port      string `yaml:"port"`
-		AuthToken string `yaml:"auth_token"`
+		Port string `yaml:"port"`
 	} `yaml:"monitor"`
 
 	MCP struct {
-		Enabled   bool   `yaml:"enabled"`
-		Path      string `yaml:"path"`
-		AuthToken string `yaml:"auth_token"`
+		Enabled bool   `yaml:"enabled"`
+		Path    string `yaml:"path"`
 	} `yaml:"mcp"`
 
 	Auth struct {
@@ -122,6 +121,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	applyEnvOverrides(&cfg)
+	if err := expandEnvRefs(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
 }
 
@@ -129,14 +131,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_SERVER_PORT"); v != "" {
 		cfg.Server.Port = v
 	}
-	if v := os.Getenv("LLM_TRACELAB_SERVER_AUTH_TOKEN"); v != "" {
-		cfg.Server.AuthToken = v
-	}
 	if v := os.Getenv("LLM_TRACELAB_MONITOR_PORT"); v != "" {
 		cfg.Monitor.Port = v
-	}
-	if v := os.Getenv("LLM_TRACELAB_MONITOR_AUTH_TOKEN"); v != "" {
-		cfg.Monitor.AuthToken = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_MCP_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
@@ -145,9 +141,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_MCP_PATH"); v != "" {
 		cfg.MCP.Path = v
-	}
-	if v := os.Getenv("LLM_TRACELAB_MCP_AUTH_TOKEN"); v != "" {
-		cfg.MCP.AuthToken = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_AUTH_DATABASE_PATH"); v != "" {
 		cfg.Auth.DatabasePath = v
@@ -257,6 +250,89 @@ func applyFirstUpstreamOverride(cfg *Config, apply func(*UpstreamConfig)) {
 		return
 	}
 	apply(&cfg.Upstreams[0].Upstream)
+}
+
+func expandEnvRefs(target any) error {
+	return expandEnvValue(reflect.ValueOf(target), "")
+}
+
+func expandEnvValue(value reflect.Value, path string) error {
+	if !value.IsValid() {
+		return nil
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return nil
+		}
+		return expandEnvValue(value.Elem(), path)
+	}
+	switch value.Kind() {
+	case reflect.Struct:
+		for i := 0; i < value.NumField(); i++ {
+			field := value.Field(i)
+			fieldType := value.Type().Field(i)
+			if fieldType.PkgPath != "" {
+				continue
+			}
+			nextPath := fieldType.Name
+			if path != "" {
+				nextPath = path + "." + nextPath
+			}
+			if err := expandEnvValue(field, nextPath); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice:
+		for i := 0; i < value.Len(); i++ {
+			if err := expandEnvValue(value.Index(i), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		for _, key := range value.MapKeys() {
+			mapValue := value.MapIndex(key)
+			if mapValue.Kind() == reflect.String {
+				expanded, err := expandEnvString(mapValue.String(), fmt.Sprintf("%s[%s]", path, key.String()))
+				if err != nil {
+					return err
+				}
+				value.SetMapIndex(key, reflect.ValueOf(expanded))
+				continue
+			}
+			copyValue := reflect.New(mapValue.Type()).Elem()
+			copyValue.Set(mapValue)
+			if err := expandEnvValue(copyValue, fmt.Sprintf("%s[%s]", path, key.String())); err != nil {
+				return err
+			}
+			value.SetMapIndex(key, copyValue)
+		}
+	case reflect.String:
+		if !value.CanSet() {
+			return nil
+		}
+		expanded, err := expandEnvString(value.String(), path)
+		if err != nil {
+			return err
+		}
+		value.SetString(expanded)
+	}
+	return nil
+}
+
+func expandEnvString(raw string, path string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "$env:") {
+		return raw, nil
+	}
+	name := strings.TrimSpace(strings.TrimPrefix(trimmed, "$env:"))
+	if name == "" {
+		return "", fmt.Errorf("empty env reference at %s", path)
+	}
+	value, ok := os.LookupEnv(name)
+	if !ok {
+		return "", fmt.Errorf("environment variable %s referenced at %s is not set", name, path)
+	}
+	return value, nil
 }
 
 func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {

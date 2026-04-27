@@ -7,7 +7,6 @@ monitor:
 mcp:
   enabled: true
   path: "/mcp"
-  auth_token: ""
 
 auth:
   session_ttl: 24h
@@ -47,7 +46,7 @@ upstreams:
       - "gemini-2.5-pro"
     upstream:
       base_url: "https://generativelanguage.googleapis.com"
-      api_key: "AIza..."
+      api_key: "$env:GOOGLE_GENAI_API_KEY"
       provider_preset: "google_genai"
       protocol_family: ""
       routing_profile: ""

@@ -15,7 +15,7 @@ task run
 
 `task fmt` rewrites Go files. `task check:quick` does not rewrite files; it checks formatting, runs `go vet`, and runs short tests.
 
-`task run` uses `config/config.dev.yaml` when that ignored local file exists, otherwise it falls back to the tracked `config/config.yaml`. Override explicitly with `CONFIG=path/to/config.yaml task run`.
+`task run` uses the tracked `config/config.yaml` by default. Override explicitly with `CONFIG=path/to/config.yaml task run`.
 
 ## Validation Levels
 

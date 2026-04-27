@@ -2,8 +2,7 @@ version: "3"
 
 vars:
   BIN: llm-tracelab
-  CONFIG:
-    sh: 'if [ -n "$CONFIG" ]; then echo "$CONFIG"; elif [ -f config/config.dev.yaml ]; then echo config/config.dev.yaml; else echo config/config.yaml; fi'
+  CONFIG: '{{default "config/config.yaml" .CONFIG}}'
 
 tasks:
   default:
@@ -120,16 +119,6 @@ tasks:
     desc: Start proxy and monitor with local config
     cmds:
       - go run ./cmd/server -c {{.CONFIG}}
-
-  run:dev:
-    desc: Start proxy and monitor with config/config.dev.yaml
-    cmds:
-      - go run ./cmd/server -c config/config.dev.yaml
-
-  migrate:db:dev:
-    desc: Apply database migrations with config/config.dev.yaml
-    cmds:
-      - go run ./cmd/server db migrate up -c config/config.dev.yaml
 
   docker:build:
     desc: Build Docker image

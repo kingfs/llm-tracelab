@@ -83,18 +83,20 @@ logs/
 
 旧的单 `upstream` 仍然兼容，适合最简单的单目标场景；但如果你的同一模型可能由多个 provider 提供，应直接使用 `upstreams + router`，避免再通过停服改配置切换上游。
 
-[config/config.yaml](./config/config.yaml) 是提交到仓库的默认样例配置，不放真实密钥；本地开发建议创建 `config/config.dev.yaml`（已被 `.gitignore` 忽略），生产 Docker Compose 通过环境变量覆盖默认值。
+[config/config.yaml](./config/config.yaml) 是提交到仓库的默认样例配置，不放真实密钥；敏感值使用 `$env:VAR_NAME` 从环境变量读取，生产 Docker Compose 也通过环境变量覆盖默认值。
 
 默认配置的结构如下：
 
 ```yaml
 server:
   port: "8080"
-  auth_token: "" # 兼容旧静态 token；推荐改用 auth 用户 + token
 
 monitor:
   port: "8081"
-  auth_token: "" # 兼容旧静态 token；推荐使用用户名密码登录
+
+mcp:
+  enabled: true
+  path: "/mcp"
 
 database:
   driver: "sqlite"
@@ -133,7 +135,7 @@ upstreams:
       - "gpt-4o-mini"
     upstream:
       base_url: "https://api.openai.com/v1"
-      api_key: ""
+      api_key: "$env:LLM_API_KEY"
       provider_preset: "openai"
 
   - id: "openrouter-fallback"
@@ -147,7 +149,7 @@ upstreams:
       - "gpt-4.1"
     upstream:
       base_url: "https://openrouter.ai/api/v1"
-      api_key: "sk-openrouter"
+      api_key: "$env:OPENROUTER_API_KEY"
       provider_preset: "openrouter"
       headers: {}                 # 额外上游请求头，比如 HTTP-Referer
 
@@ -176,9 +178,7 @@ upstream:
 支持的环境变量覆盖：
 
 - `LLM_TRACELAB_SERVER_PORT`
-- `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
-- `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
 - `LLM_TRACELAB_DATABASE_DRIVER`
 - `LLM_TRACELAB_DATABASE_DSN`
 - `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
@@ -188,7 +188,6 @@ upstream:
 - `LLM_TRACELAB_AUTH_SESSION_TTL`
 - `LLM_TRACELAB_MCP_ENABLED`
 - `LLM_TRACELAB_MCP_PATH`
-- `LLM_TRACELAB_MCP_AUTH_TOKEN`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
 - `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
@@ -208,9 +207,8 @@ upstream:
 
 - `database` 是统一的结构化数据存储，承载用户、API token、trace index、session、upstream、dataset 和 eval 元数据；SQLite 默认路径是 `trace.output_dir/llm_tracelab.sqlite3`。
 - 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
-- 为 SDK / CLI 生成 token：`go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev`。
-- LLM proxy API、Monitor API 和 MCP 都接受 `Authorization: Bearer <generated-token>`；Monitor UI 也支持用户名密码登录并自动换取 token。
-- `server.auth_token`、`monitor.auth_token`、`mcp.auth_token` 仍作为兼容旧配置的静态 token，建议新部署使用用户和 token。
+- Monitor UI 使用用户名密码登录；登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
+- 同一个个人 token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
 
 ### MCP Server
 
@@ -229,7 +227,7 @@ go run ./cmd/server serve -c config/config.yaml
 - `query_failures`
 - `summarize_failure_clusters`
 
-如果设置了 `mcp.auth_token`，客户端需要携带 `Authorization: Bearer <token>`。
+MCP 与 proxy 复用同一套个人 token，客户端需要携带 `Authorization: Bearer <token>`。
 
 详细说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)。
 
@@ -357,17 +355,16 @@ task run
 task migrate
 ```
 
-`task run` 会优先读取本机的 `config/config.dev.yaml`，不存在时回退到 `config/config.yaml`。也可以显式指定：
+默认读取 `config/config.yaml`。也可以显式指定：
 
 ```bash
 CONFIG=config/examples/openai.yaml task run
-task run:dev
 ```
 
 如果只想直接运行：
 
 ```bash
-go run ./cmd/server -c config/config.dev.yaml
+go run ./cmd/server -c config/config.yaml
 ```
 
 把你的 SDK `base_url` 指向 `http://localhost:8080/v1` 后，请求就会被代理并录制。
@@ -425,8 +422,9 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
 docker compose up --build
 docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/config/config.yaml --username admin --password 'change-me-123'
-docker compose exec llm-tracelab /app/bin/llm-tracelab auth create-token -c /app/config/config.yaml --username admin --name local-dev
 ```
+
+然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
 
 如果只想直接使用已经发布到 Docker Hub 的镜像，可以不克隆仓库，直接运行：
 

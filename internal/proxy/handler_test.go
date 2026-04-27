@@ -2,12 +2,14 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -76,8 +78,7 @@ func TestHandlerRejectsMissingProxyTokenBeforeRouting(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{}
-	cfg.Server.AuthToken = "proxy-token"
-	handler := &Handler{cfg: cfg}
+	handler := &Handler{cfg: cfg, authVerifier: proxyTestVerifier{}}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"input":"hello"}`))
 	rr := httptest.NewRecorder()
@@ -89,6 +90,12 @@ func TestHandlerRejectsMissingProxyTokenBeforeRouting(t *testing.T) {
 	if got := rr.Header().Get("WWW-Authenticate"); got != `Bearer realm="llm-tracelab-proxy"` {
 		t.Fatalf("WWW-Authenticate = %q", got)
 	}
+}
+
+type proxyTestVerifier struct{}
+
+func (proxyTestVerifier) VerifyToken(context.Context, string) (auth.Principal, bool, error) {
+	return auth.Principal{}, false, nil
 }
 
 func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
