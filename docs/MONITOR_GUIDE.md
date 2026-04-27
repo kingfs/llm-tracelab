@@ -10,6 +10,16 @@ This document explains what users can do with the current monitor and how to mov
 
 It reflects the current implemented behavior.
 
+## Access Control
+
+The monitor requires username/password login. Initialize the first user before starting a fresh deployment:
+
+```bash
+go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
+```
+
+After login, use the `Tokens` page to generate personal API tokens. The same token is used by the LLM proxy API and MCP with `Authorization: Bearer <token>`.
+
 ## What The Monitor Shows
 
 The monitor is backed by two data sources:

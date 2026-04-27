@@ -52,7 +52,7 @@ pkg/replay            replay transport for tests
 pkg/llm               cross-provider normalization helpers
 ```
 
-AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the multi-upstream routing design note is in [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), and the Vertex family design note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
+AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), and authenticated proxy examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the multi-upstream routing design note is in [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), and the Vertex family design note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
 
 ## Record Format And Index
 
@@ -341,10 +341,21 @@ go run ./cmd/server -c config/config.yaml
 ```
 
 Point your SDK `base_url` to `http://localhost:8080/v1` and traffic will be recorded through the proxy.
+The proxy API requires a personal token. OpenAI-compatible SDKs usually send `api_key` as `Authorization: Bearer <api_key>`, so set the SDK API key to the llm-tracelab token generated from the Monitor `Tokens` page.
+
+curl example:
+
+```bash
+export LLM_TRACELAB_TOKEN=llmtl_xxx
+curl -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+  http://localhost:8080/v1/models | jq
+```
+
+More non-streaming, streaming, and SDK examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md).
 
 ### 3. Open Monitor
 
-Visit `http://localhost:8081`.
+Visit `http://localhost:8081` and sign in with the initialized username and password. Request lists, session views, and trace details require login so recorded LLM payloads are not exposed to unauthenticated users.
 
 The detail page now has three first-class views:
 
@@ -398,6 +409,7 @@ docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/co
 ```
 
 Then visit `http://localhost:8081`, sign in, and create a personal token from the `Tokens` page for SDK / MCP traffic.
+When SDKs call the proxy, use this token as the SDK API key. For direct curl calls, send `Authorization: Bearer <token>`.
 
 If you only want to use the published Docker Hub image, you can run it directly without cloning the repo:
 

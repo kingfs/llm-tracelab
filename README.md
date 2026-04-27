@@ -53,7 +53,7 @@ pkg/replay            单元测试回放 Transport
 pkg/llm               多厂商请求/响应归一化
 ```
 
-更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，多 upstream 路由设计说明见 [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，多 upstream 路由设计说明见 [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
 
 面向 AI agent 演进闭环的里程碑规划见 [docs/AGENT_EVOLUTION_ROADMAP.md](./docs/AGENT_EVOLUTION_ROADMAP.md)。
 当前分支上已落地的 AI agent 闭环摘要见 [docs/AI_BRANCH_BASELINE.md](./docs/AI_BRANCH_BASELINE.md)。
@@ -368,10 +368,21 @@ go run ./cmd/server -c config/config.yaml
 ```
 
 把你的 SDK `base_url` 指向 `http://localhost:8080/v1` 后，请求就会被代理并录制。
+Proxy API 要求携带个人 token；OpenAI-compatible SDK 通常会把 `api_key` 发送为 `Authorization: Bearer <api_key>`，因此 SDK 的 `api_key` 应填写 Monitor `Tokens` 页面生成的 llm-tracelab token。
+
+curl 调用示例：
+
+```bash
+export LLM_TRACELAB_TOKEN=llmtl_xxx
+curl -H "Authorization: Bearer ${LLM_TRACELAB_TOKEN}" \
+  http://localhost:8080/v1/models | jq
+```
+
+更多非流式、流式和 SDK 示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)。
 
 ### 3. 打开 Monitor
 
-访问 `http://localhost:8081`。
+访问 `http://localhost:8081`，使用初始化的用户名密码登录。请求列表、session 聚合和 trace 详情都需要登录后访问，避免未授权用户看到录制的 LLM 请求内容。
 
 详情页现在包含三个主视图：
 
@@ -425,6 +436,7 @@ docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/co
 ```
 
 然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
+SDK 调用 proxy 时把这个 token 作为 SDK API key；直接 curl 时使用 `Authorization: Bearer <token>`。
 
 如果只想直接使用已经发布到 Docker Hub 的镜像，可以不克隆仓库，直接运行：
 
