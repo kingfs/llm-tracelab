@@ -63,3 +63,37 @@ func TestSQLitePathFromDSN(t *testing.T) {
 		})
 	}
 }
+
+func TestLegacyOutputDirEnvOverridesTraceAndDebugOutput(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_OUTPUT_DIR", "/app/data/traces")
+	t.Setenv("LLM_TRACELAB_TRACE_OUTPUT_DIR", "")
+
+	cfg := Config{}
+	cfg.Trace.OutputDir = "./logs"
+	cfg.Debug.OutputDir = "./debug"
+	applyEnvOverrides(&cfg)
+
+	if cfg.TraceOutputDir() != "/app/data/traces" {
+		t.Fatalf("TraceOutputDir() = %q, want /app/data/traces", cfg.TraceOutputDir())
+	}
+	if cfg.Debug.OutputDir != "/app/data/traces" {
+		t.Fatalf("Debug.OutputDir = %q, want /app/data/traces", cfg.Debug.OutputDir)
+	}
+}
+
+func TestTraceOutputDirEnvOverridesLegacyOutputDirEnv(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_OUTPUT_DIR", "/app/data/legacy")
+	t.Setenv("LLM_TRACELAB_TRACE_OUTPUT_DIR", "/app/data/traces")
+
+	cfg := Config{}
+	cfg.Trace.OutputDir = "./logs"
+	cfg.Debug.OutputDir = "./debug"
+	applyEnvOverrides(&cfg)
+
+	if cfg.TraceOutputDir() != "/app/data/traces" {
+		t.Fatalf("TraceOutputDir() = %q, want /app/data/traces", cfg.TraceOutputDir())
+	}
+	if cfg.Debug.OutputDir != "/app/data/legacy" {
+		t.Fatalf("Debug.OutputDir = %q, want /app/data/legacy", cfg.Debug.OutputDir)
+	}
+}

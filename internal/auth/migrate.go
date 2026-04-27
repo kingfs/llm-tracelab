@@ -60,6 +60,11 @@ func adoptLegacyTraceDatabase(driverName string, dsn string) (bool, error) {
 	if strings.TrimSpace(path) == "" {
 		return false, nil
 	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
 	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return false, err

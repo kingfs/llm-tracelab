@@ -19,7 +19,7 @@
 ## Storage Model
 
 - Raw cassette: `<output_dir>/<host>/<model>/<yyyy>/<mm>/<dd>/*.http`
-- Metadata index: `<output_dir>/trace_index.sqlite3`
+- Metadata database: `<output_dir>/llm_tracelab.sqlite3`
 - Container convention: `/app/config/config.yaml` + `/app/data/traces`
 
 The cassette remains the canonical replay artifact.
@@ -46,7 +46,7 @@ These events are generated in `pkg/llm.ResponsePipeline`, recorded into the cass
 
 ## Token Usage Normalization
 
-The monitor, cassette prelude, and SQLite index all use a shared usage shape:
+The monitor, cassette prelude, and SQLite database all use a shared usage shape:
 
 - `prompt_tokens`
 - `completion_tokens`

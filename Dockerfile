@@ -31,7 +31,8 @@ ENV APP_HOME=/app \
 	LLM_TRACELAB_CONFIG=/app/config/config.yaml
 
 ENV TZ=UTC \
-	LLM_TRACELAB_OUTPUT_DIR=/app/data/traces
+	LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
+	LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces
 
 RUN mkdir -p /app/bin /app/config /app/data/traces
 

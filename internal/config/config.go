@@ -210,6 +210,7 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v
+		cfg.Trace.OutputDir = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_TRACE_OUTPUT_DIR"); v != "" {
 		cfg.Trace.OutputDir = v

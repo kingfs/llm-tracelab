@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -150,6 +151,18 @@ func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	}
 	if _, err := st.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
+	}
+}
+
+func TestMigrateDatabaseUpCreatesMissingSQLiteParentDir(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "nested", "control.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("database file stat error = %v", err)
 	}
 }
 

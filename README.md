@@ -20,7 +20,7 @@
 - `pkg/llm` 升级为按 provider/endpoint 工作的 adapter 层，统一处理 request、response、stream transcript 和 usage pipeline
 - Monitor 改成 Go embed 的 React UI，列表页异步分页，详情页支持 timeline / summary / raw protocol
 - Monitor 首页支持 `Sessions / Requests` 双视角，可按 `session_id` 等线索聚合相关请求
-- SQLite 索引改用稳定 `trace_id`，不再在 URL 中暴露本地路径
+- SQLite 数据库改用稳定 `trace_id`，不再在 URL 中暴露本地路径
 - `LLM_PROXY_V3` 的 `# event:` 现在不仅有 request/response 基础事件，还会落 `llm.*` provider timeline
 
 ## 适合什么场景
@@ -65,13 +65,13 @@ pkg/llm               多厂商请求/响应归一化
 1. 文件前导包含紧凑元数据行，而不是固定 2KB 占位行
 2. 原始 HTTP request/response 仍然完整保留，方便人工排查
 3. `# event:` 会记录统一 timeline，例如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`
-4. 请求摘要、耗时、Token、trace id，以及可提取的 `session_id` 等聚合字段会同步索引到 `trace_index.sqlite3`
+4. 请求摘要、耗时、Token、trace id，以及可提取的 `session_id` 等聚合字段会同步索引到 `llm_tracelab.sqlite3`
 
 默认存储布局：
 
 ```text
 logs/
-  trace_index.sqlite3
+  llm_tracelab.sqlite3
   <upstream-host>/<model>/<yyyy>/<mm>/<dd>/*.http
 ```
 
@@ -381,7 +381,7 @@ go run ./cmd/server migrate -c config/config.yaml
 这个命令默认会做两件事：
 
 - 将旧的 `LLM_PROXY_V2` `.http` 文件原地改写成 `LLM_PROXY_V3`
-- 清空并重建 `trace_index.sqlite3`
+- 清空并重建 `llm_tracelab.sqlite3` 中的 trace 索引数据，不会删除用户和 token
 
 如果只想做其中一部分：
 
@@ -390,7 +390,7 @@ go run ./cmd/server migrate -c config/config.yaml -rewrite-v2=false
 go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 ```
 
-适合老日志目录批量升级，或者 SQLite 索引损坏/丢失后的全量恢复。
+适合老日志目录批量升级，或者 SQLite 数据库损坏/丢失后的全量恢复。
 
 ## Docker / Compose
 
@@ -399,7 +399,7 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 - 可执行文件：`/app/bin/llm-tracelab`
 - 配置文件：`/app/config/config.yaml`
 - 数据目录：`/app/data/traces`
-- SQLite 索引：`/app/data/traces/trace_index.sqlite3`
+- SQLite 数据库：`/app/data/traces/llm_tracelab.sqlite3`
 
 默认提供：
 
@@ -425,6 +425,7 @@ docker run --rm \
   -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
   -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
   -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
+  -e LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_SERVER_PORT=8080 \
   -e LLM_TRACELAB_MONITOR_PORT=8081 \
   -v "$(pwd)/docker-data:/app/data" \
@@ -444,6 +445,7 @@ services:
       LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com/v1
       LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
+      LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"
       LLM_TRACELAB_MONITOR_PORT: "8081"
     volumes:

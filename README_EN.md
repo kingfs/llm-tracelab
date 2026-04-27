@@ -61,13 +61,13 @@ New recordings use `LLM_PROXY_V3`:
 1. a compact metadata prelude instead of a fixed 2KB header block
 2. full raw HTTP request/response bytes kept for inspection and replay
 3. `# event:` lines now capture normalized provider timeline events such as `llm.output_text.delta`, `llm.reasoning.delta`, `llm.tool_call`, and `llm.usage`
-4. metadata is indexed into `trace_index.sqlite3` for fast monitor queries
+4. metadata is indexed into `llm_tracelab.sqlite3` for fast monitor queries
 
 Default storage layout:
 
 ```text
 logs/
-  trace_index.sqlite3
+  llm_tracelab.sqlite3
   <upstream-host>/<model>/<yyyy>/<mm>/<dd>/*.http
 ```
 
@@ -353,7 +353,7 @@ go run ./cmd/server migrate -c config/config.yaml
 By default it does both:
 
 - rewrites legacy `LLM_PROXY_V2` `.http` cassettes in place to `LLM_PROXY_V3`
-- clears and rebuilds `trace_index.sqlite3`
+- clears and rebuilds trace index rows in `llm_tracelab.sqlite3`; users and tokens are preserved
 
 Run only one part if needed:
 
@@ -371,7 +371,7 @@ The standardized in-container paths are:
 - binary: `/app/bin/llm-tracelab`
 - config file: `/app/config/config.yaml`
 - trace directory: `/app/data/traces`
-- SQLite index: `/app/data/traces/trace_index.sqlite3`
+- SQLite database: `/app/data/traces/llm_tracelab.sqlite3`
 
 The repo now includes:
 
@@ -397,6 +397,7 @@ docker run --rm \
   -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
   -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
   -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
+  -e LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_SERVER_PORT=8080 \
   -e LLM_TRACELAB_MONITOR_PORT=8081 \
   -v "$(pwd)/docker-data:/app/data" \
@@ -416,6 +417,7 @@ services:
       LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com/v1
       LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
+      LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"
       LLM_TRACELAB_MONITOR_PORT: "8081"
     volumes:
