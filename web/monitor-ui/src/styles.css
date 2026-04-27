@@ -205,7 +205,6 @@ a {
 
 .badge,
 .ghost-button,
-.tab,
 .inline-link,
 .wrap-toggle,
 .detail-meta-pill,
@@ -222,7 +221,6 @@ a {
 }
 
 .ghost-button,
-.tab,
 .icon-button,
 .tool-list-item,
 .trace-row,
@@ -236,8 +234,7 @@ a {
     transform 140ms ease;
 }
 
-.ghost-button:hover,
-.tab:hover {
+.ghost-button:hover {
   background: rgba(255, 255, 255, 0.9);
   border-color: var(--line-strong);
 }
@@ -1039,19 +1036,6 @@ a:focus-visible {
   color: var(--danger);
 }
 
-.detail-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 18px;
-  position: sticky;
-  top: 116px;
-  z-index: 6;
-  padding: 10px;
-  border-radius: 18px;
-  background: rgba(243, 240, 232, 0.78);
-  backdrop-filter: blur(10px);
-}
-
 .trace-failure-panel {
   margin-bottom: 18px;
   border-color: rgba(161, 54, 42, 0.2);
@@ -1116,18 +1100,6 @@ a:focus-visible {
   white-space: pre-wrap;
   word-break: break-word;
   font-size: 0.84rem;
-}
-
-.tab {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  padding: 0.78rem 1.05rem;
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.tab.active {
-  background: var(--text);
-  color: #fff7eb;
 }
 
 .detail-grid {
@@ -2062,10 +2034,6 @@ a:focus-visible {
     align-items: stretch;
   }
 
-  .detail-tabs {
-    top: 94px;
-  }
-
   .upstream-meta-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -2095,11 +2063,6 @@ a:focus-visible {
 
   .filter-bar {
     padding: 12px;
-  }
-
-  .detail-tabs {
-    top: 78px;
-    overflow: auto;
   }
 
   .trace-subline-group,

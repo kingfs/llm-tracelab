@@ -197,15 +197,6 @@ export function TraceDetailPage() {
         </section>
       ) : null}
 
-      <nav className="detail-tabs">
-        <button className={tab === "timeline" ? "tab active" : "tab"} onClick={() => setTab("timeline")}>Timeline</button>
-        <button className={tab === "summary" ? "tab active" : "tab"} onClick={() => setTab("summary")}>Summary</button>
-        <button className={tab === "raw" ? "tab active" : "tab"} onClick={() => setTab("raw")}>Raw Protocol</button>
-        {hasDeclaredToolsTab ? (
-          <button className={tab === "tools" ? "tab active" : "tab"} onClick={() => setTab("tools")}>Declared Tools</button>
-        ) : null}
-      </nav>
-
       {detail.data ? (
         <section className="panel trace-reading-panel">
           <div className="panel-head">
