@@ -268,21 +268,29 @@ func (c Config) DatabaseDriver() string {
 
 func (c Config) DatabasePath() string {
 	if strings.TrimSpace(c.Database.DSN) != "" && c.DatabaseDriver() == "sqlite" {
-		dsn := strings.TrimPrefix(strings.TrimSpace(c.Database.DSN), "sqlite://")
-		if strings.HasPrefix(dsn, "file:") {
-			dsn = strings.TrimPrefix(dsn, "file:")
-		}
-		if idx := strings.Index(dsn, "?"); idx >= 0 {
-			dsn = dsn[:idx]
-		}
-		if strings.TrimSpace(dsn) != "" {
-			return dsn
+		if path := SQLitePathFromDSN(c.Database.DSN); path != "" {
+			return path
 		}
 	}
 	if strings.TrimSpace(c.Auth.DatabasePath) != "" {
 		return c.Auth.DatabasePath
 	}
 	return filepath.Join(c.TraceOutputDir(), "llm_tracelab.sqlite3")
+}
+
+func SQLitePathFromDSN(dsn string) string {
+	path := strings.TrimSpace(dsn)
+	if path == "" {
+		return ""
+	}
+	path = strings.TrimPrefix(path, "sqlite://")
+	if strings.HasPrefix(path, "file:") {
+		path = strings.TrimPrefix(path, "file:")
+	}
+	if idx := strings.Index(path, "?"); idx >= 0 {
+		path = path[:idx]
+	}
+	return strings.TrimSpace(path)
 }
 
 func (c Config) DatabaseDSN() string {

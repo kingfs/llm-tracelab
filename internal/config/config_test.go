@@ -42,3 +42,24 @@ func TestRedactDSN(t *testing.T) {
 		})
 	}
 }
+
+func TestSQLitePathFromDSN(t *testing.T) {
+	tests := []struct {
+		name string
+		dsn  string
+		want string
+	}{
+		{name: "plain path", dsn: "/tmp/traces.sqlite3", want: "/tmp/traces.sqlite3"},
+		{name: "sqlite url absolute", dsn: "sqlite:///tmp/traces.sqlite3", want: "/tmp/traces.sqlite3"},
+		{name: "file uri with query", dsn: "file:/tmp/traces.sqlite3?mode=rwc&_pragma=busy_timeout(5000)", want: "/tmp/traces.sqlite3"},
+		{name: "memory uri", dsn: "file::memory:?cache=shared", want: ":memory:"},
+		{name: "empty", dsn: " ", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SQLitePathFromDSN(tt.dsn); got != tt.want {
+				t.Fatalf("SQLitePathFromDSN() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -43,6 +43,22 @@ func TestNewConfiguresSQLiteRuntimePragmas(t *testing.T) {
 	}
 }
 
+func TestNewWithDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	st, err := NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	defer st.Close()
+	if st.dbPath != dbPath {
+		t.Fatalf("dbPath = %q, want %q", st.dbPath, dbPath)
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("database file stat error = %v", err)
+	}
+}
+
 func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "trace_index.sqlite3")

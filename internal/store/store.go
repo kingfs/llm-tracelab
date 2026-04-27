@@ -29,6 +29,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
+	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
@@ -878,7 +879,7 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	if driver != "sqlite" {
 		return nil, fmt.Errorf("store driver %q is not supported yet", driver)
 	}
-	dbPath := dsn
+	dbPath := config.SQLitePathFromDSN(dsn)
 	if strings.TrimSpace(dbPath) == "" {
 		dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
 	}

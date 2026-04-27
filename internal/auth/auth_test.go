@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/user"
 )
 
 func TestBearerTokenRequiresBearerScheme(t *testing.T) {
@@ -18,7 +21,9 @@ func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 	}{
 		{header: "Bearer secret", token: "secret", ok: true},
 		{header: "bearer secret", token: "secret", ok: true},
+		{header: "  Bearer   secret  ", token: "secret", ok: true},
 		{header: "secret", ok: false},
+		{header: "Bearer secret extra", ok: false},
 		{header: "Bearer ", ok: false},
 		{header: "", ok: false},
 	} {
@@ -26,6 +31,56 @@ func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 		if ok != tc.ok || token != tc.token {
 			t.Fatalf("BearerToken(%q) = %q, %v; want %q, %v", tc.header, token, ok, tc.token, tc.ok)
 		}
+	}
+}
+
+func TestStoreRejectsExpiredTokensAndDisabledUsers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("MigrateUp() error = %v", err)
+	}
+	st, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if _, err := st.CreateToken(ctx, "admin", "invalid-negative", DefaultTokenScope, -time.Second); err == nil {
+		t.Fatalf("CreateToken(negative ttl) error = nil, want error")
+	}
+	expired, err := st.CreateToken(ctx, "admin", "expired", DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken(expired) error = %v", err)
+	}
+	past := time.Now().UTC().Add(-time.Hour)
+	if _, err := st.client.APIToken.Update().
+		Where(apitoken.TokenHashEQ(hashToken(expired.Token))).
+		SetExpiresAt(past).
+		Save(ctx); err != nil {
+		t.Fatalf("expire token error = %v", err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, expired.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(expired) = ok %v err %v, want ok false err nil", ok, err)
+	}
+
+	active, err := st.CreateToken(ctx, "admin", "active", DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken(active) error = %v", err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, active.Token); err != nil || !ok {
+		t.Fatalf("VerifyToken(active) = ok %v err %v, want ok true err nil", ok, err)
+	}
+	if _, err := st.client.User.Update().Where(user.UsernameEQ("admin")).SetEnabled(false).Save(ctx); err != nil {
+		t.Fatalf("disable user error = %v", err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, active.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(disabled user) = ok %v err %v, want ok false err nil", ok, err)
 	}
 }
 
@@ -74,6 +129,27 @@ func TestStoreUserLoginAndTokenVerification(t *testing.T) {
 	}
 	if principal.Username != "admin" || principal.Role != "admin" {
 		t.Fatalf("principal = %+v", principal)
+	}
+}
+
+func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	dsn := "file:" + dbPath + "?mode=rwc"
+	if err := MigrateDatabaseUp("sqlite", dsn, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+	st, err := OpenDatabase("sqlite", dsn, 4, 4)
+	if err != nil {
+		t.Fatalf("OpenDatabase() error = %v", err)
+	}
+	defer st.Close()
+	if st.Path() != dbPath {
+		t.Fatalf("store path = %q, want %q", st.Path(), dbPath)
+	}
+	if _, err := st.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
 	}
 }
 

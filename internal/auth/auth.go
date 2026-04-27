@@ -23,14 +23,14 @@ func Required(token string) bool {
 }
 
 func BearerToken(header string) (string, bool) {
-	header = strings.TrimSpace(header)
-	if header == "" {
+	parts := strings.Fields(header)
+	if len(parts) != 2 {
 		return "", false
 	}
-	if !strings.HasPrefix(strings.ToLower(header), "bearer ") {
+	if !strings.EqualFold(parts[0], "bearer") {
 		return "", false
 	}
-	token := strings.TrimSpace(header[len("bearer "):])
+	token := strings.TrimSpace(parts[1])
 	return token, token != ""
 }
 

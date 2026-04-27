@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
+	"github.com/kingfs/llm-tracelab/internal/config"
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
@@ -54,7 +55,7 @@ func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int)
 	if driver != "sqlite" {
 		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
-	path := dsn
+	path := config.SQLitePathFromDSN(dsn)
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("auth database path is required")
 	}
@@ -196,6 +197,9 @@ func (s *Store) Login(ctx context.Context, username string, password string, ttl
 
 func (s *Store) CreateToken(ctx context.Context, username string, name string, scope string, ttl time.Duration) (TokenResult, error) {
 	username = normalizeUsername(username)
+	if ttl < 0 {
+		return TokenResult{}, errors.New("token ttl must be non-negative")
+	}
 	row, err := s.client.User.Query().Where(user.UsernameEQ(username), user.EnabledEQ(true)).Only(ctx)
 	if err != nil {
 		if dao.IsNotFound(err) {

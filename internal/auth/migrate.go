@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	entmigrations "github.com/kingfs/llm-tracelab/ent"
+	"github.com/kingfs/llm-tracelab/internal/config"
 
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/sqlite"
@@ -65,10 +67,14 @@ func newMigrator(driverName string, dsn string) (*gomigrate.Migrate, error) {
 	if driverName != "sqlite" {
 		return nil, fmt.Errorf("database driver %q is not supported by embedded migrations yet", driverName)
 	}
-	if err := os.MkdirAll(filepath.Dir(dsn), 0o755); err != nil {
+	path := config.SQLitePathFromDSN(dsn)
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("database path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", sqliteDSN(dsn))
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
