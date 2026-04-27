@@ -21,6 +21,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
@@ -2279,57 +2280,31 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 		pageSize = 50
 	}
 
-	whereSQL, whereArgs := buildLogFilterClause(filter, "")
-	var total int
-	countSQL := `SELECT COUNT(*) FROM logs`
-	if whereSQL != "" {
-		countSQL += " WHERE " + whereSQL
-	}
-	if err := s.db.QueryRow(countSQL, whereArgs...).Scan(&total); err != nil {
+	ctx := context.Background()
+	predicates := buildTraceLogPredicates(filter)
+	total, err := s.client.TraceLog.Query().Where(predicates...).Count(ctx)
+	if err != nil {
 		return ListPageResult{}, err
 	}
 
 	offset := (page - 1) * pageSize
-	queryArgs := append([]any{}, whereArgs...)
-	queryArgs = append(queryArgs, pageSize, offset)
-	listSQL := `
-		SELECT
-			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
-			duration_ms, ttft_ms, client_ip, content_length, error_text,
-			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id,
-			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		FROM logs
-	`
-	if whereSQL != "" {
-		listSQL += " WHERE " + whereSQL
-	}
-	listSQL += `
-		ORDER BY recorded_at DESC
-		LIMIT ? OFFSET ?
-	`
-	rows, err := s.db.Query(listSQL, queryArgs...)
+	rows, err := s.client.TraceLog.Query().
+		Where(predicates...).
+		Order(tracelog.ByRecordedAt(entsql.OrderDesc())).
+		Limit(pageSize).
+		Offset(offset).
+		All(ctx)
 	if err != nil {
 		return ListPageResult{}, err
 	}
-	defer rows.Close()
 
 	result := ListPageResult{
 		Page:     page,
 		PageSize: pageSize,
 		Total:    total,
 	}
-	for rows.Next() {
-		entry, err := scanEntry(rows)
-		if err != nil {
-			return ListPageResult{}, err
-		}
-		result.Items = append(result.Items, entry)
-	}
-	if err := rows.Err(); err != nil {
-		return ListPageResult{}, err
+	for _, row := range rows {
+		result.Items = append(result.Items, logEntryFromTraceLog(row))
 	}
 	if total == 0 {
 		result.TotalPages = 0
@@ -3066,6 +3041,27 @@ func splitProviders(value string) []string {
 	}
 	sort.Strings(providers)
 	return providers
+}
+
+func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
+	var predicates []predicate.TraceLog
+	if provider := strings.TrimSpace(filter.Provider); provider != "" {
+		predicates = append(predicates, tracelog.ProviderEqualFold(provider))
+	}
+	if model := strings.TrimSpace(filter.Model); model != "" {
+		predicates = append(predicates, tracelog.ModelContainsFold(model))
+	}
+	if query := strings.TrimSpace(filter.Query); query != "" {
+		predicates = append(predicates, tracelog.Or(
+			tracelog.SessionIDContainsFold(query),
+			tracelog.TraceIDContainsFold(query),
+			tracelog.ModelContainsFold(query),
+			tracelog.ProviderContainsFold(query),
+			tracelog.EndpointContainsFold(query),
+			tracelog.URLContainsFold(query),
+		))
+	}
+	return predicates
 }
 
 func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
