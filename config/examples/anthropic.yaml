@@ -4,19 +4,60 @@ server:
 monitor:
   port: "8081"
 
-upstream:
-  base_url: "https://api.anthropic.com"
-  api_key: "sk-ant-xxx"
-  provider_preset: "anthropic"
-  protocol_family: ""
-  routing_profile: ""
-  api_version: "2023-06-01"
-  deployment: ""
-  project: ""
-  location: ""
-  model_resource: ""
-  headers:
-    anthropic-beta: "tools-2024-04-04"
+mcp:
+  enabled: true
+  path: "/mcp"
+  auth_token: ""
+
+auth:
+  session_ttl: 24h
+
+database:
+  driver: "sqlite"
+  dsn: ""
+  max_open_conns: 4
+  max_idle_conns: 4
+  auto_migrate: true
+
+trace:
+  output_dir: "./logs/anthropic"
+
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+    startup_policy: "best_effort"
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "anthropic"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "static_only"
+    static_models:
+      - "claude-3-5-sonnet-latest"
+      - "claude-3-5-haiku-latest"
+    upstream:
+      base_url: "https://api.anthropic.com"
+      api_key: "sk-ant-xxx"
+      provider_preset: "anthropic"
+      protocol_family: ""
+      routing_profile: ""
+      api_version: "2023-06-01"
+      deployment: ""
+      project: ""
+      location: ""
+      model_resource: ""
+      headers:
+        anthropic-beta: "tools-2024-04-04"
 
 debug:
   output_dir: "./logs/anthropic"

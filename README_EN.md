@@ -79,7 +79,9 @@ The recommended baseline is now the multi-upstream shape.
 
 The legacy single `upstream` block is still supported for the simplest single-target setup, but if the same model may be served by multiple providers you should prefer `upstreams + router` so switching providers no longer requires stopping the proxy and editing config.
 
-Edit [config/config.yaml](./config/config.yaml):
+[config/config.yaml](./config/config.yaml) is the tracked default example and should not contain real secrets. For local development, create `config/config.dev.yaml` (already ignored by `.gitignore`); for production Docker Compose, override the defaults with environment variables.
+
+The default config shape is:
 
 ```yaml
 server:
@@ -122,11 +124,12 @@ upstreams:
     priority: 100
     weight: 1.0
     capacity_hint: 1.0
-    model_discovery: "list_models"
-    static_models: []
+    model_discovery: "static_only" # the default example does not require a real key; use list_models in deployments
+    static_models:
+      - "gpt-4o-mini"
     upstream:
       base_url: "https://api.openai.com/v1"
-      api_key: "sk-openai"
+      api_key: ""
       provider_preset: "openai"
 
   - id: "openrouter-fallback"
@@ -191,6 +194,8 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
+
+With `upstreams`, the legacy `LLM_TRACELAB_UPSTREAM_*` variables override the first upstream target. This keeps Docker Compose simple for a single default upstream. For more complex multi-upstream deployments, mount a dedicated config file.
 
 Access control notes:
 
@@ -324,10 +329,17 @@ task run
 task migrate
 ```
 
+`task run` prefers local `config/config.dev.yaml` and falls back to `config/config.yaml` when the dev file does not exist. You can also choose a config explicitly:
+
+```bash
+CONFIG=config/examples/openai.yaml task run
+task run:dev
+```
+
 Direct run also works:
 
 ```bash
-go run ./cmd/server -c config/config.yaml
+go run ./cmd/server -c config/config.dev.yaml
 ```
 
 Point your SDK `base_url` to `http://localhost:8080/v1` and traffic will be recorded through the proxy.

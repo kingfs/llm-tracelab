@@ -4,18 +4,57 @@ server:
 monitor:
   port: "8081"
 
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "sk-xxx"
-  provider_preset: "openai"
-  protocol_family: ""
-  routing_profile: ""
-  api_version: ""
-  deployment: ""
-  project: ""
-  location: ""
-  model_resource: ""
-  headers: {}
+mcp:
+  enabled: true
+  path: "/mcp"
+  auth_token: ""
+
+auth:
+  session_ttl: 24h
+
+database:
+  driver: "sqlite"
+  dsn: ""
+  max_open_conns: 4
+  max_idle_conns: 4
+  auto_migrate: true
+
+trace:
+  output_dir: "./logs/openai"
+
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+    startup_policy: "best_effort"
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "openai"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "list_models"
+    static_models: []
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: "sk-xxx"
+      provider_preset: "openai"
+      protocol_family: ""
+      routing_profile: ""
+      api_version: ""
+      deployment: ""
+      project: ""
+      location: ""
+      model_resource: ""
+      headers: {}
 
 debug:
   output_dir: "./logs/openai"

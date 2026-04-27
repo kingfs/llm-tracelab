@@ -97,3 +97,44 @@ func TestTraceOutputDirEnvOverridesLegacyOutputDirEnv(t *testing.T) {
 		t.Fatalf("Debug.OutputDir = %q, want /app/data/legacy", cfg.Debug.OutputDir)
 	}
 }
+
+func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_UPSTREAM_BASE_URL", "https://proxy.example.com/v1")
+	t.Setenv("LLM_TRACELAB_UPSTREAM_API_KEY", "sk-env")
+	t.Setenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET", "openrouter")
+
+	cfg := Config{
+		Upstreams: []UpstreamTargetConfig{
+			{
+				ID: "primary",
+				Upstream: UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ApiKey:         "sk-config",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID: "secondary",
+				Upstream: UpstreamConfig{
+					BaseURL:        "https://secondary.example.com/v1",
+					ApiKey:         "sk-secondary",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	applyEnvOverrides(&cfg)
+
+	if cfg.Upstreams[0].Upstream.BaseURL != "https://proxy.example.com/v1" {
+		t.Fatalf("first upstream base_url = %q", cfg.Upstreams[0].Upstream.BaseURL)
+	}
+	if cfg.Upstreams[0].Upstream.ApiKey != "sk-env" {
+		t.Fatalf("first upstream api_key = %q", cfg.Upstreams[0].Upstream.ApiKey)
+	}
+	if cfg.Upstreams[0].Upstream.ProviderPreset != "openrouter" {
+		t.Fatalf("first upstream provider_preset = %q", cfg.Upstreams[0].Upstream.ProviderPreset)
+	}
+	if cfg.Upstreams[1].Upstream.ApiKey != "sk-secondary" {
+		t.Fatalf("second upstream api_key = %q", cfg.Upstreams[1].Upstream.ApiKey)
+	}
+}

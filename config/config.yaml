@@ -24,18 +24,40 @@ database:
 trace:
   output_dir: "./logs"
 
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "sk-placeholder"
-  provider_preset: "openai"
-  protocol_family: ""
-  routing_profile: ""
-  api_version: ""
-  deployment: ""
-  project: ""
-  location: ""
-  model_resource: ""
-  headers: {}
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+    startup_policy: "best_effort"
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "primary"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "static_only"
+    static_models:
+      - "gpt-4o-mini"
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: ""
+      provider_preset: "openai"
+      protocol_family: ""
+      routing_profile: ""
+      api_version: ""
+      deployment: ""
+      project: ""
+      location: ""
+      model_resource: ""
+      headers: {}
 
 debug:
   output_dir: "./logs"

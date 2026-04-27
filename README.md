@@ -83,7 +83,9 @@ logs/
 
 旧的单 `upstream` 仍然兼容，适合最简单的单目标场景；但如果你的同一模型可能由多个 provider 提供，应直接使用 `upstreams + router`，避免再通过停服改配置切换上游。
 
-编辑 [config/config.yaml](./config/config.yaml)：
+[config/config.yaml](./config/config.yaml) 是提交到仓库的默认样例配置，不放真实密钥；本地开发建议创建 `config/config.dev.yaml`（已被 `.gitignore` 忽略），生产 Docker Compose 通过环境变量覆盖默认值。
+
+默认配置的结构如下：
 
 ```yaml
 server:
@@ -126,11 +128,12 @@ upstreams:
     priority: 100
     weight: 1.0
     capacity_hint: 1.0
-    model_discovery: "list_models"
-    static_models: []
+    model_discovery: "static_only" # 默认样例不依赖真实 key；线上可改为 list_models
+    static_models:
+      - "gpt-4o-mini"
     upstream:
       base_url: "https://api.openai.com/v1"
-      api_key: "sk-openai"
+      api_key: ""
       provider_preset: "openai"
 
   - id: "openrouter-fallback"
@@ -198,6 +201,8 @@ upstream:
 - `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
+
+在 `upstreams` 多目标配置中，兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 会覆盖第一个 upstream target，适合 Docker Compose 的单默认上游部署。更复杂的多上游生产配置建议直接维护一份挂载的配置文件。
 
 访问控制说明：
 
@@ -352,10 +357,17 @@ task run
 task migrate
 ```
 
+`task run` 会优先读取本机的 `config/config.dev.yaml`，不存在时回退到 `config/config.yaml`。也可以显式指定：
+
+```bash
+CONFIG=config/examples/openai.yaml task run
+task run:dev
+```
+
 如果只想直接运行：
 
 ```bash
-go run ./cmd/server -c config/config.yaml
+go run ./cmd/server -c config/config.dev.yaml
 ```
 
 把你的 SDK `base_url` 指向 `http://localhost:8080/v1` 后，请求就会被代理并录制。

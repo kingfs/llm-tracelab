@@ -180,33 +180,63 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
 		cfg.Upstream.BaseURL = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.BaseURL = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_KEY"); v != "" {
 		cfg.Upstream.ApiKey = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.ApiKey = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET"); v != "" {
 		cfg.Upstream.ProviderPreset = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.ProviderPreset = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY"); v != "" {
 		cfg.Upstream.ProtocolFamily = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.ProtocolFamily = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE"); v != "" {
 		cfg.Upstream.RoutingProfile = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.RoutingProfile = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_VERSION"); v != "" {
 		cfg.Upstream.APIVersion = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.APIVersion = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_DEPLOYMENT"); v != "" {
 		cfg.Upstream.Deployment = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.Deployment = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROJECT"); v != "" {
 		cfg.Upstream.Project = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.Project = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_LOCATION"); v != "" {
 		cfg.Upstream.Location = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.Location = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE"); v != "" {
 		cfg.Upstream.ModelResource = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.ModelResource = v
+		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v
@@ -220,6 +250,13 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Debug.MaskKey = parsed
 		}
 	}
+}
+
+func applyFirstUpstreamOverride(cfg *Config, apply func(*UpstreamConfig)) {
+	if len(cfg.Upstreams) == 0 {
+		return
+	}
+	apply(&cfg.Upstreams[0].Upstream)
 }
 
 func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {

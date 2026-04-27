@@ -15,6 +15,8 @@ task run
 
 `task fmt` rewrites Go files. `task check:quick` does not rewrite files; it checks formatting, runs `go vet`, and runs short tests.
 
+`task run` uses `config/config.dev.yaml` when that ignored local file exists, otherwise it falls back to the tracked `config/config.yaml`. Override explicitly with `CONFIG=path/to/config.yaml task run`.
+
 ## Validation Levels
 
 Use the smallest validation level that matches the change:
@@ -81,4 +83,3 @@ For AI agents, prefer these defaults:
 - Proxy, router, recorder, or store change: `go test ./internal/proxy ./internal/router ./internal/recorder ./internal/store` and `task test:race`
 - Performance-sensitive change: `task bench:core`
 - Before handing off a broad change: `task check:full`
-
