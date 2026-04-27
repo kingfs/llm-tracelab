@@ -19,6 +19,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
@@ -1556,50 +1557,43 @@ func (s *Store) CreateDataset(name string, description string) (DatasetRecord, e
 }
 
 func (s *Store) ListDatasets() ([]DatasetRecord, error) {
-	rows, err := s.db.Query(`
-		SELECT
-			d.id,
-			d.name,
-			d.description,
-			d.created_at,
-			d.updated_at,
-			COUNT(de.trace_id) AS example_count
-		FROM datasets d
-		LEFT JOIN dataset_examples de ON de.dataset_id = d.id
-		GROUP BY d.id, d.name, d.description, d.created_at, d.updated_at
-		ORDER BY d.updated_at DESC, d.id DESC
-	`)
+	ctx := context.Background()
+	rows, err := s.client.Dataset.Query().
+		Order(dataset.ByUpdatedAt(entsql.OrderDesc()), dataset.ByID(entsql.OrderDesc())).
+		All(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var out []DatasetRecord
-	for rows.Next() {
-		record, err := scanDatasetRecord(rows)
+	out := make([]DatasetRecord, 0, len(rows))
+	for _, row := range rows {
+		count, err := s.client.DatasetExample.Query().
+			Where(datasetexample.DatasetIDEQ(row.ID)).
+			Count(ctx)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, record)
+		out = append(out, datasetRecordFromEnt(row, count))
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) GetDataset(datasetID string) (DatasetRecord, error) {
-	row := s.db.QueryRow(`
-		SELECT
-			d.id,
-			d.name,
-			d.description,
-			d.created_at,
-			d.updated_at,
-			COUNT(de.trace_id) AS example_count
-		FROM datasets d
-		LEFT JOIN dataset_examples de ON de.dataset_id = d.id
-		WHERE d.id = ?
-		GROUP BY d.id, d.name, d.description, d.created_at, d.updated_at
-	`, datasetID)
-	return scanDatasetRecord(row)
+	ctx := context.Background()
+	row, err := s.client.Dataset.Get(ctx, datasetID)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return DatasetRecord{}, sql.ErrNoRows
+		}
+		return DatasetRecord{}, err
+	}
+	count, err := s.client.DatasetExample.Query().
+		Where(datasetexample.DatasetIDEQ(row.ID)).
+		Count(ctx)
+	if err != nil {
+		return DatasetRecord{}, err
+	}
+	return datasetRecordFromEnt(row, count), nil
 }
 
 func (s *Store) AppendDatasetExamples(datasetID string, traceIDs []string, sourceType string, sourceID string, note string) (int, int, error) {
@@ -2533,6 +2527,17 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	entry.Header.Layout.ResBodyLen = row.ResBodyLen
 	entry.Header.Layout.IsStream = row.IsStream
 	return entry
+}
+
+func datasetRecordFromEnt(row *dao.Dataset, exampleCount int) DatasetRecord {
+	return DatasetRecord{
+		ID:           row.ID,
+		Name:         row.Name,
+		Description:  row.Description,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		ExampleCount: exampleCount,
+	}
 }
 
 func evalRunRecordFromEnt(row *dao.EvalRun) EvalRunRecord {
