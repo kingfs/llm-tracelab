@@ -6,6 +6,14 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
+	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
+	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
 	"github.com/kingfs/llm-tracelab/ent/schema"
 )
@@ -40,6 +48,422 @@ func init() {
 	apitokenDescCreatedAt := apitokenFields[5].Descriptor()
 	// apitoken.DefaultCreatedAt holds the default value on creation for the created_at field.
 	apitoken.DefaultCreatedAt = apitokenDescCreatedAt.Default.(func() time.Time)
+	datasetFields := schema.Dataset{}.Fields()
+	_ = datasetFields
+	// datasetDescName is the schema descriptor for name field.
+	datasetDescName := datasetFields[1].Descriptor()
+	// dataset.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	dataset.NameValidator = datasetDescName.Validators[0].(func(string) error)
+	// datasetDescDescription is the schema descriptor for description field.
+	datasetDescDescription := datasetFields[2].Descriptor()
+	// dataset.DefaultDescription holds the default value on creation for the description field.
+	dataset.DefaultDescription = datasetDescDescription.Default.(string)
+	// datasetDescCreatedAt is the schema descriptor for created_at field.
+	datasetDescCreatedAt := datasetFields[3].Descriptor()
+	// dataset.DefaultCreatedAt holds the default value on creation for the created_at field.
+	dataset.DefaultCreatedAt = datasetDescCreatedAt.Default.(func() time.Time)
+	// datasetDescUpdatedAt is the schema descriptor for updated_at field.
+	datasetDescUpdatedAt := datasetFields[4].Descriptor()
+	// dataset.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	dataset.DefaultUpdatedAt = datasetDescUpdatedAt.Default.(func() time.Time)
+	// datasetDescID is the schema descriptor for id field.
+	datasetDescID := datasetFields[0].Descriptor()
+	// dataset.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	dataset.IDValidator = datasetDescID.Validators[0].(func(string) error)
+	datasetexampleFields := schema.DatasetExample{}.Fields()
+	_ = datasetexampleFields
+	// datasetexampleDescDatasetID is the schema descriptor for dataset_id field.
+	datasetexampleDescDatasetID := datasetexampleFields[0].Descriptor()
+	// datasetexample.DatasetIDValidator is a validator for the "dataset_id" field. It is called by the builders before save.
+	datasetexample.DatasetIDValidator = datasetexampleDescDatasetID.Validators[0].(func(string) error)
+	// datasetexampleDescTraceID is the schema descriptor for trace_id field.
+	datasetexampleDescTraceID := datasetexampleFields[1].Descriptor()
+	// datasetexample.TraceIDValidator is a validator for the "trace_id" field. It is called by the builders before save.
+	datasetexample.TraceIDValidator = datasetexampleDescTraceID.Validators[0].(func(string) error)
+	// datasetexampleDescPosition is the schema descriptor for position field.
+	datasetexampleDescPosition := datasetexampleFields[2].Descriptor()
+	// datasetexample.DefaultPosition holds the default value on creation for the position field.
+	datasetexample.DefaultPosition = datasetexampleDescPosition.Default.(int)
+	// datasetexampleDescAddedAt is the schema descriptor for added_at field.
+	datasetexampleDescAddedAt := datasetexampleFields[3].Descriptor()
+	// datasetexample.DefaultAddedAt holds the default value on creation for the added_at field.
+	datasetexample.DefaultAddedAt = datasetexampleDescAddedAt.Default.(func() time.Time)
+	// datasetexampleDescSourceType is the schema descriptor for source_type field.
+	datasetexampleDescSourceType := datasetexampleFields[4].Descriptor()
+	// datasetexample.DefaultSourceType holds the default value on creation for the source_type field.
+	datasetexample.DefaultSourceType = datasetexampleDescSourceType.Default.(string)
+	// datasetexampleDescSourceID is the schema descriptor for source_id field.
+	datasetexampleDescSourceID := datasetexampleFields[5].Descriptor()
+	// datasetexample.DefaultSourceID holds the default value on creation for the source_id field.
+	datasetexample.DefaultSourceID = datasetexampleDescSourceID.Default.(string)
+	// datasetexampleDescNote is the schema descriptor for note field.
+	datasetexampleDescNote := datasetexampleFields[6].Descriptor()
+	// datasetexample.DefaultNote holds the default value on creation for the note field.
+	datasetexample.DefaultNote = datasetexampleDescNote.Default.(string)
+	evalrunFields := schema.EvalRun{}.Fields()
+	_ = evalrunFields
+	// evalrunDescDatasetID is the schema descriptor for dataset_id field.
+	evalrunDescDatasetID := evalrunFields[1].Descriptor()
+	// evalrun.DefaultDatasetID holds the default value on creation for the dataset_id field.
+	evalrun.DefaultDatasetID = evalrunDescDatasetID.Default.(string)
+	// evalrunDescSourceType is the schema descriptor for source_type field.
+	evalrunDescSourceType := evalrunFields[2].Descriptor()
+	// evalrun.DefaultSourceType holds the default value on creation for the source_type field.
+	evalrun.DefaultSourceType = evalrunDescSourceType.Default.(string)
+	// evalrunDescSourceID is the schema descriptor for source_id field.
+	evalrunDescSourceID := evalrunFields[3].Descriptor()
+	// evalrun.DefaultSourceID holds the default value on creation for the source_id field.
+	evalrun.DefaultSourceID = evalrunDescSourceID.Default.(string)
+	// evalrunDescEvaluatorSet is the schema descriptor for evaluator_set field.
+	evalrunDescEvaluatorSet := evalrunFields[4].Descriptor()
+	// evalrun.EvaluatorSetValidator is a validator for the "evaluator_set" field. It is called by the builders before save.
+	evalrun.EvaluatorSetValidator = evalrunDescEvaluatorSet.Validators[0].(func(string) error)
+	// evalrunDescCreatedAt is the schema descriptor for created_at field.
+	evalrunDescCreatedAt := evalrunFields[5].Descriptor()
+	// evalrun.DefaultCreatedAt holds the default value on creation for the created_at field.
+	evalrun.DefaultCreatedAt = evalrunDescCreatedAt.Default.(func() time.Time)
+	// evalrunDescCompletedAt is the schema descriptor for completed_at field.
+	evalrunDescCompletedAt := evalrunFields[6].Descriptor()
+	// evalrun.DefaultCompletedAt holds the default value on creation for the completed_at field.
+	evalrun.DefaultCompletedAt = evalrunDescCompletedAt.Default.(func() time.Time)
+	// evalrunDescTraceCount is the schema descriptor for trace_count field.
+	evalrunDescTraceCount := evalrunFields[7].Descriptor()
+	// evalrun.DefaultTraceCount holds the default value on creation for the trace_count field.
+	evalrun.DefaultTraceCount = evalrunDescTraceCount.Default.(int)
+	// evalrunDescScoreCount is the schema descriptor for score_count field.
+	evalrunDescScoreCount := evalrunFields[8].Descriptor()
+	// evalrun.DefaultScoreCount holds the default value on creation for the score_count field.
+	evalrun.DefaultScoreCount = evalrunDescScoreCount.Default.(int)
+	// evalrunDescPassCount is the schema descriptor for pass_count field.
+	evalrunDescPassCount := evalrunFields[9].Descriptor()
+	// evalrun.DefaultPassCount holds the default value on creation for the pass_count field.
+	evalrun.DefaultPassCount = evalrunDescPassCount.Default.(int)
+	// evalrunDescFailCount is the schema descriptor for fail_count field.
+	evalrunDescFailCount := evalrunFields[10].Descriptor()
+	// evalrun.DefaultFailCount holds the default value on creation for the fail_count field.
+	evalrun.DefaultFailCount = evalrunDescFailCount.Default.(int)
+	// evalrunDescID is the schema descriptor for id field.
+	evalrunDescID := evalrunFields[0].Descriptor()
+	// evalrun.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	evalrun.IDValidator = evalrunDescID.Validators[0].(func(string) error)
+	experimentrunFields := schema.ExperimentRun{}.Fields()
+	_ = experimentrunFields
+	// experimentrunDescName is the schema descriptor for name field.
+	experimentrunDescName := experimentrunFields[1].Descriptor()
+	// experimentrun.DefaultName holds the default value on creation for the name field.
+	experimentrun.DefaultName = experimentrunDescName.Default.(string)
+	// experimentrunDescDescription is the schema descriptor for description field.
+	experimentrunDescDescription := experimentrunFields[2].Descriptor()
+	// experimentrun.DefaultDescription holds the default value on creation for the description field.
+	experimentrun.DefaultDescription = experimentrunDescDescription.Default.(string)
+	// experimentrunDescBaselineEvalRunID is the schema descriptor for baseline_eval_run_id field.
+	experimentrunDescBaselineEvalRunID := experimentrunFields[3].Descriptor()
+	// experimentrun.BaselineEvalRunIDValidator is a validator for the "baseline_eval_run_id" field. It is called by the builders before save.
+	experimentrun.BaselineEvalRunIDValidator = experimentrunDescBaselineEvalRunID.Validators[0].(func(string) error)
+	// experimentrunDescCandidateEvalRunID is the schema descriptor for candidate_eval_run_id field.
+	experimentrunDescCandidateEvalRunID := experimentrunFields[4].Descriptor()
+	// experimentrun.CandidateEvalRunIDValidator is a validator for the "candidate_eval_run_id" field. It is called by the builders before save.
+	experimentrun.CandidateEvalRunIDValidator = experimentrunDescCandidateEvalRunID.Validators[0].(func(string) error)
+	// experimentrunDescCreatedAt is the schema descriptor for created_at field.
+	experimentrunDescCreatedAt := experimentrunFields[5].Descriptor()
+	// experimentrun.DefaultCreatedAt holds the default value on creation for the created_at field.
+	experimentrun.DefaultCreatedAt = experimentrunDescCreatedAt.Default.(func() time.Time)
+	// experimentrunDescBaselineScoreCount is the schema descriptor for baseline_score_count field.
+	experimentrunDescBaselineScoreCount := experimentrunFields[6].Descriptor()
+	// experimentrun.DefaultBaselineScoreCount holds the default value on creation for the baseline_score_count field.
+	experimentrun.DefaultBaselineScoreCount = experimentrunDescBaselineScoreCount.Default.(int)
+	// experimentrunDescCandidateScoreCount is the schema descriptor for candidate_score_count field.
+	experimentrunDescCandidateScoreCount := experimentrunFields[7].Descriptor()
+	// experimentrun.DefaultCandidateScoreCount holds the default value on creation for the candidate_score_count field.
+	experimentrun.DefaultCandidateScoreCount = experimentrunDescCandidateScoreCount.Default.(int)
+	// experimentrunDescBaselinePassRate is the schema descriptor for baseline_pass_rate field.
+	experimentrunDescBaselinePassRate := experimentrunFields[8].Descriptor()
+	// experimentrun.DefaultBaselinePassRate holds the default value on creation for the baseline_pass_rate field.
+	experimentrun.DefaultBaselinePassRate = experimentrunDescBaselinePassRate.Default.(float64)
+	// experimentrunDescCandidatePassRate is the schema descriptor for candidate_pass_rate field.
+	experimentrunDescCandidatePassRate := experimentrunFields[9].Descriptor()
+	// experimentrun.DefaultCandidatePassRate holds the default value on creation for the candidate_pass_rate field.
+	experimentrun.DefaultCandidatePassRate = experimentrunDescCandidatePassRate.Default.(float64)
+	// experimentrunDescPassRateDelta is the schema descriptor for pass_rate_delta field.
+	experimentrunDescPassRateDelta := experimentrunFields[10].Descriptor()
+	// experimentrun.DefaultPassRateDelta holds the default value on creation for the pass_rate_delta field.
+	experimentrun.DefaultPassRateDelta = experimentrunDescPassRateDelta.Default.(float64)
+	// experimentrunDescMatchedScoreCount is the schema descriptor for matched_score_count field.
+	experimentrunDescMatchedScoreCount := experimentrunFields[11].Descriptor()
+	// experimentrun.DefaultMatchedScoreCount holds the default value on creation for the matched_score_count field.
+	experimentrun.DefaultMatchedScoreCount = experimentrunDescMatchedScoreCount.Default.(int)
+	// experimentrunDescImprovementCount is the schema descriptor for improvement_count field.
+	experimentrunDescImprovementCount := experimentrunFields[12].Descriptor()
+	// experimentrun.DefaultImprovementCount holds the default value on creation for the improvement_count field.
+	experimentrun.DefaultImprovementCount = experimentrunDescImprovementCount.Default.(int)
+	// experimentrunDescRegressionCount is the schema descriptor for regression_count field.
+	experimentrunDescRegressionCount := experimentrunFields[13].Descriptor()
+	// experimentrun.DefaultRegressionCount holds the default value on creation for the regression_count field.
+	experimentrun.DefaultRegressionCount = experimentrunDescRegressionCount.Default.(int)
+	// experimentrunDescID is the schema descriptor for id field.
+	experimentrunDescID := experimentrunFields[0].Descriptor()
+	// experimentrun.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	experimentrun.IDValidator = experimentrunDescID.Validators[0].(func(string) error)
+	scoreFields := schema.Score{}.Fields()
+	_ = scoreFields
+	// scoreDescTraceID is the schema descriptor for trace_id field.
+	scoreDescTraceID := scoreFields[1].Descriptor()
+	// score.TraceIDValidator is a validator for the "trace_id" field. It is called by the builders before save.
+	score.TraceIDValidator = scoreDescTraceID.Validators[0].(func(string) error)
+	// scoreDescSessionID is the schema descriptor for session_id field.
+	scoreDescSessionID := scoreFields[2].Descriptor()
+	// score.DefaultSessionID holds the default value on creation for the session_id field.
+	score.DefaultSessionID = scoreDescSessionID.Default.(string)
+	// scoreDescDatasetID is the schema descriptor for dataset_id field.
+	scoreDescDatasetID := scoreFields[3].Descriptor()
+	// score.DefaultDatasetID holds the default value on creation for the dataset_id field.
+	score.DefaultDatasetID = scoreDescDatasetID.Default.(string)
+	// scoreDescEvalRunID is the schema descriptor for eval_run_id field.
+	scoreDescEvalRunID := scoreFields[4].Descriptor()
+	// score.DefaultEvalRunID holds the default value on creation for the eval_run_id field.
+	score.DefaultEvalRunID = scoreDescEvalRunID.Default.(string)
+	// scoreDescEvaluatorKey is the schema descriptor for evaluator_key field.
+	scoreDescEvaluatorKey := scoreFields[5].Descriptor()
+	// score.EvaluatorKeyValidator is a validator for the "evaluator_key" field. It is called by the builders before save.
+	score.EvaluatorKeyValidator = scoreDescEvaluatorKey.Validators[0].(func(string) error)
+	// scoreDescValue is the schema descriptor for value field.
+	scoreDescValue := scoreFields[6].Descriptor()
+	// score.DefaultValue holds the default value on creation for the value field.
+	score.DefaultValue = scoreDescValue.Default.(float64)
+	// scoreDescStatus is the schema descriptor for status field.
+	scoreDescStatus := scoreFields[7].Descriptor()
+	// score.DefaultStatus holds the default value on creation for the status field.
+	score.DefaultStatus = scoreDescStatus.Default.(string)
+	// scoreDescLabel is the schema descriptor for label field.
+	scoreDescLabel := scoreFields[8].Descriptor()
+	// score.DefaultLabel holds the default value on creation for the label field.
+	score.DefaultLabel = scoreDescLabel.Default.(string)
+	// scoreDescExplanation is the schema descriptor for explanation field.
+	scoreDescExplanation := scoreFields[9].Descriptor()
+	// score.DefaultExplanation holds the default value on creation for the explanation field.
+	score.DefaultExplanation = scoreDescExplanation.Default.(string)
+	// scoreDescCreatedAt is the schema descriptor for created_at field.
+	scoreDescCreatedAt := scoreFields[10].Descriptor()
+	// score.DefaultCreatedAt holds the default value on creation for the created_at field.
+	score.DefaultCreatedAt = scoreDescCreatedAt.Default.(func() time.Time)
+	// scoreDescID is the schema descriptor for id field.
+	scoreDescID := scoreFields[0].Descriptor()
+	// score.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	score.IDValidator = scoreDescID.Validators[0].(func(string) error)
+	tracelogFields := schema.TraceLog{}.Fields()
+	_ = tracelogFields
+	// tracelogDescTraceID is the schema descriptor for trace_id field.
+	tracelogDescTraceID := tracelogFields[1].Descriptor()
+	// tracelog.TraceIDValidator is a validator for the "trace_id" field. It is called by the builders before save.
+	tracelog.TraceIDValidator = tracelogDescTraceID.Validators[0].(func(string) error)
+	// tracelogDescVersion is the schema descriptor for version field.
+	tracelogDescVersion := tracelogFields[4].Descriptor()
+	// tracelog.VersionValidator is a validator for the "version" field. It is called by the builders before save.
+	tracelog.VersionValidator = tracelogDescVersion.Validators[0].(func(string) error)
+	// tracelogDescRequestID is the schema descriptor for request_id field.
+	tracelogDescRequestID := tracelogFields[5].Descriptor()
+	// tracelog.DefaultRequestID holds the default value on creation for the request_id field.
+	tracelog.DefaultRequestID = tracelogDescRequestID.Default.(string)
+	// tracelogDescRecordedAt is the schema descriptor for recorded_at field.
+	tracelogDescRecordedAt := tracelogFields[6].Descriptor()
+	// tracelog.DefaultRecordedAt holds the default value on creation for the recorded_at field.
+	tracelog.DefaultRecordedAt = tracelogDescRecordedAt.Default.(func() time.Time)
+	// tracelogDescModel is the schema descriptor for model field.
+	tracelogDescModel := tracelogFields[7].Descriptor()
+	// tracelog.DefaultModel holds the default value on creation for the model field.
+	tracelog.DefaultModel = tracelogDescModel.Default.(string)
+	// tracelogDescProvider is the schema descriptor for provider field.
+	tracelogDescProvider := tracelogFields[8].Descriptor()
+	// tracelog.DefaultProvider holds the default value on creation for the provider field.
+	tracelog.DefaultProvider = tracelogDescProvider.Default.(string)
+	// tracelogDescOperation is the schema descriptor for operation field.
+	tracelogDescOperation := tracelogFields[9].Descriptor()
+	// tracelog.DefaultOperation holds the default value on creation for the operation field.
+	tracelog.DefaultOperation = tracelogDescOperation.Default.(string)
+	// tracelogDescEndpoint is the schema descriptor for endpoint field.
+	tracelogDescEndpoint := tracelogFields[10].Descriptor()
+	// tracelog.DefaultEndpoint holds the default value on creation for the endpoint field.
+	tracelog.DefaultEndpoint = tracelogDescEndpoint.Default.(string)
+	// tracelogDescURL is the schema descriptor for url field.
+	tracelogDescURL := tracelogFields[11].Descriptor()
+	// tracelog.DefaultURL holds the default value on creation for the url field.
+	tracelog.DefaultURL = tracelogDescURL.Default.(string)
+	// tracelogDescMethod is the schema descriptor for method field.
+	tracelogDescMethod := tracelogFields[12].Descriptor()
+	// tracelog.DefaultMethod holds the default value on creation for the method field.
+	tracelog.DefaultMethod = tracelogDescMethod.Default.(string)
+	// tracelogDescStatusCode is the schema descriptor for status_code field.
+	tracelogDescStatusCode := tracelogFields[13].Descriptor()
+	// tracelog.DefaultStatusCode holds the default value on creation for the status_code field.
+	tracelog.DefaultStatusCode = tracelogDescStatusCode.Default.(int)
+	// tracelogDescDurationMs is the schema descriptor for duration_ms field.
+	tracelogDescDurationMs := tracelogFields[14].Descriptor()
+	// tracelog.DefaultDurationMs holds the default value on creation for the duration_ms field.
+	tracelog.DefaultDurationMs = tracelogDescDurationMs.Default.(int64)
+	// tracelogDescTtftMs is the schema descriptor for ttft_ms field.
+	tracelogDescTtftMs := tracelogFields[15].Descriptor()
+	// tracelog.DefaultTtftMs holds the default value on creation for the ttft_ms field.
+	tracelog.DefaultTtftMs = tracelogDescTtftMs.Default.(int64)
+	// tracelogDescClientIP is the schema descriptor for client_ip field.
+	tracelogDescClientIP := tracelogFields[16].Descriptor()
+	// tracelog.DefaultClientIP holds the default value on creation for the client_ip field.
+	tracelog.DefaultClientIP = tracelogDescClientIP.Default.(string)
+	// tracelogDescContentLength is the schema descriptor for content_length field.
+	tracelogDescContentLength := tracelogFields[17].Descriptor()
+	// tracelog.DefaultContentLength holds the default value on creation for the content_length field.
+	tracelog.DefaultContentLength = tracelogDescContentLength.Default.(int64)
+	// tracelogDescErrorText is the schema descriptor for error_text field.
+	tracelogDescErrorText := tracelogFields[18].Descriptor()
+	// tracelog.DefaultErrorText holds the default value on creation for the error_text field.
+	tracelog.DefaultErrorText = tracelogDescErrorText.Default.(string)
+	// tracelogDescPromptTokens is the schema descriptor for prompt_tokens field.
+	tracelogDescPromptTokens := tracelogFields[19].Descriptor()
+	// tracelog.DefaultPromptTokens holds the default value on creation for the prompt_tokens field.
+	tracelog.DefaultPromptTokens = tracelogDescPromptTokens.Default.(int)
+	// tracelogDescCompletionTokens is the schema descriptor for completion_tokens field.
+	tracelogDescCompletionTokens := tracelogFields[20].Descriptor()
+	// tracelog.DefaultCompletionTokens holds the default value on creation for the completion_tokens field.
+	tracelog.DefaultCompletionTokens = tracelogDescCompletionTokens.Default.(int)
+	// tracelogDescTotalTokens is the schema descriptor for total_tokens field.
+	tracelogDescTotalTokens := tracelogFields[21].Descriptor()
+	// tracelog.DefaultTotalTokens holds the default value on creation for the total_tokens field.
+	tracelog.DefaultTotalTokens = tracelogDescTotalTokens.Default.(int)
+	// tracelogDescCachedTokens is the schema descriptor for cached_tokens field.
+	tracelogDescCachedTokens := tracelogFields[22].Descriptor()
+	// tracelog.DefaultCachedTokens holds the default value on creation for the cached_tokens field.
+	tracelog.DefaultCachedTokens = tracelogDescCachedTokens.Default.(int)
+	// tracelogDescReqHeaderLen is the schema descriptor for req_header_len field.
+	tracelogDescReqHeaderLen := tracelogFields[23].Descriptor()
+	// tracelog.DefaultReqHeaderLen holds the default value on creation for the req_header_len field.
+	tracelog.DefaultReqHeaderLen = tracelogDescReqHeaderLen.Default.(int64)
+	// tracelogDescReqBodyLen is the schema descriptor for req_body_len field.
+	tracelogDescReqBodyLen := tracelogFields[24].Descriptor()
+	// tracelog.DefaultReqBodyLen holds the default value on creation for the req_body_len field.
+	tracelog.DefaultReqBodyLen = tracelogDescReqBodyLen.Default.(int64)
+	// tracelogDescResHeaderLen is the schema descriptor for res_header_len field.
+	tracelogDescResHeaderLen := tracelogFields[25].Descriptor()
+	// tracelog.DefaultResHeaderLen holds the default value on creation for the res_header_len field.
+	tracelog.DefaultResHeaderLen = tracelogDescResHeaderLen.Default.(int64)
+	// tracelogDescResBodyLen is the schema descriptor for res_body_len field.
+	tracelogDescResBodyLen := tracelogFields[26].Descriptor()
+	// tracelog.DefaultResBodyLen holds the default value on creation for the res_body_len field.
+	tracelog.DefaultResBodyLen = tracelogDescResBodyLen.Default.(int64)
+	// tracelogDescIsStream is the schema descriptor for is_stream field.
+	tracelogDescIsStream := tracelogFields[27].Descriptor()
+	// tracelog.DefaultIsStream holds the default value on creation for the is_stream field.
+	tracelog.DefaultIsStream = tracelogDescIsStream.Default.(bool)
+	// tracelogDescSessionID is the schema descriptor for session_id field.
+	tracelogDescSessionID := tracelogFields[28].Descriptor()
+	// tracelog.DefaultSessionID holds the default value on creation for the session_id field.
+	tracelog.DefaultSessionID = tracelogDescSessionID.Default.(string)
+	// tracelogDescSessionSource is the schema descriptor for session_source field.
+	tracelogDescSessionSource := tracelogFields[29].Descriptor()
+	// tracelog.DefaultSessionSource holds the default value on creation for the session_source field.
+	tracelog.DefaultSessionSource = tracelogDescSessionSource.Default.(string)
+	// tracelogDescWindowID is the schema descriptor for window_id field.
+	tracelogDescWindowID := tracelogFields[30].Descriptor()
+	// tracelog.DefaultWindowID holds the default value on creation for the window_id field.
+	tracelog.DefaultWindowID = tracelogDescWindowID.Default.(string)
+	// tracelogDescClientRequestID is the schema descriptor for client_request_id field.
+	tracelogDescClientRequestID := tracelogFields[31].Descriptor()
+	// tracelog.DefaultClientRequestID holds the default value on creation for the client_request_id field.
+	tracelog.DefaultClientRequestID = tracelogDescClientRequestID.Default.(string)
+	// tracelogDescSelectedUpstreamID is the schema descriptor for selected_upstream_id field.
+	tracelogDescSelectedUpstreamID := tracelogFields[32].Descriptor()
+	// tracelog.DefaultSelectedUpstreamID holds the default value on creation for the selected_upstream_id field.
+	tracelog.DefaultSelectedUpstreamID = tracelogDescSelectedUpstreamID.Default.(string)
+	// tracelogDescSelectedUpstreamBaseURL is the schema descriptor for selected_upstream_base_url field.
+	tracelogDescSelectedUpstreamBaseURL := tracelogFields[33].Descriptor()
+	// tracelog.DefaultSelectedUpstreamBaseURL holds the default value on creation for the selected_upstream_base_url field.
+	tracelog.DefaultSelectedUpstreamBaseURL = tracelogDescSelectedUpstreamBaseURL.Default.(string)
+	// tracelogDescSelectedUpstreamProviderPreset is the schema descriptor for selected_upstream_provider_preset field.
+	tracelogDescSelectedUpstreamProviderPreset := tracelogFields[34].Descriptor()
+	// tracelog.DefaultSelectedUpstreamProviderPreset holds the default value on creation for the selected_upstream_provider_preset field.
+	tracelog.DefaultSelectedUpstreamProviderPreset = tracelogDescSelectedUpstreamProviderPreset.Default.(string)
+	// tracelogDescRoutingPolicy is the schema descriptor for routing_policy field.
+	tracelogDescRoutingPolicy := tracelogFields[35].Descriptor()
+	// tracelog.DefaultRoutingPolicy holds the default value on creation for the routing_policy field.
+	tracelog.DefaultRoutingPolicy = tracelogDescRoutingPolicy.Default.(string)
+	// tracelogDescRoutingScore is the schema descriptor for routing_score field.
+	tracelogDescRoutingScore := tracelogFields[36].Descriptor()
+	// tracelog.DefaultRoutingScore holds the default value on creation for the routing_score field.
+	tracelog.DefaultRoutingScore = tracelogDescRoutingScore.Default.(float64)
+	// tracelogDescRoutingCandidateCount is the schema descriptor for routing_candidate_count field.
+	tracelogDescRoutingCandidateCount := tracelogFields[37].Descriptor()
+	// tracelog.DefaultRoutingCandidateCount holds the default value on creation for the routing_candidate_count field.
+	tracelog.DefaultRoutingCandidateCount = tracelogDescRoutingCandidateCount.Default.(int)
+	// tracelogDescRoutingFailureReason is the schema descriptor for routing_failure_reason field.
+	tracelogDescRoutingFailureReason := tracelogFields[38].Descriptor()
+	// tracelog.DefaultRoutingFailureReason holds the default value on creation for the routing_failure_reason field.
+	tracelog.DefaultRoutingFailureReason = tracelogDescRoutingFailureReason.Default.(string)
+	// tracelogDescID is the schema descriptor for id field.
+	tracelogDescID := tracelogFields[0].Descriptor()
+	// tracelog.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	tracelog.IDValidator = tracelogDescID.Validators[0].(func(string) error)
+	upstreammodelFields := schema.UpstreamModel{}.Fields()
+	_ = upstreammodelFields
+	// upstreammodelDescUpstreamID is the schema descriptor for upstream_id field.
+	upstreammodelDescUpstreamID := upstreammodelFields[0].Descriptor()
+	// upstreammodel.UpstreamIDValidator is a validator for the "upstream_id" field. It is called by the builders before save.
+	upstreammodel.UpstreamIDValidator = upstreammodelDescUpstreamID.Validators[0].(func(string) error)
+	// upstreammodelDescModel is the schema descriptor for model field.
+	upstreammodelDescModel := upstreammodelFields[1].Descriptor()
+	// upstreammodel.ModelValidator is a validator for the "model" field. It is called by the builders before save.
+	upstreammodel.ModelValidator = upstreammodelDescModel.Validators[0].(func(string) error)
+	// upstreammodelDescSource is the schema descriptor for source field.
+	upstreammodelDescSource := upstreammodelFields[2].Descriptor()
+	// upstreammodel.DefaultSource holds the default value on creation for the source field.
+	upstreammodel.DefaultSource = upstreammodelDescSource.Default.(string)
+	// upstreammodelDescSeenAt is the schema descriptor for seen_at field.
+	upstreammodelDescSeenAt := upstreammodelFields[3].Descriptor()
+	// upstreammodel.DefaultSeenAt holds the default value on creation for the seen_at field.
+	upstreammodel.DefaultSeenAt = upstreammodelDescSeenAt.Default.(func() time.Time)
+	upstreamtargetFields := schema.UpstreamTarget{}.Fields()
+	_ = upstreamtargetFields
+	// upstreamtargetDescBaseURL is the schema descriptor for base_url field.
+	upstreamtargetDescBaseURL := upstreamtargetFields[1].Descriptor()
+	// upstreamtarget.DefaultBaseURL holds the default value on creation for the base_url field.
+	upstreamtarget.DefaultBaseURL = upstreamtargetDescBaseURL.Default.(string)
+	// upstreamtargetDescProviderPreset is the schema descriptor for provider_preset field.
+	upstreamtargetDescProviderPreset := upstreamtargetFields[2].Descriptor()
+	// upstreamtarget.DefaultProviderPreset holds the default value on creation for the provider_preset field.
+	upstreamtarget.DefaultProviderPreset = upstreamtargetDescProviderPreset.Default.(string)
+	// upstreamtargetDescProtocolFamily is the schema descriptor for protocol_family field.
+	upstreamtargetDescProtocolFamily := upstreamtargetFields[3].Descriptor()
+	// upstreamtarget.DefaultProtocolFamily holds the default value on creation for the protocol_family field.
+	upstreamtarget.DefaultProtocolFamily = upstreamtargetDescProtocolFamily.Default.(string)
+	// upstreamtargetDescRoutingProfile is the schema descriptor for routing_profile field.
+	upstreamtargetDescRoutingProfile := upstreamtargetFields[4].Descriptor()
+	// upstreamtarget.DefaultRoutingProfile holds the default value on creation for the routing_profile field.
+	upstreamtarget.DefaultRoutingProfile = upstreamtargetDescRoutingProfile.Default.(string)
+	// upstreamtargetDescEnabled is the schema descriptor for enabled field.
+	upstreamtargetDescEnabled := upstreamtargetFields[5].Descriptor()
+	// upstreamtarget.DefaultEnabled holds the default value on creation for the enabled field.
+	upstreamtarget.DefaultEnabled = upstreamtargetDescEnabled.Default.(bool)
+	// upstreamtargetDescPriority is the schema descriptor for priority field.
+	upstreamtargetDescPriority := upstreamtargetFields[6].Descriptor()
+	// upstreamtarget.DefaultPriority holds the default value on creation for the priority field.
+	upstreamtarget.DefaultPriority = upstreamtargetDescPriority.Default.(int)
+	// upstreamtargetDescWeight is the schema descriptor for weight field.
+	upstreamtargetDescWeight := upstreamtargetFields[7].Descriptor()
+	// upstreamtarget.DefaultWeight holds the default value on creation for the weight field.
+	upstreamtarget.DefaultWeight = upstreamtargetDescWeight.Default.(float64)
+	// upstreamtargetDescCapacityHint is the schema descriptor for capacity_hint field.
+	upstreamtargetDescCapacityHint := upstreamtargetFields[8].Descriptor()
+	// upstreamtarget.DefaultCapacityHint holds the default value on creation for the capacity_hint field.
+	upstreamtarget.DefaultCapacityHint = upstreamtargetDescCapacityHint.Default.(float64)
+	// upstreamtargetDescLastRefreshStatus is the schema descriptor for last_refresh_status field.
+	upstreamtargetDescLastRefreshStatus := upstreamtargetFields[10].Descriptor()
+	// upstreamtarget.DefaultLastRefreshStatus holds the default value on creation for the last_refresh_status field.
+	upstreamtarget.DefaultLastRefreshStatus = upstreamtargetDescLastRefreshStatus.Default.(string)
+	// upstreamtargetDescLastRefreshError is the schema descriptor for last_refresh_error field.
+	upstreamtargetDescLastRefreshError := upstreamtargetFields[11].Descriptor()
+	// upstreamtarget.DefaultLastRefreshError holds the default value on creation for the last_refresh_error field.
+	upstreamtarget.DefaultLastRefreshError = upstreamtargetDescLastRefreshError.Default.(string)
+	// upstreamtargetDescID is the schema descriptor for id field.
+	upstreamtargetDescID := upstreamtargetFields[0].Descriptor()
+	// upstreamtarget.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	upstreamtarget.IDValidator = upstreamtargetDescID.Validators[0].(func(string) error)
 	userFields := schema.User{}.Fields()
 	_ = userFields
 	// userDescUsername is the schema descriptor for username field.

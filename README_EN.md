@@ -90,9 +90,18 @@ monitor:
   port: "8081"
   auth_token: "" # legacy static token; username/password login is recommended
 
+database:
+  driver: "sqlite"
+  dsn: "" # defaults to {{trace.output_dir}}/llm_tracelab.sqlite3
+  max_open_conns: 4
+  max_idle_conns: 4
+  auto_migrate: true
+
 auth:
-  database_path: "" # defaults to {{debug.output_dir}}/control.sqlite3
   session_ttl: 24h
+
+trace:
+  output_dir: "./logs"
 
 router:
   model_discovery:
@@ -163,7 +172,12 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
 - `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
-- `LLM_TRACELAB_AUTH_DATABASE_PATH`
+- `LLM_TRACELAB_DATABASE_DRIVER`
+- `LLM_TRACELAB_DATABASE_DSN`
+- `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
+- `LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS`
+- `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`
+- `LLM_TRACELAB_TRACE_OUTPUT_DIR`
 - `LLM_TRACELAB_AUTH_SESSION_TTL`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
@@ -180,7 +194,7 @@ Supported environment variable overrides:
 
 Access control notes:
 
-- `auth.database_path` stores users and API tokens. It defaults to `debug.output_dir/control.sqlite3`.
+- `database` is the unified structured store for users, API tokens, trace index, sessions, upstream metadata, datasets, and eval metadata. The default SQLite path is `trace.output_dir/llm_tracelab.sqlite3`.
 - Initialize the first user with `go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`.
 - Generate a token for SDK or CLI traffic with `go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev`.
 - The LLM proxy API, Monitor API, and MCP accept `Authorization: Bearer <generated-token>`; the Monitor UI can also log in with username and password and exchange that login for a token.

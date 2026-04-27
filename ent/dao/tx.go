@@ -16,6 +16,22 @@ type Tx struct {
 	config
 	// APIToken is the client for interacting with the APIToken builders.
 	APIToken *APITokenClient
+	// Dataset is the client for interacting with the Dataset builders.
+	Dataset *DatasetClient
+	// DatasetExample is the client for interacting with the DatasetExample builders.
+	DatasetExample *DatasetExampleClient
+	// EvalRun is the client for interacting with the EvalRun builders.
+	EvalRun *EvalRunClient
+	// ExperimentRun is the client for interacting with the ExperimentRun builders.
+	ExperimentRun *ExperimentRunClient
+	// Score is the client for interacting with the Score builders.
+	Score *ScoreClient
+	// TraceLog is the client for interacting with the TraceLog builders.
+	TraceLog *TraceLogClient
+	// UpstreamModel is the client for interacting with the UpstreamModel builders.
+	UpstreamModel *UpstreamModelClient
+	// UpstreamTarget is the client for interacting with the UpstreamTarget builders.
+	UpstreamTarget *UpstreamTargetClient
 	// User is the client for interacting with the User builders.
 	User *UserClient
 
@@ -150,6 +166,14 @@ func (tx *Tx) Client() *Client {
 
 func (tx *Tx) init() {
 	tx.APIToken = NewAPITokenClient(tx.config)
+	tx.Dataset = NewDatasetClient(tx.config)
+	tx.DatasetExample = NewDatasetExampleClient(tx.config)
+	tx.EvalRun = NewEvalRunClient(tx.config)
+	tx.ExperimentRun = NewExperimentRunClient(tx.config)
+	tx.Score = NewScoreClient(tx.config)
+	tx.TraceLog = NewTraceLogClient(tx.config)
+	tx.UpstreamModel = NewUpstreamModelClient(tx.config)
+	tx.UpstreamTarget = NewUpstreamTargetClient(tx.config)
 	tx.User = NewUserClient(tx.config)
 }
 

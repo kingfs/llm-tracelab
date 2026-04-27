@@ -32,6 +32,18 @@ type Config struct {
 		SessionTTL   time.Duration `yaml:"session_ttl"`
 	} `yaml:"auth"`
 
+	Database struct {
+		Driver       string `yaml:"driver"`
+		DSN          string `yaml:"dsn"`
+		MaxOpenConns int    `yaml:"max_open_conns"`
+		MaxIdleConns int    `yaml:"max_idle_conns"`
+		AutoMigrate  *bool  `yaml:"auto_migrate"`
+	} `yaml:"database"`
+
+	Trace struct {
+		OutputDir string `yaml:"output_dir"`
+	} `yaml:"trace"`
+
 	Upstream  UpstreamConfig         `yaml:"upstream"`
 	Upstreams []UpstreamTargetConfig `yaml:"upstreams"`
 
@@ -145,6 +157,27 @@ func applyEnvOverrides(cfg *Config) {
 			cfg.Auth.SessionTTL = parsed
 		}
 	}
+	if v := os.Getenv("LLM_TRACELAB_DATABASE_DRIVER"); v != "" {
+		cfg.Database.Driver = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_DATABASE_DSN"); v != "" {
+		cfg.Database.DSN = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.Database.MaxOpenConns = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.Database.MaxIdleConns = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_DATABASE_AUTO_MIGRATE"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Database.AutoMigrate = &parsed
+		}
+	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
 		cfg.Upstream.BaseURL = v
 	}
@@ -178,6 +211,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v
 	}
+	if v := os.Getenv("LLM_TRACELAB_TRACE_OUTPUT_DIR"); v != "" {
+		cfg.Trace.OutputDir = v
+	}
 	if v := os.Getenv("LLM_TRACELAB_MASK_KEY"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Debug.MaskKey = parsed
@@ -206,7 +242,7 @@ func (c Config) AuthDatabasePath() string {
 	if strings.TrimSpace(c.Auth.DatabasePath) != "" {
 		return c.Auth.DatabasePath
 	}
-	return filepath.Join(c.Debug.OutputDir, "control.sqlite3")
+	return c.DatabasePath()
 }
 
 func (c Config) AuthSessionTTL() time.Duration {
@@ -214,4 +250,68 @@ func (c Config) AuthSessionTTL() time.Duration {
 		return c.Auth.SessionTTL
 	}
 	return 24 * time.Hour
+}
+
+func (c Config) TraceOutputDir() string {
+	if strings.TrimSpace(c.Trace.OutputDir) != "" {
+		return c.Trace.OutputDir
+	}
+	return c.Debug.OutputDir
+}
+
+func (c Config) DatabaseDriver() string {
+	if strings.TrimSpace(c.Database.Driver) != "" {
+		return strings.ToLower(strings.TrimSpace(c.Database.Driver))
+	}
+	return "sqlite"
+}
+
+func (c Config) DatabasePath() string {
+	if strings.TrimSpace(c.Database.DSN) != "" && c.DatabaseDriver() == "sqlite" {
+		dsn := strings.TrimPrefix(strings.TrimSpace(c.Database.DSN), "sqlite://")
+		if strings.HasPrefix(dsn, "file:") {
+			dsn = strings.TrimPrefix(dsn, "file:")
+		}
+		if idx := strings.Index(dsn, "?"); idx >= 0 {
+			dsn = dsn[:idx]
+		}
+		if strings.TrimSpace(dsn) != "" {
+			return dsn
+		}
+	}
+	if strings.TrimSpace(c.Auth.DatabasePath) != "" {
+		return c.Auth.DatabasePath
+	}
+	return filepath.Join(c.TraceOutputDir(), "llm_tracelab.sqlite3")
+}
+
+func (c Config) DatabaseDSN() string {
+	if strings.TrimSpace(c.Database.DSN) != "" {
+		return c.Database.DSN
+	}
+	if c.DatabaseDriver() == "sqlite" {
+		return c.DatabasePath()
+	}
+	return ""
+}
+
+func (c Config) DatabaseAutoMigrate() bool {
+	if c.Database.AutoMigrate != nil {
+		return *c.Database.AutoMigrate
+	}
+	return true
+}
+
+func (c Config) DatabaseMaxOpenConns() int {
+	if c.Database.MaxOpenConns > 0 {
+		return c.Database.MaxOpenConns
+	}
+	return 4
+}
+
+func (c Config) DatabaseMaxIdleConns() int {
+	if c.Database.MaxIdleConns > 0 {
+		return c.Database.MaxIdleConns
+	}
+	return 4
 }

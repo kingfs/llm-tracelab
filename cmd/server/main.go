@@ -48,6 +48,8 @@ func run(args []string) int {
 		return runMigrate(args[1:])
 	case "auth":
 		return runAuth(args[1:])
+	case "db":
+		return runDB(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", args[0])
 		printUsage(os.Stderr)
@@ -82,7 +84,13 @@ func runServe(args []string) int {
 	}
 	defer authStore.Close()
 
-	traceStore, err := store.New(cfg.Debug.OutputDir)
+	traceStore, err := store.NewWithDatabase(
+		cfg.TraceOutputDir(),
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -130,7 +138,7 @@ func runServe(args []string) int {
 		WriteTimeout: 5 * time.Minute,
 	}
 
-	slog.Info("Server listening", "addr", addr, "output_dir", cfg.Debug.OutputDir)
+	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
 	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("Server failed", "error", err)
 		return 1
@@ -139,11 +147,17 @@ func runServe(args []string) int {
 }
 
 func openAuthStore(cfg *config.Config) (*auth.Store, error) {
-	dbPath := cfg.AuthDatabasePath()
-	if err := auth.MigrateUp(dbPath, 0); err != nil {
-		return nil, fmt.Errorf("migrate auth db: %w", err)
+	if cfg.DatabaseAutoMigrate() {
+		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
+			return nil, fmt.Errorf("migrate database: %w", err)
+		}
 	}
-	st, err := auth.Open(dbPath)
+	st, err := auth.OpenDatabase(
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +179,20 @@ func runMigrate(args []string) int {
 		slog.Error("Failed to load config", "path", *configPath, "error", err)
 		return 1
 	}
+	if cfg.DatabaseAutoMigrate() {
+		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
+			slog.Error("Database migration failed", "error", err)
+			return 1
+		}
+	}
 
-	traceStore, err := store.New(cfg.Debug.OutputDir)
+	traceStore, err := store.NewWithDatabase(
+		cfg.TraceOutputDir(),
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -174,7 +200,7 @@ func runMigrate(args []string) int {
 	defer traceStore.Close()
 
 	result, err := migrate.Run(traceStore, migrate.Options{
-		OutputDir: cfg.Debug.OutputDir,
+		OutputDir: cfg.TraceOutputDir(),
 		RewriteV2: *rewriteV2,
 		RebuildDB: *rebuildIndex,
 	})
@@ -185,7 +211,7 @@ func runMigrate(args []string) int {
 
 	slog.Info(
 		"Migration finished",
-		"output_dir", cfg.Debug.OutputDir,
+		"output_dir", cfg.TraceOutputDir(),
 		"scanned_files", result.ScannedFiles,
 		"converted_files", result.ConvertedFiles,
 		"skipped_v3_files", result.SkippedV3Files,
@@ -208,6 +234,14 @@ func runAuth(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+func runDB(args []string) int {
+	if len(args) == 0 || args[0] != "migrate" {
+		fmt.Fprintln(os.Stderr, "db requires migrate up or migrate down")
+		return 2
+	}
+	return runAuthMigrate(args[1:])
 }
 
 type cliExitError struct {
@@ -284,12 +318,12 @@ func runAuthMigrate(args []string) int {
 	}
 	switch direction {
 	case "up":
-		if err := auth.MigrateUp(cfg.AuthDatabasePath(), *steps); err != nil {
+		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), *steps); err != nil {
 			slog.Error("Auth migration failed", "error", err)
 			return 1
 		}
 	case "down":
-		if err := auth.MigrateDown(cfg.AuthDatabasePath(), *steps, *all); err != nil {
+		if err := auth.MigrateDatabaseDown(cfg.DatabaseDriver(), cfg.DatabaseDSN(), *steps, *all); err != nil {
 			slog.Error("Auth migration failed", "error", err)
 			return 1
 		}
@@ -297,7 +331,7 @@ func runAuthMigrate(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown auth migrate direction %q\n", direction)
 		return 2
 	}
-	slog.Info("Auth migration finished", "database", cfg.AuthDatabasePath(), "direction", direction)
+	slog.Info("Database migration finished", "driver", cfg.DatabaseDriver(), "dsn", cfg.DatabaseDSN(), "direction", direction)
 	return 0
 }
 
@@ -323,7 +357,7 @@ func runAuthInitUser(args []string) int {
 		slog.Error("Create user failed", "error", err)
 		return 1
 	}
-	slog.Info("User created", "database", cfg.AuthDatabasePath(), "username", *username)
+	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", *username)
 	return 0
 }
 
@@ -349,7 +383,7 @@ func runAuthResetPassword(args []string) int {
 		slog.Error("Reset password failed", "error", err)
 		return 1
 	}
-	slog.Info("Password reset", "database", cfg.AuthDatabasePath(), "username", *username)
+	slog.Info("Password reset", "driver", cfg.DatabaseDriver(), "username", *username)
 	return 0
 }
 
@@ -385,11 +419,18 @@ func openAuthStoreForCommand(configPath string) (*config.Config, *auth.Store, in
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return nil, nil, 1
 	}
-	if err := auth.MigrateUp(cfg.AuthDatabasePath(), 0); err != nil {
-		slog.Error("Auth migration failed", "error", err)
-		return nil, nil, 1
+	if cfg.DatabaseAutoMigrate() {
+		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
+			slog.Error("Database migration failed", "error", err)
+			return nil, nil, 1
+		}
 	}
-	st, err := auth.Open(cfg.AuthDatabasePath())
+	st, err := auth.OpenDatabase(
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
 	if err != nil {
 		slog.Error("Open auth store failed", "error", err)
 		return nil, nil, 1
@@ -401,6 +442,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  llm-tracelab serve -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab migrate -c config.yaml [-rewrite-v2=true] [-rebuild-index=true]")
+	fmt.Fprintln(w, "  llm-tracelab db migrate up|down -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab auth migrate up|down -c config.yaml")
 	fmt.Fprintln(w, "  llm-tracelab auth init-user -c config.yaml --username admin --password 'change-me'")
 	fmt.Fprintln(w, "  llm-tracelab auth reset-password -c config.yaml --username admin --password 'new-password'")

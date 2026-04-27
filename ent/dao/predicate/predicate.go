@@ -9,5 +9,29 @@ import (
 // APIToken is the predicate function for apitoken builders.
 type APIToken func(*sql.Selector)
 
+// Dataset is the predicate function for dataset builders.
+type Dataset func(*sql.Selector)
+
+// DatasetExample is the predicate function for datasetexample builders.
+type DatasetExample func(*sql.Selector)
+
+// EvalRun is the predicate function for evalrun builders.
+type EvalRun func(*sql.Selector)
+
+// ExperimentRun is the predicate function for experimentrun builders.
+type ExperimentRun func(*sql.Selector)
+
+// Score is the predicate function for score builders.
+type Score func(*sql.Selector)
+
+// TraceLog is the predicate function for tracelog builders.
+type TraceLog func(*sql.Selector)
+
+// UpstreamModel is the predicate function for upstreammodel builders.
+type UpstreamModel func(*sql.Selector)
+
+// UpstreamTarget is the predicate function for upstreamtarget builders.
+type UpstreamTarget func(*sql.Selector)
+
 // User is the predicate function for user builders.
 type User func(*sql.Selector)

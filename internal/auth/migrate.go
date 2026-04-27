@@ -16,7 +16,11 @@ import (
 )
 
 func MigrateUp(dbPath string, steps int) error {
-	m, err := newMigrator(dbPath)
+	return MigrateDatabaseUp("sqlite", dbPath, steps)
+}
+
+func MigrateDatabaseUp(driver string, dsn string, steps int) error {
+	m, err := newMigrator(driver, dsn)
 	if err != nil {
 		return err
 	}
@@ -33,7 +37,11 @@ func MigrateUp(dbPath string, steps int) error {
 }
 
 func MigrateDown(dbPath string, steps int, all bool) error {
-	m, err := newMigrator(dbPath)
+	return MigrateDatabaseDown("sqlite", dbPath, steps, all)
+}
+
+func MigrateDatabaseDown(driver string, dsn string, steps int, all bool) error {
+	m, err := newMigrator(driver, dsn)
 	if err != nil {
 		return err
 	}
@@ -52,11 +60,15 @@ func MigrateDown(dbPath string, steps int, all bool) error {
 	return err
 }
 
-func newMigrator(dbPath string) (*gomigrate.Migrate, error) {
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+func newMigrator(driverName string, dsn string) (*gomigrate.Migrate, error) {
+	driverName = normalizeDriver(driverName)
+	if driverName != "sqlite" {
+		return nil, fmt.Errorf("database driver %q is not supported by embedded migrations yet", driverName)
+	}
+	if err := os.MkdirAll(filepath.Dir(dsn), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+	db, err := sql.Open("sqlite", sqliteDSN(dsn))
 	if err != nil {
 		return nil, err
 	}

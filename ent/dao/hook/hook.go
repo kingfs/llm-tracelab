@@ -21,6 +21,102 @@ func (f APITokenFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, er
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.APITokenMutation", m)
 }
 
+// The DatasetFunc type is an adapter to allow the use of ordinary
+// function as Dataset mutator.
+type DatasetFunc func(context.Context, *dao.DatasetMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f DatasetFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.DatasetMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.DatasetMutation", m)
+}
+
+// The DatasetExampleFunc type is an adapter to allow the use of ordinary
+// function as DatasetExample mutator.
+type DatasetExampleFunc func(context.Context, *dao.DatasetExampleMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f DatasetExampleFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.DatasetExampleMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.DatasetExampleMutation", m)
+}
+
+// The EvalRunFunc type is an adapter to allow the use of ordinary
+// function as EvalRun mutator.
+type EvalRunFunc func(context.Context, *dao.EvalRunMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f EvalRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.EvalRunMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.EvalRunMutation", m)
+}
+
+// The ExperimentRunFunc type is an adapter to allow the use of ordinary
+// function as ExperimentRun mutator.
+type ExperimentRunFunc func(context.Context, *dao.ExperimentRunMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ExperimentRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ExperimentRunMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ExperimentRunMutation", m)
+}
+
+// The ScoreFunc type is an adapter to allow the use of ordinary
+// function as Score mutator.
+type ScoreFunc func(context.Context, *dao.ScoreMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ScoreFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ScoreMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ScoreMutation", m)
+}
+
+// The TraceLogFunc type is an adapter to allow the use of ordinary
+// function as TraceLog mutator.
+type TraceLogFunc func(context.Context, *dao.TraceLogMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TraceLogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.TraceLogMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.TraceLogMutation", m)
+}
+
+// The UpstreamModelFunc type is an adapter to allow the use of ordinary
+// function as UpstreamModel mutator.
+type UpstreamModelFunc func(context.Context, *dao.UpstreamModelMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UpstreamModelFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.UpstreamModelMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.UpstreamModelMutation", m)
+}
+
+// The UpstreamTargetFunc type is an adapter to allow the use of ordinary
+// function as UpstreamTarget mutator.
+type UpstreamTargetFunc func(context.Context, *dao.UpstreamTargetMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UpstreamTargetFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.UpstreamTargetMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.UpstreamTargetMutation", m)
+}
+
 // The UserFunc type is an adapter to allow the use of ordinary
 // function as User mutator.
 type UserFunc func(context.Context, *dao.UserMutation) (dao.Value, error)

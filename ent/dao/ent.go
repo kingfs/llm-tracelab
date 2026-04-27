@@ -13,6 +13,14 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
+	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
+	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
 )
 
@@ -74,8 +82,16 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			apitoken.Table: apitoken.ValidColumn,
-			user.Table:     user.ValidColumn,
+			apitoken.Table:       apitoken.ValidColumn,
+			dataset.Table:        dataset.ValidColumn,
+			datasetexample.Table: datasetexample.ValidColumn,
+			evalrun.Table:        evalrun.ValidColumn,
+			experimentrun.Table:  experimentrun.ValidColumn,
+			score.Table:          score.ValidColumn,
+			tracelog.Table:       tracelog.ValidColumn,
+			upstreammodel.Table:  upstreammodel.ValidColumn,
+			upstreamtarget.Table: upstreamtarget.ValidColumn,
+			user.Table:           user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

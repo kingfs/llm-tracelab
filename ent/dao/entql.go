@@ -4,7 +4,15 @@ package dao
 
 import (
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
+	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
+	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
 
 	"entgo.io/ent/dialect/sql"
@@ -15,7 +23,7 @@ import (
 
 // schemaGraph holds a representation of ent/schema at runtime.
 var schemaGraph = func() *sqlgraph.Schema {
-	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 2)}
+	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 10)}
 	graph.Nodes[0] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   apitoken.Table,
@@ -38,6 +46,207 @@ var schemaGraph = func() *sqlgraph.Schema {
 		},
 	}
 	graph.Nodes[1] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   dataset.Table,
+			Columns: dataset.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: dataset.FieldID,
+			},
+		},
+		Type: "Dataset",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			dataset.FieldName:        {Type: field.TypeString, Column: dataset.FieldName},
+			dataset.FieldDescription: {Type: field.TypeString, Column: dataset.FieldDescription},
+			dataset.FieldCreatedAt:   {Type: field.TypeTime, Column: dataset.FieldCreatedAt},
+			dataset.FieldUpdatedAt:   {Type: field.TypeTime, Column: dataset.FieldUpdatedAt},
+		},
+	}
+	graph.Nodes[2] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   datasetexample.Table,
+			Columns: datasetexample.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeInt,
+				Column: datasetexample.FieldID,
+			},
+		},
+		Type: "DatasetExample",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			datasetexample.FieldDatasetID:  {Type: field.TypeString, Column: datasetexample.FieldDatasetID},
+			datasetexample.FieldTraceID:    {Type: field.TypeString, Column: datasetexample.FieldTraceID},
+			datasetexample.FieldPosition:   {Type: field.TypeInt, Column: datasetexample.FieldPosition},
+			datasetexample.FieldAddedAt:    {Type: field.TypeTime, Column: datasetexample.FieldAddedAt},
+			datasetexample.FieldSourceType: {Type: field.TypeString, Column: datasetexample.FieldSourceType},
+			datasetexample.FieldSourceID:   {Type: field.TypeString, Column: datasetexample.FieldSourceID},
+			datasetexample.FieldNote:       {Type: field.TypeString, Column: datasetexample.FieldNote},
+		},
+	}
+	graph.Nodes[3] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   evalrun.Table,
+			Columns: evalrun.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: evalrun.FieldID,
+			},
+		},
+		Type: "EvalRun",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			evalrun.FieldDatasetID:    {Type: field.TypeString, Column: evalrun.FieldDatasetID},
+			evalrun.FieldSourceType:   {Type: field.TypeString, Column: evalrun.FieldSourceType},
+			evalrun.FieldSourceID:     {Type: field.TypeString, Column: evalrun.FieldSourceID},
+			evalrun.FieldEvaluatorSet: {Type: field.TypeString, Column: evalrun.FieldEvaluatorSet},
+			evalrun.FieldCreatedAt:    {Type: field.TypeTime, Column: evalrun.FieldCreatedAt},
+			evalrun.FieldCompletedAt:  {Type: field.TypeTime, Column: evalrun.FieldCompletedAt},
+			evalrun.FieldTraceCount:   {Type: field.TypeInt, Column: evalrun.FieldTraceCount},
+			evalrun.FieldScoreCount:   {Type: field.TypeInt, Column: evalrun.FieldScoreCount},
+			evalrun.FieldPassCount:    {Type: field.TypeInt, Column: evalrun.FieldPassCount},
+			evalrun.FieldFailCount:    {Type: field.TypeInt, Column: evalrun.FieldFailCount},
+		},
+	}
+	graph.Nodes[4] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   experimentrun.Table,
+			Columns: experimentrun.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: experimentrun.FieldID,
+			},
+		},
+		Type: "ExperimentRun",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			experimentrun.FieldName:                {Type: field.TypeString, Column: experimentrun.FieldName},
+			experimentrun.FieldDescription:         {Type: field.TypeString, Column: experimentrun.FieldDescription},
+			experimentrun.FieldBaselineEvalRunID:   {Type: field.TypeString, Column: experimentrun.FieldBaselineEvalRunID},
+			experimentrun.FieldCandidateEvalRunID:  {Type: field.TypeString, Column: experimentrun.FieldCandidateEvalRunID},
+			experimentrun.FieldCreatedAt:           {Type: field.TypeTime, Column: experimentrun.FieldCreatedAt},
+			experimentrun.FieldBaselineScoreCount:  {Type: field.TypeInt, Column: experimentrun.FieldBaselineScoreCount},
+			experimentrun.FieldCandidateScoreCount: {Type: field.TypeInt, Column: experimentrun.FieldCandidateScoreCount},
+			experimentrun.FieldBaselinePassRate:    {Type: field.TypeFloat64, Column: experimentrun.FieldBaselinePassRate},
+			experimentrun.FieldCandidatePassRate:   {Type: field.TypeFloat64, Column: experimentrun.FieldCandidatePassRate},
+			experimentrun.FieldPassRateDelta:       {Type: field.TypeFloat64, Column: experimentrun.FieldPassRateDelta},
+			experimentrun.FieldMatchedScoreCount:   {Type: field.TypeInt, Column: experimentrun.FieldMatchedScoreCount},
+			experimentrun.FieldImprovementCount:    {Type: field.TypeInt, Column: experimentrun.FieldImprovementCount},
+			experimentrun.FieldRegressionCount:     {Type: field.TypeInt, Column: experimentrun.FieldRegressionCount},
+		},
+	}
+	graph.Nodes[5] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   score.Table,
+			Columns: score.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: score.FieldID,
+			},
+		},
+		Type: "Score",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			score.FieldTraceID:      {Type: field.TypeString, Column: score.FieldTraceID},
+			score.FieldSessionID:    {Type: field.TypeString, Column: score.FieldSessionID},
+			score.FieldDatasetID:    {Type: field.TypeString, Column: score.FieldDatasetID},
+			score.FieldEvalRunID:    {Type: field.TypeString, Column: score.FieldEvalRunID},
+			score.FieldEvaluatorKey: {Type: field.TypeString, Column: score.FieldEvaluatorKey},
+			score.FieldValue:        {Type: field.TypeFloat64, Column: score.FieldValue},
+			score.FieldStatus:       {Type: field.TypeString, Column: score.FieldStatus},
+			score.FieldLabel:        {Type: field.TypeString, Column: score.FieldLabel},
+			score.FieldExplanation:  {Type: field.TypeString, Column: score.FieldExplanation},
+			score.FieldCreatedAt:    {Type: field.TypeTime, Column: score.FieldCreatedAt},
+		},
+	}
+	graph.Nodes[6] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   tracelog.Table,
+			Columns: tracelog.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: tracelog.FieldID,
+			},
+		},
+		Type: "TraceLog",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			tracelog.FieldTraceID:                        {Type: field.TypeString, Column: tracelog.FieldTraceID},
+			tracelog.FieldModTimeNs:                      {Type: field.TypeInt64, Column: tracelog.FieldModTimeNs},
+			tracelog.FieldFileSize:                       {Type: field.TypeInt64, Column: tracelog.FieldFileSize},
+			tracelog.FieldVersion:                        {Type: field.TypeString, Column: tracelog.FieldVersion},
+			tracelog.FieldRequestID:                      {Type: field.TypeString, Column: tracelog.FieldRequestID},
+			tracelog.FieldRecordedAt:                     {Type: field.TypeTime, Column: tracelog.FieldRecordedAt},
+			tracelog.FieldModel:                          {Type: field.TypeString, Column: tracelog.FieldModel},
+			tracelog.FieldProvider:                       {Type: field.TypeString, Column: tracelog.FieldProvider},
+			tracelog.FieldOperation:                      {Type: field.TypeString, Column: tracelog.FieldOperation},
+			tracelog.FieldEndpoint:                       {Type: field.TypeString, Column: tracelog.FieldEndpoint},
+			tracelog.FieldURL:                            {Type: field.TypeString, Column: tracelog.FieldURL},
+			tracelog.FieldMethod:                         {Type: field.TypeString, Column: tracelog.FieldMethod},
+			tracelog.FieldStatusCode:                     {Type: field.TypeInt, Column: tracelog.FieldStatusCode},
+			tracelog.FieldDurationMs:                     {Type: field.TypeInt64, Column: tracelog.FieldDurationMs},
+			tracelog.FieldTtftMs:                         {Type: field.TypeInt64, Column: tracelog.FieldTtftMs},
+			tracelog.FieldClientIP:                       {Type: field.TypeString, Column: tracelog.FieldClientIP},
+			tracelog.FieldContentLength:                  {Type: field.TypeInt64, Column: tracelog.FieldContentLength},
+			tracelog.FieldErrorText:                      {Type: field.TypeString, Column: tracelog.FieldErrorText},
+			tracelog.FieldPromptTokens:                   {Type: field.TypeInt, Column: tracelog.FieldPromptTokens},
+			tracelog.FieldCompletionTokens:               {Type: field.TypeInt, Column: tracelog.FieldCompletionTokens},
+			tracelog.FieldTotalTokens:                    {Type: field.TypeInt, Column: tracelog.FieldTotalTokens},
+			tracelog.FieldCachedTokens:                   {Type: field.TypeInt, Column: tracelog.FieldCachedTokens},
+			tracelog.FieldReqHeaderLen:                   {Type: field.TypeInt64, Column: tracelog.FieldReqHeaderLen},
+			tracelog.FieldReqBodyLen:                     {Type: field.TypeInt64, Column: tracelog.FieldReqBodyLen},
+			tracelog.FieldResHeaderLen:                   {Type: field.TypeInt64, Column: tracelog.FieldResHeaderLen},
+			tracelog.FieldResBodyLen:                     {Type: field.TypeInt64, Column: tracelog.FieldResBodyLen},
+			tracelog.FieldIsStream:                       {Type: field.TypeBool, Column: tracelog.FieldIsStream},
+			tracelog.FieldSessionID:                      {Type: field.TypeString, Column: tracelog.FieldSessionID},
+			tracelog.FieldSessionSource:                  {Type: field.TypeString, Column: tracelog.FieldSessionSource},
+			tracelog.FieldWindowID:                       {Type: field.TypeString, Column: tracelog.FieldWindowID},
+			tracelog.FieldClientRequestID:                {Type: field.TypeString, Column: tracelog.FieldClientRequestID},
+			tracelog.FieldSelectedUpstreamID:             {Type: field.TypeString, Column: tracelog.FieldSelectedUpstreamID},
+			tracelog.FieldSelectedUpstreamBaseURL:        {Type: field.TypeString, Column: tracelog.FieldSelectedUpstreamBaseURL},
+			tracelog.FieldSelectedUpstreamProviderPreset: {Type: field.TypeString, Column: tracelog.FieldSelectedUpstreamProviderPreset},
+			tracelog.FieldRoutingPolicy:                  {Type: field.TypeString, Column: tracelog.FieldRoutingPolicy},
+			tracelog.FieldRoutingScore:                   {Type: field.TypeFloat64, Column: tracelog.FieldRoutingScore},
+			tracelog.FieldRoutingCandidateCount:          {Type: field.TypeInt, Column: tracelog.FieldRoutingCandidateCount},
+			tracelog.FieldRoutingFailureReason:           {Type: field.TypeString, Column: tracelog.FieldRoutingFailureReason},
+		},
+	}
+	graph.Nodes[7] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   upstreammodel.Table,
+			Columns: upstreammodel.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeInt,
+				Column: upstreammodel.FieldID,
+			},
+		},
+		Type: "UpstreamModel",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			upstreammodel.FieldUpstreamID: {Type: field.TypeString, Column: upstreammodel.FieldUpstreamID},
+			upstreammodel.FieldModel:      {Type: field.TypeString, Column: upstreammodel.FieldModel},
+			upstreammodel.FieldSource:     {Type: field.TypeString, Column: upstreammodel.FieldSource},
+			upstreammodel.FieldSeenAt:     {Type: field.TypeTime, Column: upstreammodel.FieldSeenAt},
+		},
+	}
+	graph.Nodes[8] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   upstreamtarget.Table,
+			Columns: upstreamtarget.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: upstreamtarget.FieldID,
+			},
+		},
+		Type: "UpstreamTarget",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			upstreamtarget.FieldBaseURL:           {Type: field.TypeString, Column: upstreamtarget.FieldBaseURL},
+			upstreamtarget.FieldProviderPreset:    {Type: field.TypeString, Column: upstreamtarget.FieldProviderPreset},
+			upstreamtarget.FieldProtocolFamily:    {Type: field.TypeString, Column: upstreamtarget.FieldProtocolFamily},
+			upstreamtarget.FieldRoutingProfile:    {Type: field.TypeString, Column: upstreamtarget.FieldRoutingProfile},
+			upstreamtarget.FieldEnabled:           {Type: field.TypeBool, Column: upstreamtarget.FieldEnabled},
+			upstreamtarget.FieldPriority:          {Type: field.TypeInt, Column: upstreamtarget.FieldPriority},
+			upstreamtarget.FieldWeight:            {Type: field.TypeFloat64, Column: upstreamtarget.FieldWeight},
+			upstreamtarget.FieldCapacityHint:      {Type: field.TypeFloat64, Column: upstreamtarget.FieldCapacityHint},
+			upstreamtarget.FieldLastRefreshAt:     {Type: field.TypeTime, Column: upstreamtarget.FieldLastRefreshAt},
+			upstreamtarget.FieldLastRefreshStatus: {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshStatus},
+			upstreamtarget.FieldLastRefreshError:  {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshError},
+		},
+	}
+	graph.Nodes[9] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   user.Table,
 			Columns: user.Columns,
@@ -185,6 +394,811 @@ func (f *APITokenFilter) WhereHasUserWith(preds ...predicate.User) {
 }
 
 // addPredicate implements the predicateAdder interface.
+func (_q *DatasetQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the DatasetQuery builder.
+func (_q *DatasetQuery) Filter() *DatasetFilter {
+	return &DatasetFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *DatasetMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the DatasetMutation builder.
+func (m *DatasetMutation) Filter() *DatasetFilter {
+	return &DatasetFilter{config: m.config, predicateAdder: m}
+}
+
+// DatasetFilter provides a generic filtering capability at runtime for DatasetQuery.
+type DatasetFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *DatasetFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[1].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *DatasetFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(dataset.FieldID))
+}
+
+// WhereName applies the entql string predicate on the name field.
+func (f *DatasetFilter) WhereName(p entql.StringP) {
+	f.Where(p.Field(dataset.FieldName))
+}
+
+// WhereDescription applies the entql string predicate on the description field.
+func (f *DatasetFilter) WhereDescription(p entql.StringP) {
+	f.Where(p.Field(dataset.FieldDescription))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *DatasetFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(dataset.FieldCreatedAt))
+}
+
+// WhereUpdatedAt applies the entql time.Time predicate on the updated_at field.
+func (f *DatasetFilter) WhereUpdatedAt(p entql.TimeP) {
+	f.Where(p.Field(dataset.FieldUpdatedAt))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *DatasetExampleQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the DatasetExampleQuery builder.
+func (_q *DatasetExampleQuery) Filter() *DatasetExampleFilter {
+	return &DatasetExampleFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *DatasetExampleMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the DatasetExampleMutation builder.
+func (m *DatasetExampleMutation) Filter() *DatasetExampleFilter {
+	return &DatasetExampleFilter{config: m.config, predicateAdder: m}
+}
+
+// DatasetExampleFilter provides a generic filtering capability at runtime for DatasetExampleQuery.
+type DatasetExampleFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *DatasetExampleFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[2].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql int predicate on the id field.
+func (f *DatasetExampleFilter) WhereID(p entql.IntP) {
+	f.Where(p.Field(datasetexample.FieldID))
+}
+
+// WhereDatasetID applies the entql string predicate on the dataset_id field.
+func (f *DatasetExampleFilter) WhereDatasetID(p entql.StringP) {
+	f.Where(p.Field(datasetexample.FieldDatasetID))
+}
+
+// WhereTraceID applies the entql string predicate on the trace_id field.
+func (f *DatasetExampleFilter) WhereTraceID(p entql.StringP) {
+	f.Where(p.Field(datasetexample.FieldTraceID))
+}
+
+// WherePosition applies the entql int predicate on the position field.
+func (f *DatasetExampleFilter) WherePosition(p entql.IntP) {
+	f.Where(p.Field(datasetexample.FieldPosition))
+}
+
+// WhereAddedAt applies the entql time.Time predicate on the added_at field.
+func (f *DatasetExampleFilter) WhereAddedAt(p entql.TimeP) {
+	f.Where(p.Field(datasetexample.FieldAddedAt))
+}
+
+// WhereSourceType applies the entql string predicate on the source_type field.
+func (f *DatasetExampleFilter) WhereSourceType(p entql.StringP) {
+	f.Where(p.Field(datasetexample.FieldSourceType))
+}
+
+// WhereSourceID applies the entql string predicate on the source_id field.
+func (f *DatasetExampleFilter) WhereSourceID(p entql.StringP) {
+	f.Where(p.Field(datasetexample.FieldSourceID))
+}
+
+// WhereNote applies the entql string predicate on the note field.
+func (f *DatasetExampleFilter) WhereNote(p entql.StringP) {
+	f.Where(p.Field(datasetexample.FieldNote))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *EvalRunQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the EvalRunQuery builder.
+func (_q *EvalRunQuery) Filter() *EvalRunFilter {
+	return &EvalRunFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *EvalRunMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the EvalRunMutation builder.
+func (m *EvalRunMutation) Filter() *EvalRunFilter {
+	return &EvalRunFilter{config: m.config, predicateAdder: m}
+}
+
+// EvalRunFilter provides a generic filtering capability at runtime for EvalRunQuery.
+type EvalRunFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *EvalRunFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[3].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *EvalRunFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(evalrun.FieldID))
+}
+
+// WhereDatasetID applies the entql string predicate on the dataset_id field.
+func (f *EvalRunFilter) WhereDatasetID(p entql.StringP) {
+	f.Where(p.Field(evalrun.FieldDatasetID))
+}
+
+// WhereSourceType applies the entql string predicate on the source_type field.
+func (f *EvalRunFilter) WhereSourceType(p entql.StringP) {
+	f.Where(p.Field(evalrun.FieldSourceType))
+}
+
+// WhereSourceID applies the entql string predicate on the source_id field.
+func (f *EvalRunFilter) WhereSourceID(p entql.StringP) {
+	f.Where(p.Field(evalrun.FieldSourceID))
+}
+
+// WhereEvaluatorSet applies the entql string predicate on the evaluator_set field.
+func (f *EvalRunFilter) WhereEvaluatorSet(p entql.StringP) {
+	f.Where(p.Field(evalrun.FieldEvaluatorSet))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *EvalRunFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(evalrun.FieldCreatedAt))
+}
+
+// WhereCompletedAt applies the entql time.Time predicate on the completed_at field.
+func (f *EvalRunFilter) WhereCompletedAt(p entql.TimeP) {
+	f.Where(p.Field(evalrun.FieldCompletedAt))
+}
+
+// WhereTraceCount applies the entql int predicate on the trace_count field.
+func (f *EvalRunFilter) WhereTraceCount(p entql.IntP) {
+	f.Where(p.Field(evalrun.FieldTraceCount))
+}
+
+// WhereScoreCount applies the entql int predicate on the score_count field.
+func (f *EvalRunFilter) WhereScoreCount(p entql.IntP) {
+	f.Where(p.Field(evalrun.FieldScoreCount))
+}
+
+// WherePassCount applies the entql int predicate on the pass_count field.
+func (f *EvalRunFilter) WherePassCount(p entql.IntP) {
+	f.Where(p.Field(evalrun.FieldPassCount))
+}
+
+// WhereFailCount applies the entql int predicate on the fail_count field.
+func (f *EvalRunFilter) WhereFailCount(p entql.IntP) {
+	f.Where(p.Field(evalrun.FieldFailCount))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *ExperimentRunQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ExperimentRunQuery builder.
+func (_q *ExperimentRunQuery) Filter() *ExperimentRunFilter {
+	return &ExperimentRunFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ExperimentRunMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ExperimentRunMutation builder.
+func (m *ExperimentRunMutation) Filter() *ExperimentRunFilter {
+	return &ExperimentRunFilter{config: m.config, predicateAdder: m}
+}
+
+// ExperimentRunFilter provides a generic filtering capability at runtime for ExperimentRunQuery.
+type ExperimentRunFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ExperimentRunFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[4].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ExperimentRunFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(experimentrun.FieldID))
+}
+
+// WhereName applies the entql string predicate on the name field.
+func (f *ExperimentRunFilter) WhereName(p entql.StringP) {
+	f.Where(p.Field(experimentrun.FieldName))
+}
+
+// WhereDescription applies the entql string predicate on the description field.
+func (f *ExperimentRunFilter) WhereDescription(p entql.StringP) {
+	f.Where(p.Field(experimentrun.FieldDescription))
+}
+
+// WhereBaselineEvalRunID applies the entql string predicate on the baseline_eval_run_id field.
+func (f *ExperimentRunFilter) WhereBaselineEvalRunID(p entql.StringP) {
+	f.Where(p.Field(experimentrun.FieldBaselineEvalRunID))
+}
+
+// WhereCandidateEvalRunID applies the entql string predicate on the candidate_eval_run_id field.
+func (f *ExperimentRunFilter) WhereCandidateEvalRunID(p entql.StringP) {
+	f.Where(p.Field(experimentrun.FieldCandidateEvalRunID))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *ExperimentRunFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(experimentrun.FieldCreatedAt))
+}
+
+// WhereBaselineScoreCount applies the entql int predicate on the baseline_score_count field.
+func (f *ExperimentRunFilter) WhereBaselineScoreCount(p entql.IntP) {
+	f.Where(p.Field(experimentrun.FieldBaselineScoreCount))
+}
+
+// WhereCandidateScoreCount applies the entql int predicate on the candidate_score_count field.
+func (f *ExperimentRunFilter) WhereCandidateScoreCount(p entql.IntP) {
+	f.Where(p.Field(experimentrun.FieldCandidateScoreCount))
+}
+
+// WhereBaselinePassRate applies the entql float64 predicate on the baseline_pass_rate field.
+func (f *ExperimentRunFilter) WhereBaselinePassRate(p entql.Float64P) {
+	f.Where(p.Field(experimentrun.FieldBaselinePassRate))
+}
+
+// WhereCandidatePassRate applies the entql float64 predicate on the candidate_pass_rate field.
+func (f *ExperimentRunFilter) WhereCandidatePassRate(p entql.Float64P) {
+	f.Where(p.Field(experimentrun.FieldCandidatePassRate))
+}
+
+// WherePassRateDelta applies the entql float64 predicate on the pass_rate_delta field.
+func (f *ExperimentRunFilter) WherePassRateDelta(p entql.Float64P) {
+	f.Where(p.Field(experimentrun.FieldPassRateDelta))
+}
+
+// WhereMatchedScoreCount applies the entql int predicate on the matched_score_count field.
+func (f *ExperimentRunFilter) WhereMatchedScoreCount(p entql.IntP) {
+	f.Where(p.Field(experimentrun.FieldMatchedScoreCount))
+}
+
+// WhereImprovementCount applies the entql int predicate on the improvement_count field.
+func (f *ExperimentRunFilter) WhereImprovementCount(p entql.IntP) {
+	f.Where(p.Field(experimentrun.FieldImprovementCount))
+}
+
+// WhereRegressionCount applies the entql int predicate on the regression_count field.
+func (f *ExperimentRunFilter) WhereRegressionCount(p entql.IntP) {
+	f.Where(p.Field(experimentrun.FieldRegressionCount))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *ScoreQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ScoreQuery builder.
+func (_q *ScoreQuery) Filter() *ScoreFilter {
+	return &ScoreFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ScoreMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ScoreMutation builder.
+func (m *ScoreMutation) Filter() *ScoreFilter {
+	return &ScoreFilter{config: m.config, predicateAdder: m}
+}
+
+// ScoreFilter provides a generic filtering capability at runtime for ScoreQuery.
+type ScoreFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ScoreFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[5].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ScoreFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(score.FieldID))
+}
+
+// WhereTraceID applies the entql string predicate on the trace_id field.
+func (f *ScoreFilter) WhereTraceID(p entql.StringP) {
+	f.Where(p.Field(score.FieldTraceID))
+}
+
+// WhereSessionID applies the entql string predicate on the session_id field.
+func (f *ScoreFilter) WhereSessionID(p entql.StringP) {
+	f.Where(p.Field(score.FieldSessionID))
+}
+
+// WhereDatasetID applies the entql string predicate on the dataset_id field.
+func (f *ScoreFilter) WhereDatasetID(p entql.StringP) {
+	f.Where(p.Field(score.FieldDatasetID))
+}
+
+// WhereEvalRunID applies the entql string predicate on the eval_run_id field.
+func (f *ScoreFilter) WhereEvalRunID(p entql.StringP) {
+	f.Where(p.Field(score.FieldEvalRunID))
+}
+
+// WhereEvaluatorKey applies the entql string predicate on the evaluator_key field.
+func (f *ScoreFilter) WhereEvaluatorKey(p entql.StringP) {
+	f.Where(p.Field(score.FieldEvaluatorKey))
+}
+
+// WhereValue applies the entql float64 predicate on the value field.
+func (f *ScoreFilter) WhereValue(p entql.Float64P) {
+	f.Where(p.Field(score.FieldValue))
+}
+
+// WhereStatus applies the entql string predicate on the status field.
+func (f *ScoreFilter) WhereStatus(p entql.StringP) {
+	f.Where(p.Field(score.FieldStatus))
+}
+
+// WhereLabel applies the entql string predicate on the label field.
+func (f *ScoreFilter) WhereLabel(p entql.StringP) {
+	f.Where(p.Field(score.FieldLabel))
+}
+
+// WhereExplanation applies the entql string predicate on the explanation field.
+func (f *ScoreFilter) WhereExplanation(p entql.StringP) {
+	f.Where(p.Field(score.FieldExplanation))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *ScoreFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(score.FieldCreatedAt))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *TraceLogQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the TraceLogQuery builder.
+func (_q *TraceLogQuery) Filter() *TraceLogFilter {
+	return &TraceLogFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *TraceLogMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the TraceLogMutation builder.
+func (m *TraceLogMutation) Filter() *TraceLogFilter {
+	return &TraceLogFilter{config: m.config, predicateAdder: m}
+}
+
+// TraceLogFilter provides a generic filtering capability at runtime for TraceLogQuery.
+type TraceLogFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *TraceLogFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[6].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *TraceLogFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldID))
+}
+
+// WhereTraceID applies the entql string predicate on the trace_id field.
+func (f *TraceLogFilter) WhereTraceID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldTraceID))
+}
+
+// WhereModTimeNs applies the entql int64 predicate on the mod_time_ns field.
+func (f *TraceLogFilter) WhereModTimeNs(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldModTimeNs))
+}
+
+// WhereFileSize applies the entql int64 predicate on the file_size field.
+func (f *TraceLogFilter) WhereFileSize(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldFileSize))
+}
+
+// WhereVersion applies the entql string predicate on the version field.
+func (f *TraceLogFilter) WhereVersion(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldVersion))
+}
+
+// WhereRequestID applies the entql string predicate on the request_id field.
+func (f *TraceLogFilter) WhereRequestID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldRequestID))
+}
+
+// WhereRecordedAt applies the entql time.Time predicate on the recorded_at field.
+func (f *TraceLogFilter) WhereRecordedAt(p entql.TimeP) {
+	f.Where(p.Field(tracelog.FieldRecordedAt))
+}
+
+// WhereModel applies the entql string predicate on the model field.
+func (f *TraceLogFilter) WhereModel(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldModel))
+}
+
+// WhereProvider applies the entql string predicate on the provider field.
+func (f *TraceLogFilter) WhereProvider(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldProvider))
+}
+
+// WhereOperation applies the entql string predicate on the operation field.
+func (f *TraceLogFilter) WhereOperation(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldOperation))
+}
+
+// WhereEndpoint applies the entql string predicate on the endpoint field.
+func (f *TraceLogFilter) WhereEndpoint(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldEndpoint))
+}
+
+// WhereURL applies the entql string predicate on the url field.
+func (f *TraceLogFilter) WhereURL(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldURL))
+}
+
+// WhereMethod applies the entql string predicate on the method field.
+func (f *TraceLogFilter) WhereMethod(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldMethod))
+}
+
+// WhereStatusCode applies the entql int predicate on the status_code field.
+func (f *TraceLogFilter) WhereStatusCode(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldStatusCode))
+}
+
+// WhereDurationMs applies the entql int64 predicate on the duration_ms field.
+func (f *TraceLogFilter) WhereDurationMs(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldDurationMs))
+}
+
+// WhereTtftMs applies the entql int64 predicate on the ttft_ms field.
+func (f *TraceLogFilter) WhereTtftMs(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldTtftMs))
+}
+
+// WhereClientIP applies the entql string predicate on the client_ip field.
+func (f *TraceLogFilter) WhereClientIP(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientIP))
+}
+
+// WhereContentLength applies the entql int64 predicate on the content_length field.
+func (f *TraceLogFilter) WhereContentLength(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldContentLength))
+}
+
+// WhereErrorText applies the entql string predicate on the error_text field.
+func (f *TraceLogFilter) WhereErrorText(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldErrorText))
+}
+
+// WherePromptTokens applies the entql int predicate on the prompt_tokens field.
+func (f *TraceLogFilter) WherePromptTokens(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldPromptTokens))
+}
+
+// WhereCompletionTokens applies the entql int predicate on the completion_tokens field.
+func (f *TraceLogFilter) WhereCompletionTokens(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldCompletionTokens))
+}
+
+// WhereTotalTokens applies the entql int predicate on the total_tokens field.
+func (f *TraceLogFilter) WhereTotalTokens(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldTotalTokens))
+}
+
+// WhereCachedTokens applies the entql int predicate on the cached_tokens field.
+func (f *TraceLogFilter) WhereCachedTokens(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldCachedTokens))
+}
+
+// WhereReqHeaderLen applies the entql int64 predicate on the req_header_len field.
+func (f *TraceLogFilter) WhereReqHeaderLen(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldReqHeaderLen))
+}
+
+// WhereReqBodyLen applies the entql int64 predicate on the req_body_len field.
+func (f *TraceLogFilter) WhereReqBodyLen(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldReqBodyLen))
+}
+
+// WhereResHeaderLen applies the entql int64 predicate on the res_header_len field.
+func (f *TraceLogFilter) WhereResHeaderLen(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldResHeaderLen))
+}
+
+// WhereResBodyLen applies the entql int64 predicate on the res_body_len field.
+func (f *TraceLogFilter) WhereResBodyLen(p entql.Int64P) {
+	f.Where(p.Field(tracelog.FieldResBodyLen))
+}
+
+// WhereIsStream applies the entql bool predicate on the is_stream field.
+func (f *TraceLogFilter) WhereIsStream(p entql.BoolP) {
+	f.Where(p.Field(tracelog.FieldIsStream))
+}
+
+// WhereSessionID applies the entql string predicate on the session_id field.
+func (f *TraceLogFilter) WhereSessionID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldSessionID))
+}
+
+// WhereSessionSource applies the entql string predicate on the session_source field.
+func (f *TraceLogFilter) WhereSessionSource(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldSessionSource))
+}
+
+// WhereWindowID applies the entql string predicate on the window_id field.
+func (f *TraceLogFilter) WhereWindowID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldWindowID))
+}
+
+// WhereClientRequestID applies the entql string predicate on the client_request_id field.
+func (f *TraceLogFilter) WhereClientRequestID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldClientRequestID))
+}
+
+// WhereSelectedUpstreamID applies the entql string predicate on the selected_upstream_id field.
+func (f *TraceLogFilter) WhereSelectedUpstreamID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldSelectedUpstreamID))
+}
+
+// WhereSelectedUpstreamBaseURL applies the entql string predicate on the selected_upstream_base_url field.
+func (f *TraceLogFilter) WhereSelectedUpstreamBaseURL(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldSelectedUpstreamBaseURL))
+}
+
+// WhereSelectedUpstreamProviderPreset applies the entql string predicate on the selected_upstream_provider_preset field.
+func (f *TraceLogFilter) WhereSelectedUpstreamProviderPreset(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldSelectedUpstreamProviderPreset))
+}
+
+// WhereRoutingPolicy applies the entql string predicate on the routing_policy field.
+func (f *TraceLogFilter) WhereRoutingPolicy(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldRoutingPolicy))
+}
+
+// WhereRoutingScore applies the entql float64 predicate on the routing_score field.
+func (f *TraceLogFilter) WhereRoutingScore(p entql.Float64P) {
+	f.Where(p.Field(tracelog.FieldRoutingScore))
+}
+
+// WhereRoutingCandidateCount applies the entql int predicate on the routing_candidate_count field.
+func (f *TraceLogFilter) WhereRoutingCandidateCount(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldRoutingCandidateCount))
+}
+
+// WhereRoutingFailureReason applies the entql string predicate on the routing_failure_reason field.
+func (f *TraceLogFilter) WhereRoutingFailureReason(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldRoutingFailureReason))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *UpstreamModelQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the UpstreamModelQuery builder.
+func (_q *UpstreamModelQuery) Filter() *UpstreamModelFilter {
+	return &UpstreamModelFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *UpstreamModelMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the UpstreamModelMutation builder.
+func (m *UpstreamModelMutation) Filter() *UpstreamModelFilter {
+	return &UpstreamModelFilter{config: m.config, predicateAdder: m}
+}
+
+// UpstreamModelFilter provides a generic filtering capability at runtime for UpstreamModelQuery.
+type UpstreamModelFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *UpstreamModelFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[7].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql int predicate on the id field.
+func (f *UpstreamModelFilter) WhereID(p entql.IntP) {
+	f.Where(p.Field(upstreammodel.FieldID))
+}
+
+// WhereUpstreamID applies the entql string predicate on the upstream_id field.
+func (f *UpstreamModelFilter) WhereUpstreamID(p entql.StringP) {
+	f.Where(p.Field(upstreammodel.FieldUpstreamID))
+}
+
+// WhereModel applies the entql string predicate on the model field.
+func (f *UpstreamModelFilter) WhereModel(p entql.StringP) {
+	f.Where(p.Field(upstreammodel.FieldModel))
+}
+
+// WhereSource applies the entql string predicate on the source field.
+func (f *UpstreamModelFilter) WhereSource(p entql.StringP) {
+	f.Where(p.Field(upstreammodel.FieldSource))
+}
+
+// WhereSeenAt applies the entql time.Time predicate on the seen_at field.
+func (f *UpstreamModelFilter) WhereSeenAt(p entql.TimeP) {
+	f.Where(p.Field(upstreammodel.FieldSeenAt))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *UpstreamTargetQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the UpstreamTargetQuery builder.
+func (_q *UpstreamTargetQuery) Filter() *UpstreamTargetFilter {
+	return &UpstreamTargetFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *UpstreamTargetMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the UpstreamTargetMutation builder.
+func (m *UpstreamTargetMutation) Filter() *UpstreamTargetFilter {
+	return &UpstreamTargetFilter{config: m.config, predicateAdder: m}
+}
+
+// UpstreamTargetFilter provides a generic filtering capability at runtime for UpstreamTargetQuery.
+type UpstreamTargetFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *UpstreamTargetFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[8].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *UpstreamTargetFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldID))
+}
+
+// WhereBaseURL applies the entql string predicate on the base_url field.
+func (f *UpstreamTargetFilter) WhereBaseURL(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldBaseURL))
+}
+
+// WhereProviderPreset applies the entql string predicate on the provider_preset field.
+func (f *UpstreamTargetFilter) WhereProviderPreset(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldProviderPreset))
+}
+
+// WhereProtocolFamily applies the entql string predicate on the protocol_family field.
+func (f *UpstreamTargetFilter) WhereProtocolFamily(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldProtocolFamily))
+}
+
+// WhereRoutingProfile applies the entql string predicate on the routing_profile field.
+func (f *UpstreamTargetFilter) WhereRoutingProfile(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldRoutingProfile))
+}
+
+// WhereEnabled applies the entql bool predicate on the enabled field.
+func (f *UpstreamTargetFilter) WhereEnabled(p entql.BoolP) {
+	f.Where(p.Field(upstreamtarget.FieldEnabled))
+}
+
+// WherePriority applies the entql int predicate on the priority field.
+func (f *UpstreamTargetFilter) WherePriority(p entql.IntP) {
+	f.Where(p.Field(upstreamtarget.FieldPriority))
+}
+
+// WhereWeight applies the entql float64 predicate on the weight field.
+func (f *UpstreamTargetFilter) WhereWeight(p entql.Float64P) {
+	f.Where(p.Field(upstreamtarget.FieldWeight))
+}
+
+// WhereCapacityHint applies the entql float64 predicate on the capacity_hint field.
+func (f *UpstreamTargetFilter) WhereCapacityHint(p entql.Float64P) {
+	f.Where(p.Field(upstreamtarget.FieldCapacityHint))
+}
+
+// WhereLastRefreshAt applies the entql time.Time predicate on the last_refresh_at field.
+func (f *UpstreamTargetFilter) WhereLastRefreshAt(p entql.TimeP) {
+	f.Where(p.Field(upstreamtarget.FieldLastRefreshAt))
+}
+
+// WhereLastRefreshStatus applies the entql string predicate on the last_refresh_status field.
+func (f *UpstreamTargetFilter) WhereLastRefreshStatus(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldLastRefreshStatus))
+}
+
+// WhereLastRefreshError applies the entql string predicate on the last_refresh_error field.
+func (f *UpstreamTargetFilter) WhereLastRefreshError(p entql.StringP) {
+	f.Where(p.Field(upstreamtarget.FieldLastRefreshError))
+}
+
+// addPredicate implements the predicateAdder interface.
 func (_q *UserQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -213,7 +1227,7 @@ type UserFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UserFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[1].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})

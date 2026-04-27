@@ -48,6 +48,272 @@ var (
 			},
 		},
 	}
+	// DatasetsColumns holds the columns for the "datasets" table.
+	DatasetsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "name", Type: field.TypeString},
+		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// DatasetsTable holds the schema information for the "datasets" table.
+	DatasetsTable = &schema.Table{
+		Name:       "datasets",
+		Columns:    DatasetsColumns,
+		PrimaryKey: []*schema.Column{DatasetsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "dataset_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{DatasetsColumns[4]},
+			},
+		},
+	}
+	// DatasetExamplesColumns holds the columns for the "dataset_examples" table.
+	DatasetExamplesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "dataset_id", Type: field.TypeString},
+		{Name: "trace_id", Type: field.TypeString},
+		{Name: "position", Type: field.TypeInt, Default: 0},
+		{Name: "added_at", Type: field.TypeTime},
+		{Name: "source_type", Type: field.TypeString, Default: ""},
+		{Name: "source_id", Type: field.TypeString, Default: ""},
+		{Name: "note", Type: field.TypeString, Default: ""},
+	}
+	// DatasetExamplesTable holds the schema information for the "dataset_examples" table.
+	DatasetExamplesTable = &schema.Table{
+		Name:       "dataset_examples",
+		Columns:    DatasetExamplesColumns,
+		PrimaryKey: []*schema.Column{DatasetExamplesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "datasetexample_dataset_id_trace_id",
+				Unique:  true,
+				Columns: []*schema.Column{DatasetExamplesColumns[1], DatasetExamplesColumns[2]},
+			},
+			{
+				Name:    "datasetexample_dataset_id_position",
+				Unique:  false,
+				Columns: []*schema.Column{DatasetExamplesColumns[1], DatasetExamplesColumns[3]},
+			},
+		},
+	}
+	// EvalRunsColumns holds the columns for the "eval_runs" table.
+	EvalRunsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "dataset_id", Type: field.TypeString, Default: ""},
+		{Name: "source_type", Type: field.TypeString, Default: ""},
+		{Name: "source_id", Type: field.TypeString, Default: ""},
+		{Name: "evaluator_set", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "completed_at", Type: field.TypeTime},
+		{Name: "trace_count", Type: field.TypeInt, Default: 0},
+		{Name: "score_count", Type: field.TypeInt, Default: 0},
+		{Name: "pass_count", Type: field.TypeInt, Default: 0},
+		{Name: "fail_count", Type: field.TypeInt, Default: 0},
+	}
+	// EvalRunsTable holds the schema information for the "eval_runs" table.
+	EvalRunsTable = &schema.Table{
+		Name:       "eval_runs",
+		Columns:    EvalRunsColumns,
+		PrimaryKey: []*schema.Column{EvalRunsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "evalrun_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{EvalRunsColumns[5]},
+			},
+		},
+	}
+	// ExperimentRunsColumns holds the columns for the "experiment_runs" table.
+	ExperimentRunsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "name", Type: field.TypeString, Default: ""},
+		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "baseline_eval_run_id", Type: field.TypeString},
+		{Name: "candidate_eval_run_id", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "baseline_score_count", Type: field.TypeInt, Default: 0},
+		{Name: "candidate_score_count", Type: field.TypeInt, Default: 0},
+		{Name: "baseline_pass_rate", Type: field.TypeFloat64, Default: 0},
+		{Name: "candidate_pass_rate", Type: field.TypeFloat64, Default: 0},
+		{Name: "pass_rate_delta", Type: field.TypeFloat64, Default: 0},
+		{Name: "matched_score_count", Type: field.TypeInt, Default: 0},
+		{Name: "improvement_count", Type: field.TypeInt, Default: 0},
+		{Name: "regression_count", Type: field.TypeInt, Default: 0},
+	}
+	// ExperimentRunsTable holds the schema information for the "experiment_runs" table.
+	ExperimentRunsTable = &schema.Table{
+		Name:       "experiment_runs",
+		Columns:    ExperimentRunsColumns,
+		PrimaryKey: []*schema.Column{ExperimentRunsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "experimentrun_created_at_id",
+				Unique:  false,
+				Columns: []*schema.Column{ExperimentRunsColumns[5], ExperimentRunsColumns[0]},
+			},
+		},
+	}
+	// ScoresColumns holds the columns for the "scores" table.
+	ScoresColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "trace_id", Type: field.TypeString},
+		{Name: "session_id", Type: field.TypeString, Default: ""},
+		{Name: "dataset_id", Type: field.TypeString, Default: ""},
+		{Name: "eval_run_id", Type: field.TypeString, Default: ""},
+		{Name: "evaluator_key", Type: field.TypeString},
+		{Name: "value", Type: field.TypeFloat64, Default: 0},
+		{Name: "status", Type: field.TypeString, Default: ""},
+		{Name: "label", Type: field.TypeString, Default: ""},
+		{Name: "explanation", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// ScoresTable holds the schema information for the "scores" table.
+	ScoresTable = &schema.Table{
+		Name:       "scores",
+		Columns:    ScoresColumns,
+		PrimaryKey: []*schema.Column{ScoresColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "score_trace_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ScoresColumns[1], ScoresColumns[10]},
+			},
+			{
+				Name:    "score_session_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ScoresColumns[2], ScoresColumns[10]},
+			},
+			{
+				Name:    "score_dataset_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ScoresColumns[3], ScoresColumns[10]},
+			},
+			{
+				Name:    "score_eval_run_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ScoresColumns[4], ScoresColumns[10]},
+			},
+		},
+	}
+	// LogsColumns holds the columns for the "logs" table.
+	LogsColumns = []*schema.Column{
+		{Name: "path", Type: field.TypeString},
+		{Name: "trace_id", Type: field.TypeString, Unique: true},
+		{Name: "mod_time_ns", Type: field.TypeInt64},
+		{Name: "file_size", Type: field.TypeInt64},
+		{Name: "version", Type: field.TypeString},
+		{Name: "request_id", Type: field.TypeString, Default: ""},
+		{Name: "recorded_at", Type: field.TypeTime},
+		{Name: "model", Type: field.TypeString, Default: ""},
+		{Name: "provider", Type: field.TypeString, Default: ""},
+		{Name: "operation", Type: field.TypeString, Default: ""},
+		{Name: "endpoint", Type: field.TypeString, Default: ""},
+		{Name: "url", Type: field.TypeString, Default: ""},
+		{Name: "method", Type: field.TypeString, Default: ""},
+		{Name: "status_code", Type: field.TypeInt, Default: 0},
+		{Name: "duration_ms", Type: field.TypeInt64, Default: 0},
+		{Name: "ttft_ms", Type: field.TypeInt64, Default: 0},
+		{Name: "client_ip", Type: field.TypeString, Default: ""},
+		{Name: "content_length", Type: field.TypeInt64, Default: 0},
+		{Name: "error_text", Type: field.TypeString, Default: ""},
+		{Name: "prompt_tokens", Type: field.TypeInt, Default: 0},
+		{Name: "completion_tokens", Type: field.TypeInt, Default: 0},
+		{Name: "total_tokens", Type: field.TypeInt, Default: 0},
+		{Name: "cached_tokens", Type: field.TypeInt, Default: 0},
+		{Name: "req_header_len", Type: field.TypeInt64, Default: 0},
+		{Name: "req_body_len", Type: field.TypeInt64, Default: 0},
+		{Name: "res_header_len", Type: field.TypeInt64, Default: 0},
+		{Name: "res_body_len", Type: field.TypeInt64, Default: 0},
+		{Name: "is_stream", Type: field.TypeBool, Default: false},
+		{Name: "session_id", Type: field.TypeString, Default: ""},
+		{Name: "session_source", Type: field.TypeString, Default: ""},
+		{Name: "window_id", Type: field.TypeString, Default: ""},
+		{Name: "client_request_id", Type: field.TypeString, Default: ""},
+		{Name: "selected_upstream_id", Type: field.TypeString, Default: ""},
+		{Name: "selected_upstream_base_url", Type: field.TypeString, Default: ""},
+		{Name: "selected_upstream_provider_preset", Type: field.TypeString, Default: ""},
+		{Name: "routing_policy", Type: field.TypeString, Default: ""},
+		{Name: "routing_score", Type: field.TypeFloat64, Default: 0},
+		{Name: "routing_candidate_count", Type: field.TypeInt, Default: 0},
+		{Name: "routing_failure_reason", Type: field.TypeString, Default: ""},
+	}
+	// LogsTable holds the schema information for the "logs" table.
+	LogsTable = &schema.Table{
+		Name:       "logs",
+		Columns:    LogsColumns,
+		PrimaryKey: []*schema.Column{LogsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "tracelog_recorded_at",
+				Unique:  false,
+				Columns: []*schema.Column{LogsColumns[6]},
+			},
+			{
+				Name:    "tracelog_model_recorded_at",
+				Unique:  false,
+				Columns: []*schema.Column{LogsColumns[7], LogsColumns[6]},
+			},
+			{
+				Name:    "tracelog_session_id_recorded_at",
+				Unique:  false,
+				Columns: []*schema.Column{LogsColumns[28], LogsColumns[6]},
+			},
+			{
+				Name:    "tracelog_request_id",
+				Unique:  false,
+				Columns: []*schema.Column{LogsColumns[5]},
+			},
+		},
+	}
+	// UpstreamModelsColumns holds the columns for the "upstream_models" table.
+	UpstreamModelsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "upstream_id", Type: field.TypeString},
+		{Name: "model", Type: field.TypeString},
+		{Name: "source", Type: field.TypeString, Default: ""},
+		{Name: "seen_at", Type: field.TypeTime},
+	}
+	// UpstreamModelsTable holds the schema information for the "upstream_models" table.
+	UpstreamModelsTable = &schema.Table{
+		Name:       "upstream_models",
+		Columns:    UpstreamModelsColumns,
+		PrimaryKey: []*schema.Column{UpstreamModelsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "upstreammodel_upstream_id_model",
+				Unique:  true,
+				Columns: []*schema.Column{UpstreamModelsColumns[1], UpstreamModelsColumns[2]},
+			},
+			{
+				Name:    "upstreammodel_model",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamModelsColumns[2]},
+			},
+		},
+	}
+	// UpstreamTargetsColumns holds the columns for the "upstream_targets" table.
+	UpstreamTargetsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "base_url", Type: field.TypeString, Default: ""},
+		{Name: "provider_preset", Type: field.TypeString, Default: ""},
+		{Name: "protocol_family", Type: field.TypeString, Default: ""},
+		{Name: "routing_profile", Type: field.TypeString, Default: ""},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "priority", Type: field.TypeInt, Default: 0},
+		{Name: "weight", Type: field.TypeFloat64, Default: 0},
+		{Name: "capacity_hint", Type: field.TypeFloat64, Default: 0},
+		{Name: "last_refresh_at", Type: field.TypeTime, Nullable: true},
+		{Name: "last_refresh_status", Type: field.TypeString, Default: ""},
+		{Name: "last_refresh_error", Type: field.TypeString, Default: ""},
+	}
+	// UpstreamTargetsTable holds the schema information for the "upstream_targets" table.
+	UpstreamTargetsTable = &schema.Table{
+		Name:       "upstream_targets",
+		Columns:    UpstreamTargetsColumns,
+		PrimaryKey: []*schema.Column{UpstreamTargetsColumns[0]},
+	}
 	// UsersColumns holds the columns for the "users" table.
 	UsersColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
@@ -68,6 +334,14 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APITokensTable,
+		DatasetsTable,
+		DatasetExamplesTable,
+		EvalRunsTable,
+		ExperimentRunsTable,
+		ScoresTable,
+		LogsTable,
+		UpstreamModelsTable,
+		UpstreamTargetsTable,
 		UsersTable,
 	}
 )
@@ -76,6 +350,38 @@ func init() {
 	APITokensTable.ForeignKeys[0].RefTable = UsersTable
 	APITokensTable.Annotation = &entsql.Annotation{
 		IncrementStart: func(i int) *int { return &i }(0),
+	}
+	DatasetsTable.Annotation = &entsql.Annotation{
+		Table:          "datasets",
+		IncrementStart: func(i int) *int { return &i }(8589934592),
+	}
+	DatasetExamplesTable.Annotation = &entsql.Annotation{
+		Table:          "dataset_examples",
+		IncrementStart: func(i int) *int { return &i }(12884901888),
+	}
+	EvalRunsTable.Annotation = &entsql.Annotation{
+		Table:          "eval_runs",
+		IncrementStart: func(i int) *int { return &i }(17179869184),
+	}
+	ExperimentRunsTable.Annotation = &entsql.Annotation{
+		Table:          "experiment_runs",
+		IncrementStart: func(i int) *int { return &i }(21474836480),
+	}
+	ScoresTable.Annotation = &entsql.Annotation{
+		Table:          "scores",
+		IncrementStart: func(i int) *int { return &i }(25769803776),
+	}
+	LogsTable.Annotation = &entsql.Annotation{
+		Table:          "logs",
+		IncrementStart: func(i int) *int { return &i }(30064771072),
+	}
+	UpstreamModelsTable.Annotation = &entsql.Annotation{
+		Table:          "upstream_models",
+		IncrementStart: func(i int) *int { return &i }(34359738368),
+	}
+	UpstreamTargetsTable.Annotation = &entsql.Annotation{
+		Table:          "upstream_targets",
+		IncrementStart: func(i int) *int { return &i }(38654705664),
 	}
 	UsersTable.Annotation = &entsql.Annotation{
 		IncrementStart: func(i int) *int { return &i }(4294967296),

@@ -895,17 +895,34 @@ func sortedCountItems(counts map[string]int) []CountItem {
 }
 
 func New(outputDir string) (*Store, error) {
+	return NewWithDatabase(outputDir, "sqlite", filepath.Join(outputDir, "trace_index.sqlite3"), 4, 4)
+}
+
+func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, err
 	}
-
-	dbPath := filepath.Join(outputDir, "trace_index.sqlite3")
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "" {
+		driver = "sqlite"
+	}
+	if driver != "sqlite" {
+		return nil, fmt.Errorf("store driver %q is not supported yet", driver)
+	}
+	dbPath := dsn
+	if strings.TrimSpace(dbPath) == "" {
+		dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
+	}
 	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
+	if maxOpenConns > 0 {
+		db.SetMaxOpenConns(maxOpenConns)
+	}
+	if maxIdleConns > 0 {
+		db.SetMaxIdleConns(maxIdleConns)
+	}
 
 	st := &Store{
 		db:        db,

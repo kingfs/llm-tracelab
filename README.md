@@ -94,9 +94,18 @@ monitor:
   port: "8081"
   auth_token: "" # 兼容旧静态 token；推荐使用用户名密码登录
 
+database:
+  driver: "sqlite"
+  dsn: "" # 默认 {{trace.output_dir}}/llm_tracelab.sqlite3
+  max_open_conns: 4
+  max_idle_conns: 4
+  auto_migrate: true
+
 auth:
-  database_path: "" # 默认 {{debug.output_dir}}/control.sqlite3
   session_ttl: 24h
+
+trace:
+  output_dir: "./logs"
 
 router:
   model_discovery:
@@ -167,7 +176,12 @@ upstream:
 - `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
 - `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
-- `LLM_TRACELAB_AUTH_DATABASE_PATH`
+- `LLM_TRACELAB_DATABASE_DRIVER`
+- `LLM_TRACELAB_DATABASE_DSN`
+- `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
+- `LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS`
+- `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`
+- `LLM_TRACELAB_TRACE_OUTPUT_DIR`
 - `LLM_TRACELAB_AUTH_SESSION_TTL`
 - `LLM_TRACELAB_MCP_ENABLED`
 - `LLM_TRACELAB_MCP_PATH`
@@ -187,7 +201,7 @@ upstream:
 
 访问控制说明：
 
-- `auth.database_path` 存放用户和 API token，默认是 `debug.output_dir/control.sqlite3`。
+- `database` 是统一的结构化数据存储，承载用户、API token、trace index、session、upstream、dataset 和 eval 元数据；SQLite 默认路径是 `trace.output_dir/llm_tracelab.sqlite3`。
 - 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
 - 为 SDK / CLI 生成 token：`go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev`。
 - LLM proxy API、Monitor API 和 MCP 都接受 `Authorization: Bearer <generated-token>`；Monitor UI 也支持用户名密码登录并自动换取 token。

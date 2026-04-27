@@ -100,10 +100,10 @@ tasks:
     cmds:
       - go run ./cmd/server migrate -c {{.CONFIG}}
 
-  migrate:auth:up:
-    desc: Apply control-plane auth database migrations
+  migrate:db:up:
+    desc: Apply application database migrations
     cmds:
-      - go run ./cmd/server auth migrate up -c {{.CONFIG}}
+      - go run ./cmd/server db migrate up -c {{.CONFIG}}
 
   auth:init-user:
     desc: Initialize an auth user, pass USER and PASSWORD

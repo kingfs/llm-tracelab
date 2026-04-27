@@ -7,8 +7,16 @@ import "context"
 // SchemaConfig represents alternative schema names for all tables
 // that can be passed at runtime.
 type SchemaConfig struct {
-	APIToken string // APIToken table.
-	User     string // User table.
+	APIToken       string // APIToken table.
+	Dataset        string // Dataset table.
+	DatasetExample string // DatasetExample table.
+	EvalRun        string // EvalRun table.
+	ExperimentRun  string // ExperimentRun table.
+	Score          string // Score table.
+	TraceLog       string // TraceLog table.
+	UpstreamModel  string // UpstreamModel table.
+	UpstreamTarget string // UpstreamTarget table.
+	User           string // User table.
 }
 
 type schemaCtxKey struct{}

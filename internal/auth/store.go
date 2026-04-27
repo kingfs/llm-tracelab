@@ -46,6 +46,15 @@ func DefaultDatabasePath(outputDir string) string {
 }
 
 func Open(path string) (*Store, error) {
+	return OpenDatabase("sqlite", path, 4, 4)
+}
+
+func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
+	driver = normalizeDriver(driver)
+	if driver != "sqlite" {
+		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
+	}
+	path := dsn
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("auth database path is required")
 	}
@@ -56,14 +65,26 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(4)
+	if maxOpenConns > 0 {
+		db.SetMaxOpenConns(maxOpenConns)
+	}
+	if maxIdleConns > 0 {
+		db.SetMaxIdleConns(maxIdleConns)
+	}
 	drv := entsql.OpenDB(dialect.SQLite, db)
 	return &Store{
 		client: dao.NewClient(dao.Driver(drv)),
 		db:     db,
 		path:   path,
 	}, nil
+}
+
+func normalizeDriver(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "" {
+		return "sqlite"
+	}
+	return driver
 }
 
 func sqliteDSN(dbPath string) string {
