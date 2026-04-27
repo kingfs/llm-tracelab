@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	_ "modernc.org/sqlite"
 )
 
 func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
@@ -185,6 +187,103 @@ debug:
 	defer st.Close()
 	if _, err := st.Login(context.Background(), "admin", "change-me-123", 0); err != nil {
 		t.Fatalf("Login() error = %v", err)
+	}
+}
+
+func TestUnifiedDatabaseAdoptsLegacyTraceIndexWithFileDSN(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "legacy_trace_index.sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	legacySchema := `
+	CREATE TABLE logs (
+		path TEXT PRIMARY KEY,
+		trace_id TEXT NOT NULL DEFAULT '',
+		mod_time_ns INTEGER NOT NULL,
+		file_size INTEGER NOT NULL,
+		version TEXT NOT NULL,
+		request_id TEXT NOT NULL,
+		recorded_at TEXT NOT NULL,
+		model TEXT NOT NULL,
+		provider TEXT NOT NULL DEFAULT '',
+		operation TEXT NOT NULL DEFAULT '',
+		endpoint TEXT NOT NULL DEFAULT '',
+		url TEXT NOT NULL,
+		method TEXT NOT NULL,
+		status_code INTEGER NOT NULL,
+		duration_ms INTEGER NOT NULL,
+		ttft_ms INTEGER NOT NULL,
+		client_ip TEXT NOT NULL,
+		content_length INTEGER NOT NULL,
+		error_text TEXT NOT NULL,
+		prompt_tokens INTEGER NOT NULL,
+		completion_tokens INTEGER NOT NULL,
+		total_tokens INTEGER NOT NULL,
+		cached_tokens INTEGER NOT NULL,
+		req_header_len INTEGER NOT NULL,
+		req_body_len INTEGER NOT NULL,
+		res_header_len INTEGER NOT NULL,
+		res_body_len INTEGER NOT NULL,
+		is_stream INTEGER NOT NULL
+	);
+	CREATE INDEX idx_logs_recorded_at ON logs(recorded_at DESC);
+	`
+	if _, err := db.Exec(legacySchema); err != nil {
+		t.Fatalf("db.Exec(legacySchema) error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+database:
+  driver: "sqlite"
+  dsn: "file:` + dbPath + `?mode=rwc"
+  auto_migrate: true
+trace:
+  output_dir: "` + dir + `"
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if code := run([]string{"auth", "init-user", "-c", configPath, "--username", "admin", "--password", "change-me-123"}); code != 0 {
+		t.Fatalf("auth init-user code = %d, want 0", code)
+	}
+	if code := runMigrate([]string{"-c", configPath, "-rewrite-v2=false", "-rebuild-index=false"}); code != 0 {
+		t.Fatalf("runMigrate() = %d, want 0", code)
+	}
+
+	authStore, err := auth.OpenDatabase("sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("auth.OpenDatabase() error = %v", err)
+	}
+	defer authStore.Close()
+	if _, err := authStore.Login(context.Background(), "admin", "change-me-123", 0); err != nil {
+		t.Fatalf("Login() error = %v", err)
+	}
+
+	traceStore, err := store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	defer traceStore.Close()
+	if _, err := traceStore.Stats(); err != nil {
+		t.Fatalf("Stats() error = %v", err)
 	}
 }
 
