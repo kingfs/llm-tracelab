@@ -21,6 +21,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -2080,7 +2081,7 @@ func shouldSkipIncompleteRecord(content []byte, err error) bool {
 }
 
 func (s *Store) Reset() error {
-	_, err := s.db.Exec(`DELETE FROM logs`)
+	_, err := s.client.TraceLog.Delete().Exec(context.Background())
 	return err
 }
 
@@ -2092,22 +2093,24 @@ func (s *Store) Rebuild() (int, error) {
 		return 0, err
 	}
 
-	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs`).Scan(&count); err != nil {
+	count, err := s.client.TraceLog.Query().Count(context.Background())
+	if err != nil {
 		return 0, err
 	}
 	return count, nil
 }
 
 func (s *Store) lookupOrCreateTraceID(path string) (string, error) {
-	var traceID string
-	err := s.db.QueryRow(`SELECT trace_id FROM logs WHERE path = ?`, path).Scan(&traceID)
+	traceID, err := s.client.TraceLog.Query().
+		Where(tracelog.IDEQ(path)).
+		Select(tracelog.FieldTraceID).
+		String(context.Background())
 	switch {
 	case err == nil && traceID != "":
 		return traceID, nil
 	case err == nil:
 		return uuid.NewString(), nil
-	case err == sql.ErrNoRows:
+	case dao.IsNotFound(err):
 		return uuid.NewString(), nil
 	default:
 		return "", err
@@ -2404,9 +2407,9 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 }
 
 func (s *Store) PathByID(traceID string) (string, error) {
-	var path string
-	err := s.db.QueryRow(`SELECT path FROM logs WHERE trace_id = ?`, traceID).Scan(&path)
-	return path, err
+	return s.client.TraceLog.Query().
+		Where(tracelog.TraceIDEQ(traceID)).
+		OnlyID(context.Background())
 }
 
 func (s *Store) Stats() (Stats, error) {
