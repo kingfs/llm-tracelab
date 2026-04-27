@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
@@ -66,6 +68,25 @@ func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 	}
 	if _, ok := payload["stream_options"]; ok {
 		t.Fatalf("stream_options unexpectedly injected for responses payload: %s", string(body))
+	}
+}
+
+func TestHandlerRejectsMissingProxyTokenBeforeRouting(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{}
+	cfg.Server.AuthToken = "proxy-token"
+	handler := &Handler{cfg: cfg}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"input":"hello"}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
+	}
+	if got := rr.Header().Get("WWW-Authenticate"); got != `Bearer realm="llm-tracelab-proxy"` {
+		t.Fatalf("WWW-Authenticate = %q", got)
 	}
 }
 

@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent } from "../components/common/Display";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
-import { useJSON } from "../hooks/useJSON";
+import { monitorAuthHeaders, useJSON } from "../hooks/useJSON";
 import {
   buildRoutingDecisionSummary,
   buildTraceUpstreamHealthSummary,
@@ -71,6 +71,22 @@ export function TraceDetailPage() {
     setSearchParams(next, { replace: true });
   };
 
+  const downloadTrace = async () => {
+    const response = await fetch(`/api/traces/${traceID}/download`, { headers: monitorAuthHeaders() });
+    if (!response.ok) {
+      return;
+    }
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${traceID}.http`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
   useEffect(() => {
     const requestedTab = normalizeTraceTab(searchParams.get("tab"));
     setTab((current) => (current === requestedTab ? current : requestedTab));
@@ -132,9 +148,9 @@ export function TraceDetailPage() {
                 <StackIcon />
               </Link>
             ) : null}
-            <a className="icon-button" href={`/api/traces/${traceID}/download`} title="Download .http" aria-label="Download trace">
+            <button className="icon-button" type="button" onClick={downloadTrace} title="Download .http" aria-label="Download trace">
               <DownloadIcon />
-            </a>
+            </button>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label="in" value={usage?.prompt_tokens || 0} icon="input" />

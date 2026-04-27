@@ -17,6 +17,6 @@ services:
       - "8080:8080"
       - "8081:8081"
     volumes:
-      - ./config/config.docker.yaml:/app/config/config.yaml:ro
+      - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
     command: ["serve", "-c", "/app/config/config.yaml"]

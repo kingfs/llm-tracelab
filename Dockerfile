@@ -38,7 +38,7 @@ RUN mkdir -p /app/bin /app/config /app/data/traces
 WORKDIR /app
 
 COPY --from=builder /out/llm-tracelab /app/bin/llm-tracelab
-COPY config/config.docker.yaml /app/config/config.yaml
+COPY config/config.yaml /app/config/config.yaml
 
 VOLUME ["/app/config", "/app/data"]
 

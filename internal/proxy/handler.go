@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/chaos"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
@@ -328,6 +329,12 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+
+	if !auth.Authorized(r, h.cfg.Server.AuthToken) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-proxy"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
 		h.serveAggregatedModelList(w, r, start)

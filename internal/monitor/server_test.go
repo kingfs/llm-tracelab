@@ -57,6 +57,35 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesProtectsMonitorAPIsWhenTokenConfigured(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{AuthToken: "monitor-token"})
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	statusRR := httptest.NewRecorder()
+	mux.ServeHTTP(statusRR, statusReq)
+	if statusRR.Code != http.StatusOK {
+		t.Fatalf("status endpoint code = %d, want 200", statusRR.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated traces code = %d, want 401", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	req.Header.Set("Authorization", "Bearer monitor-token")
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("authenticated check code = %d, want 200", rr.Code)
+	}
+}
+
 func TestSessionListAPIHandlerReturnsGroupedItems(t *testing.T) {
 	t.Parallel()
 

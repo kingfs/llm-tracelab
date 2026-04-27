@@ -1,5 +1,12 @@
 import { startTransition, useEffect, useState } from "react";
 
+export const MONITOR_AUTH_TOKEN_KEY = "llm-tracelab.monitor.auth_token";
+
+export function monitorAuthHeaders() {
+  const token = window.localStorage.getItem(MONITOR_AUTH_TOKEN_KEY) || "";
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export function useJSON(url, deps = []) {
   const [state, setState] = useState({ loading: true, data: null, error: "" });
 
@@ -11,7 +18,7 @@ export function useJSON(url, deps = []) {
       setState((current) => ({ ...current, loading: true, error: "" }));
     });
 
-    fetch(url, { signal: controller.signal })
+    fetch(url, { headers: monitorAuthHeaders(), signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}));

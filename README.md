@@ -88,9 +88,11 @@ logs/
 ```yaml
 server:
   port: "8080"
+  auth_token: "dev-proxy-token" # 可选；非空时客户端必须发送 Authorization: Bearer <token>
 
 monitor:
   port: "8081"
+  auth_token: "dev-monitor-token" # 可选；非空时 Monitor API、详情和下载会要求 token
 
 router:
   model_discovery:
@@ -158,7 +160,9 @@ upstream:
 支持的环境变量覆盖：
 
 - `LLM_TRACELAB_SERVER_PORT`
+- `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
+- `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
 - `LLM_TRACELAB_MCP_ENABLED`
 - `LLM_TRACELAB_MCP_PATH`
 - `LLM_TRACELAB_MCP_AUTH_TOKEN`
@@ -174,6 +178,12 @@ upstream:
 - `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
+
+访问控制说明：
+
+- `server.auth_token` 保护 LLM proxy API。配置后，SDK 发到 proxy 的 `Authorization` 必须是 `Bearer <server.auth_token>`；上游 provider 的真实 key 仍由 `upstream.api_key` / `upstreams[].upstream.api_key` 注入。
+- `monitor.auth_token` 保护 Monitor JSON API、trace detail、raw protocol 和 `.http` 下载。浏览器打开 Monitor 后输入该 token，前端会在后续 API 请求里携带 bearer token。
+- token 为空时保持本地开发兼容，不启用对应服务的访问控制。
 
 ### MCP Server
 
@@ -373,7 +383,7 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 
 - [Dockerfile](./Dockerfile)
 - [docker-compose.yml](./docker-compose.yml)
-- [config/config.docker.yaml](./config/config.docker.yaml)
+- [config/config.yaml](./config/config.yaml)
 
 启动方式：
 
@@ -413,7 +423,7 @@ services:
       LLM_TRACELAB_SERVER_PORT: "8080"
       LLM_TRACELAB_MONITOR_PORT: "8081"
     volumes:
-      - ./config/config.docker.yaml:/app/config/config.yaml:ro
+      - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
     command: ["serve", "-c", "/app/config/config.yaml"]
 ```
@@ -448,7 +458,7 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 
 默认挂载：
 
-- `./config/config.docker.yaml -> /app/config/config.yaml:ro`
+- `./config/config.yaml -> /app/config/config.yaml:ro`
 - `./docker-data -> /app/data`
 
 运行镜像默认使用 `root` 用户启动。这是为了兼容最常见的 bind mount 场景，避免宿主机目录属主与容器内固定 UID/GID 不一致时出现 `permission denied`，例如无法创建 `/app/data/traces`。

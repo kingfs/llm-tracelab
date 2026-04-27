@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -185,7 +186,8 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router *router.Router
+	Router    *router.Router
+	AuthToken string
 }
 
 type upstreamListResponse struct {
@@ -298,13 +300,41 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
-	mux.HandleFunc("/api/traces", listAPIHandler(st))
-	mux.HandleFunc("/api/traces/", traceAPIHandler(st, opt.Router))
-	mux.HandleFunc("/api/sessions", sessionListAPIHandler(st))
-	mux.HandleFunc("/api/sessions/", sessionDetailAPIHandler(st))
-	mux.HandleFunc("/api/upstreams", upstreamListAPIHandler(st, opt.Router))
-	mux.HandleFunc("/api/upstreams/", upstreamDetailAPIHandler(st, opt.Router))
+	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthToken))
+	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthToken))
+	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthToken))
+	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthToken))
+	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthToken))
+	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthToken))
+	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthToken))
+	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthToken))
 	mux.Handle("/", appHandler())
+}
+
+func authStatusAPIHandler(authToken string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"auth_required": auth.Required(authToken)})
+	}
+}
+
+func authCheckAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
+func monitorAuthRequired(next http.HandlerFunc, authToken string) http.HandlerFunc {
+	if !auth.Required(authToken) {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !auth.Authorized(r, authToken) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-monitor"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next(w, r)
+	}
 }
 
 func appHandler() http.Handler {

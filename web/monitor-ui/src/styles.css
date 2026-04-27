@@ -52,6 +52,49 @@ a {
   text-decoration: none;
 }
 
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-soft);
+}
+
+.auth-panel h1 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.auth-panel label,
+.auth-error {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.auth-panel input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  padding: 0 12px;
+  background: #fff;
+}
+
+.auth-error {
+  margin: 0;
+  color: var(--danger);
+}
+
 .shell {
   width: min(1680px, calc(100vw - 32px));
   margin: 0 auto;

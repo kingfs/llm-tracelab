@@ -10,11 +10,13 @@ import (
 
 type Config struct {
 	Server struct {
-		Port string `yaml:"port"`
+		Port      string `yaml:"port"`
+		AuthToken string `yaml:"auth_token"`
 	} `yaml:"server"`
 
 	Monitor struct {
-		Port string `yaml:"port"`
+		Port      string `yaml:"port"`
+		AuthToken string `yaml:"auth_token"`
 	} `yaml:"monitor"`
 
 	MCP struct {
@@ -108,8 +110,14 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_SERVER_PORT"); v != "" {
 		cfg.Server.Port = v
 	}
+	if v := os.Getenv("LLM_TRACELAB_SERVER_AUTH_TOKEN"); v != "" {
+		cfg.Server.AuthToken = v
+	}
 	if v := os.Getenv("LLM_TRACELAB_MONITOR_PORT"); v != "" {
 		cfg.Monitor.Port = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_MONITOR_AUTH_TOKEN"); v != "" {
+		cfg.Monitor.AuthToken = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_MCP_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {

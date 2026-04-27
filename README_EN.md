@@ -84,9 +84,11 @@ Edit [config/config.yaml](./config/config.yaml):
 ```yaml
 server:
   port: "8080"
+  auth_token: "dev-proxy-token" # optional; when non-empty clients must send Authorization: Bearer <token>
 
 monitor:
   port: "8081"
+  auth_token: "dev-monitor-token" # optional; protects monitor APIs, trace detail, and downloads
 
 router:
   model_discovery:
@@ -154,7 +156,9 @@ If you prefer starting from a ready-made config, use one of these examples:
 Supported environment variable overrides:
 
 - `LLM_TRACELAB_SERVER_PORT`
+- `LLM_TRACELAB_SERVER_AUTH_TOKEN`
 - `LLM_TRACELAB_MONITOR_PORT`
+- `LLM_TRACELAB_MONITOR_AUTH_TOKEN`
 - `LLM_TRACELAB_UPSTREAM_BASE_URL`
 - `LLM_TRACELAB_UPSTREAM_API_KEY`
 - `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
@@ -167,6 +171,12 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
+
+Access control notes:
+
+- `server.auth_token` protects the LLM proxy API. Once configured, SDK requests sent to the proxy must use `Authorization: Bearer <server.auth_token>`; the real provider key is still injected from `upstream.api_key` or `upstreams[].upstream.api_key`.
+- `monitor.auth_token` protects the Monitor JSON APIs, trace detail, raw protocol, and `.http` downloads. The browser UI asks for this token and sends it on later API requests.
+- Empty tokens keep local development compatibility and disable access control for that service.
 
 Recommended compatibility pattern:
 
@@ -345,7 +355,7 @@ The repo now includes:
 
 - [Dockerfile](./Dockerfile)
 - [docker-compose.yml](./docker-compose.yml)
-- [config/config.docker.yaml](./config/config.docker.yaml)
+- [config/config.yaml](./config/config.yaml)
 
 Start it with:
 
@@ -385,7 +395,7 @@ services:
       LLM_TRACELAB_SERVER_PORT: "8080"
       LLM_TRACELAB_MONITOR_PORT: "8081"
     volumes:
-      - ./config/config.docker.yaml:/app/config/config.yaml:ro
+      - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
     command: ["serve", "-c", "/app/config/config.yaml"]
 ```
@@ -420,7 +430,7 @@ Recommended convention:
 
 Default mounts:
 
-- `./config/config.docker.yaml -> /app/config/config.yaml:ro`
+- `./config/config.yaml -> /app/config/config.yaml:ro`
 - `./docker-data -> /app/data`
 
 The runtime image starts as `root` by default. This avoids common bind-mount permission failures when the host directory owner does not match a fixed in-container UID/GID, such as failing to create `/app/data/traces`.
