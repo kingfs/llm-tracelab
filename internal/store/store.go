@@ -270,8 +270,8 @@ func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 	for rows.Next() {
 		var (
 			record        UpstreamTargetRecord
-			enabled       int
-			lastRefreshAt string
+			enabled       any
+			lastRefreshAt any
 		)
 		if err := rows.Scan(
 			&record.ID,
@@ -289,9 +289,9 @@ func (s *Store) ListUpstreamTargets() ([]UpstreamTargetRecord, error) {
 		); err != nil {
 			return nil, err
 		}
-		record.Enabled = enabled == 1
-		if strings.TrimSpace(lastRefreshAt) != "" {
-			record.LastRefreshAt, err = timeParse(lastRefreshAt)
+		record.Enabled = boolValue(enabled)
+		if !isEmptyTimeValue(lastRefreshAt) {
+			record.LastRefreshAt, err = timeParseValue(lastRefreshAt)
 			if err != nil {
 				return nil, err
 			}
@@ -316,12 +316,12 @@ func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
 	for rows.Next() {
 		var (
 			record UpstreamModelRecord
-			seenAt string
+			seenAt any
 		)
 		if err := rows.Scan(&record.UpstreamID, &record.Model, &record.Source, &seenAt); err != nil {
 			return nil, err
 		}
-		record.SeenAt, err = timeParse(seenAt)
+		record.SeenAt, err = timeParseValue(seenAt)
 		if err != nil {
 			return nil, err
 		}
@@ -1029,11 +1029,11 @@ func (s *Store) initSchema() error {
 			provider_preset TEXT NOT NULL,
 			protocol_family TEXT NOT NULL,
 			routing_profile TEXT NOT NULL,
-			enabled INTEGER NOT NULL,
+			enabled bool NOT NULL DEFAULT true,
 			priority INTEGER NOT NULL,
 			weight REAL NOT NULL,
 			capacity_hint REAL NOT NULL,
-			last_refresh_at TEXT NOT NULL DEFAULT '',
+			last_refresh_at datetime NULL,
 			last_refresh_status TEXT NOT NULL DEFAULT '',
 			last_refresh_error TEXT NOT NULL DEFAULT ''
 		);`,
@@ -1042,7 +1042,7 @@ func (s *Store) initSchema() error {
 			upstream_id TEXT NOT NULL,
 			model TEXT NOT NULL,
 			source TEXT NOT NULL,
-			seen_at TEXT NOT NULL
+			seen_at datetime NOT NULL
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS upstreammodel_upstream_id_model ON upstream_models(upstream_id, model);`,
 		`CREATE INDEX IF NOT EXISTS idx_upstream_models_model ON upstream_models(model);`,
@@ -1050,15 +1050,15 @@ func (s *Store) initSchema() error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS dataset_examples (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			dataset_id TEXT NOT NULL,
 			trace_id TEXT NOT NULL,
 			position INTEGER NOT NULL,
-			added_at TEXT NOT NULL,
+			added_at datetime NOT NULL,
 			source_type TEXT NOT NULL DEFAULT '',
 			source_id TEXT NOT NULL DEFAULT '',
 			note TEXT NOT NULL DEFAULT ''
@@ -1071,8 +1071,8 @@ func (s *Store) initSchema() error {
 			source_type TEXT NOT NULL DEFAULT '',
 			source_id TEXT NOT NULL DEFAULT '',
 			evaluator_set TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			completed_at TEXT NOT NULL,
+			created_at datetime NOT NULL,
+			completed_at datetime NOT NULL,
 			trace_count INTEGER NOT NULL DEFAULT 0,
 			score_count INTEGER NOT NULL DEFAULT 0,
 			pass_count INTEGER NOT NULL DEFAULT 0,
@@ -1089,7 +1089,7 @@ func (s *Store) initSchema() error {
 			status TEXT NOT NULL,
 			label TEXT NOT NULL DEFAULT '',
 			explanation TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL
+			created_at datetime NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_scores_trace_id ON scores(trace_id, created_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_scores_session_id ON scores(session_id, created_at DESC) WHERE session_id <> '';`,
@@ -1101,7 +1101,7 @@ func (s *Store) initSchema() error {
 			description TEXT NOT NULL DEFAULT '',
 			baseline_eval_run_id TEXT NOT NULL,
 			candidate_eval_run_id TEXT NOT NULL,
-			created_at TEXT NOT NULL,
+			created_at datetime NOT NULL,
 			baseline_score_count INTEGER NOT NULL DEFAULT 0,
 			candidate_score_count INTEGER NOT NULL DEFAULT 0,
 			baseline_pass_rate REAL NOT NULL DEFAULT 0,
@@ -1196,7 +1196,7 @@ func (s *Store) ensureEntCompatibleTables() error {
 			upstream_id TEXT NOT NULL,
 			model TEXT NOT NULL,
 			source TEXT NOT NULL,
-			seen_at TEXT NOT NULL
+			seen_at datetime NOT NULL
 		)`,
 		`INSERT INTO upstream_models (upstream_id, model, source, seen_at)
 		 SELECT upstream_id, model, source, seen_at FROM upstream_models_old`,
@@ -2429,7 +2429,7 @@ func scanEntry(scanner interface {
 }) (LogEntry, error) {
 	var (
 		entry        LogEntry
-		recordedAt   string
+		recordedAt   any
 		errorText    string
 		cached       int
 		isStream     int
@@ -2479,7 +2479,7 @@ func scanEntry(scanner interface {
 		return LogEntry{}, err
 	}
 
-	entry.Header.Meta.Time, err = timeParse(recordedAt)
+	entry.Header.Meta.Time, err = timeParseValue(recordedAt)
 	if err != nil {
 		return LogEntry{}, err
 	}
@@ -2498,8 +2498,8 @@ func scanDatasetRecord(scanner interface {
 }) (DatasetRecord, error) {
 	var (
 		record    DatasetRecord
-		createdAt string
-		updatedAt string
+		createdAt any
+		updatedAt any
 		err       error
 	)
 	if err := scanner.Scan(
@@ -2512,11 +2512,11 @@ func scanDatasetRecord(scanner interface {
 	); err != nil {
 		return DatasetRecord{}, err
 	}
-	record.CreatedAt, err = timeParse(createdAt)
+	record.CreatedAt, err = timeParseValue(createdAt)
 	if err != nil {
 		return DatasetRecord{}, err
 	}
-	record.UpdatedAt, err = timeParse(updatedAt)
+	record.UpdatedAt, err = timeParseValue(updatedAt)
 	if err != nil {
 		return DatasetRecord{}, err
 	}
@@ -2528,8 +2528,8 @@ func scanDatasetExampleRecord(scanner interface {
 }) (DatasetExampleRecord, error) {
 	var (
 		record       DatasetExampleRecord
-		addedAt      string
-		recordedAt   string
+		addedAt      any
+		recordedAt   any
 		errorText    string
 		cached       int
 		isStream     int
@@ -2584,11 +2584,11 @@ func scanDatasetExampleRecord(scanner interface {
 	); err != nil {
 		return DatasetExampleRecord{}, err
 	}
-	record.AddedAt, err = timeParse(addedAt)
+	record.AddedAt, err = timeParseValue(addedAt)
 	if err != nil {
 		return DatasetExampleRecord{}, err
 	}
-	record.Trace.Header.Meta.Time, err = timeParse(recordedAt)
+	record.Trace.Header.Meta.Time, err = timeParseValue(recordedAt)
 	if err != nil {
 		return DatasetExampleRecord{}, err
 	}
@@ -2606,8 +2606,8 @@ func scanEvalRunRecord(scanner interface {
 }) (EvalRunRecord, error) {
 	var (
 		record      EvalRunRecord
-		createdAt   string
-		completedAt string
+		createdAt   any
+		completedAt any
 		err         error
 	)
 	if err := scanner.Scan(
@@ -2625,11 +2625,11 @@ func scanEvalRunRecord(scanner interface {
 	); err != nil {
 		return EvalRunRecord{}, err
 	}
-	record.CreatedAt, err = timeParse(createdAt)
+	record.CreatedAt, err = timeParseValue(createdAt)
 	if err != nil {
 		return EvalRunRecord{}, err
 	}
-	record.CompletedAt, err = timeParse(completedAt)
+	record.CompletedAt, err = timeParseValue(completedAt)
 	if err != nil {
 		return EvalRunRecord{}, err
 	}
@@ -2641,7 +2641,7 @@ func scanScoreRecord(scanner interface {
 }) (ScoreRecord, error) {
 	var (
 		record    ScoreRecord
-		createdAt string
+		createdAt any
 		err       error
 	)
 	if err := scanner.Scan(
@@ -2659,7 +2659,7 @@ func scanScoreRecord(scanner interface {
 	); err != nil {
 		return ScoreRecord{}, err
 	}
-	record.CreatedAt, err = timeParse(createdAt)
+	record.CreatedAt, err = timeParseValue(createdAt)
 	if err != nil {
 		return ScoreRecord{}, err
 	}
@@ -2671,7 +2671,7 @@ func scanExperimentRunRecord(scanner interface {
 }) (ExperimentRunRecord, error) {
 	var (
 		record    ExperimentRunRecord
-		createdAt string
+		createdAt any
 		err       error
 	)
 	if err := scanner.Scan(
@@ -2692,7 +2692,7 @@ func scanExperimentRunRecord(scanner interface {
 	); err != nil {
 		return ExperimentRunRecord{}, err
 	}
-	record.CreatedAt, err = timeParse(createdAt)
+	record.CreatedAt, err = timeParseValue(createdAt)
 	if err != nil {
 		return ExperimentRunRecord{}, err
 	}
@@ -2704,8 +2704,8 @@ func scanSessionSummary(scanner interface {
 }) (SessionSummary, error) {
 	var (
 		summary      SessionSummary
-		firstSeen    string
-		lastSeen     string
+		firstSeen    any
+		lastSeen     any
 		providersCSV string
 		avgTTFT      float64
 	)
@@ -2728,11 +2728,11 @@ func scanSessionSummary(scanner interface {
 	if err != nil {
 		return SessionSummary{}, err
 	}
-	summary.FirstSeen, err = timeParse(firstSeen)
+	summary.FirstSeen, err = timeParseValue(firstSeen)
 	if err != nil {
 		return SessionSummary{}, err
 	}
-	summary.LastSeen, err = timeParse(lastSeen)
+	summary.LastSeen, err = timeParseValue(lastSeen)
 	if err != nil {
 		return SessionSummary{}, err
 	}
@@ -2753,6 +2753,54 @@ func timeParse(v string) (time.Time, error) {
 		}
 	}
 	return time.Parse(timeLayout, v)
+}
+
+func timeParseValue(v any) (time.Time, error) {
+	switch value := v.(type) {
+	case time.Time:
+		return value, nil
+	case string:
+		return timeParse(value)
+	case []byte:
+		return timeParse(string(value))
+	case nil:
+		return time.Time{}, nil
+	default:
+		return timeParse(fmt.Sprint(value))
+	}
+}
+
+func isEmptyTimeValue(v any) bool {
+	switch value := v.(type) {
+	case nil:
+		return true
+	case string:
+		return strings.TrimSpace(value) == ""
+	case []byte:
+		return strings.TrimSpace(string(value)) == ""
+	case time.Time:
+		return value.IsZero()
+	default:
+		return strings.TrimSpace(fmt.Sprint(value)) == ""
+	}
+}
+
+func boolValue(v any) bool {
+	switch value := v.(type) {
+	case bool:
+		return value
+	case int:
+		return value != 0
+	case int64:
+		return value != 0
+	case string:
+		return value == "1" || strings.EqualFold(value, "true")
+	case []byte:
+		s := string(value)
+		return s == "1" || strings.EqualFold(s, "true")
+	default:
+		return false
+	}
 }
 
 func boolToInt(v bool) int {
