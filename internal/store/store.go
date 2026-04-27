@@ -989,7 +989,7 @@ func (s *Store) initSchema() error {
 			file_size INTEGER NOT NULL,
 			version TEXT NOT NULL,
 			request_id TEXT NOT NULL,
-			recorded_at TEXT NOT NULL,
+			recorded_at datetime NOT NULL,
 			model TEXT NOT NULL,
 			provider TEXT NOT NULL DEFAULT '',
 			operation TEXT NOT NULL DEFAULT '',
@@ -1010,7 +1010,7 @@ func (s *Store) initSchema() error {
 			req_body_len INTEGER NOT NULL,
 			res_header_len INTEGER NOT NULL,
 			res_body_len INTEGER NOT NULL,
-			is_stream INTEGER NOT NULL,
+			is_stream bool NOT NULL DEFAULT false,
 			session_id TEXT NOT NULL DEFAULT '',
 			session_source TEXT NOT NULL DEFAULT '',
 			window_id TEXT NOT NULL DEFAULT '',
@@ -1023,8 +1023,6 @@ func (s *Store) initSchema() error {
 			routing_candidate_count INTEGER NOT NULL DEFAULT 0,
 			routing_failure_reason TEXT NOT NULL DEFAULT ''
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_recorded_at ON logs(recorded_at DESC);`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_model_recorded_at ON logs(model, recorded_at DESC);`,
 		`CREATE TABLE IF NOT EXISTS upstream_targets (
 			id TEXT PRIMARY KEY,
 			base_url TEXT NOT NULL,
@@ -1166,9 +1164,18 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.backfillTraceIDs(); err != nil {
+		return err
+	}
+	if err := s.ensureLogsDatetimeTable(); err != nil {
+		return err
+	}
 	postColumnStmts := []string{
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_trace_id ON logs(trace_id) WHERE trace_id <> '';`,
-		`CREATE INDEX IF NOT EXISTS idx_logs_session_id_recorded_at ON logs(session_id, recorded_at DESC) WHERE session_id <> '';`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS logs_trace_id_key ON logs(trace_id);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_recorded_at ON logs(recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_model_recorded_at ON logs(model, recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_id_recorded_at ON logs(session_id, recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_request_id ON logs(request_id);`,
 	}
 	for _, stmt := range postColumnStmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -1176,9 +1183,6 @@ func (s *Store) initSchema() error {
 		}
 	}
 	if err := s.ensureEntCompatibleTables(); err != nil {
-		return err
-	}
-	if err := s.backfillTraceIDs(); err != nil {
 		return err
 	}
 	if err := s.backfillSemantics(); err != nil {
@@ -1230,6 +1234,115 @@ func (s *Store) ensureEntCompatibleTables() error {
 	)
 }
 
+func (s *Store) ensureLogsDatetimeTable() error {
+	recordedAtType, err := s.columnType("logs", "recorded_at")
+	if err != nil {
+		return err
+	}
+	isStreamType, err := s.columnType("logs", "is_stream")
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(recordedAtType, "datetime") && strings.EqualFold(isStreamType, "bool") {
+		return nil
+	}
+
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS idx_logs_recorded_at`,
+		`DROP INDEX IF EXISTS idx_logs_model_recorded_at`,
+		`DROP INDEX IF EXISTS idx_logs_trace_id`,
+		`DROP INDEX IF EXISTS idx_logs_session_id_recorded_at`,
+		`DROP INDEX IF EXISTS logs_trace_id_key`,
+		`DROP INDEX IF EXISTS tracelog_recorded_at`,
+		`DROP INDEX IF EXISTS tracelog_model_recorded_at`,
+		`DROP INDEX IF EXISTS tracelog_session_id_recorded_at`,
+		`DROP INDEX IF EXISTS tracelog_request_id`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`ALTER TABLE logs RENAME TO logs_old`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE TABLE logs (
+		path TEXT PRIMARY KEY,
+		trace_id TEXT NOT NULL DEFAULT '',
+		mod_time_ns INTEGER NOT NULL,
+		file_size INTEGER NOT NULL,
+		version TEXT NOT NULL,
+		request_id TEXT NOT NULL DEFAULT '',
+		recorded_at datetime NOT NULL,
+		model TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		operation TEXT NOT NULL DEFAULT '',
+		endpoint TEXT NOT NULL DEFAULT '',
+		url TEXT NOT NULL DEFAULT '',
+		method TEXT NOT NULL DEFAULT '',
+		status_code INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		ttft_ms INTEGER NOT NULL DEFAULT 0,
+		client_ip TEXT NOT NULL DEFAULT '',
+		content_length INTEGER NOT NULL DEFAULT 0,
+		error_text TEXT NOT NULL DEFAULT '',
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		completion_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		req_header_len INTEGER NOT NULL DEFAULT 0,
+		req_body_len INTEGER NOT NULL DEFAULT 0,
+		res_header_len INTEGER NOT NULL DEFAULT 0,
+		res_body_len INTEGER NOT NULL DEFAULT 0,
+		is_stream bool NOT NULL DEFAULT false,
+		session_id TEXT NOT NULL DEFAULT '',
+		session_source TEXT NOT NULL DEFAULT '',
+		window_id TEXT NOT NULL DEFAULT '',
+		client_request_id TEXT NOT NULL DEFAULT '',
+		selected_upstream_id TEXT NOT NULL DEFAULT '',
+		selected_upstream_base_url TEXT NOT NULL DEFAULT '',
+		selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
+		routing_policy TEXT NOT NULL DEFAULT '',
+		routing_score REAL NOT NULL DEFAULT 0,
+		routing_candidate_count INTEGER NOT NULL DEFAULT 0,
+		routing_failure_reason TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO logs (
+		path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
+		status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
+		prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+		req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+		session_id, session_source, window_id, client_request_id,
+		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+	)
+	SELECT
+		path, trace_id, mod_time_ns, file_size, version, request_id,
+		CASE WHEN recorded_at IS NULL OR TRIM(CAST(recorded_at AS text)) = '' THEN '1970-01-01T00:00:00Z' ELSE recorded_at END,
+		model, provider, operation, endpoint, url, method,
+		status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
+		prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+		req_header_len, req_body_len, res_header_len, res_body_len,
+		CASE WHEN is_stream IN (1, '1', 'true', 'TRUE') THEN true ELSE false END,
+		session_id, session_source, window_id, client_request_id,
+		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+	FROM logs_old`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DROP TABLE logs_old`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ensureAutoIDTable(table string, createSQL string, copySQL string, indexes []string) error {
 	hasID, err := s.hasColumn(table, "id")
 	if err != nil {
@@ -1278,9 +1391,17 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 }
 
 func (s *Store) hasColumn(table string, column string) (bool, error) {
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	typ, err := s.columnType(table, column)
 	if err != nil {
 		return false, err
+	}
+	return typ != "", nil
+}
+
+func (s *Store) columnType(table string, column string) (string, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return "", err
 	}
 	defer rows.Close()
 
@@ -1294,16 +1415,16 @@ func (s *Store) hasColumn(table string, column string) (bool, error) {
 	)
 	for rows.Next() {
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
-			return false, err
+			return "", err
 		}
 		if name == column {
-			return true, rows.Err()
+			return typ, rows.Err()
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, err
+		return "", err
 	}
-	return false, nil
+	return "", nil
 }
 
 func (s *Store) backfillTraceIDs() error {
@@ -2135,34 +2256,19 @@ func (s *Store) isFresh(path string, info os.FileInfo) (bool, error) {
 }
 
 func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
-	rows, err := s.db.Query(`
-		SELECT
-			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
-			duration_ms, ttft_ms, client_ip, content_length, error_text,
-			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id,
-			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		FROM logs
-		ORDER BY recorded_at DESC
-		LIMIT ?
-	`, limit)
+	rows, err := s.client.TraceLog.Query().
+		Order(tracelog.ByRecordedAt(entsql.OrderDesc())).
+		Limit(limit).
+		All(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var entries []LogEntry
-	for rows.Next() {
-		entry, err := scanEntry(rows)
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, entry)
+	entries := make([]LogEntry, 0, len(rows))
+	for _, row := range rows {
+		entries = append(entries, logEntryFromTraceLog(row))
 	}
-
-	return entries, rows.Err()
+	return entries, nil
 }
 
 func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
@@ -2234,37 +2340,30 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 }
 
 func (s *Store) GetByID(traceID string) (LogEntry, error) {
-	row := s.db.QueryRow(`
-		SELECT
-			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
-			duration_ms, ttft_ms, client_ip, content_length, error_text,
-			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id,
-			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		FROM logs
-		WHERE trace_id = ?
-	`, traceID)
-	return scanEntry(row)
+	row, err := s.client.TraceLog.Query().
+		Where(tracelog.TraceIDEQ(traceID)).
+		Only(context.Background())
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return LogEntry{}, sql.ErrNoRows
+		}
+		return LogEntry{}, err
+	}
+	return logEntryFromTraceLog(row), nil
 }
 
 func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
-	row := s.db.QueryRow(`
-		SELECT
-			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
-			duration_ms, ttft_ms, client_ip, content_length, error_text,
-			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
-			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
-			session_id, session_source, window_id, client_request_id,
-			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
-			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		FROM logs
-		WHERE request_id = ?
-		ORDER BY recorded_at DESC, trace_id DESC
-		LIMIT 1
-	`, requestID)
-	return scanEntry(row)
+	row, err := s.client.TraceLog.Query().
+		Where(tracelog.RequestIDEQ(requestID)).
+		Order(tracelog.ByRecordedAt(entsql.OrderDesc()), tracelog.ByTraceID(entsql.OrderDesc())).
+		First(context.Background())
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return LogEntry{}, sql.ErrNoRows
+		}
+		return LogEntry{}, err
+	}
+	return logEntryFromTraceLog(row), nil
 }
 
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
@@ -2407,9 +2506,13 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 }
 
 func (s *Store) PathByID(traceID string) (string, error) {
-	return s.client.TraceLog.Query().
+	path, err := s.client.TraceLog.Query().
 		Where(tracelog.TraceIDEQ(traceID)).
 		OnlyID(context.Background())
+	if dao.IsNotFound(err) {
+		return "", sql.ErrNoRows
+	}
+	return path, err
 }
 
 func (s *Store) Stats() (Stats, error) {
@@ -2442,6 +2545,51 @@ func (s *Store) Stats() (Stats, error) {
 	stats.AvgTTFT = int(math.Round(avgTTFT))
 	stats.SuccessRate = successRate
 	return stats, nil
+}
+
+func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
+	entry := LogEntry{
+		ID:              row.TraceID,
+		LogPath:         row.ID,
+		SessionID:       row.SessionID,
+		SessionSource:   row.SessionSource,
+		WindowID:        row.WindowID,
+		ClientRequestID: row.ClientRequestID,
+	}
+	entry.Header.Version = row.Version
+	entry.Header.Meta.RequestID = row.RequestID
+	entry.Header.Meta.Time = row.RecordedAt
+	entry.Header.Meta.Model = row.Model
+	entry.Header.Meta.Provider = row.Provider
+	entry.Header.Meta.Operation = row.Operation
+	entry.Header.Meta.Endpoint = row.Endpoint
+	entry.Header.Meta.URL = row.URL
+	entry.Header.Meta.Method = row.Method
+	entry.Header.Meta.StatusCode = row.StatusCode
+	entry.Header.Meta.DurationMs = row.DurationMs
+	entry.Header.Meta.TTFTMs = row.TtftMs
+	entry.Header.Meta.ClientIP = row.ClientIP
+	entry.Header.Meta.ContentLength = row.ContentLength
+	entry.Header.Meta.Error = row.ErrorText
+	entry.Header.Meta.SelectedUpstreamID = row.SelectedUpstreamID
+	entry.Header.Meta.SelectedUpstreamBaseURL = row.SelectedUpstreamBaseURL
+	entry.Header.Meta.SelectedUpstreamProviderPreset = row.SelectedUpstreamProviderPreset
+	entry.Header.Meta.RoutingPolicy = row.RoutingPolicy
+	entry.Header.Meta.RoutingScore = row.RoutingScore
+	entry.Header.Meta.RoutingCandidateCount = row.RoutingCandidateCount
+	entry.Header.Meta.RoutingFailureReason = row.RoutingFailureReason
+	entry.Header.Usage.PromptTokens = row.PromptTokens
+	entry.Header.Usage.CompletionTokens = row.CompletionTokens
+	entry.Header.Usage.TotalTokens = row.TotalTokens
+	if row.CachedTokens > 0 {
+		entry.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: row.CachedTokens}
+	}
+	entry.Header.Layout.ReqHeaderLen = row.ReqHeaderLen
+	entry.Header.Layout.ReqBodyLen = row.ReqBodyLen
+	entry.Header.Layout.ResHeaderLen = row.ResHeaderLen
+	entry.Header.Layout.ResBodyLen = row.ResBodyLen
+	entry.Header.Layout.IsStream = row.IsStream
+	return entry
 }
 
 func scanEntry(scanner interface {

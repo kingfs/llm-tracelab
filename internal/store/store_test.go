@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
 )
@@ -457,6 +459,41 @@ func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 	}
 	if entry.ClientRequestID != "req-fixed" {
 		t.Fatalf("ClientRequestID = %q, want req-fixed", entry.ClientRequestID)
+	}
+
+	var recordedAtType string
+	rows, err := st.db.Query(`PRAGMA table_info(logs)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(logs) error = %v", err)
+	}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			typ        string
+			notNull    int
+			defaultVal sql.NullString
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultVal, &pk); err != nil {
+			t.Fatalf("rows.Scan() error = %v", err)
+		}
+		if name == "recorded_at" {
+			recordedAtType = typ
+		}
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("rows.Close() error = %v", err)
+	}
+	if !strings.EqualFold(recordedAtType, "datetime") {
+		t.Fatalf("recorded_at type = %q, want datetime", recordedAtType)
+	}
+	row, err := st.client.TraceLog.Query().Where(tracelog.TraceIDEQ("trace-legacy")).Only(context.Background())
+	if err != nil {
+		t.Fatalf("ent TraceLog.Query() error = %v", err)
+	}
+	if !row.RecordedAt.Equal(header.Meta.Time.UTC()) {
+		t.Fatalf("ent RecordedAt = %s, want %s", row.RecordedAt, header.Meta.Time.UTC())
 	}
 }
 
