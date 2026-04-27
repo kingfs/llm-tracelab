@@ -2240,20 +2240,17 @@ func (s *Store) lookupOrCreateTraceID(path string) (string, error) {
 }
 
 func (s *Store) isFresh(path string, info os.FileInfo) (bool, error) {
-	var modTimeNS int64
-	var fileSize int64
-	err := s.db.QueryRow(
-		`SELECT mod_time_ns, file_size FROM logs WHERE path = ?`,
-		path,
-	).Scan(&modTimeNS, &fileSize)
-	if err == sql.ErrNoRows {
+	row, err := s.client.TraceLog.Query().
+		Where(tracelog.IDEQ(path)).
+		Only(context.Background())
+	if dao.IsNotFound(err) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
 
-	return modTimeNS == info.ModTime().UnixNano() && fileSize == info.Size(), nil
+	return row.ModTimeNs == info.ModTime().UnixNano() && row.FileSize == info.Size(), nil
 }
 
 func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
