@@ -10,9 +10,3 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-  exclusions:
-    rules:
-      - path: internal/mcpserver/server.go
-        text: "(type|func) .* is unused"
-        linters:
-          - unused
