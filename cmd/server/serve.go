@@ -1,0 +1,185 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/kingfs/llm-tracelab/internal/auth"
+	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/proxy"
+	"github.com/kingfs/llm-tracelab/internal/router"
+	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/spf13/cobra"
+)
+
+func newServeCommand() *cobra.Command {
+	return commandAdapter("serve", "Start the proxy, recorder, monitor, and MCP management endpoints", runServe)
+}
+
+func runServe(args []string) int {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	configPath := fs.String("c", "config.yaml", "Path to configuration file")
+	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", *configPath, "error", err)
+		return 1
+	}
+	if err := validateServeConfig(cfg); err != nil {
+		slog.Error("Invalid serve config", "error", err)
+		return 1
+	}
+
+	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.25+")
+
+	authStore, err := openAuthStore(cfg)
+	if err != nil {
+		slog.Error("Failed to initialize auth store", "error", err)
+		return 1
+	}
+	defer authStore.Close()
+
+	traceStore, err := store.NewWithDatabase(
+		cfg.TraceOutputDir(),
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
+	if err != nil {
+		slog.Error("Failed to initialize trace store", "error", err)
+		return 1
+	}
+	defer traceStore.Close()
+	syncCtx, cancelSync := context.WithCancel(context.Background())
+	defer cancelSync()
+	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute)
+
+	rtr, err := router.New(cfg, traceStore)
+	if err != nil {
+		slog.Error("Invalid upstream config", "error", err)
+		return 1
+	}
+	if err := rtr.Initialize(); err != nil {
+		slog.Error("Failed to initialize upstream router", "error", err)
+		return 1
+	}
+	defer rtr.Close()
+	rtr.StartBackgroundRefresh()
+	logResolvedTargets(rtr)
+
+	if cfg.Monitor.Port != "" {
+		go func() {
+			mux := newManagementMux(traceStore, rtr, cfg, authStore)
+
+			addr := ":" + cfg.Monitor.Port
+			srv := &http.Server{
+				Addr:              addr,
+				Handler:           mux,
+				ReadHeaderTimeout: 10 * time.Second,
+				ReadTimeout:       30 * time.Second,
+				WriteTimeout:      2 * time.Minute,
+				IdleTimeout:       2 * time.Minute,
+			}
+			slog.Info("Management server started", "addr", addr, "monitor_url", "http://localhost"+addr, "mcp_path", effectiveMCPPath(cfg))
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Error("Monitor server failed", "error", err)
+			}
+		}()
+	}
+
+	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore)
+	if err != nil {
+		slog.Error("Failed to create proxy handler", "error", err)
+		return 1
+	}
+
+	addr := ":" + cfg.Server.Port
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       5 * time.Minute,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	slog.Info("Server listening", "addr", addr, "trace_output_dir", cfg.TraceOutputDir(), "database_driver", cfg.DatabaseDriver())
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		slog.Error("Server failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration) {
+	if traceStore == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	go func() {
+		run := func(reason string) {
+			start := time.Now()
+			if err := traceStore.Sync(); err != nil {
+				slog.Warn("Trace index background sync failed", "reason", reason, "error", err)
+				return
+			}
+			slog.Info("Trace index background sync finished", "reason", reason, "duration", time.Since(start).String())
+		}
+
+		run("startup")
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run("periodic")
+			}
+		}
+	}()
+}
+
+func openAuthStore(cfg *config.Config) (*auth.Store, error) {
+	if cfg.DatabaseAutoMigrate() {
+		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
+			return nil, fmt.Errorf("migrate database: %w", err)
+		}
+	}
+	st, err := auth.OpenDatabase(
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+func validateServeConfig(cfg *config.Config) error {
+	if cfg.MCP.Enabled && cfg.Monitor.Port == "" {
+		return fmt.Errorf("monitor.port is required when mcp.enabled=true")
+	}
+	if cfg.MCP.Enabled {
+		if _, err := normalizeMCPPath(cfg.MCP.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}

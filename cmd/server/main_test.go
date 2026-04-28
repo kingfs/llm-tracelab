@@ -60,6 +60,40 @@ func TestLogResolvedUpstreamConfigIncludesRoutingDiagnostics(t *testing.T) {
 	}
 }
 
+func TestNormalizeRootArgsPreservesLegacyServeShortcut(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{name: "empty defaults to serve", args: nil, want: []string{"serve"}},
+		{name: "short config flag defaults to serve", args: []string{"-c", "config.yaml"}, want: []string{"serve", "-c", "config.yaml"}},
+		{name: "long config flag defaults to serve", args: []string{"--config", "config.yaml"}, want: []string{"serve", "--config", "config.yaml"}},
+		{name: "explicit command is unchanged", args: []string{"migrate", "-c", "config.yaml"}, want: []string{"migrate", "-c", "config.yaml"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeRootArgs(tc.args)
+			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
+				t.Fatalf("normalizeRootArgs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRootCommandRegistersBaseCommands(t *testing.T) {
+	t.Parallel()
+
+	cmd := newRootCommand()
+	for _, want := range []string{"serve", "migrate", "db", "auth", "version", "completion"} {
+		if found, _, err := cmd.Find([]string{want}); err != nil || found.Name() != want {
+			t.Fatalf("root command missing %q: found=%v err=%v", want, found, err)
+		}
+	}
+}
+
 func TestRunServeLogsActionableInvalidUpstreamConfig(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))

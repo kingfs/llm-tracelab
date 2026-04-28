@@ -13,7 +13,9 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 
 ## Current Architecture
 
-- Entry point: `cmd/server/main.go`
+- CLI entry point: `cmd/server/main.go` only exits through `run`; command wiring lives in `cmd/server/root.go`
+- CLI command files: `cmd/server/serve.go`, `migrate.go`, `auth.go`, `db.go`, `version.go`, `completion.go`
+- Management HTTP/MCP wiring shared by serve and tests: `cmd/server/management.go`
 - Reverse proxy: `internal/proxy`
 - Recording pipeline: `internal/recorder`
 - Metadata index: `internal/store` using SQLite at `{{output_dir}}/trace_index.sqlite3`
