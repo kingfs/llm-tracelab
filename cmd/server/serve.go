@@ -19,7 +19,14 @@ import (
 )
 
 func newServeCommand() *cobra.Command {
-	return commandAdapter("serve", "Start the proxy, recorder, monitor, and MCP management endpoints", runServe)
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Start the proxy, recorder, monitor, and MCP management endpoints",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(runServe, configArg(cmd))
+		},
+	}
 }
 
 func runServe(args []string) int {

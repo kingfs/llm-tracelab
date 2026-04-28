@@ -28,12 +28,8 @@ func newDBCommand() *cobra.Command {
 			return cliExitError{code: 2}
 		},
 	}
-	migrateCmd.AddCommand(commandAdapter("up", "Apply application database migrations", func(args []string) int {
-		return runAuthMigrate(append([]string{"up"}, args...))
-	}))
-	migrateCmd.AddCommand(commandAdapter("down", "Roll back application database migrations", func(args []string) int {
-		return runAuthMigrate(append([]string{"down"}, args...))
-	}))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("up", "Apply application database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("down", "Roll back application database migrations"))
 	cmd.AddCommand(migrateCmd)
 	return cmd
 }

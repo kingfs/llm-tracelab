@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -35,33 +35,92 @@ func newAuthCommand() *cobra.Command {
 			return cliExitError{code: 2}
 		},
 	}
-	migrateCmd.AddCommand(commandAdapter("up", "Apply auth database migrations", func(args []string) int {
-		return runAuthMigrate(append([]string{"up"}, args...))
-	}))
-	migrateCmd.AddCommand(commandAdapter("down", "Roll back auth database migrations", func(args []string) int {
-		return runAuthMigrate(append([]string{"down"}, args...))
-	}))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("up", "Apply auth database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("down", "Roll back auth database migrations"))
 	cmd.AddCommand(migrateCmd)
-	cmd.AddCommand(commandAdapter("init-user", "Create the initial auth user", runAuthInitUser))
-	cmd.AddCommand(commandAdapter("reset-password", "Reset an auth user's password", runAuthResetPassword))
-	cmd.AddCommand(commandAdapter("create-token", "Create an API token for an auth user", runAuthCreateToken))
+	cmd.AddCommand(newAuthInitUserCommand())
+	cmd.AddCommand(newAuthResetPasswordCommand())
+	cmd.AddCommand(newAuthCreateTokenCommand())
+	return cmd
+}
+
+func newAuthMigrateDirectionCommand(direction string, short string) *cobra.Command {
+	var steps int
+	var all bool
+	cmd := &cobra.Command{
+		Use:   direction,
+		Short: short,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runArgs := append([]string{direction}, configArg(cmd)...)
+			runArgs = append(runArgs, fmt.Sprintf("-step=%d", steps), fmt.Sprintf("-all=%t", all))
+			return runCode(runAuthMigrate, runArgs)
+		},
+	}
+	cmd.Flags().IntVar(&steps, "step", 0, "Apply only N migration steps")
+	if direction == "down" {
+		cmd.Flags().BoolVar(&all, "all", false, "Roll back all migrations")
+	}
+	return cmd
+}
+
+func newAuthInitUserCommand() *cobra.Command {
+	var username string
+	var password string
+	cmd := &cobra.Command{
+		Use:   "init-user",
+		Short: "Create the initial auth user",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runArgs := append(configArg(cmd), "--username", username, "--password", password)
+			return runCode(runAuthInitUser, runArgs)
+		},
+	}
+	cmd.Flags().StringVar(&username, "username", "admin", "Username")
+	cmd.Flags().StringVar(&password, "password", "", "Password")
+	return cmd
+}
+
+func newAuthResetPasswordCommand() *cobra.Command {
+	var username string
+	var password string
+	cmd := &cobra.Command{
+		Use:   "reset-password",
+		Short: "Reset an auth user's password",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runArgs := append(configArg(cmd), "--username", username, "--password", password)
+			return runCode(runAuthResetPassword, runArgs)
+		},
+	}
+	cmd.Flags().StringVar(&username, "username", "admin", "Username")
+	cmd.Flags().StringVar(&password, "password", "", "New password")
+	return cmd
+}
+
+func newAuthCreateTokenCommand() *cobra.Command {
+	var username string
+	var name string
+	var scope string
+	var ttl time.Duration
+	cmd := &cobra.Command{
+		Use:   "create-token",
+		Short: "Create an API token for an auth user",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runArgs := append(configArg(cmd), "--username", username, "--name", name, "--scope", scope, "--ttl", ttl.String())
+			return runCode(runAuthCreateToken, runArgs)
+		},
+	}
+	cmd.Flags().StringVar(&username, "username", "admin", "Username")
+	cmd.Flags().StringVar(&name, "name", "cli", "Token name")
+	cmd.Flags().StringVar(&scope, "scope", auth.DefaultTokenScope, "Token scope")
+	cmd.Flags().DurationVar(&ttl, "ttl", 0, "Token TTL, 0 means no expiration")
 	return cmd
 }
 
 func runAuth(args []string) int {
-	cmd := newAuthCommand()
-	cmd.SetArgs(args)
-	cmd.SetOut(os.Stdout)
-	cmd.SetErr(os.Stderr)
-	if err := cmd.Execute(); err != nil {
-		var exit cliExitError
-		if errors.As(err, &exit) {
-			return exit.code
-		}
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	return 0
+	return run(append([]string{"auth"}, args...))
 }
 
 func runAuthMigrate(args []string) int {

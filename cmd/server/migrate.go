@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -13,7 +14,21 @@ import (
 )
 
 func newMigrateCommand() *cobra.Command {
-	return commandAdapter("migrate", "Rewrite legacy cassettes and rebuild the trace metadata index", runMigrate)
+	var rewriteV2 bool
+	var rebuildIndex bool
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Rewrite legacy cassettes and rebuild the trace metadata index",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			runArgs := configArg(cmd)
+			runArgs = append(runArgs, fmt.Sprintf("-rewrite-v2=%t", rewriteV2), fmt.Sprintf("-rebuild-index=%t", rebuildIndex))
+			return runCode(runMigrate, runArgs)
+		},
+	}
+	cmd.Flags().BoolVar(&rewriteV2, "rewrite-v2", true, "Rewrite legacy V2 cassette files to V3")
+	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild SQLite metadata index from cassette files")
+	return cmd
 }
 
 func runMigrate(args []string) int {

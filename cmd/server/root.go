@@ -17,7 +17,7 @@ func run(args []string) int {
 	slog.SetDefault(logger)
 
 	cmd := newRootCommand()
-	cmd.SetArgs(normalizeRootArgs(args))
+	cmd.SetArgs(args)
 	cmd.SetOut(os.Stdout)
 	cmd.SetErr(os.Stderr)
 	if err := cmd.Execute(); err != nil {
@@ -32,16 +32,20 @@ func run(args []string) int {
 }
 
 func newRootCommand() *cobra.Command {
+	var configPath string
 	cmd := &cobra.Command{
 		Use:           cliName,
 		Short:         "Local-first LLM API record/replay proxy",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			printUsage(cmd.ErrOrStderr())
-			return cliExitError{code: 2}
+			if code := runServe([]string{"-c", configPath}); code != 0 {
+				return cliExitError{code: code}
+			}
+			return nil
 		},
 	}
+	cmd.PersistentFlags().StringVarP(&configPath, "config", "c", "config.yaml", "Path to configuration file")
 	cmd.AddCommand(
 		newServeCommand(),
 		newMigrateCommand(),
@@ -53,30 +57,19 @@ func newRootCommand() *cobra.Command {
 	return cmd
 }
 
-func normalizeRootArgs(args []string) []string {
-	if len(args) == 0 {
-		return []string{"serve"}
+func runCode(run func([]string) int, args []string) error {
+	if code := run(args); code != 0 {
+		return cliExitError{code: code}
 	}
-	switch args[0] {
-	case "-c", "--config":
-		return append([]string{"serve"}, args...)
-	default:
-		return args
-	}
+	return nil
 }
 
-func commandAdapter(use string, short string, run func([]string) int) *cobra.Command {
-	return &cobra.Command{
-		Use:                use,
-		Short:              short,
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if code := run(args); code != 0 {
-				return cliExitError{code: code}
-			}
-			return nil
-		},
+func configArg(cmd *cobra.Command) []string {
+	configPath, err := cmd.Root().PersistentFlags().GetString("config")
+	if err != nil || configPath == "" {
+		configPath = "config.yaml"
 	}
+	return []string{"-c", configPath}
 }
 
 type cliExitError struct {
