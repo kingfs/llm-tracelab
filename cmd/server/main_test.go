@@ -83,6 +83,15 @@ func TestRootCommandHelpWorksWithConfigShortcut(t *testing.T) {
 	}
 }
 
+func TestCLIRuntimeReadsConfigFromEnv(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_CONFIG", "env-config.yaml")
+
+	runtime := newCLIRuntime()
+	if got := runtime.configPath(); got != "env-config.yaml" {
+		t.Fatalf("configPath() = %q, want env-config.yaml", got)
+	}
+}
+
 func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 

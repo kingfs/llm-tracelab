@@ -7,15 +7,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newDBCommand() *cobra.Command {
+func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "db",
 		Short:         "Manage application database migrations",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "db requires migrate up or migrate down")
-			return cliExitError{code: 2}
+			return requireSubcommand(cmd)
 		},
 	}
 	migrateCmd := &cobra.Command{
@@ -24,12 +23,11 @@ func newDBCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "db migrate requires up or down")
-			return cliExitError{code: 2}
+			return requireSubcommand(cmd)
 		},
 	}
-	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("up", "Apply application database migrations"))
-	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("down", "Roll back application database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "up", "Apply application database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "down", "Roll back application database migrations"))
 	cmd.AddCommand(migrateCmd)
 	return cmd
 }

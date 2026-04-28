@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,31 +15,44 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
-func newServeCommand() *cobra.Command {
+func newServeCommand(runtime *cliRuntime) *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Start the proxy, recorder, monitor, and MCP management endpoints",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCode(runServe, configArg(cmd))
+			return runCode(func() int {
+				return runServeWithConfig(runtime.configPath())
+			})
 		},
 	}
 }
 
 func runServe(args []string) int {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return 2
+	configPath, code := parseConfigPath("serve", args)
+	if code != 0 {
+		return code
 	}
+	return runServeWithConfig(configPath)
+}
 
-	cfg, err := config.Load(*configPath)
+func parseConfigPath(name string, args []string) (string, int) {
+	fs := pflag.NewFlagSet(name, pflag.ContinueOnError)
+	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
+		return "", 2
+	}
+	return *configPath, 0
+}
+
+func runServeWithConfig(configPath string) int {
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		slog.Error("Failed to load config", "path", *configPath, "error", err)
+		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return 1
 	}
 	if err := validateServeConfig(cfg); err != nil {

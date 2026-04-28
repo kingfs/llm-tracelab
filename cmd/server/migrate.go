@@ -1,8 +1,6 @@
 package main
 
 import (
-	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 
@@ -11,9 +9,16 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/migrate"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
-func newMigrateCommand() *cobra.Command {
+type migrateOptions struct {
+	configPath   string
+	rewriteV2    bool
+	rebuildIndex bool
+}
+
+func newMigrateCommand(runtime *cliRuntime) *cobra.Command {
 	var rewriteV2 bool
 	var rebuildIndex bool
 	cmd := &cobra.Command{
@@ -21,9 +26,13 @@ func newMigrateCommand() *cobra.Command {
 		Short: "Rewrite legacy cassettes and rebuild the trace metadata index",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runArgs := configArg(cmd)
-			runArgs = append(runArgs, fmt.Sprintf("-rewrite-v2=%t", rewriteV2), fmt.Sprintf("-rebuild-index=%t", rebuildIndex))
-			return runCode(runMigrate, runArgs)
+			return runCode(func() int {
+				return runMigrateWithOptions(migrateOptions{
+					configPath:   runtime.configPath(),
+					rewriteV2:    rewriteV2,
+					rebuildIndex: rebuildIndex,
+				})
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&rewriteV2, "rewrite-v2", true, "Rewrite legacy V2 cassette files to V3")
@@ -32,19 +41,25 @@ func newMigrateCommand() *cobra.Command {
 }
 
 func runMigrate(args []string) int {
-	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
+	fs := pflag.NewFlagSet("migrate", pflag.ContinueOnError)
+	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
 	rewriteV2 := fs.Bool("rewrite-v2", true, "Rewrite legacy V2 cassette files to V3")
 	rebuildIndex := fs.Bool("rebuild-index", true, "Rebuild SQLite metadata index from cassette files")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
 		return 2
 	}
+	return runMigrateWithOptions(migrateOptions{
+		configPath:   *configPath,
+		rewriteV2:    *rewriteV2,
+		rebuildIndex: *rebuildIndex,
+	})
+}
 
-	cfg, err := config.Load(*configPath)
+func runMigrateWithOptions(opts migrateOptions) int {
+	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		slog.Error("Failed to load config", "path", *configPath, "error", err)
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
 	if cfg.DatabaseAutoMigrate() {
@@ -69,8 +84,8 @@ func runMigrate(args []string) int {
 
 	result, err := migrate.Run(traceStore, migrate.Options{
 		OutputDir: cfg.TraceOutputDir(),
-		RewriteV2: *rewriteV2,
-		RebuildDB: *rebuildIndex,
+		RewriteV2: opts.rewriteV2,
+		RebuildDB: opts.rebuildIndex,
 	})
 	if err != nil {
 		slog.Error("Migration failed", "error", err)

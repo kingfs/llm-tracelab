@@ -3,11 +3,13 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 )
 
 const cliName = "llm-tracelab"
@@ -17,7 +19,7 @@ func run(args []string) int {
 	slog.SetDefault(logger)
 
 	cmd := newRootCommand()
-	cmd.SetArgs(args)
+	cmd.SetArgs(normalizeLegacyFlagArgs(args))
 	cmd.SetOut(os.Stdout)
 	cmd.SetErr(os.Stderr)
 	if err := cmd.Execute(); err != nil {
@@ -32,44 +34,81 @@ func run(args []string) int {
 }
 
 func newRootCommand() *cobra.Command {
-	var configPath string
+	runtime := newCLIRuntime()
 	cmd := &cobra.Command{
 		Use:           cliName,
 		Short:         "Local-first LLM API record/replay proxy",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if code := runServe([]string{"-c", configPath}); code != 0 {
-				return cliExitError{code: code}
-			}
-			return nil
+			return runCode(func() int {
+				return runServeWithConfig(runtime.configPath())
+			})
 		},
 	}
-	cmd.PersistentFlags().StringVarP(&configPath, "config", "c", "config.yaml", "Path to configuration file")
+	cmd.PersistentFlags().StringP("config", "c", "config.yaml", "Path to configuration file")
+	mustBindPFlag(runtime.settings, "config", cmd.PersistentFlags().Lookup("config"))
 	cmd.AddCommand(
-		newServeCommand(),
-		newMigrateCommand(),
-		newDBCommand(),
-		newAuthCommand(),
+		newServeCommand(runtime),
+		newMigrateCommand(runtime),
+		newDBCommand(runtime),
+		newAuthCommand(runtime),
 		newVersionCommand(),
 		newCompletionCommand(cmd),
 	)
 	return cmd
 }
 
-func runCode(run func([]string) int, args []string) error {
-	if code := run(args); code != 0 {
+type cliRuntime struct {
+	settings *viper.Viper
+}
+
+func newCLIRuntime() *cliRuntime {
+	settings := viper.New()
+	settings.SetEnvPrefix("LLM_TRACELAB")
+	settings.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
+	settings.AutomaticEnv()
+	return &cliRuntime{settings: settings}
+}
+
+func (rt *cliRuntime) configPath() string {
+	if rt == nil || rt.settings == nil {
+		return "config.yaml"
+	}
+	if path := rt.settings.GetString("config"); path != "" {
+		return path
+	}
+	return "config.yaml"
+}
+
+func runCode(run func() int) error {
+	if code := run(); code != 0 {
 		return cliExitError{code: code}
 	}
 	return nil
 }
 
-func configArg(cmd *cobra.Command) []string {
-	configPath, err := cmd.Root().PersistentFlags().GetString("config")
-	if err != nil || configPath == "" {
-		configPath = "config.yaml"
+func requireSubcommand(cmd *cobra.Command) error {
+	_ = cmd.Help()
+	return cliExitError{code: 2}
+}
+
+func normalizeLegacyFlagArgs(args []string) []string {
+	normalized := make([]string, len(args))
+	for i, arg := range args {
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && len(arg) > 2 {
+			normalized[i] = "-" + arg
+			continue
+		}
+		normalized[i] = arg
 	}
-	return []string{"-c", configPath}
+	return normalized
+}
+
+func mustBindPFlag(settings *viper.Viper, key string, flag *pflag.Flag) {
+	if err := settings.BindPFlag(key, flag); err != nil {
+		panic(err)
+	}
 }
 
 type cliExitError struct {
@@ -78,17 +117,4 @@ type cliExitError struct {
 
 func (e cliExitError) Error() string {
 	return fmt.Sprintf("exit %d", e.code)
-}
-
-func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  llm-tracelab serve -c config.yaml")
-	fmt.Fprintln(w, "  llm-tracelab migrate -c config.yaml [-rewrite-v2=true] [-rebuild-index=true]")
-	fmt.Fprintln(w, "  llm-tracelab db migrate up|down -c config.yaml")
-	fmt.Fprintln(w, "  llm-tracelab auth migrate up|down -c config.yaml")
-	fmt.Fprintln(w, "  llm-tracelab auth init-user -c config.yaml --username admin --password 'change-me'")
-	fmt.Fprintln(w, "  llm-tracelab auth reset-password -c config.yaml --username admin --password 'new-password'")
-	fmt.Fprintln(w, "  llm-tracelab auth create-token -c config.yaml --username admin --name cli")
-	fmt.Fprintln(w, "  llm-tracelab version")
-	fmt.Fprintln(w, "  llm-tracelab completion bash|zsh|fish|powershell")
 }

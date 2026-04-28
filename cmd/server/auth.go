@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,17 +11,38 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
-func newAuthCommand() *cobra.Command {
+type authMigrateOptions struct {
+	configPath string
+	direction  string
+	steps      int
+	all        bool
+}
+
+type authUserOptions struct {
+	configPath string
+	username   string
+	password   string
+}
+
+type authTokenOptions struct {
+	configPath string
+	username   string
+	name       string
+	scope      string
+	ttl        time.Duration
+}
+
+func newAuthCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "auth",
 		Short:         "Manage users, tokens, and auth database migrations",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			printUsage(cmd.ErrOrStderr())
-			return cliExitError{code: 2}
+			return requireSubcommand(cmd)
 		},
 	}
 	migrateCmd := &cobra.Command{
@@ -31,20 +51,19 @@ func newAuthCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.ErrOrStderr(), "auth migrate requires up or down")
-			return cliExitError{code: 2}
+			return requireSubcommand(cmd)
 		},
 	}
-	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("up", "Apply auth database migrations"))
-	migrateCmd.AddCommand(newAuthMigrateDirectionCommand("down", "Roll back auth database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "up", "Apply auth database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "down", "Roll back auth database migrations"))
 	cmd.AddCommand(migrateCmd)
-	cmd.AddCommand(newAuthInitUserCommand())
-	cmd.AddCommand(newAuthResetPasswordCommand())
-	cmd.AddCommand(newAuthCreateTokenCommand())
+	cmd.AddCommand(newAuthInitUserCommand(runtime))
+	cmd.AddCommand(newAuthResetPasswordCommand(runtime))
+	cmd.AddCommand(newAuthCreateTokenCommand(runtime))
 	return cmd
 }
 
-func newAuthMigrateDirectionCommand(direction string, short string) *cobra.Command {
+func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short string) *cobra.Command {
 	var steps int
 	var all bool
 	cmd := &cobra.Command{
@@ -52,9 +71,14 @@ func newAuthMigrateDirectionCommand(direction string, short string) *cobra.Comma
 		Short: short,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runArgs := append([]string{direction}, configArg(cmd)...)
-			runArgs = append(runArgs, fmt.Sprintf("-step=%d", steps), fmt.Sprintf("-all=%t", all))
-			return runCode(runAuthMigrate, runArgs)
+			return runCode(func() int {
+				return runAuthMigrateWithOptions(authMigrateOptions{
+					configPath: runtime.configPath(),
+					direction:  direction,
+					steps:      steps,
+					all:        all,
+				})
+			})
 		},
 	}
 	cmd.Flags().IntVar(&steps, "step", 0, "Apply only N migration steps")
@@ -64,7 +88,7 @@ func newAuthMigrateDirectionCommand(direction string, short string) *cobra.Comma
 	return cmd
 }
 
-func newAuthInitUserCommand() *cobra.Command {
+func newAuthInitUserCommand(runtime *cliRuntime) *cobra.Command {
 	var username string
 	var password string
 	cmd := &cobra.Command{
@@ -72,8 +96,13 @@ func newAuthInitUserCommand() *cobra.Command {
 		Short: "Create the initial auth user",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runArgs := append(configArg(cmd), "--username", username, "--password", password)
-			return runCode(runAuthInitUser, runArgs)
+			return runCode(func() int {
+				return runAuthInitUserWithOptions(authUserOptions{
+					configPath: runtime.configPath(),
+					username:   username,
+					password:   password,
+				})
+			})
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
@@ -81,7 +110,7 @@ func newAuthInitUserCommand() *cobra.Command {
 	return cmd
 }
 
-func newAuthResetPasswordCommand() *cobra.Command {
+func newAuthResetPasswordCommand(runtime *cliRuntime) *cobra.Command {
 	var username string
 	var password string
 	cmd := &cobra.Command{
@@ -89,8 +118,13 @@ func newAuthResetPasswordCommand() *cobra.Command {
 		Short: "Reset an auth user's password",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runArgs := append(configArg(cmd), "--username", username, "--password", password)
-			return runCode(runAuthResetPassword, runArgs)
+			return runCode(func() int {
+				return runAuthResetPasswordWithOptions(authUserOptions{
+					configPath: runtime.configPath(),
+					username:   username,
+					password:   password,
+				})
+			})
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
@@ -98,7 +132,7 @@ func newAuthResetPasswordCommand() *cobra.Command {
 	return cmd
 }
 
-func newAuthCreateTokenCommand() *cobra.Command {
+func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
 	var username string
 	var name string
 	var scope string
@@ -108,8 +142,15 @@ func newAuthCreateTokenCommand() *cobra.Command {
 		Short: "Create an API token for an auth user",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runArgs := append(configArg(cmd), "--username", username, "--name", name, "--scope", scope, "--ttl", ttl.String())
-			return runCode(runAuthCreateToken, runArgs)
+			return runCode(func() int {
+				return runAuthCreateTokenWithOptions(authTokenOptions{
+					configPath: runtime.configPath(),
+					username:   username,
+					name:       name,
+					scope:      scope,
+					ttl:        ttl,
+				})
+			})
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
@@ -129,111 +170,142 @@ func runAuthMigrate(args []string) int {
 		return 2
 	}
 	direction := args[0]
-	fs := flag.NewFlagSet("auth migrate "+direction, flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
+	fs := pflag.NewFlagSet("auth migrate "+direction, pflag.ContinueOnError)
+	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
 	steps := fs.Int("step", 0, "Apply only N migration steps")
 	all := fs.Bool("all", false, "Roll back all migrations")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(normalizeLegacyFlagArgs(args[1:])); err != nil {
 		return 2
 	}
-	cfg, err := config.Load(*configPath)
+	return runAuthMigrateWithOptions(authMigrateOptions{
+		configPath: *configPath,
+		direction:  direction,
+		steps:      *steps,
+		all:        *all,
+	})
+}
+
+func runAuthMigrateWithOptions(opts authMigrateOptions) int {
+	cfg, err := config.Load(opts.configPath)
 	if err != nil {
-		slog.Error("Failed to load config", "path", *configPath, "error", err)
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	switch direction {
+	switch opts.direction {
 	case "up":
-		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), *steps); err != nil {
+		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), opts.steps); err != nil {
 			slog.Error("Auth migration failed", "error", err)
 			return 1
 		}
 	case "down":
-		if err := auth.MigrateDatabaseDown(cfg.DatabaseDriver(), cfg.DatabaseDSN(), *steps, *all); err != nil {
+		if err := auth.MigrateDatabaseDown(cfg.DatabaseDriver(), cfg.DatabaseDSN(), opts.steps, opts.all); err != nil {
 			slog.Error("Auth migration failed", "error", err)
 			return 1
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "unknown auth migrate direction %q\n", direction)
+		fmt.Fprintf(os.Stderr, "unknown auth migrate direction %q\n", opts.direction)
 		return 2
 	}
-	slog.Info("Database migration finished", "driver", cfg.DatabaseDriver(), "dsn", config.RedactDSN(cfg.DatabaseDSN()), "direction", direction)
+	slog.Info("Database migration finished", "driver", cfg.DatabaseDriver(), "dsn", config.RedactDSN(cfg.DatabaseDSN()), "direction", opts.direction)
 	return 0
 }
 
 func runAuthInitUser(args []string) int {
-	fs := flag.NewFlagSet("auth init-user", flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
+	fs := pflag.NewFlagSet("auth init-user", pflag.ContinueOnError)
+	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
 	username := fs.String("username", "admin", "Username")
 	password := fs.String("password", "", "Password")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
 		return 2
 	}
-	if strings.TrimSpace(*password) == "" {
+	return runAuthInitUserWithOptions(authUserOptions{
+		configPath: *configPath,
+		username:   *username,
+		password:   *password,
+	})
+}
+
+func runAuthInitUserWithOptions(opts authUserOptions) int {
+	if strings.TrimSpace(opts.password) == "" {
 		fmt.Fprintln(os.Stderr, "--password is required")
 		return 2
 	}
-	cfg, st, code := openAuthStoreForCommand(*configPath)
+	cfg, st, code := openAuthStoreForCommand(opts.configPath)
 	if code != 0 {
 		return code
 	}
 	defer st.Close()
-	if _, err := st.CreateUser(context.Background(), *username, *password); err != nil {
+	if _, err := st.CreateUser(context.Background(), opts.username, opts.password); err != nil {
 		slog.Error("Create user failed", "error", err)
 		return 1
 	}
-	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", *username)
+	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", opts.username)
 	return 0
 }
 
 func runAuthResetPassword(args []string) int {
-	fs := flag.NewFlagSet("auth reset-password", flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
+	fs := pflag.NewFlagSet("auth reset-password", pflag.ContinueOnError)
+	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
 	username := fs.String("username", "admin", "Username")
 	password := fs.String("password", "", "New password")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
 		return 2
 	}
-	if strings.TrimSpace(*password) == "" {
+	return runAuthResetPasswordWithOptions(authUserOptions{
+		configPath: *configPath,
+		username:   *username,
+		password:   *password,
+	})
+}
+
+func runAuthResetPasswordWithOptions(opts authUserOptions) int {
+	if strings.TrimSpace(opts.password) == "" {
 		fmt.Fprintln(os.Stderr, "--password is required")
 		return 2
 	}
-	cfg, st, code := openAuthStoreForCommand(*configPath)
+	cfg, st, code := openAuthStoreForCommand(opts.configPath)
 	if code != 0 {
 		return code
 	}
 	defer st.Close()
-	if err := st.ResetPassword(context.Background(), *username, *password); err != nil {
+	if err := st.ResetPassword(context.Background(), opts.username, opts.password); err != nil {
 		slog.Error("Reset password failed", "error", err)
 		return 1
 	}
-	slog.Info("Password reset", "driver", cfg.DatabaseDriver(), "username", *username)
+	slog.Info("Password reset", "driver", cfg.DatabaseDriver(), "username", opts.username)
 	return 0
 }
 
 func runAuthCreateToken(args []string) int {
-	fs := flag.NewFlagSet("auth create-token", flag.ContinueOnError)
-	configPath := fs.String("c", "config.yaml", "Path to configuration file")
-	fs.StringVar(configPath, "config", "config.yaml", "Path to configuration file")
+	fs := pflag.NewFlagSet("auth create-token", pflag.ContinueOnError)
+	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
 	username := fs.String("username", "admin", "Username")
 	name := fs.String("name", "cli", "Token name")
 	scope := fs.String("scope", auth.DefaultTokenScope, "Token scope")
 	ttl := fs.Duration("ttl", 0, "Token TTL, 0 means no expiration")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
 		return 2
 	}
-	cfg, st, code := openAuthStoreForCommand(*configPath)
+	return runAuthCreateTokenWithOptions(authTokenOptions{
+		configPath: *configPath,
+		username:   *username,
+		name:       *name,
+		scope:      *scope,
+		ttl:        *ttl,
+	})
+}
+
+func runAuthCreateTokenWithOptions(opts authTokenOptions) int {
+	cfg, st, code := openAuthStoreForCommand(opts.configPath)
 	if code != 0 {
 		return code
 	}
 	defer st.Close()
-	token, err := st.CreateToken(context.Background(), *username, *name, *scope, *ttl)
+	token, err := st.CreateToken(context.Background(), opts.username, opts.name, opts.scope, opts.ttl)
 	if err != nil {
 		slog.Error("Create token failed", "error", err)
 		return 1
