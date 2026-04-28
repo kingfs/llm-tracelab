@@ -33,22 +33,18 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 		Operation: detectOperation(NormalizeEndpoint(endpoint), provider),
 	}
 
-	switch {
-	case semantics.Endpoint == "/v1/chat/completions":
+	switch semantics.Endpoint {
+	case "/v1/chat/completions":
 		return openAIChatAdapter{semantics: semantics}, nil
-	case semantics.Endpoint == "/v1/responses":
+	case "/v1/responses":
 		return openAIResponsesAdapter{semantics: semantics}, nil
-	case semantics.Endpoint == "/v1/models",
-		semantics.Endpoint == "/v1beta/models",
-		semantics.Endpoint == "/v1/publishers/models":
+	case "/v1/models", "/v1beta/models", "/v1/publishers/models":
 		return modelListAdapter{semantics: semantics}, nil
-	case semantics.Endpoint == "/v1/messages":
+	case "/v1/messages":
 		return anthropicMessagesAdapter{semantics: semantics}, nil
-	case semantics.Endpoint == "/v1beta/models:generateContent",
-		semantics.Endpoint == "/v1beta/models:streamGenerateContent":
+	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
 		return googleGenerateContentAdapter{semantics: semantics}, nil
-	case semantics.Endpoint == "/v1/publishers/models:generateContent",
-		semantics.Endpoint == "/v1/publishers/models:streamGenerateContent":
+	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
 		return vertexGenerateContentAdapter{semantics: semantics}, nil
 	default:
 		return nil, UnsupportedEndpointError{Provider: provider, Endpoint: semantics.Endpoint}

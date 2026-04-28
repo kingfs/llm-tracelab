@@ -134,22 +134,10 @@ func getContentSlice() []LLMContent {
 	return contentSlicePool.Get().([]LLMContent)[:0]
 }
 
-func putContentSlice(s []LLMContent) {
-	if cap(s) <= 64 {
-		contentSlicePool.Put(s[:0])
-	}
-}
-
 var candidateSlicePool = sync.Pool{
 	New: func() any { return make([]LLMCandidate, 0, 4) },
 }
 
 func getCandidateSlice() []LLMCandidate {
 	return candidateSlicePool.Get().([]LLMCandidate)[:0]
-}
-
-func putCandidateSlice(s []LLMCandidate) {
-	if cap(s) <= 32 {
-		candidateSlicePool.Put(s[:0])
-	}
 }

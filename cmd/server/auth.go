@@ -11,7 +11,6 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 type authMigrateOptions struct {
@@ -160,32 +159,6 @@ func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
 	return cmd
 }
 
-func runAuth(args []string) int {
-	return run(append([]string{"auth"}, args...))
-}
-
-func runAuthMigrate(args []string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "auth migrate requires up or down")
-		return 2
-	}
-	direction := args[0]
-	fs := pflag.NewFlagSet("auth migrate "+direction, pflag.ContinueOnError)
-	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
-	steps := fs.Int("step", 0, "Apply only N migration steps")
-	all := fs.Bool("all", false, "Roll back all migrations")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(normalizeLegacyFlagArgs(args[1:])); err != nil {
-		return 2
-	}
-	return runAuthMigrateWithOptions(authMigrateOptions{
-		configPath: *configPath,
-		direction:  direction,
-		steps:      *steps,
-		all:        *all,
-	})
-}
-
 func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
@@ -211,22 +184,6 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 	return 0
 }
 
-func runAuthInitUser(args []string) int {
-	fs := pflag.NewFlagSet("auth init-user", pflag.ContinueOnError)
-	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
-	username := fs.String("username", "admin", "Username")
-	password := fs.String("password", "", "Password")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
-		return 2
-	}
-	return runAuthInitUserWithOptions(authUserOptions{
-		configPath: *configPath,
-		username:   *username,
-		password:   *password,
-	})
-}
-
 func runAuthInitUserWithOptions(opts authUserOptions) int {
 	if strings.TrimSpace(opts.password) == "" {
 		fmt.Fprintln(os.Stderr, "--password is required")
@@ -245,22 +202,6 @@ func runAuthInitUserWithOptions(opts authUserOptions) int {
 	return 0
 }
 
-func runAuthResetPassword(args []string) int {
-	fs := pflag.NewFlagSet("auth reset-password", pflag.ContinueOnError)
-	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
-	username := fs.String("username", "admin", "Username")
-	password := fs.String("password", "", "New password")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
-		return 2
-	}
-	return runAuthResetPasswordWithOptions(authUserOptions{
-		configPath: *configPath,
-		username:   *username,
-		password:   *password,
-	})
-}
-
 func runAuthResetPasswordWithOptions(opts authUserOptions) int {
 	if strings.TrimSpace(opts.password) == "" {
 		fmt.Fprintln(os.Stderr, "--password is required")
@@ -277,26 +218,6 @@ func runAuthResetPasswordWithOptions(opts authUserOptions) int {
 	}
 	slog.Info("Password reset", "driver", cfg.DatabaseDriver(), "username", opts.username)
 	return 0
-}
-
-func runAuthCreateToken(args []string) int {
-	fs := pflag.NewFlagSet("auth create-token", pflag.ContinueOnError)
-	configPath := fs.StringP("config", "c", "config.yaml", "Path to configuration file")
-	username := fs.String("username", "admin", "Username")
-	name := fs.String("name", "cli", "Token name")
-	scope := fs.String("scope", auth.DefaultTokenScope, "Token scope")
-	ttl := fs.Duration("ttl", 0, "Token TTL, 0 means no expiration")
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(normalizeLegacyFlagArgs(args)); err != nil {
-		return 2
-	}
-	return runAuthCreateTokenWithOptions(authTokenOptions{
-		configPath: *configPath,
-		username:   *username,
-		name:       *name,
-		scope:      *scope,
-		ttl:        *ttl,
-	})
 }
 
 func runAuthCreateTokenWithOptions(opts authTokenOptions) int {

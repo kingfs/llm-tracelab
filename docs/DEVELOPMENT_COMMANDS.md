@@ -13,7 +13,7 @@ task build:go
 task run
 ```
 
-`task fmt` rewrites Go files. `task check:quick` does not rewrite files; it checks formatting, runs `go vet`, and runs short tests.
+`task fmt` rewrites Go files. `task check:quick` does not rewrite files; it checks formatting, runs `golangci-lint`, and runs short tests.
 
 `task run` uses the tracked `config/config.yaml` by default. Override explicitly with `CONFIG=path/to/config.yaml task run`.
 
@@ -24,6 +24,7 @@ Use the smallest validation level that matches the change:
 ```bash
 task fmt:check
 task lint
+task lint:vet
 task test:short
 task test
 task test:race
@@ -34,7 +35,9 @@ task check:full
 
 - `task check:quick` is the default pre-commit gate for focused changes.
 - `task test:race` should be run after changes to proxying, routing, recorder concurrency, SQLite access, or streaming behavior.
-- `task check:full` is the release-style gate: formatting check, vet, tests, race tests, UI build, and Go build.
+- `task lint` runs the tracked `golangci-lint` configuration.
+- `task lint:vet` runs `go vet ./...` directly for troubleshooting.
+- `task check:full` is the release-style gate: formatting check, lint, tests, race tests, UI build, and Go build.
 
 ## Build Commands
 

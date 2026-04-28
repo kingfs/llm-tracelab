@@ -1,11 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"os"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
@@ -30,12 +25,4 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "down", "Roll back application database migrations"))
 	cmd.AddCommand(migrateCmd)
 	return cmd
-}
-
-func runDB(args []string) int {
-	if len(args) == 0 || args[0] != "migrate" {
-		fmt.Fprintln(os.Stderr, "db requires migrate up or migrate down")
-		return 2
-	}
-	return runAuthMigrate(args[1:])
 }

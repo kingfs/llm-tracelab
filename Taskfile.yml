@@ -34,7 +34,12 @@ tasks:
         test -z "$files" || { echo "$files"; exit 1; }'
 
   lint:
-    desc: Run lightweight static checks
+    desc: Run golangci-lint static checks
+    cmds:
+      - golangci-lint run ./...
+
+  lint:vet:
+    desc: Run go vet directly
     cmds:
       - go vet ./...
 

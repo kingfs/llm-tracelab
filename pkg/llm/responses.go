@@ -244,12 +244,8 @@ func (r *LLMRequest) ToOpenAIResponses() OpenAIResponsesRequest {
 	tools := make([]OpenAITool, 0, len(r.Tools))
 	for _, tool := range r.Tools {
 		tools = append(tools, OpenAITool{
-			Type: "function",
-			Function: OpenAIToolFunction{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.Parameters,
-			},
+			Type:     "function",
+			Function: OpenAIToolFunction(tool),
 		})
 	}
 

@@ -494,7 +494,7 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", http.StatusOK, http.StatusText(http.StatusOK)))
 	headerBuf.WriteString("Content-Type: application/json\r\n")
-	headerBuf.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(body))
 	headerBuf.WriteString("\r\n")
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
 		slog.Error("Failed to write aggregated model-list separator", "path", logInfo.Path, "err", err)
@@ -532,10 +532,6 @@ func (h *Handler) routerPolicy() string {
 	return h.router.Policy()
 }
 
-func (h *Handler) recordSelectionFailure(r *http.Request, start time.Time, statusCode int, selectErr error) {
-	h.recordSelectionFailureWithBody(r, start, statusCode, selectErr, nil)
-}
-
 func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
@@ -554,7 +550,7 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode)))
 	headerBuf.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	headerBuf.WriteString("X-Content-Type-Options: nosniff\r\n")
-	headerBuf.WriteString(fmt.Sprintf("Content-Length: %d\r\n", len(body)))
+	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(body))
 	headerBuf.WriteString("\r\n")
 
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {

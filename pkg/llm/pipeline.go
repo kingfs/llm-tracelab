@@ -473,7 +473,7 @@ func ExtractUsageFromTail(data []byte) (UsageSummary, bool) {
 			depth--
 			if depth == 0 {
 				endBrace = i + 1
-				break
+				return ExtractUsageFromJSON([]byte(jsonPart[:endBrace]))
 			}
 		}
 	}

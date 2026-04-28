@@ -379,11 +379,7 @@ func parseGenerateContentStreamResponse(body []byte, parseStreamError func(strin
 				}
 			}
 			for _, rating := range candidate.SafetyRatings {
-				safetyAll = append(safetyAll, LLMSafetyRating{
-					Category:    rating.Category,
-					Probability: rating.Probability,
-					Blocked:     rating.Blocked,
-				})
+				safetyAll = append(safetyAll, LLMSafetyRating(rating))
 			}
 		}
 		if len(chunk.PromptFeedback) > 0 {

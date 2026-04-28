@@ -674,17 +674,6 @@ func (r *Router) rebuildCatalog() {
 	r.modelToTargets = catalog
 }
 
-func (t *Target) setModels(models []string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.models = make(map[string]struct{}, len(models))
-	for _, model := range models {
-		if model != "" {
-			t.models[strings.ToLower(model)] = struct{}{}
-		}
-	}
-}
-
 func (t *Target) setRefreshResult(models []string, status string, refreshErr error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

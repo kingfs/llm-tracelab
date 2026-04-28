@@ -557,7 +557,7 @@ func llmMessageToChatMessage(role string, contents []llm.LLMContent, endpoint st
 			if strings.TrimSpace(content.Text) != "" {
 				blocks = append(blocks, ContentBlock{
 					Kind:   content.Type,
-					Title:  strings.ReplaceAll(strings.Title(content.Type), "_", " "),
+					Title:  titleContentType(content.Type),
 					Text:   content.Text,
 					Format: detectContentFormat(content.Text),
 				})
@@ -577,6 +577,17 @@ func llmMessageToChatMessage(role string, contents []llm.LLMContent, endpoint st
 		Name:          toolName,
 		IsError:       isError,
 	}
+}
+
+func titleContentType(value string) string {
+	parts := strings.Split(value, "_")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
 }
 
 func normalizeMessageRole(role string, msgType string) string {

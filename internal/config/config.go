@@ -398,9 +398,7 @@ func SQLitePathFromDSN(dsn string) string {
 		return ""
 	}
 	path = strings.TrimPrefix(path, "sqlite://")
-	if strings.HasPrefix(path, "file:") {
-		path = strings.TrimPrefix(path, "file:")
-	}
+	path = strings.TrimPrefix(path, "file:")
 	if idx := strings.Index(path, "?"); idx >= 0 {
 		path = path[:idx]
 	}
