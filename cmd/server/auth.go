@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -18,12 +19,18 @@ type authMigrateOptions struct {
 	direction  string
 	steps      int
 	all        bool
+	dryRun     bool
+	format     string
+	stdout     io.Writer
 }
 
 type authUserOptions struct {
 	configPath string
 	username   string
 	password   string
+	dryRun     bool
+	format     string
+	stdout     io.Writer
 }
 
 type authTokenOptions struct {
@@ -32,6 +39,9 @@ type authTokenOptions struct {
 	name       string
 	scope      string
 	ttl        time.Duration
+	dryRun     bool
+	format     string
+	stdout     io.Writer
 }
 
 func newAuthCommand(runtime *cliRuntime) *cobra.Command {
@@ -65,6 +75,7 @@ func newAuthCommand(runtime *cliRuntime) *cobra.Command {
 func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short string) *cobra.Command {
 	var steps int
 	var all bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   direction,
 		Short: short,
@@ -76,11 +87,15 @@ func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short
 					direction:  direction,
 					steps:      steps,
 					all:        all,
+					dryRun:     dryRun,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
 				})
 			})
 		},
 	}
 	cmd.Flags().IntVar(&steps, "step", 0, "Apply only N migration steps")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview migration without changing the database")
 	if direction == "down" {
 		cmd.Flags().BoolVar(&all, "all", false, "Roll back all migrations")
 	}
@@ -90,6 +105,7 @@ func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short
 func newAuthInitUserCommand(runtime *cliRuntime) *cobra.Command {
 	var username string
 	var password string
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "init-user",
 		Short: "Create the initial auth user",
@@ -100,18 +116,23 @@ func newAuthInitUserCommand(runtime *cliRuntime) *cobra.Command {
 					configPath: runtime.configPath(),
 					username:   username,
 					password:   password,
+					dryRun:     dryRun,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
 				})
 			})
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
 	cmd.Flags().StringVar(&password, "password", "", "Password")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview user creation without changing the database")
 	return cmd
 }
 
 func newAuthResetPasswordCommand(runtime *cliRuntime) *cobra.Command {
 	var username string
 	var password string
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "reset-password",
 		Short: "Reset an auth user's password",
@@ -122,12 +143,16 @@ func newAuthResetPasswordCommand(runtime *cliRuntime) *cobra.Command {
 					configPath: runtime.configPath(),
 					username:   username,
 					password:   password,
+					dryRun:     dryRun,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
 				})
 			})
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "admin", "Username")
 	cmd.Flags().StringVar(&password, "password", "", "New password")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview password reset without changing the database")
 	return cmd
 }
 
@@ -136,6 +161,7 @@ func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
 	var name string
 	var scope string
 	var ttl time.Duration
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "create-token",
 		Short: "Create an API token for an auth user",
@@ -148,6 +174,9 @@ func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
 					name:       name,
 					scope:      scope,
 					ttl:        ttl,
+					dryRun:     dryRun,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
 				})
 			})
 		},
@@ -156,6 +185,7 @@ func newAuthCreateTokenCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&name, "name", "cli", "Token name")
 	cmd.Flags().StringVar(&scope, "scope", auth.DefaultTokenScope, "Token scope")
 	cmd.Flags().DurationVar(&ttl, "ttl", 0, "Token TTL, 0 means no expiration")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview token creation without changing the database")
 	return cmd
 }
 
@@ -164,6 +194,17 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 	if err != nil {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
+	}
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "auth.migrate."+opts.direction, map[string]any{
+			"dry_run":   true,
+			"mutated":   false,
+			"driver":    cfg.DatabaseDriver(),
+			"dsn":       config.RedactDSN(cfg.DatabaseDSN()),
+			"direction": opts.direction,
+			"steps":     opts.steps,
+			"all":       opts.all,
+		})
 	}
 	switch opts.direction {
 	case "up":
@@ -189,6 +230,13 @@ func runAuthInitUserWithOptions(opts authUserOptions) int {
 		fmt.Fprintln(os.Stderr, "--password is required")
 		return 2
 	}
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "auth.init-user", map[string]any{
+			"dry_run":  true,
+			"mutated":  false,
+			"username": opts.username,
+		})
+	}
 	cfg, st, code := openAuthStoreForCommand(opts.configPath)
 	if code != 0 {
 		return code
@@ -199,6 +247,15 @@ func runAuthInitUserWithOptions(opts authUserOptions) int {
 		return 1
 	}
 	slog.Info("User created", "driver", cfg.DatabaseDriver(), "username", opts.username)
+	if opts.format == "json" {
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.init-user", map[string]any{
+			"mutated":  true,
+			"username": opts.username,
+		}, nil); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+	}
 	return 0
 }
 
@@ -206,6 +263,13 @@ func runAuthResetPasswordWithOptions(opts authUserOptions) int {
 	if strings.TrimSpace(opts.password) == "" {
 		fmt.Fprintln(os.Stderr, "--password is required")
 		return 2
+	}
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "auth.reset-password", map[string]any{
+			"dry_run":  true,
+			"mutated":  false,
+			"username": opts.username,
+		})
 	}
 	cfg, st, code := openAuthStoreForCommand(opts.configPath)
 	if code != 0 {
@@ -217,10 +281,29 @@ func runAuthResetPasswordWithOptions(opts authUserOptions) int {
 		return 1
 	}
 	slog.Info("Password reset", "driver", cfg.DatabaseDriver(), "username", opts.username)
+	if opts.format == "json" {
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.reset-password", map[string]any{
+			"mutated":  true,
+			"username": opts.username,
+		}, nil); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+	}
 	return 0
 }
 
 func runAuthCreateTokenWithOptions(opts authTokenOptions) int {
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "auth.create-token", map[string]any{
+			"dry_run":  true,
+			"mutated":  false,
+			"username": opts.username,
+			"name":     opts.name,
+			"scope":    opts.scope,
+			"ttl":      opts.ttl.String(),
+		})
+	}
 	cfg, st, code := openAuthStoreForCommand(opts.configPath)
 	if code != 0 {
 		return code
@@ -231,8 +314,40 @@ func runAuthCreateTokenWithOptions(opts authTokenOptions) int {
 		slog.Error("Create token failed", "error", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stdout, token.Token)
+	if opts.format == "json" {
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.create-token", map[string]any{
+			"mutated":  true,
+			"username": opts.username,
+			"name":     opts.name,
+			"scope":    opts.scope,
+			"token":    token.Token,
+		}, nil); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintln(stdoutOrDefault(opts.stdout), token.Token)
+	}
 	_ = cfg
+	return 0
+}
+
+func stdoutOrDefault(w io.Writer) io.Writer {
+	if w != nil {
+		return w
+	}
+	return os.Stdout
+}
+
+func writeDryRunResult(stdout io.Writer, format string, command string, result map[string]any) int {
+	if format == "json" {
+		if err := writeCLIResult(stdoutOrDefault(stdout), format, command, result, nil); err != nil {
+			slog.Error("Write dry-run result failed", "error", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdoutOrDefault(stdout), "dry-run %s: no changes will be applied\n", command)
 	return 0
 }
 

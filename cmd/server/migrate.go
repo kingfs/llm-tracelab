@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log/slog"
 	"os"
 
@@ -16,11 +17,15 @@ type migrateOptions struct {
 	configPath   string
 	rewriteV2    bool
 	rebuildIndex bool
+	dryRun       bool
+	format       string
+	stdout       io.Writer
 }
 
 func newMigrateCommand(runtime *cliRuntime) *cobra.Command {
 	var rewriteV2 bool
 	var rebuildIndex bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Rewrite legacy cassettes and rebuild the trace metadata index",
@@ -31,12 +36,16 @@ func newMigrateCommand(runtime *cliRuntime) *cobra.Command {
 					configPath:   runtime.configPath(),
 					rewriteV2:    rewriteV2,
 					rebuildIndex: rebuildIndex,
+					dryRun:       dryRun,
+					format:       runtime.outputFormat(),
+					stdout:       cmd.OutOrStdout(),
 				})
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&rewriteV2, "rewrite-v2", true, "Rewrite legacy V2 cassette files to V3")
 	cmd.Flags().BoolVar(&rebuildIndex, "rebuild-index", true, "Rebuild SQLite metadata index from cassette files")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview migration without changing cassette files or the metadata index")
 	return cmd
 }
 
@@ -53,6 +62,8 @@ func runMigrate(args []string) int {
 		configPath:   *configPath,
 		rewriteV2:    *rewriteV2,
 		rebuildIndex: *rebuildIndex,
+		format:       "text",
+		stdout:       os.Stdout,
 	})
 }
 
@@ -61,6 +72,17 @@ func runMigrateWithOptions(opts migrateOptions) int {
 	if err != nil {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
+	}
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "migrate", map[string]any{
+			"dry_run":         true,
+			"mutated":         false,
+			"output_dir":      cfg.TraceOutputDir(),
+			"rewrite_v2":      opts.rewriteV2,
+			"rebuild_index":   opts.rebuildIndex,
+			"database_driver": cfg.DatabaseDriver(),
+			"database_dsn":    config.RedactDSN(cfg.DatabaseDSN()),
+		})
 	}
 	if cfg.DatabaseAutoMigrate() {
 		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
@@ -100,5 +122,18 @@ func runMigrateWithOptions(opts migrateOptions) int {
 		"skipped_v3_files", result.SkippedV3Files,
 		"indexed_rows", result.RebuiltIndexRows,
 	)
+	if opts.format == "json" {
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "migrate", map[string]any{
+			"mutated":            opts.rewriteV2 || opts.rebuildIndex,
+			"output_dir":         cfg.TraceOutputDir(),
+			"scanned_files":      result.ScannedFiles,
+			"converted_files":    result.ConvertedFiles,
+			"skipped_v3_files":   result.SkippedV3Files,
+			"rebuilt_index_rows": result.RebuiltIndexRows,
+		}, nil); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+	}
 	return 0
 }

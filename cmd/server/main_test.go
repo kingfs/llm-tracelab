@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -96,10 +97,118 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "auth", "version", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "auth", "version", "schema", "completion"} {
 		if found, _, err := cmd.Find([]string{want}); err != nil || found.Name() != want {
 			t.Fatalf("root command missing %q: found=%v err=%v", want, found, err)
 		}
+	}
+}
+
+func TestVersionCommandSupportsJSONEnvelope(t *testing.T) {
+	t.Parallel()
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"version", "--format", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "version" || envelope.Result.Name != cliName || envelope.Result.Version == "" {
+		t.Fatalf("version envelope = %+v", envelope)
+	}
+}
+
+func TestSchemaCommandSupportsJSONEnvelopeForCommandPath(t *testing.T) {
+	t.Parallel()
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"schema", "auth", "create-token", "--format", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Contracts struct {
+				Formats []string `json:"formats"`
+				Stdout  string   `json:"stdout"`
+				Stderr  string   `json:"stderr"`
+			} `json:"contracts"`
+			Commands []struct {
+				Path  string `json:"path"`
+				Flags []struct {
+					Name string `json:"name"`
+				} `json:"flags"`
+			} `json:"commands"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || len(envelope.Result.Commands) != 1 {
+		t.Fatalf("schema envelope = %+v", envelope)
+	}
+	if envelope.Result.Commands[0].Path != "llm-tracelab auth create-token" {
+		t.Fatalf("schema path = %q", envelope.Result.Commands[0].Path)
+	}
+	if len(envelope.Result.Contracts.Formats) == 0 || envelope.Result.Contracts.Stdout == "" || envelope.Result.Contracts.Stderr == "" {
+		t.Fatalf("schema contracts missing machine contract: %+v", envelope.Result.Contracts)
+	}
+	var foundDryRun bool
+	for _, flag := range envelope.Result.Commands[0].Flags {
+		if flag.Name == "dry-run" {
+			foundDryRun = true
+		}
+	}
+	if !foundDryRun {
+		t.Fatalf("schema flags = %+v, want dry-run", envelope.Result.Commands[0].Flags)
+	}
+}
+
+func TestAuthCreateTokenDryRunJSONDoesNotRequireDatabase(t *testing.T) {
+	t.Parallel()
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"auth", "create-token", "--dry-run", "--format", "json", "--username", "admin", "--name", "agent"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			DryRun  bool   `json:"dry_run"`
+			Mutated bool   `json:"mutated"`
+			Name    string `json:"name"`
+			Token   string `json:"token"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Name != "agent" || envelope.Result.Token != "" {
+		t.Fatalf("dry-run envelope = %+v", envelope)
 	}
 }
 
