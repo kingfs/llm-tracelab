@@ -28,6 +28,18 @@ export function TokenBadge({ label, value, accent = "", icon = "total" }) {
   );
 }
 
+export function LatencyMetric({ label, value, icon = "duration", title = "" }) {
+  return (
+    <span className="latency-metric" title={title}>
+      <span className="metric-icon-wrap latency-metric-icon">
+        <MetricIcon type={icon} />
+      </span>
+      <span className="latency-metric-label">{label}</span>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
 export function DetailMetaPill({ label, value, mono = false }) {
   return (
     <span className={`detail-meta-pill ${mono ? "mono" : ""}`.trim()}>
@@ -42,6 +54,32 @@ function IconFrame({ children }) {
 }
 
 function MetricIcon({ type = "total" }) {
+  if (type === "duration") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="5.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M8 4.7v3.6l2.4 1.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "ttft") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M8 2.5v3.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M4.6 7.2 8 3.8l3.4 3.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M3 9.3h10M3 12.2h7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (type === "rate") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3 11.7a5.6 5.6 0 1 1 10 0" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="m8.2 9.2 2.9-2.9" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <circle cx="8" cy="9.4" r="1" fill="currentColor" />
+      </svg>
+    );
+  }
   if (type === "input") {
     return (
       <svg viewBox="0 0 16 16" aria-hidden="true">

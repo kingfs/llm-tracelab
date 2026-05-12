@@ -825,6 +825,15 @@ a:focus-visible {
   background: linear-gradient(180deg, rgba(161, 54, 42, 0.08), rgba(255, 255, 255, 0.34));
 }
 
+.trace-row-group {
+  background: linear-gradient(180deg, rgba(161, 54, 42, 0.075), rgba(255, 252, 245, 0.44));
+}
+
+.trace-row-grouped-child {
+  padding-left: 30px;
+  background: rgba(255, 255, 255, 0.42);
+}
+
 .trace-row strong,
 .session-row strong {
   font-size: 1rem;
@@ -834,6 +843,39 @@ a:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 3px;
+}
+
+.latency-metric-stack {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.latency-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.latency-metric strong {
+  font-size: 0.9rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.latency-metric-label {
+  color: var(--muted-soft);
+  font-size: 0.62rem;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.latency-metric .latency-metric-icon {
+  color: var(--accent);
 }
 
 .trace-model-name {
@@ -930,10 +972,14 @@ a:focus-visible {
 .token-inline-row {
   display: flex;
   align-items: center;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
   overflow: hidden;
+}
+
+.token-inline-row-with-rate {
+  overflow: visible;
 }
 
 .mini-token {

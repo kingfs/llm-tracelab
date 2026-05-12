@@ -9,12 +9,14 @@ import {
   buildTraceUpstreamHealthSummary,
   buildUpstreamLink,
   formatDateTime,
+  formatDuration,
   formatEndpointTag,
   formatFailureReason,
   formatHealthLabel,
   formatProviderTag,
   formatRatio,
   formatRoutingScore,
+  formatTokenRate,
   healthTone,
   metricThresholdTone,
   normalizeTraceTab,
@@ -133,8 +135,9 @@ export function TraceDetailPage() {
             {session?.session_id ? <DetailMetaPill label="session" value={session.session_id} mono /> : null}
             <DetailMetaPill label="time" value={formatDateTime(header?.time)} />
             <DetailMetaPill label="endpoint" value={header?.endpoint || header?.url || "-"} />
-            <DetailMetaPill label="duration" value={`${header?.duration_ms || 0} ms`} />
-            <DetailMetaPill label="ttft" value={`${header?.ttft_ms || 0} ms`} />
+            <DetailMetaPill label="duration" value={formatDuration(header?.duration_ms || 0, { precise: true })} />
+            <DetailMetaPill label="ttft" value={formatDuration(header?.ttft_ms || 0, { precise: true })} />
+            <DetailMetaPill label="rate" value={formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)} />
             <DetailMetaPill label="request id" value={header?.request_id || "-"} mono />
           </div>
         </div>
@@ -176,9 +179,10 @@ export function TraceDetailPage() {
           <p className="trace-failure-summary">{failureSummary.summary}</p>
           <div className="trace-failure-meta">
             <span>{header?.endpoint || header?.url || "-"}</span>
-            <span>duration {header?.duration_ms || 0} ms</span>
-            <span>ttft {header?.ttft_ms || 0} ms</span>
+            <span>duration {formatDuration(header?.duration_ms || 0, { precise: true })}</span>
+            <span>ttft {formatDuration(header?.ttft_ms || 0, { precise: true })}</span>
             <span>tokens {usage?.total_tokens || 0}</span>
+            <span>rate {formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)}</span>
           </div>
           <div className="trace-failure-actions">
             <button className={tab === "timeline" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("timeline", "timeline_error")}>

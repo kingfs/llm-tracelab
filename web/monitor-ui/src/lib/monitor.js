@@ -234,6 +234,43 @@ export function buildFailureContexts(timeline = []) {
   return failures;
 }
 
+export function formatDuration(value, { precise = false } = {}) {
+  const ms = Number(value || 0);
+  const safeMs = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
+  let label = `${safeMs} ms`;
+  if (safeMs >= 1000) {
+    const seconds = safeMs / 1000;
+    label = `${formatCompactNumber(seconds)}s`;
+  }
+  if (precise && label !== `${safeMs} ms`) {
+    return `${label} (${safeMs} ms)`;
+  }
+  return label;
+}
+
+export function formatTokenRate(tokens = 0, durationMs = 0) {
+  const tokenCount = Number(tokens || 0);
+  const ms = Number(durationMs || 0);
+  if (!Number.isFinite(tokenCount) || !Number.isFinite(ms) || tokenCount <= 0 || ms <= 0) {
+    return "-";
+  }
+  return `${formatCompactNumber(tokenCount / (ms / 1000))} tok/s`;
+}
+
+function formatCompactNumber(value = 0) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  if (number >= 100 || Number.isInteger(number)) {
+    return String(Math.round(number));
+  }
+  if (number >= 10) {
+    return number.toFixed(1).replace(/\.0$/, "");
+  }
+  return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
 export function buildFailureSummary(context) {
   const endpoint = formatEndpointTag(context.current.endpoint);
   const provider = formatProviderTag(context.current.provider);
@@ -264,7 +301,7 @@ export function buildFailureDetail(item) {
     parts.push(formatProviderTag(item.provider));
   }
   if (item.ttft_ms) {
-    parts.push(`ttft ${item.ttft_ms} ms`);
+    parts.push(`ttft ${formatDuration(item.ttft_ms)}`);
   }
   return parts.join(" · ");
 }

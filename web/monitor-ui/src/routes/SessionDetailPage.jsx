@@ -13,10 +13,12 @@ import {
   buildFailureSummary,
   buildTraceLink,
   formatDateTime,
+  formatDuration,
   formatEndpointTag,
   formatFailureReason,
   formatProviderTag,
   formatSignedMetric,
+  formatTokenRate,
 } from "../lib/monitor";
 
 export function SessionDetailPage() {
@@ -81,7 +83,7 @@ export function SessionDetailPage() {
               <StatCard label="Failed" value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
               <StatCard label="Success" value={summary?.success_request ?? 0} />
               <StatCard label="Streams" value={summary?.stream_count ?? 0} />
-              <StatCard label="Duration" value={`${summary?.total_duration_ms ?? 0} ms`} />
+              <StatCard label="Duration" value={formatDuration(summary?.total_duration_ms ?? 0)} detail={`${summary?.total_duration_ms ?? 0} ms total`} />
             </div>
           </section>
           <section className="panel">
@@ -128,9 +130,10 @@ export function SessionDetailPage() {
                     <InlineTag tone={item.status_code >= 200 && item.status_code < 300 ? "green" : "danger"}>{item.status_code}</InlineTag>
                   </div>
                   <div className="session-timeline-meta">
-                    <span>duration {item.duration_ms} ms</span>
-                    <span>ttft {item.ttft_ms} ms</span>
+                    <span>duration {formatDuration(item.duration_ms)}</span>
+                    <span>ttft {formatDuration(item.ttft_ms)}</span>
                     <span>tokens {item.total_tokens}</span>
+                    <span>rate {formatTokenRate(item.total_tokens, item.duration_ms)}</span>
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
                   <div className="action-group action-group-start">
@@ -215,7 +218,7 @@ export function SessionDetailPage() {
         {traceFilter === "failed" && visibleTraces.length === 0 ? (
           <EmptyState title="No failed traces" detail="This session has no failed requests under the current filter." />
         ) : (
-          <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures />
+          <RequestList items={visibleTraces} fromSessionID={summary?.session_id || sessionID} focusFailures groupSessionFailures />
         )}
       </section>
     </div>
@@ -237,8 +240,9 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
       </div>
       <strong>{item.model || "unknown-model"}</strong>
       <span>{formatDateTime(item.time)}</span>
-      <span>duration {item.duration_ms} ms</span>
+      <span>duration {formatDuration(item.duration_ms)}</span>
       <span>tokens {item.total_tokens}</span>
+      <span>rate {formatTokenRate(item.total_tokens, item.duration_ms)}</span>
       {delta ? (
         <div className="failure-delta-row">
           <span>vs prev duration {formatSignedMetric(delta.duration_ms)} ms</span>
