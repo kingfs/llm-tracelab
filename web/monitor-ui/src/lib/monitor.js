@@ -257,6 +257,41 @@ export function formatTokenRate(tokens = 0, durationMs = 0) {
   return `${formatCompactNumber(tokenCount / (ms / 1000))} tok/s`;
 }
 
+export function formatPrefillSpeed(promptTokens = 0, ttftMs = 0, durationMs = 0, isStream = false) {
+  // stream: prefill ≈ ttft; non-stream: ttft == total, use total as denominator
+  const ms = isStream ? Number(ttftMs || 0) : Number(durationMs || 0);
+  const tokens = Number(promptTokens || 0);
+  if (!Number.isFinite(tokens) || !Number.isFinite(ms) || tokens <= 0 || ms <= 0) {
+    return "-";
+  }
+  return `${formatCompactNumber(tokens / (ms / 1000))} tok/s`;
+}
+
+export function formatGenerationSpeed(completionTokens = 0, durationMs = 0, ttftMs = 0, isStream = false) {
+  const totalMs = Number(durationMs || 0);
+  const tokens = Number(completionTokens || 0);
+  // non-stream: all tokens arrive at once, denominator = total
+  // stream: tokens generated after ttft, denominator = total - ttft
+  const genMs = isStream ? totalMs - Number(ttftMs || 0) : totalMs;
+  if (!Number.isFinite(tokens) || !Number.isFinite(genMs) || tokens <= 0 || genMs < 10) {
+    return "-";
+  }
+  return `${formatCompactNumber(tokens / (genMs / 1000))} tok/s`;
+}
+
+export function formatCacheRate(cachedTokens = 0, totalTokens = 0) {
+  const cached = Number(cachedTokens || 0);
+  const total = Number(totalTokens || 0);
+  if (!Number.isFinite(cached) || !Number.isFinite(total) || total <= 0) {
+    return "-";
+  }
+  const rate = (cached / total) * 100;
+  if (rate < 0.1 && cached > 0) {
+    return "<0.1%";
+  }
+  return `${rate.toFixed(1)}%`;
+}
+
 function formatCompactNumber(value = 0) {
   const number = Number(value || 0);
   if (!Number.isFinite(number)) {

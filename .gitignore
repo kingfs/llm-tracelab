@@ -6,3 +6,4 @@ node_modules/
 /server
 docker-data/
 .codex
+config/config.dev.yaml

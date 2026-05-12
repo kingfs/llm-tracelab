@@ -80,6 +80,24 @@ function MetricIcon({ type = "total" }) {
       </svg>
     );
   }
+  if (type === "pp") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M2 10V4a2 2 0 012-2h4l2 2h4a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2z" fill="none" stroke="currentColor" strokeWidth="1.3" />
+        <path d="M10 5v1.8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="m8.8 6.2 1.2-1.2 1.2 1.2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (type === "tg") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3 3.5h4M3 6.5h6M3 9.5h5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M13 10.5V7.3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="m11.5 8.5 1.5-1.5 1.5 1.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
   if (type === "input") {
     return (
       <svg viewBox="0 0 16 16" aria-hidden="true">
