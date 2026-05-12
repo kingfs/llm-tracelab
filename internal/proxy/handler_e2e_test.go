@@ -1015,6 +1015,334 @@ func waitForRecordedPrelude(path string, timeout time.Duration) (*recordfile.Par
 	}
 }
 
+func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	// upstream-primary: returns 404 for the requested model.
+	var primaryCalled bool
+	upstreamPrimary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"message":"model not found","type":"not_found_error"}}`)
+	}))
+	defer upstreamPrimary.Close()
+
+	// upstream-secondary: returns 200.
+	var secondaryCalled bool
+	upstreamSecondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_secondary","object":"response","usage":{"input_tokens":5,"output_tokens":3,"total_tokens":8}}`)
+	}))
+	defer upstreamSecondary.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamPrimary.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamSecondary.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	// Use first_available for deterministic selection order.
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// The handler should have retried on the primary 404 and succeeded on secondary.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200 (should have fallen back to secondary)", resp.StatusCode)
+	}
+	if !primaryCalled {
+		t.Errorf("primary upstream was not called, expected one 404 attempt")
+	}
+	if !secondaryCalled {
+		t.Fatalf("secondary upstream was not called, expected fallback after primary 404")
+	}
+
+	// Verify the recording attributes the request to secondary.
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "secondary" {
+		t.Fatalf("SelectedUpstreamID = %q, want secondary (recording should reflect the successful upstream)", parsed.Header.Meta.SelectedUpstreamID)
+	}
+	if parsed.Header.Meta.RoutingFailureReason != "" {
+		t.Fatalf("RoutingFailureReason = %q, want empty", parsed.Header.Meta.RoutingFailureReason)
+	}
+}
+
+func TestHandlerRetryOnUpstream500(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	// upstream-primary: returns 503.
+	var primaryCalled bool
+	upstreamPrimary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `{"error":"service unavailable"}`)
+	}))
+	defer upstreamPrimary.Close()
+
+	// upstream-secondary: returns 200.
+	var secondaryCalled bool
+	upstreamSecondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_secondary","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamSecondary.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamPrimary.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamSecondary.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200 (should have fallen back to secondary)", resp.StatusCode)
+	}
+	if !primaryCalled || !secondaryCalled {
+		t.Fatalf("primary=%v secondary=%v, want both called", primaryCalled, secondaryCalled)
+	}
+}
+
+func TestHandlerRetryExhaustedReturns502(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	// Both upstreams return 404 — handler should eventually give up.
+	upstream1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":"not found"}`)
+	}))
+	defer upstream1.Close()
+
+	upstream2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":"not found"}`)
+	}))
+	defer upstream2.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary", Enabled: boolPtr(true), Priority: 100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstream1.URL + "/v1", ProviderPreset: "openai"},
+			},
+			{
+				ID:             "secondary", Enabled: boolPtr(true), Priority: 90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstream2.URL + "/v1", ProviderPreset: "openai"},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("resp.StatusCode = %d, want 502 (all upstreams exhausted)", resp.StatusCode)
+	}
+}
+
+func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
+	// 4xx errors other than 404 and 429 should NOT be retried — they indicate
+	// a client mistake that would fail on any upstream.
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var primaryCalled, secondaryCalled bool
+	upstreamPrimary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		primaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"bad request"}`)
+	}))
+	defer upstreamPrimary.Close()
+
+	upstreamSecondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondaryCalled = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","usage":{"total_tokens":2}}`)
+	}))
+	defer upstreamSecondary.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary", Enabled: boolPtr(true), Priority: 100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai"},
+			},
+			{
+				ID:             "secondary", Enabled: boolPtr(true), Priority: 90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai"},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("resp.StatusCode = %d, want 400 (should NOT retry on 400)", resp.StatusCode)
+	}
+	if secondaryCalled {
+		t.Fatalf("secondary was called, but client 4xx errors should not trigger retry")
+	}
+	if !primaryCalled {
+		t.Fatalf("primary was not called, expected 400 response forwarded from primary")
+	}
+}
+
 func findRecordedHTTP(t *testing.T, root string) string {
 	t.Helper()
 

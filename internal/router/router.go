@@ -209,6 +209,7 @@ const (
 	SelectionFailureNilRequest         = "nil_request"
 	SelectionFailureNoSupportingTarget = "no_supporting_target"
 	SelectionFailureAllTargetsOpen     = "all_targets_open"
+	SelectionFailureAllTargetsExcluded = "all_targets_excluded"
 	SelectionFailureUnknown            = "unknown"
 )
 
@@ -440,6 +441,22 @@ func (r *Router) Select(req *http.Request) (*Selection, error) {
 	return r.SelectWithBody(req, body)
 }
 
+// SelectWithExclusion works like SelectWithBody but excludes the given target IDs
+// from consideration. This is used by the proxy handler to retry after an upstream
+// failure with the next available candidate.
+func (r *Router) SelectWithExclusion(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
+	if req == nil {
+		return nil, &SelectionError{
+			Reason:  SelectionFailureNilRequest,
+			Message: "nil request",
+		}
+	}
+	if len(excludeIDs) == 0 {
+		return r.SelectWithBody(req, body)
+	}
+	return r.selectTargets(req.URL.Path, body, excludeIDs)
+}
+
 func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, error) {
 	if req == nil {
 		return nil, &SelectionError{
@@ -447,30 +464,50 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 			Message: "nil request",
 		}
 	}
-	features := extractRequestFeatures(req.URL.Path, body)
+	return r.selectTargets(req.URL.Path, body, nil)
+}
+
+// selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
+func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string) (*Selection, error) {
+	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	candidates := r.candidatesForRequest(req.URL.Path, model)
+	candidates := r.candidatesForRequest(rawPath, model)
 	if len(candidates) == 0 {
 		return nil, &SelectionError{
 			Reason:  SelectionFailureNoSupportingTarget,
-			Message: fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(req.URL.Path)),
+			Message: fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(rawPath)),
 		}
 	}
+
+	excludeSet := make(map[string]struct{}, len(excludeIDs))
+	for _, id := range excludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+
 	available := make([]*Target, 0, len(candidates))
 	for _, candidate := range candidates {
 		if candidate.isOpen(time.Now()) {
 			continue
 		}
+		if _, excluded := excludeSet[candidate.ID]; excluded {
+			continue
+		}
 		available = append(available, candidate)
 	}
 	if len(available) == 0 {
+		reason := SelectionFailureAllTargetsOpen
+		msg := fmt.Sprintf("all upstream targets are temporarily unavailable for model %q", model)
+		if len(excludeIDs) > 0 {
+			reason = SelectionFailureAllTargetsExcluded
+			msg = fmt.Sprintf("all upstream targets for model %q have been exhausted", model)
+		}
 		return nil, &SelectionError{
-			Reason:  SelectionFailureAllTargetsOpen,
-			Message: fmt.Sprintf("all upstream targets are temporarily unavailable for model %q", model),
+			Reason:  reason,
+			Message: msg,
 		}
 	}
 

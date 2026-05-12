@@ -700,3 +700,108 @@ func TestRouterSelectReturnsStructuredAllTargetsOpenError(t *testing.T) {
 		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureAllTargetsOpen)
 	}
 }
+
+func TestRouterSelectWithExclusion(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.primary.example/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.secondary.example/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "tertiary",
+				Enabled:        boolPtr(true),
+				Priority:       80,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.tertiary.example/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	// Use first_available so priority ordering is deterministic.
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	body := []byte(`{"model":"gpt-5.5","input":"hello"}`)
+
+	// First selection: should be highest-priority target.
+	req1, _ := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", nil)
+	req1.Header.Set("Content-Type", "application/json")
+	sel1, err := rtr.SelectWithBody(req1, body)
+	if err != nil {
+		t.Fatalf("first SelectWithBody() error = %v", err)
+	}
+	if sel1.Target.ID != "primary" {
+		t.Fatalf("first selection = %q, want primary", sel1.Target.ID)
+	}
+	rtr.Complete(sel1, Outcome{Success: false, StatusCode: 404}) // simulate model-not-found
+
+	// Second selection: exclude primary, should get secondary.
+	req2, _ := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", nil)
+	req2.Header.Set("Content-Type", "application/json")
+	sel2, err := rtr.SelectWithExclusion(req2, body, []string{"primary"})
+	if err != nil {
+		t.Fatalf("SelectWithExclusion(exclude primary) error = %v", err)
+	}
+	if sel2.Target.ID != "secondary" {
+		t.Fatalf("second selection after exclusion = %q, want secondary", sel2.Target.ID)
+	}
+
+	// Third selection: exclude primary + secondary, should get tertiary.
+	req3, _ := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", nil)
+	req3.Header.Set("Content-Type", "application/json")
+	sel3, err := rtr.SelectWithExclusion(req3, body, []string{"primary", "secondary"})
+	if err != nil {
+		t.Fatalf("SelectWithExclusion(exclude primary+secondary) error = %v", err)
+	}
+	if sel3.Target.ID != "tertiary" {
+		t.Fatalf("third selection after exclusion = %q, want tertiary", sel3.Target.ID)
+	}
+
+	// Exclude all targets: should fail.
+	req4, _ := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", nil)
+	req4.Header.Set("Content-Type", "application/json")
+	_, err = rtr.SelectWithExclusion(req4, body, []string{"primary", "secondary", "tertiary"})
+	if err == nil {
+		t.Fatalf("SelectWithExclusion(all excluded) error = nil, want error")
+	}
+
+	// Empty exclusion list should behave like SelectWithBody.
+	req5, _ := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", nil)
+	req5.Header.Set("Content-Type", "application/json")
+	sel5, err := rtr.SelectWithExclusion(req5, body, nil)
+	if err != nil {
+		t.Fatalf("SelectWithExclusion(nil) error = %v", err)
+	}
+	if sel5.Target.ID != "primary" {
+		t.Fatalf("SelectWithExclusion(nil) = %q, want primary (same as SelectWithBody)", sel5.Target.ID)
+	}
+}

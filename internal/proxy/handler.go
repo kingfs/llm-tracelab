@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -357,92 +358,284 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	selection, err := h.router.SelectWithBody(r, bodyBytes)
-	if err != nil {
-		slog.Error("Failed to select upstream target", "error", err)
-		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, err, bodyBytes)
-		http.Error(w, err.Error(), http.StatusBadGateway)
-		return
-	}
-
-	// [Step 2] 准备日志 (此时 r.Body 已经包含 injected options，Log 里会记录下来)
-	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
-		SiteURL:                        selection.Target.Upstream.BaseURL,
-		SelectedUpstreamID:             selection.Target.ID,
-		SelectedUpstreamProviderPreset: selection.Target.Upstream.ProviderPreset,
-		RoutingPolicy:                  h.routerPolicy(),
-		RoutingScore:                   selection.Score,
-		RoutingCandidateCount:          selection.CandidateCount,
-	}, bodyBytes)
-	if err != nil {
-		slog.Error("Failed to prepare log file", "err", err)
-		http.Error(w, "Internal Logging Error", 500)
-		h.router.Complete(selection, router.Outcome{
-			Success:    false,
-			StatusCode: http.StatusInternalServerError,
-			Stream:     selection.Request.Stream,
-		})
-		return
-	}
-	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
-		Type: "routing.selection",
-		Time: start,
-		Attributes: map[string]interface{}{
-			"upstream_id":       selection.Target.ID,
-			"provider_preset":   selection.Target.Upstream.ProviderPreset,
-			"candidate_count":   selection.CandidateCount,
-			"routing_score":     selection.Score,
-			"routing_policy":    h.routerPolicy(),
-			"candidate_targets": selection.Candidates,
-		},
-	})
-
 	irw := NewInstrumentedResponseWriter(w)
 
-	defer func() {
-		duration := time.Since(start)
-		code, written, ttft := irw.GetMetrics()
+	var (
+		lastErr   error
+		logInfo   *recorder.LogInfo
+		selection *router.Selection
+		triedIDs  []string
+	)
 
-		logInfo.Header.Meta.DurationMs = duration.Milliseconds()
-		logInfo.Header.Meta.StatusCode = code
-		logInfo.Header.Meta.ContentLength = written
-		logInfo.Header.Meta.TTFTMs = ttft
-
-		// 回填 Header
-		if uErr := h.recorder.UpdateLogFile(logInfo); uErr != nil {
-			slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
+	// 重试循环：逐个尝试候选上游目标，遇到可重试失败时自动降级到下一个。
+	for {
+		var selErr error
+		if len(triedIDs) == 0 {
+			selection, selErr = h.router.SelectWithBody(r, bodyBytes)
+		} else {
+			selection, selErr = h.router.SelectWithExclusion(r, bodyBytes, triedIDs)
 		}
-		h.router.Complete(selection, router.Outcome{
-			Success:        code >= 200 && code < 300 && logInfo.Header.Meta.Error == "",
-			ClientCanceled: r.Context().Err() != nil,
-			StatusCode:     code,
-			DurationMs:     float64(duration.Milliseconds()),
-			TTFTMs:         float64(ttft),
-			Stream:         logInfo.Header.Layout.IsStream || selection.Request.Stream,
+		if selErr != nil {
+			slog.Error("Failed to select upstream target", "error", selErr)
+			// 如果是第一次就失败，保持原有的 selection-failure 记录行为。
+			if len(triedIDs) == 0 {
+				h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selErr, bodyBytes)
+				http.Error(w, selErr.Error(), http.StatusBadGateway)
+				return
+			}
+			lastErr = selErr
+			break
+		}
+		triedIDs = append(triedIDs, selection.Target.ID)
+
+		// 准备日志
+		logInfo, err = h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+			SiteURL:                        selection.Target.Upstream.BaseURL,
+			SelectedUpstreamID:             selection.Target.ID,
+			SelectedUpstreamProviderPreset: selection.Target.Upstream.ProviderPreset,
+			RoutingPolicy:                  h.routerPolicy(),
+			RoutingScore:                   selection.Score,
+			RoutingCandidateCount:          selection.CandidateCount,
+		}, bodyBytes)
+		if err != nil {
+			slog.Error("Failed to prepare log file", "err", err)
+			h.router.Complete(selection, router.Outcome{
+				Success:    false,
+				StatusCode: http.StatusInternalServerError,
+				Stream:     selection.Request.Stream,
+			})
+			lastErr = err
+			break
+		}
+		logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+			Type: "routing.selection",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"upstream_id":       selection.Target.ID,
+				"provider_preset":   selection.Target.Upstream.ProviderPreset,
+				"candidate_count":   selection.CandidateCount,
+				"routing_score":     selection.Score,
+				"routing_policy":    h.routerPolicy(),
+				"candidate_targets": selection.Candidates,
+			},
 		})
 
-		slog.Info("Request completed",
-			"model", logInfo.Header.Meta.Model,
-			"selected_upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
-			"status", code,
-			"tokens_total", logInfo.Header.Usage.TotalTokens, // 此时应该有值了
-		)
-	}()
-
-	// Chaos Logic ... (略，与之前一致，可保留)
-	chaosRes := h.chaosManager.Evaluate(logInfo.Header.Meta.Model)
-	if chaosRes.ShouldInject {
-		// ... 保持之前的 chaos 逻辑 ...
-		// 为节省篇幅这里简写，请保留你现有的代码
-		if chaosRes.Action == "delay" {
-			time.Sleep(chaosRes.Delay)
+		// Chaos
+		chaosRes := h.chaosManager.Evaluate(logInfo.Header.Meta.Model)
+		if chaosRes.ShouldInject {
+			if chaosRes.Action == "delay" {
+				time.Sleep(chaosRes.Delay)
+			}
 		}
-		// ...
+
+		// 发送请求到上游
+		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, bodyBytes)
+		if reqErr != nil {
+			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
+			logInfo.Header.Meta.Error = reqErr.Error()
+			slog.Warn("Upstream request failed, will retry with next candidate",
+				"upstream_id", selection.Target.ID,
+				"model", selection.Request.ModelName,
+				"error", reqErr,
+			)
+			lastErr = reqErr
+			h.router.Complete(selection, router.Outcome{
+				Success:    false,
+				StatusCode: 0,
+				Stream:     selection.Request.Stream,
+			})
+			h.closeLogFile(logInfo)
+			continue
+		}
+
+		if isRetryableStatus(resp.StatusCode) {
+			resp.Body.Close()
+			logInfo.Header.Meta.Error = fmt.Sprintf("upstream returned status %d", resp.StatusCode)
+			slog.Warn("Upstream returned retryable status, will retry with next candidate",
+				"upstream_id", selection.Target.ID,
+				"model", selection.Request.ModelName,
+				"status", resp.StatusCode,
+			)
+			lastErr = fmt.Errorf("upstream %s returned status %d for model %q", selection.Target.ID, resp.StatusCode, selection.Request.ModelName)
+			h.router.Complete(selection, router.Outcome{
+				Success:    false,
+				StatusCode: resp.StatusCode,
+				DurationMs: float64(time.Since(start).Milliseconds()),
+				Stream:     selection.Request.Stream,
+			})
+			h.closeLogFile(logInfo)
+			continue
+		}
+
+		// 成功 —— 将上游响应写入客户端
+		h.writeUpstreamResponse(irw, resp, logInfo, selection, start, r)
+		return
 	}
 
-	ctx := context.WithValue(r.Context(), logInfoContextKey, logInfo)
-	ctx = context.WithValue(ctx, selectionContextKey, selection)
-	h.proxy.ServeHTTP(irw, r.WithContext(ctx))
+	// 全部候选目标都已尝试且失败
+	modelName := ""
+	if selection != nil {
+		modelName = selection.Request.ModelName
+	}
+	slog.Error("All upstream targets exhausted",
+		"model", modelName,
+		"tried", triedIDs,
+		"last_error", lastErr,
+	)
+	// Record the failure with a fresh log file (previous attempt logs were already
+	// closed by closeLogFile in the retry loop).
+	if h.recorder != nil {
+		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes)
+	}
+	http.Error(w, "Proxy Error: "+lastErr.Error(), http.StatusBadGateway)
+}
+
+// sendUpstreamRequest prepares a request targeting the given upstream and executes it.
+// It creates a fresh outgoing request (not cloning the original, because http.Request.Clone
+// discards the Body), applies the director logic (URL rewrite, auth headers), and returns
+// the upstream response. The caller is responsible for closing resp.Body.
+func (h *Handler) sendUpstreamRequest(original *http.Request, target *router.Target, bodyBytes []byte) (*http.Response, error) {
+	clientPath := original.URL.Path
+	if original.URL.RawQuery != "" {
+		clientPath += "?" + original.URL.RawQuery
+	}
+
+	fullURL, err := target.Upstream.BuildURL(clientPath)
+	if err != nil {
+		return nil, fmt.Errorf("build target URL: %w", err)
+	}
+
+	var body io.Reader
+	if bodyBytes != nil {
+		body = bytes.NewReader(bodyBytes)
+	}
+	outreq, err := http.NewRequestWithContext(context.Background(), original.Method, fullURL, body)
+	if err != nil {
+		return nil, fmt.Errorf("create outbound request: %w", err)
+	}
+
+	// Copy relevant headers from the original request.
+	for key, vals := range original.Header {
+		for _, val := range vals {
+			outreq.Header.Add(key, val)
+		}
+	}
+
+	target.Upstream.ApplyAuthHeaders(outreq.Header)
+	outreq.Header.Set("Accept-Encoding", "identity")
+
+	if bodyBytes != nil {
+		outreq.ContentLength = int64(len(bodyBytes))
+	}
+
+	return h.proxy.Transport.RoundTrip(outreq)
+}
+
+// writeUpstreamResponse writes a successful upstream response to the client response writer,
+// recording metrics and usage along the way (equivalent to the old ModifyResponse + defer block).
+func (h *Handler) writeUpstreamResponse(
+	irw *InstrumentedResponseWriter,
+	resp *http.Response,
+	logInfo *recorder.LogInfo,
+	selection *router.Selection,
+	start time.Time,
+	originalReq *http.Request,
+) {
+	// Write separator and response header to log file.
+	logInfo.File.Write([]byte("\n"))
+	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
+	resp.Header.Write(headerBuf)
+	headerBuf.WriteString("\r\n")
+	n, _ := logInfo.File.Write(headerBuf.Bytes())
+	logInfo.Header.Layout.ResHeaderLen = int64(n)
+
+	// Detect streaming mode.
+	isStream := llm.DetectStreamingResponse(resp.Header)
+	logInfo.Header.Layout.IsStream = isStream
+
+	// Wrap response body with UsageSniffer.
+	resp.Body = &UsageSniffer{
+		Source:   resp.Body,
+		File:     logInfo.File,
+		Count:    &logInfo.Header.Layout.ResBodyLen,
+		Usage:    &logInfo.Header.Usage,
+		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
+		Events:   &logInfo.Events,
+	}
+
+	// Copy response headers to client.
+	for key, vals := range resp.Header {
+		for _, val := range vals {
+			irw.Header().Add(key, val)
+		}
+	}
+
+	// Write status code then body.
+	irw.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(irw, resp.Body); err != nil && err != io.EOF {
+		logInfo.Header.Meta.Error = "failed to copy response body: " + err.Error()
+	}
+
+	// Close the sniffer so Finalize() runs before we call UpdateLogFile.
+	resp.Body.Close()
+
+	// Finalize metrics and log (equivalent to old defer block).
+	duration := time.Since(start)
+	code, written, ttft := irw.GetMetrics()
+
+	logInfo.Header.Meta.DurationMs = duration.Milliseconds()
+	logInfo.Header.Meta.StatusCode = code
+	logInfo.Header.Meta.ContentLength = written
+	logInfo.Header.Meta.TTFTMs = ttft
+
+	if uErr := h.recorder.UpdateLogFile(logInfo); uErr != nil {
+		slog.Error("Failed to update log file", "path", logInfo.Path, "err", uErr)
+	}
+	h.router.Complete(selection, router.Outcome{
+		Success:        code >= 200 && code < 300 && logInfo.Header.Meta.Error == "",
+		ClientCanceled: originalReq.Context().Err() != nil,
+		StatusCode:     code,
+		DurationMs:     float64(duration.Milliseconds()),
+		TTFTMs:         float64(ttft),
+		Stream:         logInfo.Header.Layout.IsStream || selection.Request.Stream,
+	})
+
+	slog.Info("Request completed",
+		"model", logInfo.Header.Meta.Model,
+		"selected_upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
+		"status", code,
+		"tokens_total", logInfo.Header.Usage.TotalTokens,
+	)
+}
+
+// closeLogFile closes and removes the log file for a failed attempt so stale
+// recordings from retried targets do not interfere with later lookup.
+func (h *Handler) closeLogFile(logInfo *recorder.LogInfo) {
+	if logInfo == nil || logInfo.File == nil {
+		return
+	}
+	_ = logInfo.File.Close()
+	if logInfo.Path != "" {
+		_ = os.Remove(logInfo.Path)
+	}
+}
+
+// isRetryableStatus returns true for HTTP status codes that indicate the upstream may be
+// temporarily unable to serve this specific model but another upstream might succeed.
+func isRetryableStatus(code int) bool {
+	switch code {
+	case http.StatusNotFound:              // 404 — model not available on this upstream
+		return true
+	case http.StatusTooManyRequests:      // 429 — rate limited on this upstream
+		return true
+	case http.StatusInternalServerError,  // 500
+		http.StatusBadGateway,             // 502
+		http.StatusServiceUnavailable,     // 503
+		http.StatusGatewayTimeout:         // 504
+		return true
+	default:
+		return code >= http.StatusInternalServerError
+	}
 }
 
 func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
