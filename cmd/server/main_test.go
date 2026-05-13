@@ -354,13 +354,9 @@ debug:
 			ResBodyLen:   int64(len(resBody)),
 		},
 	}
-	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
-	if err != nil {
-		t.Fatalf("MarshalPrelude() error = %v", err)
-	}
 	reqHeadWithSession := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession_id: sess-analysis-cli\r\n\r\n"
 	header.Layout.ReqHeaderLen = int64(len(reqHeadWithSession))
-	prelude, err = recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
 	if err != nil {
 		t.Fatalf("MarshalPrelude(session) error = %v", err)
 	}

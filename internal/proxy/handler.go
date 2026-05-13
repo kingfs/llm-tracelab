@@ -464,6 +464,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Stream:     selection.Request.Stream,
 			})
 			h.closeLogFile(logInfo)
+			if len(triedIDs) >= selection.CandidateCount {
+				break
+			}
 			continue
 		}
 
