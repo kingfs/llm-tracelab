@@ -1363,6 +1363,57 @@ func TestSaveObservationPersistsSummaryAndSemanticNodes(t *testing.T) {
 	}
 }
 
+func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	longEvidence := strings.Repeat("x", 600)
+	first := observe.Finding{
+		ID:              "finding-1",
+		TraceID:         "trace-findings",
+		Category:        "credential_leak",
+		Severity:        observe.SeverityHigh,
+		Confidence:      0.95,
+		Title:           "Credential exposure",
+		EvidencePath:    "trace#trace-findings#node#node-secret",
+		EvidenceExcerpt: longEvidence,
+		NodeID:          "node-secret",
+		Detector:        "credential",
+		DetectorVersion: "0.1.0",
+	}
+	if err := st.SaveFindings("trace-findings", []observe.Finding{first}); err != nil {
+		t.Fatalf("SaveFindings() error = %v", err)
+	}
+	findings, err := st.ListFindings("trace-findings", FindingFilter{Severity: string(observe.SeverityHigh)})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != "finding-1" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	if len(findings[0].EvidenceExcerpt) != 500 {
+		t.Fatalf("evidence excerpt length = %d, want 500", len(findings[0].EvidenceExcerpt))
+	}
+
+	second := first
+	second.ID = "finding-2"
+	second.Category = "tool_result_error"
+	second.Severity = observe.SeverityMedium
+	if err := st.SaveFindings("trace-findings", []observe.Finding{second}); err != nil {
+		t.Fatalf("SaveFindings(rebuild) error = %v", err)
+	}
+	findings, err = st.ListFindings("trace-findings", FindingFilter{})
+	if err != nil {
+		t.Fatalf("ListFindings(rebuild) error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != "finding-2" {
+		t.Fatalf("findings after rebuild = %+v", findings)
+	}
+}
+
 func mustTraceID(t *testing.T, st *Store, path string) string {
 	t.Helper()
 	var traceID string

@@ -282,6 +282,11 @@ type ParseJobRecord struct {
 	UpdatedAt time.Time
 }
 
+type FindingFilter struct {
+	Category string
+	Severity string
+}
+
 type ScoreFilter struct {
 	TraceID   string
 	SessionID string
@@ -1149,6 +1154,24 @@ func (s *Store) initSchema() error {
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS semantic_nodes_trace_node_key ON semantic_nodes(trace_id, node_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_semantic_nodes_trace_depth ON semantic_nodes(trace_id, depth, node_index);`,
+		`CREATE TABLE IF NOT EXISTS trace_findings (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			trace_id TEXT NOT NULL,
+			finding_id TEXT NOT NULL,
+			category TEXT NOT NULL,
+			severity TEXT NOT NULL,
+			confidence REAL NOT NULL DEFAULT 0,
+			title TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			evidence_path TEXT NOT NULL DEFAULT '',
+			evidence_excerpt TEXT NOT NULL DEFAULT '',
+			node_id TEXT NOT NULL DEFAULT '',
+			detector TEXT NOT NULL,
+			detector_version TEXT NOT NULL,
+			created_at datetime NOT NULL
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS trace_findings_trace_finding_key ON trace_findings(trace_id, finding_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_trace_findings_trace_severity ON trace_findings(trace_id, severity, category);`,
 		`CREATE TABLE IF NOT EXISTS parse_jobs (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			trace_id TEXT NOT NULL,
@@ -2581,6 +2604,34 @@ func (s *Store) ListSemanticNodes(traceID string) ([]observe.FlatSemanticNode, e
 	return out, rows.Err()
 }
 
+func (s *Store) GetObservation(traceID string) (observe.TraceObservation, error) {
+	summary, err := s.GetObservationSummary(traceID)
+	if err != nil {
+		return observe.TraceObservation{}, err
+	}
+	nodes, err := s.ListSemanticNodes(traceID)
+	if err != nil {
+		return observe.TraceObservation{}, err
+	}
+	var warnings []observe.ParseWarning
+	if strings.TrimSpace(summary.WarningsJSON) != "" {
+		_ = json.Unmarshal([]byte(summary.WarningsJSON), &warnings)
+	}
+	return observe.TraceObservation{
+		TraceID:       summary.TraceID,
+		Provider:      summary.Provider,
+		Operation:     summary.Operation,
+		Model:         summary.Model,
+		Parser:        summary.Parser,
+		ParserVersion: summary.ParserVersion,
+		Status:        observe.ParseStatus(summary.Status),
+		Warnings:      warnings,
+		Response: observe.ObservationResponse{
+			Nodes: observe.RebuildNodeTree(nodes),
+		},
+	}, nil
+}
+
 func (s *Store) EnqueueParseJob(traceID string) error {
 	if strings.TrimSpace(traceID) == "" {
 		return fmt.Errorf("enqueue parse job: trace id is required")
@@ -2653,6 +2704,91 @@ func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
 		WHERE id = ?
 	`, textPreview(lastError, 2000), time.Now().UTC(), id)
 	return err
+}
+
+func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
+	if strings.TrimSpace(traceID) == "" {
+		return fmt.Errorf("save findings: trace id is required")
+	}
+	now := time.Now().UTC()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
+		return err
+	}
+	for _, finding := range findings {
+		if finding.ID == "" {
+			return fmt.Errorf("save findings: finding id is required")
+		}
+		if finding.CreatedAt.IsZero() {
+			finding.CreatedAt = now
+		}
+		if finding.TraceID == "" {
+			finding.TraceID = traceID
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO trace_findings (
+				trace_id, finding_id, category, severity, confidence, title, description,
+				evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, finding.TraceID, finding.ID, finding.Category, string(finding.Severity), finding.Confidence, finding.Title,
+			finding.Description, finding.EvidencePath, textPreview(finding.EvidenceExcerpt, 500), finding.NodeID,
+			finding.Detector, finding.DetectorVersion, finding.CreatedAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Finding, error) {
+	if strings.TrimSpace(traceID) == "" {
+		return nil, fmt.Errorf("list findings: trace id is required")
+	}
+	query := `
+		SELECT finding_id, trace_id, category, severity, confidence, title, description,
+			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
+		FROM trace_findings
+		WHERE trace_id = ?
+	`
+	args := []any{traceID}
+	if category := strings.TrimSpace(filter.Category); category != "" {
+		query += ` AND category = ?`
+		args = append(args, category)
+	}
+	if severity := strings.TrimSpace(filter.Severity); severity != "" {
+		query += ` AND severity = ?`
+		args = append(args, severity)
+	}
+	query += ` ORDER BY id ASC`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []observe.Finding
+	for rows.Next() {
+		var finding observe.Finding
+		var severity string
+		var createdAt any
+		if err := rows.Scan(&finding.ID, &finding.TraceID, &finding.Category, &severity, &finding.Confidence, &finding.Title,
+			&finding.Description, &finding.EvidencePath, &finding.EvidenceExcerpt, &finding.NodeID,
+			&finding.Detector, &finding.DetectorVersion, &createdAt); err != nil {
+			return nil, err
+		}
+		finding.Severity = observe.Severity(severity)
+		if finding.CreatedAt, err = timeParseValue(createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, finding)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {

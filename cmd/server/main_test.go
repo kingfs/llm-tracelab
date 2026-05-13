@@ -327,7 +327,7 @@ debug:
 	}
 
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
-	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	reqBody := `{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
 	header := recordfile.RecordHeader{
@@ -417,6 +417,24 @@ debug:
 	}
 	if len(nodes) == 0 {
 		t.Fatalf("semantic nodes empty")
+	}
+
+	out.Reset()
+	code = runAnalyzeScan(analyzeScanOptions{
+		configPath: configPath,
+		traceID:    traceID,
+		format:     "json",
+		stdout:     &out,
+	})
+	if code != 0 {
+		t.Fatalf("runAnalyzeScan() = %d, want 0", code)
+	}
+	findings, err := st.ListFindings(traceID, store.FindingFilter{Category: "credential_leak"})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].EvidencePath == "" || findings[0].NodeID == "" {
+		t.Fatalf("findings = %+v", findings)
 	}
 }
 
