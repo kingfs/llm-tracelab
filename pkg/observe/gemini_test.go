@@ -1,6 +1,7 @@
 package observe
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -101,6 +102,58 @@ func TestGeminiParserParsesStreamGenerateContent(t *testing.T) {
 	}
 	if obs.Usage.TotalTokens != 10 {
 		t.Fatalf("usage = %+v", obs.Usage)
+	}
+}
+
+func TestGeminiParserPreservesMultimodalPartMetadata(t *testing.T) {
+	parser := NewGeminiParser()
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID: "trace-gemini-multimodal",
+		Header:  geminiTestHeader("google_genai", "/v1beta/models:generateContent", false),
+		RequestBody: []byte(`{
+			"model":"models/gemini-2.5-flash",
+			"contents":[{
+				"role":"user",
+				"parts":[
+					{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="},"partMetadata":{"source":"clipboard"}},
+					{"fileData":{"mimeType":"application/pdf","fileUri":"gs://bucket/doc.pdf"},"videoMetadata":{"startOffset":"1s","endOffset":"2s"}}
+				]
+			}]
+		}`),
+		ResponseBody: []byte(`{
+			"candidates":[{
+				"content":{"role":"model","parts":[
+					{"text":"I inspected the files.","thought":true,"thoughtSignature":"sig_multimodal"},
+					{"text":"Done"}
+				]}
+			}]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Request.Messages) != 1 || len(obs.Request.Messages[0].Children) != 2 {
+		t.Fatalf("request messages = %+v", obs.Request.Messages)
+	}
+	imageNode := obs.Request.Messages[0].Children[0]
+	if imageNode.ProviderType != "inlineData" || imageNode.NormalizedType != NodeImage {
+		t.Fatalf("image node = %+v", imageNode)
+	}
+	if _, ok := imageNode.Metadata["partMetadata"]; !ok {
+		t.Fatalf("partMetadata missing from image node metadata: %+v", imageNode.Metadata)
+	}
+	fileNode := obs.Request.Messages[0].Children[1]
+	if fileNode.ProviderType != "fileData" || fileNode.NormalizedType != NodeFile {
+		t.Fatalf("file node = %+v", fileNode)
+	}
+	if !strings.Contains(string(fileNode.Raw), `"videoMetadata"`) {
+		t.Fatalf("videoMetadata raw not preserved: %s", fileNode.Raw)
+	}
+	if len(obs.Response.Reasoning) != 1 || obs.Response.Reasoning[0].Text != "I inspected the files." {
+		t.Fatalf("reasoning = %+v", obs.Response.Reasoning)
+	}
+	if obs.Response.Reasoning[0].Metadata["thoughtSignature"] != "sig_multimodal" {
+		t.Fatalf("thought signature metadata = %+v", obs.Response.Reasoning[0].Metadata)
 	}
 }
 
