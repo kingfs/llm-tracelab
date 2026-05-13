@@ -105,6 +105,11 @@ func (p geminiParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 		}
 		return obs, fmt.Errorf("parse gemini response: %w", err)
 	}
+	if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
+		obs.Response.Errors = append(obs.Response.Errors, providerErr)
+		obs.Response.Nodes = append(obs.Response.Nodes, providerErr)
+		return obs, nil
+	}
 	if model := firstNonEmpty(stringField(resp, "modelVersion"), stringField(resp, "model")); model != "" {
 		obs.Model = model
 	}

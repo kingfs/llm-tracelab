@@ -119,6 +119,11 @@ func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceOb
 		}
 		return obs, fmt.Errorf("parse openai chat response: %w", err)
 	}
+	if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
+		obs.Response.Errors = append(obs.Response.Errors, providerErr)
+		obs.Response.Nodes = append(obs.Response.Nodes, providerErr)
+		return obs, nil
+	}
 	if model := stringField(resp, "model"); model != "" {
 		obs.Model = model
 	}
@@ -953,7 +958,8 @@ func parseProviderErrorNode(raw json.RawMessage, section string, path string) Se
 	if err != nil {
 		return SemanticNode{}
 	}
-	if _, ok := obj["error"]; !ok {
+	errRaw, ok := obj["error"]
+	if !ok || len(errRaw) == 0 || string(errRaw) == "null" {
 		return SemanticNode{}
 	}
 	return SemanticNode{

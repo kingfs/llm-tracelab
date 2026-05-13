@@ -368,3 +368,31 @@ func TestOpenAIParserParsesResponsesStreamRefusalAndError(t *testing.T) {
 		t.Fatalf("errors = %+v", obs.Response.Errors)
 	}
 }
+
+func TestOpenAIParserParsesNonStreamProviderError(t *testing.T) {
+	parser := NewOpenAIParser()
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-error",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+		},
+		RequestBody:  []byte(`{"model":"gpt-5.1","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: []byte(`{"error":{"message":"rate limited","type":"rate_limit_error","code":"rate_limit_exceeded"}}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].NormalizedType != NodeError {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if !strings.Contains(obs.Response.Errors[0].Text, "rate limited") {
+		t.Fatalf("error text = %q", obs.Response.Errors[0].Text)
+	}
+	if len(obs.Response.Outputs) != 0 {
+		t.Fatalf("outputs = %+v", obs.Response.Outputs)
+	}
+}

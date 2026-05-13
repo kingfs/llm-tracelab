@@ -157,6 +157,28 @@ func TestGeminiParserPreservesMultimodalPartMetadata(t *testing.T) {
 	}
 }
 
+func TestGeminiParserParsesNonStreamProviderError(t *testing.T) {
+	parser := NewGeminiParser()
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID:      "trace-gemini-error",
+		Header:       geminiTestHeader("google_genai", "/v1beta/models:generateContent", false),
+		RequestBody:  []byte(`{"model":"models/gemini-2.5-flash","contents":[{"role":"user","parts":[{"text":"hi"}]}]}`),
+		ResponseBody: []byte(`{"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].NormalizedType != NodeError {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if !strings.Contains(obs.Response.Errors[0].Text, "Quota exceeded") {
+		t.Fatalf("error text = %q", obs.Response.Errors[0].Text)
+	}
+	if len(obs.Response.Candidates) != 0 {
+		t.Fatalf("candidates = %+v", obs.Response.Candidates)
+	}
+}
+
 func geminiTestHeader(provider string, endpoint string, isStream bool) recordfile.RecordHeader {
 	return recordfile.RecordHeader{
 		Meta: recordfile.MetaData{

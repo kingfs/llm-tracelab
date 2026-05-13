@@ -199,3 +199,25 @@ func TestAnthropicParserPreservesRedactedThinkingAndSignature(t *testing.T) {
 		t.Fatalf("signature_delta event missing in %+v", streamObs.Stream.Events)
 	}
 }
+
+func TestAnthropicParserParsesNonStreamProviderError(t *testing.T) {
+	parser := NewAnthropicParser()
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID:      "trace-claude-error",
+		Header:       anthropicTestHeader(false),
+		RequestBody:  []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"max_tokens":64}`),
+		ResponseBody: []byte(`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].NormalizedType != NodeError {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if !strings.Contains(obs.Response.Errors[0].Text, "Overloaded") {
+		t.Fatalf("error text = %q", obs.Response.Errors[0].Text)
+	}
+	if len(obs.Response.Outputs) != 0 {
+		t.Fatalf("outputs = %+v", obs.Response.Outputs)
+	}
+}
