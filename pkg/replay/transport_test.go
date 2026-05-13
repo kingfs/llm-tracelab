@@ -1,6 +1,7 @@
 package replay
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -87,6 +88,41 @@ func TestTransportInvalidatesCacheWhenCassetteChanges(t *testing.T) {
 	}
 }
 
+func TestTransportReplaysLegacyV2Cassette(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "legacy.http")
+	if err := os.WriteFile(path, buildLegacyReplayFixture(t, "202 Accepted", `{"legacy":"ok"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	client := &http.Client{Transport: NewTransport(path)}
+	resp, err := client.Post("http://localhost/v1/responses", "application/json", strings.NewReader(`{"input":"hello"}`))
+	if err != nil {
+		t.Fatalf("Post() error = %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("StatusCode = %d, want 202", resp.StatusCode)
+	}
+	if string(body) != `{"legacy":"ok"}` {
+		t.Fatalf("body = %q", body)
+	}
+
+	summary, err := ReplayFile(path, SummaryOptions{})
+	if err != nil {
+		t.Fatalf("ReplayFile() error = %v", err)
+	}
+	if summary.StatusCode != http.StatusAccepted || summary.BodyBytes != len(`{"legacy":"ok"}`) {
+		t.Fatalf("summary = %+v", summary)
+	}
+}
+
 func buildReplayFixture(t *testing.T, status string, resBody string) []byte {
 	t.Helper()
 
@@ -121,4 +157,44 @@ func buildReplayFixture(t *testing.T, status string, resBody string) []byte {
 		t.Fatalf("MarshalPrelude() error = %v", err)
 	}
 	return append(prelude, []byte(reqHeader+reqBody+"\n"+resHeader+resBody)...)
+}
+
+func buildLegacyReplayFixture(t *testing.T, status string, resBody string) []byte {
+	t.Helper()
+
+	reqBody := `{"input":"hello"}`
+	reqHeader := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
+	resHeader := "HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\n\r\n"
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V2",
+		Meta: recordfile.MetaData{
+			RequestID:     "req_legacy",
+			Time:          time.Date(2026, 4, 21, 8, 0, 0, 0, time.UTC),
+			Model:         "gpt-5.1-codex",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    http.StatusAccepted,
+			DurationMs:    100,
+			TTFTMs:        10,
+			ClientIP:      "127.0.0.1",
+			ContentLength: int64(len(resBody)),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len(reqHeader)),
+			ReqBodyLen:   int64(len(reqBody)),
+			ResHeaderLen: int64(len(resHeader)),
+			ResBodyLen:   int64(len(resBody)),
+		},
+	}
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if len(headerJSON)+1 > recordfile.LegacyHeaderLen {
+		t.Fatalf("legacy header too large: %d", len(headerJSON))
+	}
+	buf := make([]byte, recordfile.LegacyHeaderLen)
+	copy(buf, headerJSON)
+	buf[len(headerJSON)] = '\n'
+	return append(buf, []byte(reqHeader+reqBody+"\n"+resHeader+resBody)...)
 }
