@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
@@ -1656,6 +1657,130 @@ func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) 
 	}
 	if !strings.Contains(payload["error"], "parse error:") {
 		t.Fatalf("error = %q, want parse error prefix", payload["error"])
+	}
+}
+
+func TestTraceObservationAPIHandlerReturnsObservationTree(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	logPath := filepath.Join(outputDir, "trace-observation.http")
+	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:  "req-observation",
+			Time:       time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model:      "gpt-5.1",
+			Provider:   "openai_compatible",
+			Operation:  "responses",
+			Endpoint:   "/v1/responses",
+			URL:        "/v1/responses",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID("req-observation")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	obs := observe.TraceObservation{
+		TraceID:       entry.ID,
+		Provider:      "openai_compatible",
+		Operation:     "responses",
+		Model:         "gpt-5.1",
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+		Response: observe.ObservationResponse{
+			Nodes: []observe.SemanticNode{{
+				ID:             "node-root",
+				ProviderType:   "message",
+				NormalizedType: observe.NodeMessage,
+				Path:           "$.output[0]",
+				Children: []observe.SemanticNode{{
+					ID:             "node-child",
+					ProviderType:   "output_text",
+					NormalizedType: observe.NodeText,
+					Path:           "$.output[0].content[0]",
+					Text:           "hello",
+				}},
+			}},
+		},
+	}
+	if err := st.SaveObservation(obs); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload observationDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Summary.Parser != "openai" || payload.Summary.Status != "parsed" {
+		t.Fatalf("summary = %+v", payload.Summary)
+	}
+	if len(payload.Tree) != 1 || len(payload.Tree[0].Children) != 1 {
+		t.Fatalf("tree = %+v", payload.Tree)
+	}
+	if payload.Tree[0].Children[0].TextPreview != "hello" {
+		t.Fatalf("child preview = %q", payload.Tree[0].Children[0].TextPreview)
+	}
+}
+
+func TestTraceObservationAPIHandlerReturnsNotFoundBeforeReparse(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	logPath := filepath.Join(outputDir, "trace-no-observation.http")
+	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:  "req-no-observation",
+			Time:       time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model:      "gpt-5.1",
+			Provider:   "openai_compatible",
+			Operation:  "responses",
+			Endpoint:   "/v1/responses",
+			URL:        "/v1/responses",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID("req-no-observation")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 body=%s", rr.Code, rr.Body.String())
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
@@ -148,6 +149,41 @@ type rawDetailResponse struct {
 	ResponseProtocol string            `json:"response_protocol"`
 	Header           recordHeaderView  `json:"header"`
 	Events           []recordEventView `json:"events"`
+}
+
+type observationDetailResponse struct {
+	ID      string                 `json:"id"`
+	Summary observationSummaryView `json:"summary"`
+	Nodes   []observationNodeView  `json:"nodes"`
+	Tree    []observationNodeView  `json:"tree"`
+}
+
+type observationSummaryView struct {
+	TraceID       string    `json:"trace_id"`
+	Parser        string    `json:"parser"`
+	ParserVersion string    `json:"parser_version"`
+	Status        string    `json:"status"`
+	Provider      string    `json:"provider"`
+	Operation     string    `json:"operation"`
+	Model         string    `json:"model"`
+	Summary       any       `json:"summary"`
+	Warnings      any       `json:"warnings"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type observationNodeView struct {
+	ID             string                `json:"id"`
+	ParentID       string                `json:"parent_id,omitempty"`
+	ProviderType   string                `json:"provider_type"`
+	NormalizedType string                `json:"normalized_type"`
+	Role           string                `json:"role,omitempty"`
+	Path           string                `json:"path"`
+	Index          int                   `json:"index"`
+	Depth          int                   `json:"depth,omitempty"`
+	TextPreview    string                `json:"text_preview,omitempty"`
+	Raw            json.RawMessage       `json:"raw,omitempty"`
+	Children       []observationNodeView `json:"children,omitempty"`
 }
 
 type traceSessionView struct {
@@ -990,12 +1026,39 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceDetail(w, absPath, entry, rtr)
 		case len(parts) == 2 && parts[1] == "raw" && r.Method == http.MethodGet:
 			handleTraceRaw(w, absPath, entry)
+		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
+			handleTraceObservation(w, st, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
 			serveTraceDownload(w, r, absPath)
 		default:
 			http.NotFound(w, r)
 		}
 	}
+}
+
+func handleTraceObservation(w http.ResponseWriter, st *store.Store, entry store.LogEntry) {
+	summary, err := st.GetObservationSummary(entry.ID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "trace observation not found; run analyze reparse first"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	nodes, err := st.ListSemanticNodes(entry.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	tree := observe.RebuildNodeTree(nodes)
+	payload := observationDetailResponse{
+		ID:      entry.ID,
+		Summary: observationSummaryFromStore(summary),
+		Nodes:   observationNodeViewsFromFlat(nodes),
+		Tree:    observationNodeViewsFromTree(tree, 0),
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry, rtr *router.Router) {
@@ -1123,6 +1186,63 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 		payload = append(payload, row)
 	}
 	return payload
+}
+
+func observationSummaryFromStore(summary store.ObservationSummary) observationSummaryView {
+	var summaryPayload any = map[string]any{}
+	if strings.TrimSpace(summary.SummaryJSON) != "" {
+		_ = json.Unmarshal([]byte(summary.SummaryJSON), &summaryPayload)
+	}
+	var warningsPayload any = []any{}
+	if strings.TrimSpace(summary.WarningsJSON) != "" {
+		_ = json.Unmarshal([]byte(summary.WarningsJSON), &warningsPayload)
+	}
+	return observationSummaryView{
+		TraceID:       summary.TraceID,
+		Parser:        summary.Parser,
+		ParserVersion: summary.ParserVersion,
+		Status:        summary.Status,
+		Provider:      summary.Provider,
+		Operation:     summary.Operation,
+		Model:         summary.Model,
+		Summary:       summaryPayload,
+		Warnings:      warningsPayload,
+		CreatedAt:     summary.CreatedAt,
+		UpdatedAt:     summary.UpdatedAt,
+	}
+}
+
+func observationNodeViewsFromFlat(nodes []observe.FlatSemanticNode) []observationNodeView {
+	out := make([]observationNodeView, 0, len(nodes))
+	for _, row := range nodes {
+		out = append(out, observationNodeViewFromNode(row.Node, row.ParentID, row.Depth))
+	}
+	return out
+}
+
+func observationNodeViewsFromTree(nodes []observe.SemanticNode, depth int) []observationNodeView {
+	out := make([]observationNodeView, 0, len(nodes))
+	for _, node := range nodes {
+		view := observationNodeViewFromNode(node, node.ParentID, depth)
+		view.Children = observationNodeViewsFromTree(node.Children, depth+1)
+		out = append(out, view)
+	}
+	return out
+}
+
+func observationNodeViewFromNode(node observe.SemanticNode, parentID string, depth int) observationNodeView {
+	return observationNodeView{
+		ID:             node.ID,
+		ParentID:       parentID,
+		ProviderType:   node.ProviderType,
+		NormalizedType: string(node.NormalizedType),
+		Role:           node.Role,
+		Path:           node.Path,
+		Index:          node.Index,
+		Depth:          depth,
+		TextPreview:    node.Text,
+		Raw:            node.Raw,
+	}
 }
 
 func buildTimelineEventViews(parsed *ParsedData) []recordEventView {
