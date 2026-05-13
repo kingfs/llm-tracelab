@@ -42,6 +42,7 @@ func NewDefaultRegistry() *Registry {
 	return NewRegistry(
 		NewOpenAIParser(),
 		NewAnthropicParser(),
+		NewGeminiParser(),
 	)
 }
 
