@@ -76,6 +76,8 @@ Compatibility note:
 - `README.md` and `README_EN.md`: human-facing overview and quick start
 - `AGENTS.md`: AI-oriented project map and invariants
 - `docs/PROJECT_BASELINE.md`: current implemented capability baseline for both humans and AI agents
+- `docs/v1/README.md`: v1 中文设计文档入口，覆盖产品定位、总体架构、Observation IR、协议解析、审计分析、展示体验、存储管道和实施路线图
+- `docs/PRODUCT_EVOLUTION_DESIGN.md`: v1 设计兼容入口，正文以 `docs/v1/README.md` 及其子文档为准
 - `docs/AI_BRANCH_BASELINE.md`: branch-specific summary of the current AI-agent evolution work and implemented closed loop
 - `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
 - `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants
