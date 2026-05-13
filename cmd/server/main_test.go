@@ -462,7 +462,7 @@ debug:
 	}
 }
 
-func TestAnalyzeReparseCommandEndToEnd(t *testing.T) {
+func TestAnalyzeCommandsEndToEnd(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -486,7 +486,7 @@ debug:
 	}
 
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
-	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	reqBody := `{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`
 	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
 	resBody := `{"id":"resp_cmd","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from cli"}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}`
 	header := recordfile.RecordHeader{
@@ -526,8 +526,8 @@ debug:
 	if err != nil {
 		t.Fatalf("NewWithDatabase() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{SessionID: "sess-command-e2e", SessionSource: "test"}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	traceID := mustTraceIDFromStore(t, st, logPath)
 	if err := st.Close(); err != nil {
@@ -561,7 +561,6 @@ debug:
 	if err != nil {
 		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
 	}
-	defer st.Close()
 	nodes, err := st.ListSemanticNodes(traceID)
 	if err != nil {
 		t.Fatalf("ListSemanticNodes() error = %v", err)
@@ -575,6 +574,82 @@ debug:
 	}
 	if !foundText {
 		t.Fatalf("semantic text node missing in %+v", nodes)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close(reopen) error = %v", err)
+	}
+
+	cmd = newRootCommand()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "analyze", "scan", "--trace-id", traceID})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("scan Execute() error = %v, output=%q", err, out.String())
+	}
+	var scanEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			TraceID  string `json:"trace_id"`
+			Findings int    `json:"findings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &scanEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(scan) error = %v, output=%q", err, out.String())
+	}
+	if !scanEnvelope.OK || scanEnvelope.Result.TraceID != traceID || scanEnvelope.Result.Findings == 0 {
+		t.Fatalf("scan envelope = %+v", scanEnvelope)
+	}
+
+	st, err = store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(scan reopen) error = %v", err)
+	}
+	findings, err := st.ListFindings(traceID, store.FindingFilter{Category: "credential_leak"})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].NodeID == "" {
+		t.Fatalf("findings = %+v", findings)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close(scan reopen) error = %v", err)
+	}
+
+	cmd = newRootCommand()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "analyze", "session", "--session-id", "sess-command-e2e"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("session Execute() error = %v, output=%q", err, out.String())
+	}
+	var sessionEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			SessionID   string `json:"session_id"`
+			TraceCount  int    `json:"trace_count"`
+			FindingRefs int    `json:"finding_refs"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &sessionEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(session) error = %v, output=%q", err, out.String())
+	}
+	if !sessionEnvelope.OK || sessionEnvelope.Result.SessionID != "sess-command-e2e" || sessionEnvelope.Result.TraceCount != 1 || sessionEnvelope.Result.FindingRefs == 0 {
+		t.Fatalf("session envelope = %+v", sessionEnvelope)
+	}
+
+	st, err = store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(session reopen) error = %v", err)
+	}
+	defer st.Close()
+	runs, err := st.ListAnalysisRuns("sess-command-e2e", "", "session_summary", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisRuns() error = %v", err)
+	}
+	if len(runs) != 1 || !strings.Contains(runs[0].OutputJSON, `"finding_refs"`) {
+		t.Fatalf("analysis runs = %+v", runs)
 	}
 }
 
