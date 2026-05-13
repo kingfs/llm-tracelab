@@ -5,6 +5,7 @@ import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { SessionList } from "../components/monitor/SessionList";
 import { useJSON } from "../hooks/useJSON";
+import { apiPaths, apiURL } from "../lib/api";
 import { formatTime, setOrDeleteParam, summarizeSessionItems } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
@@ -31,7 +32,7 @@ export function SessionsPage() {
   if (model) {
     requestParams.set("model", model);
   }
-  const { loading, data, error } = useJSON(`/api/sessions?${requestParams.toString()}`, [page, query, provider, model, refreshTick]);
+  const { loading, data, error } = useJSON(apiURL(apiPaths.sessions, requestParams), [page, query, provider, model, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

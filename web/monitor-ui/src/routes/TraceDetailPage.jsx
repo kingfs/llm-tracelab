@@ -3,7 +3,8 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { CollapsibleCard, CodeBlock, MessageContent } from "../components/common/Display";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
-import { monitorAuthHeaders, useJSON } from "../hooks/useJSON";
+import { useJSON } from "../hooks/useJSON";
+import { apiPaths, downloadBlob } from "../lib/api";
 import {
   buildRoutingDecisionSummary,
   buildTraceUpstreamHealthSummary,
@@ -40,8 +41,8 @@ export function TraceDetailPage() {
   const [tab, setTab] = useState(() => normalizeTraceTab(searchParams.get("tab")));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
   const failureSummaryRef = useRef(null);
-  const detail = useJSON(`/api/traces/${traceID}`, [traceID]);
-  const raw = useJSON(`/api/traces/${traceID}/raw`, [traceID, tab === "raw" ? "raw" : "summary"]);
+  const detail = useJSON(apiPaths.trace(traceID), [traceID]);
+  const raw = useJSON(apiPaths.traceRaw(traceID), [traceID, tab === "raw" ? "raw" : "summary"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
@@ -74,11 +75,12 @@ export function TraceDetailPage() {
   };
 
   const downloadTrace = async () => {
-    const response = await fetch(`/api/traces/${traceID}/download`, { headers: monitorAuthHeaders() });
-    if (!response.ok) {
+    let blob;
+    try {
+      blob = await downloadBlob(apiPaths.traceDownload(traceID));
+    } catch {
       return;
     }
-    const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;

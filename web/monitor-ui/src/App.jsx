@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { MONITOR_TOKEN_KEY, monitorAuthHeaders } from "./hooks/useJSON";
+import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
 import { RequestsPage } from "./routes/RequestsPage";
 import { RoutingPage } from "./routes/RoutingPage";
 import { SessionDetailPage } from "./routes/SessionDetailPage";
@@ -19,17 +19,22 @@ function App() {
 
     async function resolveAuth() {
       try {
-        const statusResponse = await fetch("/api/auth/status");
-        const status = await statusResponse.json();
+        const status = await requestJSON(apiPaths.authStatus);
         if (!status.auth_required) {
           if (!cancelled) {
             setAuth({ loading: false, required: false, authorized: true, error: "" });
           }
           return;
         }
-        const checkResponse = await fetch("/api/auth/check", { headers: monitorAuthHeaders() });
-        if (!cancelled) {
-          setAuth({ loading: false, required: true, authorized: checkResponse.ok, error: checkResponse.ok ? "" : "Invalid or missing monitor token." });
+        try {
+          await requestJSON(apiPaths.authCheck);
+          if (!cancelled) {
+            setAuth({ loading: false, required: true, authorized: true, error: "" });
+          }
+        } catch {
+          if (!cancelled) {
+            setAuth({ loading: false, required: true, authorized: false, error: "Invalid or missing monitor token." });
+          }
         }
       } catch (error) {
         if (!cancelled) {
@@ -47,18 +52,13 @@ function App() {
   const submitToken = async (event) => {
     event.preventDefault();
     if (username.trim() && password) {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
-      });
-      if (!response.ok) {
+      try {
+        const payload = await postJSON(apiPaths.authLogin, { username, password });
+        window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
+        setAuth({ loading: false, required: true, authorized: true, error: "" });
+      } catch {
         setAuth({ loading: false, required: true, authorized: false, error: "Invalid username or password." });
-        return;
       }
-      const payload = await response.json();
-      window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
-      setAuth({ loading: false, required: true, authorized: true, error: "" });
       return;
     }
     setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password." });

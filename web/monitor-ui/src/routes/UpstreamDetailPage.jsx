@@ -7,6 +7,7 @@ import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { RoutingFailureTimeline } from "../components/monitor/RoutingFailureTimeline";
 import { useJSON } from "../hooks/useJSON";
+import { apiPaths, apiURL } from "../lib/api";
 import {
   buildRoutingLink,
   buildTraceLink,
@@ -38,7 +39,7 @@ export function UpstreamDetailPage() {
   if (modelValue) {
     params.set("model", modelValue);
   }
-  const detail = useJSON(`/api/upstreams/${encodeURIComponent(upstreamID)}?${params.toString()}`, [upstreamID, windowValue, modelValue]);
+  const detail = useJSON(apiURL(apiPaths.upstream(upstreamID), params), [upstreamID, windowValue, modelValue]);
   const target = detail.data?.target;
   const breakdown = detail.data?.breakdown;
   const traces = detail.data?.traces ?? [];

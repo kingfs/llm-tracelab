@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { DownloadIcon, InlineTag, LatencyMetric, MiniToken, StackIcon, ViewIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
+import { apiPaths } from "../../lib/api";
 import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatGenerationSpeed, formatPrefillSpeed, formatProviderTag } from "../../lib/monitor";
 
 export function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false, groupSessionFailures = false }) {
@@ -158,7 +159,7 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
       <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID, "", focus)} title="View trace" aria-label="View trace">
         <ViewIcon />
       </Link>
-      <a className="icon-button" href={`/api/traces/${item.id}/download`} title="Download .http" aria-label="Download trace">
+      <a className="icon-button" href={apiPaths.traceDownload(item.id)} title="Download .http" aria-label="Download trace">
         <DownloadIcon />
       </a>
     </div>

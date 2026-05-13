@@ -4,6 +4,7 @@ import { PrimaryNav } from "../components/PrimaryNav";
 import { EmptyState } from "../components/common/EmptyState";
 import { UpstreamOverview } from "../components/routing/UpstreamOverview";
 import { useJSON } from "../hooks/useJSON";
+import { apiPaths, apiURL } from "../lib/api";
 import { formatTime, normalizeUpstreamWindow, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
@@ -19,7 +20,7 @@ export function RoutingPage() {
   if (upstreamModel) {
     upstreamParams.set("model", upstreamModel);
   }
-  const upstreams = useJSON(`/api/upstreams?${upstreamParams.toString()}`, [refreshTick, upstreamWindow, upstreamModel]);
+  const upstreams = useJSON(apiURL(apiPaths.upstreams, upstreamParams), [refreshTick, upstreamWindow, upstreamModel]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

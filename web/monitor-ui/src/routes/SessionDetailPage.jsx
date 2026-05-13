@@ -6,6 +6,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
+import { apiPaths } from "../lib/api";
 import {
   buildFailureContexts,
   buildFailureDelta,
@@ -24,7 +25,7 @@ import {
 export function SessionDetailPage() {
   const { sessionID = "" } = useParams();
   const [traceFilter, setTraceFilter] = useState("all");
-  const detail = useJSON(`/api/sessions/${encodeURIComponent(sessionID)}`, [sessionID]);
+  const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
   const timeline = detail.data?.timeline ?? [];

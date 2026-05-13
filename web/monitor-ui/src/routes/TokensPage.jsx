@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { PrimaryNav } from "../components/PrimaryNav";
-import { monitorAuthHeaders } from "../hooks/useJSON";
+import { apiPaths, postJSON } from "../lib/api";
 
 export function TokensPage() {
   const [name, setName] = useState("local-dev");
@@ -15,15 +15,7 @@ export function TokensPage() {
     setError("");
     setToken("");
     try {
-      const response = await fetch("/api/auth/tokens", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...monitorAuthHeaders() },
-        body: JSON.stringify({ name, ttl, scope: "api" }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload.error || `request failed: ${response.status}`);
-      }
+      const payload = await postJSON(apiPaths.authTokens, { name, ttl, scope: "api" });
       setToken(payload.token || "");
     } catch (err) {
       setError(err.message || "Unable to create token.");
