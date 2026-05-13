@@ -51,7 +51,7 @@ tasks:
   test:e2e:
     desc: Run local end-to-end tests without external network dependencies
     cmds:
-      - go test ./internal/proxy ./cmd/server ./unittest
+      - go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest
 
   test:short:
     desc: Run short unit tests

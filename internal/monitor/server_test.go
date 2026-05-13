@@ -17,6 +17,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -1982,6 +1983,73 @@ func TestTraceObservationAPIHandlerReturnsNotFoundBeforeReparse(t *testing.T) {
 	traceAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestTraceObservationAPIEndToEndAfterWorkerReparse(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	resBody := `{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from worker"}]}],"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}`
+	header := buildRecordHeader("/v1/responses", false, reqBody, resBody)
+	header.Meta.RequestID = "req-observation-e2e"
+	header.Meta.Provider = "openai_compatible"
+	header.Meta.Operation = "responses"
+	header.Meta.Endpoint = "/v1/responses"
+	header.Meta.Model = "gpt-5.1"
+	header.Usage = recordfile.UsageInfo{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n"
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	logPath := filepath.Join(outputDir, "trace-observation-e2e.http")
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID("req-observation-e2e")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if err := st.EnqueueParseJob(entry.ID); err != nil {
+		t.Fatalf("EnqueueParseJob() error = %v", err)
+	}
+	observeworker.New(st, observeworker.Options{BatchSize: 1}).RunOnce(context.Background())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/observation", nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload observationDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Summary.Parser != "openai" || payload.Summary.Status != "parsed" {
+		t.Fatalf("summary = %+v", payload.Summary)
+	}
+	if len(payload.Nodes) == 0 || len(payload.Tree) == 0 {
+		t.Fatalf("nodes=%+v tree=%+v", payload.Nodes, payload.Tree)
+	}
+	var foundText bool
+	for _, node := range payload.Nodes {
+		if node.NormalizedType == string(observe.NodeText) && node.TextPreview == "hello from worker" {
+			foundText = true
+			break
+		}
+	}
+	if !foundText {
+		t.Fatalf("text node missing in %+v", payload.Nodes)
 	}
 }
 
