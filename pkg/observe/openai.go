@@ -1,9 +1,12 @@
 package observe
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -102,6 +105,11 @@ func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceOb
 		})
 	}
 
+	if input.IsStream {
+		parseOpenAIChatStream(input.ResponseBody, &obs)
+		return obs, nil
+	}
+
 	resp, err := decodeJSONObject(input.ResponseBody)
 	if err != nil {
 		if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
@@ -149,6 +157,11 @@ func parseOpenAIResponsesObservation(input ParseInput, obs TraceObservation) (Tr
 		})
 	}
 
+	if input.IsStream {
+		parseOpenAIResponsesStream(input.ResponseBody, &obs)
+		return obs, nil
+	}
+
 	resp, err := decodeJSONObject(input.ResponseBody)
 	if err != nil {
 		if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
@@ -182,6 +195,265 @@ func parseOpenAIResponsesObservation(input ParseInput, obs TraceObservation) (Tr
 		obs.Usage = usage
 	}
 	return obs, nil
+}
+
+func parseOpenAIChatStream(body []byte, obs *TraceObservation) {
+	type toolDelta struct {
+		ID        string
+		Type      string
+		Name      string
+		Arguments strings.Builder
+		Index     int
+	}
+	toolCalls := map[int]*toolDelta{}
+	var toolOrder []int
+	eventIndex := 0
+	scanSSEData(body, func(data string) {
+		if data == "[DONE]" {
+			return
+		}
+		raw := json.RawMessage(data)
+		obj, err := decodeJSONObject(raw)
+		if err != nil {
+			addStreamWarning(obs, "invalid_stream_json", "$", err.Error())
+			return
+		}
+		if parseStreamErrorObject(obj, raw, obs, eventIndex) {
+			eventIndex++
+			return
+		}
+		if model := stringField(obj, "model"); model != "" {
+			obs.Model = model
+		}
+		if usage, ok := parseOpenAIUsage(obj["usage"]); ok {
+			obs.Usage = usage
+		}
+		var choices []json.RawMessage
+		if err := json.Unmarshal(obj["choices"], &choices); err != nil {
+			eventIndex++
+			return
+		}
+		for choiceIndex, choiceRaw := range choices {
+			choiceObj, _ := decodeJSONObject(choiceRaw)
+			basePath := fmt.Sprintf("$.choices[%d]", choiceIndex)
+			deltaObj, _ := decodeJSONObject(choiceObj["delta"])
+			if content := stringField(deltaObj, "content"); content != "" {
+				obs.Stream.AccumulatedText += content
+				obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, "chat.completion.delta", "content", NodeText, basePath+".delta.content", content, raw))
+				eventIndex++
+			}
+			if reasoning := stringField(deltaObj, "reasoning_content"); reasoning != "" {
+				obs.Stream.AccumulatedReasoning += reasoning
+				obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, "chat.completion.delta", "reasoning_content", NodeReasoning, basePath+".delta.reasoning_content", reasoning, raw))
+				eventIndex++
+			}
+			var calls []json.RawMessage
+			if err := json.Unmarshal(deltaObj["tool_calls"], &calls); err == nil {
+				for callIndex, callRaw := range calls {
+					callObj, _ := decodeJSONObject(callRaw)
+					idx := intField(callObj, "index")
+					if _, ok := toolCalls[idx]; !ok {
+						toolCalls[idx] = &toolDelta{Index: idx}
+						toolOrder = append(toolOrder, idx)
+					}
+					call := toolCalls[idx]
+					call.ID = firstNonEmpty(call.ID, stringField(callObj, "id"))
+					call.Type = firstNonEmpty(call.Type, stringField(callObj, "type"), "function")
+					functionObj, _ := decodeJSONObject(callObj["function"])
+					call.Name = firstNonEmpty(call.Name, stringField(functionObj, "name"))
+					if args := stringField(functionObj, "arguments"); args != "" {
+						call.Arguments.WriteString(args)
+					}
+					path := fmt.Sprintf("%s.delta.tool_calls[%d]", basePath, callIndex)
+					obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, "chat.completion.delta", "tool_calls", NodeToolCallDelta, path, string(callRaw), callRaw))
+					eventIndex++
+				}
+			}
+			if finish := stringField(choiceObj, "finish_reason"); finish == "content_filter" {
+				node := SemanticNode{
+					ID:             StableNodeID("response", basePath+".finish_reason", "finish_reason", 0),
+					ProviderType:   "finish_reason",
+					NormalizedType: NodeSafety,
+					Path:           basePath + ".finish_reason",
+					Text:           finish,
+					Raw:            cloneRaw(choiceObj["finish_reason"]),
+				}
+				obs.Response.Safety = append(obs.Response.Safety, node)
+				obs.Response.Nodes = append(obs.Response.Nodes, node)
+				obs.Safety.Blocked = true
+			}
+		}
+	})
+
+	if obs.Stream.AccumulatedText != "" {
+		node := SemanticNode{
+			ID:             StableNodeID("response", "$.stream.accumulated_text", "content", 0),
+			ProviderType:   "content",
+			NormalizedType: NodeText,
+			Role:           "assistant",
+			Path:           "$.stream.accumulated_text",
+			Text:           obs.Stream.AccumulatedText,
+		}
+		obs.Response.Outputs = append(obs.Response.Outputs, node)
+		obs.Response.Nodes = append(obs.Response.Nodes, node)
+	}
+	if obs.Stream.AccumulatedReasoning != "" {
+		node := SemanticNode{
+			ID:             StableNodeID("response", "$.stream.accumulated_reasoning", "reasoning_content", 0),
+			ProviderType:   "reasoning_content",
+			NormalizedType: NodeReasoning,
+			Role:           "assistant",
+			Path:           "$.stream.accumulated_reasoning",
+			Text:           obs.Stream.AccumulatedReasoning,
+		}
+		obs.Response.Reasoning = append(obs.Response.Reasoning, node)
+		obs.Response.Nodes = append(obs.Response.Nodes, node)
+	}
+	sort.Ints(toolOrder)
+	for _, idx := range toolOrder {
+		call := toolCalls[idx]
+		path := fmt.Sprintf("$.stream.tool_calls[%d]", idx)
+		node := SemanticNode{
+			ID:             StableNodeID("response", path, "tool_call", idx),
+			ProviderType:   firstNonEmpty(call.Type, "tool_call"),
+			NormalizedType: NodeToolCall,
+			Path:           path,
+			Index:          idx,
+			Text:           call.Name,
+			Metadata: map[string]any{
+				"id":        call.ID,
+				"name":      call.Name,
+				"arguments": call.Arguments.String(),
+			},
+		}
+		obs.Stream.AccumulatedToolCalls = append(obs.Stream.AccumulatedToolCalls, node)
+		obs.Response.ToolCalls = append(obs.Response.ToolCalls, node)
+		obs.Response.Nodes = append(obs.Response.Nodes, node)
+		obs.Tools.Calls = append(obs.Tools.Calls, toolCallObservationFromNode(node, ToolOwnerModelRequested))
+	}
+}
+
+func parseOpenAIResponsesStream(body []byte, obs *TraceObservation) {
+	toolNodes := map[string]*SemanticNode{}
+	var toolOrder []string
+	eventIndex := 0
+	scanSSEData(body, func(data string) {
+		if data == "[DONE]" {
+			return
+		}
+		raw := json.RawMessage(data)
+		obj, err := decodeJSONObject(raw)
+		if err != nil {
+			addStreamWarning(obs, "invalid_stream_json", "$", err.Error())
+			return
+		}
+		if parseStreamErrorObject(obj, raw, obs, eventIndex) {
+			eventIndex++
+			return
+		}
+		eventType := stringField(obj, "type")
+		normalized := normalizedResponsesStreamEvent(eventType)
+		delta := firstNonEmpty(stringField(obj, "delta"), stringField(obj, "arguments"))
+		obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, eventType, eventType, normalized, "$", delta, raw))
+		eventIndex++
+		switch eventType {
+		case "response.output_text.delta":
+			obs.Stream.AccumulatedText += delta
+		case "response.refusal.delta":
+			obs.Safety.Refused = true
+			obs.Stream.AccumulatedText += delta
+		case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+			obs.Stream.AccumulatedReasoning += delta
+		case "response.function_call_arguments.delta", "response.mcp_call_arguments.delta", "response.custom_tool_call_input.delta":
+			itemID := stringField(obj, "item_id")
+			if itemID == "" {
+				itemID = stringField(obj, "output_index")
+			}
+			node := ensureStreamToolNode(toolNodes, &toolOrder, itemID, eventType)
+			node.Metadata["arguments"] = metadataString(node.Metadata, "arguments") + delta
+		case "response.function_call_arguments.done", "response.mcp_call_arguments.done", "response.custom_tool_call_input.done":
+			itemID := stringField(obj, "item_id")
+			node := ensureStreamToolNode(toolNodes, &toolOrder, itemID, eventType)
+			node.Metadata["arguments"] = firstNonEmpty(stringField(obj, "arguments"), metadataString(node.Metadata, "arguments"))
+		case "response.output_item.added", "response.output_item.done":
+			item := obj["item"]
+			node := parseResponsesItem(item, "response", fmt.Sprintf("$.stream.output_items[%d]", len(toolOrder)), len(toolOrder))
+			if node.ID == "" {
+				return
+			}
+			switch node.NormalizedType {
+			case NodeToolCall, NodeServerToolCall:
+				key := firstNonEmpty(metadataString(node.Metadata, "id"), metadataString(node.Metadata, "call_id"), node.ID)
+				if _, ok := toolNodes[key]; !ok {
+					toolOrder = append(toolOrder, key)
+				}
+				copied := node
+				toolNodes[key] = &copied
+			default:
+				obs.Response.Outputs = append(obs.Response.Outputs, node)
+				obs.Response.Nodes = append(obs.Response.Nodes, node)
+			}
+		case "response.completed":
+			if responseRaw := obj["response"]; len(responseRaw) > 0 {
+				responseObj, err := decodeJSONObject(responseRaw)
+				if err == nil {
+					if usage, ok := parseResponsesUsage(responseObj["usage"]); ok {
+						obs.Usage = usage
+					}
+				}
+			}
+		case "response.failed", "response.incomplete":
+			obs.Warnings = append(obs.Warnings, ParseWarning{
+				Code:    "stream_response_status",
+				Message: eventType,
+				Path:    "$.type",
+			})
+		}
+	})
+
+	if obs.Stream.AccumulatedText != "" {
+		normalized := NodeText
+		if obs.Safety.Refused {
+			normalized = NodeRefusal
+		}
+		node := SemanticNode{
+			ID:             StableNodeID("response", "$.stream.accumulated_text", "output_text", 0),
+			ProviderType:   "output_text",
+			NormalizedType: normalized,
+			Role:           "assistant",
+			Path:           "$.stream.accumulated_text",
+			Text:           obs.Stream.AccumulatedText,
+		}
+		if normalized == NodeRefusal {
+			obs.Response.Refusals = append(obs.Response.Refusals, node)
+		} else {
+			obs.Response.Outputs = append(obs.Response.Outputs, node)
+		}
+		obs.Response.Nodes = append(obs.Response.Nodes, node)
+	}
+	if obs.Stream.AccumulatedReasoning != "" {
+		node := SemanticNode{
+			ID:             StableNodeID("response", "$.stream.accumulated_reasoning", "reasoning_text", 0),
+			ProviderType:   "reasoning_text",
+			NormalizedType: NodeReasoning,
+			Role:           "assistant",
+			Path:           "$.stream.accumulated_reasoning",
+			Text:           obs.Stream.AccumulatedReasoning,
+		}
+		obs.Response.Reasoning = append(obs.Response.Reasoning, node)
+		obs.Response.Nodes = append(obs.Response.Nodes, node)
+	}
+	sort.Strings(toolOrder)
+	for _, key := range toolOrder {
+		node := toolNodes[key]
+		if node == nil {
+			continue
+		}
+		obs.Stream.AccumulatedToolCalls = append(obs.Stream.AccumulatedToolCalls, *node)
+		obs.Response.ToolCalls = append(obs.Response.ToolCalls, *node)
+		obs.Response.Nodes = append(obs.Response.Nodes, *node)
+		obs.Tools.Calls = append(obs.Tools.Calls, toolCallObservationFromNode(*node, toolOwnerForResponsesType(node.ProviderType)))
+	}
 }
 
 func parseOpenAIChatMessages(raw json.RawMessage, section string, basePath string) []SemanticNode {
@@ -839,4 +1111,131 @@ func cachedTokens(input ParseInput) int {
 		return 0
 	}
 	return input.Header.Usage.PromptTokenDetails.CachedTokens
+}
+
+func scanSSEData(body []byte, handle func(data string)) {
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" {
+			continue
+		}
+		handle(data)
+	}
+}
+
+func streamEvent(index int, eventType string, providerType string, normalized NormalizedType, path string, delta string, raw json.RawMessage) StreamEvent {
+	return StreamEvent{
+		Index:          index,
+		EventType:      eventType,
+		ProviderType:   providerType,
+		NormalizedType: normalized,
+		Path:           path,
+		Delta:          delta,
+		JSON:           cloneRaw(raw),
+	}
+}
+
+func normalizedResponsesStreamEvent(eventType string) NormalizedType {
+	switch eventType {
+	case "response.output_text.delta", "response.output_text.done":
+		return NodeText
+	case "response.refusal.delta", "response.refusal.done":
+		return NodeRefusal
+	case "response.reasoning_text.delta", "response.reasoning_text.done",
+		"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+		return NodeReasoning
+	case "response.function_call_arguments.delta", "response.function_call_arguments.done",
+		"response.custom_tool_call_input.delta", "response.custom_tool_call_input.done",
+		"response.mcp_call_arguments.delta", "response.mcp_call_arguments.done":
+		return NodeToolCallDelta
+	case "response.failed", "response.error":
+		return NodeError
+	case "response.incomplete":
+		return NodeSafety
+	default:
+		if strings.Contains(eventType, "_call") {
+			return NodeToolCallDelta
+		}
+		return NodeUnknown
+	}
+}
+
+func ensureStreamToolNode(nodes map[string]*SemanticNode, order *[]string, key string, eventType string) *SemanticNode {
+	if key == "" {
+		key = fmt.Sprintf("stream_tool_%d", len(*order))
+	}
+	if node, ok := nodes[key]; ok {
+		return node
+	}
+	providerType := streamEventToolProviderType(eventType)
+	path := fmt.Sprintf("$.stream.tool_calls[%d]", len(*order))
+	node := &SemanticNode{
+		ID:             StableNodeID("response", path, providerType, len(*order)),
+		ProviderType:   providerType,
+		NormalizedType: normalizedResponsesType(providerType),
+		Path:           path,
+		Index:          len(*order),
+		Metadata: map[string]any{
+			"id": key,
+		},
+	}
+	nodes[key] = node
+	*order = append(*order, key)
+	return node
+}
+
+func streamEventToolProviderType(eventType string) string {
+	switch {
+	case strings.Contains(eventType, "mcp_call"):
+		return "mcp_call"
+	case strings.Contains(eventType, "custom_tool_call"):
+		return "custom_tool_call"
+	default:
+		return "function_call"
+	}
+}
+
+func parseStreamErrorObject(obj map[string]json.RawMessage, raw json.RawMessage, obs *TraceObservation, eventIndex int) bool {
+	eventType := stringField(obj, "type")
+	if eventType != "error" && eventType != "response.failed" {
+		if _, ok := obj["error"]; !ok {
+			return false
+		}
+	}
+	errorRaw := obj["error"]
+	if len(errorRaw) == 0 {
+		if responseObj, err := decodeJSONObject(obj["response"]); err == nil {
+			errorRaw = responseObj["error"]
+		}
+	}
+	if len(errorRaw) == 0 || string(errorRaw) == "null" {
+		return false
+	}
+	node := SemanticNode{
+		ID:             StableNodeID("response", fmt.Sprintf("$.stream.events[%d].error", eventIndex), "error", eventIndex),
+		ProviderType:   "error",
+		NormalizedType: NodeError,
+		Path:           fmt.Sprintf("$.stream.events[%d].error", eventIndex),
+		Index:          eventIndex,
+		Text:           textFromRaw(errorRaw),
+		Raw:            cloneRaw(errorRaw),
+	}
+	obs.Stream.Errors = append(obs.Stream.Errors, node)
+	obs.Response.Errors = append(obs.Response.Errors, node)
+	obs.Response.Nodes = append(obs.Response.Nodes, node)
+	obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, firstNonEmpty(eventType, "error"), "error", NodeError, node.Path, node.Text, raw))
+	return true
+}
+
+func addStreamWarning(obs *TraceObservation, code string, path string, message string) {
+	obs.Warnings = append(obs.Warnings, ParseWarning{
+		Code:    code,
+		Message: message,
+		Path:    path,
+	})
 }
