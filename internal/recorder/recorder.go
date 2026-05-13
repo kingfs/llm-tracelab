@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -239,6 +240,12 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 		}
 		if err := r.store.UpsertLogWithGrouping(info.Path, info.Header, grouping); err != nil {
 			return err
+		}
+		entry, err := r.store.GetByRequestID(info.Header.Meta.RequestID)
+		if err != nil {
+			slog.Warn("Trace parse job enqueue skipped: indexed trace not found", "request_id", info.Header.Meta.RequestID, "error", err)
+		} else if err := r.store.EnqueueParseJob(entry.ID); err != nil {
+			slog.Warn("Trace parse job enqueue failed", "trace_id", entry.ID, "error", err)
 		}
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -84,6 +85,8 @@ func runServeWithConfig(configPath string) int {
 	syncCtx, cancelSync := context.WithCancel(context.Background())
 	defer cancelSync()
 	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute)
+	parseWorker := observeworker.New(traceStore, observeworker.Options{Interval: 5 * time.Second, BatchSize: 10})
+	go parseWorker.Run(syncCtx)
 
 	rtr, err := router.New(cfg, traceStore)
 	if err != nil {

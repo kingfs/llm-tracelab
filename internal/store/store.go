@@ -272,6 +272,16 @@ type ObservationSummary struct {
 	UpdatedAt     time.Time
 }
 
+type ParseJobRecord struct {
+	ID        int64
+	TraceID   string
+	Status    string
+	Attempts  int
+	LastError string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type ScoreFilter struct {
 	TraceID   string
 	SessionID string
@@ -2569,6 +2579,80 @@ func (s *Store) ListSemanticNodes(traceID string) ([]observe.FlatSemanticNode, e
 		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) EnqueueParseJob(traceID string) error {
+	if strings.TrimSpace(traceID) == "" {
+		return fmt.Errorf("enqueue parse job: trace id is required")
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
+		VALUES (?, 'queued', 0, ?, ?)
+	`, traceID, now, now)
+	return err
+}
+
+func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.db.Query(`
+		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
+		FROM parse_jobs
+		WHERE status = ?
+		ORDER BY updated_at ASC, id ASC
+		LIMIT ?
+	`, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ParseJobRecord
+	for rows.Next() {
+		var job ParseJobRecord
+		var createdAt, updatedAt any
+		if err := rows.Scan(&job.ID, &job.TraceID, &job.Status, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		var err error
+		if job.CreatedAt, err = timeParseValue(createdAt); err != nil {
+			return nil, err
+		}
+		if job.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) MarkParseJobRunning(id int64) error {
+	_, err := s.db.Exec(`
+		UPDATE parse_jobs
+		SET status = 'running', attempts = attempts + 1, updated_at = ?
+		WHERE id = ?
+	`, time.Now().UTC(), id)
+	return err
+}
+
+func (s *Store) MarkParseJobDone(id int64) error {
+	_, err := s.db.Exec(`
+		UPDATE parse_jobs
+		SET status = 'parsed', last_error = '', updated_at = ?
+		WHERE id = ?
+	`, time.Now().UTC(), id)
+	return err
+}
+
+func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
+	_, err := s.db.Exec(`
+		UPDATE parse_jobs
+		SET status = 'failed', last_error = ?, updated_at = ?
+		WHERE id = ?
+	`, textPreview(lastError, 2000), time.Now().UTC(), id)
+	return err
 }
 
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {

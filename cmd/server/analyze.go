@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
-	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	"github.com/spf13/cobra"
 )
 
@@ -80,38 +79,14 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 	}
 	defer traceStore.Close()
 
-	entry, err := traceStore.GetByID(opts.traceID)
-	if err != nil {
-		slog.Error("Trace not found", "trace_id", opts.traceID, "error", err)
-		return 1
-	}
-	content, err := os.ReadFile(entry.LogPath)
-	if err != nil {
-		slog.Error("Failed to read cassette", "path", entry.LogPath, "error", err)
-		return 1
-	}
-	parsed, err := recordfile.ParsePrelude(content)
-	if err != nil {
-		slog.Error("Failed to parse cassette prelude", "path", entry.LogPath, "error", err)
-		return 1
-	}
-	_, reqBody, _, resBody := recordfile.ExtractSections(content, parsed)
 	registry := observe.NewRegistry(observe.NewOpenAIParser())
-	obs, err := registry.Parse(context.Background(), observe.ParseInput{
-		TraceID:      entry.ID,
-		CassettePath: entry.LogPath,
-		Header:       parsed.Header,
-		Events:       parsed.Events,
-		RequestBody:  reqBody,
-		ResponseBody: resBody,
-		IsStream:     parsed.Header.Layout.IsStream,
-	})
+	obs, err := observeworker.ReparseTrace(context.Background(), traceStore, registry, opts.traceID)
 	if err != nil {
-		slog.Error("Failed to reparse trace", "trace_id", entry.ID, "error", err)
+		slog.Error("Failed to reparse trace", "trace_id", opts.traceID, "error", err)
 		return 1
 	}
 	if err := traceStore.SaveObservation(obs); err != nil {
-		slog.Error("Failed to save observation", "trace_id", entry.ID, "error", err)
+		slog.Error("Failed to save observation", "trace_id", obs.TraceID, "error", err)
 		return 1
 	}
 	result := map[string]any{

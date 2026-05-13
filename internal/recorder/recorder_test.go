@@ -153,3 +153,45 @@ func TestUpdateLogFileIndexesGroupingFromCodexHeaders(t *testing.T) {
 		t.Fatalf("ClientRequestID = %q, want req-codex-live", entry.ClientRequestID)
 	}
 }
+
+func TestUpdateLogFileEnqueuesParseJob(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	rec := New(dir, false, st)
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.1","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[]}`
+	info.Header.Meta.StatusCode = 200
+	info.Header.Layout.ResHeaderLen = int64(len(resHead))
+	info.Header.Layout.ResBodyLen = int64(len(resBody))
+	if _, err := info.File.Write([]byte("\n" + resHead + resBody)); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := rec.UpdateLogFile(info); err != nil {
+		t.Fatalf("UpdateLogFile() error = %v", err)
+	}
+	entry, err := st.GetByRequestID(info.Header.Meta.RequestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	jobs, err := st.ListParseJobs("queued", 10)
+	if err != nil {
+		t.Fatalf("ListParseJobs() error = %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].TraceID != entry.ID {
+		t.Fatalf("jobs = %+v, want trace %s", jobs, entry.ID)
+	}
+}
