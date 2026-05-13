@@ -137,6 +137,71 @@ func TestOpenAIParserParsesResponsesOutputAndUnknown(t *testing.T) {
 	}
 }
 
+func TestOpenAIParserPreservesResponsesBuiltInToolItems(t *testing.T) {
+	parser := NewOpenAIParser()
+	input := ParseInput{
+		TraceID: "trace-responses-builtins",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationResponses,
+				Endpoint:  "/v1/responses",
+			},
+		},
+		RequestBody: []byte(`{
+			"model":"gpt-5.1",
+			"input":"search docs and run code",
+			"tools":[
+				{"type":"web_search_preview"},
+				{"type":"file_search","vector_store_ids":["vs_123"]},
+				{"type":"code_interpreter","container":{"type":"auto"}}
+			],
+			"include":["web_search_call.action.sources","file_search_call.results","code_interpreter_call.outputs"]
+		}`),
+		ResponseBody: []byte(`{
+			"id":"resp_builtin",
+			"object":"response",
+			"status":"completed",
+			"model":"gpt-5.1",
+			"output":[
+				{"type":"web_search_call","id":"ws_1","status":"completed","action":{"query":"llm tracing","sources":[{"url":"https://example.com/docs","title":"Docs"}]}},
+				{"type":"file_search_call","id":"fs_1","status":"completed","queries":["trace"],"results":[{"file_id":"file_1","filename":"trace.md","score":0.9}]},
+				{"type":"code_interpreter_call","id":"ci_1","status":"completed","code":"print(1)","outputs":[{"type":"logs","logs":"1\n"}]},
+				{"type":"code_interpreter_call_output","id":"cio_1","call_id":"ci_1","output":{"type":"logs","logs":"1\n"}},
+				{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Found docs and executed code."}]}
+			]
+		}`),
+	}
+
+	obs, err := parser.Parse(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Outputs) != 5 {
+		t.Fatalf("outputs = %d", len(obs.Response.Outputs))
+	}
+	if len(obs.Response.ToolCalls) != 3 || len(obs.Tools.Calls) != 3 {
+		t.Fatalf("tool calls = response %+v tools %+v", obs.Response.ToolCalls, obs.Tools.Calls)
+	}
+	for _, call := range obs.Tools.Calls {
+		if call.Owner != ToolOwnerProviderExecuted {
+			t.Fatalf("built-in call owner = %q for %+v", call.Owner, call)
+		}
+	}
+	if len(obs.Response.ToolResults) != 1 || len(obs.Tools.Results) != 1 {
+		t.Fatalf("tool results = response %+v tools %+v", obs.Response.ToolResults, obs.Tools.Results)
+	}
+	if obs.Tools.Results[0].Owner != ToolOwnerProviderExecuted {
+		t.Fatalf("built-in result owner = %q", obs.Tools.Results[0].Owner)
+	}
+	if got := obs.Response.Outputs[2]; got.NormalizedType != NodeServerToolCall || got.ProviderType != "code_interpreter_call" || !strings.Contains(string(got.Raw), `"outputs"`) {
+		t.Fatalf("code interpreter node = %+v raw=%s", got, string(got.Raw))
+	}
+	if len(obs.Warnings) != 0 {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
 func TestOpenAIParserParsesResponsesRefusalAndError(t *testing.T) {
 	parser := NewOpenAIParser()
 	input := ParseInput{
