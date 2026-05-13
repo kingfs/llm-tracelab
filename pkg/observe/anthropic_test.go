@@ -126,3 +126,76 @@ func TestAnthropicParserParsesStreamingMessages(t *testing.T) {
 		t.Fatalf("usage = %+v", obs.Usage)
 	}
 }
+
+func TestAnthropicParserPreservesRedactedThinkingAndSignature(t *testing.T) {
+	parser := NewAnthropicParser()
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID: "trace-claude-redacted-thinking",
+		Header:  anthropicTestHeader(false),
+		RequestBody: []byte(`{
+			"model":"claude-sonnet-4-5",
+			"messages":[{"role":"user","content":"think privately"}],
+			"thinking":{"type":"enabled","budget_tokens":1024},
+			"max_tokens":64
+		}`),
+		ResponseBody: []byte(`{
+			"id":"msg_1",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-sonnet-4-5",
+			"content":[
+				{"type":"redacted_thinking","data":"opaque-signature-bound-payload"},
+				{"type":"text","text":"Done"}
+			],
+			"usage":{"input_tokens":7,"output_tokens":9}
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Reasoning) != 1 {
+		t.Fatalf("reasoning = %+v", obs.Response.Reasoning)
+	}
+	reasoning := obs.Response.Reasoning[0]
+	if reasoning.ProviderType != "redacted_thinking" || reasoning.NormalizedType != NodeReasoning || reasoning.Text != "[redacted_thinking]" {
+		t.Fatalf("redacted reasoning = %+v", reasoning)
+	}
+	if !strings.Contains(string(reasoning.Raw), "opaque-signature-bound-payload") {
+		t.Fatalf("redacted thinking raw not preserved: %s", reasoning.Raw)
+	}
+
+	streamBody := joinSSE(
+		`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[]}}`,
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`,
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}`,
+		`data: {"type":"content_block_stop","index":0}`,
+		`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done"}}`,
+		`data: {"type":"message_stop"}`,
+	)
+	streamObs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID:      "trace-claude-signature-delta",
+		Header:       anthropicTestHeader(true),
+		RequestBody:  []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}],"stream":true,"max_tokens":64}`),
+		ResponseBody: []byte(streamBody),
+		IsStream:     true,
+	})
+	if err != nil {
+		t.Fatalf("Parse() stream error = %v", err)
+	}
+	if streamObs.Stream.AccumulatedText != "Done" || streamObs.Stream.AccumulatedReasoning != "" {
+		t.Fatalf("stream accumulators = text %q reasoning %q", streamObs.Stream.AccumulatedText, streamObs.Stream.AccumulatedReasoning)
+	}
+	var foundSignature bool
+	for _, event := range streamObs.Stream.Events {
+		if event.EventType == "content_block_delta" && strings.Contains(string(event.JSON), `"signature_delta"`) {
+			foundSignature = true
+			if event.NormalizedType != NodeUnknown || event.Delta != "" {
+				t.Fatalf("signature event = %+v", event)
+			}
+		}
+	}
+	if !foundSignature {
+		t.Fatalf("signature_delta event missing in %+v", streamObs.Stream.Events)
+	}
+}
