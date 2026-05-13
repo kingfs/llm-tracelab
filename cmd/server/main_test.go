@@ -462,6 +462,122 @@ debug:
 	}
 }
 
+func TestAnalyzeReparseCommandEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+database:
+  dsn: "file:` + dbPath + `?mode=rwc"
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
+	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"id":"resp_cmd","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello from cli"}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}`
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "req-reparse-command",
+			Time:          time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model:         "gpt-5.1",
+			Provider:      "openai_compatible",
+			Operation:     "responses",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    20,
+			TTFTMs:        5,
+			ClientIP:      "127.0.0.1",
+			ContentLength: int64(len(reqBody)),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len(reqHead)),
+			ReqBodyLen:   int64(len(reqBody)),
+			ResHeaderLen: int64(len(resHead)),
+			ResBodyLen:   int64(len(resBody)),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "trace-command.http")
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(trace) error = %v", err)
+	}
+
+	st, err := store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	traceID := mustTraceIDFromStore(t, st, logPath)
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "analyze", "reparse", "--trace-id", traceID})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%q", err, out.String())
+	}
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			TraceID string `json:"trace_id"`
+			Parser  string `json:"parser"`
+			Status  string `json:"status"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Result.TraceID != traceID || envelope.Result.Parser != "openai" || envelope.Result.Status != "parsed" {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+
+	st, err = store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
+	}
+	defer st.Close()
+	nodes, err := st.ListSemanticNodes(traceID)
+	if err != nil {
+		t.Fatalf("ListSemanticNodes() error = %v", err)
+	}
+	var foundText bool
+	for _, node := range nodes {
+		if string(node.Node.NormalizedType) == "text" && node.Node.Text == "hello from cli" {
+			foundText = true
+			break
+		}
+	}
+	if !foundText {
+		t.Fatalf("semantic text node missing in %+v", nodes)
+	}
+}
+
 func mustTraceIDFromStore(t *testing.T, st *store.Store, path string) string {
 	t.Helper()
 	entry, err := st.ListRecent(1)
