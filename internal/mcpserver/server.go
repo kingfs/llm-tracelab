@@ -41,6 +41,20 @@ type getTraceInput struct {
 	IncludeRaw bool   `json:"include_raw,omitempty" jsonschema:"include raw HTTP request and response bytes"`
 }
 
+type listTraceFindingsInput struct {
+	TraceID  string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
+	Severity string `json:"severity,omitempty" jsonschema:"optional severity filter"`
+	Category string `json:"category,omitempty" jsonschema:"optional category filter"`
+}
+
+type queryDangerousToolCallsInput struct {
+	TraceID string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
+}
+
+type querySensitiveDataFindingsInput struct {
+	TraceID string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
+}
+
 type listSessionsInput struct {
 	Page     int    `json:"page,omitempty" jsonschema:"1-based page number"`
 	PageSize int    `json:"page_size,omitempty" jsonschema:"number of items per page, max 200"`
@@ -170,6 +184,18 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Description: "Get one trace detail by trace_id, optionally including raw HTTP request and response bytes.",
 	}, api.getTrace)
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_trace_findings",
+		Description: "List deterministic audit findings for one trace, with optional severity and category filters.",
+	}, api.listTraceFindings)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "query_dangerous_tool_calls",
+		Description: "Return dangerous command and unsafe tool-call findings for one trace.",
+	}, api.queryDangerousToolCalls)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "query_sensitive_data_findings",
+		Description: "Return credential and sensitive-data findings for one trace.",
+	}, api.querySensitiveDataFindings)
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_sessions",
 		Description: "List grouped sessions with pagination and optional provider/model/query filters.",
 	}, api.listSessions)
@@ -222,6 +248,29 @@ func (a *serverAPI) getTrace(ctx context.Context, req *mcp.CallToolRequest, in *
 		out["raw"] = raw
 	}
 	return nil, out, nil
+}
+
+func (a *serverAPI) listTraceFindings(ctx context.Context, req *mcp.CallToolRequest, in *listTraceFindingsInput) (*mcp.CallToolResult, map[string]any, error) {
+	return a.traceFindings(ctx, in.TraceID, in.Severity, in.Category)
+}
+
+func (a *serverAPI) queryDangerousToolCalls(ctx context.Context, req *mcp.CallToolRequest, in *queryDangerousToolCallsInput) (*mcp.CallToolResult, map[string]any, error) {
+	out, err := a.mergeTraceFindingCategories(ctx, in.TraceID, "", []string{
+		"dangerous_command",
+		"filesystem_destructive_operation",
+		"unsafe_code_execution",
+		"network_exfiltration",
+		"unexpected_tool_call",
+	})
+	return nil, out, err
+}
+
+func (a *serverAPI) querySensitiveDataFindings(ctx context.Context, req *mcp.CallToolRequest, in *querySensitiveDataFindingsInput) (*mcp.CallToolResult, map[string]any, error) {
+	out, err := a.mergeTraceFindingCategories(ctx, in.TraceID, "", []string{
+		"credential_leak",
+		"sensitive_data",
+	})
+	return nil, out, err
 }
 
 func (a *serverAPI) listSessions(ctx context.Context, req *mcp.CallToolRequest, in *listSessionsInput) (*mcp.CallToolResult, *sessionListOutput, error) {
@@ -368,6 +417,46 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 		out.TopFailures = out.TopFailures[:limit]
 	}
 	return nil, out, nil
+}
+
+func (a *serverAPI) traceFindings(ctx context.Context, traceID string, severity string, category string) (*mcp.CallToolResult, map[string]any, error) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return nil, nil, fmt.Errorf("trace_id is required")
+	}
+	values := url.Values{}
+	setIfNotEmpty(values, "severity", severity)
+	setIfNotEmpty(values, "category", category)
+
+	var out map[string]any
+	if err := a.getJSON(ctx, "/api/traces/"+url.PathEscape(traceID)+"/findings", values, &out); err != nil {
+		return nil, nil, err
+	}
+	return nil, out, nil
+}
+
+func (a *serverAPI) mergeTraceFindingCategories(ctx context.Context, traceID string, severity string, categories []string) (map[string]any, error) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return nil, fmt.Errorf("trace_id is required")
+	}
+	out := map[string]any{
+		"id":    traceID,
+		"items": []any{},
+		"total": float64(0),
+	}
+	var merged []any
+	for _, category := range categories {
+		_, payload, err := a.traceFindings(ctx, traceID, severity, category)
+		if err != nil {
+			return nil, err
+		}
+		items, _ := payload["items"].([]any)
+		merged = append(merged, items...)
+	}
+	out["items"] = merged
+	out["total"] = float64(len(merged))
+	return out, nil
 }
 
 func (a *serverAPI) getJSON(ctx context.Context, path string, query url.Values, out interface{}) error {

@@ -158,6 +158,30 @@ type observationDetailResponse struct {
 	Tree    []observationNodeView  `json:"tree"`
 }
 
+type findingListResponse struct {
+	ID       string        `json:"id"`
+	Items    []findingView `json:"items"`
+	Total    int           `json:"total"`
+	Severity string        `json:"severity,omitempty"`
+	Category string        `json:"category,omitempty"`
+}
+
+type findingView struct {
+	ID              string    `json:"id"`
+	TraceID         string    `json:"trace_id"`
+	Category        string    `json:"category"`
+	Severity        string    `json:"severity"`
+	Confidence      float64   `json:"confidence"`
+	Title           string    `json:"title"`
+	Description     string    `json:"description,omitempty"`
+	EvidencePath    string    `json:"evidence_path"`
+	EvidenceExcerpt string    `json:"evidence_excerpt,omitempty"`
+	NodeID          string    `json:"node_id,omitempty"`
+	Detector        string    `json:"detector"`
+	DetectorVersion string    `json:"detector_version"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
 type observationSummaryView struct {
 	TraceID       string    `json:"trace_id"`
 	Parser        string    `json:"parser"`
@@ -1028,6 +1052,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
 			handleTraceObservation(w, st, entry)
+		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
+			handleTraceFindings(w, r, st, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
 			serveTraceDownload(w, r, absPath)
 		default:
@@ -1059,6 +1085,29 @@ func handleTraceObservation(w http.ResponseWriter, st *store.Store, entry store.
 		Tree:    observationNodeViewsFromTree(tree, 0),
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+	filter := store.FindingFilter{
+		Category: strings.TrimSpace(r.URL.Query().Get("category")),
+		Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
+	}
+	findings, err := st.ListFindings(entry.ID, filter)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := make([]findingView, 0, len(findings))
+	for _, finding := range findings {
+		items = append(items, findingViewFromObservation(finding))
+	}
+	writeJSON(w, http.StatusOK, findingListResponse{
+		ID:       entry.ID,
+		Items:    items,
+		Total:    len(items),
+		Severity: filter.Severity,
+		Category: filter.Category,
+	})
 }
 
 func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry, rtr *router.Router) {
@@ -1242,6 +1291,24 @@ func observationNodeViewFromNode(node observe.SemanticNode, parentID string, dep
 		Depth:          depth,
 		TextPreview:    node.Text,
 		Raw:            node.Raw,
+	}
+}
+
+func findingViewFromObservation(finding observe.Finding) findingView {
+	return findingView{
+		ID:              finding.ID,
+		TraceID:         finding.TraceID,
+		Category:        finding.Category,
+		Severity:        string(finding.Severity),
+		Confidence:      finding.Confidence,
+		Title:           finding.Title,
+		Description:     finding.Description,
+		EvidencePath:    finding.EvidencePath,
+		EvidenceExcerpt: finding.EvidenceExcerpt,
+		NodeID:          finding.NodeID,
+		Detector:        finding.Detector,
+		DetectorVersion: finding.DetectorVersion,
+		CreatedAt:       finding.CreatedAt,
 	}
 }
 

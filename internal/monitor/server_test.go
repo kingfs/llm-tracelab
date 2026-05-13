@@ -1784,6 +1784,82 @@ func TestTraceObservationAPIHandlerReturnsNotFoundBeforeReparse(t *testing.T) {
 	}
 }
 
+func TestTraceFindingsAPIHandlerReturnsFilteredFindings(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	logPath := filepath.Join(outputDir, "trace-findings.http")
+	if err := os.WriteFile(logPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:  "req-findings",
+			Time:       time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model:      "gpt-5.1",
+			Provider:   "openai_compatible",
+			Operation:  "responses",
+			Endpoint:   "/v1/responses",
+			URL:        "/v1/responses",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	entry, err := st.GetByRequestID("req-findings")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	findings := []observe.Finding{{
+		ID:              "finding-danger",
+		TraceID:         entry.ID,
+		Category:        "dangerous_command",
+		Severity:        observe.SeverityHigh,
+		Confidence:      0.95,
+		Title:           "Dangerous command",
+		EvidencePath:    "trace#" + entry.ID + "#node#node-shell",
+		EvidenceExcerpt: "rm -rf /",
+		NodeID:          "node-shell",
+		Detector:        "dangerous_shell",
+		DetectorVersion: "0.1.0",
+	}, {
+		ID:              "finding-secret",
+		TraceID:         entry.ID,
+		Category:        "credential_leak",
+		Severity:        observe.SeverityHigh,
+		Confidence:      0.9,
+		Title:           "Credential exposure",
+		EvidencePath:    "trace#" + entry.ID + "#node#node-secret",
+		NodeID:          "node-secret",
+		Detector:        "credential",
+		DetectorVersion: "0.1.0",
+	}}
+	if err := st.SaveFindings(entry.ID, findings); err != nil {
+		t.Fatalf("SaveFindings() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+entry.ID+"/findings?category=credential_leak", nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload findingListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Total != 1 || payload.Items[0].ID != "finding-secret" || payload.Items[0].NodeID != "node-secret" {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
 func TestTraceRawAPIHandlerReturnsFileNotFoundError(t *testing.T) {
 	t.Parallel()
 

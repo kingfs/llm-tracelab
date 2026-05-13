@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -81,6 +82,36 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
+	failureEntry, err := st.GetByRequestID("req-failure")
+	if err != nil {
+		t.Fatalf("GetByRequestID(req-failure) error = %v", err)
+	}
+	if err := st.SaveFindings(failureEntry.ID, []observe.Finding{{
+		ID:              "finding-danger",
+		TraceID:         failureEntry.ID,
+		Category:        "dangerous_command",
+		Severity:        observe.SeverityHigh,
+		Confidence:      0.95,
+		Title:           "Dangerous command",
+		EvidencePath:    "trace#" + failureEntry.ID + "#node#node-shell",
+		EvidenceExcerpt: "rm -rf /",
+		NodeID:          "node-shell",
+		Detector:        "dangerous_shell",
+		DetectorVersion: "0.1.0",
+	}, {
+		ID:              "finding-secret",
+		TraceID:         failureEntry.ID,
+		Category:        "credential_leak",
+		Severity:        observe.SeverityHigh,
+		Confidence:      0.9,
+		Title:           "Credential exposure",
+		EvidencePath:    "trace#" + failureEntry.ID + "#node#node-secret",
+		NodeID:          "node-secret",
+		Detector:        "credential",
+		DetectorVersion: "0.1.0",
+	}}); err != nil {
+		t.Fatalf("SaveFindings() error = %v", err)
+	}
 
 	server := New(st, Options{})
 	session, err := connectClient(context.Background(), server)
@@ -93,8 +124,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 6 {
-		t.Fatalf("len(tools.Tools) = %d, want 6", len(tools.Tools))
+	if len(tools.Tools) != 9 {
+		t.Fatalf("len(tools.Tools) = %d, want 9", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -130,6 +161,40 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if _, ok := traceDetailPayload["raw"].(map[string]any); !ok {
 		t.Fatalf("get_trace.raw missing")
+	}
+
+	traceFindings, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_trace_findings",
+		Arguments: map[string]any{"trace_id": failureEntry.ID, "severity": "high"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_trace_findings) error = %v", err)
+	}
+	traceFindingsPayload := traceFindings.StructuredContent.(map[string]any)
+	if got := int(traceFindingsPayload["total"].(float64)); got != 2 {
+		t.Fatalf("list_trace_findings.total = %d, want 2", got)
+	}
+
+	dangerous, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_dangerous_tool_calls",
+		Arguments: map[string]any{"trace_id": failureEntry.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_dangerous_tool_calls) error = %v", err)
+	}
+	if got := int(dangerous.StructuredContent.(map[string]any)["total"].(float64)); got != 1 {
+		t.Fatalf("query_dangerous_tool_calls.total = %d, want 1", got)
+	}
+
+	sensitive, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_sensitive_data_findings",
+		Arguments: map[string]any{"trace_id": failureEntry.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_sensitive_data_findings) error = %v", err)
+	}
+	if got := int(sensitive.StructuredContent.(map[string]any)["total"].(float64)); got != 1 {
+		t.Fatalf("query_sensitive_data_findings.total = %d, want 1", got)
 	}
 
 	sessionList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
