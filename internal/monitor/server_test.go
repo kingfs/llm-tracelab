@@ -432,6 +432,12 @@ func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
 	if len(payload.Timeline) != 2 {
 		t.Fatalf("len(timeline) = %d, want 2", len(payload.Timeline))
 	}
+	if payload.Performance.RequestCount != 2 || payload.Performance.SuccessRequest != 1 || payload.Performance.FailedRequest != 1 {
+		t.Fatalf("performance summary = %+v", payload.Performance)
+	}
+	if len(payload.Performance.ByEndpoint) != 2 || len(payload.Performance.ByModel) != 1 {
+		t.Fatalf("performance breakdown = %+v", payload.Performance)
+	}
 	if payload.Timeline[0].Time.After(payload.Timeline[1].Time) {
 		t.Fatalf("timeline not sorted ascending: %+v", payload.Timeline)
 	}
@@ -1054,6 +1060,63 @@ func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 	}
 	if payload.Session.SessionSource != "header.session_id" {
 		t.Fatalf("SessionSource = %q, want header.session_id", payload.Session.SessionSource)
+	}
+	if payload.Performance.RequestCount != 1 || payload.Performance.DurationMs != 100 || payload.Performance.TTFTMs != 10 {
+		t.Fatalf("performance = %+v", payload.Performance)
+	}
+}
+
+func TestTracePerformanceAPIHandlerReturnsMetrics(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace-performance.http")
+	reqBody := `{"input":"hello"}`
+	resBody := `{"output_text":"done"}`
+	header := buildRecordHeader("/v1/responses", true, reqBody, resBody)
+	header.Usage.PromptTokens = 10
+	header.Usage.CompletionTokens = 20
+	header.Usage.TotalTokens = 30
+	header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: 4}
+	header.Meta.SelectedUpstreamID = "openai-primary"
+	header.Meta.RoutingPolicy = "p2c"
+	header.Meta.RoutingCandidateCount = 2
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	payload := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" +
+		reqBody + "\nHTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" + resBody
+	if err := os.WriteFile(tracePath, append(prelude, []byte(payload)...), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+	items, err := st.ListRecent(1)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID+"/performance", nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var out performanceResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if out.Performance.TotalTokens != 30 || out.Performance.TokensPerSec != 300 || out.Performance.CacheRatio != 0.4 {
+		t.Fatalf("performance = %+v", out.Performance)
+	}
+	if !out.Performance.IsStream || !out.Performance.RoutingFallback || out.Performance.SelectedUpstreamID != "openai-primary" {
+		t.Fatalf("routing performance = %+v", out.Performance)
 	}
 }
 

@@ -84,10 +84,11 @@ type sessionListItem struct {
 }
 
 type sessionDetailResponse struct {
-	Summary   sessionListItem       `json:"summary"`
-	Breakdown sessionBreakdownView  `json:"breakdown"`
-	Timeline  []sessionTimelineItem `json:"timeline"`
-	Traces    []traceListItem       `json:"traces"`
+	Summary     sessionListItem       `json:"summary"`
+	Breakdown   sessionBreakdownView  `json:"breakdown"`
+	Timeline    []sessionTimelineItem `json:"timeline"`
+	Performance performanceView       `json:"performance"`
+	Traces      []traceListItem       `json:"traces"`
 }
 
 type sessionBreakdownView struct {
@@ -127,6 +128,62 @@ type detailResponse struct {
 	AIBlocks               []ContentBlock           `json:"ai_blocks"`
 	ToolCalls              []ToolCall               `json:"tool_calls"`
 	SelectedUpstreamHealth *traceUpstreamHealthView `json:"selected_upstream_health,omitempty"`
+	Performance            performanceView          `json:"performance"`
+}
+
+type performanceResponse struct {
+	ID          string          `json:"id"`
+	Scope       string          `json:"scope"`
+	Performance performanceView `json:"performance"`
+}
+
+type performanceView struct {
+	RequestCount       int             `json:"request_count"`
+	SuccessRequest     int             `json:"success_request"`
+	FailedRequest      int             `json:"failed_request"`
+	SuccessRate        float64         `json:"success_rate"`
+	DurationMs         int64           `json:"duration_ms"`
+	TTFTMs             int64           `json:"ttft_ms"`
+	TokensPerSec       float64         `json:"tokens_per_sec"`
+	TotalTokens        int             `json:"total_tokens"`
+	PromptTokens       int             `json:"prompt_tokens"`
+	CompletionTokens   int             `json:"completion_tokens"`
+	CachedTokens       int             `json:"cached_tokens"`
+	CacheRatio         float64         `json:"cache_ratio"`
+	StatusCode         int             `json:"status_code,omitempty"`
+	ProviderError      string          `json:"provider_error,omitempty"`
+	IsStream           bool            `json:"is_stream,omitempty"`
+	SelectedUpstreamID string          `json:"selected_upstream_id,omitempty"`
+	RoutingPolicy      string          `json:"routing_policy,omitempty"`
+	RoutingFallback    bool            `json:"routing_fallback,omitempty"`
+	Upstreams          []upstreamPerf  `json:"upstreams,omitempty"`
+	ByModel            []perfCountItem `json:"by_model,omitempty"`
+	ByEndpoint         []perfCountItem `json:"by_endpoint,omitempty"`
+}
+
+type upstreamPerf struct {
+	ID             string  `json:"id"`
+	BaseURL        string  `json:"base_url,omitempty"`
+	ProviderPreset string  `json:"provider_preset,omitempty"`
+	RequestCount   int     `json:"request_count"`
+	SuccessRequest int     `json:"success_request"`
+	FailedRequest  int     `json:"failed_request"`
+	SuccessRate    float64 `json:"success_rate"`
+	TotalTokens    int     `json:"total_tokens"`
+	AvgTTFT        int     `json:"avg_ttft"`
+	HealthState    string  `json:"health_state,omitempty"`
+	ErrorRate      float64 `json:"error_rate,omitempty"`
+	TimeoutRate    float64 `json:"timeout_rate,omitempty"`
+}
+
+type perfCountItem struct {
+	Label        string  `json:"label"`
+	Count        int     `json:"count"`
+	TotalTokens  int     `json:"total_tokens"`
+	AvgDuration  int64   `json:"avg_duration_ms"`
+	AvgTTFT      int64   `json:"avg_ttft_ms"`
+	SuccessRate  float64 `json:"success_rate"`
+	TokensPerSec float64 `json:"tokens_per_sec"`
 }
 
 type traceUpstreamHealthView struct {
@@ -315,6 +372,7 @@ type upstreamItem struct {
 	LastModel         string                `json:"last_model"`
 	RecentErrors      []string              `json:"recent_errors"`
 	RecentFailures    []upstreamFailureItem `json:"recent_failures"`
+	Performance       performanceView       `json:"performance"`
 }
 
 type upstreamFailureItem struct {
@@ -637,6 +695,7 @@ func upstreamDetailAPIHandler(st *store.Store, rtr *router.Router) http.HandlerF
 		for _, entry := range detail.Traces {
 			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
 		}
+		resp.Target.Performance = buildUpstreamPerformance(resp.Target)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -1020,6 +1079,7 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		resp.Timeline = buildSessionTimeline(resp.Traces)
+		resp.Performance = buildAggregatePerformance(resp.Traces)
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -1054,6 +1114,8 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTraceObservation(w, st, entry)
 		case len(parts) == 2 && parts[1] == "findings" && r.Method == http.MethodGet:
 			handleTraceFindings(w, r, st, entry)
+		case len(parts) == 2 && parts[1] == "performance" && r.Method == http.MethodGet:
+			handleTracePerformance(w, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
 			serveTraceDownload(w, r, absPath)
 		default:
@@ -1110,6 +1172,14 @@ func handleTraceFindings(w http.ResponseWriter, r *http.Request, st *store.Store
 	})
 }
 
+func handleTracePerformance(w http.ResponseWriter, entry store.LogEntry) {
+	writeJSON(w, http.StatusOK, performanceResponse{
+		ID:          entry.ID,
+		Scope:       "trace",
+		Performance: buildTracePerformance(entry),
+	})
+}
+
 func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry, rtr *router.Router) {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
@@ -1130,6 +1200,7 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 		AIReasoning: parsed.AIReasoning,
 		AIBlocks:    parsed.AIBlocks,
 		ToolCalls:   parsed.ResponseToolCalls,
+		Performance: buildTracePerformance(entry),
 		Header: recordHeaderView{
 			Version: parsed.Header.Version,
 			Meta:    parsed.Header.Meta,
@@ -1379,6 +1450,161 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		IsStream:         entry.Header.Layout.IsStream,
 		Error:            entry.Header.Meta.Error,
 	}
+}
+
+func buildTracePerformance(entry store.LogEntry) performanceView {
+	item := traceListItemFromEntry(entry)
+	success := 0
+	failed := 0
+	if item.StatusCode >= 200 && item.StatusCode < 300 && strings.TrimSpace(item.Error) == "" {
+		success = 1
+	} else {
+		failed = 1
+	}
+	return performanceView{
+		RequestCount:       1,
+		SuccessRequest:     success,
+		FailedRequest:      failed,
+		SuccessRate:        float64(success),
+		DurationMs:         item.DurationMs,
+		TTFTMs:             item.TTFTMs,
+		TokensPerSec:       tokensPerSec(item.TotalTokens, item.DurationMs),
+		TotalTokens:        item.TotalTokens,
+		PromptTokens:       item.PromptTokens,
+		CompletionTokens:   item.CompletionTokens,
+		CachedTokens:       item.CachedTokens,
+		CacheRatio:         cacheRatio(item.CachedTokens, item.PromptTokens),
+		StatusCode:         item.StatusCode,
+		ProviderError:      item.Error,
+		IsStream:           item.IsStream,
+		SelectedUpstreamID: entry.Header.Meta.SelectedUpstreamID,
+		RoutingPolicy:      entry.Header.Meta.RoutingPolicy,
+		RoutingFallback:    entry.Header.Meta.RoutingCandidateCount > 1,
+	}
+}
+
+func buildAggregatePerformance(traces []traceListItem) performanceView {
+	perf := performanceView{RequestCount: len(traces)}
+	models := map[string]*perfAccumulator{}
+	endpoints := map[string]*perfAccumulator{}
+	for _, trace := range traces {
+		addTraceToPerformance(&perf, trace)
+		addTraceToAccumulator(models, firstNonEmpty(trace.Model, "unknown-model"), trace)
+		addTraceToAccumulator(endpoints, firstNonEmpty(trace.Endpoint, trace.Operation, trace.URL, "unknown-endpoint"), trace)
+	}
+	finalizePerformance(&perf)
+	perf.ByModel = perfCountItems(models)
+	perf.ByEndpoint = perfCountItems(endpoints)
+	return perf
+}
+
+func buildUpstreamPerformance(item upstreamItem) performanceView {
+	perf := performanceView{
+		RequestCount:   item.RequestCount,
+		SuccessRequest: item.SuccessRequest,
+		FailedRequest:  item.FailedRequest,
+		SuccessRate:    item.SuccessRate,
+		TotalTokens:    item.TotalTokens,
+		TTFTMs:         int64(item.AvgTTFT),
+	}
+	perf.Upstreams = []upstreamPerf{{
+		ID:             item.ID,
+		BaseURL:        item.BaseURL,
+		ProviderPreset: item.ProviderPreset,
+		RequestCount:   item.RequestCount,
+		SuccessRequest: item.SuccessRequest,
+		FailedRequest:  item.FailedRequest,
+		SuccessRate:    item.SuccessRate,
+		TotalTokens:    item.TotalTokens,
+		AvgTTFT:        item.AvgTTFT,
+		HealthState:    item.HealthState,
+		ErrorRate:      item.ErrorRate,
+		TimeoutRate:    item.TimeoutRate,
+	}}
+	return perf
+}
+
+type perfAccumulator struct {
+	count        int
+	success      int
+	totalTokens  int
+	totalTTFT    int64
+	totalLatency int64
+}
+
+func addTraceToPerformance(perf *performanceView, trace traceListItem) {
+	perf.DurationMs += trace.DurationMs
+	perf.TTFTMs += trace.TTFTMs
+	perf.TotalTokens += trace.TotalTokens
+	perf.PromptTokens += trace.PromptTokens
+	perf.CompletionTokens += trace.CompletionTokens
+	perf.CachedTokens += trace.CachedTokens
+	if trace.StatusCode >= 200 && trace.StatusCode < 300 && strings.TrimSpace(trace.Error) == "" {
+		perf.SuccessRequest++
+	} else {
+		perf.FailedRequest++
+	}
+}
+
+func finalizePerformance(perf *performanceView) {
+	totalDuration := perf.DurationMs
+	if perf.RequestCount > 0 {
+		perf.SuccessRate = float64(perf.SuccessRequest) / float64(perf.RequestCount)
+		perf.DurationMs = perf.DurationMs / int64(perf.RequestCount)
+		perf.TTFTMs = perf.TTFTMs / int64(perf.RequestCount)
+	}
+	perf.TokensPerSec = tokensPerSec(perf.TotalTokens, totalDuration)
+	perf.CacheRatio = cacheRatio(perf.CachedTokens, perf.PromptTokens)
+}
+
+func addTraceToAccumulator(items map[string]*perfAccumulator, key string, trace traceListItem) {
+	acc := items[key]
+	if acc == nil {
+		acc = &perfAccumulator{}
+		items[key] = acc
+	}
+	acc.count++
+	acc.totalTokens += trace.TotalTokens
+	acc.totalTTFT += trace.TTFTMs
+	acc.totalLatency += trace.DurationMs
+	if trace.StatusCode >= 200 && trace.StatusCode < 300 && strings.TrimSpace(trace.Error) == "" {
+		acc.success++
+	}
+}
+
+func perfCountItems(items map[string]*perfAccumulator) []perfCountItem {
+	out := make([]perfCountItem, 0, len(items))
+	for label, acc := range items {
+		item := perfCountItem{Label: label, Count: acc.count, TotalTokens: acc.totalTokens}
+		if acc.count > 0 {
+			item.AvgDuration = acc.totalLatency / int64(acc.count)
+			item.AvgTTFT = acc.totalTTFT / int64(acc.count)
+			item.SuccessRate = float64(acc.success) / float64(acc.count)
+			item.TokensPerSec = tokensPerSec(acc.totalTokens, acc.totalLatency)
+		}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Label < out[j].Label
+	})
+	return out
+}
+
+func tokensPerSec(tokens int, durationMs int64) float64 {
+	if tokens <= 0 || durationMs <= 0 {
+		return 0
+	}
+	return float64(tokens) * 1000 / float64(durationMs)
+}
+
+func cacheRatio(cached int, prompt int) float64 {
+	if cached <= 0 || prompt <= 0 {
+		return 0
+	}
+	return float64(cached) / float64(prompt)
 }
 
 func parseListFilter(r *http.Request) store.ListFilter {
