@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
+import { AppShell } from "./components/AppShell";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
+import { AnalysisPage } from "./routes/AnalysisPage";
+import { AuditPage } from "./routes/AuditPage";
+import { OverviewPage } from "./routes/OverviewPage";
 import { RequestsPage } from "./routes/RequestsPage";
 import { RoutingPage } from "./routes/RoutingPage";
 import { SessionDetailPage } from "./routes/SessionDetailPage";
@@ -86,16 +90,22 @@ function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/requests" replace />} />
-      <Route path="/requests" element={<RequestsPage />} />
-      <Route path="/sessions" element={<SessionsPage />} />
-      <Route path="/routing" element={<RoutingPage />} />
-      <Route path="/tokens" element={<TokensPage />} />
-      <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
-      <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
-      <Route path="/traces/:traceID" element={<TraceDetailPage />} />
-    </Routes>
+    <AppShell>
+      <Routes>
+        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/overview" element={<OverviewPage />} />
+        <Route path="/requests" element={<RequestsPage />} />
+        <Route path="/traces" element={<RequestsPage />} />
+        <Route path="/sessions" element={<SessionsPage />} />
+        <Route path="/audit" element={<AuditPage />} />
+        <Route path="/routing" element={<RoutingPage />} />
+        <Route path="/analysis" element={<AnalysisPage />} />
+        <Route path="/tokens" element={<TokensPage />} />
+        <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
+        <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
+        <Route path="/traces/:traceID" element={<TraceDetailPage />} />
+      </Routes>
+    </AppShell>
   );
 }
 

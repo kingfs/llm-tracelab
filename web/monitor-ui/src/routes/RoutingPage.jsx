@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { PrimaryNav } from "../components/PrimaryNav";
 import { EmptyState } from "../components/common/EmptyState";
 import { UpstreamOverview } from "../components/routing/UpstreamOverview";
 import { useJSON } from "../hooks/useJSON";
@@ -63,8 +62,6 @@ export function RoutingPage() {
           <span className="badge">{upstreams.data?.refreshed_at ? formatTime(upstreams.data.refreshed_at) : "..."}</span>
         </div>
       </header>
-      <PrimaryNav />
-
       <section className="panel">
         <div className="panel-head">
           <div>

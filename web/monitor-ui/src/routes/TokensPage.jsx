@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import { PrimaryNav } from "../components/PrimaryNav";
 import { apiPaths, postJSON } from "../lib/api";
 
 export function TokensPage() {
@@ -32,7 +31,6 @@ export function TokensPage() {
           <h1>API tokens</h1>
         </div>
       </header>
-      <PrimaryNav />
 
       <section className="panel token-panel">
         <div className="panel-head">

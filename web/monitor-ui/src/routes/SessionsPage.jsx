@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { PrimaryNav } from "../components/PrimaryNav";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { SessionList } from "../components/monitor/SessionList";
@@ -83,8 +82,6 @@ export function SessionsPage() {
           <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
-      <PrimaryNav />
-
       <section className="hero-grid">
         <StatCard label="Sessions" value={sessionStats.totalSessions} />
         <StatCard label="Requests" value={sessionStats.totalRequests} />

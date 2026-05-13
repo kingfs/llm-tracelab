@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { PrimaryNav } from "../components/PrimaryNav";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { RequestList } from "../components/monitor/RequestList";
@@ -83,8 +82,6 @@ export function RequestsPage() {
           <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
-      <PrimaryNav />
-
       <section className="hero-grid">
         <StatCard label="Total" value={stats.total_request ?? 0} />
         <StatCard label="Avg TTFT" value={`${stats.avg_ttft ?? 0} ms`} />
