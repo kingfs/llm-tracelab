@@ -50,6 +50,16 @@ task build
 
 `task build:go` is useful when changing backend code only. `task build` and `task build:all` rebuild the embedded monitor UI before compiling the server.
 
+For monitor UI changes, run:
+
+```bash
+task ui:build
+go test ./internal/monitor
+task build:go
+```
+
+`go test ./internal/monitor` includes an embedded UI smoke test that verifies the SPA entry routes and built JS/CSS assets are served from Go `embed.FS`.
+
 ## Benchmarks
 
 ```bash
@@ -83,6 +93,7 @@ For AI agents, prefer these defaults:
 
 - Small code change: `task check:quick`
 - Record format, replay, or monitor parsing change: `go test ./pkg/recordfile ./pkg/replay ./internal/monitor ./unittest`
+- Monitor UI source or embedded asset change: `task ui:build`, `go test ./internal/monitor`, and `task build:go`
 - Proxy, router, recorder, or store change: `go test ./internal/proxy ./internal/router ./internal/recorder ./internal/store` and `task test:race`
 - Performance-sensitive change: `task bench:core`
 - Before handing off a broad change: `task check:full`

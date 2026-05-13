@@ -336,7 +336,7 @@ feat: add monitor overview audit analysis pages
 - 所有主要页面 loading/error/empty 状态一致。
 - `task ui:build`
 - `task build`
-- 手工 smoke test Monitor 主要 routes。
+- `go test ./internal/monitor`，覆盖 embedded UI 主要 SPA routes 和构建产物 asset。
 
 提交：
 
@@ -353,4 +353,3 @@ style: polish monitor ui system
 3. 是否只修改 `web/monitor-ui/src` 和构建产物需要的文件。
 4. 是否存在 API 缺口需要回到后端补齐。
 5. 是否因为视觉调整降低了信息密度或 evidence 可追溯性。
-
