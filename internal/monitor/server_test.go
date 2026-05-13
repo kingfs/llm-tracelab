@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,65 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
+
+func TestEmbeddedMonitorUISmoke(t *testing.T) {
+	t.Parallel()
+
+	handler := appHandler()
+	routes := []string{
+		"/",
+		"/overview",
+		"/traces",
+		"/sessions",
+		"/audit",
+		"/analysis",
+		"/routing",
+		"/tokens",
+		"/traces/example-trace",
+		"/sessions/example-session",
+	}
+	var indexBody string
+	for _, route := range routes {
+		req := httptest.NewRequest(http.MethodGet, route, nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body=%s", route, rr.Code, rr.Body.String())
+		}
+		if contentType := rr.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+			t.Fatalf("%s content-type = %q, want html", route, contentType)
+		}
+		if !strings.Contains(rr.Body.String(), `<div id="root"></div>`) {
+			t.Fatalf("%s did not return monitor index", route)
+		}
+		if route == "/" {
+			indexBody = rr.Body.String()
+		}
+	}
+	for _, asset := range embeddedUIAssets(indexBody) {
+		req := httptest.NewRequest(http.MethodGet, asset, nil)
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body=%s", asset, rr.Code, rr.Body.String())
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/traces", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("/api/traces status = %d, want 404 from app handler", rr.Code)
+	}
+}
+
+func embeddedUIAssets(indexHTML string) []string {
+	matches := regexp.MustCompile(`/(assets/[^"']+)`).FindAllStringSubmatch(indexHTML, -1)
+	out := make([]string, 0, len(matches))
+	for _, match := range matches {
+		out = append(out, "/"+match[1])
+	}
+	return out
+}
 
 func syncStore(t *testing.T, st *store.Store) {
 	t.Helper()
