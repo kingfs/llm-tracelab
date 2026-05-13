@@ -43,6 +43,9 @@ export function TraceDetailPage() {
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
   const raw = useJSON(apiPaths.traceRaw(traceID), [traceID, tab === "raw" ? "raw" : "summary"]);
+  const observation = useJSON(apiPaths.traceObservation(traceID), [traceID, tab === "protocol" ? "protocol" : "idle"]);
+  const findings = useJSON(apiPaths.traceFindings(traceID), [traceID, tab === "audit" ? "audit" : "idle"]);
+  const performance = useJSON(apiPaths.tracePerformance(traceID), [traceID, tab === "performance" ? "performance" : "idle"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
   const session = detail.data?.session;
@@ -69,7 +72,7 @@ export function TraceDetailPage() {
 
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "tab", nextTab === "timeline" ? "" : nextTab);
+    setOrDeleteParam(next, "tab", nextTab === "conversation" ? "" : nextTab);
     setOrDeleteParam(next, "focus", nextFocus);
     setSearchParams(next, { replace: true });
   };
@@ -97,15 +100,8 @@ export function TraceDetailPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (tab !== "tools" || hasDeclaredToolsTab) {
-      return;
-    }
-    setTab("timeline");
-  }, [hasDeclaredToolsTab, tab]);
-
-  useEffect(() => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "tab", tab === "timeline" ? "" : tab);
+    setOrDeleteParam(next, "tab", tab === "conversation" ? "" : tab);
     if (next.toString() === searchParams.toString()) {
       return;
     }
@@ -187,8 +183,8 @@ export function TraceDetailPage() {
             <span>rate {formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)}</span>
           </div>
           <div className="trace-failure-actions">
-            <button className={tab === "timeline" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("timeline", "timeline_error")}>
-              Open Timeline
+            <button className={tab === "conversation" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("conversation", "timeline_error")}>
+              Open Conversation
             </button>
             <button className={tab === "raw" ? "ghost-button active" : "ghost-button"} onClick={() => applyTraceFocus("raw", "response")}>
               Open Raw Protocol
@@ -212,28 +208,31 @@ export function TraceDetailPage() {
             </div>
           </div>
           <div className="trace-reading-grid">
-            <button className={tab === "timeline" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("timeline")}>
-              <strong>Timeline</strong>
-              <span>{timelineCount ? `${timelineCount} event record${timelineCount > 1 ? "s" : ""}` : "No timeline events"}</span>
-              <p>Use this first when you need execution order, nested tool activity, or the first failing node.</p>
+            <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("conversation")}>
+              <strong>Conversation</strong>
+              <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : `${timelineCount} event record${timelineCount > 1 ? "s" : ""}`}</span>
+              <p>Use this for routing context, conversation payloads, final output, and captured timeline events.</p>
             </button>
-            <button className={tab === "summary" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("summary")}>
-              <strong>Summary</strong>
-              <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : "Request / response body view"}</span>
-              <p>Use this for the high-level routing decision, conversation payloads, and final model output.</p>
+            <button className={tab === "protocol" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("protocol")}>
+              <strong>Protocol</strong>
+              <span>Observation IR</span>
+              <p>Use this for provider-specific semantic nodes, normalized types, JSON paths, and raw node payloads.</p>
+            </button>
+            <button className={tab === "audit" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("audit")}>
+              <strong>Audit</strong>
+              <span>Deterministic findings</span>
+              <p>Use this for dangerous tool calls, credential leaks, safety findings, and evidence paths.</p>
+            </button>
+            <button className={tab === "performance" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("performance")}>
+              <strong>Performance</strong>
+              <span>Latency and token speed</span>
+              <p>Use this for latency, TTFT, token throughput, cache ratio, status, and routing context.</p>
             </button>
             <button className={tab === "raw" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("raw")}>
-              <strong>Raw Protocol</strong>
+              <strong>Raw</strong>
               <span>Original HTTP exchange</span>
               <p>Use this when you need exact request or response bytes, headers, and provider-facing payloads.</p>
             </button>
-            {hasDeclaredToolsTab ? (
-              <button className={tab === "tools" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("tools")}>
-                <strong>Declared Tools</strong>
-                <span>{toolCount} declared tool{toolCount > 1 ? "s" : ""}</span>
-                <p>Use this to compare declared tool definitions with the calls that were actually executed.</p>
-              </button>
-            ) : null}
           </div>
         </section>
       ) : null}
@@ -241,9 +240,7 @@ export function TraceDetailPage() {
       {detail.error ? <EmptyState title="Unable to load trace detail" detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title="Loading trace detail" detail="Resolving timeline, routing, payload, and tool information for this trace." /> : null}
 
-      {tab === "timeline" && detail.data ? <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
-
-      {tab === "summary" && detail.data ? (
+      {tab === "conversation" && detail.data ? (
         <div className="detail-grid">
           {selectedUpstreamID || routingFailureReason ? (
             <section className="panel">
@@ -380,11 +377,15 @@ export function TraceDetailPage() {
               <PayloadSummary raw={raw} CodeBlock={CodeBlock} />
             )}
           </section>
+          <TimelinePanel events={detail.data.events || []} focusTarget={focusTarget} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+          {hasDeclaredToolsTab ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
         </div>
       ) : null}
 
+      {tab === "protocol" ? <ProtocolPanel observation={observation} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
+      {tab === "audit" ? <AuditPanel findings={findings} InlineTag={InlineTag} CodeBlock={CodeBlock} /> : null}
+      {tab === "performance" ? <PerformancePanel performance={performance} /> : null}
       {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} /> : null}
-      {tab === "tools" && detail.data ? <DeclaredToolsPanel tools={declaredTools} toolCalls={traceToolCalls} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
     </div>
   );
 }
@@ -505,6 +506,183 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
         </div>
       ) : null}
     </>
+  );
+}
+
+function ProtocolPanel({ observation, CodeBlock, InlineTag }) {
+  if (observation.error) {
+    return <EmptyState title="Protocol observation unavailable" detail={observation.error} tone="danger" />;
+  }
+  if (observation.loading && !observation.data) {
+    return <EmptyState title="Loading protocol observation" detail="Reading derived semantic nodes for this trace." />;
+  }
+  const summary = observation.data?.summary;
+  const tree = observation.data?.tree || [];
+  if (!observation.data) {
+    return <EmptyState title="No protocol observation" detail="Run analyze reparse for this trace to build Observation IR." />;
+  }
+  return (
+    <section className="panel protocol-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Observation IR</p>
+          <h2>Protocol</h2>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone={summary?.status === "parsed" ? "green" : "gold"}>{summary?.status || "unknown"}</InlineTag>
+          <InlineTag>{summary?.parser || "parser"}</InlineTag>
+          <InlineTag>{summary?.provider || "provider"}</InlineTag>
+        </div>
+      </div>
+      <div className="detail-meta-strip">
+        <DetailMetaPill label="model" value={summary?.model || "-"} />
+        <DetailMetaPill label="operation" value={summary?.operation || "-"} />
+        <DetailMetaPill label="parser" value={`${summary?.parser || "-"} ${summary?.parser_version || ""}`.trim()} />
+      </div>
+      {summary?.warnings ? (
+        <CollapsibleCard title="Parser warnings" subtitle="tolerant parse notes" defaultOpen={false}>
+          <CodeBlock value={JSON.stringify(summary.warnings, null, 2)} />
+        </CollapsibleCard>
+      ) : null}
+      {tree.length ? (
+        <div className="semantic-tree">
+          {tree.map((node) => (
+            <SemanticNodeView key={node.id} node={node} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No semantic nodes" detail="The parser completed without persisted semantic nodes." compact />
+      )}
+    </section>
+  );
+}
+
+function SemanticNodeView({ node, CodeBlock, InlineTag }) {
+  const hasChildren = Boolean(node.children?.length);
+  const raw = node.raw ? JSON.stringify(node.raw, null, 2) : "";
+  const body = (
+    <>
+      {node.text_preview ? <p className="semantic-node-preview">{node.text_preview}</p> : null}
+      <div className="detail-meta-strip semantic-node-meta">
+        <DetailMetaPill label="path" value={node.path || "-"} mono />
+        <DetailMetaPill label="index" value={node.index ?? 0} />
+      </div>
+      {raw ? (
+        <CollapsibleCard title="Raw node" subtitle={node.path || node.id} defaultOpen={false}>
+          <CodeBlock value={raw} />
+        </CollapsibleCard>
+      ) : null}
+      {hasChildren ? (
+        <div className="semantic-children">
+          {node.children.map((child) => (
+            <SemanticNodeView key={child.id} node={child} CodeBlock={CodeBlock} InlineTag={InlineTag} />
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+  return (
+    <article className="semantic-node">
+      <div className="semantic-node-head">
+        <div>
+          <strong>{node.normalized_type || node.provider_type || "node"}</strong>
+          <span className="mono">{node.id}</span>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone="accent">{node.provider_type || "provider"}</InlineTag>
+          {node.role ? <InlineTag>{node.role}</InlineTag> : null}
+        </div>
+      </div>
+      {body}
+    </article>
+  );
+}
+
+function AuditPanel({ findings, InlineTag, CodeBlock }) {
+  if (findings.error) {
+    return <EmptyState title="Unable to load findings" detail={findings.error} tone="danger" />;
+  }
+  if (findings.loading && !findings.data) {
+    return <EmptyState title="Loading findings" detail="Reading deterministic audit findings for this trace." />;
+  }
+  const items = findings.data?.items || [];
+  return (
+    <section className="panel audit-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Deterministic audit</p>
+          <h2>Findings</h2>
+        </div>
+        <InlineTag tone={items.length ? "danger" : "green"}>{items.length} finding{items.length === 1 ? "" : "s"}</InlineTag>
+      </div>
+      {items.length ? (
+        <div className="finding-list">
+          {items.map((finding) => (
+            <article key={finding.id} className="finding-card">
+              <div className="finding-card-head">
+                <div>
+                  <strong>{finding.title || finding.category}</strong>
+                  <span>{finding.description || finding.category}</span>
+                </div>
+                <div className="trace-tag-group">
+                  <InlineTag tone={finding.severity === "high" || finding.severity === "critical" ? "danger" : "gold"}>{finding.severity}</InlineTag>
+                  <InlineTag>{finding.category}</InlineTag>
+                </div>
+              </div>
+              <div className="detail-meta-strip">
+                <DetailMetaPill label="detector" value={`${finding.detector || "-"} ${finding.detector_version || ""}`.trim()} />
+                <DetailMetaPill label="confidence" value={Number(finding.confidence || 0).toFixed(2)} />
+                <DetailMetaPill label="node" value={finding.node_id || "-"} mono />
+                <DetailMetaPill label="evidence" value={finding.evidence_path || "-"} mono />
+              </div>
+              {finding.evidence_excerpt ? <CodeBlock value={finding.evidence_excerpt} /> : null}
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No findings" detail="No deterministic audit findings are stored for this trace." compact />
+      )}
+    </section>
+  );
+}
+
+function PerformancePanel({ performance }) {
+  if (performance.error) {
+    return <EmptyState title="Unable to load performance" detail={performance.error} tone="danger" />;
+  }
+  if (performance.loading && !performance.data) {
+    return <EmptyState title="Loading performance" detail="Reading trace-level latency and token metrics." />;
+  }
+  const perf = performance.data?.performance;
+  if (!perf) {
+    return <EmptyState title="No performance data" detail="This trace does not have indexed performance metrics." />;
+  }
+  return (
+    <section className="panel performance-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Runtime metrics</p>
+          <h2>Performance</h2>
+        </div>
+      </div>
+      <section className="hero-grid">
+        <StatCard label="Duration" value={formatDuration(perf.duration_ms || 0, { precise: true })} />
+        <StatCard label="TTFT" value={formatDuration(perf.ttft_ms || 0, { precise: true })} />
+        <StatCard label="Tokens / sec" value={Number(perf.tokens_per_sec || 0).toFixed(2)} accent="accent-green" />
+        <StatCard label="Cache" value={`${Number(perf.cache_ratio || 0).toFixed(1)}%`} accent="accent-gold" />
+      </section>
+      <div className="detail-meta-strip">
+        <DetailMetaPill label="status" value={perf.status_code || 0} />
+        <DetailMetaPill label="total tokens" value={perf.total_tokens || 0} />
+        <DetailMetaPill label="input" value={perf.prompt_tokens || 0} />
+        <DetailMetaPill label="output" value={perf.completion_tokens || 0} />
+        <DetailMetaPill label="cached" value={perf.cached_tokens || 0} />
+        <DetailMetaPill label="stream" value={perf.is_stream ? "yes" : "no"} />
+        <DetailMetaPill label="upstream" value={perf.selected_upstream_id || "-"} mono />
+        <DetailMetaPill label="policy" value={perf.routing_policy || "-"} />
+      </div>
+      {perf.provider_error ? <pre className="trace-failure-detail">{perf.provider_error}</pre> : null}
+    </section>
   );
 }
 

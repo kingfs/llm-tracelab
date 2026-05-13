@@ -154,7 +154,7 @@ export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab =
   if (fromSessionID) {
     params.set("from_session", fromSessionID);
   }
-  if (tab && normalizedTab !== "timeline") {
+  if (tab && normalizedTab !== "conversation") {
     params.set("tab", normalizedTab);
   }
   if (focus) {
@@ -190,12 +190,18 @@ export function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
 
 export function normalizeTraceTab(value = "") {
   switch (value) {
-    case "summary":
+    case "conversation":
+    case "protocol":
+    case "audit":
+    case "performance":
     case "raw":
-    case "tools":
       return value;
+    case "timeline":
+    case "summary":
+    case "tools":
+      return "conversation";
     default:
-      return "timeline";
+      return "conversation";
   }
 }
 
