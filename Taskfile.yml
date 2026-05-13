@@ -48,6 +48,11 @@ tasks:
     cmds:
       - go test ./...
 
+  test:e2e:
+    desc: Run local end-to-end tests without external network dependencies
+    cmds:
+      - go test ./internal/proxy ./cmd/server ./unittest
+
   test:short:
     desc: Run short unit tests
     cmds:
@@ -172,6 +177,7 @@ tasks:
     cmds:
       - task: check:quick
       - task: test
+      - task: test:e2e
       - task: test:race
       - task: build:all
 

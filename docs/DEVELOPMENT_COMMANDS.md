@@ -27,6 +27,7 @@ task lint
 task lint:vet
 task test:short
 task test
+task test:e2e
 task test:race
 task test:cover
 task check:quick
@@ -34,10 +35,11 @@ task check:full
 ```
 
 - `task check:quick` is the default pre-commit gate for focused changes.
+- `task test:e2e` runs local end-to-end coverage for proxy recording/replay, CLI/management wiring, and cassette fixture workflows. It must not depend on real provider network access or API keys.
 - `task test:race` should be run after changes to proxying, routing, recorder concurrency, SQLite access, or streaming behavior.
 - `task lint` runs the tracked `golangci-lint` configuration.
 - `task lint:vet` runs `go vet ./...` directly for troubleshooting.
-- `task check:full` is the release-style gate: formatting check, lint, tests, race tests, UI build, and Go build.
+- `task check:full` is the release-style gate: formatting check, lint, tests, explicit end-to-end tests, race tests, UI build, and Go build.
 
 ## Build Commands
 
@@ -92,6 +94,7 @@ Use `task deps:verify` in checks because it does not edit module files. Use `tas
 For AI agents, prefer these defaults:
 
 - Small code change: `task check:quick`
+- End-to-end behavior change: `task test:e2e`
 - Record format, replay, or monitor parsing change: `go test ./pkg/recordfile ./pkg/replay ./internal/monitor ./unittest`
 - Monitor UI source or embedded asset change: `task ui:build`, `go test ./internal/monitor`, and `task build:go`
 - Proxy, router, recorder, or store change: `go test ./internal/proxy ./internal/router ./internal/recorder ./internal/store` and `task test:race`
