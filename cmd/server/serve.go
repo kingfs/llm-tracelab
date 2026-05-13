@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
@@ -83,10 +84,18 @@ func runServeWithConfig(configPath string) int {
 	}
 	defer traceStore.Close()
 	syncCtx, cancelSync := context.WithCancel(context.Background())
-	defer cancelSync()
-	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute)
+	var background sync.WaitGroup
+	defer func() {
+		cancelSync()
+		background.Wait()
+	}()
+	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute, &background)
 	parseWorker := observeworker.New(traceStore, observeworker.Options{Interval: 5 * time.Second, BatchSize: 10})
-	go parseWorker.Run(syncCtx)
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		parseWorker.Run(syncCtx)
+	}()
 
 	rtr, err := router.New(cfg, traceStore)
 	if err != nil {
@@ -145,14 +154,20 @@ func runServeWithConfig(configPath string) int {
 	return 0
 }
 
-func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration) {
+func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, wg *sync.WaitGroup) {
 	if traceStore == nil {
 		return
 	}
 	if interval <= 0 {
 		interval = time.Minute
 	}
+	if wg != nil {
+		wg.Add(1)
+	}
 	go func() {
+		if wg != nil {
+			defer wg.Done()
+		}
 		run := func(reason string) {
 			start := time.Now()
 			if err := traceStore.Sync(); err != nil {
