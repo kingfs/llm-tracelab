@@ -1228,13 +1228,13 @@ func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
-				ID:             "primary", Enabled: boolPtr(true), Priority: 100,
+				ID: "primary", Enabled: boolPtr(true), Priority: 100,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
 				Upstream:       config.UpstreamConfig{BaseURL: upstream1.URL + "/v1", ProviderPreset: "openai"},
 			},
 			{
-				ID:             "secondary", Enabled: boolPtr(true), Priority: 90,
+				ID: "secondary", Enabled: boolPtr(true), Priority: 90,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
 				Upstream:       config.UpstreamConfig{BaseURL: upstream2.URL + "/v1", ProviderPreset: "openai"},
@@ -1297,13 +1297,13 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
-				ID:             "primary", Enabled: boolPtr(true), Priority: 100,
+				ID: "primary", Enabled: boolPtr(true), Priority: 100,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
 				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai"},
 			},
 			{
-				ID:             "secondary", Enabled: boolPtr(true), Priority: 90,
+				ID: "secondary", Enabled: boolPtr(true), Priority: 90,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
 				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai"},

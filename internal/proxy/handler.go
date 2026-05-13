@@ -624,14 +624,14 @@ func (h *Handler) closeLogFile(logInfo *recorder.LogInfo) {
 // temporarily unable to serve this specific model but another upstream might succeed.
 func isRetryableStatus(code int) bool {
 	switch code {
-	case http.StatusNotFound:              // 404 — model not available on this upstream
+	case http.StatusNotFound: // 404 — model not available on this upstream
 		return true
-	case http.StatusTooManyRequests:      // 429 — rate limited on this upstream
+	case http.StatusTooManyRequests: // 429 — rate limited on this upstream
 		return true
-	case http.StatusInternalServerError,  // 500
-		http.StatusBadGateway,             // 502
-		http.StatusServiceUnavailable,     // 503
-		http.StatusGatewayTimeout:         // 504
+	case http.StatusInternalServerError, // 500
+		http.StatusBadGateway,         // 502
+		http.StatusServiceUnavailable, // 503
+		http.StatusGatewayTimeout:     // 504
 		return true
 	default:
 		return code >= http.StatusInternalServerError
