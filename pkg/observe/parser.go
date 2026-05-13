@@ -38,6 +38,13 @@ func NewRegistry(parsers ...Parser) *Registry {
 	return r
 }
 
+func NewDefaultRegistry() *Registry {
+	return NewRegistry(
+		NewOpenAIParser(),
+		NewAnthropicParser(),
+	)
+}
+
 func (r *Registry) Register(parser Parser) {
 	if parser == nil {
 		return

@@ -114,7 +114,7 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 	}
 	defer traceStore.Close()
 
-	registry := observe.NewRegistry(observe.NewOpenAIParser())
+	registry := observe.NewDefaultRegistry()
 	obs, err := observeworker.ReparseTrace(context.Background(), traceStore, registry, opts.traceID)
 	if err != nil {
 		slog.Error("Failed to reparse trace", "trace_id", opts.traceID, "error", err)

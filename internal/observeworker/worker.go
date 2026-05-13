@@ -36,7 +36,7 @@ func New(st *store.Store, opts Options) *Worker {
 	}
 	registry := opts.Registry
 	if registry == nil {
-		registry = observe.NewRegistry(observe.NewOpenAIParser())
+		registry = observe.NewDefaultRegistry()
 	}
 	return &Worker{
 		store:     st,
@@ -109,7 +109,7 @@ func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Regist
 		return observe.TraceObservation{}, fmt.Errorf("trace store is nil")
 	}
 	if registry == nil {
-		registry = observe.NewRegistry(observe.NewOpenAIParser())
+		registry = observe.NewDefaultRegistry()
 	}
 	entry, err := st.GetByID(traceID)
 	if err != nil {
