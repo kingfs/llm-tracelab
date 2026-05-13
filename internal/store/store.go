@@ -32,6 +32,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
+	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
 )
@@ -255,6 +256,20 @@ type ExperimentRunRecord struct {
 	MatchedScoreCount   int
 	ImprovementCount    int
 	RegressionCount     int
+}
+
+type ObservationSummary struct {
+	TraceID       string
+	Parser        string
+	ParserVersion string
+	Status        string
+	Provider      string
+	Operation     string
+	Model         string
+	SummaryJSON   string
+	WarningsJSON  string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type ScoreFilter struct {
@@ -1091,6 +1106,56 @@ func (s *Store) initSchema() error {
 			regression_count INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_experiment_runs_created_at ON experiment_runs(created_at DESC, id DESC);`,
+		`CREATE TABLE IF NOT EXISTS trace_observations (
+			trace_id TEXT PRIMARY KEY,
+			parser TEXT NOT NULL,
+			parser_version TEXT NOT NULL,
+			status TEXT NOT NULL,
+			provider TEXT NOT NULL DEFAULT '',
+			operation TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			summary_json TEXT NOT NULL DEFAULT '{}',
+			warnings_json TEXT NOT NULL DEFAULT '[]',
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_trace_observations_status ON trace_observations(status, updated_at DESC);`,
+		`CREATE TABLE IF NOT EXISTS semantic_nodes (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			trace_id TEXT NOT NULL,
+			node_id TEXT NOT NULL,
+			parent_node_id TEXT NOT NULL DEFAULT '',
+			provider_type TEXT NOT NULL DEFAULT '',
+			normalized_type TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			node_index INTEGER NOT NULL DEFAULT 0,
+			depth INTEGER NOT NULL DEFAULT 0,
+			text_preview TEXT NOT NULL DEFAULT '',
+			json TEXT NOT NULL DEFAULT '',
+			raw TEXT NOT NULL DEFAULT '',
+			raw_ref TEXT NOT NULL DEFAULT '',
+			created_at datetime NOT NULL
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS semantic_nodes_trace_node_key ON semantic_nodes(trace_id, node_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_semantic_nodes_trace_depth ON semantic_nodes(trace_id, depth, node_index);`,
+		`CREATE TABLE IF NOT EXISTS parse_jobs (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			trace_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status ON parse_jobs(status, updated_at ASC);`,
+		`CREATE TABLE IF NOT EXISTS parser_versions (
+			parser TEXT NOT NULL,
+			version TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			created_at datetime NOT NULL,
+			PRIMARY KEY(parser, version)
+		);`,
 	}
 
 	for _, stmt := range stmts {
@@ -2348,6 +2413,164 @@ func (s *Store) GetByRequestID(requestID string) (LogEntry, error) {
 	return logEntryFromTraceLog(row), nil
 }
 
+func (s *Store) SaveObservation(obs observe.TraceObservation) error {
+	if obs.TraceID == "" {
+		return fmt.Errorf("save observation: trace id is required")
+	}
+	now := time.Now().UTC()
+	warningsJSON, err := json.Marshal(obs.Warnings)
+	if err != nil {
+		return err
+	}
+	summaryJSON, err := json.Marshal(observationSummaryJSON(obs))
+	if err != nil {
+		return err
+	}
+	nodes := observationFlatNodes(obs)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`
+		INSERT INTO parser_versions (parser, version, created_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(parser, version) DO NOTHING
+	`, obs.Parser, obs.ParserVersion, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO trace_observations (
+			trace_id, parser, parser_version, status, provider, operation, model,
+			summary_json, warnings_json, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(trace_id) DO UPDATE SET
+			parser=excluded.parser,
+			parser_version=excluded.parser_version,
+			status=excluded.status,
+			provider=excluded.provider,
+			operation=excluded.operation,
+			model=excluded.model,
+			summary_json=excluded.summary_json,
+			warnings_json=excluded.warnings_json,
+			updated_at=excluded.updated_at
+	`, obs.TraceID, obs.Parser, obs.ParserVersion, string(obs.Status), obs.Provider, obs.Operation, obs.Model, string(summaryJSON), string(warningsJSON), now, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
+		return err
+	}
+	for _, row := range nodes {
+		nodeJSON, err := json.Marshal(row.Node.JSON)
+		if err != nil {
+			return err
+		}
+		rawJSON, err := json.Marshal(row.Node.Raw)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO semantic_nodes (
+				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
+				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, obs.TraceID, row.Node.ID, row.ParentID, row.Node.ProviderType, string(row.Node.NormalizedType), row.Node.Role,
+			row.Node.Path, row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
+		VALUES (?, ?, 1, ?, ?)
+	`, obs.TraceID, string(obs.Status), now, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error) {
+	var summary ObservationSummary
+	var createdAt, updatedAt any
+	err := s.db.QueryRow(`
+		SELECT trace_id, parser, parser_version, status, provider, operation, model,
+			summary_json, warnings_json, created_at, updated_at
+		FROM trace_observations
+		WHERE trace_id = ?
+	`, traceID).Scan(
+		&summary.TraceID,
+		&summary.Parser,
+		&summary.ParserVersion,
+		&summary.Status,
+		&summary.Provider,
+		&summary.Operation,
+		&summary.Model,
+		&summary.SummaryJSON,
+		&summary.WarningsJSON,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return ObservationSummary{}, err
+	}
+	if summary.CreatedAt, err = timeParseValue(createdAt); err != nil {
+		return ObservationSummary{}, err
+	}
+	if summary.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+		return ObservationSummary{}, err
+	}
+	return summary, nil
+}
+
+func (s *Store) ListSemanticNodes(traceID string) ([]observe.FlatSemanticNode, error) {
+	rows, err := s.db.Query(`
+		SELECT node_id, parent_node_id, provider_type, normalized_type, role, path,
+			node_index, depth, text_preview, json, raw
+		FROM semantic_nodes
+		WHERE trace_id = ?
+		ORDER BY depth ASC, node_index ASC, id ASC
+	`, traceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []observe.FlatSemanticNode
+	for rows.Next() {
+		var row observe.FlatSemanticNode
+		var normalized string
+		var nodeJSON, rawJSON string
+		if err := rows.Scan(
+			&row.Node.ID,
+			&row.ParentID,
+			&row.Node.ProviderType,
+			&normalized,
+			&row.Node.Role,
+			&row.Node.Path,
+			&row.Node.Index,
+			&row.Depth,
+			&row.Node.Text,
+			&nodeJSON,
+			&rawJSON,
+		); err != nil {
+			return nil, err
+		}
+		row.Node.ParentID = row.ParentID
+		row.Node.NormalizedType = observe.NormalizedType(normalized)
+		if nodeJSON != "" && nodeJSON != "null" {
+			row.Node.JSON = json.RawMessage(nodeJSON)
+		}
+		if rawJSON != "" && rawJSON != "null" {
+			row.Node.Raw = json.RawMessage(rawJSON)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
 	if page < 1 {
 		page = 1
@@ -2932,6 +3155,32 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 		))
 	}
 	return predicates
+}
+
+func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
+	return map[string]any{
+		"request_nodes":  len(obs.Request.Nodes),
+		"response_nodes": len(obs.Response.Nodes),
+		"stream_events":  len(obs.Stream.Events),
+		"tool_calls":     len(obs.Tools.Calls),
+		"tool_results":   len(obs.Tools.Results),
+		"findings":       len(obs.Findings),
+	}
+}
+
+func observationFlatNodes(obs observe.TraceObservation) []observe.FlatSemanticNode {
+	var roots []observe.SemanticNode
+	roots = append(roots, obs.Request.Nodes...)
+	roots = append(roots, obs.Response.Nodes...)
+	roots = append(roots, obs.Stream.AccumulatedToolCalls...)
+	return observe.FlattenNodes(roots)
+}
+
+func textPreview(text string, limit int) string {
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return text[:limit]
 }
 
 func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {

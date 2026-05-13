@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
 )
@@ -1299,6 +1300,66 @@ func TestGetRoutingFailureAnalyticsAggregatesReasonsAndRecent(t *testing.T) {
 	}
 	if totalTimeline != 3 {
 		t.Fatalf("timeline total = %d, want 3", totalTimeline)
+	}
+}
+
+func TestSaveObservationPersistsSummaryAndSemanticNodes(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	root := observe.SemanticNode{
+		ID:             "node-root",
+		ProviderType:   "message",
+		NormalizedType: observe.NodeMessage,
+		Path:           "$.output[0]",
+		Index:          0,
+		Children: []observe.SemanticNode{{
+			ID:             "node-child",
+			ProviderType:   "output_text",
+			NormalizedType: observe.NodeText,
+			Path:           "$.output[0].content[0]",
+			Index:          0,
+			Text:           "hello",
+		}},
+	}
+	obs := observe.TraceObservation{
+		TraceID:       "trace-observe",
+		Provider:      "openai_compatible",
+		Operation:     "responses",
+		Model:         "gpt-5.1",
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+		Response: observe.ObservationResponse{
+			Nodes: []observe.SemanticNode{root},
+		},
+		Warnings: []observe.ParseWarning{{Code: "fixture", Message: "test warning"}},
+	}
+	if err := st.SaveObservation(obs); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+
+	summary, err := st.GetObservationSummary("trace-observe")
+	if err != nil {
+		t.Fatalf("GetObservationSummary() error = %v", err)
+	}
+	if summary.Parser != "openai" || summary.Status != string(observe.ParseStatusParsed) {
+		t.Fatalf("summary = %+v", summary)
+	}
+
+	nodes, err := st.ListSemanticNodes("trace-observe")
+	if err != nil {
+		t.Fatalf("ListSemanticNodes() error = %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(nodes))
+	}
+	tree := observe.RebuildNodeTree(nodes)
+	if len(tree) != 1 || len(tree[0].Children) != 1 || tree[0].Children[0].Text != "hello" {
+		t.Fatalf("tree = %+v", tree)
 	}
 }
 

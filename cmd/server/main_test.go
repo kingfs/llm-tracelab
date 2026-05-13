@@ -18,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	_ "modernc.org/sqlite"
 )
@@ -97,7 +98,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "auth", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "auth", "analyze", "version", "schema", "completion"} {
 		if found, _, err := cmd.Find([]string{want}); err != nil || found.Name() != want {
 			t.Fatalf("root command missing %q: found=%v err=%v", want, found, err)
 		}
@@ -302,6 +303,133 @@ debug:
 			t.Fatalf("log output = %q, want contain %q", output, want)
 		}
 	}
+}
+
+func TestRunAnalyzeReparsePersistsObservation(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+database:
+  dsn: "file:` + dbPath + `?mode=rwc"
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"
+	reqBody := `{"model":"gpt-5.1","input":"hello"}`
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	resBody := `{"id":"resp_1","object":"response","created_at":1741476777,"status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "req-reparse",
+			Time:          time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model:         "gpt-5.1",
+			Provider:      "openai_compatible",
+			Operation:     "responses",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			DurationMs:    20,
+			TTFTMs:        5,
+			ClientIP:      "127.0.0.1",
+			ContentLength: int64(len(reqBody)),
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len(reqHead)),
+			ReqBodyLen:   int64(len(reqBody)),
+			ResHeaderLen: int64(len(resHead)),
+			ResBodyLen:   int64(len(resBody)),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	logPath := filepath.Join(dir, "trace.http")
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(trace) error = %v", err)
+	}
+
+	st, err := store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if err := st.UpsertLog(logPath, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	traceID := mustTraceIDFromStore(t, st, logPath)
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	code := runAnalyzeReparse(analyzeReparseOptions{
+		configPath: configPath,
+		traceID:    traceID,
+		format:     "json",
+		stdout:     &out,
+	})
+	if code != 0 {
+		t.Fatalf("runAnalyzeReparse() = %d, want 0", code)
+	}
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			TraceID string `json:"trace_id"`
+			Parser  string `json:"parser"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Result.TraceID != traceID || envelope.Result.Parser != "openai" {
+		t.Fatalf("envelope = %+v, want trace id %q", envelope, traceID)
+	}
+
+	st, err = store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
+	}
+	defer st.Close()
+	summary, err := st.GetObservationSummary(traceID)
+	if err != nil {
+		t.Fatalf("GetObservationSummary() error = %v", err)
+	}
+	if summary.Parser != "openai" || summary.Status != "parsed" {
+		t.Fatalf("summary = %+v", summary)
+	}
+	nodes, err := st.ListSemanticNodes(traceID)
+	if err != nil {
+		t.Fatalf("ListSemanticNodes() error = %v", err)
+	}
+	if len(nodes) == 0 {
+		t.Fatalf("semantic nodes empty")
+	}
+}
+
+func mustTraceIDFromStore(t *testing.T, st *store.Store, path string) string {
+	t.Helper()
+	entry, err := st.ListRecent(1)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(entry) != 1 || entry[0].LogPath != path {
+		t.Fatalf("recent entries = %+v, want path %q", entry, path)
+	}
+	return entry[0].ID
 }
 
 func TestRunAuthInitUserAndCreateToken(t *testing.T) {
