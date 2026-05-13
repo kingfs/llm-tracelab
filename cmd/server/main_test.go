@@ -358,8 +358,14 @@ debug:
 	if err != nil {
 		t.Fatalf("MarshalPrelude() error = %v", err)
 	}
+	reqHeadWithSession := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession_id: sess-analysis-cli\r\n\r\n"
+	header.Layout.ReqHeaderLen = int64(len(reqHeadWithSession))
+	prelude, err = recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude(session) error = %v", err)
+	}
 	logPath := filepath.Join(dir, "trace.http")
-	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHead+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
+	if err := os.WriteFile(logPath, []byte(string(prelude)+reqHeadWithSession+reqBody+"\n"+resHead+resBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(trace) error = %v", err)
 	}
 
@@ -367,8 +373,8 @@ debug:
 	if err != nil {
 		t.Fatalf("NewWithDatabase() error = %v", err)
 	}
-	if err := st.UpsertLog(logPath, header); err != nil {
-		t.Fatalf("UpsertLog() error = %v", err)
+	if err := st.UpsertLogWithGrouping(logPath, header, store.GroupingInfo{SessionID: "sess-analysis-cli", SessionSource: "header.session_id"}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
 	}
 	traceID := mustTraceIDFromStore(t, st, logPath)
 	if err := st.Close(); err != nil {
@@ -435,6 +441,24 @@ debug:
 	}
 	if len(findings) != 1 || findings[0].EvidencePath == "" || findings[0].NodeID == "" {
 		t.Fatalf("findings = %+v", findings)
+	}
+
+	out.Reset()
+	code = runAnalyzeSession(analyzeSessionOptions{
+		configPath: configPath,
+		sessionID:  "sess-analysis-cli",
+		format:     "json",
+		stdout:     &out,
+	})
+	if code != 0 {
+		t.Fatalf("runAnalyzeSession() = %d, want 0", code)
+	}
+	runs, err := st.ListAnalysisRuns("sess-analysis-cli", "", "session_summary", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisRuns() error = %v", err)
+	}
+	if len(runs) != 1 || !strings.Contains(runs[0].OutputJSON, `"trace_refs"`) {
+		t.Fatalf("analysis runs = %+v", runs)
 	}
 }
 

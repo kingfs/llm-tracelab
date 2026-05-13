@@ -188,6 +188,20 @@ type RoutingFailureRecord struct {
 	StatusCode int
 }
 
+type AnalysisRunRecord struct {
+	ID              int64
+	TraceID         string
+	SessionID       string
+	Kind            string
+	Analyzer        string
+	AnalyzerVersion string
+	Model           string
+	InputRef        string
+	OutputJSON      string
+	Status          string
+	CreatedAt       time.Time
+}
+
 type TimeCountItem struct {
 	Time  time.Time
 	Count int
@@ -1172,6 +1186,21 @@ func (s *Store) initSchema() error {
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS trace_findings_trace_finding_key ON trace_findings(trace_id, finding_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_trace_findings_trace_severity ON trace_findings(trace_id, severity, category);`,
+		`CREATE TABLE IF NOT EXISTS analysis_runs (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			trace_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL,
+			analyzer TEXT NOT NULL,
+			analyzer_version TEXT NOT NULL,
+			model TEXT NOT NULL DEFAULT '',
+			input_ref TEXT NOT NULL DEFAULT '',
+			output_json TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL,
+			created_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_analysis_runs_session_kind ON analysis_runs(session_id, kind, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_analysis_runs_trace_kind ON analysis_runs(trace_id, kind, created_at DESC);`,
 		`CREATE TABLE IF NOT EXISTS parse_jobs (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			trace_id TEXT NOT NULL,
@@ -2787,6 +2816,78 @@ func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Fi
 			return nil, err
 		}
 		out = append(out, finding)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
+	if strings.TrimSpace(run.Kind) == "" {
+		return 0, fmt.Errorf("save analysis run: kind is required")
+	}
+	if strings.TrimSpace(run.Analyzer) == "" {
+		return 0, fmt.Errorf("save analysis run: analyzer is required")
+	}
+	if strings.TrimSpace(run.Status) == "" {
+		run.Status = "completed"
+	}
+	if run.CreatedAt.IsZero() {
+		run.CreatedAt = time.Now().UTC()
+	}
+	result, err := s.db.Exec(`
+		INSERT INTO analysis_runs (
+			trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, run.TraceID, run.SessionID, run.Kind, run.Analyzer, run.AnalyzerVersion, run.Model, run.InputRef, run.OutputJSON, run.Status, run.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func (s *Store) ListAnalysisRuns(sessionID string, traceID string, kind string, limit int) ([]AnalysisRunRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	query := `
+		SELECT id, trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
+		FROM analysis_runs
+		WHERE 1 = 1
+	`
+	var args []any
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sessionID)
+	}
+	if traceID = strings.TrimSpace(traceID); traceID != "" {
+		query += ` AND trace_id = ?`
+		args = append(args, traceID)
+	}
+	if kind = strings.TrimSpace(kind); kind != "" {
+		query += ` AND kind = ?`
+		args = append(args, kind)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AnalysisRunRecord
+	for rows.Next() {
+		var run AnalysisRunRecord
+		var createdAt any
+		if err := rows.Scan(&run.ID, &run.TraceID, &run.SessionID, &run.Kind, &run.Analyzer, &run.AnalyzerVersion,
+			&run.Model, &run.InputRef, &run.OutputJSON, &run.Status, &createdAt); err != nil {
+			return nil, err
+		}
+		if run.CreatedAt, err = timeParseValue(createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, run)
 	}
 	return out, rows.Err()
 }

@@ -1414,6 +1414,37 @@ func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	}
 }
 
+func TestSaveAndListAnalysisRuns(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	id, err := st.SaveAnalysisRun(AnalysisRunRecord{
+		SessionID:       "sess-analysis",
+		Kind:            "session_summary",
+		Analyzer:        "session_summary",
+		AnalyzerVersion: "0.1.0",
+		InputRef:        "session:sess-analysis",
+		OutputJSON:      `{"session_id":"sess-analysis"}`,
+		Status:          "completed",
+	})
+	if err != nil {
+		t.Fatalf("SaveAnalysisRun() error = %v", err)
+	}
+	if id == 0 {
+		t.Fatalf("analysis run id = 0")
+	}
+	runs, err := st.ListAnalysisRuns("sess-analysis", "", "session_summary", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisRuns() error = %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != id || runs[0].OutputJSON == "" {
+		t.Fatalf("runs = %+v, want id %d", runs, id)
+	}
+}
+
 func mustTraceID(t *testing.T, st *Store, path string) string {
 	t.Helper()
 	var traceID string

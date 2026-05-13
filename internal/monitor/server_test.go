@@ -448,6 +448,70 @@ func TestSessionDetailAPIHandlerReturnsBreakdownAndFailureCount(t *testing.T) {
 	}
 }
 
+func TestSessionAnalysisAPIHandlerReturnsAnalysisRuns(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "trace-analysis.http")
+	sessionID := "sess-analysis-api"
+	content := buildRecordFixtureWithRequestHeaders(
+		t,
+		"/v1/responses",
+		false,
+		[]string{"Session_id: " + sessionID},
+		`{"input":"hello"}`,
+		`{"output_text":"done"}`,
+	)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+	if _, err := st.SaveAnalysisRun(store.AnalysisRunRecord{
+		SessionID:       sessionID,
+		Kind:            "session_summary",
+		Analyzer:        "session_summary",
+		AnalyzerVersion: "0.1.0",
+		InputRef:        "session:" + sessionID,
+		OutputJSON:      `{"session_id":"` + sessionID + `","trace_refs":[{"trace_id":"trace-1"}]}`,
+		Status:          "completed",
+	}); err != nil {
+		t.Fatalf("SaveAnalysisRun() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID+"/analysis", nil)
+	rr := httptest.NewRecorder()
+	sessionDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload analysisListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Total != 1 || payload.Items[0].Kind != "session_summary" {
+		t.Fatalf("payload = %+v", payload)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/sessions/"+sessionID, nil)
+	rr = httptest.NewRecorder()
+	sessionDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var detail sessionDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("json.Unmarshal(detail) error = %v", err)
+	}
+	if len(detail.Analysis) != 1 {
+		t.Fatalf("detail analysis = %+v", detail.Analysis)
+	}
+}
+
 func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 	t.Parallel()
 

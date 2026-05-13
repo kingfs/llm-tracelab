@@ -88,7 +88,29 @@ type sessionDetailResponse struct {
 	Breakdown   sessionBreakdownView  `json:"breakdown"`
 	Timeline    []sessionTimelineItem `json:"timeline"`
 	Performance performanceView       `json:"performance"`
+	Analysis    []analysisRunView     `json:"analysis"`
 	Traces      []traceListItem       `json:"traces"`
+}
+
+type analysisListResponse struct {
+	SessionID string            `json:"session_id,omitempty"`
+	TraceID   string            `json:"trace_id,omitempty"`
+	Items     []analysisRunView `json:"items"`
+	Total     int               `json:"total"`
+}
+
+type analysisRunView struct {
+	ID              int64     `json:"id"`
+	TraceID         string    `json:"trace_id,omitempty"`
+	SessionID       string    `json:"session_id,omitempty"`
+	Kind            string    `json:"kind"`
+	Analyzer        string    `json:"analyzer"`
+	AnalyzerVersion string    `json:"analyzer_version"`
+	Model           string    `json:"model,omitempty"`
+	InputRef        string    `json:"input_ref"`
+	Output          any       `json:"output"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type sessionBreakdownView struct {
@@ -1029,9 +1051,19 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 
-		sessionID := strings.TrimPrefix(pathClean(r.URL.Path), "/api/sessions/")
-		sessionID = strings.Trim(sessionID, "/")
-		if sessionID == "" || strings.Contains(sessionID, "/") {
+		path := strings.TrimPrefix(pathClean(r.URL.Path), "/api/sessions/")
+		path = strings.Trim(path, "/")
+		parts := strings.Split(path, "/")
+		sessionID := parts[0]
+		if sessionID == "" || len(parts) > 2 {
+			http.NotFound(w, r)
+			return
+		}
+		if len(parts) == 2 {
+			if parts[1] == "analysis" && r.Method == http.MethodGet {
+				handleSessionAnalysis(w, r, st, sessionID)
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
@@ -1080,8 +1112,26 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		resp.Timeline = buildSessionTimeline(resp.Traces)
 		resp.Performance = buildAggregatePerformance(resp.Traces)
+		if runs, err := st.ListAnalysisRuns(sessionID, "", "", 10); err == nil {
+			resp.Analysis = analysisRunViews(runs)
+		}
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+func handleSessionAnalysis(w http.ResponseWriter, r *http.Request, st *store.Store, sessionID string) {
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	limit := parseInt(r.URL.Query().Get("limit"), 20)
+	runs, err := st.ListAnalysisRuns(sessionID, "", kind, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query analysis runs: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, analysisListResponse{
+		SessionID: sessionID,
+		Items:     analysisRunViews(runs),
+		Total:     len(runs),
+	})
 }
 
 func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
@@ -1381,6 +1431,30 @@ func findingViewFromObservation(finding observe.Finding) findingView {
 		DetectorVersion: finding.DetectorVersion,
 		CreatedAt:       finding.CreatedAt,
 	}
+}
+
+func analysisRunViews(runs []store.AnalysisRunRecord) []analysisRunView {
+	out := make([]analysisRunView, 0, len(runs))
+	for _, run := range runs {
+		var output any = map[string]any{}
+		if strings.TrimSpace(run.OutputJSON) != "" {
+			_ = json.Unmarshal([]byte(run.OutputJSON), &output)
+		}
+		out = append(out, analysisRunView{
+			ID:              run.ID,
+			TraceID:         run.TraceID,
+			SessionID:       run.SessionID,
+			Kind:            run.Kind,
+			Analyzer:        run.Analyzer,
+			AnalyzerVersion: run.AnalyzerVersion,
+			Model:           run.Model,
+			InputRef:        run.InputRef,
+			Output:          output,
+			Status:          run.Status,
+			CreatedAt:       run.CreatedAt,
+		})
+	}
+	return out
 }
 
 func buildTimelineEventViews(parsed *ParsedData) []recordEventView {
