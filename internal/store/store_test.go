@@ -1412,6 +1412,13 @@ func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	if len(findings) != 1 || findings[0].ID != "finding-2" {
 		t.Fatalf("findings after rebuild = %+v", findings)
 	}
+	allFindings, err := st.ListAllFindings(FindingFilter{Category: "tool_result_error"}, 10)
+	if err != nil {
+		t.Fatalf("ListAllFindings() error = %v", err)
+	}
+	if len(allFindings) != 1 || allFindings[0].TraceID != "trace-findings" {
+		t.Fatalf("all findings = %+v", allFindings)
+	}
 }
 
 func TestSaveAndListAnalysisRuns(t *testing.T) {
@@ -1442,6 +1449,13 @@ func TestSaveAndListAnalysisRuns(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].ID != id || runs[0].OutputJSON == "" {
 		t.Fatalf("runs = %+v, want id %d", runs, id)
+	}
+	allRuns, err := st.ListAnalysisRuns("", "", "session_summary", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisRuns(all) error = %v", err)
+	}
+	if len(allRuns) != 1 || allRuns[0].ID != id {
+		t.Fatalf("all runs = %+v, want id %d", allRuns, id)
 	}
 }
 

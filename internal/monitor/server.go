@@ -471,6 +471,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.Handle("/", appHandler())
@@ -1132,6 +1134,55 @@ func handleSessionAnalysis(w http.ResponseWriter, r *http.Request, st *store.Sto
 		Items:     analysisRunViews(runs),
 		Total:     len(runs),
 	})
+}
+
+func findingListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		filter := store.FindingFilter{
+			Category: strings.TrimSpace(r.URL.Query().Get("category")),
+			Severity: strings.TrimSpace(r.URL.Query().Get("severity")),
+		}
+		limit := parseInt(r.URL.Query().Get("limit"), 50)
+		findings, err := st.ListAllFindings(filter, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		items := make([]findingView, 0, len(findings))
+		for _, finding := range findings {
+			items = append(items, findingViewFromObservation(finding))
+		}
+		writeJSON(w, http.StatusOK, findingListResponse{
+			Items:    items,
+			Total:    len(items),
+			Severity: filter.Severity,
+			Category: filter.Category,
+		})
+	}
+}
+
+func analysisListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+		limit := parseInt(r.URL.Query().Get("limit"), 50)
+		runs, err := st.ListAnalysisRuns("", "", kind, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, analysisListResponse{
+			Items: analysisRunViews(runs),
+			Total: len(runs),
+		})
+	}
 }
 
 func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {

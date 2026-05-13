@@ -6,6 +6,8 @@ export const apiPaths = {
   authLogin: "/api/auth/login",
   authTokens: "/api/auth/tokens",
   traces: "/api/traces",
+  findings: "/api/findings",
+  analysis: "/api/analysis",
   trace: (traceID) => `/api/traces/${encodeURIComponent(traceID)}`,
   traceRaw: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/raw`,
   traceObservation: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/observation`,

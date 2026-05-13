@@ -2820,6 +2820,53 @@ func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Fi
 	return out, rows.Err()
 }
 
+func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Finding, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT finding_id, trace_id, category, severity, confidence, title, description,
+			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
+		FROM trace_findings
+		WHERE 1 = 1
+	`
+	var args []any
+	if category := strings.TrimSpace(filter.Category); category != "" {
+		query += ` AND category = ?`
+		args = append(args, category)
+	}
+	if severity := strings.TrimSpace(filter.Severity); severity != "" {
+		query += ` AND severity = ?`
+		args = append(args, severity)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []observe.Finding
+	for rows.Next() {
+		var finding observe.Finding
+		var severity string
+		var createdAt any
+		if err := rows.Scan(&finding.ID, &finding.TraceID, &finding.Category, &severity, &finding.Confidence, &finding.Title,
+			&finding.Description, &finding.EvidencePath, &finding.EvidenceExcerpt, &finding.NodeID,
+			&finding.Detector, &finding.DetectorVersion, &createdAt); err != nil {
+			return nil, err
+		}
+		finding.Severity = observe.Severity(severity)
+		if finding.CreatedAt, err = timeParseValue(createdAt); err != nil {
+			return nil, err
+		}
+		out = append(out, finding)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
 	if strings.TrimSpace(run.Kind) == "" {
 		return 0, fmt.Errorf("save analysis run: kind is required")

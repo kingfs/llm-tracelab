@@ -510,6 +510,20 @@ func TestSessionAnalysisAPIHandlerReturnsAnalysisRuns(t *testing.T) {
 	if len(detail.Analysis) != 1 {
 		t.Fatalf("detail analysis = %+v", detail.Analysis)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/analysis?kind=session_summary", nil)
+	rr = httptest.NewRecorder()
+	analysisListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("global analysis status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var global analysisListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &global); err != nil {
+		t.Fatalf("json.Unmarshal(global) error = %v", err)
+	}
+	if global.Total != 1 || global.Items[0].SessionID != sessionID {
+		t.Fatalf("global analysis = %+v", global)
+	}
 }
 
 func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
@@ -1984,6 +1998,20 @@ func TestTraceFindingsAPIHandlerReturnsFilteredFindings(t *testing.T) {
 	}
 	if payload.Total != 1 || payload.Items[0].ID != "finding-secret" || payload.Items[0].NodeID != "node-secret" {
 		t.Fatalf("payload = %+v", payload)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/findings?severity=high", nil)
+	rr = httptest.NewRecorder()
+	findingListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("global status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var global findingListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &global); err != nil {
+		t.Fatalf("json.Unmarshal(global) error = %v", err)
+	}
+	if global.Total != 2 {
+		t.Fatalf("global findings = %+v", global)
 	}
 }
 
