@@ -23,6 +23,7 @@ export function ChannelDetailPage() {
   const channel = detail.data || {};
   const summary = channel.summary || {};
   const modelsUsage = channel.models_usage || [];
+  const discoveredDisabledModels = modelsUsage.filter((model) => model.source === "discovered" && !model.enabled).map((model) => model.model);
   const failures = channel.recent_failures || [];
   const probeRuns = channel.recent_probe_runs || [];
   const trends = channel.trends || [];
@@ -105,6 +106,21 @@ export function ChannelDetailPage() {
       reload();
     } catch (err) {
       setActionError(err.message || "Unable to add model.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const setModelsEnabled = async (models, enabled) => {
+    if (!models.length) {
+      return;
+    }
+    setBusy(enabled ? "models-enable" : "models-disable");
+    setActionError("");
+    try {
+      await patchJSON(apiPaths.channelModelsBatch(channelID), { models, enabled });
+      reload();
+    } catch (err) {
+      setActionError(err.message || "Unable to update models.");
     } finally {
       setBusy("");
     }
@@ -224,6 +240,7 @@ export function ChannelDetailPage() {
             <form className="filter-bar" onSubmit={addModel}>
               <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder="Add model manually" />
               <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? "Adding" : "Add model"}</button>
+              <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? "Enabling" : `Enable new (${formatCount(discoveredDisabledModels.length)})`}</button>
             </form>
             <div className="channel-model-table">
               {modelsUsage.length ? modelsUsage.map((model) => <ChannelModelRow key={model.model} item={model} busy={busy === model.model} onToggle={() => setModelEnabled(model.model, !model.enabled)} />) : <EmptyState title="No models" detail="Probe or manually configure models for this channel." compact />}

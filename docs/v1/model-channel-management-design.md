@@ -707,10 +707,11 @@ Headers 编辑：
 - 已增强渠道探测失败 UX：`channel.Service.Probe` 对认证、404、网络、限流、上游 5xx、JSON/schema 和配置类错误做稳定分类；分类与 retry hint 写入 `channel_probe_runs.request_meta_json`，渠道详情 API 返回最近探测记录，Channel Detail 展示成功/失败探测、错误摘要和重试建议。
 - 已按产品取舍跳过 UI E2E 截图归档，不作为 v1 必做项。
 - 已增强探测结果启用体验：探测支持 `enable_discovered` 选项，默认保持兼容；Monitor UI 探测时先发现模型但不自动启用新模型，保留既有 manual/static/discovered 模型状态，并在模型表标记待启用的新发现模型。
+- 已增加批量模型启用操作：`PATCH /api/channels/{channel}/models/batch` 支持批量启停模型并 reload router；Channel Detail 对探测到但未启用的新模型提供一键启用。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 - 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路，并覆盖本地失败探测提示。
 
 下一步建议：
 
-1. 增加批量模型选择操作：对探测到但未启用的模型提供批量启用/禁用，减少渠道首次接入时的逐个点击成本。
-2. 补齐渠道配置表单高级字段：协议族、routing profile、Azure/Gemini/Vertex 相关字段使用结构化控件，降低手填出错概率。
+1. 补齐渠道配置表单高级字段：协议族、routing profile、Azure/Gemini/Vertex 相关字段使用结构化控件，降低手填出错概率。
+2. 增加渠道导入/导出能力：支持将数据库托管渠道导出为脱敏配置快照，并可从快照导入到新环境。

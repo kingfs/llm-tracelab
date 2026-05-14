@@ -779,6 +779,27 @@ func TestChannelManagementAPI(t *testing.T) {
 		t.Fatalf("enabledModels = %#v", enabledModels)
 	}
 
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/batch", strings.NewReader(`{"models":["gpt-5","gpt-5"],"enabled":true}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("batch enable status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var batch channelModelBatchPatchResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &batch); err != nil {
+		t.Fatalf("json.Unmarshal(batch) error = %v", err)
+	}
+	if batch.Updated != 1 || !batch.Enabled || len(batch.Models) != 1 || batch.Models[0] != "gpt-5" {
+		t.Fatalf("batch = %+v", batch)
+	}
+	enabledModels, err = st.ListChannelModels("openai-primary", true)
+	if err != nil {
+		t.Fatalf("ListChannelModels(after batch) error = %v", err)
+	}
+	if len(enabledModels) != 2 {
+		t.Fatalf("enabledModels after batch = %#v", enabledModels)
+	}
+
 	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary", strings.NewReader(`{"enabled":false}`))
 	rr = httptest.NewRecorder()
 	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)

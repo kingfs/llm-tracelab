@@ -25,6 +25,7 @@ export const apiPaths = {
   channel: (channelID) => `/api/channels/${encodeURIComponent(channelID)}`,
   channelProbe: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/probe`,
   channelModels: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models`,
+  channelModelsBatch: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models/batch`,
   channelModel: (channelID, model) => `/api/channels/${encodeURIComponent(channelID)}/models/${encodeURIComponent(model)}`,
   localSecretKey: "/api/secrets/local-key",
   localSecretKeyExport: "/api/secrets/local-key?export=1",

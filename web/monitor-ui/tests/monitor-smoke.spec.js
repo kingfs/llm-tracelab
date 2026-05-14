@@ -44,6 +44,11 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels/openai-primary/models/gpt-5") {
       return route.fulfill({ json: { ok: true } });
     }
+    if (path === "/api/channels/openai-primary/models/batch" && method === "PATCH") {
+      const body = route.request().postDataJSON();
+      expect(body).toEqual({ models: ["gpt-new"], enabled: true });
+      return route.fulfill({ json: { updated: 1, models: ["gpt-new"], enabled: true } });
+    }
     if (path === "/api/traces/trace-routed") {
       return route.fulfill({ json: tracePayload() });
     }
@@ -93,6 +98,9 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await expect(page.getByRole("button", { name: "Probing" })).toBeHidden();
   await expect(page.getByText("auth_error").first()).toBeVisible();
   await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Enable new (1)" }).click();
+  await expect(page.getByRole("button", { name: "Enabling" })).toBeHidden();
 });
 
 test("trace routing links to channel and upstream views", async ({ page }) => {
