@@ -91,6 +91,13 @@ func syncStore(t *testing.T, st *store.Store) {
 	}
 }
 
+func writeTraceFixture(t *testing.T, outputDir string, name string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(outputDir, name), content, 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", name, err)
+	}
+}
+
 func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	t.Parallel()
 
@@ -191,6 +198,102 @@ func TestListAPIHandlerDoesNotSyncFilesystem(t *testing.T) {
 	}
 	if len(payload.Items) != 0 {
 		t.Fatalf("len(payload.Items) = %d, want 0 before explicit sync", len(payload.Items))
+	}
+}
+
+func TestOverviewAPIHandlerReturnsDashboardFromIndexedData(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	writeTraceFixture(t, outputDir, "success.http", buildRecordFixtureWithRequestHeaders(t, "/v1/chat/completions", true, []string{"Session_id: sess-overview"}, `{"model":"gpt-5","messages":[{"role":"user","content":"ok"}]}`, `{"choices":[{"message":{"content":"done"}}],"usage":{"prompt_tokens":7,"completion_tokens":11,"total_tokens":18}}`))
+	writeTraceFixture(t, outputDir, "failure.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "502 Bad Gateway", []string{"Session_id: sess-overview"}, `{"model":"gpt-5","input":"fail"}`, `{"error":{"message":"upstream unavailable"}}`, func(header *recordfile.RecordHeader) {
+		header.Meta.SelectedUpstreamID = "openai-primary"
+		header.Meta.RoutingFailureReason = "http_5xx"
+	}))
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	items, err := st.ListRecent(2)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	_, err = st.SaveAnalysisRun(store.AnalysisRunRecord{
+		SessionID:       "sess-overview",
+		Kind:            "session_summary",
+		Analyzer:        "test",
+		AnalyzerVersion: "v1",
+		Status:          "failed",
+		CreatedAt:       time.Date(2026, 3, 27, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("SaveAnalysisRun() error = %v", err)
+	}
+	if err := st.SaveFindings(items[0].ID, []observe.Finding{{
+		ID:          "finding-overview",
+		TraceID:     items[0].ID,
+		Category:    "credential_leak",
+		Severity:    observe.SeverityHigh,
+		Confidence:  0.9,
+		Title:       "Credential-like value",
+		Description: "test finding",
+		CreatedAt:   time.Date(2026, 3, 27, 9, 5, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("SaveFindings() error = %v", err)
+	}
+
+	writeTraceFixture(t, outputDir, "unsynced.http", buildRecordFixture(t, "/v1/chat/completions", false, `{"messages":[{"role":"user","content":"unsynced"}]}`, `{"choices":[{"message":{"content":"ignored"}}]}`))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/overview?window=all", nil)
+	rr := httptest.NewRecorder()
+	overviewAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload overviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Window != "all" {
+		t.Fatalf("window = %q, want all", payload.Window)
+	}
+	if payload.Summary.RequestCount != 2 || payload.Summary.SuccessRequest != 1 || payload.Summary.FailedRequest != 1 {
+		t.Fatalf("summary = %+v, want 2 total, 1 success, 1 failure", payload.Summary)
+	}
+	if payload.Summary.StreamCount != 1 || payload.Summary.SessionCount != 1 {
+		t.Fatalf("summary streams/sessions = %+v, want 1/1", payload.Summary)
+	}
+	if len(payload.Timeline) == 0 {
+		t.Fatalf("timeline missing")
+	}
+	if len(payload.Breakdown.Models) == 0 || payload.Breakdown.Models[0].Label == "" {
+		t.Fatalf("model breakdown missing: %+v", payload.Breakdown.Models)
+	}
+	if len(payload.Breakdown.RoutingFailureReasons) != 1 || payload.Breakdown.RoutingFailureReasons[0].Label != "http_5xx" {
+		t.Fatalf("routing failure breakdown = %+v", payload.Breakdown.RoutingFailureReasons)
+	}
+	if len(payload.Breakdown.FindingCategories) != 1 || payload.Breakdown.FindingCategories[0].Label != "credential_leak" {
+		t.Fatalf("finding category breakdown = %+v", payload.Breakdown.FindingCategories)
+	}
+	if len(payload.Attention.RecentFailures) != 1 || payload.Attention.RecentFailures[0].StatusCode != http.StatusBadGateway {
+		t.Fatalf("recent failures = %+v", payload.Attention.RecentFailures)
+	}
+	if len(payload.Attention.RoutingFailures) != 1 || payload.Attention.RoutingFailures[0].Reason != "http_5xx" {
+		t.Fatalf("routing failures = %+v", payload.Attention.RoutingFailures)
+	}
+	if len(payload.Attention.HighRiskFindings) != 1 || payload.Attention.HighRiskFindings[0].Severity != "high" {
+		t.Fatalf("high risk findings = %+v", payload.Attention.HighRiskFindings)
+	}
+	if payload.Analysis.Total != 1 || payload.Analysis.Failed != 1 || len(payload.Analysis.Recent) != 1 {
+		t.Fatalf("analysis = %+v, want 1 failed recent run", payload.Analysis)
 	}
 }
 
@@ -2761,6 +2864,11 @@ func buildRecordFixtureWithRequestHeaders(t *testing.T, url string, isStream boo
 
 func buildRecordFixtureWithStatusAndHeaders(t *testing.T, url string, isStream bool, status string, extraHeaders []string, reqBody string, resBody string) []byte {
 	t.Helper()
+	return buildRecordFixtureWithStatusHeadersAndMutator(t, url, isStream, status, extraHeaders, reqBody, resBody, nil)
+}
+
+func buildRecordFixtureWithStatusHeadersAndMutator(t *testing.T, url string, isStream bool, status string, extraHeaders []string, reqBody string, resBody string, mutate func(*recordfile.RecordHeader)) []byte {
+	t.Helper()
 
 	requestHeaderLines := []string{
 		"POST " + url + " HTTP/1.1",
@@ -2777,6 +2885,9 @@ func buildRecordFixtureWithStatusAndHeaders(t *testing.T, url string, isStream b
 	header.Meta.StatusCode = parseStatusCode(status)
 	header.Layout.ReqHeaderLen = int64(len(strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n"))
 	header.Layout.ResHeaderLen = int64(len(responseHeader))
+	if mutate != nil {
+		mutate(&header)
+	}
 	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
 	if err != nil {
 		t.Fatalf("MarshalPrelude() error = %v", err)

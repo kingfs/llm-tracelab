@@ -37,6 +37,59 @@ type listResponse struct {
 	RefreshedAt time.Time       `json:"refreshed_at"`
 }
 
+type overviewResponse struct {
+	Window      string                  `json:"window"`
+	RefreshedAt time.Time               `json:"refreshed_at"`
+	Summary     overviewSummaryView     `json:"summary"`
+	Timeline    []overviewTimelineItem  `json:"timeline"`
+	Breakdown   overviewBreakdownView   `json:"breakdown"`
+	Attention   overviewAttentionView   `json:"attention"`
+	Analysis    overviewAnalysisSummary `json:"analysis"`
+}
+
+type overviewSummaryView struct {
+	RequestCount   int     `json:"request_count"`
+	SuccessRequest int     `json:"success_request"`
+	FailedRequest  int     `json:"failed_request"`
+	SuccessRate    float64 `json:"success_rate"`
+	TotalTokens    int     `json:"total_tokens"`
+	AvgTTFTMs      int     `json:"avg_ttft_ms"`
+	AvgDurationMs  int64   `json:"avg_duration_ms"`
+	StreamCount    int     `json:"stream_count"`
+	SessionCount   int     `json:"session_count"`
+}
+
+type overviewTimelineItem struct {
+	Time          time.Time `json:"time"`
+	RequestCount  int       `json:"request_count"`
+	FailedRequest int       `json:"failed_request"`
+	TotalTokens   int       `json:"total_tokens"`
+	AvgTTFTMs     int       `json:"avg_ttft_ms"`
+	AvgDurationMs int64     `json:"avg_duration_ms"`
+}
+
+type overviewBreakdownView struct {
+	Models                []sessionCountItem `json:"models"`
+	Providers             []sessionCountItem `json:"providers"`
+	Endpoints             []sessionCountItem `json:"endpoints"`
+	Upstreams             []sessionCountItem `json:"upstreams"`
+	RoutingFailureReasons []sessionCountItem `json:"routing_failure_reasons"`
+	FindingCategories     []sessionCountItem `json:"finding_categories"`
+}
+
+type overviewAttentionView struct {
+	RecentFailures   []traceListItem      `json:"recent_failures"`
+	HighRiskFindings []findingView        `json:"high_risk_findings"`
+	RoutingFailures  []routingFailureItem `json:"routing_failures"`
+	SlowTraces       []traceListItem      `json:"slow_traces"`
+}
+
+type overviewAnalysisSummary struct {
+	Total  int               `json:"total"`
+	Failed int               `json:"failed"`
+	Recent []analysisRunView `json:"recent"`
+}
+
 type traceListItem struct {
 	ID               string    `json:"id"`
 	SessionID        string    `json:"session_id,omitempty"`
@@ -722,6 +775,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authCreateTokenAPIHandler(opt.AuthStore), opt.AuthVerifier))
+	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
@@ -2072,6 +2126,22 @@ func parseUpstreamWindow(value string) (string, time.Time) {
 	}
 }
 
+func parseOverviewWindow(value string) (string, time.Time, time.Duration, int) {
+	now := time.Now().UTC()
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1h":
+		return "1h", now.Add(-time.Hour), 5 * time.Minute, 12
+	case "7d":
+		return "7d", now.Add(-7 * 24 * time.Hour), 12 * time.Hour, 14
+	case "all":
+		return "all", time.Time{}, 24 * time.Hour, 14
+	case "", "24h":
+		return "24h", now.Add(-24 * time.Hour), 2 * time.Hour, 12
+	default:
+		return "24h", now.Add(-24 * time.Hour), 2 * time.Hour, 12
+	}
+}
+
 func parseAnalyticsWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -2333,6 +2403,32 @@ func analysisListAPIHandler(st *store.Store) http.HandlerFunc {
 			Items: analysisRunViews(runs),
 			Total: len(runs),
 		})
+	}
+}
+
+func overviewAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+
+		windowLabel, since, bucketSize, bucketCount := parseOverviewWindow(r.URL.Query().Get("window"))
+		dashboard, err := st.Overview(store.OverviewOptions{
+			Since:       since,
+			BucketSize:  bucketSize,
+			BucketCount: bucketCount,
+			Limit:       5,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "overview error: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, overviewResponseFromStore(windowLabel, dashboard))
 	}
 }
 
@@ -2655,6 +2751,86 @@ func analysisRunViews(runs []store.AnalysisRunRecord) []analysisRunView {
 			Status:          run.Status,
 			CreatedAt:       run.CreatedAt,
 		})
+	}
+	return out
+}
+
+func overviewResponseFromStore(window string, dashboard store.OverviewDashboard) overviewResponse {
+	return overviewResponse{
+		Window:      window,
+		RefreshedAt: time.Now().UTC(),
+		Summary: overviewSummaryView{
+			RequestCount:   dashboard.Summary.RequestCount,
+			SuccessRequest: dashboard.Summary.SuccessRequest,
+			FailedRequest:  dashboard.Summary.FailedRequest,
+			SuccessRate:    dashboard.Summary.SuccessRate,
+			TotalTokens:    dashboard.Summary.TotalTokens,
+			AvgTTFTMs:      dashboard.Summary.AvgTTFTMs,
+			AvgDurationMs:  dashboard.Summary.AvgDurationMs,
+			StreamCount:    dashboard.Summary.StreamCount,
+			SessionCount:   dashboard.Summary.SessionCount,
+		},
+		Timeline: overviewTimelineViews(dashboard.Timeline),
+		Breakdown: overviewBreakdownView{
+			Models:                countItemViews(dashboard.Breakdown.Models),
+			Providers:             countItemViews(dashboard.Breakdown.Providers),
+			Endpoints:             countItemViews(dashboard.Breakdown.Endpoints),
+			Upstreams:             countItemViews(dashboard.Breakdown.Upstreams),
+			RoutingFailureReasons: countItemViews(dashboard.Breakdown.RoutingFailureReasons),
+			FindingCategories:     countItemViews(dashboard.Breakdown.FindingCategories),
+		},
+		Attention: overviewAttentionView{
+			RecentFailures:   traceListItemsFromEntries(dashboard.Attention.RecentFailures),
+			HighRiskFindings: findingViewsFromObservations(dashboard.Attention.HighRiskFindings),
+			RoutingFailures:  toRoutingFailureItems(dashboard.Attention.RoutingFailures),
+			SlowTraces:       traceListItemsFromEntries(dashboard.Attention.SlowTraces),
+		},
+		Analysis: overviewAnalysisSummary{
+			Total:  dashboard.Analysis.Total,
+			Failed: dashboard.Analysis.Failed,
+			Recent: analysisRunViews(dashboard.Analysis.Recent),
+		},
+	}
+}
+
+func overviewTimelineViews(items []store.OverviewTimelineItem) []overviewTimelineItem {
+	out := make([]overviewTimelineItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, overviewTimelineItem{
+			Time:          item.Time,
+			RequestCount:  item.RequestCount,
+			FailedRequest: item.FailedRequest,
+			TotalTokens:   item.TotalTokens,
+			AvgTTFTMs:     item.AvgTTFTMs,
+			AvgDurationMs: item.AvgDurationMs,
+		})
+	}
+	return out
+}
+
+func countItemViews(items []store.CountItem) []sessionCountItem {
+	out := make([]sessionCountItem, 0, len(items))
+	for _, item := range items {
+		out = append(out, sessionCountItem{
+			Label: item.Label,
+			Count: item.Count,
+		})
+	}
+	return out
+}
+
+func traceListItemsFromEntries(entries []store.LogEntry) []traceListItem {
+	out := make([]traceListItem, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, traceListItemFromEntry(entry))
+	}
+	return out
+}
+
+func findingViewsFromObservations(findings []observe.Finding) []findingView {
+	out := make([]findingView, 0, len(findings))
+	for _, finding := range findings {
+		out = append(out, findingViewFromObservation(finding))
 	}
 	return out
 }

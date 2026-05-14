@@ -307,6 +307,64 @@ type CountItem struct {
 	Count int
 }
 
+type OverviewOptions struct {
+	Since       time.Time
+	BucketSize  time.Duration
+	BucketCount int
+	Limit       int
+}
+
+type OverviewSummary struct {
+	RequestCount   int
+	SuccessRequest int
+	FailedRequest  int
+	SuccessRate    float64
+	TotalTokens    int
+	AvgTTFTMs      int
+	AvgDurationMs  int64
+	StreamCount    int
+	SessionCount   int
+}
+
+type OverviewTimelineItem struct {
+	Time          time.Time
+	RequestCount  int
+	FailedRequest int
+	TotalTokens   int
+	AvgTTFTMs     int
+	AvgDurationMs int64
+}
+
+type OverviewBreakdown struct {
+	Models                []CountItem
+	Providers             []CountItem
+	Endpoints             []CountItem
+	Upstreams             []CountItem
+	RoutingFailureReasons []CountItem
+	FindingCategories     []CountItem
+}
+
+type OverviewAttention struct {
+	RecentFailures   []LogEntry
+	HighRiskFindings []observe.Finding
+	RoutingFailures  []RoutingFailureRecord
+	SlowTraces       []LogEntry
+}
+
+type OverviewAnalysisSummary struct {
+	Total  int
+	Failed int
+	Recent []AnalysisRunRecord
+}
+
+type OverviewDashboard struct {
+	Summary   OverviewSummary
+	Timeline  []OverviewTimelineItem
+	Breakdown OverviewBreakdown
+	Attention OverviewAttention
+	Analysis  OverviewAnalysisSummary
+}
+
 type RoutingFailureAnalytics struct {
 	Total    int
 	Reasons  []CountItem
@@ -4354,24 +4412,7 @@ func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Find
 		return nil, err
 	}
 	defer rows.Close()
-
-	var out []observe.Finding
-	for rows.Next() {
-		var finding observe.Finding
-		var severity string
-		var createdAt any
-		if err := rows.Scan(&finding.ID, &finding.TraceID, &finding.Category, &severity, &finding.Confidence, &finding.Title,
-			&finding.Description, &finding.EvidencePath, &finding.EvidenceExcerpt, &finding.NodeID,
-			&finding.Detector, &finding.DetectorVersion, &createdAt); err != nil {
-			return nil, err
-		}
-		finding.Severity = observe.Severity(severity)
-		if finding.CreatedAt, err = timeParseValue(createdAt); err != nil {
-			return nil, err
-		}
-		out = append(out, finding)
-	}
-	return out, rows.Err()
+	return scanFindings(rows)
 }
 
 func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
@@ -4636,6 +4677,359 @@ func (s *Store) Stats() (Stats, error) {
 	stats.AvgTTFT = int(math.Round(avgTTFT))
 	stats.TotalTokens = totalTokens
 	return stats, nil
+}
+
+func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 5
+	}
+	if opts.BucketSize <= 0 {
+		opts.BucketSize = time.Hour
+	}
+	if opts.BucketCount <= 0 {
+		opts.BucketCount = 12
+	}
+
+	whereSQL, whereArgs := overviewLogWhere(opts.Since)
+	summary, err := s.overviewSummary(whereSQL, whereArgs)
+	if err != nil {
+		return OverviewDashboard{}, err
+	}
+	timeline, err := s.overviewTimeline(whereSQL, whereArgs, opts)
+	if err != nil {
+		return OverviewDashboard{}, err
+	}
+	breakdown, err := s.overviewBreakdown(whereSQL, whereArgs, opts.Limit)
+	if err != nil {
+		return OverviewDashboard{}, err
+	}
+	attention, err := s.overviewAttention(whereSQL, whereArgs, opts.Limit)
+	if err != nil {
+		return OverviewDashboard{}, err
+	}
+	analysis, err := s.overviewAnalysis(opts.Limit)
+	if err != nil {
+		return OverviewDashboard{}, err
+	}
+	return OverviewDashboard{
+		Summary:   summary,
+		Timeline:  timeline,
+		Breakdown: breakdown,
+		Attention: attention,
+		Analysis:  analysis,
+	}, nil
+}
+
+func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSummary, error) {
+	var summary OverviewSummary
+	var avgTTFT, avgDuration float64
+	query := `
+		SELECT
+			COUNT(*) AS request_count,
+			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 AND error_text = '' THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(total_tokens), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms END), 0) AS avg_ttft,
+			COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS avg_duration,
+			COALESCE(SUM(CASE WHEN is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count,
+			COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS session_count
+		FROM logs
+		WHERE ` + whereSQL
+	if err := s.db.QueryRow(query, whereArgs...).Scan(
+		&summary.RequestCount,
+		&summary.SuccessRequest,
+		&summary.TotalTokens,
+		&avgTTFT,
+		&avgDuration,
+		&summary.StreamCount,
+		&summary.SessionCount,
+	); err != nil {
+		return OverviewSummary{}, err
+	}
+	summary.FailedRequest = summary.RequestCount - summary.SuccessRequest
+	if summary.RequestCount > 0 {
+		summary.SuccessRate = 100.0 * float64(summary.SuccessRequest) / float64(summary.RequestCount)
+	}
+	summary.AvgTTFTMs = int(math.Round(avgTTFT))
+	summary.AvgDurationMs = int64(math.Round(avgDuration))
+	return summary, nil
+}
+
+func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, error) {
+	referenceTime := time.Now().UTC()
+	var latestRecordedAt string
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(latestRecordedAt) != "" {
+		latestTime, err := timeParse(latestRecordedAt)
+		if err != nil {
+			return nil, err
+		}
+		referenceTime = latestTime
+	}
+	bucketStart := referenceTime.UTC().Truncate(opts.BucketSize).Add(-time.Duration(opts.BucketCount-1) * opts.BucketSize)
+	queryArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
+	rows, err := s.db.Query(`
+		SELECT recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms
+		FROM logs
+		WHERE recorded_at >= ? AND `+whereSQL+`
+		ORDER BY recorded_at ASC
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type bucketAccumulator struct {
+		requestCount  int
+		failedCount   int
+		totalTokens   int
+		ttftSum       int64
+		ttftCount     int
+		durationSum   int64
+		durationCount int
+	}
+	buckets := make(map[time.Time]*bucketAccumulator, opts.BucketCount)
+	for index := 0; index < opts.BucketCount; index++ {
+		bucketTime := bucketStart.Add(time.Duration(index) * opts.BucketSize)
+		buckets[bucketTime] = &bucketAccumulator{}
+	}
+	for rows.Next() {
+		var (
+			recordedAt  string
+			statusCode  int
+			errorText   string
+			totalTokens int
+			ttftMs      int64
+			durationMs  int64
+		)
+		if err := rows.Scan(&recordedAt, &statusCode, &errorText, &totalTokens, &ttftMs, &durationMs); err != nil {
+			return nil, err
+		}
+		recorded, err := timeParse(recordedAt)
+		if err != nil {
+			return nil, err
+		}
+		bucketTime := recorded.UTC().Truncate(opts.BucketSize)
+		bucket, ok := buckets[bucketTime]
+		if !ok {
+			continue
+		}
+		bucket.requestCount++
+		if statusCode < 200 || statusCode >= 300 || strings.TrimSpace(errorText) != "" {
+			bucket.failedCount++
+		}
+		bucket.totalTokens += totalTokens
+		if ttftMs > 0 {
+			bucket.ttftSum += ttftMs
+			bucket.ttftCount++
+		}
+		if durationMs > 0 {
+			bucket.durationSum += durationMs
+			bucket.durationCount++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]OverviewTimelineItem, 0, opts.BucketCount)
+	for index := 0; index < opts.BucketCount; index++ {
+		bucketTime := bucketStart.Add(time.Duration(index) * opts.BucketSize)
+		bucket := buckets[bucketTime]
+		item := OverviewTimelineItem{
+			Time:          bucketTime,
+			RequestCount:  bucket.requestCount,
+			FailedRequest: bucket.failedCount,
+			TotalTokens:   bucket.totalTokens,
+		}
+		if bucket.ttftCount > 0 {
+			item.AvgTTFTMs = int(math.Round(float64(bucket.ttftSum) / float64(bucket.ttftCount)))
+		}
+		if bucket.durationCount > 0 {
+			item.AvgDurationMs = int64(math.Round(float64(bucket.durationSum) / float64(bucket.durationCount)))
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (s *Store) overviewBreakdown(whereSQL string, whereArgs []any, limit int) (OverviewBreakdown, error) {
+	var out OverviewBreakdown
+	var err error
+	if out.Models, err = s.overviewCountBy("model", whereSQL, whereArgs, limit); err != nil {
+		return OverviewBreakdown{}, err
+	}
+	if out.Providers, err = s.overviewCountBy("provider", whereSQL, whereArgs, limit); err != nil {
+		return OverviewBreakdown{}, err
+	}
+	if out.Endpoints, err = s.overviewCountBy("endpoint", whereSQL, whereArgs, limit); err != nil {
+		return OverviewBreakdown{}, err
+	}
+	if out.Upstreams, err = s.overviewCountBy("selected_upstream_id", whereSQL, whereArgs, limit); err != nil {
+		return OverviewBreakdown{}, err
+	}
+	if out.RoutingFailureReasons, err = s.overviewCountBy("routing_failure_reason", whereSQL, whereArgs, limit); err != nil {
+		return OverviewBreakdown{}, err
+	}
+	if out.FindingCategories, err = s.overviewFindingCategories(limit); err != nil {
+		return OverviewBreakdown{}, err
+	}
+	return out, nil
+}
+
+func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any, limit int) ([]CountItem, error) {
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, limit)
+	rows, err := s.db.Query(`
+		SELECT `+column+`, COUNT(*) AS count
+		FROM logs
+		WHERE `+whereSQL+` AND `+column+` != ''
+		GROUP BY `+column+`
+		ORDER BY count DESC, `+column+` ASC
+		LIMIT ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCountItems(rows)
+}
+
+func (s *Store) overviewFindingCategories(limit int) ([]CountItem, error) {
+	rows, err := s.db.Query(`
+		SELECT category, COUNT(*) AS count
+		FROM trace_findings
+		WHERE category != ''
+		GROUP BY category
+		ORDER BY count DESC, category ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCountItems(rows)
+}
+
+func (s *Store) overviewAttention(whereSQL string, whereArgs []any, limit int) (OverviewAttention, error) {
+	var out OverviewAttention
+	var err error
+	if out.RecentFailures, err = s.overviewTraceList(whereSQL+` AND (status_code < 200 OR status_code >= 300 OR error_text != '')`, whereArgs, `recorded_at DESC, trace_id DESC`, limit); err != nil {
+		return OverviewAttention{}, err
+	}
+	if out.HighRiskFindings, err = s.overviewHighRiskFindings(limit); err != nil {
+		return OverviewAttention{}, err
+	}
+	if out.RoutingFailures, err = s.overviewRoutingFailures(whereSQL+` AND routing_failure_reason != ''`, whereArgs, limit); err != nil {
+		return OverviewAttention{}, err
+	}
+	if out.SlowTraces, err = s.overviewTraceList(whereSQL, whereArgs, `duration_ms DESC, recorded_at DESC, trace_id DESC`, limit); err != nil {
+		return OverviewAttention{}, err
+	}
+	return out, nil
+}
+
+func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy string, limit int) ([]LogEntry, error) {
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, limit)
+	rows, err := s.db.Query(`
+		SELECT
+			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
+			duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		FROM logs
+		WHERE `+whereSQL+`
+		ORDER BY `+orderBy+`
+		LIMIT ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []LogEntry
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+	return entries, rows.Err()
+}
+
+func (s *Store) overviewHighRiskFindings(limit int) ([]observe.Finding, error) {
+	rows, err := s.db.Query(`
+		SELECT finding_id, trace_id, category, severity, confidence, title, description,
+			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
+		FROM trace_findings
+		WHERE severity IN ('critical', 'high')
+		ORDER BY
+			CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
+			created_at DESC,
+			id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanFindings(rows)
+}
+
+func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit int) ([]RoutingFailureRecord, error) {
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, limit)
+	rows, err := s.db.Query(`
+		SELECT trace_id, model, endpoint, recorded_at, routing_failure_reason, error_text, status_code
+		FROM logs
+		WHERE `+whereSQL+`
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RoutingFailureRecord
+	for rows.Next() {
+		var record RoutingFailureRecord
+		var recordedAt string
+		if err := rows.Scan(&record.TraceID, &record.Model, &record.Endpoint, &recordedAt, &record.Reason, &record.ErrorText, &record.StatusCode); err != nil {
+			return nil, err
+		}
+		var err error
+		record.RecordedAt, err = timeParse(recordedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
+	var summary OverviewAnalysisSummary
+	if err := s.db.QueryRow(`
+		SELECT
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status NOT IN ('completed', 'success') THEN 1 ELSE 0 END), 0) AS failed
+		FROM analysis_runs
+	`).Scan(&summary.Total, &summary.Failed); err != nil {
+		return OverviewAnalysisSummary{}, err
+	}
+	runs, err := s.ListAnalysisRuns("", "", "", limit)
+	if err != nil {
+		return OverviewAnalysisSummary{}, err
+	}
+	summary.Recent = runs
+	return summary, nil
 }
 
 func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
@@ -5178,6 +5572,47 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 		))
 	}
 	return predicates
+}
+
+func overviewLogWhere(since time.Time) (string, []any) {
+	if since.IsZero() {
+		return "1 = 1", nil
+	}
+	return "recorded_at >= ?", []any{since.UTC().Format(timeLayout)}
+}
+
+func scanCountItems(rows *sql.Rows) ([]CountItem, error) {
+	var out []CountItem
+	for rows.Next() {
+		var item CountItem
+		if err := rows.Scan(&item.Label, &item.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func scanFindings(rows *sql.Rows) ([]observe.Finding, error) {
+	var out []observe.Finding
+	for rows.Next() {
+		var finding observe.Finding
+		var severity string
+		var createdAt any
+		if err := rows.Scan(&finding.ID, &finding.TraceID, &finding.Category, &severity, &finding.Confidence, &finding.Title,
+			&finding.Description, &finding.EvidencePath, &finding.EvidenceExcerpt, &finding.NodeID,
+			&finding.Detector, &finding.DetectorVersion, &createdAt); err != nil {
+			return nil, err
+		}
+		finding.Severity = observe.Severity(severity)
+		var err error
+		finding.CreatedAt, err = timeParseValue(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, finding)
+	}
+	return out, rows.Err()
 }
 
 func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
