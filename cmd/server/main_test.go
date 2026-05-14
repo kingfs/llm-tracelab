@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
+	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -91,6 +92,71 @@ func TestCLIRuntimeReadsConfigFromEnv(t *testing.T) {
 	runtime := newCLIRuntime()
 	if got := runtime.configPath(); got != "env-config.yaml" {
 		t.Fatalf("configPath() = %q, want env-config.yaml", got)
+	}
+}
+
+func TestRouterConfigFromChannelsUsesDatabaseTargets(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "db-channel",
+		Name:           "DB Channel",
+		BaseURL:        "https://db.example.com/v1",
+		ProviderPreset: "openai",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("db-channel", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = "https://yaml.example.com/v1"
+	cfg.Upstream.ProviderPreset = "openai"
+
+	routerCfg, source, err := routerConfigFromChannels(cfg, channel.NewService(st))
+	if err != nil {
+		t.Fatalf("routerConfigFromChannels() error = %v", err)
+	}
+	if source != "database" {
+		t.Fatalf("source = %q, want database", source)
+	}
+	if len(routerCfg.Upstreams) != 1 || routerCfg.Upstreams[0].ID != "db-channel" {
+		t.Fatalf("routerCfg.Upstreams = %#v", routerCfg.Upstreams)
+	}
+	if routerCfg.Upstream.BaseURL != "" {
+		t.Fatalf("routerCfg.Upstream.BaseURL = %q, want empty", routerCfg.Upstream.BaseURL)
+	}
+}
+
+func TestRouterConfigFromChannelsFallsBackToYAML(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = "https://yaml.example.com/v1"
+	cfg.Upstream.ProviderPreset = "openai"
+
+	routerCfg, source, err := routerConfigFromChannels(cfg, channel.NewService(st))
+	if err != nil {
+		t.Fatalf("routerConfigFromChannels() error = %v", err)
+	}
+	if source != "yaml" {
+		t.Fatalf("source = %q, want yaml", source)
+	}
+	if routerCfg != cfg {
+		t.Fatalf("routerConfigFromChannels should return original cfg on YAML fallback")
 	}
 }
 

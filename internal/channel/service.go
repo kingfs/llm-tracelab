@@ -39,7 +39,7 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		return 0, nil
 	}
 
-	targets := cfg.EffectiveUpstreams()
+	targets := configuredUpstreams(cfg)
 	imported := 0
 	seenIDs := map[string]struct{}{}
 	for idx, target := range targets {
@@ -103,6 +103,19 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		imported++
 	}
 	return imported, nil
+}
+
+func configuredUpstreams(cfg *config.Config) []config.UpstreamTargetConfig {
+	if cfg == nil {
+		return nil
+	}
+	if len(cfg.Upstreams) > 0 {
+		return append([]config.UpstreamTargetConfig(nil), cfg.Upstreams...)
+	}
+	if strings.TrimSpace(cfg.Upstream.BaseURL) == "" {
+		return nil
+	}
+	return cfg.EffectiveUpstreams()
 }
 
 func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {

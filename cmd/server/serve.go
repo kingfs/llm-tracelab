@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
+	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
@@ -97,7 +98,21 @@ func runServeWithConfig(configPath string) int {
 		parseWorker.Run(syncCtx)
 	}()
 
-	rtr, err := router.New(cfg, traceStore)
+	channelService := channel.NewService(traceStore)
+	if imported, err := channelService.BootstrapFromConfig(cfg); err != nil {
+		slog.Error("Failed to bootstrap channel config", "error", err)
+		return 1
+	} else if imported > 0 {
+		slog.Info("Imported upstream config into channel store", "channels", imported)
+	}
+	routerCfg, source, err := routerConfigFromChannels(cfg, channelService)
+	if err != nil {
+		slog.Error("Failed to build router config from channels", "error", err)
+		return 1
+	}
+	slog.Info("Resolved router config source", "source", source)
+
+	rtr, err := router.New(routerCfg, traceStore)
 	if err != nil {
 		slog.Error("Invalid upstream config", "error", err)
 		return 1
@@ -219,4 +234,18 @@ func validateServeConfig(cfg *config.Config) error {
 		}
 	}
 	return nil
+}
+
+func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {
+	targets, err := channelService.RuntimeTargets()
+	if err != nil {
+		return nil, "", err
+	}
+	if len(targets) == 0 {
+		return cfg, "yaml", nil
+	}
+	routerCfg := *cfg
+	routerCfg.Upstream = config.UpstreamConfig{}
+	routerCfg.Upstreams = targets
+	return &routerCfg, "database", nil
 }
