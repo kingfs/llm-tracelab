@@ -171,6 +171,51 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSecretStatusAndExportLocalSecretKey(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	status := st.SecretStatus()
+	if status.Mode != "encrypted-local" {
+		t.Fatalf("status.Mode = %q, want encrypted-local", status.Mode)
+	}
+	if !status.Exists || !status.Readable {
+		t.Fatalf("status exists/readable = %v/%v, want true/true", status.Exists, status.Readable)
+	}
+	if status.KeyPath != filepath.Join(dir, localSecretKeyFile) {
+		t.Fatalf("status.KeyPath = %q", status.KeyPath)
+	}
+	if status.Fingerprint == "" {
+		t.Fatalf("status.Fingerprint is empty")
+	}
+
+	exported, exportStatus, err := st.ExportLocalSecretKey()
+	if err != nil {
+		t.Fatalf("ExportLocalSecretKey() error = %v", err)
+	}
+	if string(exported) == "" || !strings.HasSuffix(string(exported), "\n") {
+		t.Fatalf("exported key = %q, want newline-terminated base64", string(exported))
+	}
+	if exportStatus.Fingerprint != status.Fingerprint {
+		t.Fatalf("export fingerprint = %q, want %q", exportStatus.Fingerprint, status.Fingerprint)
+	}
+
+	if err := os.Remove(filepath.Join(dir, localSecretKeyFile)); err != nil {
+		t.Fatalf("Remove(secret key) error = %v", err)
+	}
+	missing := st.SecretStatus()
+	if missing.Exists || missing.Readable || missing.Error == "" {
+		t.Fatalf("missing status = %+v, want missing key error", missing)
+	}
+	if _, _, err := st.ExportLocalSecretKey(); err == nil {
+		t.Fatalf("ExportLocalSecretKey() error = nil, want missing key error")
+	}
+}
+
 func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

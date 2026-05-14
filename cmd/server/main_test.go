@@ -164,8 +164,10 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "auth", "analyze", "version", "schema", "completion"} {
-		if found, _, err := cmd.Find([]string{want}); err != nil || found.Name() != want {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "auth", "analyze", "version", "schema", "completion"} {
+		parts := strings.Fields(want)
+		found, _, err := cmd.Find(parts)
+		if err != nil || found.CommandPath() != cliName+" "+want {
 			t.Fatalf("root command missing %q: found=%v err=%v", want, found, err)
 		}
 	}
@@ -276,6 +278,86 @@ func TestAuthCreateTokenDryRunJSONDoesNotRequireDatabase(t *testing.T) {
 	}
 	if !envelope.OK || !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Name != "agent" || envelope.Result.Token != "" {
 		t.Fatalf("dry-run envelope = %+v", envelope)
+	}
+}
+
+func TestDBSecretStatusAndExportCommands(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + filepath.Join(dir, "trace_index.sqlite3") + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if code := runDBSecretStatusWithOptions(dbSecretOptions{configPath: configPath, format: "json", stdout: &out}); code != 0 {
+		t.Fatalf("runDBSecretStatusWithOptions() = %d, output=%s", code, out.String())
+	}
+	var statusEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Mode        string `json:"mode"`
+			KeyPath     string `json:"key_path"`
+			Exists      bool   `json:"exists"`
+			Readable    bool   `json:"readable"`
+			Fingerprint string `json:"fingerprint"`
+			Error       string `json:"error"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &statusEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(status) error = %v, output=%q", err, out.String())
+	}
+	if !statusEnvelope.OK || statusEnvelope.Result.Mode != "encrypted-local" || !statusEnvelope.Result.Exists || !statusEnvelope.Result.Readable || statusEnvelope.Result.Fingerprint == "" || statusEnvelope.Result.Error != "" {
+		t.Fatalf("status envelope = %+v", statusEnvelope)
+	}
+	if strings.Contains(out.String(), "key\":\"") {
+		t.Fatalf("status output leaked exported key: %s", out.String())
+	}
+
+	exportPath := filepath.Join(dir, "secret-backup.key")
+	out.Reset()
+	if code := runDBSecretExportWithOptions(dbSecretOptions{configPath: configPath, format: "json", stdout: &out, outPath: exportPath}); code != 0 {
+		t.Fatalf("runDBSecretExportWithOptions(file) = %d, output=%s", code, out.String())
+	}
+	info, err := os.Stat(exportPath)
+	if err != nil {
+		t.Fatalf("Stat(exportPath) error = %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("export mode = %v, want 0600", info.Mode().Perm())
+	}
+	exported, err := os.ReadFile(exportPath)
+	if err != nil {
+		t.Fatalf("ReadFile(exportPath) error = %v", err)
+	}
+	if len(strings.TrimSpace(string(exported))) == 0 {
+		t.Fatalf("exported key is empty")
+	}
+	if strings.Contains(out.String(), strings.TrimSpace(string(exported))) {
+		t.Fatalf("file export result leaked key: %s", out.String())
+	}
+
+	out.Reset()
+	if code := runDBSecretExportWithOptions(dbSecretOptions{configPath: configPath, format: "json", stdout: &out}); code != 0 {
+		t.Fatalf("runDBSecretExportWithOptions(stdout json) = %d, output=%s", code, out.String())
+	}
+	var exportEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Key string `json:"key"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &exportEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(export) error = %v, output=%q", err, out.String())
+	}
+	if !exportEnvelope.OK || exportEnvelope.Result.Key != strings.TrimSpace(string(exported)) {
+		t.Fatalf("export envelope = %+v, want exported key", exportEnvelope)
 	}
 }
 

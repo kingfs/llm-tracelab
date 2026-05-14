@@ -6,8 +6,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,8 +82,19 @@ const (
 )
 
 type secretBox struct {
-	aead cipher.AEAD
-	mode string
+	aead        cipher.AEAD
+	mode        string
+	keyPath     string
+	fingerprint string
+}
+
+type SecretStatus struct {
+	Mode        string `json:"mode"`
+	KeyPath     string `json:"key_path"`
+	Exists      bool   `json:"exists"`
+	Readable    bool   `json:"readable"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type ListPageResult struct {
@@ -1945,6 +1958,18 @@ func newLocalSecretBox(outputDir string) (*secretBox, error) {
 		outputDir = "."
 	}
 	keyPath := filepath.Join(outputDir, localSecretKeyFile)
+	key, err := readOrCreateLocalSecretKey(keyPath)
+	if err != nil {
+		return nil, err
+	}
+	box, err := secretBoxFromKey(key, keyPath)
+	if err != nil {
+		return nil, err
+	}
+	return box, nil
+}
+
+func readOrCreateLocalSecretKey(keyPath string) ([]byte, error) {
 	key, err := os.ReadFile(keyPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -1968,6 +1993,13 @@ func newLocalSecretBox(outputDir string) (*secretBox, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("local secret key must be 32 bytes, got %d", len(key))
 	}
+	return key, nil
+}
+
+func secretBoxFromKey(key []byte, keyPath string) (*secretBox, error) {
+	if len(key) != 32 {
+		return nil, fmt.Errorf("local secret key must be 32 bytes, got %d", len(key))
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -1976,7 +2008,13 @@ func newLocalSecretBox(outputDir string) (*secretBox, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &secretBox{aead: aead, mode: "encrypted-local"}, nil
+	sum := sha256.Sum256(key)
+	return &secretBox{
+		aead:        aead,
+		mode:        "encrypted-local",
+		keyPath:     keyPath,
+		fingerprint: hex.EncodeToString(sum[:8]),
+	}, nil
 }
 
 func (s *Store) SecretStorageMode() string {
@@ -1984,6 +2022,64 @@ func (s *Store) SecretStorageMode() string {
 		return "plaintext-local"
 	}
 	return s.secrets.mode
+}
+
+func (s *Store) SecretStatus() SecretStatus {
+	status := SecretStatus{
+		Mode: s.SecretStorageMode(),
+	}
+	if s == nil || s.secrets == nil {
+		status.Error = "secret box is not configured"
+		return status
+	}
+	status.KeyPath = s.secrets.keyPath
+	status.Fingerprint = s.secrets.fingerprint
+	if strings.TrimSpace(status.KeyPath) == "" {
+		status.Readable = s.secrets.aead != nil
+		return status
+	}
+	key, err := readLocalSecretKey(status.KeyPath)
+	if err != nil {
+		status.Error = err.Error()
+		return status
+	}
+	status.Exists = true
+	status.Readable = true
+	sum := sha256.Sum256(key)
+	status.Fingerprint = hex.EncodeToString(sum[:8])
+	return status
+}
+
+func (s *Store) ExportLocalSecretKey() ([]byte, SecretStatus, error) {
+	status := s.SecretStatus()
+	if strings.TrimSpace(status.KeyPath) == "" {
+		return nil, status, fmt.Errorf("local secret key path is not configured")
+	}
+	key, err := readLocalSecretKey(status.KeyPath)
+	if err != nil {
+		return nil, status, err
+	}
+	encoded := []byte(base64.RawStdEncoding.EncodeToString(key) + "\n")
+	status.Exists = true
+	status.Readable = true
+	sum := sha256.Sum256(key)
+	status.Fingerprint = hex.EncodeToString(sum[:8])
+	return encoded, status, nil
+}
+
+func readLocalSecretKey(keyPath string) ([]byte, error) {
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, err
+	}
+	key, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(keyData)))
+	if err != nil {
+		return nil, fmt.Errorf("decode local secret key: %w", err)
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("local secret key must be 32 bytes, got %d", len(key))
+	}
+	return key, nil
 }
 
 func (s *Store) encryptSecretBytes(plaintext []byte) ([]byte, error) {
