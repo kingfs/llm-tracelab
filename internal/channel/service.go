@@ -100,6 +100,7 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		_, err := s.store.UpsertChannelConfig(store.ChannelConfigRecord{
 			ID:               channelID,
 			Name:             defaultChannelName(channelID, target.Upstream.ProviderPreset),
+			Source:           "bootstrap",
 			BaseURL:          target.Upstream.BaseURL,
 			ProviderPreset:   target.Upstream.ProviderPreset,
 			ProtocolFamily:   target.Upstream.ProtocolFamily,

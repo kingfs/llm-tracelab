@@ -21,6 +21,8 @@ type ChannelConfig struct {
 	Name string `json:"name,omitempty"`
 	// Description holds the value of the "description" field.
 	Description string `json:"description,omitempty"`
+	// Source holds the value of the "source" field.
+	Source string `json:"source,omitempty"`
 	// BaseURL holds the value of the "base_url" field.
 	BaseURL string `json:"base_url,omitempty"`
 	// ProviderPreset holds the value of the "provider_preset" field.
@@ -83,7 +85,7 @@ func (*ChannelConfig) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case channelconfig.FieldPriority:
 			values[i] = new(sql.NullInt64)
-		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
+		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
 			values[i] = new(sql.NullString)
 		case channelconfig.FieldCreatedAt, channelconfig.FieldUpdatedAt, channelconfig.FieldLastProbeAt:
 			values[i] = new(sql.NullTime)
@@ -119,6 +121,12 @@ func (_m *ChannelConfig) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field description", values[i])
 			} else if value.Valid {
 				_m.Description = value.String
+			}
+		case channelconfig.FieldSource:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field source", values[i])
+			} else if value.Valid {
+				_m.Source = value.String
 			}
 		case channelconfig.FieldBaseURL:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -300,6 +308,9 @@ func (_m *ChannelConfig) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("description=")
 	builder.WriteString(_m.Description)
+	builder.WriteString(", ")
+	builder.WriteString("source=")
+	builder.WriteString(_m.Source)
 	builder.WriteString(", ")
 	builder.WriteString("base_url=")
 	builder.WriteString(_m.BaseURL)

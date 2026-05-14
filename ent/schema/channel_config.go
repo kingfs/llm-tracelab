@@ -23,6 +23,7 @@ func (ChannelConfig) Fields() []ent.Field {
 		field.String("id").NotEmpty().Immutable(),
 		field.String("name").NotEmpty(),
 		field.String("description").Default(""),
+		field.String("source").Default("manual"),
 		field.String("base_url").NotEmpty(),
 		field.String("provider_preset").Default(""),
 		field.String("protocol_family").Default(""),

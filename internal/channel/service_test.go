@@ -55,6 +55,13 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	if imported != 0 {
 		t.Fatalf("second imported = %d, want 0", imported)
 	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.Source != "bootstrap" {
+		t.Fatalf("record.Source = %q, want bootstrap", record.Source)
+	}
 
 	targets, err := svc.RuntimeTargets()
 	if err != nil {

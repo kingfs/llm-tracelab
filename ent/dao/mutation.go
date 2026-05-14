@@ -873,6 +873,7 @@ type ChannelConfigMutation struct {
 	id                   *string
 	name                 *string
 	description          *string
+	source               *string
 	base_url             *string
 	provider_preset      *string
 	protocol_family      *string
@@ -1079,6 +1080,42 @@ func (m *ChannelConfigMutation) OldDescription(ctx context.Context) (v string, e
 // ResetDescription resets all changes to the "description" field.
 func (m *ChannelConfigMutation) ResetDescription() {
 	m.description = nil
+}
+
+// SetSource sets the "source" field.
+func (m *ChannelConfigMutation) SetSource(s string) {
+	m.source = &s
+}
+
+// Source returns the value of the "source" field in the mutation.
+func (m *ChannelConfigMutation) Source() (r string, exists bool) {
+	v := m.source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSource returns the old "source" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSource: %w", err)
+	}
+	return oldValue.Source, nil
+}
+
+// ResetSource resets all changes to the "source" field.
+func (m *ChannelConfigMutation) ResetSource() {
+	m.source = nil
 }
 
 // SetBaseURL sets the "base_url" field.
@@ -2029,12 +2066,15 @@ func (m *ChannelConfigMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelConfigMutation) Fields() []string {
-	fields := make([]string, 0, 25)
+	fields := make([]string, 0, 26)
 	if m.name != nil {
 		fields = append(fields, channelconfig.FieldName)
 	}
 	if m.description != nil {
 		fields = append(fields, channelconfig.FieldDescription)
+	}
+	if m.source != nil {
+		fields = append(fields, channelconfig.FieldSource)
 	}
 	if m.base_url != nil {
 		fields = append(fields, channelconfig.FieldBaseURL)
@@ -2117,6 +2157,8 @@ func (m *ChannelConfigMutation) Field(name string) (ent.Value, bool) {
 		return m.Name()
 	case channelconfig.FieldDescription:
 		return m.Description()
+	case channelconfig.FieldSource:
+		return m.Source()
 	case channelconfig.FieldBaseURL:
 		return m.BaseURL()
 	case channelconfig.FieldProviderPreset:
@@ -2176,6 +2218,8 @@ func (m *ChannelConfigMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldName(ctx)
 	case channelconfig.FieldDescription:
 		return m.OldDescription(ctx)
+	case channelconfig.FieldSource:
+		return m.OldSource(ctx)
 	case channelconfig.FieldBaseURL:
 		return m.OldBaseURL(ctx)
 	case channelconfig.FieldProviderPreset:
@@ -2244,6 +2288,13 @@ func (m *ChannelConfigMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetDescription(v)
+		return nil
+	case channelconfig.FieldSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSource(v)
 		return nil
 	case channelconfig.FieldBaseURL:
 		v, ok := value.(string)
@@ -2514,6 +2565,9 @@ func (m *ChannelConfigMutation) ResetField(name string) error {
 		return nil
 	case channelconfig.FieldDescription:
 		m.ResetDescription()
+		return nil
+	case channelconfig.FieldSource:
+		m.ResetSource()
 		return nil
 	case channelconfig.FieldBaseURL:
 		m.ResetBaseURL()

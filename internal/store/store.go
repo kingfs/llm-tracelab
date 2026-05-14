@@ -196,6 +196,7 @@ type ChannelConfigRecord struct {
 	ID                 string
 	Name               string
 	Description        string
+	Source             string
 	BaseURL            string
 	ProviderPreset     string
 	ProtocolFamily     string
@@ -573,6 +574,9 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 	if strings.TrimSpace(record.ModelDiscovery) == "" {
 		record.ModelDiscovery = "list_models"
 	}
+	if strings.TrimSpace(record.Source) == "" {
+		record.Source = "manual"
+	}
 	if record.Weight == 0 {
 		record.Weight = 1
 	}
@@ -597,6 +601,7 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetID(record.ID).
 		SetName(record.Name).
 		SetDescription(strings.TrimSpace(record.Description)).
+		SetSource(strings.TrimSpace(record.Source)).
 		SetBaseURL(record.BaseURL).
 		SetProviderPreset(strings.TrimSpace(record.ProviderPreset)).
 		SetProtocolFamily(strings.TrimSpace(record.ProtocolFamily)).
@@ -2470,6 +2475,7 @@ func (s *Store) initSchema() error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
 			base_url TEXT NOT NULL,
 			provider_preset TEXT NOT NULL DEFAULT '',
 			protocol_family TEXT NOT NULL DEFAULT '',
@@ -2744,6 +2750,9 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
 		return err
 	}
 	if err := s.backfillTraceIDs(); err != nil {
@@ -4686,6 +4695,7 @@ func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 		ID:                 row.ID,
 		Name:               row.Name,
 		Description:        row.Description,
+		Source:             row.Source,
 		BaseURL:            row.BaseURL,
 		ProviderPreset:     row.ProviderPreset,
 		ProtocolFamily:     row.ProtocolFamily,

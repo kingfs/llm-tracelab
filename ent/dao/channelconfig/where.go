@@ -74,6 +74,11 @@ func Description(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldDescription, v))
 }
 
+// Source applies equality check predicate on the "source" field. It's identical to SourceEQ.
+func Source(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldSource, v))
+}
+
 // BaseURL applies equality check predicate on the "base_url" field. It's identical to BaseURLEQ.
 func BaseURL(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldBaseURL, v))
@@ -317,6 +322,71 @@ func DescriptionEqualFold(v string) predicate.ChannelConfig {
 // DescriptionContainsFold applies the ContainsFold predicate on the "description" field.
 func DescriptionContainsFold(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldContainsFold(FieldDescription, v))
+}
+
+// SourceEQ applies the EQ predicate on the "source" field.
+func SourceEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldSource, v))
+}
+
+// SourceNEQ applies the NEQ predicate on the "source" field.
+func SourceNEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNEQ(FieldSource, v))
+}
+
+// SourceIn applies the In predicate on the "source" field.
+func SourceIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldIn(FieldSource, vs...))
+}
+
+// SourceNotIn applies the NotIn predicate on the "source" field.
+func SourceNotIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNotIn(FieldSource, vs...))
+}
+
+// SourceGT applies the GT predicate on the "source" field.
+func SourceGT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGT(FieldSource, v))
+}
+
+// SourceGTE applies the GTE predicate on the "source" field.
+func SourceGTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGTE(FieldSource, v))
+}
+
+// SourceLT applies the LT predicate on the "source" field.
+func SourceLT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLT(FieldSource, v))
+}
+
+// SourceLTE applies the LTE predicate on the "source" field.
+func SourceLTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLTE(FieldSource, v))
+}
+
+// SourceContains applies the Contains predicate on the "source" field.
+func SourceContains(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContains(FieldSource, v))
+}
+
+// SourceHasPrefix applies the HasPrefix predicate on the "source" field.
+func SourceHasPrefix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasPrefix(FieldSource, v))
+}
+
+// SourceHasSuffix applies the HasSuffix predicate on the "source" field.
+func SourceHasSuffix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasSuffix(FieldSource, v))
+}
+
+// SourceEqualFold applies the EqualFold predicate on the "source" field.
+func SourceEqualFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEqualFold(FieldSource, v))
+}
+
+// SourceContainsFold applies the ContainsFold predicate on the "source" field.
+func SourceContainsFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContainsFold(FieldSource, v))
 }
 
 // BaseURLEQ applies the EQ predicate on the "base_url" field.

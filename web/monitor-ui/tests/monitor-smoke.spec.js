@@ -88,6 +88,7 @@ test("models marketplace and detail render", async ({ page }) => {
 test("channel management renders and supports core actions", async ({ page }) => {
   await page.goto("/channels");
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+  await expect(page.getByText("web-managed").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Channel secret storage" })).toBeVisible();
   await expect(page.getByText("abc123")).toBeVisible();
@@ -102,6 +103,8 @@ test("channel management renders and supports core actions", async ({ page }) =>
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
+  await expect(page.getByText("config source").first()).toBeVisible();
+  await expect(page.getByText("web-managed").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
 
@@ -217,6 +220,7 @@ function channelDetailPayload() {
   return {
     id: "openai-primary",
     name: "OpenAI Primary",
+    source: "manual",
     base_url: "https://api.openai.example/v1",
     provider_preset: "openai",
     protocol_family: "openai_compatible",

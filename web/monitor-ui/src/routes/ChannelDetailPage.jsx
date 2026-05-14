@@ -138,12 +138,14 @@ export function ChannelDetailPage() {
             <h1>{channel.name || channelID}</h1>
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone={channel.enabled ? "green" : "default"}>{channel.enabled ? "enabled" : "disabled"}</InlineTag>
+              <InlineTag tone={channel.source === "bootstrap" ? "gold" : "green"}>{channelSourceLabel(channel.source)}</InlineTag>
               <InlineTag tone="accent">{channel.provider_preset || "custom"}</InlineTag>
               {channel.secret_storage_mode ? <InlineTag tone={channel.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{channel.secret_storage_mode}</InlineTag> : null}
               {channel.last_probe_status ? <InlineTag tone={channel.last_probe_status === "success" ? "green" : "danger"}>{channel.last_probe_status}</InlineTag> : null}
             </div>
           </div>
           <div className="detail-meta-strip">
+            <DetailMetaPill label="config source" value={channelSourceLabel(channel.source)} />
             <DetailMetaPill label="base url" value={channel.base_url || "-"} mono />
             <DetailMetaPill label="models" value={`${formatCount(channel.enabled_model_count)} / ${formatCount(channel.model_count)}`} />
             <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
@@ -360,7 +362,7 @@ function ChannelModelRow({ item, busy, onToggle }) {
       <div className="channel-model-card-head">
         <div>
           <strong>{item.model}</strong>
-          <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : item.source || "unknown"}</span>
+          <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : modelSourceLabel(item.source)}</span>
         </div>
         <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} />
       </div>
@@ -375,6 +377,34 @@ function ChannelModelRow({ item, busy, onToggle }) {
       </div>
     </div>
   );
+}
+
+function channelSourceLabel(source) {
+  switch (source) {
+    case "bootstrap":
+      return "bootstrap";
+    case "manual":
+    case "":
+    case undefined:
+      return "web-managed";
+    default:
+      return source;
+  }
+}
+
+function modelSourceLabel(source) {
+  switch (source) {
+    case "manual":
+      return "manual";
+    case "static":
+      return "bootstrap static";
+    case "discovered":
+      return "probe discovered";
+    case "trace":
+      return "seen in trace";
+    default:
+      return source || "unknown";
+  }
 }
 
 function Metric({ label, value, danger = false }) {

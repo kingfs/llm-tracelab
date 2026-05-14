@@ -53,6 +53,7 @@ var (
 		{Name: "id", Type: field.TypeString},
 		{Name: "name", Type: field.TypeString},
 		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "source", Type: field.TypeString, Default: "manual"},
 		{Name: "base_url", Type: field.TypeString},
 		{Name: "provider_preset", Type: field.TypeString, Default: ""},
 		{Name: "protocol_family", Type: field.TypeString, Default: ""},
@@ -86,12 +87,12 @@ var (
 			{
 				Name:    "channelconfig_enabled_priority",
 				Unique:  false,
-				Columns: []*schema.Column{ChannelConfigsColumns[15], ChannelConfigsColumns[16]},
+				Columns: []*schema.Column{ChannelConfigsColumns[16], ChannelConfigsColumns[17]},
 			},
 			{
 				Name:    "channelconfig_provider_preset",
 				Unique:  false,
-				Columns: []*schema.Column{ChannelConfigsColumns[4]},
+				Columns: []*schema.Column{ChannelConfigsColumns[5]},
 			},
 		},
 	}

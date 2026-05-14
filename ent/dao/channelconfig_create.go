@@ -43,6 +43,20 @@ func (_c *ChannelConfigCreate) SetNillableDescription(v *string) *ChannelConfigC
 	return _c
 }
 
+// SetSource sets the "source" field.
+func (_c *ChannelConfigCreate) SetSource(v string) *ChannelConfigCreate {
+	_c.mutation.SetSource(v)
+	return _c
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_c *ChannelConfigCreate) SetNillableSource(v *string) *ChannelConfigCreate {
+	if v != nil {
+		_c.SetSource(*v)
+	}
+	return _c
+}
+
 // SetBaseURL sets the "base_url" field.
 func (_c *ChannelConfigCreate) SetBaseURL(v string) *ChannelConfigCreate {
 	_c.mutation.SetBaseURL(v)
@@ -394,6 +408,10 @@ func (_c *ChannelConfigCreate) defaults() {
 		v := channelconfig.DefaultDescription
 		_c.mutation.SetDescription(v)
 	}
+	if _, ok := _c.mutation.Source(); !ok {
+		v := channelconfig.DefaultSource
+		_c.mutation.SetSource(v)
+	}
 	if _, ok := _c.mutation.ProviderPreset(); !ok {
 		v := channelconfig.DefaultProviderPreset
 		_c.mutation.SetProviderPreset(v)
@@ -488,6 +506,9 @@ func (_c *ChannelConfigCreate) check() error {
 	}
 	if _, ok := _c.mutation.Description(); !ok {
 		return &ValidationError{Name: "description", err: errors.New(`dao: missing required field "ChannelConfig.description"`)}
+	}
+	if _, ok := _c.mutation.Source(); !ok {
+		return &ValidationError{Name: "source", err: errors.New(`dao: missing required field "ChannelConfig.source"`)}
 	}
 	if _, ok := _c.mutation.BaseURL(); !ok {
 		return &ValidationError{Name: "base_url", err: errors.New(`dao: missing required field "ChannelConfig.base_url"`)}
@@ -606,6 +627,10 @@ func (_c *ChannelConfigCreate) createSpec() (*ChannelConfig, *sqlgraph.CreateSpe
 	if value, ok := _c.mutation.Description(); ok {
 		_spec.SetField(channelconfig.FieldDescription, field.TypeString, value)
 		_node.Description = value
+	}
+	if value, ok := _c.mutation.Source(); ok {
+		_spec.SetField(channelconfig.FieldSource, field.TypeString, value)
+		_node.Source = value
 	}
 	if value, ok := _c.mutation.BaseURL(); ok {
 		_spec.SetField(channelconfig.FieldBaseURL, field.TypeString, value)
@@ -772,6 +797,18 @@ func (u *ChannelConfigUpsert) SetDescription(v string) *ChannelConfigUpsert {
 // UpdateDescription sets the "description" field to the value that was provided on create.
 func (u *ChannelConfigUpsert) UpdateDescription() *ChannelConfigUpsert {
 	u.SetExcluded(channelconfig.FieldDescription)
+	return u
+}
+
+// SetSource sets the "source" field.
+func (u *ChannelConfigUpsert) SetSource(v string) *ChannelConfigUpsert {
+	u.Set(channelconfig.FieldSource, v)
+	return u
+}
+
+// UpdateSource sets the "source" field to the value that was provided on create.
+func (u *ChannelConfigUpsert) UpdateSource() *ChannelConfigUpsert {
+	u.SetExcluded(channelconfig.FieldSource)
 	return u
 }
 
@@ -1154,6 +1191,20 @@ func (u *ChannelConfigUpsertOne) SetDescription(v string) *ChannelConfigUpsertOn
 func (u *ChannelConfigUpsertOne) UpdateDescription() *ChannelConfigUpsertOne {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateDescription()
+	})
+}
+
+// SetSource sets the "source" field.
+func (u *ChannelConfigUpsertOne) SetSource(v string) *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetSource(v)
+	})
+}
+
+// UpdateSource sets the "source" field to the value that was provided on create.
+func (u *ChannelConfigUpsertOne) UpdateSource() *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateSource()
 	})
 }
 
@@ -1754,6 +1805,20 @@ func (u *ChannelConfigUpsertBulk) SetDescription(v string) *ChannelConfigUpsertB
 func (u *ChannelConfigUpsertBulk) UpdateDescription() *ChannelConfigUpsertBulk {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateDescription()
+	})
+}
+
+// SetSource sets the "source" field.
+func (u *ChannelConfigUpsertBulk) SetSource(v string) *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetSource(v)
+	})
+}
+
+// UpdateSource sets the "source" field to the value that was provided on create.
+func (u *ChannelConfigUpsertBulk) UpdateSource() *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateSource()
 	})
 }
 

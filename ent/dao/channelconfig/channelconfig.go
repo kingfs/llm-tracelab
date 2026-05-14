@@ -17,6 +17,8 @@ const (
 	FieldName = "name"
 	// FieldDescription holds the string denoting the description field in the database.
 	FieldDescription = "description"
+	// FieldSource holds the string denoting the source field in the database.
+	FieldSource = "source"
 	// FieldBaseURL holds the string denoting the base_url field in the database.
 	FieldBaseURL = "base_url"
 	// FieldProviderPreset holds the string denoting the provider_preset field in the database.
@@ -72,6 +74,7 @@ var Columns = []string{
 	FieldID,
 	FieldName,
 	FieldDescription,
+	FieldSource,
 	FieldBaseURL,
 	FieldProviderPreset,
 	FieldProtocolFamily,
@@ -112,6 +115,8 @@ var (
 	NameValidator func(string) error
 	// DefaultDescription holds the default value on creation for the "description" field.
 	DefaultDescription string
+	// DefaultSource holds the default value on creation for the "source" field.
+	DefaultSource string
 	// BaseURLValidator is a validator for the "base_url" field. It is called by the builders before save.
 	BaseURLValidator func(string) error
 	// DefaultProviderPreset holds the default value on creation for the "provider_preset" field.
@@ -174,6 +179,11 @@ func ByName(opts ...sql.OrderTermOption) OrderOption {
 // ByDescription orders the results by the description field.
 func ByDescription(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldDescription, opts...).ToFunc()
+}
+
+// BySource orders the results by the source field.
+func BySource(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSource, opts...).ToFunc()
 }
 
 // ByBaseURL orders the results by the base_url field.

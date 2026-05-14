@@ -108,7 +108,7 @@ export function ChannelsPage() {
       {channels.loading && !channels.data ? <EmptyState title="Loading channels" detail="Collecting channel configuration and usage summary." /> : null}
       {channels.data ? (
         <section className="channel-grid">
-          {items.length ? items.map((item) => <ChannelCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title="No channels" detail="Create a channel or bootstrap one from upstream configuration." />}
+          {items.length ? items.map((item) => <ChannelCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title="No channels" detail="Create a channel from Monitor. YAML upstreams are only used as first-run bootstrap input." />}
         </section>
       ) : null}
       {formOpen ? (
@@ -275,6 +275,7 @@ function ChannelCard({ item, windowValue, onRefresh }) {
         </div>
         <div className="trace-tag-group">
           <Switch checked={Boolean(item.enabled)} onChange={setEnabled} disabled={saving} label={`${item.name || item.id} enabled`} />
+          <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{channelSourceLabel(item.source)}</InlineTag>
           {item.secret_storage_mode ? <InlineTag tone={item.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{item.secret_storage_mode}</InlineTag> : null}
           {item.last_probe_status ? <InlineTag tone={item.last_probe_status === "success" ? "green" : "danger"}>{item.last_probe_status}</InlineTag> : null}
         </div>
@@ -290,6 +291,19 @@ function ChannelCard({ item, windowValue, onRefresh }) {
       </div>
     </Link>
   );
+}
+
+function channelSourceLabel(source) {
+  switch (source) {
+    case "bootstrap":
+      return "bootstrap";
+    case "manual":
+    case "":
+    case undefined:
+      return "web-managed";
+    default:
+      return source;
+  }
 }
 
 function buildChannelTrendItems(items) {

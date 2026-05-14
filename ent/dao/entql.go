@@ -62,6 +62,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 		Fields: map[string]*sqlgraph.FieldSpec{
 			channelconfig.FieldName:               {Type: field.TypeString, Column: channelconfig.FieldName},
 			channelconfig.FieldDescription:        {Type: field.TypeString, Column: channelconfig.FieldDescription},
+			channelconfig.FieldSource:             {Type: field.TypeString, Column: channelconfig.FieldSource},
 			channelconfig.FieldBaseURL:            {Type: field.TypeString, Column: channelconfig.FieldBaseURL},
 			channelconfig.FieldProviderPreset:     {Type: field.TypeString, Column: channelconfig.FieldProviderPreset},
 			channelconfig.FieldProtocolFamily:     {Type: field.TypeString, Column: channelconfig.FieldProtocolFamily},
@@ -557,6 +558,11 @@ func (f *ChannelConfigFilter) WhereName(p entql.StringP) {
 // WhereDescription applies the entql string predicate on the description field.
 func (f *ChannelConfigFilter) WhereDescription(p entql.StringP) {
 	f.Where(p.Field(channelconfig.FieldDescription))
+}
+
+// WhereSource applies the entql string predicate on the source field.
+func (f *ChannelConfigFilter) WhereSource(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldSource))
 }
 
 // WhereBaseURL applies the entql string predicate on the base_url field.

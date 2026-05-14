@@ -502,6 +502,7 @@ type channelItem struct {
 	ID                 string                `json:"id"`
 	Name               string                `json:"name"`
 	Description        string                `json:"description,omitempty"`
+	Source             string                `json:"source"`
 	BaseURL            string                `json:"base_url"`
 	ProviderPreset     string                `json:"provider_preset"`
 	ProtocolFamily     string                `json:"protocol_family"`
@@ -1400,6 +1401,9 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.Description) != "" {
 		record.Description = strings.TrimSpace(req.Description)
 	}
+	if strings.TrimSpace(record.Source) == "" {
+		record.Source = "manual"
+	}
 	if strings.TrimSpace(req.BaseURL) != "" {
 		record.BaseURL = strings.TrimSpace(req.BaseURL)
 	}
@@ -1458,6 +1462,7 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		ID:                 record.ID,
 		Name:               record.Name,
 		Description:        record.Description,
+		Source:             record.Source,
 		BaseURL:            record.BaseURL,
 		ProviderPreset:     record.ProviderPreset,
 		ProtocolFamily:     record.ProtocolFamily,

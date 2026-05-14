@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 `llm-tracelab` 已经具备多 upstream 路由、模型发现、基础健康状态、selected upstream 录制和 upstream 监控能力，但上游来源仍主要来自 YAML 配置。这个形态适合启动期和测试期，不适合长期使用：
+当前 `llm-tracelab` 已经具备多 upstream 路由、模型发现、基础健康状态、selected upstream 录制和 upstream 监控能力，但历史上游来源主要来自 YAML 配置。v1 起，YAML 只保留服务启动必要配置与首次迁移 bootstrap 能力；channel 与 models 的长期管理入口是 Monitor Web，并持久化到 SQLite。
 
 - 增删渠道需要编辑配置并重启。
 - API key、headers、模型启停与路由权重不适合直接暴露在静态文件中反复修改。
@@ -17,7 +17,7 @@
 2. 渠道视角：展示每个渠道提供的模型数量、请求量、token、错误、健康状态、模型分布和趋势。
 3. 渠道配置：通过页面新增、编辑、启用、禁用渠道；支持 base URL、API key、自定义 headers、provider preset、protocol family、routing profile、权重、优先级和模型启停。
 4. 探测能力：支持对渠道执行模型发现，优先使用 provider 对应的模型列表端点，并兼容 OpenAI Responses API 相关模型获取方式。
-5. 路由融合：数据库配置成为 router 的主配置源，同时保留 YAML 作为 bootstrap、环境覆盖和兼容层。
+5. 路由融合：数据库配置成为 router 的主配置源，同时保留 YAML 作为首次启动 bootstrap 和兼容层。
 6. 回放不变：录制、回放和 raw cassette 格式不因为渠道管理变化而破坏兼容性。
 
 ## 非目标
@@ -86,11 +86,13 @@
 
 ### 目标形态
 
-数据库是渠道配置主源。YAML 继续保留：
+数据库是渠道配置主源。YAML 后续只保留服务启动必要配置，例如 server、monitor、auth、trace、database、router 默认策略等。历史 upstream YAML 仅作为首次启动或迁移时的 bootstrap 输入：
 
-- server、monitor、auth、trace、database、router 默认策略。
-- bootstrap upstreams，用于首次启动或无 DB 记录时导入。
-- 环境变量覆盖，用于 CI、本地临时调试和无 UI 场景。
+- 首次启动时把 legacy `upstream` / `upstreams` 导入 `channel_configs` 和 `channel_models`。
+- 导入后的 channel 标记 `source=bootstrap`，后续在 Web 中编辑和启停。
+- Web 创建的 channel 标记 `source=manual`，UI 展示为 `web-managed`。
+- 一旦 DB 中存在 channel，运行时以 DB 为准，不再把 YAML 作为持续同步来源。
+- 环境变量仍只用于启动与本地部署覆盖，不作为长期 channel/model 管理面。
 
 ### 启动规则
 
@@ -715,11 +717,12 @@ Headers 编辑：
 - 已完成 Channel Detail 编辑表单弹窗化：编辑入口不再在详情页中插入内联表单，启用/禁用继续由顶部开关负责，基础字段默认可见，路由参数、探测模式和 headers 收入高级选项。
 - 已完成渠道高级配置最小结构化：`/api/provider-presets` 返回 resolver 的 provider support matrix；Create/Edit 高级区使用结构化协议族、routing profile、model discovery 下拉，并按 Azure/Anthropic/Vertex profile 展开 API version、deployment、project、location、model resource 等必要字段。
 - 已增强 Routing 排障筛选：`/api/traces` 支持 selected route 视角的 status、duration、TTFT、token 区间过滤；Routing 页面提供 model、channel、status、latency/token 区间筛选并保留 URL 参数，便于复现排查上下文。
+- 已明确配置源可见性：YAML 仅作为服务启动配置和首次 bootstrap 输入；`channel_configs.source` 标记 `manual`/`bootstrap`，Monitor UI 展示 web-managed/bootstrap 来源，模型来源展示 manual/bootstrap static/probe discovered/seen in trace。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 - 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路，并覆盖本地失败探测提示。
 - 已按产品取舍跳过渠道导入/导出能力，不作为 v1 必做项。
 
 下一步建议：
 
-1. 补齐配置源可见性：在 Channel 卡片/详情中明确 DB、bootstrap、manual/static/discovered 来源，降低 DB 优先后用户对 YAML 修改不生效的困惑。
-2. 完善 token unknown 与 0 的展示口径：在模型、渠道、Routing 统计中明确 usage 缺失请求，避免用户误读为真实 0 消耗。
+1. 完善 token unknown 与 0 的展示口径：在模型、渠道、Routing 统计中明确 usage 缺失请求，避免用户误读为真实 0 消耗。
+2. 同步用户文档：更新 README / MONITOR_GUIDE，明确 channel/models 通过 Web 管理并入库，YAML 不再作为长期渠道配置入口。

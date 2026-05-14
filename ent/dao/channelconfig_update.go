@@ -58,6 +58,20 @@ func (_u *ChannelConfigUpdate) SetNillableDescription(v *string) *ChannelConfigU
 	return _u
 }
 
+// SetSource sets the "source" field.
+func (_u *ChannelConfigUpdate) SetSource(v string) *ChannelConfigUpdate {
+	_u.mutation.SetSource(v)
+	return _u
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_u *ChannelConfigUpdate) SetNillableSource(v *string) *ChannelConfigUpdate {
+	if v != nil {
+		_u.SetSource(*v)
+	}
+	return _u
+}
+
 // SetBaseURL sets the "base_url" field.
 func (_u *ChannelConfigUpdate) SetBaseURL(v string) *ChannelConfigUpdate {
 	_u.mutation.SetBaseURL(v)
@@ -476,6 +490,9 @@ func (_u *ChannelConfigUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	if value, ok := _u.mutation.Description(); ok {
 		_spec.SetField(channelconfig.FieldDescription, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.Source(); ok {
+		_spec.SetField(channelconfig.FieldSource, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.BaseURL(); ok {
 		_spec.SetField(channelconfig.FieldBaseURL, field.TypeString, value)
 	}
@@ -608,6 +625,20 @@ func (_u *ChannelConfigUpdateOne) SetDescription(v string) *ChannelConfigUpdateO
 func (_u *ChannelConfigUpdateOne) SetNillableDescription(v *string) *ChannelConfigUpdateOne {
 	if v != nil {
 		_u.SetDescription(*v)
+	}
+	return _u
+}
+
+// SetSource sets the "source" field.
+func (_u *ChannelConfigUpdateOne) SetSource(v string) *ChannelConfigUpdateOne {
+	_u.mutation.SetSource(v)
+	return _u
+}
+
+// SetNillableSource sets the "source" field if the given value is not nil.
+func (_u *ChannelConfigUpdateOne) SetNillableSource(v *string) *ChannelConfigUpdateOne {
+	if v != nil {
+		_u.SetSource(*v)
 	}
 	return _u
 }
@@ -1059,6 +1090,9 @@ func (_u *ChannelConfigUpdateOne) sqlSave(ctx context.Context) (_node *ChannelCo
 	}
 	if value, ok := _u.mutation.Description(); ok {
 		_spec.SetField(channelconfig.FieldDescription, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Source(); ok {
+		_spec.SetField(channelconfig.FieldSource, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.BaseURL(); ok {
 		_spec.SetField(channelconfig.FieldBaseURL, field.TypeString, value)
