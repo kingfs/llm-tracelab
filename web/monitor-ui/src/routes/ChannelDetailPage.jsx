@@ -117,6 +117,7 @@ export function ChannelDetailPage() {
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone={channel.enabled ? "green" : "default"}>{channel.enabled ? "enabled" : "disabled"}</InlineTag>
               <InlineTag tone="accent">{channel.provider_preset || "custom"}</InlineTag>
+              {channel.secret_storage_mode ? <InlineTag tone={channel.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{channel.secret_storage_mode}</InlineTag> : null}
               {channel.last_probe_status ? <InlineTag tone={channel.last_probe_status === "success" ? "green" : "danger"}>{channel.last_probe_status}</InlineTag> : null}
             </div>
           </div>
@@ -167,6 +168,9 @@ export function ChannelDetailPage() {
       {actionError ? <EmptyState title="Channel action failed" detail={actionError} tone="danger" /> : null}
       {detail.error ? <EmptyState title="Unable to load channel" detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title="Loading channel" detail="Collecting channel configuration, models, and usage." /> : null}
+      {detail.data?.secret_storage_mode === "plaintext-local" ? (
+        <EmptyState title="Local plaintext secret storage" detail="API keys and secret headers are redacted in Monitor responses, but currently stored in the local SQLite database without encryption." tone="danger" />
+      ) : null}
 
       {detail.data && editOpen ? (
         <section className="panel">

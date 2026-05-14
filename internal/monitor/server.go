@@ -490,6 +490,7 @@ type channelItem struct {
 	Location           string                `json:"location,omitempty"`
 	ModelResource      string                `json:"model_resource,omitempty"`
 	APIKeyHint         string                `json:"api_key_hint,omitempty"`
+	SecretStorageMode  string                `json:"secret_storage_mode"`
 	Headers            map[string]string     `json:"headers,omitempty"`
 	Enabled            bool                  `json:"enabled"`
 	Priority           int                   `json:"priority"`
@@ -1250,6 +1251,7 @@ func channelItemFromRecord(record store.ChannelConfigRecord, modelCount int, ena
 		Location:           record.Location,
 		ModelResource:      record.ModelResource,
 		APIKeyHint:         record.APIKeyHint,
+		SecretStorageMode:  "plaintext-local",
 		Headers:            redactHeaders(headers),
 		Enabled:            record.Enabled,
 		Priority:           record.Priority,

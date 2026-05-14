@@ -696,8 +696,9 @@ Headers 编辑：
 - 已补齐人工模型添加闭环：`POST /api/channels/{channel}/models` 可手动添加模型并写入模型目录，Channel Detail 可直接添加模型，用于不支持模型列表探测的 provider。
 - 已完成渠道编辑首版：Channel Detail 支持编辑基础字段、API key、权重、探测模式和 headers；headers 支持字符串更新与 `{ "keep": true }` 保留 redacted secret，避免 UI 回传 `***` 覆盖真实密钥。
 - 已完成 Trace detail 入口衔接：selected upstream 同时提供 Open Channel 与 Open Upstream，前者面向托管渠道配置与分析，后者保留旧运行时诊断视角。
+- 已显式标记 secret 存储模式：渠道 API 返回 `secret_storage_mode=plaintext-local`，UI 在渠道卡片与详情页提示本地 SQLite 明文存储风险。
 
 下一步建议：
 
-1. 引入本地 secret 加密或至少明确展示 `plaintext-local` secret storage mode。
+1. 引入本地 secret 加密，可选本地 master key 或 OS keyring。
 2. 增加 UI 层端到端/截图校验，覆盖模型广场、渠道创建、探测失败和移动端布局。
