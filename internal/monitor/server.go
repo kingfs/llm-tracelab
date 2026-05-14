@@ -539,26 +539,52 @@ type channelProbeResponse struct {
 }
 
 type channelUpsertRequest struct {
-	ID                 string            `json:"id"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description"`
-	BaseURL            string            `json:"base_url"`
-	ProviderPreset     string            `json:"provider_preset"`
-	ProtocolFamily     string            `json:"protocol_family"`
-	RoutingProfile     string            `json:"routing_profile"`
-	APIVersion         string            `json:"api_version"`
-	Deployment         string            `json:"deployment"`
-	Project            string            `json:"project"`
-	Location           string            `json:"location"`
-	ModelResource      string            `json:"model_resource"`
-	APIKey             string            `json:"api_key"`
-	Headers            map[string]string `json:"headers"`
-	Enabled            *bool             `json:"enabled"`
-	Priority           *int              `json:"priority"`
-	Weight             *float64          `json:"weight"`
-	CapacityHint       *float64          `json:"capacity_hint"`
-	ModelDiscovery     string            `json:"model_discovery"`
-	AllowUnknownModels *bool             `json:"allow_unknown_models"`
+	ID                 string                         `json:"id"`
+	Name               string                         `json:"name"`
+	Description        string                         `json:"description"`
+	BaseURL            string                         `json:"base_url"`
+	ProviderPreset     string                         `json:"provider_preset"`
+	ProtocolFamily     string                         `json:"protocol_family"`
+	RoutingProfile     string                         `json:"routing_profile"`
+	APIVersion         string                         `json:"api_version"`
+	Deployment         string                         `json:"deployment"`
+	Project            string                         `json:"project"`
+	Location           string                         `json:"location"`
+	ModelResource      string                         `json:"model_resource"`
+	APIKey             string                         `json:"api_key"`
+	Headers            map[string]channelHeaderUpdate `json:"headers"`
+	Enabled            *bool                          `json:"enabled"`
+	Priority           *int                           `json:"priority"`
+	Weight             *float64                       `json:"weight"`
+	CapacityHint       *float64                       `json:"capacity_hint"`
+	ModelDiscovery     string                         `json:"model_discovery"`
+	AllowUnknownModels *bool                          `json:"allow_unknown_models"`
+}
+
+type channelHeaderUpdate struct {
+	Value  string
+	Keep   bool
+	Delete bool
+}
+
+func (u *channelHeaderUpdate) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err == nil {
+		u.Value = value
+		return nil
+	}
+	var object struct {
+		Value  string `json:"value"`
+		Keep   bool   `json:"keep"`
+		Delete bool   `json:"delete"`
+	}
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+	u.Value = object.Value
+	u.Keep = object.Keep
+	u.Delete = object.Delete
+	return nil
 }
 
 type channelModelPatchRequest struct {
@@ -1178,7 +1204,8 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 		record.APIKeyHint = secretHint(req.APIKey)
 	}
 	if req.Headers != nil {
-		data, _ := json.Marshal(req.Headers)
+		headers := applyHeaderUpdates(existing.HeadersJSON, req.Headers)
+		data, _ := json.Marshal(headers)
 		record.HeadersJSON = string(data)
 	}
 	if req.Enabled != nil {
@@ -1371,6 +1398,28 @@ func redactHeaders(headers map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func applyHeaderUpdates(existingJSON string, updates map[string]channelHeaderUpdate) map[string]string {
+	out := map[string]string{}
+	if strings.TrimSpace(existingJSON) != "" {
+		_ = json.Unmarshal([]byte(existingJSON), &out)
+	}
+	next := map[string]string{}
+	for key, update := range updates {
+		name := strings.TrimSpace(key)
+		if name == "" || update.Delete {
+			continue
+		}
+		if update.Keep {
+			if value, ok := out[name]; ok {
+				next[name] = value
+			}
+			continue
+		}
+		next[name] = update.Value
+	}
+	return next
 }
 
 func isSecretHeader(key string) bool {

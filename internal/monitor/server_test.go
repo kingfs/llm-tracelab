@@ -776,6 +776,27 @@ func TestChannelManagementAPI(t *testing.T) {
 		t.Fatalf("patched.AllowUnknownModels = false, want preserved true")
 	}
 
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary", strings.NewReader(`{"headers":{"Authorization":{"keep":true},"X-Test":"updated","X-New":"value"}}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch headers status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "Bearer hidden") {
+		t.Fatalf("patch headers response leaked secret: %s", rr.Body.String())
+	}
+	patched, err = st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig(after headers) error = %v", err)
+	}
+	var patchedHeaders map[string]string
+	if err := json.Unmarshal([]byte(patched.HeadersJSON), &patchedHeaders); err != nil {
+		t.Fatalf("json.Unmarshal(headers) error = %v", err)
+	}
+	if patchedHeaders["Authorization"] != "Bearer hidden" || patchedHeaders["X-Test"] != "updated" || patchedHeaders["X-New"] != "value" {
+		t.Fatalf("patchedHeaders = %+v", patchedHeaders)
+	}
+
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/models", strings.NewReader(`{"model":"gpt-manual","display_name":"GPT Manual","enabled":true}`))
 	rr = httptest.NewRecorder()
 	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)

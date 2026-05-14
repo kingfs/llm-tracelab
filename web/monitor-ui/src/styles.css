@@ -1249,6 +1249,7 @@ a:focus-visible {
 
 :root[data-theme="light"] .filter-input,
 :root[data-theme="light"] .channel-form input,
+:root[data-theme="light"] .channel-form textarea,
 :root[data-theme="light"] .token-form input,
 :root[data-theme="light"] .auth-panel input {
   border-color: rgba(0, 0, 0, 0.12);
@@ -1302,6 +1303,7 @@ a:focus-visible {
 
   :root[data-theme="system"] .filter-input,
   :root[data-theme="system"] .channel-form input,
+  :root[data-theme="system"] .channel-form textarea,
   :root[data-theme="system"] .token-form input,
   :root[data-theme="system"] .auth-panel input {
     border-color: rgba(0, 0, 0, 0.12);
@@ -1393,7 +1395,8 @@ a:focus-visible {
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
-.channel-form input {
+.channel-form input,
+.channel-form textarea {
   min-height: 42px;
   width: 100%;
   border: 1px solid var(--line);
@@ -1401,6 +1404,19 @@ a:focus-visible {
   padding: 0 12px;
   background: rgba(2, 8, 23, 0.42);
   color: var(--text);
+}
+
+.channel-form textarea {
+  min-height: 112px;
+  padding: 10px 12px;
+  resize: vertical;
+  font-family: SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.channel-form-wide {
+  grid-column: 1 / -1;
 }
 
 .channel-form-check {

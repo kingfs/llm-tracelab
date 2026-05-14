@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, HomeIcon, InlineTag } from "../components/common/Badges";
@@ -15,6 +15,8 @@ export function ChannelDetailPage() {
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState("");
   const [modelDraft, setModelDraft] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState(() => emptyEditForm());
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const detail = useJSON(apiURL(apiPaths.channel(channelID), params), [channelID, windowValue, refreshTick]);
@@ -23,6 +25,13 @@ export function ChannelDetailPage() {
   const modelsUsage = channel.models_usage || [];
   const failures = channel.recent_failures || [];
   const trends = channel.trends || [];
+
+  useEffect(() => {
+    if (!detail.data) {
+      return;
+    }
+    setEditForm(editFormFromChannel(detail.data));
+  }, [detail.data]);
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -50,6 +59,20 @@ export function ChannelDetailPage() {
       reload();
     } catch (err) {
       setActionError(err.message || "Unable to update channel.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const saveChannel = async (event) => {
+    event.preventDefault();
+    setBusy("save-channel");
+    setActionError("");
+    try {
+      await patchJSON(apiPaths.channel(channelID), channelPayloadFromForm(editForm));
+      setEditOpen(false);
+      reload();
+    } catch (err) {
+      setActionError(err.message || "Unable to save channel.");
     } finally {
       setBusy("");
     }
@@ -110,6 +133,7 @@ export function ChannelDetailPage() {
               <HomeIcon />
             </Link>
             <button className="ghost-button" type="button" onClick={probe} disabled={busy === "probe"}>{busy === "probe" ? "Probing" : "Probe"}</button>
+            <button className="ghost-button" type="button" onClick={() => setEditOpen((open) => !open)}>{editOpen ? "Close edit" : "Edit"}</button>
             <button className="ghost-button" type="button" onClick={() => setChannelEnabled(!channel.enabled)} disabled={busy === "channel"}>{channel.enabled ? "Disable" : "Enable"}</button>
           </div>
           <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
@@ -143,6 +167,34 @@ export function ChannelDetailPage() {
       {actionError ? <EmptyState title="Channel action failed" detail={actionError} tone="danger" /> : null}
       {detail.error ? <EmptyState title="Unable to load channel" detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title="Loading channel" detail="Collecting channel configuration, models, and usage." /> : null}
+
+      {detail.data && editOpen ? (
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Configuration</p>
+              <h2>Edit channel</h2>
+            </div>
+          </div>
+          <form className="channel-form" onSubmit={saveChannel}>
+            <label>Name<input value={editForm.name} onChange={(event) => setEditValue(setEditForm, "name", event.target.value)} /></label>
+            <label>Base URL<input value={editForm.base_url} onChange={(event) => setEditValue(setEditForm, "base_url", event.target.value)} /></label>
+            <label>Provider preset<input value={editForm.provider_preset} onChange={(event) => setEditValue(setEditForm, "provider_preset", event.target.value)} /></label>
+            <label>API key<input type="password" value={editForm.api_key} onChange={(event) => setEditValue(setEditForm, "api_key", event.target.value)} placeholder={channel.api_key_hint ? `keep ${channel.api_key_hint}` : "unchanged"} /></label>
+            <label>Priority<input type="number" value={editForm.priority} onChange={(event) => setEditValue(setEditForm, "priority", event.target.value)} /></label>
+            <label>Weight<input type="number" step="0.1" value={editForm.weight} onChange={(event) => setEditValue(setEditForm, "weight", event.target.value)} /></label>
+            <label>Capacity<input type="number" step="0.1" value={editForm.capacity_hint} onChange={(event) => setEditValue(setEditForm, "capacity_hint", event.target.value)} /></label>
+            <label>Model discovery<input value={editForm.model_discovery} onChange={(event) => setEditValue(setEditForm, "model_discovery", event.target.value)} /></label>
+            <label className="channel-form-check"><input type="checkbox" checked={editForm.enabled} onChange={(event) => setEditValue(setEditForm, "enabled", event.target.checked)} /> Enabled</label>
+            <label className="channel-form-check"><input type="checkbox" checked={editForm.allow_unknown_models} onChange={(event) => setEditValue(setEditForm, "allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+            <label className="channel-form-wide">Headers<textarea value={editForm.headers_text} onChange={(event) => setEditValue(setEditForm, "headers_text", event.target.value)} spellCheck={false} /></label>
+            <div className="channel-form-actions">
+              <button className="ghost-button" type="button" onClick={() => setEditForm(editFormFromChannel(channel))}>Reset</button>
+              <button className="ghost-button active" type="submit" disabled={busy === "save-channel"}>{busy === "save-channel" ? "Saving" : "Save changes"}</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
 
       {detail.data ? (
         <>
@@ -218,6 +270,83 @@ function ChannelModelRow({ item, busy, onToggle }) {
       <button className="ghost-button" type="button" onClick={onToggle} disabled={busy}>{busy ? "Saving" : item.enabled ? "Disable" : "Enable"}</button>
     </div>
   );
+}
+
+function emptyEditForm() {
+  return {
+    name: "",
+    base_url: "",
+    provider_preset: "",
+    api_key: "",
+    priority: 0,
+    weight: 1,
+    capacity_hint: 1,
+    model_discovery: "list_models",
+    enabled: true,
+    allow_unknown_models: false,
+    headers_text: "",
+  };
+}
+
+function editFormFromChannel(channel = {}) {
+  const headers = channel.headers || {};
+  return {
+    name: channel.name || "",
+    base_url: channel.base_url || "",
+    provider_preset: channel.provider_preset || "",
+    api_key: "",
+    priority: channel.priority ?? 0,
+    weight: channel.weight ?? 1,
+    capacity_hint: channel.capacity_hint ?? 1,
+    model_discovery: channel.model_discovery || "list_models",
+    enabled: Boolean(channel.enabled),
+    allow_unknown_models: Boolean(channel.allow_unknown_models),
+    headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
+  };
+}
+
+function setEditValue(setEditForm, key, value) {
+  setEditForm((current) => ({ ...current, [key]: value }));
+}
+
+function channelPayloadFromForm(form) {
+  const payload = {
+    name: form.name,
+    base_url: form.base_url,
+    provider_preset: form.provider_preset,
+    priority: Number(form.priority || 0),
+    weight: Number(form.weight || 1),
+    capacity_hint: Number(form.capacity_hint || 1),
+    model_discovery: form.model_discovery,
+    enabled: Boolean(form.enabled),
+    allow_unknown_models: Boolean(form.allow_unknown_models),
+    headers: parseHeadersText(form.headers_text),
+  };
+  if (form.api_key.trim()) {
+    payload.api_key = form.api_key.trim();
+  }
+  return payload;
+}
+
+function parseHeadersText(value) {
+  const headers = {};
+  String(value || "").split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    const index = trimmed.indexOf(":");
+    if (index <= 0) {
+      return;
+    }
+    const key = trimmed.slice(0, index).trim();
+    const headerValue = trimmed.slice(index + 1).trim();
+    if (!key) {
+      return;
+    }
+    headers[key] = headerValue === "***" ? { keep: true } : headerValue;
+  });
+  return headers;
 }
 
 function UsageBars({ items }) {
