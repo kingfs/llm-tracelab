@@ -233,6 +233,8 @@ Current recommended support matrix:
 
 Anthropic example:
 
+The examples below use YAML to document field meanings for legacy compatibility and first-run bootstrap. For new or long-lived channel configuration, set the same fields in Monitor Web > Channels.
+
 ```yaml
 upstream:
   base_url: "https://api.anthropic.com"
@@ -456,7 +458,7 @@ Default mounts:
 
 The runtime image starts as `root` by default. This avoids common bind-mount permission failures when the host directory owner does not match a fixed in-container UID/GID, such as failing to create `/app/data/traces`.
 
-For external configuration, prefer mounting a config file and overriding runtime values through environment variables. Keep `debug.output_dir` on a stable path inside the mounted data volume.
+For external configuration, prefer mounted config files and environment variables for service startup settings such as ports, database, and output directories. Manage channels and models in Monitor Web so they are persisted to SQLite. Keep `debug.output_dir` on a stable path inside the mounted data volume.
 
 ## Developer Commands
 

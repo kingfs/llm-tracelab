@@ -260,6 +260,8 @@ MCP 与 proxy 复用同一套个人 token，客户端需要携带 `Authorization
 
 Anthropic 示例：
 
+下面仍用 YAML 展示字段含义，主要用于历史配置兼容和首次 bootstrap 参考；新建和长期维护渠道请在 Monitor Web 的 Channels 表单中配置同名字段。
+
 ```yaml
 upstream:
   base_url: "https://api.anthropic.com"
@@ -483,7 +485,7 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 
 运行镜像默认使用 `root` 用户启动。这是为了兼容最常见的 bind mount 场景，避免宿主机目录属主与容器内固定 UID/GID 不一致时出现 `permission denied`，例如无法创建 `/app/data/traces`。
 
-如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖 `upstream`、端口、输出目录；`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
+如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖端口、数据库、输出目录等服务启动参数；渠道和模型配置请在 Monitor Web 中维护并写入 SQLite。`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
 
 ## 开发命令
 
