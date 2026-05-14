@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { InlineTag } from "../components/common/Badges";
+import { InlineTag, PlusIcon } from "../components/common/Badges";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
@@ -88,7 +88,9 @@ export function TokensPage() {
             <span>Scope</span>
             <input id="token-scope" type="text" value={scope} onChange={(event) => setScope(event.target.value)} />
           </label>
-          <button className="ghost-button" type="submit" disabled={loading}>{loading ? "Creating" : "Create token"}</button>
+          <button className="icon-button token-create-button" type="submit" disabled={loading} title={loading ? "Creating token" : "Create token"} aria-label={loading ? "Creating token" : "Create token"}>
+            <PlusIcon />
+          </button>
         </form>
         {error ? <p className="auth-error">{error}</p> : null}
         {created?.token ? (

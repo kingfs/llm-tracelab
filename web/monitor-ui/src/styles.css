@@ -259,6 +259,11 @@ a {
   color: var(--text);
 }
 
+.token-create-button {
+  width: 44px;
+  height: 44px;
+}
+
 .token-result {
   display: grid;
   gap: 8px;
