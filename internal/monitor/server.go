@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
+	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -469,6 +470,96 @@ type upstreamBreakdownView struct {
 	FailedTraces   int                `json:"failed_traces"`
 }
 
+type channelListResponse struct {
+	Items       []channelItem `json:"items"`
+	RefreshedAt time.Time     `json:"refreshed_at"`
+}
+
+type channelItem struct {
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description,omitempty"`
+	BaseURL            string            `json:"base_url"`
+	ProviderPreset     string            `json:"provider_preset"`
+	ProtocolFamily     string            `json:"protocol_family"`
+	RoutingProfile     string            `json:"routing_profile"`
+	APIVersion         string            `json:"api_version,omitempty"`
+	Deployment         string            `json:"deployment,omitempty"`
+	Project            string            `json:"project,omitempty"`
+	Location           string            `json:"location,omitempty"`
+	ModelResource      string            `json:"model_resource,omitempty"`
+	APIKeyHint         string            `json:"api_key_hint,omitempty"`
+	Headers            map[string]string `json:"headers,omitempty"`
+	Enabled            bool              `json:"enabled"`
+	Priority           int               `json:"priority"`
+	Weight             float64           `json:"weight"`
+	CapacityHint       float64           `json:"capacity_hint"`
+	ModelDiscovery     string            `json:"model_discovery"`
+	AllowUnknownModels bool              `json:"allow_unknown_models"`
+	ModelCount         int               `json:"model_count"`
+	EnabledModelCount  int               `json:"enabled_model_count"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	LastProbeAt        time.Time         `json:"last_probe_at,omitempty"`
+	LastProbeStatus    string            `json:"last_probe_status,omitempty"`
+	LastProbeError     string            `json:"last_probe_error,omitempty"`
+}
+
+type channelModelsResponse struct {
+	Items       []channelModelItem `json:"items"`
+	RefreshedAt time.Time          `json:"refreshed_at"`
+}
+
+type channelModelItem struct {
+	Model       string    `json:"model"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Source      string    `json:"source"`
+	Enabled     bool      `json:"enabled"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	LastProbeAt time.Time `json:"last_probe_at,omitempty"`
+}
+
+type channelProbeResponse struct {
+	ChannelID       string    `json:"channel_id"`
+	Status          string    `json:"status"`
+	Models          []string  `json:"models"`
+	DiscoveredCount int       `json:"discovered_count"`
+	EnabledCount    int       `json:"enabled_count"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	ErrorText       string    `json:"error_text,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	CompletedAt     time.Time `json:"completed_at"`
+	DurationMs      int64     `json:"duration_ms"`
+}
+
+type channelUpsertRequest struct {
+	ID                 string            `json:"id"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	BaseURL            string            `json:"base_url"`
+	ProviderPreset     string            `json:"provider_preset"`
+	ProtocolFamily     string            `json:"protocol_family"`
+	RoutingProfile     string            `json:"routing_profile"`
+	APIVersion         string            `json:"api_version"`
+	Deployment         string            `json:"deployment"`
+	Project            string            `json:"project"`
+	Location           string            `json:"location"`
+	ModelResource      string            `json:"model_resource"`
+	APIKey             string            `json:"api_key"`
+	Headers            map[string]string `json:"headers"`
+	Enabled            *bool             `json:"enabled"`
+	Priority           *int              `json:"priority"`
+	Weight             *float64          `json:"weight"`
+	CapacityHint       *float64          `json:"capacity_hint"`
+	ModelDiscovery     string            `json:"model_discovery"`
+	AllowUnknownModels bool              `json:"allow_unknown_models"`
+}
+
+type channelModelPatchRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	var opt RouteOptions
 	if len(opts) > 0 {
@@ -486,6 +577,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.Handle("/", appHandler())
@@ -653,6 +746,353 @@ func appHandler() http.Handler {
 		}
 		serveEmbeddedIndex(distFS, w, r)
 	})
+}
+
+func channelListCreateAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			channels, err := st.ListChannelConfigs()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			models, err := st.ListChannelModels("", false)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			counts := channelModelCounts(models)
+			items := make([]channelItem, 0, len(channels))
+			for _, record := range channels {
+				items = append(items, channelItemFromRecord(record, counts[record.ID], enabledChannelModelCount(models, record.ID)))
+			}
+			writeJSON(w, http.StatusOK, channelListResponse{Items: items, RefreshedAt: time.Now().UTC()})
+		case http.MethodPost:
+			var req channelUpsertRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel payload"})
+				return
+			}
+			record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, store.ChannelConfigRecord{}))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, channelItemFromRecord(record, 0, 0))
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		rest := strings.TrimPrefix(pathClean(r.URL.Path), "/api/channels/")
+		parts := strings.Split(strings.Trim(rest, "/"), "/")
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			http.NotFound(w, r)
+			return
+		}
+		channelID := parts[0]
+		if len(parts) == 1 {
+			handleChannelConfig(w, r, st, channelID)
+			return
+		}
+		switch parts[1] {
+		case "probe":
+			if r.Method != http.MethodPost {
+				http.NotFound(w, r)
+				return
+			}
+			result, err := channel.NewService(st).Probe(channelID)
+			if err != nil && result.Status == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			status := http.StatusOK
+			if err != nil {
+				status = http.StatusBadGateway
+			}
+			writeJSON(w, status, channelProbeResponseFromResult(result))
+		case "models":
+			if len(parts) == 2 {
+				handleChannelModels(w, r, st, channelID)
+				return
+			}
+			if len(parts) == 3 {
+				handleChannelModel(w, r, st, channelID, parts[2])
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store, channelID string) {
+	switch r.Method {
+	case http.MethodGet:
+		record, err := st.GetChannelConfig(channelID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		models, err := st.ListChannelModels(channelID, false)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID)))
+	case http.MethodPatch:
+		existing, err := st.GetChannelConfig(channelID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		var req channelUpsertRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid channel payload"})
+			return
+		}
+		req.ID = channelID
+		record, err := st.UpsertChannelConfig(channelRecordFromRequest(req, existing))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		models, _ := st.ListChannelModels(channelID, false)
+		writeJSON(w, http.StatusOK, channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID)))
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store, channelID string) {
+	if r.Method != http.MethodGet {
+		http.NotFound(w, r)
+		return
+	}
+	models, err := st.ListChannelModels(channelID, false)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := make([]channelModelItem, 0, len(models))
+	for _, model := range models {
+		items = append(items, channelModelItemFromRecord(model))
+	}
+	writeJSON(w, http.StatusOK, channelModelsResponse{Items: items, RefreshedAt: time.Now().UTC()})
+}
+
+func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store, channelID string, model string) {
+	if r.Method != http.MethodPatch {
+		http.NotFound(w, r)
+		return
+	}
+	var req channelModelPatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
+		return
+	}
+	if err := st.SetChannelModelEnabled(channelID, model, req.Enabled); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelConfigRecord) store.ChannelConfigRecord {
+	record := existing
+	if strings.TrimSpace(req.ID) != "" {
+		record.ID = strings.TrimSpace(req.ID)
+	}
+	if strings.TrimSpace(req.Name) != "" {
+		record.Name = strings.TrimSpace(req.Name)
+	}
+	if strings.TrimSpace(req.Description) != "" {
+		record.Description = strings.TrimSpace(req.Description)
+	}
+	if strings.TrimSpace(req.BaseURL) != "" {
+		record.BaseURL = strings.TrimSpace(req.BaseURL)
+	}
+	if strings.TrimSpace(req.ProviderPreset) != "" {
+		record.ProviderPreset = strings.TrimSpace(req.ProviderPreset)
+	}
+	if strings.TrimSpace(req.ProtocolFamily) != "" {
+		record.ProtocolFamily = strings.TrimSpace(req.ProtocolFamily)
+	}
+	if strings.TrimSpace(req.RoutingProfile) != "" {
+		record.RoutingProfile = strings.TrimSpace(req.RoutingProfile)
+	}
+	record.APIVersion = valueOrExisting(req.APIVersion, record.APIVersion)
+	record.Deployment = valueOrExisting(req.Deployment, record.Deployment)
+	record.Project = valueOrExisting(req.Project, record.Project)
+	record.Location = valueOrExisting(req.Location, record.Location)
+	record.ModelResource = valueOrExisting(req.ModelResource, record.ModelResource)
+	if strings.TrimSpace(req.APIKey) != "" {
+		record.APIKeyCiphertext = []byte(strings.TrimSpace(req.APIKey))
+		record.APIKeyHint = secretHint(req.APIKey)
+	}
+	if req.Headers != nil {
+		data, _ := json.Marshal(req.Headers)
+		record.HeadersJSON = string(data)
+	}
+	if req.Enabled != nil {
+		record.Enabled = *req.Enabled
+	} else if record.ID == "" {
+		record.Enabled = true
+	}
+	if req.Priority != nil {
+		record.Priority = *req.Priority
+	}
+	if req.Weight != nil {
+		record.Weight = *req.Weight
+	}
+	if req.CapacityHint != nil {
+		record.CapacityHint = *req.CapacityHint
+	}
+	if strings.TrimSpace(req.ModelDiscovery) != "" {
+		record.ModelDiscovery = strings.TrimSpace(req.ModelDiscovery)
+	}
+	record.AllowUnknownModels = req.AllowUnknownModels
+	return record
+}
+
+func channelItemFromRecord(record store.ChannelConfigRecord, modelCount int, enabledModelCount int) channelItem {
+	headers := map[string]string{}
+	if strings.TrimSpace(record.HeadersJSON) != "" {
+		_ = json.Unmarshal([]byte(record.HeadersJSON), &headers)
+	}
+	return channelItem{
+		ID:                 record.ID,
+		Name:               record.Name,
+		Description:        record.Description,
+		BaseURL:            record.BaseURL,
+		ProviderPreset:     record.ProviderPreset,
+		ProtocolFamily:     record.ProtocolFamily,
+		RoutingProfile:     record.RoutingProfile,
+		APIVersion:         record.APIVersion,
+		Deployment:         record.Deployment,
+		Project:            record.Project,
+		Location:           record.Location,
+		ModelResource:      record.ModelResource,
+		APIKeyHint:         record.APIKeyHint,
+		Headers:            redactHeaders(headers),
+		Enabled:            record.Enabled,
+		Priority:           record.Priority,
+		Weight:             record.Weight,
+		CapacityHint:       record.CapacityHint,
+		ModelDiscovery:     record.ModelDiscovery,
+		AllowUnknownModels: record.AllowUnknownModels,
+		ModelCount:         modelCount,
+		EnabledModelCount:  enabledModelCount,
+		CreatedAt:          record.CreatedAt,
+		UpdatedAt:          record.UpdatedAt,
+		LastProbeAt:        record.LastProbeAt,
+		LastProbeStatus:    record.LastProbeStatus,
+		LastProbeError:     record.LastProbeError,
+	}
+}
+
+func channelModelItemFromRecord(record store.ChannelModelRecord) channelModelItem {
+	return channelModelItem{
+		Model:       record.Model,
+		DisplayName: record.DisplayName,
+		Source:      record.Source,
+		Enabled:     record.Enabled,
+		FirstSeenAt: record.FirstSeenAt,
+		LastSeenAt:  record.LastSeenAt,
+		LastProbeAt: record.LastProbeAt,
+	}
+}
+
+func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResponse {
+	return channelProbeResponse{
+		ChannelID:       result.ChannelID,
+		Status:          result.Status,
+		Models:          result.Models,
+		DiscoveredCount: result.DiscoveredCount,
+		EnabledCount:    result.EnabledCount,
+		Endpoint:        result.Endpoint,
+		ErrorText:       result.ErrorText,
+		StartedAt:       result.StartedAt,
+		CompletedAt:     result.CompletedAt,
+		DurationMs:      result.DurationMs,
+	}
+}
+
+func channelModelCounts(models []store.ChannelModelRecord) map[string]int {
+	counts := map[string]int{}
+	for _, model := range models {
+		counts[model.ChannelID]++
+	}
+	return counts
+}
+
+func enabledChannelModelCount(models []store.ChannelModelRecord, channelID string) int {
+	count := 0
+	for _, model := range models {
+		if model.ChannelID == channelID && model.Enabled {
+			count++
+		}
+	}
+	return count
+}
+
+func redactHeaders(headers map[string]string) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, value := range headers {
+		if isSecretHeader(key) && strings.TrimSpace(value) != "" {
+			out[key] = "***"
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func isSecretHeader(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return key == "authorization" || strings.Contains(key, "api-key") || strings.Contains(key, "apikey") || strings.Contains(key, "token")
+}
+
+func valueOrExisting(value string, existing string) string {
+	if strings.TrimSpace(value) == "" {
+		return existing
+	}
+	return strings.TrimSpace(value)
+}
+
+func secretHint(secret string) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return ""
+	}
+	if len(secret) <= 8 {
+		return secret
+	}
+	return secret[:3] + "..." + secret[len(secret)-4:]
 }
 
 func upstreamListAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {

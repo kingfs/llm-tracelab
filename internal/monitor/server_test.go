@@ -667,6 +667,96 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 	}
 }
 
+func TestChannelManagementAPI(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("request path = %q, want /v1/models", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"},{"id":"gpt-4.1"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	createBody := strings.NewReader(`{
+		"id":"openai-primary",
+		"name":"OpenAI Primary",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_key":"sk-secret-value",
+		"headers":{"Authorization":"Bearer hidden","X-Test":"visible"},
+		"enabled":true,
+		"priority":100,
+		"weight":1,
+		"capacity_hint":1,
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/channels", createBody)
+	rr := httptest.NewRecorder()
+	channelListCreateAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-secret-value") || strings.Contains(rr.Body.String(), "Bearer hidden") {
+		t.Fatalf("create response leaked secret: %s", rr.Body.String())
+	}
+	var created channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("json.Unmarshal(created) error = %v", err)
+	}
+	if created.APIKeyHint == "" || created.Headers["Authorization"] != "***" || created.Headers["X-Test"] != "visible" {
+		t.Fatalf("created channel redaction = %+v", created)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var probe channelProbeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &probe); err != nil {
+		t.Fatalf("json.Unmarshal(probe) error = %v", err)
+	}
+	if probe.Status != "success" || probe.DiscoveredCount != 2 {
+		t.Fatalf("probe = %+v", probe)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/channels/openai-primary/models", nil)
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("models status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var models channelModelsResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &models); err != nil {
+		t.Fatalf("json.Unmarshal(models) error = %v", err)
+	}
+	if len(models.Items) != 2 {
+		t.Fatalf("len(models.Items) = %d, want 2", len(models.Items))
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	enabledModels, err := st.ListChannelModels("openai-primary", true)
+	if err != nil {
+		t.Fatalf("ListChannelModels() error = %v", err)
+	}
+	if len(enabledModels) != 1 || enabledModels[0].Model != "gpt-4.1" {
+		t.Fatalf("enabledModels = %#v", enabledModels)
+	}
+}
+
 func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
 	t.Parallel()
 
