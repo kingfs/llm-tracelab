@@ -697,8 +697,9 @@ Headers 编辑：
 - 已完成渠道编辑首版：Channel Detail 支持编辑基础字段、API key、权重、探测模式和 headers；headers 支持字符串更新与 `{ "keep": true }` 保留 redacted secret，避免 UI 回传 `***` 覆盖真实密钥。
 - 已完成 Trace detail 入口衔接：selected upstream 同时提供 Open Channel 与 Open Upstream，前者面向托管渠道配置与分析，后者保留旧运行时诊断视角。
 - 已显式标记 secret 存储模式：渠道 API 返回 `secret_storage_mode=plaintext-local`，UI 在渠道卡片与详情页提示本地 SQLite 明文存储风险。
+- 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 
 下一步建议：
 
 1. 引入本地 secret 加密，可选本地 master key 或 OS keyring。
-2. 增加 UI 层端到端/截图校验，覆盖模型广场、渠道创建、探测失败和移动端布局。
+2. 扩展 UI 端到端校验，增加真实 Go monitor server fixture、探测失败截图和移动端布局截图归档。

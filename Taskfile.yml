@@ -16,6 +16,13 @@ tasks:
       - bun install --frozen-lockfile
       - bun run build
 
+  ui:test:
+    desc: Run browser smoke tests for the Monitor UI
+    dir: web/monitor-ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run test:ui
+
   generate:ent:
     desc: Generate ent control-plane DAO code
     cmds:

@@ -7,3 +7,5 @@ node_modules/
 docker-data/
 .codex
 config/config.dev.yaml
+web/monitor-ui/test-results/
+web/monitor-ui/playwright-report/

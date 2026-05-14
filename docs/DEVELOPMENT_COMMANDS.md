@@ -46,6 +46,7 @@ task check:full
 ```bash
 task build:go
 task ui:build
+task ui:test
 task build:all
 task build
 ```
@@ -56,11 +57,12 @@ For monitor UI changes, run:
 
 ```bash
 task ui:build
+task ui:test
 go test ./internal/monitor
 task build:go
 ```
 
-`go test ./internal/monitor` includes an embedded UI smoke test that verifies the SPA entry routes and built JS/CSS assets are served from Go `embed.FS`.
+`task ui:test` runs Playwright browser smoke tests with mocked Monitor APIs for the model/channel pages and trace routing links. `go test ./internal/monitor` includes an embedded UI smoke test that verifies the SPA entry routes and built JS/CSS assets are served from Go `embed.FS`.
 
 ## Benchmarks
 
@@ -96,7 +98,7 @@ For AI agents, prefer these defaults:
 - Small code change: `task check:quick`
 - End-to-end behavior change: `task test:e2e`
 - Record format, replay, or monitor parsing change: `go test ./pkg/recordfile ./pkg/replay ./internal/monitor ./unittest`
-- Monitor UI source or embedded asset change: `task ui:build`, `go test ./internal/monitor`, and `task build:go`
+- Monitor UI source or embedded asset change: `task ui:build`, `task ui:test`, `go test ./internal/monitor`, and `task build:go`
 - Proxy, router, recorder, or store change: `go test ./internal/proxy ./internal/router ./internal/recorder ./internal/store` and `task test:race`
 - Performance-sensitive change: `task bench:core`
 - Before handing off a broad change: `task check:full`

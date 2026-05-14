@@ -564,7 +564,7 @@
   }
 
   .app-sidebar {
-    position: sticky;
+    position: relative;
     z-index: 20;
     height: auto;
     padding: 12px;
