@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
@@ -119,6 +120,26 @@ type sessionBreakdownView struct {
 	Models       []sessionCountItem `json:"models"`
 	Endpoints    []sessionCountItem `json:"endpoints"`
 	FailedTraces int                `json:"failed_traces"`
+}
+
+type providerPresetResponse struct {
+	Items    []string                   `json:"items"`
+	Presets  []providerPresetItem       `json:"presets"`
+	Defaults providerPresetFormDefaults `json:"defaults"`
+}
+
+type providerPresetItem struct {
+	ID              string   `json:"id"`
+	ProtocolFamily  string   `json:"protocol_family"`
+	RoutingProfile  string   `json:"routing_profile"`
+	SupportLevel    string   `json:"support_level"`
+	AllowedProfiles []string `json:"allowed_profiles"`
+}
+
+type providerPresetFormDefaults struct {
+	ProtocolFamilies []string `json:"protocol_families"`
+	RoutingProfiles  []string `json:"routing_profiles"`
+	ModelDiscovery   []string `json:"model_discovery"`
 }
 
 type sessionCountItem struct {
@@ -912,28 +933,48 @@ func providerPresetAPIHandler() http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string][]string{"items": []string{
-			"alibaba",
-			"anthropic",
-			"azure_openai",
-			"baseten",
-			"cerebras",
-			"deepseek",
-			"fireworks",
-			"github_models",
-			"google_genai",
-			"groq",
-			"hugging_face",
-			"moonshot",
-			"nvidia_nim",
-			"openai",
-			"openrouter",
-			"perplexity",
-			"together",
-			"vertex",
-			"vllm",
-			"xai",
-		}})
+		matrix := upstream.PresetSupportMatrix()
+		ids := make([]string, 0, len(matrix))
+		for id := range matrix {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		items := make([]providerPresetItem, 0, len(ids))
+		for _, id := range ids {
+			spec := matrix[id]
+			allowed := append([]string(nil), spec.AllowedProfiles...)
+			sort.Strings(allowed)
+			items = append(items, providerPresetItem{
+				ID:              id,
+				ProtocolFamily:  spec.ProtocolFamily,
+				RoutingProfile:  spec.RoutingProfile,
+				SupportLevel:    spec.SupportLevel,
+				AllowedProfiles: allowed,
+			})
+		}
+		writeJSON(w, http.StatusOK, providerPresetResponse{
+			Items:   ids,
+			Presets: items,
+			Defaults: providerPresetFormDefaults{
+				ProtocolFamilies: []string{
+					upstream.ProtocolFamilyOpenAICompatible,
+					upstream.ProtocolFamilyAnthropicMessages,
+					upstream.ProtocolFamilyGoogleGenAI,
+					upstream.ProtocolFamilyVertexNative,
+				},
+				RoutingProfiles: []string{
+					upstream.RoutingProfileOpenAIDefault,
+					upstream.RoutingProfileAzureOpenAIV1,
+					upstream.RoutingProfileAzureOpenAIDeploy,
+					upstream.RoutingProfileVLLMOpenAI,
+					upstream.RoutingProfileAnthropicDefault,
+					upstream.RoutingProfileGoogleAIStudio,
+					upstream.RoutingProfileVertexExpress,
+					upstream.RoutingProfileVertexProject,
+				},
+				ModelDiscovery: []string{"list_models", "disabled"},
+			},
+		})
 	}
 }
 

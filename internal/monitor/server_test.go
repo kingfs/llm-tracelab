@@ -91,6 +91,37 @@ func syncStore(t *testing.T, st *store.Store) {
 	}
 }
 
+func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/provider-presets", nil)
+	rr := httptest.NewRecorder()
+	providerPresetAPIHandler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var payload providerPresetResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) == 0 || len(payload.Presets) == 0 {
+		t.Fatalf("payload missing presets: %+v", payload)
+	}
+	byID := map[string]providerPresetItem{}
+	for _, item := range payload.Presets {
+		byID[item.ID] = item
+	}
+	if byID["openai"].ProtocolFamily != "openai_compatible" || byID["openai"].RoutingProfile != "openai_default" {
+		t.Fatalf("openai preset = %+v", byID["openai"])
+	}
+	if got := strings.Join(byID["azure_openai"].AllowedProfiles, ","); !strings.Contains(got, "azure_openai_v1") || !strings.Contains(got, "azure_openai_deployment") {
+		t.Fatalf("azure_openai allowed profiles = %q", got)
+	}
+	if got := strings.Join(byID["vertex"].AllowedProfiles, ","); !strings.Contains(got, "vertex_express") || !strings.Contains(got, "vertex_project_location") {
+		t.Fatalf("vertex allowed profiles = %q", got)
+	}
+}
+
 func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	t.Parallel()
 

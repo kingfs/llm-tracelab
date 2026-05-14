@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: channelListPayload() });
     }
     if (path === "/api/provider-presets") {
-      return route.fulfill({ json: { items: ["openai", "openrouter", "anthropic", "google_genai"] } });
+      return route.fulfill({ json: providerPresetPayload() });
     }
     if (path === "/api/secrets/local-key" && method === "GET" && !url.searchParams.has("export")) {
       return route.fulfill({ json: localSecretPayload() });
@@ -89,6 +89,9 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await page.getByRole("button", { name: "New channel" }).click();
   await expect(page.getByRole("heading", { name: "Create channel" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
+  await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
@@ -102,6 +105,8 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await expect(page.getByLabel("Channel enabled")).toBeVisible();
   await expect(page.locator(".channel-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
   await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
+  await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await page.getByRole("button", { name: "Cancel" }).click();
 
@@ -172,12 +177,39 @@ function channelListPayload() {
   };
 }
 
+function providerPresetPayload() {
+  return {
+    items: ["anthropic", "azure_openai", "google_genai", "openai", "openrouter", "vertex", "vllm"],
+    presets: [
+      { id: "anthropic", protocol_family: "anthropic_messages", routing_profile: "anthropic_default", support_level: "verified", allowed_profiles: ["anthropic_default"] },
+      { id: "azure_openai", protocol_family: "openai_compatible", routing_profile: "", support_level: "verified", allowed_profiles: ["azure_openai_v1", "azure_openai_deployment"] },
+      { id: "google_genai", protocol_family: "google_genai", routing_profile: "google_ai_studio", support_level: "verified", allowed_profiles: ["google_ai_studio"] },
+      { id: "openai", protocol_family: "openai_compatible", routing_profile: "openai_default", support_level: "verified", allowed_profiles: ["openai_default"] },
+      { id: "openrouter", protocol_family: "openai_compatible", routing_profile: "openai_default", support_level: "verified", allowed_profiles: ["openai_default"] },
+      { id: "vertex", protocol_family: "vertex_native", routing_profile: "", support_level: "verified", allowed_profiles: ["vertex_express", "vertex_project_location"] },
+      { id: "vllm", protocol_family: "openai_compatible", routing_profile: "vllm_openai", support_level: "verified", allowed_profiles: ["vllm_openai"] },
+    ],
+    defaults: {
+      protocol_families: ["openai_compatible", "anthropic_messages", "google_genai", "vertex_native"],
+      routing_profiles: ["openai_default", "azure_openai_v1", "azure_openai_deployment", "vllm_openai", "anthropic_default", "google_ai_studio", "vertex_express", "vertex_project_location"],
+      model_discovery: ["list_models", "disabled"],
+    },
+  };
+}
+
 function channelDetailPayload() {
   return {
     id: "openai-primary",
     name: "OpenAI Primary",
     base_url: "https://api.openai.example/v1",
     provider_preset: "openai",
+    protocol_family: "openai_compatible",
+    routing_profile: "openai_default",
+    api_version: "",
+    deployment: "",
+    project: "",
+    location: "",
+    model_resource: "",
     api_key_hint: "sk-...test",
     secret_storage_mode: "encrypted-local",
     headers: { Authorization: "***", "X-Test": "visible" },

@@ -713,11 +713,12 @@ Headers 编辑：
 - 已调整模型与路由页面语义：Models 页面仅展示当前窗口内有流量的模型；Routing 页面改为 selected route 记录视角，展示模型、所选渠道、状态、token、duration、TTFT 等路由决策结果。
 - 已修正 light theme 卡片背景：渠道卡、模型卡、图表卡、探测卡和空状态随主题切换。
 - 已完成 Channel Detail 编辑表单弹窗化：编辑入口不再在详情页中插入内联表单，启用/禁用继续由顶部开关负责，基础字段默认可见，路由参数、探测模式和 headers 收入高级选项。
+- 已完成渠道高级配置最小结构化：`/api/provider-presets` 返回 resolver 的 provider support matrix；Create/Edit 高级区使用结构化协议族、routing profile、model discovery 下拉，并按 Azure/Anthropic/Vertex profile 展开 API version、deployment、project、location、model resource 等必要字段。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 - 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路，并覆盖本地失败探测提示。
 - 已按产品取舍跳过渠道导入/导出能力，不作为 v1 必做项。
 
 下一步建议：
 
-1. 补齐渠道高级配置字段的最小结构化输入：协议族、routing profile、Azure/Gemini/Vertex 相关字段按 provider preset 展开。
-2. 继续打磨 Routing 页面筛选能力：按 model、channel、status、latency/token 区间筛选 selected route 记录，减少排查时跳转后台日志的需要。
+1. 继续打磨 Routing 页面筛选能力：按 model、channel、status、latency/token 区间筛选 selected route 记录，减少排查时跳转后台日志的需要。
+2. 补齐配置源可见性：在 Channel 卡片/详情中明确 DB、bootstrap、manual/static/discovered 来源，降低 DB 优先后用户对 YAML 修改不生效的困惑。

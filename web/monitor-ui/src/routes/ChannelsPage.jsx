@@ -14,6 +14,13 @@ const DEFAULT_FORM = {
   name: "",
   base_url: "",
   provider_preset: "openai",
+  protocol_family: "openai_compatible",
+  routing_profile: "openai_default",
+  api_version: "",
+  deployment: "",
+  project: "",
+  location: "",
+  model_resource: "",
   api_key: "",
   enabled: true,
   priority: 100,
@@ -106,7 +113,7 @@ export function ChannelsPage() {
       ) : null}
       {formOpen ? (
         <CreateChannelDialog
-          presets={presets.data?.items || []}
+          presetData={presets.data}
           onClose={() => setFormOpen(false)}
           onCreated={() => {
             setFormOpen(false);
@@ -118,11 +125,15 @@ export function ChannelsPage() {
   );
 }
 
-function CreateChannelDialog({ presets = [], onClose, onCreated }) {
+function CreateChannelDialog({ presetData, onClose, onCreated }) {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
+  const updateForm = (key, value) => {
+    setForm((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -149,18 +160,16 @@ function CreateChannelDialog({ presets = [], onClose, onCreated }) {
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
         <div className="channel-form channel-form-modal">
-          <label>Name<input required value={form.name} onChange={(event) => setFormValue(setForm, "name", event.target.value)} placeholder="OpenAI Primary" /></label>
-          <label>Provider preset<select value={form.provider_preset} onChange={(event) => setFormValue(setForm, "provider_preset", event.target.value)}>{providerOptions(presets).map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
-          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => setFormValue(setForm, "base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
-          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => setFormValue(setForm, "api_key", event.target.value)} placeholder="sk-..." /></label>
-          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => setFormValue(setForm, "allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+          <label>Name<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
+          <label>Provider preset<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
+          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
+          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
         </div>
         <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
         {advancedOpen ? (
           <div className="channel-form channel-form-modal">
-            <label>Priority<input type="number" value={form.priority} onChange={(event) => setFormValue(setForm, "priority", event.target.value)} /></label>
-            <label>Weight<input type="number" step="0.1" value={form.weight} onChange={(event) => setFormValue(setForm, "weight", event.target.value)} /></label>
-            <label>Capacity<input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => setFormValue(setForm, "capacity_hint", event.target.value)} /></label>
+            <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
           </div>
         ) : null}
         {error ? <p className="auth-error">{error}</p> : null}
@@ -283,10 +292,6 @@ function ChannelCard({ item, windowValue, onRefresh }) {
   );
 }
 
-function providerOptions(presets) {
-  return (presets.length ? presets : ["openai", "openrouter", "anthropic", "google_genai", "azure_openai", "vertex", "vllm"]).slice().sort();
-}
-
 function buildChannelTrendItems(items) {
   const times = [];
   const byTime = new Map();
@@ -313,8 +318,68 @@ function Metric({ label, value }) {
   );
 }
 
-function setFormValue(setForm, key, value) {
-  setForm((current) => ({ ...current, [key]: value }));
+export function ProviderAdvancedFields({ form, presetState, onChange, includeHeaders = false }) {
+  const discoveryOptions = presetState.modelDiscoveryOptions.length ? presetState.modelDiscoveryOptions : ["list_models", "disabled"];
+  return (
+    <>
+      <label>Protocol family<select value={form.protocol_family || ""} onChange={(event) => onChange("protocol_family", event.target.value)}>{presetState.protocolOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <label>Routing profile<select value={form.routing_profile || ""} onChange={(event) => onChange("routing_profile", event.target.value)}>{presetState.routingOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      {presetState.needsAPIVersion ? <label>API version<input value={form.api_version || ""} onChange={(event) => onChange("api_version", event.target.value)} placeholder={presetState.apiVersionPlaceholder} /></label> : null}
+      {presetState.needsDeployment ? <label>Deployment<input value={form.deployment || ""} onChange={(event) => onChange("deployment", event.target.value)} placeholder="gpt-4o-mini" /></label> : null}
+      {presetState.needsProject ? <label>Project<input value={form.project || ""} onChange={(event) => onChange("project", event.target.value)} placeholder="my-gcp-project" /></label> : null}
+      {presetState.needsLocation ? <label>Location<input value={form.location || ""} onChange={(event) => onChange("location", event.target.value)} placeholder="us-central1" /></label> : null}
+      {presetState.needsModelResource ? <label className="channel-form-wide">Model resource<input value={form.model_resource || ""} onChange={(event) => onChange("model_resource", event.target.value)} placeholder="publishers/google/models/gemini-2.5-flash" /></label> : null}
+      <label>Model discovery<select value={form.model_discovery || "list_models"} onChange={(event) => onChange("model_discovery", event.target.value)}>{discoveryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      <label>Priority<input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
+      <label>Weight<input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
+      <label>Capacity<input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
+      {includeHeaders ? <label className="channel-form-wide">Headers<textarea value={form.headers_text} onChange={(event) => onChange("headers_text", event.target.value)} spellCheck={false} /></label> : null}
+    </>
+  );
+}
+
+export function buildPresetState(presetData, providerPreset, routingProfile) {
+  const presets = Array.isArray(presetData?.presets) ? presetData.presets : [];
+  const byID = new Map(presets.map((item) => [item.id, item]));
+  const fallbackOptions = ["openai", "openrouter", "anthropic", "google_genai", "azure_openai", "vertex", "vllm"];
+  const options = (Array.isArray(presetData?.items) && presetData.items.length ? presetData.items : fallbackOptions).slice().sort();
+  const spec = byID.get(providerPreset) || {};
+  const defaultProtocolOptions = presetData?.defaults?.protocol_families || ["openai_compatible", "anthropic_messages", "google_genai", "vertex_native"];
+  const defaultRoutingOptions = presetData?.defaults?.routing_profiles || ["openai_default", "azure_openai_v1", "azure_openai_deployment", "vllm_openai", "anthropic_default", "google_ai_studio", "vertex_express", "vertex_project_location"];
+  const protocolOptions = uniqueSorted([spec.protocol_family, ...defaultProtocolOptions].filter(Boolean));
+  const allowedProfiles = Array.isArray(spec.allowed_profiles) && spec.allowed_profiles.length ? spec.allowed_profiles : defaultRoutingOptions;
+  const routingOptions = uniqueSorted([routingProfile, spec.routing_profile, ...allowedProfiles].filter(Boolean));
+  const effectiveProfile = routingProfile || spec.routing_profile || routingOptions[0] || "";
+  return {
+    options,
+    spec,
+    protocolOptions,
+    routingOptions,
+    modelDiscoveryOptions: presetData?.defaults?.model_discovery || ["list_models", "disabled"],
+    needsAPIVersion: effectiveProfile.startsWith("azure_openai") || spec.protocol_family === "anthropic_messages",
+    needsDeployment: effectiveProfile === "azure_openai_deployment",
+    needsProject: effectiveProfile === "vertex_project_location",
+    needsLocation: effectiveProfile === "vertex_project_location",
+    needsModelResource: effectiveProfile === "vertex_express" || effectiveProfile === "vertex_project_location",
+    apiVersionPlaceholder: spec.protocol_family === "anthropic_messages" ? "2023-06-01" : "preview",
+  };
+}
+
+export function normalizePresetSelection(form, presetData, changedKey) {
+  if (changedKey !== "provider_preset") {
+    return form;
+  }
+  const spec = (presetData?.presets || []).find((item) => item.id === form.provider_preset) || {};
+  const allowedProfiles = Array.isArray(spec.allowed_profiles) ? spec.allowed_profiles : [];
+  return {
+    ...form,
+    protocol_family: spec.protocol_family || form.protocol_family || "",
+    routing_profile: spec.routing_profile || allowedProfiles[0] || form.routing_profile || "",
+  };
+}
+
+function uniqueSorted(values) {
+  return Array.from(new Set(values.filter(Boolean))).sort();
 }
 
 function normalizeChannelPayload(form) {

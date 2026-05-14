@@ -33,14 +33,14 @@ const (
 	DefaultAnthropicAPIVersion      = "2023-06-01"
 )
 
-type providerPresetSpec struct {
+type ProviderPresetSpec struct {
 	ProtocolFamily  string
 	RoutingProfile  string
 	SupportLevel    string
 	AllowedProfiles []string
 }
 
-var providerPresetRegistry = map[string]providerPresetSpec{
+var providerPresetRegistry = map[string]ProviderPresetSpec{
 	"alibaba":          {ProtocolFamily: ProtocolFamilyOpenAICompatible, RoutingProfile: RoutingProfileOpenAIDefault, SupportLevel: "compatible", AllowedProfiles: []string{RoutingProfileOpenAIDefault}},
 	"anthropic":        {ProtocolFamily: ProtocolFamilyAnthropicMessages, RoutingProfile: RoutingProfileAnthropicDefault, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAnthropicDefault}},
 	"azure":            {ProtocolFamily: ProtocolFamilyOpenAICompatible, SupportLevel: "verified", AllowedProfiles: []string{RoutingProfileAzureOpenAIV1, RoutingProfileAzureOpenAIDeploy}},
@@ -262,8 +262,8 @@ func validateResolvedPreset(resolved ResolvedUpstream) error {
 	return fmt.Errorf("upstream.provider_preset=%q does not support routing_profile=%q", resolved.ProviderPreset, resolved.RoutingProfile)
 }
 
-func PresetSupportMatrix() map[string]providerPresetSpec {
-	out := make(map[string]providerPresetSpec, len(providerPresetRegistry))
+func PresetSupportMatrix() map[string]ProviderPresetSpec {
+	out := make(map[string]ProviderPresetSpec, len(providerPresetRegistry))
 	for key, value := range providerPresetRegistry {
 		out[key] = value
 	}

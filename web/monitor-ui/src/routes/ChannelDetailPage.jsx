@@ -9,6 +9,7 @@ import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, patchJSON, postJSON } from "../lib/api";
 import { buildTraceLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
 export function ChannelDetailPage() {
   const { channelID = "" } = useParams();
@@ -197,7 +198,7 @@ export function ChannelDetailPage() {
         <EditChannelDialog
           channel={channel}
           form={editForm}
-          presets={presets.data?.items || []}
+          presetData={presets.data}
           saving={busy === "save-channel"}
           onChange={setEditForm}
           onReset={() => setEditForm(editFormFromChannel(channel))}
@@ -282,8 +283,12 @@ export function ChannelDetailPage() {
   );
 }
 
-function EditChannelDialog({ channel, form, presets = [], saving, onChange, onReset, onClose, onSave }) {
+function EditChannelDialog({ channel, form, presetData, saving, onChange, onReset, onClose, onSave }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
+  const updateForm = (key, value) => {
+    onChange((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
+  };
   const submit = async (event) => {
     event.preventDefault();
     await onSave();
@@ -300,20 +305,16 @@ function EditChannelDialog({ channel, form, presets = [], saving, onChange, onRe
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
         <div className="channel-form channel-form-modal">
-          <label>Name<input required value={form.name} onChange={(event) => setEditValue(onChange, "name", event.target.value)} /></label>
-          <label>Provider preset<select value={form.provider_preset} onChange={(event) => setEditValue(onChange, "provider_preset", event.target.value)}>{providerOptions(presets, form.provider_preset).map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
-          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => setEditValue(onChange, "base_url", event.target.value)} /></label>
-          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => setEditValue(onChange, "api_key", event.target.value)} placeholder={channel.api_key_hint ? `keep ${channel.api_key_hint}` : "unchanged"} /></label>
-          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => setEditValue(onChange, "allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+          <label>Name<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
+          <label>Provider preset<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
+          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
+          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={channel.api_key_hint ? `keep ${channel.api_key_hint}` : "unchanged"} /></label>
+          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
         </div>
         <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
         {advancedOpen ? (
           <div className="channel-form channel-form-modal">
-            <label>Priority<input type="number" value={form.priority} onChange={(event) => setEditValue(onChange, "priority", event.target.value)} /></label>
-            <label>Weight<input type="number" step="0.1" value={form.weight} onChange={(event) => setEditValue(onChange, "weight", event.target.value)} /></label>
-            <label>Capacity<input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => setEditValue(onChange, "capacity_hint", event.target.value)} /></label>
-            <label>Model discovery<select value={form.model_discovery} onChange={(event) => setEditValue(onChange, "model_discovery", event.target.value)}><option value="list_models">list_models</option><option value="disabled">disabled</option></select></label>
-            <label className="channel-form-wide">Headers<textarea value={form.headers_text} onChange={(event) => setEditValue(onChange, "headers_text", event.target.value)} spellCheck={false} /></label>
+            <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders />
           </div>
         ) : null}
         <div className="nav-modal-actions">
@@ -405,6 +406,13 @@ function emptyEditForm() {
     name: "",
     base_url: "",
     provider_preset: "",
+    protocol_family: "",
+    routing_profile: "",
+    api_version: "",
+    deployment: "",
+    project: "",
+    location: "",
+    model_resource: "",
     api_key: "",
     priority: 0,
     weight: 1,
@@ -421,6 +429,13 @@ function editFormFromChannel(channel = {}) {
     name: channel.name || "",
     base_url: channel.base_url || "",
     provider_preset: channel.provider_preset || "",
+    protocol_family: channel.protocol_family || "",
+    routing_profile: channel.routing_profile || "",
+    api_version: channel.api_version || "",
+    deployment: channel.deployment || "",
+    project: channel.project || "",
+    location: channel.location || "",
+    model_resource: channel.model_resource || "",
     api_key: "",
     priority: channel.priority ?? 0,
     weight: channel.weight ?? 1,
@@ -440,6 +455,13 @@ function channelPayloadFromForm(form) {
     name: form.name,
     base_url: form.base_url,
     provider_preset: form.provider_preset,
+    protocol_family: form.protocol_family,
+    routing_profile: form.routing_profile,
+    api_version: form.api_version,
+    deployment: form.deployment,
+    project: form.project,
+    location: form.location,
+    model_resource: form.model_resource,
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
@@ -472,9 +494,4 @@ function parseHeadersText(value) {
     headers[key] = headerValue === "***" ? { keep: true } : headerValue;
   });
   return headers;
-}
-
-function providerOptions(presets, current) {
-  const fallback = ["openai", "openrouter", "anthropic", "google_genai", "azure_openai", "vertex", "vllm"];
-  return Array.from(new Set([...(presets.length ? presets : fallback), current].filter(Boolean))).sort();
 }
