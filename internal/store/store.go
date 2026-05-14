@@ -931,7 +931,7 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 	enabledChannelsByModel := map[string]map[string]struct{}{}
 	for _, channelModel := range channelModels {
 		model := strings.ToLower(strings.TrimSpace(channelModel.Model))
-		if model == "" {
+		if !isUsageModelName(model) {
 			continue
 		}
 		record := modelSet[model]
@@ -971,6 +971,9 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 		return nil, err
 	}
 	for _, model := range logModels {
+		if !isUsageModelName(model) {
+			continue
+		}
 		if modelSet[model] == nil {
 			modelSet[model] = &ModelCatalogAnalyticsRecord{Model: model}
 		}
@@ -1035,7 +1038,7 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 		return ModelDetailAnalyticsRecord{}, err
 	}
 	for _, channelModel := range channelModels {
-		if strings.ToLower(channelModel.Model) != model {
+		if strings.ToLower(channelModel.Model) != model || !isUsageModelName(model) {
 			continue
 		}
 		summary, err := s.usageSummary("model = ? AND selected_upstream_id = ?", []any{model, channelModel.ChannelID}, since)
@@ -1088,7 +1091,7 @@ func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]Chann
 	out := make([]ChannelModelAnalyticsRecord, 0, len(channelModels))
 	for _, channelModel := range channelModels {
 		model := strings.ToLower(strings.TrimSpace(channelModel.Model))
-		if model == "" {
+		if !isUsageModelName(model) {
 			continue
 		}
 		seen[model] = struct{}{}
@@ -1110,6 +1113,9 @@ func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]Chann
 		return nil, err
 	}
 	for _, model := range logModels {
+		if !isUsageModelName(model) {
+			continue
+		}
 		if _, ok := seen[model]; ok {
 			continue
 		}
@@ -1703,7 +1709,7 @@ func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, [
 }
 
 func (s *Store) listLogModels(since time.Time) ([]string, error) {
-	where := "model <> ''"
+	where := "model <> '' AND LOWER(model) <> 'list_models'"
 	args := []any{}
 	if !since.IsZero() {
 		where += " AND recorded_at >= ?"
@@ -1728,7 +1734,7 @@ func (s *Store) listLogModels(since time.Time) ([]string, error) {
 }
 
 func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, error) {
-	where := "selected_upstream_id = ? AND model <> ''"
+	where := "selected_upstream_id = ? AND model <> '' AND LOWER(model) <> 'list_models'"
 	args := []any{channelID}
 	if !since.IsZero() {
 		where += " AND recorded_at >= ?"
@@ -1896,7 +1902,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 			item.missing++
 		}
 		item.tokens += totalTokens
-		if model = strings.TrimSpace(model); model != "" {
+		if model = strings.TrimSpace(model); isUsageModelName(model) {
 			item.models[strings.ToLower(model)] = struct{}{}
 		}
 	}
@@ -1926,6 +1932,11 @@ func sortedKeys(values map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func isUsageModelName(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model != "" && model != "list_models"
 }
 
 func sortedCountItems(counts map[string]int) []CountItem {

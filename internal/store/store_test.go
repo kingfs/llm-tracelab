@@ -346,6 +346,7 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	writeAnalyticsLog("success.http", "openai", 200, 100, now)
 	writeAnalyticsLog("missing-usage.http", "openai", 200, 0, now)
 	writeAnalyticsLog("failed.http", "openrouter", 500, 50, now)
+	writeModelLog(t, st, dir, "list-models.http", "list_models", "/v1/models", "GET", "openai", 200, 0, now)
 
 	items, err := st.ListModelCatalogAnalytics(now.Add(-24*time.Hour), startOfDayForTest(now))
 	if err != nil {
@@ -372,8 +373,37 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	if len(detail.Trends) == 0 || detail.Trends[len(detail.Trends)-1].MissingUsage != 1 {
 		t.Fatalf("trend missing usage not recorded: %+v", detail.Trends)
 	}
+	if detail.Trends[len(detail.Trends)-1].RequestCount != 3 || detail.Trends[len(detail.Trends)-1].FailedRequest != 1 {
+		t.Fatalf("trend request/error counts = %+v", detail.Trends[len(detail.Trends)-1])
+	}
 	if len(detail.Trends) != 24 {
 		t.Fatalf("len(detail.Trends) = %d, want 24", len(detail.Trends))
+	}
+}
+
+func writeModelLog(t *testing.T, st *Store, dir string, name string, model string, url string, method string, upstreamID string, statusCode int, totalTokens int, recordedAt time.Time) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          name,
+			Time:               recordedAt,
+			Model:              model,
+			URL:                url,
+			Method:             method,
+			StatusCode:         statusCode,
+			DurationMs:         100,
+			TTFTMs:             20,
+			SelectedUpstreamID: upstreamID,
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
+	}
+	if err := st.UpsertLog(path, header); err != nil {
+		t.Fatalf("UpsertLog(%q) error = %v", name, err)
 	}
 }
 

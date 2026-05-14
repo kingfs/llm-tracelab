@@ -47,16 +47,31 @@ export function MultiLineChart({ items = [], series = [], metric = "request_coun
 }
 
 export function SingleUsageCharts({ items = [], height = 240 }) {
-  const series = [{ key: "value", name: "value" }];
+  const requestSeries = [
+    { key: "requests", name: "requests" },
+    { key: "errors", name: "errors" },
+  ];
+  const tokenSeries = [{ key: "value", name: "tokens" }];
   return (
     <div className="usage-chart-grid">
       <section className="usage-chart-panel">
         <div className="breakdown-title">Requests</div>
-        <MultiLineChart items={items.map((item) => ({ time: item.time, value: item.request_count }))} series={series} metric="value" height={height} />
+        <MultiLineChart
+          items={items.map((item) => ({
+            time: item.time,
+            series: {
+              requests: { value: item.request_count },
+              errors: { value: item.failed_request },
+            },
+          }))}
+          series={requestSeries}
+          metric="value"
+          height={height}
+        />
       </section>
       <section className="usage-chart-panel">
         <div className="breakdown-title">Tokens</div>
-        <MultiLineChart items={items.map((item) => ({ time: item.time, value: item.total_tokens }))} series={series} metric="value" height={height} />
+        <MultiLineChart items={items.map((item) => ({ time: item.time, value: item.total_tokens }))} series={tokenSeries} metric="value" height={height} />
       </section>
     </div>
   );
