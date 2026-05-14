@@ -1440,6 +1440,15 @@ a:focus-visible {
   flex: 1 1 320px;
 }
 
+.filter-input-small {
+  min-width: 132px;
+  flex: 0 1 150px;
+}
+
+.routing-filter-bar {
+  align-items: stretch;
+}
+
 .channel-form {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

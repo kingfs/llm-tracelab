@@ -9,24 +9,23 @@ import { formatCount, formatTime, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
 const WINDOW_OPTIONS = ["24h", "7d", "30d", "all"];
+const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
 
 export function RoutingPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeRoutingWindow(searchParams.get("window"));
-  const modelValue = searchParams.get("model") || "";
-  const upstreamValue = searchParams.get("upstream") || "";
+  const activeFilters = readRoutingFilters(searchParams);
   const [refreshTick, setRefreshTick] = useState(0);
-  const [filters, setFilters] = useState({ model: modelValue, upstream: upstreamValue });
+  const [filters, setFilters] = useState(activeFilters);
   const params = new URLSearchParams();
   params.set("page", "1");
-  params.set("page_size", "100");
-  if (modelValue) {
-    params.set("model", modelValue);
-  }
-  if (upstreamValue) {
-    params.set("upstream", upstreamValue);
-  }
-  const traces = useJSON(apiURL(apiPaths.traces, params), [refreshTick, windowValue, modelValue, upstreamValue]);
+  params.set("page_size", "200");
+  FILTER_KEYS.forEach((key) => {
+    if (activeFilters[key]) {
+      params.set(key, activeFilters[key]);
+    }
+  });
+  const traces = useJSON(apiURL(apiPaths.traces, params), [refreshTick, windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
   const routedItems = useMemo(() => filterByWindow(traces.data?.items || [], windowValue), [traces.data, windowValue]);
   const summary = useMemo(() => summarizeRouting(routedItems), [routedItems]);
 
@@ -36,8 +35,8 @@ export function RoutingPage() {
   }, []);
 
   useEffect(() => {
-    setFilters({ model: modelValue, upstream: upstreamValue });
-  }, [modelValue, upstreamValue]);
+    setFilters(activeFilters);
+  }, [searchParams]);
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -47,17 +46,16 @@ export function RoutingPage() {
   const applyFilters = (event) => {
     event.preventDefault();
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "model", filters.model);
-    setOrDeleteParam(next, "upstream", filters.upstream);
+    FILTER_KEYS.forEach((key) => setOrDeleteParam(next, key, filters[key]));
     setSearchParams(next);
   };
   const resetFilters = () => {
-    setFilters({ model: "", upstream: "" });
+    setFilters(emptyRoutingFilters());
     const next = new URLSearchParams(searchParams);
-    next.delete("model");
-    next.delete("upstream");
+    FILTER_KEYS.forEach((key) => next.delete(key));
     setSearchParams(next);
   };
+  const updateFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
 
   return (
     <div className="shell shell-list">
@@ -88,9 +86,20 @@ export function RoutingPage() {
             </div>
           </div>
         </div>
-        <form className="filter-bar" onSubmit={applyFilters}>
-          <input className="filter-input" type="search" name="routing_model" placeholder="Model" value={filters.model} onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))} />
-          <input className="filter-input" type="search" name="routing_upstream" placeholder="Channel / upstream" value={filters.upstream} onChange={(event) => setFilters((current) => ({ ...current, upstream: event.target.value }))} />
+        <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
+          <input className="filter-input" type="search" name="routing_model" placeholder="Model" value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
+          <input className="filter-input" type="search" name="routing_upstream" placeholder="Channel / upstream" value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
+          <select className="filter-input" name="routing_status" aria-label="Routing status" value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
+            <option value="">Any status</option>
+            <option value="success">Success</option>
+            <option value="error">Error</option>
+          </select>
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_duration" placeholder="Min duration" value={filters.min_duration_ms} onChange={(event) => updateFilter("min_duration_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_duration" placeholder="Max duration" value={filters.max_duration_ms} onChange={(event) => updateFilter("max_duration_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_ttft" placeholder="Min TTFT" value={filters.min_ttft_ms} onChange={(event) => updateFilter("min_ttft_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_ttft" placeholder="Max TTFT" value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_tokens" placeholder="Min tokens" value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_tokens" placeholder="Max tokens" value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
           <button className="ghost-button" type="submit">Apply</button>
           <button className="ghost-button" type="button" onClick={resetFilters}>Reset</button>
         </form>
@@ -111,6 +120,18 @@ export function RoutingPage() {
 
 function normalizeRoutingWindow(value) {
   return WINDOW_OPTIONS.includes(value) ? value : "24h";
+}
+
+function emptyRoutingFilters() {
+  return FILTER_KEYS.reduce((state, key) => ({ ...state, [key]: "" }), {});
+}
+
+function readRoutingFilters(searchParams) {
+  const filters = emptyRoutingFilters();
+  FILTER_KEYS.forEach((key) => {
+    filters[key] = searchParams.get(key) || "";
+  });
+  return filters;
 }
 
 function filterByWindow(items, windowValue) {

@@ -129,6 +129,13 @@ type ListFilter struct {
 	Provider         string
 	Model            string
 	SelectedUpstream string
+	Status           string
+	MinDurationMs    int64
+	MaxDurationMs    int64
+	MinTTFTMs        int64
+	MaxTTFTMs        int64
+	MinTokens        int
+	MaxTokens        int
 }
 
 type GroupingInfo struct {
@@ -5103,6 +5110,30 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		predicates = append(predicates, tracelog.SelectedUpstreamIDContainsFold(upstream))
 	}
+	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
+	case "success":
+		predicates = append(predicates, tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300), tracelog.ErrorTextEQ(""))
+	case "error":
+		predicates = append(predicates, tracelog.Or(tracelog.StatusCodeLT(200), tracelog.StatusCodeGTE(300), tracelog.ErrorTextNEQ("")))
+	}
+	if filter.MinDurationMs > 0 {
+		predicates = append(predicates, tracelog.DurationMsGTE(filter.MinDurationMs))
+	}
+	if filter.MaxDurationMs > 0 {
+		predicates = append(predicates, tracelog.DurationMsLTE(filter.MaxDurationMs))
+	}
+	if filter.MinTTFTMs > 0 {
+		predicates = append(predicates, tracelog.TtftMsGTE(filter.MinTTFTMs))
+	}
+	if filter.MaxTTFTMs > 0 {
+		predicates = append(predicates, tracelog.TtftMsLTE(filter.MaxTTFTMs))
+	}
+	if filter.MinTokens > 0 {
+		predicates = append(predicates, tracelog.TotalTokensGTE(filter.MinTokens))
+	}
+	if filter.MaxTokens > 0 {
+		predicates = append(predicates, tracelog.TotalTokensLTE(filter.MaxTokens))
+	}
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		predicates = append(predicates, tracelog.Or(
 			tracelog.SessionIDContainsFold(query),
@@ -5167,6 +5198,36 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?)`)
 		args = append(args, "%"+escapeLike(upstream)+"%")
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
+	case "success":
+		clauses = append(clauses, `(`+column("status_code")+` >= 200 AND `+column("status_code")+` < 300 AND `+column("error_text")+` = '')`)
+	case "error":
+		clauses = append(clauses, `(`+column("status_code")+` < 200 OR `+column("status_code")+` >= 300 OR `+column("error_text")+` != '')`)
+	}
+	if filter.MinDurationMs > 0 {
+		clauses = append(clauses, column("duration_ms")+` >= ?`)
+		args = append(args, filter.MinDurationMs)
+	}
+	if filter.MaxDurationMs > 0 {
+		clauses = append(clauses, column("duration_ms")+` <= ?`)
+		args = append(args, filter.MaxDurationMs)
+	}
+	if filter.MinTTFTMs > 0 {
+		clauses = append(clauses, column("ttft_ms")+` >= ?`)
+		args = append(args, filter.MinTTFTMs)
+	}
+	if filter.MaxTTFTMs > 0 {
+		clauses = append(clauses, column("ttft_ms")+` <= ?`)
+		args = append(args, filter.MaxTTFTMs)
+	}
+	if filter.MinTokens > 0 {
+		clauses = append(clauses, column("total_tokens")+` >= ?`)
+		args = append(args, filter.MinTokens)
+	}
+	if filter.MaxTokens > 0 {
+		clauses = append(clauses, column("total_tokens")+` <= ?`)
+		args = append(args, filter.MaxTokens)
 	}
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		pattern := "%" + escapeLike(query) + "%"

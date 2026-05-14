@@ -2884,6 +2884,13 @@ func parseListFilter(r *http.Request) store.ListFilter {
 		Provider:         strings.TrimSpace(query.Get("provider")),
 		Model:            strings.TrimSpace(query.Get("model")),
 		SelectedUpstream: strings.TrimSpace(query.Get("upstream")),
+		Status:           strings.TrimSpace(query.Get("status")),
+		MinDurationMs:    int64(parseInt(query.Get("min_duration_ms"), 0)),
+		MaxDurationMs:    int64(parseInt(query.Get("max_duration_ms"), 0)),
+		MinTTFTMs:        int64(parseInt(query.Get("min_ttft_ms"), 0)),
+		MaxTTFTMs:        int64(parseInt(query.Get("max_ttft_ms"), 0)),
+		MinTokens:        parseInt(query.Get("min_tokens"), 0),
+		MaxTokens:        parseInt(query.Get("max_tokens"), 0),
 	}
 }
 

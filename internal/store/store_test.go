@@ -1210,6 +1210,74 @@ func TestListPageAppliesFilters(t *testing.T) {
 	}
 }
 
+func TestListPageAppliesRoutingDecisionFilters(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, statusCode int, durationMs int64, ttftMs int64, totalTokens int, upstreamID string, errorText string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:          name,
+				Time:               time.Date(2026, 4, 16, 9, 0, 0, 0, time.UTC),
+				Model:              "gpt-5",
+				Provider:           "openai_compatible",
+				Operation:          "responses",
+				Endpoint:           "/v1/responses",
+				URL:                "/v1/responses",
+				Method:             "POST",
+				StatusCode:         statusCode,
+				DurationMs:         durationMs,
+				TTFTMs:             ttftMs,
+				SelectedUpstreamID: upstreamID,
+				Error:              errorText,
+			},
+			Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
+		}
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+		}
+	}
+
+	writeLog("ok.http", 200, 240, 40, 120, "openai-primary", "")
+	writeLog("slow-error.http", 429, 1500, 320, 900, "openai-secondary", "rate limited")
+
+	result, err := st.ListPage(1, 50, ListFilter{
+		SelectedUpstream: "secondary",
+		Status:           "error",
+		MinDurationMs:    1000,
+		MinTTFTMs:        300,
+		MinTokens:        800,
+		MaxTokens:        1000,
+	})
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(result.Items) = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Header.Meta.RequestID != "slow-error.http" {
+		t.Fatalf("request id = %q, want slow-error.http", result.Items[0].Header.Meta.RequestID)
+	}
+
+	result, err = st.ListPage(1, 50, ListFilter{Status: "success", MaxDurationMs: 300, MaxTTFTMs: 50, MaxTokens: 200})
+	if err != nil {
+		t.Fatalf("ListPage(success) error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Header.Meta.RequestID != "ok.http" {
+		t.Fatalf("success result = %+v", result.Items)
+	}
+}
+
 func TestListSessionPageAppliesFilters(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

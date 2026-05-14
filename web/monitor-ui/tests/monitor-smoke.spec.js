@@ -53,6 +53,12 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: { updated: 1, models: ["gpt-new"], enabled: true } });
     }
     if (path === "/api/traces") {
+      if (url.searchParams.get("status") === "error") {
+        expect(url.searchParams.get("model")).toBe("gpt-5");
+        expect(url.searchParams.get("upstream")).toBe("openai-primary");
+        expect(url.searchParams.get("min_ttft_ms")).toBe("100");
+        expect(url.searchParams.get("max_tokens")).toBe("500");
+      }
       return route.fulfill({ json: traceListPayload() });
     }
     if (path === "/api/traces/trace-routed") {
@@ -128,6 +134,16 @@ test("routing page renders selected route records", async ({ page }) => {
   await expect(page.getByText("Recent selected routes")).toBeVisible();
   await expect(page.getByText("openai-primary").first()).toBeVisible();
   await expect(page.getByText("gpt-5").first()).toBeVisible();
+  await page.getByPlaceholder("Model").fill("gpt-5");
+  await page.getByPlaceholder("Channel / upstream").fill("openai-primary");
+  await page.getByLabel("Routing status").selectOption("error");
+  await page.getByPlaceholder("Min TTFT").fill("100");
+  await page.getByPlaceholder("Max tokens").fill("500");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page).toHaveURL(/status=error/);
+  await expect(page).toHaveURL(/min_ttft_ms=100/);
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(page).not.toHaveURL(/status=error/);
 });
 
 test("trace routing links to channel and upstream views", async ({ page }) => {
