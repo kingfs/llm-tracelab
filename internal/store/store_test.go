@@ -142,6 +142,90 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channel := range []ChannelConfigRecord{
+		{ID: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1", ProviderPreset: "openai", HeadersJSON: "{}", Enabled: true},
+		{ID: "openrouter", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1", ProviderPreset: "openrouter", HeadersJSON: "{}", Enabled: true},
+	} {
+		if _, err := st.UpsertChannelConfig(channel); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channel.ID, err)
+		}
+	}
+	if err := st.ReplaceChannelModels("openai", []ChannelModelRecord{{Model: "gpt-5", Source: "manual", Enabled: true}}); err != nil {
+		t.Fatalf("ReplaceChannelModels(openai) error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openrouter", []ChannelModelRecord{{Model: "gpt-5", Source: "manual", Enabled: false}}); err != nil {
+		t.Fatalf("ReplaceChannelModels(openrouter) error = %v", err)
+	}
+
+	writeAnalyticsLog := func(name string, upstreamID string, statusCode int, totalTokens int, recordedAt time.Time) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:          name,
+				Time:               recordedAt,
+				Model:              "gpt-5",
+				URL:                "/v1/responses",
+				Method:             "POST",
+				StatusCode:         statusCode,
+				DurationMs:         100,
+				TTFTMs:             20,
+				SelectedUpstreamID: upstreamID,
+			},
+			Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+	now := time.Now().UTC()
+	writeAnalyticsLog("success.http", "openai", 200, 100, now)
+	writeAnalyticsLog("failed.http", "openrouter", 500, 50, now)
+
+	items, err := st.ListModelCatalogAnalytics(now.Add(-24*time.Hour), startOfDayForTest(now))
+	if err != nil {
+		t.Fatalf("ListModelCatalogAnalytics() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.Model != "gpt-5" || item.ChannelCount != 2 || item.EnabledChannelCount != 1 || item.ProviderCount != 2 {
+		t.Fatalf("item = %+v", item)
+	}
+	if item.Summary.RequestCount != 2 || item.Summary.FailedRequest != 1 || item.Summary.TotalTokens != 150 {
+		t.Fatalf("summary = %+v", item.Summary)
+	}
+
+	detail, err := st.GetModelDetailAnalytics("gpt-5", now.Add(-24*time.Hour), startOfDayForTest(now), time.Hour, 24)
+	if err != nil {
+		t.Fatalf("GetModelDetailAnalytics() error = %v", err)
+	}
+	if len(detail.Channels) != 2 {
+		t.Fatalf("len(detail.Channels) = %d, want 2", len(detail.Channels))
+	}
+	if len(detail.Trends) != 24 {
+		t.Fatalf("len(detail.Trends) = %d, want 24", len(detail.Trends))
+	}
+}
+
+func startOfDayForTest(now time.Time) time.Time {
+	year, month, day := now.UTC().Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+}
+
 func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "trace_index.sqlite3")

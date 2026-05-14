@@ -286,6 +286,53 @@ type TimeCountItem struct {
 	Count int
 }
 
+type UsageSummaryRecord struct {
+	RequestCount     int
+	SuccessRequest   int
+	FailedRequest    int
+	SuccessRate      float64
+	TotalTokens      int
+	PromptTokens     int
+	CompletionTokens int
+	CachedTokens     int
+	AvgTTFT          int
+	AvgDurationMs    int64
+	LastSeen         time.Time
+}
+
+type UsageTrendRecord struct {
+	Time          time.Time
+	RequestCount  int
+	FailedRequest int
+	TotalTokens   int
+	ModelCount    int
+}
+
+type ModelCatalogAnalyticsRecord struct {
+	Model               string
+	DisplayName         string
+	ProviderCount       int
+	ChannelCount        int
+	EnabledChannelCount int
+	Summary             UsageSummaryRecord
+	Today               UsageSummaryRecord
+	Channels            []string
+}
+
+type ModelDetailAnalyticsRecord struct {
+	Model    ModelCatalogAnalyticsRecord
+	Trends   []UsageTrendRecord
+	Channels []ChannelModelAnalyticsRecord
+}
+
+type ChannelModelAnalyticsRecord struct {
+	ChannelID string
+	Model     string
+	Enabled   bool
+	Source    string
+	Summary   UsageSummaryRecord
+}
+
 type DatasetRecord struct {
 	ID           string
 	Name         string
@@ -735,6 +782,161 @@ func (s *Store) ListChannelProbeRuns(channelID string, limit int) ([]ChannelProb
 		out = append(out, channelProbeRunRecordFromEnt(row))
 	}
 	return out, nil
+}
+
+func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time) ([]ModelCatalogAnalyticsRecord, error) {
+	modelSet := map[string]*ModelCatalogAnalyticsRecord{}
+	channelModels, err := s.ListChannelModels("", false)
+	if err != nil {
+		return nil, err
+	}
+	providersByModel := map[string]map[string]struct{}{}
+	channelsByModel := map[string]map[string]struct{}{}
+	enabledChannelsByModel := map[string]map[string]struct{}{}
+	for _, channelModel := range channelModels {
+		model := strings.ToLower(strings.TrimSpace(channelModel.Model))
+		if model == "" {
+			continue
+		}
+		record := modelSet[model]
+		if record == nil {
+			record = &ModelCatalogAnalyticsRecord{Model: model, DisplayName: channelModel.DisplayName}
+			modelSet[model] = record
+		}
+		if providersByModel[model] == nil {
+			providersByModel[model] = map[string]struct{}{}
+			channelsByModel[model] = map[string]struct{}{}
+			enabledChannelsByModel[model] = map[string]struct{}{}
+		}
+		channelsByModel[model][channelModel.ChannelID] = struct{}{}
+		if channelModel.Enabled {
+			enabledChannelsByModel[model][channelModel.ChannelID] = struct{}{}
+		}
+	}
+
+	channels, err := s.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	providerByChannel := map[string]string{}
+	for _, channel := range channels {
+		providerByChannel[channel.ID] = channel.ProviderPreset
+	}
+	for model, channelIDs := range channelsByModel {
+		for channelID := range channelIDs {
+			if provider := providerByChannel[channelID]; provider != "" {
+				providersByModel[model][provider] = struct{}{}
+			}
+		}
+	}
+
+	logModels, err := s.listLogModels(since)
+	if err != nil {
+		return nil, err
+	}
+	for _, model := range logModels {
+		if modelSet[model] == nil {
+			modelSet[model] = &ModelCatalogAnalyticsRecord{Model: model}
+		}
+	}
+	for _, record := range modelSet {
+		summary, err := s.usageSummary("model = ?", []any{record.Model}, since)
+		if err != nil {
+			return nil, err
+		}
+		today, err := s.usageSummary("model = ?", []any{record.Model}, todaySince)
+		if err != nil {
+			return nil, err
+		}
+		record.Summary = summary
+		record.Today = today
+		record.ProviderCount = len(providersByModel[record.Model])
+		record.ChannelCount = len(channelsByModel[record.Model])
+		record.EnabledChannelCount = len(enabledChannelsByModel[record.Model])
+		record.Channels = sortedKeys(channelsByModel[record.Model])
+	}
+
+	out := make([]ModelCatalogAnalyticsRecord, 0, len(modelSet))
+	for _, record := range modelSet {
+		out = append(out, *record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Summary.RequestCount != out[j].Summary.RequestCount {
+			return out[i].Summary.RequestCount > out[j].Summary.RequestCount
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out, nil
+}
+
+func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySince time.Time, bucketSize time.Duration, bucketCount int) (ModelDetailAnalyticsRecord, error) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return ModelDetailAnalyticsRecord{}, fmt.Errorf("model is required")
+	}
+	all, err := s.ListModelCatalogAnalytics(since, todaySince)
+	if err != nil {
+		return ModelDetailAnalyticsRecord{}, err
+	}
+	var detail ModelDetailAnalyticsRecord
+	for _, item := range all {
+		if item.Model == model {
+			detail.Model = item
+			break
+		}
+	}
+	if detail.Model.Model == "" {
+		return ModelDetailAnalyticsRecord{}, sql.ErrNoRows
+	}
+	trends, err := s.usageTrends("model = ?", []any{model}, since, bucketSize, bucketCount)
+	if err != nil {
+		return ModelDetailAnalyticsRecord{}, err
+	}
+	detail.Trends = trends
+
+	channelModels, err := s.ListChannelModels("", false)
+	if err != nil {
+		return ModelDetailAnalyticsRecord{}, err
+	}
+	for _, channelModel := range channelModels {
+		if strings.ToLower(channelModel.Model) != model {
+			continue
+		}
+		summary, err := s.usageSummary("model = ? AND selected_upstream_id = ?", []any{model, channelModel.ChannelID}, since)
+		if err != nil {
+			return ModelDetailAnalyticsRecord{}, err
+		}
+		detail.Channels = append(detail.Channels, ChannelModelAnalyticsRecord{
+			ChannelID: channelModel.ChannelID,
+			Model:     model,
+			Enabled:   channelModel.Enabled,
+			Source:    channelModel.Source,
+			Summary:   summary,
+		})
+	}
+	sort.Slice(detail.Channels, func(i, j int) bool {
+		if detail.Channels[i].Summary.RequestCount != detail.Channels[j].Summary.RequestCount {
+			return detail.Channels[i].Summary.RequestCount > detail.Channels[j].Summary.RequestCount
+		}
+		return detail.Channels[i].ChannelID < detail.Channels[j].ChannelID
+	})
+	return detail, nil
+}
+
+func (s *Store) GetChannelUsageTrends(channelID string, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, fmt.Errorf("channel id is required")
+	}
+	return s.usageTrends("selected_upstream_id = ?", []any{channelID}, since, bucketSize, bucketCount)
+}
+
+func (s *Store) GetChannelUsageSummary(channelID string, since time.Time) (UsageSummaryRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return UsageSummaryRecord{}, fmt.Errorf("channel id is required")
+	}
+	return s.usageSummary("selected_upstream_id = ?", []any{channelID}, since)
 }
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
@@ -1293,6 +1495,198 @@ func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, [
 		return "", nil
 	}
 	return " AND " + strings.Join(clauses, " AND "), args
+}
+
+func (s *Store) listLogModels(since time.Time) ([]string, error) {
+	where := "model <> ''"
+	args := []any{}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		if model = strings.TrimSpace(model); model != "" {
+			out = append(out, model)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) (UsageSummaryRecord, error) {
+	where := strings.TrimSpace(baseWhere)
+	if where == "" {
+		where = "1=1"
+	}
+	args := append([]any(nil), baseArgs...)
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	var (
+		record       UsageSummaryRecord
+		avgTTFT      float64
+		avgDuration  float64
+		successRate  float64
+		lastSeenText string
+	)
+	if err := s.db.QueryRow(`
+		SELECT
+			COUNT(*) AS request_count,
+			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE 100.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*) END AS success_rate,
+			COALESCE(SUM(total_tokens), 0) AS total_tokens,
+			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+			COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+			COALESCE(AVG(ttft_ms), 0) AS avg_ttft,
+			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
+			COALESCE(MAX(recorded_at), '') AS last_seen
+		FROM logs
+		WHERE `+where, args...).Scan(
+		&record.RequestCount,
+		&record.SuccessRequest,
+		&record.FailedRequest,
+		&successRate,
+		&record.TotalTokens,
+		&record.PromptTokens,
+		&record.CompletionTokens,
+		&record.CachedTokens,
+		&avgTTFT,
+		&avgDuration,
+		&lastSeenText,
+	); err != nil {
+		return UsageSummaryRecord{}, err
+	}
+	record.SuccessRate = successRate
+	record.AvgTTFT = int(math.Round(avgTTFT))
+	record.AvgDurationMs = int64(math.Round(avgDuration))
+	if strings.TrimSpace(lastSeenText) != "" {
+		lastSeen, err := timeParse(lastSeenText)
+		if err != nil {
+			return UsageSummaryRecord{}, err
+		}
+		record.LastSeen = lastSeen
+	}
+	return record, nil
+}
+
+func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, bucketSize time.Duration, bucketCount int) ([]UsageTrendRecord, error) {
+	if bucketSize <= 0 {
+		bucketSize = 24 * time.Hour
+	}
+	if bucketCount <= 0 {
+		bucketCount = 7
+	}
+	where := strings.TrimSpace(baseWhere)
+	if where == "" {
+		where = "1=1"
+	}
+	args := append([]any(nil), baseArgs...)
+	referenceTime := time.Now().UTC()
+	var latestRecordedAt string
+	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(latestRecordedAt) != "" {
+		latestTime, err := timeParse(latestRecordedAt)
+		if err != nil {
+			return nil, err
+		}
+		referenceTime = latestTime.UTC()
+	}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
+	queryArgs := append([]any(nil), args...)
+	queryArgs = append(queryArgs, bucketStart.Format(timeLayout))
+	rows, err := s.db.Query(`
+		SELECT recorded_at, status_code, total_tokens, model
+		FROM logs
+		WHERE `+where+` AND recorded_at >= ?
+		ORDER BY recorded_at ASC
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type bucket struct {
+		requests int
+		failed   int
+		tokens   int
+		models   map[string]struct{}
+	}
+	buckets := make(map[time.Time]*bucket, bucketCount)
+	for index := 0; index < bucketCount; index++ {
+		slot := bucketStart.Add(time.Duration(index) * bucketSize)
+		buckets[slot] = &bucket{models: map[string]struct{}{}}
+	}
+	for rows.Next() {
+		var (
+			recordedAt  string
+			statusCode  int
+			totalTokens int
+			model       string
+		)
+		if err := rows.Scan(&recordedAt, &statusCode, &totalTokens, &model); err != nil {
+			return nil, err
+		}
+		recordedTime, err := timeParse(recordedAt)
+		if err != nil {
+			return nil, err
+		}
+		slot := recordedTime.UTC().Truncate(bucketSize)
+		item := buckets[slot]
+		if item == nil {
+			continue
+		}
+		item.requests++
+		if statusCode < 200 || statusCode >= 300 {
+			item.failed++
+		}
+		item.tokens += totalTokens
+		if model = strings.TrimSpace(model); model != "" {
+			item.models[strings.ToLower(model)] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]UsageTrendRecord, 0, bucketCount)
+	for index := 0; index < bucketCount; index++ {
+		slot := bucketStart.Add(time.Duration(index) * bucketSize)
+		item := buckets[slot]
+		out = append(out, UsageTrendRecord{
+			Time:          slot,
+			RequestCount:  item.requests,
+			FailedRequest: item.failed,
+			TotalTokens:   item.tokens,
+			ModelCount:    len(item.models),
+		})
+	}
+	return out, nil
+}
+
+func sortedKeys(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sortedCountItems(counts map[string]int) []CountItem {

@@ -758,6 +758,83 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 }
 
+func TestModelCatalogAPI(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.com/v1",
+		ProviderPreset: "openai",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	path := filepath.Join(dir, "model-api.http")
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          "model-api",
+			Time:               time.Now().UTC(),
+			Model:              "gpt-5",
+			URL:                "/v1/responses",
+			Method:             "POST",
+			StatusCode:         200,
+			DurationMs:         100,
+			TTFTMs:             10,
+			SelectedUpstreamID: "openai-primary",
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: 42},
+	}
+	if err := st.UpsertLog(path, header); err != nil {
+		t.Fatalf("UpsertLog() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/models?window=24h", nil)
+	rr := httptest.NewRecorder()
+	modelListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("model list status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var list modelListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].Model != "gpt-5" || list.Items[0].Summary.TotalTokens != 42 {
+		t.Fatalf("model list = %+v", list)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/gpt-5?window=24h", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("model detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var detail modelDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("json.Unmarshal(detail) error = %v", err)
+	}
+	if detail.Model.Model != "gpt-5" || len(detail.Channels) != 1 || len(detail.Trends) != 24 {
+		t.Fatalf("model detail = %+v", detail)
+	}
+}
+
 func TestChannelModelPatchReloadsRouter(t *testing.T) {
 	t.Parallel()
 

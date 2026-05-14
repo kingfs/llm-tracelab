@@ -504,6 +504,8 @@ type channelItem struct {
 	LastProbeAt        time.Time         `json:"last_probe_at,omitempty"`
 	LastProbeStatus    string            `json:"last_probe_status,omitempty"`
 	LastProbeError     string            `json:"last_probe_error,omitempty"`
+	Summary            usageSummaryView  `json:"summary,omitempty"`
+	Trends             []usageTrendView  `json:"trends,omitempty"`
 }
 
 type channelModelsResponse struct {
@@ -561,6 +563,61 @@ type channelModelPatchRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+type usageSummaryView struct {
+	RequestCount     int       `json:"request_count"`
+	SuccessRequest   int       `json:"success_request"`
+	FailedRequest    int       `json:"failed_request"`
+	SuccessRate      float64   `json:"success_rate"`
+	TotalTokens      int       `json:"total_tokens"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	CachedTokens     int       `json:"cached_tokens"`
+	AvgTTFT          int       `json:"avg_ttft"`
+	AvgDurationMs    int64     `json:"avg_duration_ms"`
+	LastSeen         time.Time `json:"last_seen,omitempty"`
+}
+
+type usageTrendView struct {
+	Time          time.Time `json:"time"`
+	RequestCount  int       `json:"request_count"`
+	FailedRequest int       `json:"failed_request"`
+	TotalTokens   int       `json:"total_tokens"`
+	ModelCount    int       `json:"model_count"`
+}
+
+type modelListResponse struct {
+	Items       []modelItem `json:"items"`
+	RefreshedAt time.Time   `json:"refreshed_at"`
+	Window      string      `json:"window"`
+}
+
+type modelItem struct {
+	Model               string           `json:"model"`
+	DisplayName         string           `json:"display_name,omitempty"`
+	ProviderCount       int              `json:"provider_count"`
+	ChannelCount        int              `json:"channel_count"`
+	EnabledChannelCount int              `json:"enabled_channel_count"`
+	Channels            []string         `json:"channels"`
+	Summary             usageSummaryView `json:"summary"`
+	Today               usageSummaryView `json:"today"`
+}
+
+type modelDetailResponse struct {
+	Model       modelItem          `json:"model"`
+	Trends      []usageTrendView   `json:"trends"`
+	Channels    []modelChannelItem `json:"channels"`
+	RefreshedAt time.Time          `json:"refreshed_at"`
+	Window      string             `json:"window"`
+}
+
+type modelChannelItem struct {
+	ChannelID string           `json:"channel_id"`
+	Model     string           `json:"model"`
+	Enabled   bool             `json:"enabled"`
+	Source    string           `json:"source"`
+	Summary   usageSummaryView `json:"summary"`
+}
+
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	var opt RouteOptions
 	if len(opts) > 0 {
@@ -578,6 +635,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
@@ -704,6 +763,72 @@ func authCreateTokenAPIHandler(authStore *auth.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, createTokenResponse{Token: token.Token, Prefix: token.Prefix})
+	}
+}
+
+func modelListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
+		todaySince := startOfUTCDay(time.Now().UTC())
+		items, err := st.ListModelCatalogAnalytics(since, todaySince)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+		resp := modelListResponse{RefreshedAt: time.Now().UTC(), Window: windowLabel}
+		for _, item := range items {
+			if q != "" && !strings.Contains(strings.ToLower(item.Model), q) && !strings.Contains(strings.ToLower(item.DisplayName), q) {
+				continue
+			}
+			resp.Items = append(resp.Items, modelItemFromRecord(item))
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		model := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/models/"), "/")
+		if model == "" || strings.Contains(model, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
+		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
+		detail, err := st.GetModelDetailAnalytics(model, since, startOfUTCDay(time.Now().UTC()), bucketSize, bucketCount)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		resp := modelDetailResponse{
+			Model:       modelItemFromRecord(detail.Model),
+			Trends:      usageTrendViews(detail.Trends),
+			RefreshedAt: time.Now().UTC(),
+			Window:      windowLabel,
+		}
+		for _, channelRecord := range detail.Channels {
+			resp.Channels = append(resp.Channels, modelChannelItem{
+				ChannelID: channelRecord.ChannelID,
+				Model:     channelRecord.Model,
+				Enabled:   channelRecord.Enabled,
+				Source:    channelRecord.Source,
+				Summary:   usageSummaryViewFromRecord(channelRecord.Summary),
+			})
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -869,7 +994,16 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID)))
+		item := channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID))
+		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
+		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
+		if summary, err := st.GetChannelUsageSummary(channelID, since); err == nil {
+			item.Summary = usageSummaryViewFromRecord(summary)
+		}
+		if trends, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount); err == nil {
+			item.Trends = usageTrendViews(trends)
+		}
+		writeJSON(w, http.StatusOK, item)
 	case http.MethodPatch:
 		existing, err := st.GetChannelConfig(channelID)
 		if err != nil {
@@ -1096,6 +1230,49 @@ func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResp
 		CompletedAt:     result.CompletedAt,
 		DurationMs:      result.DurationMs,
 	}
+}
+
+func modelItemFromRecord(record store.ModelCatalogAnalyticsRecord) modelItem {
+	return modelItem{
+		Model:               record.Model,
+		DisplayName:         record.DisplayName,
+		ProviderCount:       record.ProviderCount,
+		ChannelCount:        record.ChannelCount,
+		EnabledChannelCount: record.EnabledChannelCount,
+		Channels:            record.Channels,
+		Summary:             usageSummaryViewFromRecord(record.Summary),
+		Today:               usageSummaryViewFromRecord(record.Today),
+	}
+}
+
+func usageSummaryViewFromRecord(record store.UsageSummaryRecord) usageSummaryView {
+	return usageSummaryView{
+		RequestCount:     record.RequestCount,
+		SuccessRequest:   record.SuccessRequest,
+		FailedRequest:    record.FailedRequest,
+		SuccessRate:      record.SuccessRate,
+		TotalTokens:      record.TotalTokens,
+		PromptTokens:     record.PromptTokens,
+		CompletionTokens: record.CompletionTokens,
+		CachedTokens:     record.CachedTokens,
+		AvgTTFT:          record.AvgTTFT,
+		AvgDurationMs:    record.AvgDurationMs,
+		LastSeen:         record.LastSeen,
+	}
+}
+
+func usageTrendViews(records []store.UsageTrendRecord) []usageTrendView {
+	out := make([]usageTrendView, 0, len(records))
+	for _, record := range records {
+		out = append(out, usageTrendView{
+			Time:          record.Time,
+			RequestCount:  record.RequestCount,
+			FailedRequest: record.FailedRequest,
+			TotalTokens:   record.TotalTokens,
+			ModelCount:    record.ModelCount,
+		})
+	}
+	return out
 }
 
 func channelModelCounts(models []store.ChannelModelRecord) map[string]int {
@@ -1486,6 +1663,19 @@ func routingFailureBucketSpec(window string) (time.Duration, int) {
 	}
 }
 
+func analyticsBucketSpec(window string) (time.Duration, int) {
+	switch window {
+	case "30d":
+		return 24 * time.Hour, 30
+	case "7d":
+		return 24 * time.Hour, 7
+	case "all":
+		return 24 * time.Hour, 30
+	default:
+		return time.Hour, 24
+	}
+}
+
 func parseUpstreamWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
@@ -1500,6 +1690,27 @@ func parseUpstreamWindow(value string) (string, time.Time) {
 	default:
 		return "24h", now.Add(-24 * time.Hour)
 	}
+}
+
+func parseAnalyticsWindow(value string) (string, time.Time) {
+	now := time.Now().UTC()
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "7d":
+		return "7d", now.Add(-7 * 24 * time.Hour)
+	case "30d":
+		return "30d", now.Add(-30 * 24 * time.Hour)
+	case "all":
+		return "all", time.Time{}
+	case "", "24h":
+		return "24h", now.Add(-24 * time.Hour)
+	default:
+		return "24h", now.Add(-24 * time.Hour)
+	}
+}
+
+func startOfUTCDay(now time.Time) time.Time {
+	year, month, day := now.UTC().Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
 func serveEmbeddedIndex(distFS fs.FS, w http.ResponseWriter, r *http.Request) {
