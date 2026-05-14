@@ -326,10 +326,11 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router       *router.Router
-	AuthVerifier auth.TokenVerifier
-	AuthStore    *auth.Store
-	SessionTTL   time.Duration
+	Router         *router.Router
+	ChannelService *channel.Service
+	AuthVerifier   auth.TokenVerifier
+	AuthStore      *auth.Store
+	SessionTTL     time.Duration
 }
 
 type loginRequest struct {
@@ -577,8 +578,9 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
+	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
+	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.Handle("/", appHandler())
@@ -748,7 +750,7 @@ func appHandler() http.Handler {
 	})
 }
 
-func channelListCreateAPIHandler(st *store.Store) http.HandlerFunc {
+func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
@@ -783,6 +785,10 @@ func channelListCreateAPIHandler(st *store.Store) http.HandlerFunc {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
+			if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+				return
+			}
 			writeJSON(w, http.StatusOK, channelItemFromRecord(record, 0, 0))
 		default:
 			http.NotFound(w, r)
@@ -790,7 +796,7 @@ func channelListCreateAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
+func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
@@ -804,7 +810,7 @@ func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		channelID := parts[0]
 		if len(parts) == 1 {
-			handleChannelConfig(w, r, st, channelID)
+			handleChannelConfig(w, r, st, rtr, channelService, channelID)
 			return
 		}
 		switch parts[1] {
@@ -813,7 +819,8 @@ func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				http.NotFound(w, r)
 				return
 			}
-			result, err := channel.NewService(st).Probe(channelID)
+			svc := effectiveChannelService(st, channelService)
+			result, err := svc.Probe(channelID)
 			if err != nil && result.Status == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -822,6 +829,12 @@ func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			if err != nil {
 				status = http.StatusBadGateway
 			}
+			if err == nil {
+				if reloadErr := reloadRouterFromChannels(rtr, svc); reloadErr != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + reloadErr.Error()})
+					return
+				}
+			}
 			writeJSON(w, status, channelProbeResponseFromResult(result))
 		case "models":
 			if len(parts) == 2 {
@@ -829,7 +842,7 @@ func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				return
 			}
 			if len(parts) == 3 {
-				handleChannelModel(w, r, st, channelID, parts[2])
+				handleChannelModel(w, r, st, rtr, channelService, channelID, parts[2])
 				return
 			}
 			http.NotFound(w, r)
@@ -839,7 +852,7 @@ func channelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
-func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store, channelID string) {
+func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string) {
 	switch r.Method {
 	case http.MethodGet:
 		record, err := st.GetChannelConfig(channelID)
@@ -878,6 +891,10 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+			return
+		}
 		models, _ := st.ListChannelModels(channelID, false)
 		writeJSON(w, http.StatusOK, channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID)))
 	default:
@@ -902,7 +919,7 @@ func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store
 	writeJSON(w, http.StatusOK, channelModelsResponse{Items: items, RefreshedAt: time.Now().UTC()})
 }
 
-func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store, channelID string, model string) {
+func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string, model string) {
 	if r.Method != http.MethodPatch {
 		http.NotFound(w, r)
 		return
@@ -916,7 +933,49 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func routerReloadAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
+func reloadRouterFromChannels(rtr *router.Router, channelService *channel.Service) error {
+	if rtr == nil {
+		return nil
+	}
+	if channelService == nil {
+		return fmt.Errorf("channel service not configured")
+	}
+	targets, err := channelService.RuntimeTargets()
+	if err != nil {
+		return err
+	}
+	return rtr.Reload(targets)
+}
+
+func effectiveChannelService(st *store.Store, channelService *channel.Service) *channel.Service {
+	if channelService != nil {
+		return channelService
+	}
+	if st == nil {
+		return nil
+	}
+	return channel.NewService(st)
 }
 
 func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelConfigRecord) store.ChannelConfigRecord {

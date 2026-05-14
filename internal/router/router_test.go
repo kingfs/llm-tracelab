@@ -62,6 +62,89 @@ func TestRouterSelectUsesModelCatalog(t *testing.T) {
 	}
 }
 
+func TestRouterReloadReplacesCatalogAndPreservesOldOnFailure(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	target := rtr.Targets()[0]
+	target.onFinish(RequestFeatures{}, Outcome{Success: true, StatusCode: 200, DurationMs: 1234, TTFTMs: 321}, rtr.costs, 3, time.Minute)
+	beforeLatency := target.snapshot().LatencyFastMs
+
+	err = rtr.Reload([]config.UpstreamTargetConfig{
+		{
+			ID:             "primary",
+			Enabled:        boolPtr(true),
+			Priority:       100,
+			ModelDiscovery: ModelDiscoveryStaticOnly,
+			StaticModels:   []string{"gpt-4.1"},
+			Upstream: config.UpstreamConfig{
+				BaseURL:        "https://api.openai.com/v1",
+				ProviderPreset: "openai",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reload() error = %v", err)
+	}
+	if got := rtr.Targets()[0].snapshot().LatencyFastMs; got != beforeLatency {
+		t.Fatalf("LatencyFastMs after reload = %v, want inherited %v", got, beforeLatency)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-4.1","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select(gpt-4.1) error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
+	}
+
+	err = rtr.Reload([]config.UpstreamTargetConfig{
+		{
+			ID:             "broken",
+			Enabled:        boolPtr(true),
+			ModelDiscovery: ModelDiscoveryStaticOnly,
+			Upstream: config.UpstreamConfig{
+				BaseURL: "://bad-url",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatalf("Reload(invalid) error = nil, want error")
+	}
+	selection, err = rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select after failed reload error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("selected target after failed reload = %q, want primary", selection.Target.ID)
+	}
+}
+
 func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

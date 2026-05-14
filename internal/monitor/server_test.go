@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
+	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -699,7 +700,7 @@ func TestChannelManagementAPI(t *testing.T) {
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channels", createBody)
 	rr := httptest.NewRecorder()
-	channelListCreateAPIHandler(st).ServeHTTP(rr, req)
+	channelListCreateAPIHandler(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("create status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -716,7 +717,7 @@ func TestChannelManagementAPI(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
 	rr = httptest.NewRecorder()
-	channelDetailAPIHandler(st).ServeHTTP(rr, req)
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("probe status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -730,7 +731,7 @@ func TestChannelManagementAPI(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/api/channels/openai-primary/models", nil)
 	rr = httptest.NewRecorder()
-	channelDetailAPIHandler(st).ServeHTTP(rr, req)
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("models status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -744,7 +745,7 @@ func TestChannelManagementAPI(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false}`))
 	rr = httptest.NewRecorder()
-	channelDetailAPIHandler(st).ServeHTTP(rr, req)
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("disable model status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -754,6 +755,58 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if len(enabledModels) != 1 || enabledModels[0].Model != "gpt-4.1" {
 		t.Fatalf("enabledModels = %#v", enabledModels)
+	}
+}
+
+func TestChannelModelPatchReloadsRouter(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.com/v1",
+		ProviderPreset: "openai",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	cfg := &config.Config{Upstreams: targets}
+	rtr, err := router.New(cfg, st)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false}`))
+	rr := httptest.NewRecorder()
+	channelDetailAPIHandler(st, rtr, channel.NewService(st)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("disable model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	selectReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	selectReq.Header.Set("Content-Type", "application/json")
+	if _, err := rtr.Select(selectReq); err == nil {
+		t.Fatalf("Select(gpt-5) error = nil, want no supporting target after reload")
 	}
 }
 

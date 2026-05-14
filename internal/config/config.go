@@ -75,14 +75,15 @@ type UpstreamConfig struct {
 }
 
 type UpstreamTargetConfig struct {
-	ID             string         `yaml:"id"`
-	Enabled        *bool          `yaml:"enabled"`
-	Priority       int            `yaml:"priority"`
-	Weight         float64        `yaml:"weight"`
-	CapacityHint   float64        `yaml:"capacity_hint"`
-	ModelDiscovery string         `yaml:"model_discovery"`
-	StaticModels   []string       `yaml:"static_models"`
-	Upstream       UpstreamConfig `yaml:"upstream"`
+	ID                 string         `yaml:"id"`
+	Enabled            *bool          `yaml:"enabled"`
+	Priority           int            `yaml:"priority"`
+	Weight             float64        `yaml:"weight"`
+	CapacityHint       float64        `yaml:"capacity_hint"`
+	ModelDiscovery     string         `yaml:"model_discovery"`
+	StaticModels       []string       `yaml:"static_models"`
+	AllowUnknownModels *bool          `yaml:"allow_unknown_models"`
+	Upstream           UpstreamConfig `yaml:"upstream"`
 }
 
 type RouterConfig struct {

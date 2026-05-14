@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
+	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/mcpserver"
 	"github.com/kingfs/llm-tracelab/internal/monitor"
@@ -34,10 +35,11 @@ func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.C
 		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier))
 	}
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
-		Router:       rtr,
-		AuthVerifier: verifier,
-		AuthStore:    authStorePtr,
-		SessionTTL:   cfg.AuthSessionTTL(),
+		Router:         rtr,
+		ChannelService: channel.NewService(traceStore),
+		AuthVerifier:   verifier,
+		AuthStore:      authStorePtr,
+		SessionTTL:     cfg.AuthSessionTTL(),
 	})
 	return mux
 }

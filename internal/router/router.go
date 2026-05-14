@@ -275,7 +275,17 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		r.failureThreshold = 3
 	}
 
+	targets, err := buildTargets(targetCfgs)
+	if err != nil {
+		return nil, err
+	}
+	r.targets = targets
+	return r, nil
+}
+
+func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 	seenIDs := map[string]struct{}{}
+	targets := make([]*Target, 0, len(targetCfgs))
 	for idx, targetCfg := range targetCfgs {
 		enabled := true
 		if targetCfg.Enabled != nil {
@@ -299,7 +309,7 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 			ModelDiscovery:     normalizeDiscoveryMode(targetCfg.ModelDiscovery),
 			StaticModels:       normalizeModels(targetCfg.StaticModels),
 			Upstream:           resolved,
-			allowUnknownModels: len(targetCfgs) == 1,
+			allowUnknownModels: allowUnknownModels(targetCfg, len(targetCfgs) == 1),
 			models:             map[string]struct{}{},
 			ttftFastMs:         500,
 			ttftSlowMs:         500,
@@ -311,18 +321,22 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 			return nil, fmt.Errorf("duplicate upstream target id %q", target.ID)
 		}
 		seenIDs[target.ID] = struct{}{}
-		r.targets = append(r.targets, target)
+		targets = append(targets, target)
 	}
-	if len(r.targets) == 0 {
+	if len(targets) == 0 {
 		return nil, fmt.Errorf("no enabled upstream targets configured")
 	}
-	slices.SortFunc(r.targets, func(a, b *Target) int {
+	sortTargets(targets)
+	return targets, nil
+}
+
+func sortTargets(targets []*Target) {
+	slices.SortFunc(targets, func(a, b *Target) int {
 		if a.Priority != b.Priority {
 			return b.Priority - a.Priority
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	return r, nil
 }
 
 func (r *Router) Initialize() error {
@@ -333,6 +347,44 @@ func (r *Router) Initialize() error {
 	if usable == 0 {
 		return fmt.Errorf("no usable upstream targets after startup discovery")
 	}
+	r.mu.Lock()
+	r.rebuildCatalog()
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
+	if r == nil {
+		return fmt.Errorf("router is nil")
+	}
+	if len(targetCfgs) == 0 {
+		return fmt.Errorf("no upstream targets configured")
+	}
+	nextTargets, err := buildTargets(targetCfgs)
+	if err != nil {
+		return err
+	}
+
+	r.mu.RLock()
+	existing := make(map[string]*Target, len(r.targets))
+	for _, target := range r.targets {
+		existing[target.ID] = target
+	}
+	r.mu.RUnlock()
+	for _, target := range nextTargets {
+		if old := existing[target.ID]; old != nil {
+			target.inheritRuntimeState(old)
+		}
+	}
+
+	if _, err := r.refreshTargets(nextTargets); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.targets = nextTargets
+	r.rebuildCatalog()
+	r.mu.Unlock()
 	return nil
 }
 
@@ -648,8 +700,15 @@ func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
 }
 
 func (r *Router) refreshAll() (int, error) {
+	r.mu.RLock()
+	targets := append([]*Target(nil), r.targets...)
+	r.mu.RUnlock()
+	return r.refreshTargets(targets)
+}
+
+func (r *Router) refreshTargets(targets []*Target) (int, error) {
 	var usable int
-	for _, target := range r.targets {
+	for _, target := range targets {
 		models, status, refreshErr := r.refreshTarget(target)
 		if refreshErr == nil || len(models) > 0 || target.allowUnknownModels {
 			usable++
@@ -690,9 +749,6 @@ func (r *Router) refreshAll() (int, error) {
 			}
 		}
 	}
-	r.mu.Lock()
-	r.rebuildCatalog()
-	r.mu.Unlock()
 	return usable, nil
 }
 
@@ -727,6 +783,27 @@ func (t *Target) setRefreshResult(models []string, status string, refreshErr err
 	} else {
 		t.lastRefreshError = ""
 	}
+}
+
+func (t *Target) inheritRuntimeState(old *Target) {
+	if t == nil || old == nil {
+		return
+	}
+	old.mu.Lock()
+	defer old.mu.Unlock()
+	t.consecutiveFailures = old.consecutiveFailures
+	t.openUntil = old.openUntil
+	t.lastRefreshAt = old.lastRefreshAt
+	t.lastRefreshStatus = old.lastRefreshStatus
+	t.lastRefreshError = old.lastRefreshError
+	t.ttftFastMs = old.ttftFastMs
+	t.ttftSlowMs = old.ttftSlowMs
+	t.reqLatencyFastMs = old.reqLatencyFastMs
+	t.reqLatencySlowMs = old.reqLatencySlowMs
+	t.errorRate = old.errorRate
+	t.timeoutRate = old.timeoutRate
+	t.cancelRate = old.cancelRate
+	t.healthState = old.healthState
 }
 
 func (t *Target) snapshot() Snapshot {
@@ -1084,6 +1161,13 @@ func normalizeDiscoveryMode(mode string) string {
 	default:
 		return ModelDiscoveryListModels
 	}
+}
+
+func allowUnknownModels(cfg config.UpstreamTargetConfig, fallback bool) bool {
+	if cfg.AllowUnknownModels != nil {
+		return *cfg.AllowUnknownModels
+	}
+	return fallback
 }
 
 func defaultFloat(v float64, fallback float64) float64 {
