@@ -340,6 +340,8 @@
 
 .nav-modal {
   width: min(460px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
   display: grid;
   gap: 14px;
   padding: 22px;
@@ -366,6 +368,12 @@
 .nav-modal-actions {
   justify-content: flex-end;
   align-items: center;
+  position: sticky;
+  bottom: -22px;
+  margin: 0 -22px -22px;
+  padding: 14px 22px 22px;
+  background: var(--panel-strong);
+  border-top: 1px solid var(--line);
 }
 
 .theme-option {

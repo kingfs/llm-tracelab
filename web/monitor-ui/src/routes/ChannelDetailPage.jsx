@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
@@ -22,6 +23,7 @@ export function ChannelDetailPage() {
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const detail = useJSON(apiURL(apiPaths.channel(channelID), params), [channelID, windowValue, refreshTick]);
+  const presets = useJSON(apiPaths.providerPresets, []);
   const channel = detail.data || {};
   const summary = channel.summary || {};
   const modelsUsage = channel.models_usage || [];
@@ -68,8 +70,7 @@ export function ChannelDetailPage() {
       setBusy("");
     }
   };
-  const saveChannel = async (event) => {
-    event.preventDefault();
+  const saveChannel = async () => {
     setBusy("save-channel");
     setActionError("");
     try {
@@ -154,7 +155,7 @@ export function ChannelDetailPage() {
               <HomeIcon />
             </Link>
             <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title="Probe channel" aria-label="Probe channel"><ProbeIcon /></button>
-            <button className="icon-button" type="button" onClick={() => setEditOpen((open) => !open)} title={editOpen ? "Close edit" : "Edit channel"} aria-label={editOpen ? "Close edit" : "Edit channel"}><EditIcon /></button>
+            <button className="icon-button" type="button" onClick={() => setEditOpen(true)} title="Edit channel" aria-label="Edit channel"><EditIcon /></button>
             <Switch checked={Boolean(channel.enabled)} onChange={setChannelEnabled} disabled={busy === "channel"} label="Channel enabled" />
           </div>
           <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
@@ -193,31 +194,16 @@ export function ChannelDetailPage() {
       ) : null}
 
       {detail.data && editOpen ? (
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">Configuration</p>
-              <h2>Edit channel</h2>
-            </div>
-          </div>
-          <form className="channel-form" onSubmit={saveChannel}>
-            <label>Name<input value={editForm.name} onChange={(event) => setEditValue(setEditForm, "name", event.target.value)} /></label>
-            <label>Base URL<input value={editForm.base_url} onChange={(event) => setEditValue(setEditForm, "base_url", event.target.value)} /></label>
-            <label>Provider preset<input value={editForm.provider_preset} onChange={(event) => setEditValue(setEditForm, "provider_preset", event.target.value)} /></label>
-            <label>API key<input type="password" value={editForm.api_key} onChange={(event) => setEditValue(setEditForm, "api_key", event.target.value)} placeholder={channel.api_key_hint ? `keep ${channel.api_key_hint}` : "unchanged"} /></label>
-            <label>Priority<input type="number" value={editForm.priority} onChange={(event) => setEditValue(setEditForm, "priority", event.target.value)} /></label>
-            <label>Weight<input type="number" step="0.1" value={editForm.weight} onChange={(event) => setEditValue(setEditForm, "weight", event.target.value)} /></label>
-            <label>Capacity<input type="number" step="0.1" value={editForm.capacity_hint} onChange={(event) => setEditValue(setEditForm, "capacity_hint", event.target.value)} /></label>
-            <label>Model discovery<input value={editForm.model_discovery} onChange={(event) => setEditValue(setEditForm, "model_discovery", event.target.value)} /></label>
-            <label className="channel-form-check"><input type="checkbox" checked={editForm.enabled} onChange={(event) => setEditValue(setEditForm, "enabled", event.target.checked)} /> Enabled</label>
-            <label className="channel-form-check"><input type="checkbox" checked={editForm.allow_unknown_models} onChange={(event) => setEditValue(setEditForm, "allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
-            <label className="channel-form-wide">Headers<textarea value={editForm.headers_text} onChange={(event) => setEditValue(setEditForm, "headers_text", event.target.value)} spellCheck={false} /></label>
-            <div className="channel-form-actions">
-              <button className="ghost-button" type="button" onClick={() => setEditForm(editFormFromChannel(channel))}>Reset</button>
-              <button className="ghost-button active" type="submit" disabled={busy === "save-channel"}>{busy === "save-channel" ? "Saving" : "Save changes"}</button>
-            </div>
-          </form>
-        </section>
+        <EditChannelDialog
+          channel={channel}
+          form={editForm}
+          presets={presets.data?.items || []}
+          saving={busy === "save-channel"}
+          onChange={setEditForm}
+          onReset={() => setEditForm(editFormFromChannel(channel))}
+          onClose={() => setEditOpen(false)}
+          onSave={saveChannel}
+        />
       ) : null}
 
       {detail.data ? (
@@ -293,6 +279,51 @@ export function ChannelDetailPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+function EditChannelDialog({ channel, form, presets = [], saving, onChange, onReset, onClose, onSave }) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const submit = async (event) => {
+    event.preventDefault();
+    await onSave();
+  };
+
+  return createPortal(
+    <div className="nav-modal-backdrop" role="presentation">
+      <form className="nav-modal channel-edit-modal" onSubmit={submit}>
+        <div className="nav-modal-head">
+          <div>
+            <p className="eyebrow">Configuration</p>
+            <h2>Edit channel</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+        </div>
+        <div className="channel-form channel-form-modal">
+          <label>Name<input required value={form.name} onChange={(event) => setEditValue(onChange, "name", event.target.value)} /></label>
+          <label>Provider preset<select value={form.provider_preset} onChange={(event) => setEditValue(onChange, "provider_preset", event.target.value)}>{providerOptions(presets, form.provider_preset).map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
+          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => setEditValue(onChange, "base_url", event.target.value)} /></label>
+          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => setEditValue(onChange, "api_key", event.target.value)} placeholder={channel.api_key_hint ? `keep ${channel.api_key_hint}` : "unchanged"} /></label>
+          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => setEditValue(onChange, "allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+        </div>
+        <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
+        {advancedOpen ? (
+          <div className="channel-form channel-form-modal">
+            <label>Priority<input type="number" value={form.priority} onChange={(event) => setEditValue(onChange, "priority", event.target.value)} /></label>
+            <label>Weight<input type="number" step="0.1" value={form.weight} onChange={(event) => setEditValue(onChange, "weight", event.target.value)} /></label>
+            <label>Capacity<input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => setEditValue(onChange, "capacity_hint", event.target.value)} /></label>
+            <label>Model discovery<select value={form.model_discovery} onChange={(event) => setEditValue(onChange, "model_discovery", event.target.value)}><option value="list_models">list_models</option><option value="disabled">disabled</option></select></label>
+            <label className="channel-form-wide">Headers<textarea value={form.headers_text} onChange={(event) => setEditValue(onChange, "headers_text", event.target.value)} spellCheck={false} /></label>
+          </div>
+        ) : null}
+        <div className="nav-modal-actions">
+          <button className="ghost-button" type="button" onClick={onReset}>Reset</button>
+          <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
+          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Save changes"}</button>
+        </div>
+      </form>
+    </div>,
+    document.body,
   );
 }
 
@@ -379,7 +410,6 @@ function emptyEditForm() {
     weight: 1,
     capacity_hint: 1,
     model_discovery: "list_models",
-    enabled: true,
     allow_unknown_models: false,
     headers_text: "",
   };
@@ -396,7 +426,6 @@ function editFormFromChannel(channel = {}) {
     weight: channel.weight ?? 1,
     capacity_hint: channel.capacity_hint ?? 1,
     model_discovery: channel.model_discovery || "list_models",
-    enabled: Boolean(channel.enabled),
     allow_unknown_models: Boolean(channel.allow_unknown_models),
     headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
   };
@@ -415,7 +444,6 @@ function channelPayloadFromForm(form) {
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
     model_discovery: form.model_discovery,
-    enabled: Boolean(form.enabled),
     allow_unknown_models: Boolean(form.allow_unknown_models),
     headers: parseHeadersText(form.headers_text),
   };
@@ -444,4 +472,9 @@ function parseHeadersText(value) {
     headers[key] = headerValue === "***" ? { keep: true } : headerValue;
   });
   return headers;
+}
+
+function providerOptions(presets, current) {
+  const fallback = ["openai", "openrouter", "anthropic", "google_genai", "azure_openai", "vertex", "vllm"];
+  return Array.from(new Set([...(presets.length ? presets : fallback), current].filter(Boolean))).sort();
 }

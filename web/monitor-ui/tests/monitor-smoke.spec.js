@@ -98,7 +98,12 @@ test("channel management renders and supports core actions", async ({ page }) =>
 
   await page.getByRole("button", { name: "Edit channel" }).click();
   await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
+  await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await expect(page.getByLabel("Channel enabled")).toBeVisible();
+  await expect(page.locator(".channel-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
+  await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
+  await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByPlaceholder("Add model manually").fill("gpt-manual");
   await page.getByRole("button", { name: "Add model" }).click();

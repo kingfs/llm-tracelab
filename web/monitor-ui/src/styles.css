@@ -1479,6 +1479,10 @@ a:focus-visible {
   width: min(620px, 100%);
 }
 
+.channel-edit-modal {
+  width: min(720px, 100%);
+}
+
 .channel-form textarea {
   min-height: 112px;
   padding: 10px 12px;

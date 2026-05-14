@@ -17,6 +17,9 @@ test("real monitor server renders seeded model and channel data", async ({ page 
   await expect(page.getByText("rate limited")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit channel" }).click();
+  await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
+  await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await expect(page.locator("textarea")).toContainText("X-Test: visible");
 });
