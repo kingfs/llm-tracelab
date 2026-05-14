@@ -939,6 +939,75 @@ func (s *Store) GetChannelUsageSummary(channelID string, since time.Time) (Usage
 	return s.usageSummary("selected_upstream_id = ?", []any{channelID}, since)
 }
 
+func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]ChannelModelAnalyticsRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, fmt.Errorf("channel id is required")
+	}
+	channelModels, err := s.ListChannelModels(channelID, false)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]struct{}{}
+	out := make([]ChannelModelAnalyticsRecord, 0, len(channelModels))
+	for _, channelModel := range channelModels {
+		model := strings.ToLower(strings.TrimSpace(channelModel.Model))
+		if model == "" {
+			continue
+		}
+		seen[model] = struct{}{}
+		summary, err := s.usageSummary("selected_upstream_id = ? AND model = ?", []any{channelID, model}, since)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ChannelModelAnalyticsRecord{
+			ChannelID: channelID,
+			Model:     model,
+			Enabled:   channelModel.Enabled,
+			Source:    channelModel.Source,
+			Summary:   summary,
+		})
+	}
+
+	logModels, err := s.channelLogModels(channelID, since)
+	if err != nil {
+		return nil, err
+	}
+	for _, model := range logModels {
+		if _, ok := seen[model]; ok {
+			continue
+		}
+		summary, err := s.usageSummary("selected_upstream_id = ? AND model = ?", []any{channelID, model}, since)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ChannelModelAnalyticsRecord{
+			ChannelID: channelID,
+			Model:     model,
+			Source:    "trace",
+			Summary:   summary,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Summary.TotalTokens != out[j].Summary.TotalTokens {
+			return out[i].Summary.TotalTokens > out[j].Summary.TotalTokens
+		}
+		if out[i].Summary.RequestCount != out[j].Summary.RequestCount {
+			return out[i].Summary.RequestCount > out[j].Summary.RequestCount
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out, nil
+}
+
+func (s *Store) GetChannelRecentFailures(channelID string, since time.Time, limit int) ([]UpstreamFailureRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return nil, fmt.Errorf("channel id is required")
+	}
+	return s.upstreamRecentFailures(channelID, limit, since, "")
+}
+
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	rows, err := s.db.Query(`
@@ -1500,6 +1569,31 @@ func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, [
 func (s *Store) listLogModels(since time.Time) ([]string, error) {
 	where := "model <> ''"
 	args := []any{}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var model string
+		if err := rows.Scan(&model); err != nil {
+			return nil, err
+		}
+		if model = strings.TrimSpace(model); model != "" {
+			out = append(out, model)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, error) {
+	where := "selected_upstream_id = ? AND model <> ''"
+	args := []any{channelID}
 	if !since.IsZero() {
 		where += " AND recorded_at >= ?"
 		args = append(args, since.UTC().Format(timeLayout))

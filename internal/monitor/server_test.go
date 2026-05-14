@@ -679,7 +679,8 @@ func TestChannelManagementAPI(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	st, err := store.New(t.TempDir())
+	dir := t.TempDir()
+	st, err := store.New(dir)
 	if err != nil {
 		t.Fatalf("store.New() error = %v", err)
 	}
@@ -755,6 +756,71 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if len(enabledModels) != 1 || enabledModels[0].Model != "gpt-4.1" {
 		t.Fatalf("enabledModels = %#v", enabledModels)
+	}
+
+	writeChannelLog := func(name string, model string, statusCode int, totalTokens int) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:          strings.TrimSuffix(name, ".http"),
+				Time:               time.Now().UTC(),
+				Model:              model,
+				URL:                "/v1/responses",
+				Method:             "POST",
+				StatusCode:         statusCode,
+				DurationMs:         100,
+				TTFTMs:             20,
+				SelectedUpstreamID: "openai-primary",
+			},
+			Usage: recordfile.UsageInfo{TotalTokens: totalTokens},
+		}
+		if statusCode >= 400 {
+			header.Meta.Error = "upstream overloaded"
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", name, err)
+		}
+	}
+	writeChannelLog("channel-success.http", "gpt-4.1", 200, 120)
+	writeChannelLog("channel-failed.http", "gpt-5", 429, 30)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/channels?window=24h", nil)
+	rr = httptest.NewRecorder()
+	channelListCreateAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("channel list status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var channelList channelListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &channelList); err != nil {
+		t.Fatalf("json.Unmarshal(channelList) error = %v", err)
+	}
+	if len(channelList.Items) != 1 || channelList.Items[0].Summary.TotalTokens != 150 || len(channelList.Items[0].Trends) != 24 {
+		t.Fatalf("channelList = %+v", channelList)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/channels/openai-primary?window=24h", nil)
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("channel detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var detail channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("json.Unmarshal(channel detail) error = %v", err)
+	}
+	if detail.Summary.RequestCount != 2 || detail.Summary.FailedRequest != 1 || detail.Summary.TotalTokens != 150 {
+		t.Fatalf("detail summary = %+v", detail.Summary)
+	}
+	if len(detail.ModelsUsage) != 2 || detail.ModelsUsage[0].Model != "gpt-4.1" || detail.ModelsUsage[0].Summary.TotalTokens != 120 {
+		t.Fatalf("models usage = %+v", detail.ModelsUsage)
+	}
+	if len(detail.RecentFailures) != 1 || detail.RecentFailures[0].StatusCode != 429 {
+		t.Fatalf("recent failures = %+v", detail.RecentFailures)
 	}
 }
 

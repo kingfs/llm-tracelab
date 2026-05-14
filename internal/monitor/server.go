@@ -477,35 +477,37 @@ type channelListResponse struct {
 }
 
 type channelItem struct {
-	ID                 string            `json:"id"`
-	Name               string            `json:"name"`
-	Description        string            `json:"description,omitempty"`
-	BaseURL            string            `json:"base_url"`
-	ProviderPreset     string            `json:"provider_preset"`
-	ProtocolFamily     string            `json:"protocol_family"`
-	RoutingProfile     string            `json:"routing_profile"`
-	APIVersion         string            `json:"api_version,omitempty"`
-	Deployment         string            `json:"deployment,omitempty"`
-	Project            string            `json:"project,omitempty"`
-	Location           string            `json:"location,omitempty"`
-	ModelResource      string            `json:"model_resource,omitempty"`
-	APIKeyHint         string            `json:"api_key_hint,omitempty"`
-	Headers            map[string]string `json:"headers,omitempty"`
-	Enabled            bool              `json:"enabled"`
-	Priority           int               `json:"priority"`
-	Weight             float64           `json:"weight"`
-	CapacityHint       float64           `json:"capacity_hint"`
-	ModelDiscovery     string            `json:"model_discovery"`
-	AllowUnknownModels bool              `json:"allow_unknown_models"`
-	ModelCount         int               `json:"model_count"`
-	EnabledModelCount  int               `json:"enabled_model_count"`
-	CreatedAt          time.Time         `json:"created_at"`
-	UpdatedAt          time.Time         `json:"updated_at"`
-	LastProbeAt        time.Time         `json:"last_probe_at,omitempty"`
-	LastProbeStatus    string            `json:"last_probe_status,omitempty"`
-	LastProbeError     string            `json:"last_probe_error,omitempty"`
-	Summary            usageSummaryView  `json:"summary,omitempty"`
-	Trends             []usageTrendView  `json:"trends,omitempty"`
+	ID                 string                `json:"id"`
+	Name               string                `json:"name"`
+	Description        string                `json:"description,omitempty"`
+	BaseURL            string                `json:"base_url"`
+	ProviderPreset     string                `json:"provider_preset"`
+	ProtocolFamily     string                `json:"protocol_family"`
+	RoutingProfile     string                `json:"routing_profile"`
+	APIVersion         string                `json:"api_version,omitempty"`
+	Deployment         string                `json:"deployment,omitempty"`
+	Project            string                `json:"project,omitempty"`
+	Location           string                `json:"location,omitempty"`
+	ModelResource      string                `json:"model_resource,omitempty"`
+	APIKeyHint         string                `json:"api_key_hint,omitempty"`
+	Headers            map[string]string     `json:"headers,omitempty"`
+	Enabled            bool                  `json:"enabled"`
+	Priority           int                   `json:"priority"`
+	Weight             float64               `json:"weight"`
+	CapacityHint       float64               `json:"capacity_hint"`
+	ModelDiscovery     string                `json:"model_discovery"`
+	AllowUnknownModels bool                  `json:"allow_unknown_models"`
+	ModelCount         int                   `json:"model_count"`
+	EnabledModelCount  int                   `json:"enabled_model_count"`
+	CreatedAt          time.Time             `json:"created_at"`
+	UpdatedAt          time.Time             `json:"updated_at"`
+	LastProbeAt        time.Time             `json:"last_probe_at,omitempty"`
+	LastProbeStatus    string                `json:"last_probe_status,omitempty"`
+	LastProbeError     string                `json:"last_probe_error,omitempty"`
+	Summary            usageSummaryView      `json:"summary,omitempty"`
+	Trends             []usageTrendView      `json:"trends,omitempty"`
+	ModelsUsage        []modelChannelItem    `json:"models_usage,omitempty"`
+	RecentFailures     []upstreamFailureItem `json:"recent_failures,omitempty"`
 }
 
 type channelModelsResponse struct {
@@ -883,6 +885,8 @@ func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelSer
 		}
 		switch r.Method {
 		case http.MethodGet:
+			windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
+			bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
 			channels, err := st.ListChannelConfigs()
 			if err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -896,7 +900,9 @@ func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelSer
 			counts := channelModelCounts(models)
 			items := make([]channelItem, 0, len(channels))
 			for _, record := range channels {
-				items = append(items, channelItemFromRecord(record, counts[record.ID], enabledChannelModelCount(models, record.ID)))
+				item := channelItemFromRecord(record, counts[record.ID], enabledChannelModelCount(models, record.ID))
+				enrichChannelItemAnalytics(st, &item, record.ID, since, bucketSize, bucketCount, false)
+				items = append(items, item)
 			}
 			writeJSON(w, http.StatusOK, channelListResponse{Items: items, RefreshedAt: time.Now().UTC()})
 		case http.MethodPost:
@@ -997,12 +1003,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 		item := channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID))
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
 		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
-		if summary, err := st.GetChannelUsageSummary(channelID, since); err == nil {
-			item.Summary = usageSummaryViewFromRecord(summary)
-		}
-		if trends, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount); err == nil {
-			item.Trends = usageTrendViews(trends)
-		}
+		enrichChannelItemAnalytics(st, &item, channelID, since, bucketSize, bucketCount, true)
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodPatch:
 		existing, err := st.GetChannelConfig(channelID)
@@ -1214,6 +1215,36 @@ func channelModelItemFromRecord(record store.ChannelModelRecord) channelModelIte
 		FirstSeenAt: record.FirstSeenAt,
 		LastSeenAt:  record.LastSeenAt,
 		LastProbeAt: record.LastProbeAt,
+	}
+}
+
+func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID string, since time.Time, bucketSize time.Duration, bucketCount int, includeDetail bool) {
+	if st == nil || item == nil {
+		return
+	}
+	if summary, err := st.GetChannelUsageSummary(channelID, since); err == nil {
+		item.Summary = usageSummaryViewFromRecord(summary)
+	}
+	if trends, err := st.GetChannelUsageTrends(channelID, since, bucketSize, bucketCount); err == nil {
+		item.Trends = usageTrendViews(trends)
+	}
+	if !includeDetail {
+		return
+	}
+	if models, err := st.GetChannelModelUsage(channelID, since); err == nil {
+		item.ModelsUsage = make([]modelChannelItem, 0, len(models))
+		for _, model := range models {
+			item.ModelsUsage = append(item.ModelsUsage, modelChannelItem{
+				ChannelID: model.ChannelID,
+				Model:     model.Model,
+				Enabled:   model.Enabled,
+				Source:    model.Source,
+				Summary:   usageSummaryViewFromRecord(model.Summary),
+			})
+		}
+	}
+	if failures, err := st.GetChannelRecentFailures(channelID, since, 10); err == nil {
+		item.RecentFailures = toUpstreamFailureItems(failures)
 	}
 }
 
