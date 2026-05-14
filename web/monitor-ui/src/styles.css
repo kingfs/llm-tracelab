@@ -232,9 +232,13 @@ a {
   gap: 18px;
 }
 
+.token-summary-grid {
+  margin-bottom: 20px;
+}
+
 .token-form {
   display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(180px, 220px) auto;
+  grid-template-columns: minmax(180px, 280px) minmax(180px, 220px) minmax(140px, 180px) auto;
   align-items: end;
   gap: 12px;
 }
@@ -273,6 +277,65 @@ a {
   overflow-wrap: anywhere;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.86rem;
+}
+
+.token-result small {
+  color: var(--muted);
+  line-height: 1.45;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.token-table {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(2, 8, 23, 0.24);
+}
+
+.token-table-head,
+.token-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.9fr) minmax(80px, 0.6fr) minmax(92px, 0.65fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(110px, 0.7fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.token-table-head {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 14px 16px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: rgba(15, 23, 42, 0.5);
+  border-bottom: 1px solid var(--line);
+}
+
+.token-row {
+  border-top: 1px solid var(--line);
+  padding: 14px 16px;
+  min-width: 0;
+}
+
+.token-row strong,
+.token-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.token-row span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.token-row code {
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
 }
 
 .app-shell {
@@ -3152,24 +3215,30 @@ a:focus-visible {
   .trace-row,
   .overview-attention-panel .trace-row,
   .session-table-head,
-  .session-row {
+  .session-row,
+  .token-form,
+  .token-table-head,
+  .token-row {
     grid-template-columns: 1fr;
   }
 
   .trace-table-head,
-  .session-table-head {
+  .session-table-head,
+  .token-table-head {
     display: none;
   }
 
   .trace-row,
-  .session-row {
+  .session-row,
+  .token-row {
     border-radius: 18px;
     margin-bottom: 10px;
     border: 1px solid var(--line);
   }
 
   .trace-table,
-  .session-table {
+  .session-table,
+  .token-table {
     border: 0;
     border-radius: 0;
     background: transparent;

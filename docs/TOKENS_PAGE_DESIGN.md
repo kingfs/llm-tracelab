@@ -245,6 +245,11 @@ Validation:
 - `task ui:build`
 - `go test ./internal/monitor`
 
+Status:
+
+- Completed in this phase.
+- Tokens page now owns token inventory, token creation, one-time token reveal, and revoke action.
+
 ### Phase 4: Remove Duplicate Account Menu Token Flow
 
 - Remove `Get token` menu item.
