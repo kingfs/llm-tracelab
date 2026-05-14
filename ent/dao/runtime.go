@@ -6,10 +6,14 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -48,6 +52,192 @@ func init() {
 	apitokenDescCreatedAt := apitokenFields[5].Descriptor()
 	// apitoken.DefaultCreatedAt holds the default value on creation for the created_at field.
 	apitoken.DefaultCreatedAt = apitokenDescCreatedAt.Default.(func() time.Time)
+	channelconfigFields := schema.ChannelConfig{}.Fields()
+	_ = channelconfigFields
+	// channelconfigDescName is the schema descriptor for name field.
+	channelconfigDescName := channelconfigFields[1].Descriptor()
+	// channelconfig.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	channelconfig.NameValidator = channelconfigDescName.Validators[0].(func(string) error)
+	// channelconfigDescDescription is the schema descriptor for description field.
+	channelconfigDescDescription := channelconfigFields[2].Descriptor()
+	// channelconfig.DefaultDescription holds the default value on creation for the description field.
+	channelconfig.DefaultDescription = channelconfigDescDescription.Default.(string)
+	// channelconfigDescBaseURL is the schema descriptor for base_url field.
+	channelconfigDescBaseURL := channelconfigFields[3].Descriptor()
+	// channelconfig.BaseURLValidator is a validator for the "base_url" field. It is called by the builders before save.
+	channelconfig.BaseURLValidator = channelconfigDescBaseURL.Validators[0].(func(string) error)
+	// channelconfigDescProviderPreset is the schema descriptor for provider_preset field.
+	channelconfigDescProviderPreset := channelconfigFields[4].Descriptor()
+	// channelconfig.DefaultProviderPreset holds the default value on creation for the provider_preset field.
+	channelconfig.DefaultProviderPreset = channelconfigDescProviderPreset.Default.(string)
+	// channelconfigDescProtocolFamily is the schema descriptor for protocol_family field.
+	channelconfigDescProtocolFamily := channelconfigFields[5].Descriptor()
+	// channelconfig.DefaultProtocolFamily holds the default value on creation for the protocol_family field.
+	channelconfig.DefaultProtocolFamily = channelconfigDescProtocolFamily.Default.(string)
+	// channelconfigDescRoutingProfile is the schema descriptor for routing_profile field.
+	channelconfigDescRoutingProfile := channelconfigFields[6].Descriptor()
+	// channelconfig.DefaultRoutingProfile holds the default value on creation for the routing_profile field.
+	channelconfig.DefaultRoutingProfile = channelconfigDescRoutingProfile.Default.(string)
+	// channelconfigDescAPIVersion is the schema descriptor for api_version field.
+	channelconfigDescAPIVersion := channelconfigFields[7].Descriptor()
+	// channelconfig.DefaultAPIVersion holds the default value on creation for the api_version field.
+	channelconfig.DefaultAPIVersion = channelconfigDescAPIVersion.Default.(string)
+	// channelconfigDescDeployment is the schema descriptor for deployment field.
+	channelconfigDescDeployment := channelconfigFields[8].Descriptor()
+	// channelconfig.DefaultDeployment holds the default value on creation for the deployment field.
+	channelconfig.DefaultDeployment = channelconfigDescDeployment.Default.(string)
+	// channelconfigDescProject is the schema descriptor for project field.
+	channelconfigDescProject := channelconfigFields[9].Descriptor()
+	// channelconfig.DefaultProject holds the default value on creation for the project field.
+	channelconfig.DefaultProject = channelconfigDescProject.Default.(string)
+	// channelconfigDescLocation is the schema descriptor for location field.
+	channelconfigDescLocation := channelconfigFields[10].Descriptor()
+	// channelconfig.DefaultLocation holds the default value on creation for the location field.
+	channelconfig.DefaultLocation = channelconfigDescLocation.Default.(string)
+	// channelconfigDescModelResource is the schema descriptor for model_resource field.
+	channelconfigDescModelResource := channelconfigFields[11].Descriptor()
+	// channelconfig.DefaultModelResource holds the default value on creation for the model_resource field.
+	channelconfig.DefaultModelResource = channelconfigDescModelResource.Default.(string)
+	// channelconfigDescAPIKeyHint is the schema descriptor for api_key_hint field.
+	channelconfigDescAPIKeyHint := channelconfigFields[13].Descriptor()
+	// channelconfig.DefaultAPIKeyHint holds the default value on creation for the api_key_hint field.
+	channelconfig.DefaultAPIKeyHint = channelconfigDescAPIKeyHint.Default.(string)
+	// channelconfigDescHeadersJSON is the schema descriptor for headers_json field.
+	channelconfigDescHeadersJSON := channelconfigFields[14].Descriptor()
+	// channelconfig.DefaultHeadersJSON holds the default value on creation for the headers_json field.
+	channelconfig.DefaultHeadersJSON = channelconfigDescHeadersJSON.Default.(string)
+	// channelconfigDescEnabled is the schema descriptor for enabled field.
+	channelconfigDescEnabled := channelconfigFields[15].Descriptor()
+	// channelconfig.DefaultEnabled holds the default value on creation for the enabled field.
+	channelconfig.DefaultEnabled = channelconfigDescEnabled.Default.(bool)
+	// channelconfigDescPriority is the schema descriptor for priority field.
+	channelconfigDescPriority := channelconfigFields[16].Descriptor()
+	// channelconfig.DefaultPriority holds the default value on creation for the priority field.
+	channelconfig.DefaultPriority = channelconfigDescPriority.Default.(int)
+	// channelconfigDescWeight is the schema descriptor for weight field.
+	channelconfigDescWeight := channelconfigFields[17].Descriptor()
+	// channelconfig.DefaultWeight holds the default value on creation for the weight field.
+	channelconfig.DefaultWeight = channelconfigDescWeight.Default.(float64)
+	// channelconfigDescCapacityHint is the schema descriptor for capacity_hint field.
+	channelconfigDescCapacityHint := channelconfigFields[18].Descriptor()
+	// channelconfig.DefaultCapacityHint holds the default value on creation for the capacity_hint field.
+	channelconfig.DefaultCapacityHint = channelconfigDescCapacityHint.Default.(float64)
+	// channelconfigDescModelDiscovery is the schema descriptor for model_discovery field.
+	channelconfigDescModelDiscovery := channelconfigFields[19].Descriptor()
+	// channelconfig.DefaultModelDiscovery holds the default value on creation for the model_discovery field.
+	channelconfig.DefaultModelDiscovery = channelconfigDescModelDiscovery.Default.(string)
+	// channelconfigDescAllowUnknownModels is the schema descriptor for allow_unknown_models field.
+	channelconfigDescAllowUnknownModels := channelconfigFields[20].Descriptor()
+	// channelconfig.DefaultAllowUnknownModels holds the default value on creation for the allow_unknown_models field.
+	channelconfig.DefaultAllowUnknownModels = channelconfigDescAllowUnknownModels.Default.(bool)
+	// channelconfigDescCreatedAt is the schema descriptor for created_at field.
+	channelconfigDescCreatedAt := channelconfigFields[21].Descriptor()
+	// channelconfig.DefaultCreatedAt holds the default value on creation for the created_at field.
+	channelconfig.DefaultCreatedAt = channelconfigDescCreatedAt.Default.(func() time.Time)
+	// channelconfigDescUpdatedAt is the schema descriptor for updated_at field.
+	channelconfigDescUpdatedAt := channelconfigFields[22].Descriptor()
+	// channelconfig.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	channelconfig.DefaultUpdatedAt = channelconfigDescUpdatedAt.Default.(func() time.Time)
+	// channelconfigDescLastProbeStatus is the schema descriptor for last_probe_status field.
+	channelconfigDescLastProbeStatus := channelconfigFields[24].Descriptor()
+	// channelconfig.DefaultLastProbeStatus holds the default value on creation for the last_probe_status field.
+	channelconfig.DefaultLastProbeStatus = channelconfigDescLastProbeStatus.Default.(string)
+	// channelconfigDescLastProbeError is the schema descriptor for last_probe_error field.
+	channelconfigDescLastProbeError := channelconfigFields[25].Descriptor()
+	// channelconfig.DefaultLastProbeError holds the default value on creation for the last_probe_error field.
+	channelconfig.DefaultLastProbeError = channelconfigDescLastProbeError.Default.(string)
+	// channelconfigDescID is the schema descriptor for id field.
+	channelconfigDescID := channelconfigFields[0].Descriptor()
+	// channelconfig.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	channelconfig.IDValidator = channelconfigDescID.Validators[0].(func(string) error)
+	channelmodelFields := schema.ChannelModel{}.Fields()
+	_ = channelmodelFields
+	// channelmodelDescChannelID is the schema descriptor for channel_id field.
+	channelmodelDescChannelID := channelmodelFields[0].Descriptor()
+	// channelmodel.ChannelIDValidator is a validator for the "channel_id" field. It is called by the builders before save.
+	channelmodel.ChannelIDValidator = channelmodelDescChannelID.Validators[0].(func(string) error)
+	// channelmodelDescModel is the schema descriptor for model field.
+	channelmodelDescModel := channelmodelFields[1].Descriptor()
+	// channelmodel.ModelValidator is a validator for the "model" field. It is called by the builders before save.
+	channelmodel.ModelValidator = channelmodelDescModel.Validators[0].(func(string) error)
+	// channelmodelDescDisplayName is the schema descriptor for display_name field.
+	channelmodelDescDisplayName := channelmodelFields[2].Descriptor()
+	// channelmodel.DefaultDisplayName holds the default value on creation for the display_name field.
+	channelmodel.DefaultDisplayName = channelmodelDescDisplayName.Default.(string)
+	// channelmodelDescSource is the schema descriptor for source field.
+	channelmodelDescSource := channelmodelFields[3].Descriptor()
+	// channelmodel.DefaultSource holds the default value on creation for the source field.
+	channelmodel.DefaultSource = channelmodelDescSource.Default.(string)
+	// channelmodelDescEnabled is the schema descriptor for enabled field.
+	channelmodelDescEnabled := channelmodelFields[4].Descriptor()
+	// channelmodel.DefaultEnabled holds the default value on creation for the enabled field.
+	channelmodel.DefaultEnabled = channelmodelDescEnabled.Default.(bool)
+	// channelmodelDescInputModalitiesJSON is the schema descriptor for input_modalities_json field.
+	channelmodelDescInputModalitiesJSON := channelmodelFields[9].Descriptor()
+	// channelmodel.DefaultInputModalitiesJSON holds the default value on creation for the input_modalities_json field.
+	channelmodel.DefaultInputModalitiesJSON = channelmodelDescInputModalitiesJSON.Default.(string)
+	// channelmodelDescOutputModalitiesJSON is the schema descriptor for output_modalities_json field.
+	channelmodelDescOutputModalitiesJSON := channelmodelFields[10].Descriptor()
+	// channelmodel.DefaultOutputModalitiesJSON holds the default value on creation for the output_modalities_json field.
+	channelmodel.DefaultOutputModalitiesJSON = channelmodelDescOutputModalitiesJSON.Default.(string)
+	// channelmodelDescRawModelJSON is the schema descriptor for raw_model_json field.
+	channelmodelDescRawModelJSON := channelmodelFields[11].Descriptor()
+	// channelmodel.DefaultRawModelJSON holds the default value on creation for the raw_model_json field.
+	channelmodel.DefaultRawModelJSON = channelmodelDescRawModelJSON.Default.(string)
+	// channelmodelDescFirstSeenAt is the schema descriptor for first_seen_at field.
+	channelmodelDescFirstSeenAt := channelmodelFields[12].Descriptor()
+	// channelmodel.DefaultFirstSeenAt holds the default value on creation for the first_seen_at field.
+	channelmodel.DefaultFirstSeenAt = channelmodelDescFirstSeenAt.Default.(func() time.Time)
+	// channelmodelDescLastSeenAt is the schema descriptor for last_seen_at field.
+	channelmodelDescLastSeenAt := channelmodelFields[13].Descriptor()
+	// channelmodel.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
+	channelmodel.DefaultLastSeenAt = channelmodelDescLastSeenAt.Default.(func() time.Time)
+	channelproberunFields := schema.ChannelProbeRun{}.Fields()
+	_ = channelproberunFields
+	// channelproberunDescChannelID is the schema descriptor for channel_id field.
+	channelproberunDescChannelID := channelproberunFields[1].Descriptor()
+	// channelproberun.ChannelIDValidator is a validator for the "channel_id" field. It is called by the builders before save.
+	channelproberun.ChannelIDValidator = channelproberunDescChannelID.Validators[0].(func(string) error)
+	// channelproberunDescStatus is the schema descriptor for status field.
+	channelproberunDescStatus := channelproberunFields[2].Descriptor()
+	// channelproberun.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	channelproberun.StatusValidator = channelproberunDescStatus.Validators[0].(func(string) error)
+	// channelproberunDescDurationMs is the schema descriptor for duration_ms field.
+	channelproberunDescDurationMs := channelproberunFields[5].Descriptor()
+	// channelproberun.DefaultDurationMs holds the default value on creation for the duration_ms field.
+	channelproberun.DefaultDurationMs = channelproberunDescDurationMs.Default.(int64)
+	// channelproberunDescDiscoveredCount is the schema descriptor for discovered_count field.
+	channelproberunDescDiscoveredCount := channelproberunFields[6].Descriptor()
+	// channelproberun.DefaultDiscoveredCount holds the default value on creation for the discovered_count field.
+	channelproberun.DefaultDiscoveredCount = channelproberunDescDiscoveredCount.Default.(int)
+	// channelproberunDescEnabledCount is the schema descriptor for enabled_count field.
+	channelproberunDescEnabledCount := channelproberunFields[7].Descriptor()
+	// channelproberun.DefaultEnabledCount holds the default value on creation for the enabled_count field.
+	channelproberun.DefaultEnabledCount = channelproberunDescEnabledCount.Default.(int)
+	// channelproberunDescEndpoint is the schema descriptor for endpoint field.
+	channelproberunDescEndpoint := channelproberunFields[8].Descriptor()
+	// channelproberun.DefaultEndpoint holds the default value on creation for the endpoint field.
+	channelproberun.DefaultEndpoint = channelproberunDescEndpoint.Default.(string)
+	// channelproberunDescStatusCode is the schema descriptor for status_code field.
+	channelproberunDescStatusCode := channelproberunFields[9].Descriptor()
+	// channelproberun.DefaultStatusCode holds the default value on creation for the status_code field.
+	channelproberun.DefaultStatusCode = channelproberunDescStatusCode.Default.(int)
+	// channelproberunDescErrorText is the schema descriptor for error_text field.
+	channelproberunDescErrorText := channelproberunFields[10].Descriptor()
+	// channelproberun.DefaultErrorText holds the default value on creation for the error_text field.
+	channelproberun.DefaultErrorText = channelproberunDescErrorText.Default.(string)
+	// channelproberunDescRequestMetaJSON is the schema descriptor for request_meta_json field.
+	channelproberunDescRequestMetaJSON := channelproberunFields[11].Descriptor()
+	// channelproberun.DefaultRequestMetaJSON holds the default value on creation for the request_meta_json field.
+	channelproberun.DefaultRequestMetaJSON = channelproberunDescRequestMetaJSON.Default.(string)
+	// channelproberunDescResponseSampleJSON is the schema descriptor for response_sample_json field.
+	channelproberunDescResponseSampleJSON := channelproberunFields[12].Descriptor()
+	// channelproberun.DefaultResponseSampleJSON holds the default value on creation for the response_sample_json field.
+	channelproberun.DefaultResponseSampleJSON = channelproberunDescResponseSampleJSON.Default.(string)
+	// channelproberunDescID is the schema descriptor for id field.
+	channelproberunDescID := channelproberunFields[0].Descriptor()
+	// channelproberun.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	channelproberun.IDValidator = channelproberunDescID.Validators[0].(func(string) error)
 	datasetFields := schema.Dataset{}.Fields()
 	_ = datasetFields
 	// datasetDescName is the schema descriptor for name field.
@@ -204,6 +394,40 @@ func init() {
 	experimentrunDescID := experimentrunFields[0].Descriptor()
 	// experimentrun.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	experimentrun.IDValidator = experimentrunDescID.Validators[0].(func(string) error)
+	modelcatalogFields := schema.ModelCatalog{}.Fields()
+	_ = modelcatalogFields
+	// modelcatalogDescDisplayName is the schema descriptor for display_name field.
+	modelcatalogDescDisplayName := modelcatalogFields[1].Descriptor()
+	// modelcatalog.DefaultDisplayName holds the default value on creation for the display_name field.
+	modelcatalog.DefaultDisplayName = modelcatalogDescDisplayName.Default.(string)
+	// modelcatalogDescFamily is the schema descriptor for family field.
+	modelcatalogDescFamily := modelcatalogFields[2].Descriptor()
+	// modelcatalog.DefaultFamily holds the default value on creation for the family field.
+	modelcatalog.DefaultFamily = modelcatalogDescFamily.Default.(string)
+	// modelcatalogDescVendor is the schema descriptor for vendor field.
+	modelcatalogDescVendor := modelcatalogFields[3].Descriptor()
+	// modelcatalog.DefaultVendor holds the default value on creation for the vendor field.
+	modelcatalog.DefaultVendor = modelcatalogDescVendor.Default.(string)
+	// modelcatalogDescDescription is the schema descriptor for description field.
+	modelcatalogDescDescription := modelcatalogFields[4].Descriptor()
+	// modelcatalog.DefaultDescription holds the default value on creation for the description field.
+	modelcatalog.DefaultDescription = modelcatalogDescDescription.Default.(string)
+	// modelcatalogDescTagsJSON is the schema descriptor for tags_json field.
+	modelcatalogDescTagsJSON := modelcatalogFields[5].Descriptor()
+	// modelcatalog.DefaultTagsJSON holds the default value on creation for the tags_json field.
+	modelcatalog.DefaultTagsJSON = modelcatalogDescTagsJSON.Default.(string)
+	// modelcatalogDescFirstSeenAt is the schema descriptor for first_seen_at field.
+	modelcatalogDescFirstSeenAt := modelcatalogFields[6].Descriptor()
+	// modelcatalog.DefaultFirstSeenAt holds the default value on creation for the first_seen_at field.
+	modelcatalog.DefaultFirstSeenAt = modelcatalogDescFirstSeenAt.Default.(func() time.Time)
+	// modelcatalogDescLastSeenAt is the schema descriptor for last_seen_at field.
+	modelcatalogDescLastSeenAt := modelcatalogFields[7].Descriptor()
+	// modelcatalog.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
+	modelcatalog.DefaultLastSeenAt = modelcatalogDescLastSeenAt.Default.(func() time.Time)
+	// modelcatalogDescID is the schema descriptor for id field.
+	modelcatalogDescID := modelcatalogFields[0].Descriptor()
+	// modelcatalog.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	modelcatalog.IDValidator = modelcatalogDescID.Validators[0].(func(string) error)
 	scoreFields := schema.Score{}.Fields()
 	_ = scoreFields
 	// scoreDescTraceID is the schema descriptor for trace_id field.

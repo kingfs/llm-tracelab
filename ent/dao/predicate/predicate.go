@@ -9,6 +9,15 @@ import (
 // APIToken is the predicate function for apitoken builders.
 type APIToken func(*sql.Selector)
 
+// ChannelConfig is the predicate function for channelconfig builders.
+type ChannelConfig func(*sql.Selector)
+
+// ChannelModel is the predicate function for channelmodel builders.
+type ChannelModel func(*sql.Selector)
+
+// ChannelProbeRun is the predicate function for channelproberun builders.
+type ChannelProbeRun func(*sql.Selector)
+
 // Dataset is the predicate function for dataset builders.
 type Dataset func(*sql.Selector)
 
@@ -20,6 +29,9 @@ type EvalRun func(*sql.Selector)
 
 // ExperimentRun is the predicate function for experimentrun builders.
 type ExperimentRun func(*sql.Selector)
+
+// ModelCatalog is the predicate function for modelcatalog builders.
+type ModelCatalog func(*sql.Selector)
 
 // Score is the predicate function for score builders.
 type Score func(*sql.Selector)

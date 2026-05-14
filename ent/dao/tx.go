@@ -16,6 +16,12 @@ type Tx struct {
 	config
 	// APIToken is the client for interacting with the APIToken builders.
 	APIToken *APITokenClient
+	// ChannelConfig is the client for interacting with the ChannelConfig builders.
+	ChannelConfig *ChannelConfigClient
+	// ChannelModel is the client for interacting with the ChannelModel builders.
+	ChannelModel *ChannelModelClient
+	// ChannelProbeRun is the client for interacting with the ChannelProbeRun builders.
+	ChannelProbeRun *ChannelProbeRunClient
 	// Dataset is the client for interacting with the Dataset builders.
 	Dataset *DatasetClient
 	// DatasetExample is the client for interacting with the DatasetExample builders.
@@ -24,6 +30,8 @@ type Tx struct {
 	EvalRun *EvalRunClient
 	// ExperimentRun is the client for interacting with the ExperimentRun builders.
 	ExperimentRun *ExperimentRunClient
+	// ModelCatalog is the client for interacting with the ModelCatalog builders.
+	ModelCatalog *ModelCatalogClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
 	// TraceLog is the client for interacting with the TraceLog builders.
@@ -166,10 +174,14 @@ func (tx *Tx) Client() *Client {
 
 func (tx *Tx) init() {
 	tx.APIToken = NewAPITokenClient(tx.config)
+	tx.ChannelConfig = NewChannelConfigClient(tx.config)
+	tx.ChannelModel = NewChannelModelClient(tx.config)
+	tx.ChannelProbeRun = NewChannelProbeRunClient(tx.config)
 	tx.Dataset = NewDatasetClient(tx.config)
 	tx.DatasetExample = NewDatasetExampleClient(tx.config)
 	tx.EvalRun = NewEvalRunClient(tx.config)
 	tx.ExperimentRun = NewExperimentRunClient(tx.config)
+	tx.ModelCatalog = NewModelCatalogClient(tx.config)
 	tx.Score = NewScoreClient(tx.config)
 	tx.TraceLog = NewTraceLogClient(tx.config)
 	tx.UpstreamModel = NewUpstreamModelClient(tx.config)

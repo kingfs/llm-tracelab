@@ -13,10 +13,14 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -82,16 +86,20 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			apitoken.Table:       apitoken.ValidColumn,
-			dataset.Table:        dataset.ValidColumn,
-			datasetexample.Table: datasetexample.ValidColumn,
-			evalrun.Table:        evalrun.ValidColumn,
-			experimentrun.Table:  experimentrun.ValidColumn,
-			score.Table:          score.ValidColumn,
-			tracelog.Table:       tracelog.ValidColumn,
-			upstreammodel.Table:  upstreammodel.ValidColumn,
-			upstreamtarget.Table: upstreamtarget.ValidColumn,
-			user.Table:           user.ValidColumn,
+			apitoken.Table:        apitoken.ValidColumn,
+			channelconfig.Table:   channelconfig.ValidColumn,
+			channelmodel.Table:    channelmodel.ValidColumn,
+			channelproberun.Table: channelproberun.ValidColumn,
+			dataset.Table:         dataset.ValidColumn,
+			datasetexample.Table:  datasetexample.ValidColumn,
+			evalrun.Table:         evalrun.ValidColumn,
+			experimentrun.Table:   experimentrun.ValidColumn,
+			modelcatalog.Table:    modelcatalog.ValidColumn,
+			score.Table:           score.ValidColumn,
+			tracelog.Table:        tracelog.ValidColumn,
+			upstreammodel.Table:   upstreammodel.ValidColumn,
+			upstreamtarget.Table:  upstreamtarget.ValidColumn,
+			user.Table:            user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

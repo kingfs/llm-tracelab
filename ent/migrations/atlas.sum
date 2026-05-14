@@ -1,4 +1,5 @@
-h1:JaAEW8Q/9WDIdisG78UsBhqdK+IdVS5/wZVx5dGEWL8=
+h1:DHIrmDaPyoCL1VLa0q1tvJY9WVVtIqE+ikJJSabJWkA=
 20260427035302_init_auth.up.sql h1:WQ1MHbQjTs4UOfCA8XfKz71SGj/7Z6VxdGl3gS5AfjU=
 20260427060126_add_trace_store.up.sql h1:1nV8kUaKI1QB2fod3bL/NCpqXSdrYQctRQIjQ7zjZmE=
 20260427083000_normalize_logs_recorded_at.up.sql h1:eSn94hwoO6kNBL1IYpeCmo4m5j24w0cs90d+vqR1bYU=
+20260514070630_add_channel_management_tables.up.sql h1:BzgBWDrtPtvXJlDy0IHoslbLaRtZ/MsVDscTp6veu1o=

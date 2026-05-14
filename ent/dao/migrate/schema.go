@@ -48,6 +48,129 @@ var (
 			},
 		},
 	}
+	// ChannelConfigsColumns holds the columns for the "channel_configs" table.
+	ChannelConfigsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "name", Type: field.TypeString},
+		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "base_url", Type: field.TypeString},
+		{Name: "provider_preset", Type: field.TypeString, Default: ""},
+		{Name: "protocol_family", Type: field.TypeString, Default: ""},
+		{Name: "routing_profile", Type: field.TypeString, Default: ""},
+		{Name: "api_version", Type: field.TypeString, Default: ""},
+		{Name: "deployment", Type: field.TypeString, Default: ""},
+		{Name: "project", Type: field.TypeString, Default: ""},
+		{Name: "location", Type: field.TypeString, Default: ""},
+		{Name: "model_resource", Type: field.TypeString, Default: ""},
+		{Name: "api_key_ciphertext", Type: field.TypeBytes, Nullable: true},
+		{Name: "api_key_hint", Type: field.TypeString, Default: ""},
+		{Name: "headers_json", Type: field.TypeString, Default: "{}"},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "priority", Type: field.TypeInt, Default: 0},
+		{Name: "weight", Type: field.TypeFloat64, Default: 1},
+		{Name: "capacity_hint", Type: field.TypeFloat64, Default: 1},
+		{Name: "model_discovery", Type: field.TypeString, Default: "list_models"},
+		{Name: "allow_unknown_models", Type: field.TypeBool, Default: false},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "last_probe_at", Type: field.TypeTime, Nullable: true},
+		{Name: "last_probe_status", Type: field.TypeString, Default: ""},
+		{Name: "last_probe_error", Type: field.TypeString, Default: ""},
+	}
+	// ChannelConfigsTable holds the schema information for the "channel_configs" table.
+	ChannelConfigsTable = &schema.Table{
+		Name:       "channel_configs",
+		Columns:    ChannelConfigsColumns,
+		PrimaryKey: []*schema.Column{ChannelConfigsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "channelconfig_enabled_priority",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelConfigsColumns[15], ChannelConfigsColumns[16]},
+			},
+			{
+				Name:    "channelconfig_provider_preset",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelConfigsColumns[4]},
+			},
+		},
+	}
+	// ChannelModelsColumns holds the columns for the "channel_models" table.
+	ChannelModelsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "channel_id", Type: field.TypeString},
+		{Name: "model", Type: field.TypeString},
+		{Name: "display_name", Type: field.TypeString, Default: ""},
+		{Name: "source", Type: field.TypeString, Default: ""},
+		{Name: "enabled", Type: field.TypeBool, Default: true},
+		{Name: "supports_responses", Type: field.TypeInt, Nullable: true},
+		{Name: "supports_chat_completions", Type: field.TypeInt, Nullable: true},
+		{Name: "supports_embeddings", Type: field.TypeInt, Nullable: true},
+		{Name: "context_window", Type: field.TypeInt, Nullable: true},
+		{Name: "input_modalities_json", Type: field.TypeString, Default: "[]"},
+		{Name: "output_modalities_json", Type: field.TypeString, Default: "[]"},
+		{Name: "raw_model_json", Type: field.TypeString, Default: "{}"},
+		{Name: "first_seen_at", Type: field.TypeTime},
+		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "last_probe_at", Type: field.TypeTime, Nullable: true},
+	}
+	// ChannelModelsTable holds the schema information for the "channel_models" table.
+	ChannelModelsTable = &schema.Table{
+		Name:       "channel_models",
+		Columns:    ChannelModelsColumns,
+		PrimaryKey: []*schema.Column{ChannelModelsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "channelmodel_channel_id_model",
+				Unique:  true,
+				Columns: []*schema.Column{ChannelModelsColumns[1], ChannelModelsColumns[2]},
+			},
+			{
+				Name:    "channelmodel_model",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelModelsColumns[2]},
+			},
+			{
+				Name:    "channelmodel_channel_id_enabled",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelModelsColumns[1], ChannelModelsColumns[5]},
+			},
+		},
+	}
+	// ChannelProbeRunsColumns holds the columns for the "channel_probe_runs" table.
+	ChannelProbeRunsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "channel_id", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "started_at", Type: field.TypeTime},
+		{Name: "completed_at", Type: field.TypeTime, Nullable: true},
+		{Name: "duration_ms", Type: field.TypeInt64, Default: 0},
+		{Name: "discovered_count", Type: field.TypeInt, Default: 0},
+		{Name: "enabled_count", Type: field.TypeInt, Default: 0},
+		{Name: "endpoint", Type: field.TypeString, Default: ""},
+		{Name: "status_code", Type: field.TypeInt, Default: 0},
+		{Name: "error_text", Type: field.TypeString, Default: ""},
+		{Name: "request_meta_json", Type: field.TypeString, Default: "{}"},
+		{Name: "response_sample_json", Type: field.TypeString, Default: "{}"},
+	}
+	// ChannelProbeRunsTable holds the schema information for the "channel_probe_runs" table.
+	ChannelProbeRunsTable = &schema.Table{
+		Name:       "channel_probe_runs",
+		Columns:    ChannelProbeRunsColumns,
+		PrimaryKey: []*schema.Column{ChannelProbeRunsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "channelproberun_channel_id_started_at",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelProbeRunsColumns[1], ChannelProbeRunsColumns[3]},
+			},
+			{
+				Name:    "channelproberun_status_started_at",
+				Unique:  false,
+				Columns: []*schema.Column{ChannelProbeRunsColumns[2], ChannelProbeRunsColumns[3]},
+			},
+		},
+	}
 	// DatasetsColumns holds the columns for the "datasets" table.
 	DatasetsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -154,6 +277,24 @@ var (
 				Columns: []*schema.Column{ExperimentRunsColumns[5], ExperimentRunsColumns[0]},
 			},
 		},
+	}
+	// ModelCatalogColumns holds the columns for the "model_catalog" table.
+	ModelCatalogColumns = []*schema.Column{
+		{Name: "model", Type: field.TypeString},
+		{Name: "display_name", Type: field.TypeString, Default: ""},
+		{Name: "family", Type: field.TypeString, Default: ""},
+		{Name: "vendor", Type: field.TypeString, Default: ""},
+		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "tags_json", Type: field.TypeString, Default: "[]"},
+		{Name: "first_seen_at", Type: field.TypeTime},
+		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "last_used_at", Type: field.TypeTime, Nullable: true},
+	}
+	// ModelCatalogTable holds the schema information for the "model_catalog" table.
+	ModelCatalogTable = &schema.Table{
+		Name:       "model_catalog",
+		Columns:    ModelCatalogColumns,
+		PrimaryKey: []*schema.Column{ModelCatalogColumns[0]},
 	}
 	// ScoresColumns holds the columns for the "scores" table.
 	ScoresColumns = []*schema.Column{
@@ -334,10 +475,14 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APITokensTable,
+		ChannelConfigsTable,
+		ChannelModelsTable,
+		ChannelProbeRunsTable,
 		DatasetsTable,
 		DatasetExamplesTable,
 		EvalRunsTable,
 		ExperimentRunsTable,
+		ModelCatalogTable,
 		ScoresTable,
 		LogsTable,
 		UpstreamModelsTable,
@@ -350,6 +495,18 @@ func init() {
 	APITokensTable.ForeignKeys[0].RefTable = UsersTable
 	APITokensTable.Annotation = &entsql.Annotation{
 		IncrementStart: func(i int) *int { return &i }(0),
+	}
+	ChannelConfigsTable.Annotation = &entsql.Annotation{
+		Table:          "channel_configs",
+		IncrementStart: func(i int) *int { return &i }(42949672960),
+	}
+	ChannelModelsTable.Annotation = &entsql.Annotation{
+		Table:          "channel_models",
+		IncrementStart: func(i int) *int { return &i }(47244640256),
+	}
+	ChannelProbeRunsTable.Annotation = &entsql.Annotation{
+		Table:          "channel_probe_runs",
+		IncrementStart: func(i int) *int { return &i }(51539607552),
 	}
 	DatasetsTable.Annotation = &entsql.Annotation{
 		Table:          "datasets",
@@ -366,6 +523,10 @@ func init() {
 	ExperimentRunsTable.Annotation = &entsql.Annotation{
 		Table:          "experiment_runs",
 		IncrementStart: func(i int) *int { return &i }(21474836480),
+	}
+	ModelCatalogTable.Annotation = &entsql.Annotation{
+		Table:          "model_catalog",
+		IncrementStart: func(i int) *int { return &i }(55834574848),
 	}
 	ScoresTable.Annotation = &entsql.Annotation{
 		Table:          "scores",

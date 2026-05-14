@@ -21,6 +21,42 @@ func (f APITokenFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, er
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.APITokenMutation", m)
 }
 
+// The ChannelConfigFunc type is an adapter to allow the use of ordinary
+// function as ChannelConfig mutator.
+type ChannelConfigFunc func(context.Context, *dao.ChannelConfigMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ChannelConfigFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ChannelConfigMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ChannelConfigMutation", m)
+}
+
+// The ChannelModelFunc type is an adapter to allow the use of ordinary
+// function as ChannelModel mutator.
+type ChannelModelFunc func(context.Context, *dao.ChannelModelMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ChannelModelFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ChannelModelMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ChannelModelMutation", m)
+}
+
+// The ChannelProbeRunFunc type is an adapter to allow the use of ordinary
+// function as ChannelProbeRun mutator.
+type ChannelProbeRunFunc func(context.Context, *dao.ChannelProbeRunMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ChannelProbeRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ChannelProbeRunMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ChannelProbeRunMutation", m)
+}
+
 // The DatasetFunc type is an adapter to allow the use of ordinary
 // function as Dataset mutator.
 type DatasetFunc func(context.Context, *dao.DatasetMutation) (dao.Value, error)
@@ -67,6 +103,18 @@ func (f ExperimentRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Valu
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ExperimentRunMutation", m)
+}
+
+// The ModelCatalogFunc type is an adapter to allow the use of ordinary
+// function as ModelCatalog mutator.
+type ModelCatalogFunc func(context.Context, *dao.ModelCatalogMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ModelCatalogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ModelCatalogMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ModelCatalogMutation", m)
 }
 
 // The ScoreFunc type is an adapter to allow the use of ordinary

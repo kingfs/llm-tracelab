@@ -4,10 +4,14 @@ package dao
 
 import (
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
@@ -23,7 +27,7 @@ import (
 
 // schemaGraph holds a representation of ent/schema at runtime.
 var schemaGraph = func() *sqlgraph.Schema {
-	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 10)}
+	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 14)}
 	graph.Nodes[0] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   apitoken.Table,
@@ -47,6 +51,97 @@ var schemaGraph = func() *sqlgraph.Schema {
 	}
 	graph.Nodes[1] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
+			Table:   channelconfig.Table,
+			Columns: channelconfig.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: channelconfig.FieldID,
+			},
+		},
+		Type: "ChannelConfig",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			channelconfig.FieldName:               {Type: field.TypeString, Column: channelconfig.FieldName},
+			channelconfig.FieldDescription:        {Type: field.TypeString, Column: channelconfig.FieldDescription},
+			channelconfig.FieldBaseURL:            {Type: field.TypeString, Column: channelconfig.FieldBaseURL},
+			channelconfig.FieldProviderPreset:     {Type: field.TypeString, Column: channelconfig.FieldProviderPreset},
+			channelconfig.FieldProtocolFamily:     {Type: field.TypeString, Column: channelconfig.FieldProtocolFamily},
+			channelconfig.FieldRoutingProfile:     {Type: field.TypeString, Column: channelconfig.FieldRoutingProfile},
+			channelconfig.FieldAPIVersion:         {Type: field.TypeString, Column: channelconfig.FieldAPIVersion},
+			channelconfig.FieldDeployment:         {Type: field.TypeString, Column: channelconfig.FieldDeployment},
+			channelconfig.FieldProject:            {Type: field.TypeString, Column: channelconfig.FieldProject},
+			channelconfig.FieldLocation:           {Type: field.TypeString, Column: channelconfig.FieldLocation},
+			channelconfig.FieldModelResource:      {Type: field.TypeString, Column: channelconfig.FieldModelResource},
+			channelconfig.FieldAPIKeyCiphertext:   {Type: field.TypeBytes, Column: channelconfig.FieldAPIKeyCiphertext},
+			channelconfig.FieldAPIKeyHint:         {Type: field.TypeString, Column: channelconfig.FieldAPIKeyHint},
+			channelconfig.FieldHeadersJSON:        {Type: field.TypeString, Column: channelconfig.FieldHeadersJSON},
+			channelconfig.FieldEnabled:            {Type: field.TypeBool, Column: channelconfig.FieldEnabled},
+			channelconfig.FieldPriority:           {Type: field.TypeInt, Column: channelconfig.FieldPriority},
+			channelconfig.FieldWeight:             {Type: field.TypeFloat64, Column: channelconfig.FieldWeight},
+			channelconfig.FieldCapacityHint:       {Type: field.TypeFloat64, Column: channelconfig.FieldCapacityHint},
+			channelconfig.FieldModelDiscovery:     {Type: field.TypeString, Column: channelconfig.FieldModelDiscovery},
+			channelconfig.FieldAllowUnknownModels: {Type: field.TypeBool, Column: channelconfig.FieldAllowUnknownModels},
+			channelconfig.FieldCreatedAt:          {Type: field.TypeTime, Column: channelconfig.FieldCreatedAt},
+			channelconfig.FieldUpdatedAt:          {Type: field.TypeTime, Column: channelconfig.FieldUpdatedAt},
+			channelconfig.FieldLastProbeAt:        {Type: field.TypeTime, Column: channelconfig.FieldLastProbeAt},
+			channelconfig.FieldLastProbeStatus:    {Type: field.TypeString, Column: channelconfig.FieldLastProbeStatus},
+			channelconfig.FieldLastProbeError:     {Type: field.TypeString, Column: channelconfig.FieldLastProbeError},
+		},
+	}
+	graph.Nodes[2] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   channelmodel.Table,
+			Columns: channelmodel.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeInt,
+				Column: channelmodel.FieldID,
+			},
+		},
+		Type: "ChannelModel",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			channelmodel.FieldChannelID:               {Type: field.TypeString, Column: channelmodel.FieldChannelID},
+			channelmodel.FieldModel:                   {Type: field.TypeString, Column: channelmodel.FieldModel},
+			channelmodel.FieldDisplayName:             {Type: field.TypeString, Column: channelmodel.FieldDisplayName},
+			channelmodel.FieldSource:                  {Type: field.TypeString, Column: channelmodel.FieldSource},
+			channelmodel.FieldEnabled:                 {Type: field.TypeBool, Column: channelmodel.FieldEnabled},
+			channelmodel.FieldSupportsResponses:       {Type: field.TypeInt, Column: channelmodel.FieldSupportsResponses},
+			channelmodel.FieldSupportsChatCompletions: {Type: field.TypeInt, Column: channelmodel.FieldSupportsChatCompletions},
+			channelmodel.FieldSupportsEmbeddings:      {Type: field.TypeInt, Column: channelmodel.FieldSupportsEmbeddings},
+			channelmodel.FieldContextWindow:           {Type: field.TypeInt, Column: channelmodel.FieldContextWindow},
+			channelmodel.FieldInputModalitiesJSON:     {Type: field.TypeString, Column: channelmodel.FieldInputModalitiesJSON},
+			channelmodel.FieldOutputModalitiesJSON:    {Type: field.TypeString, Column: channelmodel.FieldOutputModalitiesJSON},
+			channelmodel.FieldRawModelJSON:            {Type: field.TypeString, Column: channelmodel.FieldRawModelJSON},
+			channelmodel.FieldFirstSeenAt:             {Type: field.TypeTime, Column: channelmodel.FieldFirstSeenAt},
+			channelmodel.FieldLastSeenAt:              {Type: field.TypeTime, Column: channelmodel.FieldLastSeenAt},
+			channelmodel.FieldLastProbeAt:             {Type: field.TypeTime, Column: channelmodel.FieldLastProbeAt},
+		},
+	}
+	graph.Nodes[3] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   channelproberun.Table,
+			Columns: channelproberun.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: channelproberun.FieldID,
+			},
+		},
+		Type: "ChannelProbeRun",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			channelproberun.FieldChannelID:          {Type: field.TypeString, Column: channelproberun.FieldChannelID},
+			channelproberun.FieldStatus:             {Type: field.TypeString, Column: channelproberun.FieldStatus},
+			channelproberun.FieldStartedAt:          {Type: field.TypeTime, Column: channelproberun.FieldStartedAt},
+			channelproberun.FieldCompletedAt:        {Type: field.TypeTime, Column: channelproberun.FieldCompletedAt},
+			channelproberun.FieldDurationMs:         {Type: field.TypeInt64, Column: channelproberun.FieldDurationMs},
+			channelproberun.FieldDiscoveredCount:    {Type: field.TypeInt, Column: channelproberun.FieldDiscoveredCount},
+			channelproberun.FieldEnabledCount:       {Type: field.TypeInt, Column: channelproberun.FieldEnabledCount},
+			channelproberun.FieldEndpoint:           {Type: field.TypeString, Column: channelproberun.FieldEndpoint},
+			channelproberun.FieldStatusCode:         {Type: field.TypeInt, Column: channelproberun.FieldStatusCode},
+			channelproberun.FieldErrorText:          {Type: field.TypeString, Column: channelproberun.FieldErrorText},
+			channelproberun.FieldRequestMetaJSON:    {Type: field.TypeString, Column: channelproberun.FieldRequestMetaJSON},
+			channelproberun.FieldResponseSampleJSON: {Type: field.TypeString, Column: channelproberun.FieldResponseSampleJSON},
+		},
+	}
+	graph.Nodes[4] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
 			Table:   dataset.Table,
 			Columns: dataset.Columns,
 			ID: &sqlgraph.FieldSpec{
@@ -62,7 +157,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			dataset.FieldUpdatedAt:   {Type: field.TypeTime, Column: dataset.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[2] = &sqlgraph.Node{
+	graph.Nodes[5] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   datasetexample.Table,
 			Columns: datasetexample.Columns,
@@ -82,7 +177,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			datasetexample.FieldNote:       {Type: field.TypeString, Column: datasetexample.FieldNote},
 		},
 	}
-	graph.Nodes[3] = &sqlgraph.Node{
+	graph.Nodes[6] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   evalrun.Table,
 			Columns: evalrun.Columns,
@@ -105,7 +200,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			evalrun.FieldFailCount:    {Type: field.TypeInt, Column: evalrun.FieldFailCount},
 		},
 	}
-	graph.Nodes[4] = &sqlgraph.Node{
+	graph.Nodes[7] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   experimentrun.Table,
 			Columns: experimentrun.Columns,
@@ -131,7 +226,28 @@ var schemaGraph = func() *sqlgraph.Schema {
 			experimentrun.FieldRegressionCount:     {Type: field.TypeInt, Column: experimentrun.FieldRegressionCount},
 		},
 	}
-	graph.Nodes[5] = &sqlgraph.Node{
+	graph.Nodes[8] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   modelcatalog.Table,
+			Columns: modelcatalog.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: modelcatalog.FieldID,
+			},
+		},
+		Type: "ModelCatalog",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			modelcatalog.FieldDisplayName: {Type: field.TypeString, Column: modelcatalog.FieldDisplayName},
+			modelcatalog.FieldFamily:      {Type: field.TypeString, Column: modelcatalog.FieldFamily},
+			modelcatalog.FieldVendor:      {Type: field.TypeString, Column: modelcatalog.FieldVendor},
+			modelcatalog.FieldDescription: {Type: field.TypeString, Column: modelcatalog.FieldDescription},
+			modelcatalog.FieldTagsJSON:    {Type: field.TypeString, Column: modelcatalog.FieldTagsJSON},
+			modelcatalog.FieldFirstSeenAt: {Type: field.TypeTime, Column: modelcatalog.FieldFirstSeenAt},
+			modelcatalog.FieldLastSeenAt:  {Type: field.TypeTime, Column: modelcatalog.FieldLastSeenAt},
+			modelcatalog.FieldLastUsedAt:  {Type: field.TypeTime, Column: modelcatalog.FieldLastUsedAt},
+		},
+	}
+	graph.Nodes[9] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   score.Table,
 			Columns: score.Columns,
@@ -154,7 +270,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			score.FieldCreatedAt:    {Type: field.TypeTime, Column: score.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[6] = &sqlgraph.Node{
+	graph.Nodes[10] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracelog.Table,
 			Columns: tracelog.Columns,
@@ -205,7 +321,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldRoutingFailureReason:           {Type: field.TypeString, Column: tracelog.FieldRoutingFailureReason},
 		},
 	}
-	graph.Nodes[7] = &sqlgraph.Node{
+	graph.Nodes[11] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreammodel.Table,
 			Columns: upstreammodel.Columns,
@@ -222,7 +338,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreammodel.FieldSeenAt:     {Type: field.TypeTime, Column: upstreammodel.FieldSeenAt},
 		},
 	}
-	graph.Nodes[8] = &sqlgraph.Node{
+	graph.Nodes[12] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamtarget.Table,
 			Columns: upstreamtarget.Columns,
@@ -246,7 +362,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamtarget.FieldLastRefreshError:  {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshError},
 		},
 	}
-	graph.Nodes[9] = &sqlgraph.Node{
+	graph.Nodes[13] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   user.Table,
 			Columns: user.Columns,
@@ -394,6 +510,386 @@ func (f *APITokenFilter) WhereHasUserWith(preds ...predicate.User) {
 }
 
 // addPredicate implements the predicateAdder interface.
+func (_q *ChannelConfigQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ChannelConfigQuery builder.
+func (_q *ChannelConfigQuery) Filter() *ChannelConfigFilter {
+	return &ChannelConfigFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ChannelConfigMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ChannelConfigMutation builder.
+func (m *ChannelConfigMutation) Filter() *ChannelConfigFilter {
+	return &ChannelConfigFilter{config: m.config, predicateAdder: m}
+}
+
+// ChannelConfigFilter provides a generic filtering capability at runtime for ChannelConfigQuery.
+type ChannelConfigFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ChannelConfigFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[1].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ChannelConfigFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldID))
+}
+
+// WhereName applies the entql string predicate on the name field.
+func (f *ChannelConfigFilter) WhereName(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldName))
+}
+
+// WhereDescription applies the entql string predicate on the description field.
+func (f *ChannelConfigFilter) WhereDescription(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldDescription))
+}
+
+// WhereBaseURL applies the entql string predicate on the base_url field.
+func (f *ChannelConfigFilter) WhereBaseURL(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldBaseURL))
+}
+
+// WhereProviderPreset applies the entql string predicate on the provider_preset field.
+func (f *ChannelConfigFilter) WhereProviderPreset(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldProviderPreset))
+}
+
+// WhereProtocolFamily applies the entql string predicate on the protocol_family field.
+func (f *ChannelConfigFilter) WhereProtocolFamily(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldProtocolFamily))
+}
+
+// WhereRoutingProfile applies the entql string predicate on the routing_profile field.
+func (f *ChannelConfigFilter) WhereRoutingProfile(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldRoutingProfile))
+}
+
+// WhereAPIVersion applies the entql string predicate on the api_version field.
+func (f *ChannelConfigFilter) WhereAPIVersion(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldAPIVersion))
+}
+
+// WhereDeployment applies the entql string predicate on the deployment field.
+func (f *ChannelConfigFilter) WhereDeployment(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldDeployment))
+}
+
+// WhereProject applies the entql string predicate on the project field.
+func (f *ChannelConfigFilter) WhereProject(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldProject))
+}
+
+// WhereLocation applies the entql string predicate on the location field.
+func (f *ChannelConfigFilter) WhereLocation(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldLocation))
+}
+
+// WhereModelResource applies the entql string predicate on the model_resource field.
+func (f *ChannelConfigFilter) WhereModelResource(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldModelResource))
+}
+
+// WhereAPIKeyCiphertext applies the entql []byte predicate on the api_key_ciphertext field.
+func (f *ChannelConfigFilter) WhereAPIKeyCiphertext(p entql.BytesP) {
+	f.Where(p.Field(channelconfig.FieldAPIKeyCiphertext))
+}
+
+// WhereAPIKeyHint applies the entql string predicate on the api_key_hint field.
+func (f *ChannelConfigFilter) WhereAPIKeyHint(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldAPIKeyHint))
+}
+
+// WhereHeadersJSON applies the entql string predicate on the headers_json field.
+func (f *ChannelConfigFilter) WhereHeadersJSON(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldHeadersJSON))
+}
+
+// WhereEnabled applies the entql bool predicate on the enabled field.
+func (f *ChannelConfigFilter) WhereEnabled(p entql.BoolP) {
+	f.Where(p.Field(channelconfig.FieldEnabled))
+}
+
+// WherePriority applies the entql int predicate on the priority field.
+func (f *ChannelConfigFilter) WherePriority(p entql.IntP) {
+	f.Where(p.Field(channelconfig.FieldPriority))
+}
+
+// WhereWeight applies the entql float64 predicate on the weight field.
+func (f *ChannelConfigFilter) WhereWeight(p entql.Float64P) {
+	f.Where(p.Field(channelconfig.FieldWeight))
+}
+
+// WhereCapacityHint applies the entql float64 predicate on the capacity_hint field.
+func (f *ChannelConfigFilter) WhereCapacityHint(p entql.Float64P) {
+	f.Where(p.Field(channelconfig.FieldCapacityHint))
+}
+
+// WhereModelDiscovery applies the entql string predicate on the model_discovery field.
+func (f *ChannelConfigFilter) WhereModelDiscovery(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldModelDiscovery))
+}
+
+// WhereAllowUnknownModels applies the entql bool predicate on the allow_unknown_models field.
+func (f *ChannelConfigFilter) WhereAllowUnknownModels(p entql.BoolP) {
+	f.Where(p.Field(channelconfig.FieldAllowUnknownModels))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *ChannelConfigFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(channelconfig.FieldCreatedAt))
+}
+
+// WhereUpdatedAt applies the entql time.Time predicate on the updated_at field.
+func (f *ChannelConfigFilter) WhereUpdatedAt(p entql.TimeP) {
+	f.Where(p.Field(channelconfig.FieldUpdatedAt))
+}
+
+// WhereLastProbeAt applies the entql time.Time predicate on the last_probe_at field.
+func (f *ChannelConfigFilter) WhereLastProbeAt(p entql.TimeP) {
+	f.Where(p.Field(channelconfig.FieldLastProbeAt))
+}
+
+// WhereLastProbeStatus applies the entql string predicate on the last_probe_status field.
+func (f *ChannelConfigFilter) WhereLastProbeStatus(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldLastProbeStatus))
+}
+
+// WhereLastProbeError applies the entql string predicate on the last_probe_error field.
+func (f *ChannelConfigFilter) WhereLastProbeError(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldLastProbeError))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *ChannelModelQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ChannelModelQuery builder.
+func (_q *ChannelModelQuery) Filter() *ChannelModelFilter {
+	return &ChannelModelFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ChannelModelMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ChannelModelMutation builder.
+func (m *ChannelModelMutation) Filter() *ChannelModelFilter {
+	return &ChannelModelFilter{config: m.config, predicateAdder: m}
+}
+
+// ChannelModelFilter provides a generic filtering capability at runtime for ChannelModelQuery.
+type ChannelModelFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ChannelModelFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[2].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql int predicate on the id field.
+func (f *ChannelModelFilter) WhereID(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldID))
+}
+
+// WhereChannelID applies the entql string predicate on the channel_id field.
+func (f *ChannelModelFilter) WhereChannelID(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldChannelID))
+}
+
+// WhereModel applies the entql string predicate on the model field.
+func (f *ChannelModelFilter) WhereModel(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldModel))
+}
+
+// WhereDisplayName applies the entql string predicate on the display_name field.
+func (f *ChannelModelFilter) WhereDisplayName(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldDisplayName))
+}
+
+// WhereSource applies the entql string predicate on the source field.
+func (f *ChannelModelFilter) WhereSource(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldSource))
+}
+
+// WhereEnabled applies the entql bool predicate on the enabled field.
+func (f *ChannelModelFilter) WhereEnabled(p entql.BoolP) {
+	f.Where(p.Field(channelmodel.FieldEnabled))
+}
+
+// WhereSupportsResponses applies the entql int predicate on the supports_responses field.
+func (f *ChannelModelFilter) WhereSupportsResponses(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldSupportsResponses))
+}
+
+// WhereSupportsChatCompletions applies the entql int predicate on the supports_chat_completions field.
+func (f *ChannelModelFilter) WhereSupportsChatCompletions(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldSupportsChatCompletions))
+}
+
+// WhereSupportsEmbeddings applies the entql int predicate on the supports_embeddings field.
+func (f *ChannelModelFilter) WhereSupportsEmbeddings(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldSupportsEmbeddings))
+}
+
+// WhereContextWindow applies the entql int predicate on the context_window field.
+func (f *ChannelModelFilter) WhereContextWindow(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldContextWindow))
+}
+
+// WhereInputModalitiesJSON applies the entql string predicate on the input_modalities_json field.
+func (f *ChannelModelFilter) WhereInputModalitiesJSON(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldInputModalitiesJSON))
+}
+
+// WhereOutputModalitiesJSON applies the entql string predicate on the output_modalities_json field.
+func (f *ChannelModelFilter) WhereOutputModalitiesJSON(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldOutputModalitiesJSON))
+}
+
+// WhereRawModelJSON applies the entql string predicate on the raw_model_json field.
+func (f *ChannelModelFilter) WhereRawModelJSON(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldRawModelJSON))
+}
+
+// WhereFirstSeenAt applies the entql time.Time predicate on the first_seen_at field.
+func (f *ChannelModelFilter) WhereFirstSeenAt(p entql.TimeP) {
+	f.Where(p.Field(channelmodel.FieldFirstSeenAt))
+}
+
+// WhereLastSeenAt applies the entql time.Time predicate on the last_seen_at field.
+func (f *ChannelModelFilter) WhereLastSeenAt(p entql.TimeP) {
+	f.Where(p.Field(channelmodel.FieldLastSeenAt))
+}
+
+// WhereLastProbeAt applies the entql time.Time predicate on the last_probe_at field.
+func (f *ChannelModelFilter) WhereLastProbeAt(p entql.TimeP) {
+	f.Where(p.Field(channelmodel.FieldLastProbeAt))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *ChannelProbeRunQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ChannelProbeRunQuery builder.
+func (_q *ChannelProbeRunQuery) Filter() *ChannelProbeRunFilter {
+	return &ChannelProbeRunFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ChannelProbeRunMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ChannelProbeRunMutation builder.
+func (m *ChannelProbeRunMutation) Filter() *ChannelProbeRunFilter {
+	return &ChannelProbeRunFilter{config: m.config, predicateAdder: m}
+}
+
+// ChannelProbeRunFilter provides a generic filtering capability at runtime for ChannelProbeRunQuery.
+type ChannelProbeRunFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ChannelProbeRunFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[3].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ChannelProbeRunFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldID))
+}
+
+// WhereChannelID applies the entql string predicate on the channel_id field.
+func (f *ChannelProbeRunFilter) WhereChannelID(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldChannelID))
+}
+
+// WhereStatus applies the entql string predicate on the status field.
+func (f *ChannelProbeRunFilter) WhereStatus(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldStatus))
+}
+
+// WhereStartedAt applies the entql time.Time predicate on the started_at field.
+func (f *ChannelProbeRunFilter) WhereStartedAt(p entql.TimeP) {
+	f.Where(p.Field(channelproberun.FieldStartedAt))
+}
+
+// WhereCompletedAt applies the entql time.Time predicate on the completed_at field.
+func (f *ChannelProbeRunFilter) WhereCompletedAt(p entql.TimeP) {
+	f.Where(p.Field(channelproberun.FieldCompletedAt))
+}
+
+// WhereDurationMs applies the entql int64 predicate on the duration_ms field.
+func (f *ChannelProbeRunFilter) WhereDurationMs(p entql.Int64P) {
+	f.Where(p.Field(channelproberun.FieldDurationMs))
+}
+
+// WhereDiscoveredCount applies the entql int predicate on the discovered_count field.
+func (f *ChannelProbeRunFilter) WhereDiscoveredCount(p entql.IntP) {
+	f.Where(p.Field(channelproberun.FieldDiscoveredCount))
+}
+
+// WhereEnabledCount applies the entql int predicate on the enabled_count field.
+func (f *ChannelProbeRunFilter) WhereEnabledCount(p entql.IntP) {
+	f.Where(p.Field(channelproberun.FieldEnabledCount))
+}
+
+// WhereEndpoint applies the entql string predicate on the endpoint field.
+func (f *ChannelProbeRunFilter) WhereEndpoint(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldEndpoint))
+}
+
+// WhereStatusCode applies the entql int predicate on the status_code field.
+func (f *ChannelProbeRunFilter) WhereStatusCode(p entql.IntP) {
+	f.Where(p.Field(channelproberun.FieldStatusCode))
+}
+
+// WhereErrorText applies the entql string predicate on the error_text field.
+func (f *ChannelProbeRunFilter) WhereErrorText(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldErrorText))
+}
+
+// WhereRequestMetaJSON applies the entql string predicate on the request_meta_json field.
+func (f *ChannelProbeRunFilter) WhereRequestMetaJSON(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldRequestMetaJSON))
+}
+
+// WhereResponseSampleJSON applies the entql string predicate on the response_sample_json field.
+func (f *ChannelProbeRunFilter) WhereResponseSampleJSON(p entql.StringP) {
+	f.Where(p.Field(channelproberun.FieldResponseSampleJSON))
+}
+
+// addPredicate implements the predicateAdder interface.
 func (_q *DatasetQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -422,7 +918,7 @@ type DatasetFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *DatasetFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[1].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[4].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -482,7 +978,7 @@ type DatasetExampleFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *DatasetExampleFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[2].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[5].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -557,7 +1053,7 @@ type EvalRunFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *EvalRunFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[3].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[6].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -647,7 +1143,7 @@ type ExperimentRunFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ExperimentRunFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[4].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[7].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -724,6 +1220,86 @@ func (f *ExperimentRunFilter) WhereRegressionCount(p entql.IntP) {
 }
 
 // addPredicate implements the predicateAdder interface.
+func (_q *ModelCatalogQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ModelCatalogQuery builder.
+func (_q *ModelCatalogQuery) Filter() *ModelCatalogFilter {
+	return &ModelCatalogFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ModelCatalogMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ModelCatalogMutation builder.
+func (m *ModelCatalogMutation) Filter() *ModelCatalogFilter {
+	return &ModelCatalogFilter{config: m.config, predicateAdder: m}
+}
+
+// ModelCatalogFilter provides a generic filtering capability at runtime for ModelCatalogQuery.
+type ModelCatalogFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ModelCatalogFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[8].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ModelCatalogFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(modelcatalog.FieldID))
+}
+
+// WhereDisplayName applies the entql string predicate on the display_name field.
+func (f *ModelCatalogFilter) WhereDisplayName(p entql.StringP) {
+	f.Where(p.Field(modelcatalog.FieldDisplayName))
+}
+
+// WhereFamily applies the entql string predicate on the family field.
+func (f *ModelCatalogFilter) WhereFamily(p entql.StringP) {
+	f.Where(p.Field(modelcatalog.FieldFamily))
+}
+
+// WhereVendor applies the entql string predicate on the vendor field.
+func (f *ModelCatalogFilter) WhereVendor(p entql.StringP) {
+	f.Where(p.Field(modelcatalog.FieldVendor))
+}
+
+// WhereDescription applies the entql string predicate on the description field.
+func (f *ModelCatalogFilter) WhereDescription(p entql.StringP) {
+	f.Where(p.Field(modelcatalog.FieldDescription))
+}
+
+// WhereTagsJSON applies the entql string predicate on the tags_json field.
+func (f *ModelCatalogFilter) WhereTagsJSON(p entql.StringP) {
+	f.Where(p.Field(modelcatalog.FieldTagsJSON))
+}
+
+// WhereFirstSeenAt applies the entql time.Time predicate on the first_seen_at field.
+func (f *ModelCatalogFilter) WhereFirstSeenAt(p entql.TimeP) {
+	f.Where(p.Field(modelcatalog.FieldFirstSeenAt))
+}
+
+// WhereLastSeenAt applies the entql time.Time predicate on the last_seen_at field.
+func (f *ModelCatalogFilter) WhereLastSeenAt(p entql.TimeP) {
+	f.Where(p.Field(modelcatalog.FieldLastSeenAt))
+}
+
+// WhereLastUsedAt applies the entql time.Time predicate on the last_used_at field.
+func (f *ModelCatalogFilter) WhereLastUsedAt(p entql.TimeP) {
+	f.Where(p.Field(modelcatalog.FieldLastUsedAt))
+}
+
+// addPredicate implements the predicateAdder interface.
 func (_q *ScoreQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -752,7 +1328,7 @@ type ScoreFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ScoreFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[5].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -842,7 +1418,7 @@ type TraceLogFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceLogFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[6].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[10].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1072,7 +1648,7 @@ type UpstreamModelFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamModelFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[7].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[11].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1132,7 +1708,7 @@ type UpstreamTargetFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamTargetFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[8].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[12].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1227,7 +1803,7 @@ type UserFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UserFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[13].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})

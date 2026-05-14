@@ -12,10 +12,14 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
@@ -33,16 +37,20 @@ const (
 	OpUpdateOne = ent.OpUpdateOne
 
 	// Node types.
-	TypeAPIToken       = "APIToken"
-	TypeDataset        = "Dataset"
-	TypeDatasetExample = "DatasetExample"
-	TypeEvalRun        = "EvalRun"
-	TypeExperimentRun  = "ExperimentRun"
-	TypeScore          = "Score"
-	TypeTraceLog       = "TraceLog"
-	TypeUpstreamModel  = "UpstreamModel"
-	TypeUpstreamTarget = "UpstreamTarget"
-	TypeUser           = "User"
+	TypeAPIToken        = "APIToken"
+	TypeChannelConfig   = "ChannelConfig"
+	TypeChannelModel    = "ChannelModel"
+	TypeChannelProbeRun = "ChannelProbeRun"
+	TypeDataset         = "Dataset"
+	TypeDatasetExample  = "DatasetExample"
+	TypeEvalRun         = "EvalRun"
+	TypeExperimentRun   = "ExperimentRun"
+	TypeModelCatalog    = "ModelCatalog"
+	TypeScore           = "Score"
+	TypeTraceLog        = "TraceLog"
+	TypeUpstreamModel   = "UpstreamModel"
+	TypeUpstreamTarget  = "UpstreamTarget"
+	TypeUser            = "User"
 )
 
 // APITokenMutation represents an operation that mutates the APIToken nodes in the graph.
@@ -855,6 +863,4179 @@ func (m *APITokenMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown APIToken edge %s", name)
+}
+
+// ChannelConfigMutation represents an operation that mutates the ChannelConfig nodes in the graph.
+type ChannelConfigMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *string
+	name                 *string
+	description          *string
+	base_url             *string
+	provider_preset      *string
+	protocol_family      *string
+	routing_profile      *string
+	api_version          *string
+	deployment           *string
+	project              *string
+	location             *string
+	model_resource       *string
+	api_key_ciphertext   *[]byte
+	api_key_hint         *string
+	headers_json         *string
+	enabled              *bool
+	priority             *int
+	addpriority          *int
+	weight               *float64
+	addweight            *float64
+	capacity_hint        *float64
+	addcapacity_hint     *float64
+	model_discovery      *string
+	allow_unknown_models *bool
+	created_at           *time.Time
+	updated_at           *time.Time
+	last_probe_at        *time.Time
+	last_probe_status    *string
+	last_probe_error     *string
+	clearedFields        map[string]struct{}
+	done                 bool
+	oldValue             func(context.Context) (*ChannelConfig, error)
+	predicates           []predicate.ChannelConfig
+}
+
+var _ ent.Mutation = (*ChannelConfigMutation)(nil)
+
+// channelconfigOption allows management of the mutation configuration using functional options.
+type channelconfigOption func(*ChannelConfigMutation)
+
+// newChannelConfigMutation creates new mutation for the ChannelConfig entity.
+func newChannelConfigMutation(c config, op Op, opts ...channelconfigOption) *ChannelConfigMutation {
+	m := &ChannelConfigMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeChannelConfig,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withChannelConfigID sets the ID field of the mutation.
+func withChannelConfigID(id string) channelconfigOption {
+	return func(m *ChannelConfigMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *ChannelConfig
+		)
+		m.oldValue = func(ctx context.Context) (*ChannelConfig, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().ChannelConfig.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withChannelConfig sets the old ChannelConfig of the mutation.
+func withChannelConfig(node *ChannelConfig) channelconfigOption {
+	return func(m *ChannelConfigMutation) {
+		m.oldValue = func(context.Context) (*ChannelConfig, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m ChannelConfigMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m ChannelConfigMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("dao: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of ChannelConfig entities.
+func (m *ChannelConfigMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *ChannelConfigMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *ChannelConfigMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().ChannelConfig.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetName sets the "name" field.
+func (m *ChannelConfigMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *ChannelConfigMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *ChannelConfigMutation) ResetName() {
+	m.name = nil
+}
+
+// SetDescription sets the "description" field.
+func (m *ChannelConfigMutation) SetDescription(s string) {
+	m.description = &s
+}
+
+// Description returns the value of the "description" field in the mutation.
+func (m *ChannelConfigMutation) Description() (r string, exists bool) {
+	v := m.description
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDescription returns the old "description" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldDescription(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDescription is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDescription requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDescription: %w", err)
+	}
+	return oldValue.Description, nil
+}
+
+// ResetDescription resets all changes to the "description" field.
+func (m *ChannelConfigMutation) ResetDescription() {
+	m.description = nil
+}
+
+// SetBaseURL sets the "base_url" field.
+func (m *ChannelConfigMutation) SetBaseURL(s string) {
+	m.base_url = &s
+}
+
+// BaseURL returns the value of the "base_url" field in the mutation.
+func (m *ChannelConfigMutation) BaseURL() (r string, exists bool) {
+	v := m.base_url
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBaseURL returns the old "base_url" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldBaseURL(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBaseURL is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBaseURL requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBaseURL: %w", err)
+	}
+	return oldValue.BaseURL, nil
+}
+
+// ResetBaseURL resets all changes to the "base_url" field.
+func (m *ChannelConfigMutation) ResetBaseURL() {
+	m.base_url = nil
+}
+
+// SetProviderPreset sets the "provider_preset" field.
+func (m *ChannelConfigMutation) SetProviderPreset(s string) {
+	m.provider_preset = &s
+}
+
+// ProviderPreset returns the value of the "provider_preset" field in the mutation.
+func (m *ChannelConfigMutation) ProviderPreset() (r string, exists bool) {
+	v := m.provider_preset
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProviderPreset returns the old "provider_preset" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldProviderPreset(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProviderPreset is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProviderPreset requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProviderPreset: %w", err)
+	}
+	return oldValue.ProviderPreset, nil
+}
+
+// ResetProviderPreset resets all changes to the "provider_preset" field.
+func (m *ChannelConfigMutation) ResetProviderPreset() {
+	m.provider_preset = nil
+}
+
+// SetProtocolFamily sets the "protocol_family" field.
+func (m *ChannelConfigMutation) SetProtocolFamily(s string) {
+	m.protocol_family = &s
+}
+
+// ProtocolFamily returns the value of the "protocol_family" field in the mutation.
+func (m *ChannelConfigMutation) ProtocolFamily() (r string, exists bool) {
+	v := m.protocol_family
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProtocolFamily returns the old "protocol_family" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldProtocolFamily(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProtocolFamily is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProtocolFamily requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProtocolFamily: %w", err)
+	}
+	return oldValue.ProtocolFamily, nil
+}
+
+// ResetProtocolFamily resets all changes to the "protocol_family" field.
+func (m *ChannelConfigMutation) ResetProtocolFamily() {
+	m.protocol_family = nil
+}
+
+// SetRoutingProfile sets the "routing_profile" field.
+func (m *ChannelConfigMutation) SetRoutingProfile(s string) {
+	m.routing_profile = &s
+}
+
+// RoutingProfile returns the value of the "routing_profile" field in the mutation.
+func (m *ChannelConfigMutation) RoutingProfile() (r string, exists bool) {
+	v := m.routing_profile
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRoutingProfile returns the old "routing_profile" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldRoutingProfile(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRoutingProfile is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRoutingProfile requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRoutingProfile: %w", err)
+	}
+	return oldValue.RoutingProfile, nil
+}
+
+// ResetRoutingProfile resets all changes to the "routing_profile" field.
+func (m *ChannelConfigMutation) ResetRoutingProfile() {
+	m.routing_profile = nil
+}
+
+// SetAPIVersion sets the "api_version" field.
+func (m *ChannelConfigMutation) SetAPIVersion(s string) {
+	m.api_version = &s
+}
+
+// APIVersion returns the value of the "api_version" field in the mutation.
+func (m *ChannelConfigMutation) APIVersion() (r string, exists bool) {
+	v := m.api_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAPIVersion returns the old "api_version" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldAPIVersion(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAPIVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAPIVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAPIVersion: %w", err)
+	}
+	return oldValue.APIVersion, nil
+}
+
+// ResetAPIVersion resets all changes to the "api_version" field.
+func (m *ChannelConfigMutation) ResetAPIVersion() {
+	m.api_version = nil
+}
+
+// SetDeployment sets the "deployment" field.
+func (m *ChannelConfigMutation) SetDeployment(s string) {
+	m.deployment = &s
+}
+
+// Deployment returns the value of the "deployment" field in the mutation.
+func (m *ChannelConfigMutation) Deployment() (r string, exists bool) {
+	v := m.deployment
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeployment returns the old "deployment" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldDeployment(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeployment is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeployment requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeployment: %w", err)
+	}
+	return oldValue.Deployment, nil
+}
+
+// ResetDeployment resets all changes to the "deployment" field.
+func (m *ChannelConfigMutation) ResetDeployment() {
+	m.deployment = nil
+}
+
+// SetProject sets the "project" field.
+func (m *ChannelConfigMutation) SetProject(s string) {
+	m.project = &s
+}
+
+// Project returns the value of the "project" field in the mutation.
+func (m *ChannelConfigMutation) Project() (r string, exists bool) {
+	v := m.project
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProject returns the old "project" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldProject(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProject is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProject requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProject: %w", err)
+	}
+	return oldValue.Project, nil
+}
+
+// ResetProject resets all changes to the "project" field.
+func (m *ChannelConfigMutation) ResetProject() {
+	m.project = nil
+}
+
+// SetLocation sets the "location" field.
+func (m *ChannelConfigMutation) SetLocation(s string) {
+	m.location = &s
+}
+
+// Location returns the value of the "location" field in the mutation.
+func (m *ChannelConfigMutation) Location() (r string, exists bool) {
+	v := m.location
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLocation returns the old "location" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldLocation(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLocation is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLocation requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLocation: %w", err)
+	}
+	return oldValue.Location, nil
+}
+
+// ResetLocation resets all changes to the "location" field.
+func (m *ChannelConfigMutation) ResetLocation() {
+	m.location = nil
+}
+
+// SetModelResource sets the "model_resource" field.
+func (m *ChannelConfigMutation) SetModelResource(s string) {
+	m.model_resource = &s
+}
+
+// ModelResource returns the value of the "model_resource" field in the mutation.
+func (m *ChannelConfigMutation) ModelResource() (r string, exists bool) {
+	v := m.model_resource
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModelResource returns the old "model_resource" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldModelResource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModelResource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModelResource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModelResource: %w", err)
+	}
+	return oldValue.ModelResource, nil
+}
+
+// ResetModelResource resets all changes to the "model_resource" field.
+func (m *ChannelConfigMutation) ResetModelResource() {
+	m.model_resource = nil
+}
+
+// SetAPIKeyCiphertext sets the "api_key_ciphertext" field.
+func (m *ChannelConfigMutation) SetAPIKeyCiphertext(b []byte) {
+	m.api_key_ciphertext = &b
+}
+
+// APIKeyCiphertext returns the value of the "api_key_ciphertext" field in the mutation.
+func (m *ChannelConfigMutation) APIKeyCiphertext() (r []byte, exists bool) {
+	v := m.api_key_ciphertext
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAPIKeyCiphertext returns the old "api_key_ciphertext" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldAPIKeyCiphertext(ctx context.Context) (v *[]byte, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAPIKeyCiphertext is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAPIKeyCiphertext requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAPIKeyCiphertext: %w", err)
+	}
+	return oldValue.APIKeyCiphertext, nil
+}
+
+// ClearAPIKeyCiphertext clears the value of the "api_key_ciphertext" field.
+func (m *ChannelConfigMutation) ClearAPIKeyCiphertext() {
+	m.api_key_ciphertext = nil
+	m.clearedFields[channelconfig.FieldAPIKeyCiphertext] = struct{}{}
+}
+
+// APIKeyCiphertextCleared returns if the "api_key_ciphertext" field was cleared in this mutation.
+func (m *ChannelConfigMutation) APIKeyCiphertextCleared() bool {
+	_, ok := m.clearedFields[channelconfig.FieldAPIKeyCiphertext]
+	return ok
+}
+
+// ResetAPIKeyCiphertext resets all changes to the "api_key_ciphertext" field.
+func (m *ChannelConfigMutation) ResetAPIKeyCiphertext() {
+	m.api_key_ciphertext = nil
+	delete(m.clearedFields, channelconfig.FieldAPIKeyCiphertext)
+}
+
+// SetAPIKeyHint sets the "api_key_hint" field.
+func (m *ChannelConfigMutation) SetAPIKeyHint(s string) {
+	m.api_key_hint = &s
+}
+
+// APIKeyHint returns the value of the "api_key_hint" field in the mutation.
+func (m *ChannelConfigMutation) APIKeyHint() (r string, exists bool) {
+	v := m.api_key_hint
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAPIKeyHint returns the old "api_key_hint" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldAPIKeyHint(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAPIKeyHint is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAPIKeyHint requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAPIKeyHint: %w", err)
+	}
+	return oldValue.APIKeyHint, nil
+}
+
+// ResetAPIKeyHint resets all changes to the "api_key_hint" field.
+func (m *ChannelConfigMutation) ResetAPIKeyHint() {
+	m.api_key_hint = nil
+}
+
+// SetHeadersJSON sets the "headers_json" field.
+func (m *ChannelConfigMutation) SetHeadersJSON(s string) {
+	m.headers_json = &s
+}
+
+// HeadersJSON returns the value of the "headers_json" field in the mutation.
+func (m *ChannelConfigMutation) HeadersJSON() (r string, exists bool) {
+	v := m.headers_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldHeadersJSON returns the old "headers_json" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldHeadersJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldHeadersJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldHeadersJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldHeadersJSON: %w", err)
+	}
+	return oldValue.HeadersJSON, nil
+}
+
+// ResetHeadersJSON resets all changes to the "headers_json" field.
+func (m *ChannelConfigMutation) ResetHeadersJSON() {
+	m.headers_json = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *ChannelConfigMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *ChannelConfigMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *ChannelConfigMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// SetPriority sets the "priority" field.
+func (m *ChannelConfigMutation) SetPriority(i int) {
+	m.priority = &i
+	m.addpriority = nil
+}
+
+// Priority returns the value of the "priority" field in the mutation.
+func (m *ChannelConfigMutation) Priority() (r int, exists bool) {
+	v := m.priority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPriority returns the old "priority" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldPriority(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPriority is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPriority requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPriority: %w", err)
+	}
+	return oldValue.Priority, nil
+}
+
+// AddPriority adds i to the "priority" field.
+func (m *ChannelConfigMutation) AddPriority(i int) {
+	if m.addpriority != nil {
+		*m.addpriority += i
+	} else {
+		m.addpriority = &i
+	}
+}
+
+// AddedPriority returns the value that was added to the "priority" field in this mutation.
+func (m *ChannelConfigMutation) AddedPriority() (r int, exists bool) {
+	v := m.addpriority
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetPriority resets all changes to the "priority" field.
+func (m *ChannelConfigMutation) ResetPriority() {
+	m.priority = nil
+	m.addpriority = nil
+}
+
+// SetWeight sets the "weight" field.
+func (m *ChannelConfigMutation) SetWeight(f float64) {
+	m.weight = &f
+	m.addweight = nil
+}
+
+// Weight returns the value of the "weight" field in the mutation.
+func (m *ChannelConfigMutation) Weight() (r float64, exists bool) {
+	v := m.weight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldWeight returns the old "weight" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldWeight(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldWeight is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldWeight requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldWeight: %w", err)
+	}
+	return oldValue.Weight, nil
+}
+
+// AddWeight adds f to the "weight" field.
+func (m *ChannelConfigMutation) AddWeight(f float64) {
+	if m.addweight != nil {
+		*m.addweight += f
+	} else {
+		m.addweight = &f
+	}
+}
+
+// AddedWeight returns the value that was added to the "weight" field in this mutation.
+func (m *ChannelConfigMutation) AddedWeight() (r float64, exists bool) {
+	v := m.addweight
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetWeight resets all changes to the "weight" field.
+func (m *ChannelConfigMutation) ResetWeight() {
+	m.weight = nil
+	m.addweight = nil
+}
+
+// SetCapacityHint sets the "capacity_hint" field.
+func (m *ChannelConfigMutation) SetCapacityHint(f float64) {
+	m.capacity_hint = &f
+	m.addcapacity_hint = nil
+}
+
+// CapacityHint returns the value of the "capacity_hint" field in the mutation.
+func (m *ChannelConfigMutation) CapacityHint() (r float64, exists bool) {
+	v := m.capacity_hint
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCapacityHint returns the old "capacity_hint" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldCapacityHint(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCapacityHint is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCapacityHint requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCapacityHint: %w", err)
+	}
+	return oldValue.CapacityHint, nil
+}
+
+// AddCapacityHint adds f to the "capacity_hint" field.
+func (m *ChannelConfigMutation) AddCapacityHint(f float64) {
+	if m.addcapacity_hint != nil {
+		*m.addcapacity_hint += f
+	} else {
+		m.addcapacity_hint = &f
+	}
+}
+
+// AddedCapacityHint returns the value that was added to the "capacity_hint" field in this mutation.
+func (m *ChannelConfigMutation) AddedCapacityHint() (r float64, exists bool) {
+	v := m.addcapacity_hint
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetCapacityHint resets all changes to the "capacity_hint" field.
+func (m *ChannelConfigMutation) ResetCapacityHint() {
+	m.capacity_hint = nil
+	m.addcapacity_hint = nil
+}
+
+// SetModelDiscovery sets the "model_discovery" field.
+func (m *ChannelConfigMutation) SetModelDiscovery(s string) {
+	m.model_discovery = &s
+}
+
+// ModelDiscovery returns the value of the "model_discovery" field in the mutation.
+func (m *ChannelConfigMutation) ModelDiscovery() (r string, exists bool) {
+	v := m.model_discovery
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModelDiscovery returns the old "model_discovery" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldModelDiscovery(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModelDiscovery is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModelDiscovery requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModelDiscovery: %w", err)
+	}
+	return oldValue.ModelDiscovery, nil
+}
+
+// ResetModelDiscovery resets all changes to the "model_discovery" field.
+func (m *ChannelConfigMutation) ResetModelDiscovery() {
+	m.model_discovery = nil
+}
+
+// SetAllowUnknownModels sets the "allow_unknown_models" field.
+func (m *ChannelConfigMutation) SetAllowUnknownModels(b bool) {
+	m.allow_unknown_models = &b
+}
+
+// AllowUnknownModels returns the value of the "allow_unknown_models" field in the mutation.
+func (m *ChannelConfigMutation) AllowUnknownModels() (r bool, exists bool) {
+	v := m.allow_unknown_models
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAllowUnknownModels returns the old "allow_unknown_models" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldAllowUnknownModels(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAllowUnknownModels is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAllowUnknownModels requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAllowUnknownModels: %w", err)
+	}
+	return oldValue.AllowUnknownModels, nil
+}
+
+// ResetAllowUnknownModels resets all changes to the "allow_unknown_models" field.
+func (m *ChannelConfigMutation) ResetAllowUnknownModels() {
+	m.allow_unknown_models = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *ChannelConfigMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *ChannelConfigMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *ChannelConfigMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *ChannelConfigMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *ChannelConfigMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *ChannelConfigMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetLastProbeAt sets the "last_probe_at" field.
+func (m *ChannelConfigMutation) SetLastProbeAt(t time.Time) {
+	m.last_probe_at = &t
+}
+
+// LastProbeAt returns the value of the "last_probe_at" field in the mutation.
+func (m *ChannelConfigMutation) LastProbeAt() (r time.Time, exists bool) {
+	v := m.last_probe_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastProbeAt returns the old "last_probe_at" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldLastProbeAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastProbeAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastProbeAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastProbeAt: %w", err)
+	}
+	return oldValue.LastProbeAt, nil
+}
+
+// ClearLastProbeAt clears the value of the "last_probe_at" field.
+func (m *ChannelConfigMutation) ClearLastProbeAt() {
+	m.last_probe_at = nil
+	m.clearedFields[channelconfig.FieldLastProbeAt] = struct{}{}
+}
+
+// LastProbeAtCleared returns if the "last_probe_at" field was cleared in this mutation.
+func (m *ChannelConfigMutation) LastProbeAtCleared() bool {
+	_, ok := m.clearedFields[channelconfig.FieldLastProbeAt]
+	return ok
+}
+
+// ResetLastProbeAt resets all changes to the "last_probe_at" field.
+func (m *ChannelConfigMutation) ResetLastProbeAt() {
+	m.last_probe_at = nil
+	delete(m.clearedFields, channelconfig.FieldLastProbeAt)
+}
+
+// SetLastProbeStatus sets the "last_probe_status" field.
+func (m *ChannelConfigMutation) SetLastProbeStatus(s string) {
+	m.last_probe_status = &s
+}
+
+// LastProbeStatus returns the value of the "last_probe_status" field in the mutation.
+func (m *ChannelConfigMutation) LastProbeStatus() (r string, exists bool) {
+	v := m.last_probe_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastProbeStatus returns the old "last_probe_status" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldLastProbeStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastProbeStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastProbeStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastProbeStatus: %w", err)
+	}
+	return oldValue.LastProbeStatus, nil
+}
+
+// ResetLastProbeStatus resets all changes to the "last_probe_status" field.
+func (m *ChannelConfigMutation) ResetLastProbeStatus() {
+	m.last_probe_status = nil
+}
+
+// SetLastProbeError sets the "last_probe_error" field.
+func (m *ChannelConfigMutation) SetLastProbeError(s string) {
+	m.last_probe_error = &s
+}
+
+// LastProbeError returns the value of the "last_probe_error" field in the mutation.
+func (m *ChannelConfigMutation) LastProbeError() (r string, exists bool) {
+	v := m.last_probe_error
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastProbeError returns the old "last_probe_error" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldLastProbeError(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastProbeError is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastProbeError requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastProbeError: %w", err)
+	}
+	return oldValue.LastProbeError, nil
+}
+
+// ResetLastProbeError resets all changes to the "last_probe_error" field.
+func (m *ChannelConfigMutation) ResetLastProbeError() {
+	m.last_probe_error = nil
+}
+
+// Where appends a list predicates to the ChannelConfigMutation builder.
+func (m *ChannelConfigMutation) Where(ps ...predicate.ChannelConfig) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ChannelConfigMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ChannelConfigMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.ChannelConfig, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *ChannelConfigMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *ChannelConfigMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (ChannelConfig).
+func (m *ChannelConfigMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *ChannelConfigMutation) Fields() []string {
+	fields := make([]string, 0, 25)
+	if m.name != nil {
+		fields = append(fields, channelconfig.FieldName)
+	}
+	if m.description != nil {
+		fields = append(fields, channelconfig.FieldDescription)
+	}
+	if m.base_url != nil {
+		fields = append(fields, channelconfig.FieldBaseURL)
+	}
+	if m.provider_preset != nil {
+		fields = append(fields, channelconfig.FieldProviderPreset)
+	}
+	if m.protocol_family != nil {
+		fields = append(fields, channelconfig.FieldProtocolFamily)
+	}
+	if m.routing_profile != nil {
+		fields = append(fields, channelconfig.FieldRoutingProfile)
+	}
+	if m.api_version != nil {
+		fields = append(fields, channelconfig.FieldAPIVersion)
+	}
+	if m.deployment != nil {
+		fields = append(fields, channelconfig.FieldDeployment)
+	}
+	if m.project != nil {
+		fields = append(fields, channelconfig.FieldProject)
+	}
+	if m.location != nil {
+		fields = append(fields, channelconfig.FieldLocation)
+	}
+	if m.model_resource != nil {
+		fields = append(fields, channelconfig.FieldModelResource)
+	}
+	if m.api_key_ciphertext != nil {
+		fields = append(fields, channelconfig.FieldAPIKeyCiphertext)
+	}
+	if m.api_key_hint != nil {
+		fields = append(fields, channelconfig.FieldAPIKeyHint)
+	}
+	if m.headers_json != nil {
+		fields = append(fields, channelconfig.FieldHeadersJSON)
+	}
+	if m.enabled != nil {
+		fields = append(fields, channelconfig.FieldEnabled)
+	}
+	if m.priority != nil {
+		fields = append(fields, channelconfig.FieldPriority)
+	}
+	if m.weight != nil {
+		fields = append(fields, channelconfig.FieldWeight)
+	}
+	if m.capacity_hint != nil {
+		fields = append(fields, channelconfig.FieldCapacityHint)
+	}
+	if m.model_discovery != nil {
+		fields = append(fields, channelconfig.FieldModelDiscovery)
+	}
+	if m.allow_unknown_models != nil {
+		fields = append(fields, channelconfig.FieldAllowUnknownModels)
+	}
+	if m.created_at != nil {
+		fields = append(fields, channelconfig.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, channelconfig.FieldUpdatedAt)
+	}
+	if m.last_probe_at != nil {
+		fields = append(fields, channelconfig.FieldLastProbeAt)
+	}
+	if m.last_probe_status != nil {
+		fields = append(fields, channelconfig.FieldLastProbeStatus)
+	}
+	if m.last_probe_error != nil {
+		fields = append(fields, channelconfig.FieldLastProbeError)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *ChannelConfigMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case channelconfig.FieldName:
+		return m.Name()
+	case channelconfig.FieldDescription:
+		return m.Description()
+	case channelconfig.FieldBaseURL:
+		return m.BaseURL()
+	case channelconfig.FieldProviderPreset:
+		return m.ProviderPreset()
+	case channelconfig.FieldProtocolFamily:
+		return m.ProtocolFamily()
+	case channelconfig.FieldRoutingProfile:
+		return m.RoutingProfile()
+	case channelconfig.FieldAPIVersion:
+		return m.APIVersion()
+	case channelconfig.FieldDeployment:
+		return m.Deployment()
+	case channelconfig.FieldProject:
+		return m.Project()
+	case channelconfig.FieldLocation:
+		return m.Location()
+	case channelconfig.FieldModelResource:
+		return m.ModelResource()
+	case channelconfig.FieldAPIKeyCiphertext:
+		return m.APIKeyCiphertext()
+	case channelconfig.FieldAPIKeyHint:
+		return m.APIKeyHint()
+	case channelconfig.FieldHeadersJSON:
+		return m.HeadersJSON()
+	case channelconfig.FieldEnabled:
+		return m.Enabled()
+	case channelconfig.FieldPriority:
+		return m.Priority()
+	case channelconfig.FieldWeight:
+		return m.Weight()
+	case channelconfig.FieldCapacityHint:
+		return m.CapacityHint()
+	case channelconfig.FieldModelDiscovery:
+		return m.ModelDiscovery()
+	case channelconfig.FieldAllowUnknownModels:
+		return m.AllowUnknownModels()
+	case channelconfig.FieldCreatedAt:
+		return m.CreatedAt()
+	case channelconfig.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case channelconfig.FieldLastProbeAt:
+		return m.LastProbeAt()
+	case channelconfig.FieldLastProbeStatus:
+		return m.LastProbeStatus()
+	case channelconfig.FieldLastProbeError:
+		return m.LastProbeError()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *ChannelConfigMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case channelconfig.FieldName:
+		return m.OldName(ctx)
+	case channelconfig.FieldDescription:
+		return m.OldDescription(ctx)
+	case channelconfig.FieldBaseURL:
+		return m.OldBaseURL(ctx)
+	case channelconfig.FieldProviderPreset:
+		return m.OldProviderPreset(ctx)
+	case channelconfig.FieldProtocolFamily:
+		return m.OldProtocolFamily(ctx)
+	case channelconfig.FieldRoutingProfile:
+		return m.OldRoutingProfile(ctx)
+	case channelconfig.FieldAPIVersion:
+		return m.OldAPIVersion(ctx)
+	case channelconfig.FieldDeployment:
+		return m.OldDeployment(ctx)
+	case channelconfig.FieldProject:
+		return m.OldProject(ctx)
+	case channelconfig.FieldLocation:
+		return m.OldLocation(ctx)
+	case channelconfig.FieldModelResource:
+		return m.OldModelResource(ctx)
+	case channelconfig.FieldAPIKeyCiphertext:
+		return m.OldAPIKeyCiphertext(ctx)
+	case channelconfig.FieldAPIKeyHint:
+		return m.OldAPIKeyHint(ctx)
+	case channelconfig.FieldHeadersJSON:
+		return m.OldHeadersJSON(ctx)
+	case channelconfig.FieldEnabled:
+		return m.OldEnabled(ctx)
+	case channelconfig.FieldPriority:
+		return m.OldPriority(ctx)
+	case channelconfig.FieldWeight:
+		return m.OldWeight(ctx)
+	case channelconfig.FieldCapacityHint:
+		return m.OldCapacityHint(ctx)
+	case channelconfig.FieldModelDiscovery:
+		return m.OldModelDiscovery(ctx)
+	case channelconfig.FieldAllowUnknownModels:
+		return m.OldAllowUnknownModels(ctx)
+	case channelconfig.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case channelconfig.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case channelconfig.FieldLastProbeAt:
+		return m.OldLastProbeAt(ctx)
+	case channelconfig.FieldLastProbeStatus:
+		return m.OldLastProbeStatus(ctx)
+	case channelconfig.FieldLastProbeError:
+		return m.OldLastProbeError(ctx)
+	}
+	return nil, fmt.Errorf("unknown ChannelConfig field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ChannelConfigMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case channelconfig.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case channelconfig.FieldDescription:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDescription(v)
+		return nil
+	case channelconfig.FieldBaseURL:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBaseURL(v)
+		return nil
+	case channelconfig.FieldProviderPreset:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProviderPreset(v)
+		return nil
+	case channelconfig.FieldProtocolFamily:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProtocolFamily(v)
+		return nil
+	case channelconfig.FieldRoutingProfile:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRoutingProfile(v)
+		return nil
+	case channelconfig.FieldAPIVersion:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAPIVersion(v)
+		return nil
+	case channelconfig.FieldDeployment:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeployment(v)
+		return nil
+	case channelconfig.FieldProject:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProject(v)
+		return nil
+	case channelconfig.FieldLocation:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLocation(v)
+		return nil
+	case channelconfig.FieldModelResource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModelResource(v)
+		return nil
+	case channelconfig.FieldAPIKeyCiphertext:
+		v, ok := value.([]byte)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAPIKeyCiphertext(v)
+		return nil
+	case channelconfig.FieldAPIKeyHint:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAPIKeyHint(v)
+		return nil
+	case channelconfig.FieldHeadersJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetHeadersJSON(v)
+		return nil
+	case channelconfig.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	case channelconfig.FieldPriority:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPriority(v)
+		return nil
+	case channelconfig.FieldWeight:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetWeight(v)
+		return nil
+	case channelconfig.FieldCapacityHint:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCapacityHint(v)
+		return nil
+	case channelconfig.FieldModelDiscovery:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModelDiscovery(v)
+		return nil
+	case channelconfig.FieldAllowUnknownModels:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAllowUnknownModels(v)
+		return nil
+	case channelconfig.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case channelconfig.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case channelconfig.FieldLastProbeAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastProbeAt(v)
+		return nil
+	case channelconfig.FieldLastProbeStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastProbeStatus(v)
+		return nil
+	case channelconfig.FieldLastProbeError:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastProbeError(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelConfig field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *ChannelConfigMutation) AddedFields() []string {
+	var fields []string
+	if m.addpriority != nil {
+		fields = append(fields, channelconfig.FieldPriority)
+	}
+	if m.addweight != nil {
+		fields = append(fields, channelconfig.FieldWeight)
+	}
+	if m.addcapacity_hint != nil {
+		fields = append(fields, channelconfig.FieldCapacityHint)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *ChannelConfigMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case channelconfig.FieldPriority:
+		return m.AddedPriority()
+	case channelconfig.FieldWeight:
+		return m.AddedWeight()
+	case channelconfig.FieldCapacityHint:
+		return m.AddedCapacityHint()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ChannelConfigMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case channelconfig.FieldPriority:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPriority(v)
+		return nil
+	case channelconfig.FieldWeight:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddWeight(v)
+		return nil
+	case channelconfig.FieldCapacityHint:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCapacityHint(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelConfig numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *ChannelConfigMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(channelconfig.FieldAPIKeyCiphertext) {
+		fields = append(fields, channelconfig.FieldAPIKeyCiphertext)
+	}
+	if m.FieldCleared(channelconfig.FieldLastProbeAt) {
+		fields = append(fields, channelconfig.FieldLastProbeAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *ChannelConfigMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *ChannelConfigMutation) ClearField(name string) error {
+	switch name {
+	case channelconfig.FieldAPIKeyCiphertext:
+		m.ClearAPIKeyCiphertext()
+		return nil
+	case channelconfig.FieldLastProbeAt:
+		m.ClearLastProbeAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelConfig nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *ChannelConfigMutation) ResetField(name string) error {
+	switch name {
+	case channelconfig.FieldName:
+		m.ResetName()
+		return nil
+	case channelconfig.FieldDescription:
+		m.ResetDescription()
+		return nil
+	case channelconfig.FieldBaseURL:
+		m.ResetBaseURL()
+		return nil
+	case channelconfig.FieldProviderPreset:
+		m.ResetProviderPreset()
+		return nil
+	case channelconfig.FieldProtocolFamily:
+		m.ResetProtocolFamily()
+		return nil
+	case channelconfig.FieldRoutingProfile:
+		m.ResetRoutingProfile()
+		return nil
+	case channelconfig.FieldAPIVersion:
+		m.ResetAPIVersion()
+		return nil
+	case channelconfig.FieldDeployment:
+		m.ResetDeployment()
+		return nil
+	case channelconfig.FieldProject:
+		m.ResetProject()
+		return nil
+	case channelconfig.FieldLocation:
+		m.ResetLocation()
+		return nil
+	case channelconfig.FieldModelResource:
+		m.ResetModelResource()
+		return nil
+	case channelconfig.FieldAPIKeyCiphertext:
+		m.ResetAPIKeyCiphertext()
+		return nil
+	case channelconfig.FieldAPIKeyHint:
+		m.ResetAPIKeyHint()
+		return nil
+	case channelconfig.FieldHeadersJSON:
+		m.ResetHeadersJSON()
+		return nil
+	case channelconfig.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	case channelconfig.FieldPriority:
+		m.ResetPriority()
+		return nil
+	case channelconfig.FieldWeight:
+		m.ResetWeight()
+		return nil
+	case channelconfig.FieldCapacityHint:
+		m.ResetCapacityHint()
+		return nil
+	case channelconfig.FieldModelDiscovery:
+		m.ResetModelDiscovery()
+		return nil
+	case channelconfig.FieldAllowUnknownModels:
+		m.ResetAllowUnknownModels()
+		return nil
+	case channelconfig.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case channelconfig.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case channelconfig.FieldLastProbeAt:
+		m.ResetLastProbeAt()
+		return nil
+	case channelconfig.FieldLastProbeStatus:
+		m.ResetLastProbeStatus()
+		return nil
+	case channelconfig.FieldLastProbeError:
+		m.ResetLastProbeError()
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelConfig field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *ChannelConfigMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *ChannelConfigMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *ChannelConfigMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *ChannelConfigMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *ChannelConfigMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *ChannelConfigMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *ChannelConfigMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown ChannelConfig unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *ChannelConfigMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown ChannelConfig edge %s", name)
+}
+
+// ChannelModelMutation represents an operation that mutates the ChannelModel nodes in the graph.
+type ChannelModelMutation struct {
+	config
+	op                           Op
+	typ                          string
+	id                           *int
+	channel_id                   *string
+	model                        *string
+	display_name                 *string
+	source                       *string
+	enabled                      *bool
+	supports_responses           *int
+	addsupports_responses        *int
+	supports_chat_completions    *int
+	addsupports_chat_completions *int
+	supports_embeddings          *int
+	addsupports_embeddings       *int
+	context_window               *int
+	addcontext_window            *int
+	input_modalities_json        *string
+	output_modalities_json       *string
+	raw_model_json               *string
+	first_seen_at                *time.Time
+	last_seen_at                 *time.Time
+	last_probe_at                *time.Time
+	clearedFields                map[string]struct{}
+	done                         bool
+	oldValue                     func(context.Context) (*ChannelModel, error)
+	predicates                   []predicate.ChannelModel
+}
+
+var _ ent.Mutation = (*ChannelModelMutation)(nil)
+
+// channelmodelOption allows management of the mutation configuration using functional options.
+type channelmodelOption func(*ChannelModelMutation)
+
+// newChannelModelMutation creates new mutation for the ChannelModel entity.
+func newChannelModelMutation(c config, op Op, opts ...channelmodelOption) *ChannelModelMutation {
+	m := &ChannelModelMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeChannelModel,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withChannelModelID sets the ID field of the mutation.
+func withChannelModelID(id int) channelmodelOption {
+	return func(m *ChannelModelMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *ChannelModel
+		)
+		m.oldValue = func(ctx context.Context) (*ChannelModel, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().ChannelModel.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withChannelModel sets the old ChannelModel of the mutation.
+func withChannelModel(node *ChannelModel) channelmodelOption {
+	return func(m *ChannelModelMutation) {
+		m.oldValue = func(context.Context) (*ChannelModel, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m ChannelModelMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m ChannelModelMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("dao: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *ChannelModelMutation) ID() (id int, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *ChannelModelMutation) IDs(ctx context.Context) ([]int, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().ChannelModel.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetChannelID sets the "channel_id" field.
+func (m *ChannelModelMutation) SetChannelID(s string) {
+	m.channel_id = &s
+}
+
+// ChannelID returns the value of the "channel_id" field in the mutation.
+func (m *ChannelModelMutation) ChannelID() (r string, exists bool) {
+	v := m.channel_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldChannelID returns the old "channel_id" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldChannelID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldChannelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldChannelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldChannelID: %w", err)
+	}
+	return oldValue.ChannelID, nil
+}
+
+// ResetChannelID resets all changes to the "channel_id" field.
+func (m *ChannelModelMutation) ResetChannelID() {
+	m.channel_id = nil
+}
+
+// SetModel sets the "model" field.
+func (m *ChannelModelMutation) SetModel(s string) {
+	m.model = &s
+}
+
+// Model returns the value of the "model" field in the mutation.
+func (m *ChannelModelMutation) Model() (r string, exists bool) {
+	v := m.model
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModel returns the old "model" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldModel(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModel: %w", err)
+	}
+	return oldValue.Model, nil
+}
+
+// ResetModel resets all changes to the "model" field.
+func (m *ChannelModelMutation) ResetModel() {
+	m.model = nil
+}
+
+// SetDisplayName sets the "display_name" field.
+func (m *ChannelModelMutation) SetDisplayName(s string) {
+	m.display_name = &s
+}
+
+// DisplayName returns the value of the "display_name" field in the mutation.
+func (m *ChannelModelMutation) DisplayName() (r string, exists bool) {
+	v := m.display_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDisplayName returns the old "display_name" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldDisplayName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDisplayName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDisplayName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDisplayName: %w", err)
+	}
+	return oldValue.DisplayName, nil
+}
+
+// ResetDisplayName resets all changes to the "display_name" field.
+func (m *ChannelModelMutation) ResetDisplayName() {
+	m.display_name = nil
+}
+
+// SetSource sets the "source" field.
+func (m *ChannelModelMutation) SetSource(s string) {
+	m.source = &s
+}
+
+// Source returns the value of the "source" field in the mutation.
+func (m *ChannelModelMutation) Source() (r string, exists bool) {
+	v := m.source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSource returns the old "source" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSource: %w", err)
+	}
+	return oldValue.Source, nil
+}
+
+// ResetSource resets all changes to the "source" field.
+func (m *ChannelModelMutation) ResetSource() {
+	m.source = nil
+}
+
+// SetEnabled sets the "enabled" field.
+func (m *ChannelModelMutation) SetEnabled(b bool) {
+	m.enabled = &b
+}
+
+// Enabled returns the value of the "enabled" field in the mutation.
+func (m *ChannelModelMutation) Enabled() (r bool, exists bool) {
+	v := m.enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabled returns the old "enabled" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabled: %w", err)
+	}
+	return oldValue.Enabled, nil
+}
+
+// ResetEnabled resets all changes to the "enabled" field.
+func (m *ChannelModelMutation) ResetEnabled() {
+	m.enabled = nil
+}
+
+// SetSupportsResponses sets the "supports_responses" field.
+func (m *ChannelModelMutation) SetSupportsResponses(i int) {
+	m.supports_responses = &i
+	m.addsupports_responses = nil
+}
+
+// SupportsResponses returns the value of the "supports_responses" field in the mutation.
+func (m *ChannelModelMutation) SupportsResponses() (r int, exists bool) {
+	v := m.supports_responses
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSupportsResponses returns the old "supports_responses" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldSupportsResponses(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSupportsResponses is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSupportsResponses requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSupportsResponses: %w", err)
+	}
+	return oldValue.SupportsResponses, nil
+}
+
+// AddSupportsResponses adds i to the "supports_responses" field.
+func (m *ChannelModelMutation) AddSupportsResponses(i int) {
+	if m.addsupports_responses != nil {
+		*m.addsupports_responses += i
+	} else {
+		m.addsupports_responses = &i
+	}
+}
+
+// AddedSupportsResponses returns the value that was added to the "supports_responses" field in this mutation.
+func (m *ChannelModelMutation) AddedSupportsResponses() (r int, exists bool) {
+	v := m.addsupports_responses
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSupportsResponses clears the value of the "supports_responses" field.
+func (m *ChannelModelMutation) ClearSupportsResponses() {
+	m.supports_responses = nil
+	m.addsupports_responses = nil
+	m.clearedFields[channelmodel.FieldSupportsResponses] = struct{}{}
+}
+
+// SupportsResponsesCleared returns if the "supports_responses" field was cleared in this mutation.
+func (m *ChannelModelMutation) SupportsResponsesCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldSupportsResponses]
+	return ok
+}
+
+// ResetSupportsResponses resets all changes to the "supports_responses" field.
+func (m *ChannelModelMutation) ResetSupportsResponses() {
+	m.supports_responses = nil
+	m.addsupports_responses = nil
+	delete(m.clearedFields, channelmodel.FieldSupportsResponses)
+}
+
+// SetSupportsChatCompletions sets the "supports_chat_completions" field.
+func (m *ChannelModelMutation) SetSupportsChatCompletions(i int) {
+	m.supports_chat_completions = &i
+	m.addsupports_chat_completions = nil
+}
+
+// SupportsChatCompletions returns the value of the "supports_chat_completions" field in the mutation.
+func (m *ChannelModelMutation) SupportsChatCompletions() (r int, exists bool) {
+	v := m.supports_chat_completions
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSupportsChatCompletions returns the old "supports_chat_completions" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldSupportsChatCompletions(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSupportsChatCompletions is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSupportsChatCompletions requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSupportsChatCompletions: %w", err)
+	}
+	return oldValue.SupportsChatCompletions, nil
+}
+
+// AddSupportsChatCompletions adds i to the "supports_chat_completions" field.
+func (m *ChannelModelMutation) AddSupportsChatCompletions(i int) {
+	if m.addsupports_chat_completions != nil {
+		*m.addsupports_chat_completions += i
+	} else {
+		m.addsupports_chat_completions = &i
+	}
+}
+
+// AddedSupportsChatCompletions returns the value that was added to the "supports_chat_completions" field in this mutation.
+func (m *ChannelModelMutation) AddedSupportsChatCompletions() (r int, exists bool) {
+	v := m.addsupports_chat_completions
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSupportsChatCompletions clears the value of the "supports_chat_completions" field.
+func (m *ChannelModelMutation) ClearSupportsChatCompletions() {
+	m.supports_chat_completions = nil
+	m.addsupports_chat_completions = nil
+	m.clearedFields[channelmodel.FieldSupportsChatCompletions] = struct{}{}
+}
+
+// SupportsChatCompletionsCleared returns if the "supports_chat_completions" field was cleared in this mutation.
+func (m *ChannelModelMutation) SupportsChatCompletionsCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldSupportsChatCompletions]
+	return ok
+}
+
+// ResetSupportsChatCompletions resets all changes to the "supports_chat_completions" field.
+func (m *ChannelModelMutation) ResetSupportsChatCompletions() {
+	m.supports_chat_completions = nil
+	m.addsupports_chat_completions = nil
+	delete(m.clearedFields, channelmodel.FieldSupportsChatCompletions)
+}
+
+// SetSupportsEmbeddings sets the "supports_embeddings" field.
+func (m *ChannelModelMutation) SetSupportsEmbeddings(i int) {
+	m.supports_embeddings = &i
+	m.addsupports_embeddings = nil
+}
+
+// SupportsEmbeddings returns the value of the "supports_embeddings" field in the mutation.
+func (m *ChannelModelMutation) SupportsEmbeddings() (r int, exists bool) {
+	v := m.supports_embeddings
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSupportsEmbeddings returns the old "supports_embeddings" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldSupportsEmbeddings(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSupportsEmbeddings is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSupportsEmbeddings requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSupportsEmbeddings: %w", err)
+	}
+	return oldValue.SupportsEmbeddings, nil
+}
+
+// AddSupportsEmbeddings adds i to the "supports_embeddings" field.
+func (m *ChannelModelMutation) AddSupportsEmbeddings(i int) {
+	if m.addsupports_embeddings != nil {
+		*m.addsupports_embeddings += i
+	} else {
+		m.addsupports_embeddings = &i
+	}
+}
+
+// AddedSupportsEmbeddings returns the value that was added to the "supports_embeddings" field in this mutation.
+func (m *ChannelModelMutation) AddedSupportsEmbeddings() (r int, exists bool) {
+	v := m.addsupports_embeddings
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSupportsEmbeddings clears the value of the "supports_embeddings" field.
+func (m *ChannelModelMutation) ClearSupportsEmbeddings() {
+	m.supports_embeddings = nil
+	m.addsupports_embeddings = nil
+	m.clearedFields[channelmodel.FieldSupportsEmbeddings] = struct{}{}
+}
+
+// SupportsEmbeddingsCleared returns if the "supports_embeddings" field was cleared in this mutation.
+func (m *ChannelModelMutation) SupportsEmbeddingsCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldSupportsEmbeddings]
+	return ok
+}
+
+// ResetSupportsEmbeddings resets all changes to the "supports_embeddings" field.
+func (m *ChannelModelMutation) ResetSupportsEmbeddings() {
+	m.supports_embeddings = nil
+	m.addsupports_embeddings = nil
+	delete(m.clearedFields, channelmodel.FieldSupportsEmbeddings)
+}
+
+// SetContextWindow sets the "context_window" field.
+func (m *ChannelModelMutation) SetContextWindow(i int) {
+	m.context_window = &i
+	m.addcontext_window = nil
+}
+
+// ContextWindow returns the value of the "context_window" field in the mutation.
+func (m *ChannelModelMutation) ContextWindow() (r int, exists bool) {
+	v := m.context_window
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldContextWindow returns the old "context_window" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldContextWindow(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldContextWindow is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldContextWindow requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldContextWindow: %w", err)
+	}
+	return oldValue.ContextWindow, nil
+}
+
+// AddContextWindow adds i to the "context_window" field.
+func (m *ChannelModelMutation) AddContextWindow(i int) {
+	if m.addcontext_window != nil {
+		*m.addcontext_window += i
+	} else {
+		m.addcontext_window = &i
+	}
+}
+
+// AddedContextWindow returns the value that was added to the "context_window" field in this mutation.
+func (m *ChannelModelMutation) AddedContextWindow() (r int, exists bool) {
+	v := m.addcontext_window
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearContextWindow clears the value of the "context_window" field.
+func (m *ChannelModelMutation) ClearContextWindow() {
+	m.context_window = nil
+	m.addcontext_window = nil
+	m.clearedFields[channelmodel.FieldContextWindow] = struct{}{}
+}
+
+// ContextWindowCleared returns if the "context_window" field was cleared in this mutation.
+func (m *ChannelModelMutation) ContextWindowCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldContextWindow]
+	return ok
+}
+
+// ResetContextWindow resets all changes to the "context_window" field.
+func (m *ChannelModelMutation) ResetContextWindow() {
+	m.context_window = nil
+	m.addcontext_window = nil
+	delete(m.clearedFields, channelmodel.FieldContextWindow)
+}
+
+// SetInputModalitiesJSON sets the "input_modalities_json" field.
+func (m *ChannelModelMutation) SetInputModalitiesJSON(s string) {
+	m.input_modalities_json = &s
+}
+
+// InputModalitiesJSON returns the value of the "input_modalities_json" field in the mutation.
+func (m *ChannelModelMutation) InputModalitiesJSON() (r string, exists bool) {
+	v := m.input_modalities_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputModalitiesJSON returns the old "input_modalities_json" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldInputModalitiesJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputModalitiesJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputModalitiesJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputModalitiesJSON: %w", err)
+	}
+	return oldValue.InputModalitiesJSON, nil
+}
+
+// ResetInputModalitiesJSON resets all changes to the "input_modalities_json" field.
+func (m *ChannelModelMutation) ResetInputModalitiesJSON() {
+	m.input_modalities_json = nil
+}
+
+// SetOutputModalitiesJSON sets the "output_modalities_json" field.
+func (m *ChannelModelMutation) SetOutputModalitiesJSON(s string) {
+	m.output_modalities_json = &s
+}
+
+// OutputModalitiesJSON returns the value of the "output_modalities_json" field in the mutation.
+func (m *ChannelModelMutation) OutputModalitiesJSON() (r string, exists bool) {
+	v := m.output_modalities_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOutputModalitiesJSON returns the old "output_modalities_json" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldOutputModalitiesJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOutputModalitiesJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOutputModalitiesJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOutputModalitiesJSON: %w", err)
+	}
+	return oldValue.OutputModalitiesJSON, nil
+}
+
+// ResetOutputModalitiesJSON resets all changes to the "output_modalities_json" field.
+func (m *ChannelModelMutation) ResetOutputModalitiesJSON() {
+	m.output_modalities_json = nil
+}
+
+// SetRawModelJSON sets the "raw_model_json" field.
+func (m *ChannelModelMutation) SetRawModelJSON(s string) {
+	m.raw_model_json = &s
+}
+
+// RawModelJSON returns the value of the "raw_model_json" field in the mutation.
+func (m *ChannelModelMutation) RawModelJSON() (r string, exists bool) {
+	v := m.raw_model_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRawModelJSON returns the old "raw_model_json" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldRawModelJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRawModelJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRawModelJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRawModelJSON: %w", err)
+	}
+	return oldValue.RawModelJSON, nil
+}
+
+// ResetRawModelJSON resets all changes to the "raw_model_json" field.
+func (m *ChannelModelMutation) ResetRawModelJSON() {
+	m.raw_model_json = nil
+}
+
+// SetFirstSeenAt sets the "first_seen_at" field.
+func (m *ChannelModelMutation) SetFirstSeenAt(t time.Time) {
+	m.first_seen_at = &t
+}
+
+// FirstSeenAt returns the value of the "first_seen_at" field in the mutation.
+func (m *ChannelModelMutation) FirstSeenAt() (r time.Time, exists bool) {
+	v := m.first_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFirstSeenAt returns the old "first_seen_at" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldFirstSeenAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFirstSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFirstSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFirstSeenAt: %w", err)
+	}
+	return oldValue.FirstSeenAt, nil
+}
+
+// ResetFirstSeenAt resets all changes to the "first_seen_at" field.
+func (m *ChannelModelMutation) ResetFirstSeenAt() {
+	m.first_seen_at = nil
+}
+
+// SetLastSeenAt sets the "last_seen_at" field.
+func (m *ChannelModelMutation) SetLastSeenAt(t time.Time) {
+	m.last_seen_at = &t
+}
+
+// LastSeenAt returns the value of the "last_seen_at" field in the mutation.
+func (m *ChannelModelMutation) LastSeenAt() (r time.Time, exists bool) {
+	v := m.last_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastSeenAt returns the old "last_seen_at" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldLastSeenAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastSeenAt: %w", err)
+	}
+	return oldValue.LastSeenAt, nil
+}
+
+// ResetLastSeenAt resets all changes to the "last_seen_at" field.
+func (m *ChannelModelMutation) ResetLastSeenAt() {
+	m.last_seen_at = nil
+}
+
+// SetLastProbeAt sets the "last_probe_at" field.
+func (m *ChannelModelMutation) SetLastProbeAt(t time.Time) {
+	m.last_probe_at = &t
+}
+
+// LastProbeAt returns the value of the "last_probe_at" field in the mutation.
+func (m *ChannelModelMutation) LastProbeAt() (r time.Time, exists bool) {
+	v := m.last_probe_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastProbeAt returns the old "last_probe_at" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldLastProbeAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastProbeAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastProbeAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastProbeAt: %w", err)
+	}
+	return oldValue.LastProbeAt, nil
+}
+
+// ClearLastProbeAt clears the value of the "last_probe_at" field.
+func (m *ChannelModelMutation) ClearLastProbeAt() {
+	m.last_probe_at = nil
+	m.clearedFields[channelmodel.FieldLastProbeAt] = struct{}{}
+}
+
+// LastProbeAtCleared returns if the "last_probe_at" field was cleared in this mutation.
+func (m *ChannelModelMutation) LastProbeAtCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldLastProbeAt]
+	return ok
+}
+
+// ResetLastProbeAt resets all changes to the "last_probe_at" field.
+func (m *ChannelModelMutation) ResetLastProbeAt() {
+	m.last_probe_at = nil
+	delete(m.clearedFields, channelmodel.FieldLastProbeAt)
+}
+
+// Where appends a list predicates to the ChannelModelMutation builder.
+func (m *ChannelModelMutation) Where(ps ...predicate.ChannelModel) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ChannelModelMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ChannelModelMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.ChannelModel, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *ChannelModelMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *ChannelModelMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (ChannelModel).
+func (m *ChannelModelMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *ChannelModelMutation) Fields() []string {
+	fields := make([]string, 0, 15)
+	if m.channel_id != nil {
+		fields = append(fields, channelmodel.FieldChannelID)
+	}
+	if m.model != nil {
+		fields = append(fields, channelmodel.FieldModel)
+	}
+	if m.display_name != nil {
+		fields = append(fields, channelmodel.FieldDisplayName)
+	}
+	if m.source != nil {
+		fields = append(fields, channelmodel.FieldSource)
+	}
+	if m.enabled != nil {
+		fields = append(fields, channelmodel.FieldEnabled)
+	}
+	if m.supports_responses != nil {
+		fields = append(fields, channelmodel.FieldSupportsResponses)
+	}
+	if m.supports_chat_completions != nil {
+		fields = append(fields, channelmodel.FieldSupportsChatCompletions)
+	}
+	if m.supports_embeddings != nil {
+		fields = append(fields, channelmodel.FieldSupportsEmbeddings)
+	}
+	if m.context_window != nil {
+		fields = append(fields, channelmodel.FieldContextWindow)
+	}
+	if m.input_modalities_json != nil {
+		fields = append(fields, channelmodel.FieldInputModalitiesJSON)
+	}
+	if m.output_modalities_json != nil {
+		fields = append(fields, channelmodel.FieldOutputModalitiesJSON)
+	}
+	if m.raw_model_json != nil {
+		fields = append(fields, channelmodel.FieldRawModelJSON)
+	}
+	if m.first_seen_at != nil {
+		fields = append(fields, channelmodel.FieldFirstSeenAt)
+	}
+	if m.last_seen_at != nil {
+		fields = append(fields, channelmodel.FieldLastSeenAt)
+	}
+	if m.last_probe_at != nil {
+		fields = append(fields, channelmodel.FieldLastProbeAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *ChannelModelMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case channelmodel.FieldChannelID:
+		return m.ChannelID()
+	case channelmodel.FieldModel:
+		return m.Model()
+	case channelmodel.FieldDisplayName:
+		return m.DisplayName()
+	case channelmodel.FieldSource:
+		return m.Source()
+	case channelmodel.FieldEnabled:
+		return m.Enabled()
+	case channelmodel.FieldSupportsResponses:
+		return m.SupportsResponses()
+	case channelmodel.FieldSupportsChatCompletions:
+		return m.SupportsChatCompletions()
+	case channelmodel.FieldSupportsEmbeddings:
+		return m.SupportsEmbeddings()
+	case channelmodel.FieldContextWindow:
+		return m.ContextWindow()
+	case channelmodel.FieldInputModalitiesJSON:
+		return m.InputModalitiesJSON()
+	case channelmodel.FieldOutputModalitiesJSON:
+		return m.OutputModalitiesJSON()
+	case channelmodel.FieldRawModelJSON:
+		return m.RawModelJSON()
+	case channelmodel.FieldFirstSeenAt:
+		return m.FirstSeenAt()
+	case channelmodel.FieldLastSeenAt:
+		return m.LastSeenAt()
+	case channelmodel.FieldLastProbeAt:
+		return m.LastProbeAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *ChannelModelMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case channelmodel.FieldChannelID:
+		return m.OldChannelID(ctx)
+	case channelmodel.FieldModel:
+		return m.OldModel(ctx)
+	case channelmodel.FieldDisplayName:
+		return m.OldDisplayName(ctx)
+	case channelmodel.FieldSource:
+		return m.OldSource(ctx)
+	case channelmodel.FieldEnabled:
+		return m.OldEnabled(ctx)
+	case channelmodel.FieldSupportsResponses:
+		return m.OldSupportsResponses(ctx)
+	case channelmodel.FieldSupportsChatCompletions:
+		return m.OldSupportsChatCompletions(ctx)
+	case channelmodel.FieldSupportsEmbeddings:
+		return m.OldSupportsEmbeddings(ctx)
+	case channelmodel.FieldContextWindow:
+		return m.OldContextWindow(ctx)
+	case channelmodel.FieldInputModalitiesJSON:
+		return m.OldInputModalitiesJSON(ctx)
+	case channelmodel.FieldOutputModalitiesJSON:
+		return m.OldOutputModalitiesJSON(ctx)
+	case channelmodel.FieldRawModelJSON:
+		return m.OldRawModelJSON(ctx)
+	case channelmodel.FieldFirstSeenAt:
+		return m.OldFirstSeenAt(ctx)
+	case channelmodel.FieldLastSeenAt:
+		return m.OldLastSeenAt(ctx)
+	case channelmodel.FieldLastProbeAt:
+		return m.OldLastProbeAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown ChannelModel field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ChannelModelMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case channelmodel.FieldChannelID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetChannelID(v)
+		return nil
+	case channelmodel.FieldModel:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModel(v)
+		return nil
+	case channelmodel.FieldDisplayName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDisplayName(v)
+		return nil
+	case channelmodel.FieldSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSource(v)
+		return nil
+	case channelmodel.FieldEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabled(v)
+		return nil
+	case channelmodel.FieldSupportsResponses:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSupportsResponses(v)
+		return nil
+	case channelmodel.FieldSupportsChatCompletions:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSupportsChatCompletions(v)
+		return nil
+	case channelmodel.FieldSupportsEmbeddings:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSupportsEmbeddings(v)
+		return nil
+	case channelmodel.FieldContextWindow:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetContextWindow(v)
+		return nil
+	case channelmodel.FieldInputModalitiesJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputModalitiesJSON(v)
+		return nil
+	case channelmodel.FieldOutputModalitiesJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOutputModalitiesJSON(v)
+		return nil
+	case channelmodel.FieldRawModelJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRawModelJSON(v)
+		return nil
+	case channelmodel.FieldFirstSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFirstSeenAt(v)
+		return nil
+	case channelmodel.FieldLastSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastSeenAt(v)
+		return nil
+	case channelmodel.FieldLastProbeAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastProbeAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelModel field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *ChannelModelMutation) AddedFields() []string {
+	var fields []string
+	if m.addsupports_responses != nil {
+		fields = append(fields, channelmodel.FieldSupportsResponses)
+	}
+	if m.addsupports_chat_completions != nil {
+		fields = append(fields, channelmodel.FieldSupportsChatCompletions)
+	}
+	if m.addsupports_embeddings != nil {
+		fields = append(fields, channelmodel.FieldSupportsEmbeddings)
+	}
+	if m.addcontext_window != nil {
+		fields = append(fields, channelmodel.FieldContextWindow)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *ChannelModelMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case channelmodel.FieldSupportsResponses:
+		return m.AddedSupportsResponses()
+	case channelmodel.FieldSupportsChatCompletions:
+		return m.AddedSupportsChatCompletions()
+	case channelmodel.FieldSupportsEmbeddings:
+		return m.AddedSupportsEmbeddings()
+	case channelmodel.FieldContextWindow:
+		return m.AddedContextWindow()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ChannelModelMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case channelmodel.FieldSupportsResponses:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSupportsResponses(v)
+		return nil
+	case channelmodel.FieldSupportsChatCompletions:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSupportsChatCompletions(v)
+		return nil
+	case channelmodel.FieldSupportsEmbeddings:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSupportsEmbeddings(v)
+		return nil
+	case channelmodel.FieldContextWindow:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddContextWindow(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelModel numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *ChannelModelMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(channelmodel.FieldSupportsResponses) {
+		fields = append(fields, channelmodel.FieldSupportsResponses)
+	}
+	if m.FieldCleared(channelmodel.FieldSupportsChatCompletions) {
+		fields = append(fields, channelmodel.FieldSupportsChatCompletions)
+	}
+	if m.FieldCleared(channelmodel.FieldSupportsEmbeddings) {
+		fields = append(fields, channelmodel.FieldSupportsEmbeddings)
+	}
+	if m.FieldCleared(channelmodel.FieldContextWindow) {
+		fields = append(fields, channelmodel.FieldContextWindow)
+	}
+	if m.FieldCleared(channelmodel.FieldLastProbeAt) {
+		fields = append(fields, channelmodel.FieldLastProbeAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *ChannelModelMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *ChannelModelMutation) ClearField(name string) error {
+	switch name {
+	case channelmodel.FieldSupportsResponses:
+		m.ClearSupportsResponses()
+		return nil
+	case channelmodel.FieldSupportsChatCompletions:
+		m.ClearSupportsChatCompletions()
+		return nil
+	case channelmodel.FieldSupportsEmbeddings:
+		m.ClearSupportsEmbeddings()
+		return nil
+	case channelmodel.FieldContextWindow:
+		m.ClearContextWindow()
+		return nil
+	case channelmodel.FieldLastProbeAt:
+		m.ClearLastProbeAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelModel nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *ChannelModelMutation) ResetField(name string) error {
+	switch name {
+	case channelmodel.FieldChannelID:
+		m.ResetChannelID()
+		return nil
+	case channelmodel.FieldModel:
+		m.ResetModel()
+		return nil
+	case channelmodel.FieldDisplayName:
+		m.ResetDisplayName()
+		return nil
+	case channelmodel.FieldSource:
+		m.ResetSource()
+		return nil
+	case channelmodel.FieldEnabled:
+		m.ResetEnabled()
+		return nil
+	case channelmodel.FieldSupportsResponses:
+		m.ResetSupportsResponses()
+		return nil
+	case channelmodel.FieldSupportsChatCompletions:
+		m.ResetSupportsChatCompletions()
+		return nil
+	case channelmodel.FieldSupportsEmbeddings:
+		m.ResetSupportsEmbeddings()
+		return nil
+	case channelmodel.FieldContextWindow:
+		m.ResetContextWindow()
+		return nil
+	case channelmodel.FieldInputModalitiesJSON:
+		m.ResetInputModalitiesJSON()
+		return nil
+	case channelmodel.FieldOutputModalitiesJSON:
+		m.ResetOutputModalitiesJSON()
+		return nil
+	case channelmodel.FieldRawModelJSON:
+		m.ResetRawModelJSON()
+		return nil
+	case channelmodel.FieldFirstSeenAt:
+		m.ResetFirstSeenAt()
+		return nil
+	case channelmodel.FieldLastSeenAt:
+		m.ResetLastSeenAt()
+		return nil
+	case channelmodel.FieldLastProbeAt:
+		m.ResetLastProbeAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelModel field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *ChannelModelMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *ChannelModelMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *ChannelModelMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *ChannelModelMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *ChannelModelMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *ChannelModelMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *ChannelModelMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown ChannelModel unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *ChannelModelMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown ChannelModel edge %s", name)
+}
+
+// ChannelProbeRunMutation represents an operation that mutates the ChannelProbeRun nodes in the graph.
+type ChannelProbeRunMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *string
+	channel_id           *string
+	status               *string
+	started_at           *time.Time
+	completed_at         *time.Time
+	duration_ms          *int64
+	addduration_ms       *int64
+	discovered_count     *int
+	adddiscovered_count  *int
+	enabled_count        *int
+	addenabled_count     *int
+	endpoint             *string
+	status_code          *int
+	addstatus_code       *int
+	error_text           *string
+	request_meta_json    *string
+	response_sample_json *string
+	clearedFields        map[string]struct{}
+	done                 bool
+	oldValue             func(context.Context) (*ChannelProbeRun, error)
+	predicates           []predicate.ChannelProbeRun
+}
+
+var _ ent.Mutation = (*ChannelProbeRunMutation)(nil)
+
+// channelproberunOption allows management of the mutation configuration using functional options.
+type channelproberunOption func(*ChannelProbeRunMutation)
+
+// newChannelProbeRunMutation creates new mutation for the ChannelProbeRun entity.
+func newChannelProbeRunMutation(c config, op Op, opts ...channelproberunOption) *ChannelProbeRunMutation {
+	m := &ChannelProbeRunMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeChannelProbeRun,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withChannelProbeRunID sets the ID field of the mutation.
+func withChannelProbeRunID(id string) channelproberunOption {
+	return func(m *ChannelProbeRunMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *ChannelProbeRun
+		)
+		m.oldValue = func(ctx context.Context) (*ChannelProbeRun, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().ChannelProbeRun.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withChannelProbeRun sets the old ChannelProbeRun of the mutation.
+func withChannelProbeRun(node *ChannelProbeRun) channelproberunOption {
+	return func(m *ChannelProbeRunMutation) {
+		m.oldValue = func(context.Context) (*ChannelProbeRun, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m ChannelProbeRunMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m ChannelProbeRunMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("dao: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of ChannelProbeRun entities.
+func (m *ChannelProbeRunMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *ChannelProbeRunMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *ChannelProbeRunMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().ChannelProbeRun.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetChannelID sets the "channel_id" field.
+func (m *ChannelProbeRunMutation) SetChannelID(s string) {
+	m.channel_id = &s
+}
+
+// ChannelID returns the value of the "channel_id" field in the mutation.
+func (m *ChannelProbeRunMutation) ChannelID() (r string, exists bool) {
+	v := m.channel_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldChannelID returns the old "channel_id" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldChannelID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldChannelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldChannelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldChannelID: %w", err)
+	}
+	return oldValue.ChannelID, nil
+}
+
+// ResetChannelID resets all changes to the "channel_id" field.
+func (m *ChannelProbeRunMutation) ResetChannelID() {
+	m.channel_id = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *ChannelProbeRunMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *ChannelProbeRunMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *ChannelProbeRunMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetStartedAt sets the "started_at" field.
+func (m *ChannelProbeRunMutation) SetStartedAt(t time.Time) {
+	m.started_at = &t
+}
+
+// StartedAt returns the value of the "started_at" field in the mutation.
+func (m *ChannelProbeRunMutation) StartedAt() (r time.Time, exists bool) {
+	v := m.started_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStartedAt returns the old "started_at" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldStartedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStartedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStartedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStartedAt: %w", err)
+	}
+	return oldValue.StartedAt, nil
+}
+
+// ResetStartedAt resets all changes to the "started_at" field.
+func (m *ChannelProbeRunMutation) ResetStartedAt() {
+	m.started_at = nil
+}
+
+// SetCompletedAt sets the "completed_at" field.
+func (m *ChannelProbeRunMutation) SetCompletedAt(t time.Time) {
+	m.completed_at = &t
+}
+
+// CompletedAt returns the value of the "completed_at" field in the mutation.
+func (m *ChannelProbeRunMutation) CompletedAt() (r time.Time, exists bool) {
+	v := m.completed_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCompletedAt returns the old "completed_at" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldCompletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCompletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCompletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCompletedAt: %w", err)
+	}
+	return oldValue.CompletedAt, nil
+}
+
+// ClearCompletedAt clears the value of the "completed_at" field.
+func (m *ChannelProbeRunMutation) ClearCompletedAt() {
+	m.completed_at = nil
+	m.clearedFields[channelproberun.FieldCompletedAt] = struct{}{}
+}
+
+// CompletedAtCleared returns if the "completed_at" field was cleared in this mutation.
+func (m *ChannelProbeRunMutation) CompletedAtCleared() bool {
+	_, ok := m.clearedFields[channelproberun.FieldCompletedAt]
+	return ok
+}
+
+// ResetCompletedAt resets all changes to the "completed_at" field.
+func (m *ChannelProbeRunMutation) ResetCompletedAt() {
+	m.completed_at = nil
+	delete(m.clearedFields, channelproberun.FieldCompletedAt)
+}
+
+// SetDurationMs sets the "duration_ms" field.
+func (m *ChannelProbeRunMutation) SetDurationMs(i int64) {
+	m.duration_ms = &i
+	m.addduration_ms = nil
+}
+
+// DurationMs returns the value of the "duration_ms" field in the mutation.
+func (m *ChannelProbeRunMutation) DurationMs() (r int64, exists bool) {
+	v := m.duration_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDurationMs returns the old "duration_ms" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldDurationMs(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDurationMs is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDurationMs requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDurationMs: %w", err)
+	}
+	return oldValue.DurationMs, nil
+}
+
+// AddDurationMs adds i to the "duration_ms" field.
+func (m *ChannelProbeRunMutation) AddDurationMs(i int64) {
+	if m.addduration_ms != nil {
+		*m.addduration_ms += i
+	} else {
+		m.addduration_ms = &i
+	}
+}
+
+// AddedDurationMs returns the value that was added to the "duration_ms" field in this mutation.
+func (m *ChannelProbeRunMutation) AddedDurationMs() (r int64, exists bool) {
+	v := m.addduration_ms
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetDurationMs resets all changes to the "duration_ms" field.
+func (m *ChannelProbeRunMutation) ResetDurationMs() {
+	m.duration_ms = nil
+	m.addduration_ms = nil
+}
+
+// SetDiscoveredCount sets the "discovered_count" field.
+func (m *ChannelProbeRunMutation) SetDiscoveredCount(i int) {
+	m.discovered_count = &i
+	m.adddiscovered_count = nil
+}
+
+// DiscoveredCount returns the value of the "discovered_count" field in the mutation.
+func (m *ChannelProbeRunMutation) DiscoveredCount() (r int, exists bool) {
+	v := m.discovered_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDiscoveredCount returns the old "discovered_count" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldDiscoveredCount(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDiscoveredCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDiscoveredCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDiscoveredCount: %w", err)
+	}
+	return oldValue.DiscoveredCount, nil
+}
+
+// AddDiscoveredCount adds i to the "discovered_count" field.
+func (m *ChannelProbeRunMutation) AddDiscoveredCount(i int) {
+	if m.adddiscovered_count != nil {
+		*m.adddiscovered_count += i
+	} else {
+		m.adddiscovered_count = &i
+	}
+}
+
+// AddedDiscoveredCount returns the value that was added to the "discovered_count" field in this mutation.
+func (m *ChannelProbeRunMutation) AddedDiscoveredCount() (r int, exists bool) {
+	v := m.adddiscovered_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetDiscoveredCount resets all changes to the "discovered_count" field.
+func (m *ChannelProbeRunMutation) ResetDiscoveredCount() {
+	m.discovered_count = nil
+	m.adddiscovered_count = nil
+}
+
+// SetEnabledCount sets the "enabled_count" field.
+func (m *ChannelProbeRunMutation) SetEnabledCount(i int) {
+	m.enabled_count = &i
+	m.addenabled_count = nil
+}
+
+// EnabledCount returns the value of the "enabled_count" field in the mutation.
+func (m *ChannelProbeRunMutation) EnabledCount() (r int, exists bool) {
+	v := m.enabled_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEnabledCount returns the old "enabled_count" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldEnabledCount(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEnabledCount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEnabledCount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEnabledCount: %w", err)
+	}
+	return oldValue.EnabledCount, nil
+}
+
+// AddEnabledCount adds i to the "enabled_count" field.
+func (m *ChannelProbeRunMutation) AddEnabledCount(i int) {
+	if m.addenabled_count != nil {
+		*m.addenabled_count += i
+	} else {
+		m.addenabled_count = &i
+	}
+}
+
+// AddedEnabledCount returns the value that was added to the "enabled_count" field in this mutation.
+func (m *ChannelProbeRunMutation) AddedEnabledCount() (r int, exists bool) {
+	v := m.addenabled_count
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEnabledCount resets all changes to the "enabled_count" field.
+func (m *ChannelProbeRunMutation) ResetEnabledCount() {
+	m.enabled_count = nil
+	m.addenabled_count = nil
+}
+
+// SetEndpoint sets the "endpoint" field.
+func (m *ChannelProbeRunMutation) SetEndpoint(s string) {
+	m.endpoint = &s
+}
+
+// Endpoint returns the value of the "endpoint" field in the mutation.
+func (m *ChannelProbeRunMutation) Endpoint() (r string, exists bool) {
+	v := m.endpoint
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEndpoint returns the old "endpoint" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldEndpoint(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEndpoint is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEndpoint requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEndpoint: %w", err)
+	}
+	return oldValue.Endpoint, nil
+}
+
+// ResetEndpoint resets all changes to the "endpoint" field.
+func (m *ChannelProbeRunMutation) ResetEndpoint() {
+	m.endpoint = nil
+}
+
+// SetStatusCode sets the "status_code" field.
+func (m *ChannelProbeRunMutation) SetStatusCode(i int) {
+	m.status_code = &i
+	m.addstatus_code = nil
+}
+
+// StatusCode returns the value of the "status_code" field in the mutation.
+func (m *ChannelProbeRunMutation) StatusCode() (r int, exists bool) {
+	v := m.status_code
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatusCode returns the old "status_code" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldStatusCode(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatusCode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatusCode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatusCode: %w", err)
+	}
+	return oldValue.StatusCode, nil
+}
+
+// AddStatusCode adds i to the "status_code" field.
+func (m *ChannelProbeRunMutation) AddStatusCode(i int) {
+	if m.addstatus_code != nil {
+		*m.addstatus_code += i
+	} else {
+		m.addstatus_code = &i
+	}
+}
+
+// AddedStatusCode returns the value that was added to the "status_code" field in this mutation.
+func (m *ChannelProbeRunMutation) AddedStatusCode() (r int, exists bool) {
+	v := m.addstatus_code
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetStatusCode resets all changes to the "status_code" field.
+func (m *ChannelProbeRunMutation) ResetStatusCode() {
+	m.status_code = nil
+	m.addstatus_code = nil
+}
+
+// SetErrorText sets the "error_text" field.
+func (m *ChannelProbeRunMutation) SetErrorText(s string) {
+	m.error_text = &s
+}
+
+// ErrorText returns the value of the "error_text" field in the mutation.
+func (m *ChannelProbeRunMutation) ErrorText() (r string, exists bool) {
+	v := m.error_text
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldErrorText returns the old "error_text" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldErrorText(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldErrorText is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldErrorText requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldErrorText: %w", err)
+	}
+	return oldValue.ErrorText, nil
+}
+
+// ResetErrorText resets all changes to the "error_text" field.
+func (m *ChannelProbeRunMutation) ResetErrorText() {
+	m.error_text = nil
+}
+
+// SetRequestMetaJSON sets the "request_meta_json" field.
+func (m *ChannelProbeRunMutation) SetRequestMetaJSON(s string) {
+	m.request_meta_json = &s
+}
+
+// RequestMetaJSON returns the value of the "request_meta_json" field in the mutation.
+func (m *ChannelProbeRunMutation) RequestMetaJSON() (r string, exists bool) {
+	v := m.request_meta_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestMetaJSON returns the old "request_meta_json" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldRequestMetaJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestMetaJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestMetaJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestMetaJSON: %w", err)
+	}
+	return oldValue.RequestMetaJSON, nil
+}
+
+// ResetRequestMetaJSON resets all changes to the "request_meta_json" field.
+func (m *ChannelProbeRunMutation) ResetRequestMetaJSON() {
+	m.request_meta_json = nil
+}
+
+// SetResponseSampleJSON sets the "response_sample_json" field.
+func (m *ChannelProbeRunMutation) SetResponseSampleJSON(s string) {
+	m.response_sample_json = &s
+}
+
+// ResponseSampleJSON returns the value of the "response_sample_json" field in the mutation.
+func (m *ChannelProbeRunMutation) ResponseSampleJSON() (r string, exists bool) {
+	v := m.response_sample_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResponseSampleJSON returns the old "response_sample_json" field's value of the ChannelProbeRun entity.
+// If the ChannelProbeRun object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelProbeRunMutation) OldResponseSampleJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResponseSampleJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResponseSampleJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResponseSampleJSON: %w", err)
+	}
+	return oldValue.ResponseSampleJSON, nil
+}
+
+// ResetResponseSampleJSON resets all changes to the "response_sample_json" field.
+func (m *ChannelProbeRunMutation) ResetResponseSampleJSON() {
+	m.response_sample_json = nil
+}
+
+// Where appends a list predicates to the ChannelProbeRunMutation builder.
+func (m *ChannelProbeRunMutation) Where(ps ...predicate.ChannelProbeRun) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ChannelProbeRunMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ChannelProbeRunMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.ChannelProbeRun, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *ChannelProbeRunMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *ChannelProbeRunMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (ChannelProbeRun).
+func (m *ChannelProbeRunMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *ChannelProbeRunMutation) Fields() []string {
+	fields := make([]string, 0, 12)
+	if m.channel_id != nil {
+		fields = append(fields, channelproberun.FieldChannelID)
+	}
+	if m.status != nil {
+		fields = append(fields, channelproberun.FieldStatus)
+	}
+	if m.started_at != nil {
+		fields = append(fields, channelproberun.FieldStartedAt)
+	}
+	if m.completed_at != nil {
+		fields = append(fields, channelproberun.FieldCompletedAt)
+	}
+	if m.duration_ms != nil {
+		fields = append(fields, channelproberun.FieldDurationMs)
+	}
+	if m.discovered_count != nil {
+		fields = append(fields, channelproberun.FieldDiscoveredCount)
+	}
+	if m.enabled_count != nil {
+		fields = append(fields, channelproberun.FieldEnabledCount)
+	}
+	if m.endpoint != nil {
+		fields = append(fields, channelproberun.FieldEndpoint)
+	}
+	if m.status_code != nil {
+		fields = append(fields, channelproberun.FieldStatusCode)
+	}
+	if m.error_text != nil {
+		fields = append(fields, channelproberun.FieldErrorText)
+	}
+	if m.request_meta_json != nil {
+		fields = append(fields, channelproberun.FieldRequestMetaJSON)
+	}
+	if m.response_sample_json != nil {
+		fields = append(fields, channelproberun.FieldResponseSampleJSON)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *ChannelProbeRunMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case channelproberun.FieldChannelID:
+		return m.ChannelID()
+	case channelproberun.FieldStatus:
+		return m.Status()
+	case channelproberun.FieldStartedAt:
+		return m.StartedAt()
+	case channelproberun.FieldCompletedAt:
+		return m.CompletedAt()
+	case channelproberun.FieldDurationMs:
+		return m.DurationMs()
+	case channelproberun.FieldDiscoveredCount:
+		return m.DiscoveredCount()
+	case channelproberun.FieldEnabledCount:
+		return m.EnabledCount()
+	case channelproberun.FieldEndpoint:
+		return m.Endpoint()
+	case channelproberun.FieldStatusCode:
+		return m.StatusCode()
+	case channelproberun.FieldErrorText:
+		return m.ErrorText()
+	case channelproberun.FieldRequestMetaJSON:
+		return m.RequestMetaJSON()
+	case channelproberun.FieldResponseSampleJSON:
+		return m.ResponseSampleJSON()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *ChannelProbeRunMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case channelproberun.FieldChannelID:
+		return m.OldChannelID(ctx)
+	case channelproberun.FieldStatus:
+		return m.OldStatus(ctx)
+	case channelproberun.FieldStartedAt:
+		return m.OldStartedAt(ctx)
+	case channelproberun.FieldCompletedAt:
+		return m.OldCompletedAt(ctx)
+	case channelproberun.FieldDurationMs:
+		return m.OldDurationMs(ctx)
+	case channelproberun.FieldDiscoveredCount:
+		return m.OldDiscoveredCount(ctx)
+	case channelproberun.FieldEnabledCount:
+		return m.OldEnabledCount(ctx)
+	case channelproberun.FieldEndpoint:
+		return m.OldEndpoint(ctx)
+	case channelproberun.FieldStatusCode:
+		return m.OldStatusCode(ctx)
+	case channelproberun.FieldErrorText:
+		return m.OldErrorText(ctx)
+	case channelproberun.FieldRequestMetaJSON:
+		return m.OldRequestMetaJSON(ctx)
+	case channelproberun.FieldResponseSampleJSON:
+		return m.OldResponseSampleJSON(ctx)
+	}
+	return nil, fmt.Errorf("unknown ChannelProbeRun field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ChannelProbeRunMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case channelproberun.FieldChannelID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetChannelID(v)
+		return nil
+	case channelproberun.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case channelproberun.FieldStartedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStartedAt(v)
+		return nil
+	case channelproberun.FieldCompletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCompletedAt(v)
+		return nil
+	case channelproberun.FieldDurationMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDurationMs(v)
+		return nil
+	case channelproberun.FieldDiscoveredCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDiscoveredCount(v)
+		return nil
+	case channelproberun.FieldEnabledCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEnabledCount(v)
+		return nil
+	case channelproberun.FieldEndpoint:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEndpoint(v)
+		return nil
+	case channelproberun.FieldStatusCode:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatusCode(v)
+		return nil
+	case channelproberun.FieldErrorText:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetErrorText(v)
+		return nil
+	case channelproberun.FieldRequestMetaJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestMetaJSON(v)
+		return nil
+	case channelproberun.FieldResponseSampleJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResponseSampleJSON(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelProbeRun field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *ChannelProbeRunMutation) AddedFields() []string {
+	var fields []string
+	if m.addduration_ms != nil {
+		fields = append(fields, channelproberun.FieldDurationMs)
+	}
+	if m.adddiscovered_count != nil {
+		fields = append(fields, channelproberun.FieldDiscoveredCount)
+	}
+	if m.addenabled_count != nil {
+		fields = append(fields, channelproberun.FieldEnabledCount)
+	}
+	if m.addstatus_code != nil {
+		fields = append(fields, channelproberun.FieldStatusCode)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *ChannelProbeRunMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case channelproberun.FieldDurationMs:
+		return m.AddedDurationMs()
+	case channelproberun.FieldDiscoveredCount:
+		return m.AddedDiscoveredCount()
+	case channelproberun.FieldEnabledCount:
+		return m.AddedEnabledCount()
+	case channelproberun.FieldStatusCode:
+		return m.AddedStatusCode()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ChannelProbeRunMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case channelproberun.FieldDurationMs:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddDurationMs(v)
+		return nil
+	case channelproberun.FieldDiscoveredCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddDiscoveredCount(v)
+		return nil
+	case channelproberun.FieldEnabledCount:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEnabledCount(v)
+		return nil
+	case channelproberun.FieldStatusCode:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddStatusCode(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelProbeRun numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *ChannelProbeRunMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(channelproberun.FieldCompletedAt) {
+		fields = append(fields, channelproberun.FieldCompletedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *ChannelProbeRunMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *ChannelProbeRunMutation) ClearField(name string) error {
+	switch name {
+	case channelproberun.FieldCompletedAt:
+		m.ClearCompletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelProbeRun nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *ChannelProbeRunMutation) ResetField(name string) error {
+	switch name {
+	case channelproberun.FieldChannelID:
+		m.ResetChannelID()
+		return nil
+	case channelproberun.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case channelproberun.FieldStartedAt:
+		m.ResetStartedAt()
+		return nil
+	case channelproberun.FieldCompletedAt:
+		m.ResetCompletedAt()
+		return nil
+	case channelproberun.FieldDurationMs:
+		m.ResetDurationMs()
+		return nil
+	case channelproberun.FieldDiscoveredCount:
+		m.ResetDiscoveredCount()
+		return nil
+	case channelproberun.FieldEnabledCount:
+		m.ResetEnabledCount()
+		return nil
+	case channelproberun.FieldEndpoint:
+		m.ResetEndpoint()
+		return nil
+	case channelproberun.FieldStatusCode:
+		m.ResetStatusCode()
+		return nil
+	case channelproberun.FieldErrorText:
+		m.ResetErrorText()
+		return nil
+	case channelproberun.FieldRequestMetaJSON:
+		m.ResetRequestMetaJSON()
+		return nil
+	case channelproberun.FieldResponseSampleJSON:
+		m.ResetResponseSampleJSON()
+		return nil
+	}
+	return fmt.Errorf("unknown ChannelProbeRun field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *ChannelProbeRunMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *ChannelProbeRunMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *ChannelProbeRunMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *ChannelProbeRunMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *ChannelProbeRunMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *ChannelProbeRunMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *ChannelProbeRunMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown ChannelProbeRun unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *ChannelProbeRunMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown ChannelProbeRun edge %s", name)
 }
 
 // DatasetMutation represents an operation that mutates the Dataset nodes in the graph.
@@ -4235,6 +8416,738 @@ func (m *ExperimentRunMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *ExperimentRunMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown ExperimentRun edge %s", name)
+}
+
+// ModelCatalogMutation represents an operation that mutates the ModelCatalog nodes in the graph.
+type ModelCatalogMutation struct {
+	config
+	op            Op
+	typ           string
+	id            *string
+	display_name  *string
+	family        *string
+	vendor        *string
+	description   *string
+	tags_json     *string
+	first_seen_at *time.Time
+	last_seen_at  *time.Time
+	last_used_at  *time.Time
+	clearedFields map[string]struct{}
+	done          bool
+	oldValue      func(context.Context) (*ModelCatalog, error)
+	predicates    []predicate.ModelCatalog
+}
+
+var _ ent.Mutation = (*ModelCatalogMutation)(nil)
+
+// modelcatalogOption allows management of the mutation configuration using functional options.
+type modelcatalogOption func(*ModelCatalogMutation)
+
+// newModelCatalogMutation creates new mutation for the ModelCatalog entity.
+func newModelCatalogMutation(c config, op Op, opts ...modelcatalogOption) *ModelCatalogMutation {
+	m := &ModelCatalogMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeModelCatalog,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withModelCatalogID sets the ID field of the mutation.
+func withModelCatalogID(id string) modelcatalogOption {
+	return func(m *ModelCatalogMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *ModelCatalog
+		)
+		m.oldValue = func(ctx context.Context) (*ModelCatalog, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().ModelCatalog.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withModelCatalog sets the old ModelCatalog of the mutation.
+func withModelCatalog(node *ModelCatalog) modelcatalogOption {
+	return func(m *ModelCatalogMutation) {
+		m.oldValue = func(context.Context) (*ModelCatalog, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m ModelCatalogMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m ModelCatalogMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("dao: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of ModelCatalog entities.
+func (m *ModelCatalogMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *ModelCatalogMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *ModelCatalogMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().ModelCatalog.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetDisplayName sets the "display_name" field.
+func (m *ModelCatalogMutation) SetDisplayName(s string) {
+	m.display_name = &s
+}
+
+// DisplayName returns the value of the "display_name" field in the mutation.
+func (m *ModelCatalogMutation) DisplayName() (r string, exists bool) {
+	v := m.display_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDisplayName returns the old "display_name" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldDisplayName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDisplayName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDisplayName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDisplayName: %w", err)
+	}
+	return oldValue.DisplayName, nil
+}
+
+// ResetDisplayName resets all changes to the "display_name" field.
+func (m *ModelCatalogMutation) ResetDisplayName() {
+	m.display_name = nil
+}
+
+// SetFamily sets the "family" field.
+func (m *ModelCatalogMutation) SetFamily(s string) {
+	m.family = &s
+}
+
+// Family returns the value of the "family" field in the mutation.
+func (m *ModelCatalogMutation) Family() (r string, exists bool) {
+	v := m.family
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFamily returns the old "family" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldFamily(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFamily is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFamily requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFamily: %w", err)
+	}
+	return oldValue.Family, nil
+}
+
+// ResetFamily resets all changes to the "family" field.
+func (m *ModelCatalogMutation) ResetFamily() {
+	m.family = nil
+}
+
+// SetVendor sets the "vendor" field.
+func (m *ModelCatalogMutation) SetVendor(s string) {
+	m.vendor = &s
+}
+
+// Vendor returns the value of the "vendor" field in the mutation.
+func (m *ModelCatalogMutation) Vendor() (r string, exists bool) {
+	v := m.vendor
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldVendor returns the old "vendor" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldVendor(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldVendor is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldVendor requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldVendor: %w", err)
+	}
+	return oldValue.Vendor, nil
+}
+
+// ResetVendor resets all changes to the "vendor" field.
+func (m *ModelCatalogMutation) ResetVendor() {
+	m.vendor = nil
+}
+
+// SetDescription sets the "description" field.
+func (m *ModelCatalogMutation) SetDescription(s string) {
+	m.description = &s
+}
+
+// Description returns the value of the "description" field in the mutation.
+func (m *ModelCatalogMutation) Description() (r string, exists bool) {
+	v := m.description
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDescription returns the old "description" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldDescription(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDescription is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDescription requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDescription: %w", err)
+	}
+	return oldValue.Description, nil
+}
+
+// ResetDescription resets all changes to the "description" field.
+func (m *ModelCatalogMutation) ResetDescription() {
+	m.description = nil
+}
+
+// SetTagsJSON sets the "tags_json" field.
+func (m *ModelCatalogMutation) SetTagsJSON(s string) {
+	m.tags_json = &s
+}
+
+// TagsJSON returns the value of the "tags_json" field in the mutation.
+func (m *ModelCatalogMutation) TagsJSON() (r string, exists bool) {
+	v := m.tags_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTagsJSON returns the old "tags_json" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldTagsJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTagsJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTagsJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTagsJSON: %w", err)
+	}
+	return oldValue.TagsJSON, nil
+}
+
+// ResetTagsJSON resets all changes to the "tags_json" field.
+func (m *ModelCatalogMutation) ResetTagsJSON() {
+	m.tags_json = nil
+}
+
+// SetFirstSeenAt sets the "first_seen_at" field.
+func (m *ModelCatalogMutation) SetFirstSeenAt(t time.Time) {
+	m.first_seen_at = &t
+}
+
+// FirstSeenAt returns the value of the "first_seen_at" field in the mutation.
+func (m *ModelCatalogMutation) FirstSeenAt() (r time.Time, exists bool) {
+	v := m.first_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFirstSeenAt returns the old "first_seen_at" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldFirstSeenAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFirstSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFirstSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFirstSeenAt: %w", err)
+	}
+	return oldValue.FirstSeenAt, nil
+}
+
+// ResetFirstSeenAt resets all changes to the "first_seen_at" field.
+func (m *ModelCatalogMutation) ResetFirstSeenAt() {
+	m.first_seen_at = nil
+}
+
+// SetLastSeenAt sets the "last_seen_at" field.
+func (m *ModelCatalogMutation) SetLastSeenAt(t time.Time) {
+	m.last_seen_at = &t
+}
+
+// LastSeenAt returns the value of the "last_seen_at" field in the mutation.
+func (m *ModelCatalogMutation) LastSeenAt() (r time.Time, exists bool) {
+	v := m.last_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastSeenAt returns the old "last_seen_at" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldLastSeenAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastSeenAt: %w", err)
+	}
+	return oldValue.LastSeenAt, nil
+}
+
+// ResetLastSeenAt resets all changes to the "last_seen_at" field.
+func (m *ModelCatalogMutation) ResetLastSeenAt() {
+	m.last_seen_at = nil
+}
+
+// SetLastUsedAt sets the "last_used_at" field.
+func (m *ModelCatalogMutation) SetLastUsedAt(t time.Time) {
+	m.last_used_at = &t
+}
+
+// LastUsedAt returns the value of the "last_used_at" field in the mutation.
+func (m *ModelCatalogMutation) LastUsedAt() (r time.Time, exists bool) {
+	v := m.last_used_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastUsedAt returns the old "last_used_at" field's value of the ModelCatalog entity.
+// If the ModelCatalog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogMutation) OldLastUsedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastUsedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastUsedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastUsedAt: %w", err)
+	}
+	return oldValue.LastUsedAt, nil
+}
+
+// ClearLastUsedAt clears the value of the "last_used_at" field.
+func (m *ModelCatalogMutation) ClearLastUsedAt() {
+	m.last_used_at = nil
+	m.clearedFields[modelcatalog.FieldLastUsedAt] = struct{}{}
+}
+
+// LastUsedAtCleared returns if the "last_used_at" field was cleared in this mutation.
+func (m *ModelCatalogMutation) LastUsedAtCleared() bool {
+	_, ok := m.clearedFields[modelcatalog.FieldLastUsedAt]
+	return ok
+}
+
+// ResetLastUsedAt resets all changes to the "last_used_at" field.
+func (m *ModelCatalogMutation) ResetLastUsedAt() {
+	m.last_used_at = nil
+	delete(m.clearedFields, modelcatalog.FieldLastUsedAt)
+}
+
+// Where appends a list predicates to the ModelCatalogMutation builder.
+func (m *ModelCatalogMutation) Where(ps ...predicate.ModelCatalog) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ModelCatalogMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ModelCatalogMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.ModelCatalog, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *ModelCatalogMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *ModelCatalogMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (ModelCatalog).
+func (m *ModelCatalogMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *ModelCatalogMutation) Fields() []string {
+	fields := make([]string, 0, 8)
+	if m.display_name != nil {
+		fields = append(fields, modelcatalog.FieldDisplayName)
+	}
+	if m.family != nil {
+		fields = append(fields, modelcatalog.FieldFamily)
+	}
+	if m.vendor != nil {
+		fields = append(fields, modelcatalog.FieldVendor)
+	}
+	if m.description != nil {
+		fields = append(fields, modelcatalog.FieldDescription)
+	}
+	if m.tags_json != nil {
+		fields = append(fields, modelcatalog.FieldTagsJSON)
+	}
+	if m.first_seen_at != nil {
+		fields = append(fields, modelcatalog.FieldFirstSeenAt)
+	}
+	if m.last_seen_at != nil {
+		fields = append(fields, modelcatalog.FieldLastSeenAt)
+	}
+	if m.last_used_at != nil {
+		fields = append(fields, modelcatalog.FieldLastUsedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *ModelCatalogMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case modelcatalog.FieldDisplayName:
+		return m.DisplayName()
+	case modelcatalog.FieldFamily:
+		return m.Family()
+	case modelcatalog.FieldVendor:
+		return m.Vendor()
+	case modelcatalog.FieldDescription:
+		return m.Description()
+	case modelcatalog.FieldTagsJSON:
+		return m.TagsJSON()
+	case modelcatalog.FieldFirstSeenAt:
+		return m.FirstSeenAt()
+	case modelcatalog.FieldLastSeenAt:
+		return m.LastSeenAt()
+	case modelcatalog.FieldLastUsedAt:
+		return m.LastUsedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *ModelCatalogMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case modelcatalog.FieldDisplayName:
+		return m.OldDisplayName(ctx)
+	case modelcatalog.FieldFamily:
+		return m.OldFamily(ctx)
+	case modelcatalog.FieldVendor:
+		return m.OldVendor(ctx)
+	case modelcatalog.FieldDescription:
+		return m.OldDescription(ctx)
+	case modelcatalog.FieldTagsJSON:
+		return m.OldTagsJSON(ctx)
+	case modelcatalog.FieldFirstSeenAt:
+		return m.OldFirstSeenAt(ctx)
+	case modelcatalog.FieldLastSeenAt:
+		return m.OldLastSeenAt(ctx)
+	case modelcatalog.FieldLastUsedAt:
+		return m.OldLastUsedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown ModelCatalog field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ModelCatalogMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case modelcatalog.FieldDisplayName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDisplayName(v)
+		return nil
+	case modelcatalog.FieldFamily:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFamily(v)
+		return nil
+	case modelcatalog.FieldVendor:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetVendor(v)
+		return nil
+	case modelcatalog.FieldDescription:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDescription(v)
+		return nil
+	case modelcatalog.FieldTagsJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTagsJSON(v)
+		return nil
+	case modelcatalog.FieldFirstSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFirstSeenAt(v)
+		return nil
+	case modelcatalog.FieldLastSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastSeenAt(v)
+		return nil
+	case modelcatalog.FieldLastUsedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastUsedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalog field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *ModelCatalogMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *ModelCatalogMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ModelCatalogMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown ModelCatalog numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *ModelCatalogMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(modelcatalog.FieldLastUsedAt) {
+		fields = append(fields, modelcatalog.FieldLastUsedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *ModelCatalogMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *ModelCatalogMutation) ClearField(name string) error {
+	switch name {
+	case modelcatalog.FieldLastUsedAt:
+		m.ClearLastUsedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalog nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *ModelCatalogMutation) ResetField(name string) error {
+	switch name {
+	case modelcatalog.FieldDisplayName:
+		m.ResetDisplayName()
+		return nil
+	case modelcatalog.FieldFamily:
+		m.ResetFamily()
+		return nil
+	case modelcatalog.FieldVendor:
+		m.ResetVendor()
+		return nil
+	case modelcatalog.FieldDescription:
+		m.ResetDescription()
+		return nil
+	case modelcatalog.FieldTagsJSON:
+		m.ResetTagsJSON()
+		return nil
+	case modelcatalog.FieldFirstSeenAt:
+		m.ResetFirstSeenAt()
+		return nil
+	case modelcatalog.FieldLastSeenAt:
+		m.ResetLastSeenAt()
+		return nil
+	case modelcatalog.FieldLastUsedAt:
+		m.ResetLastUsedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalog field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *ModelCatalogMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *ModelCatalogMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *ModelCatalogMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *ModelCatalogMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *ModelCatalogMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *ModelCatalogMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *ModelCatalogMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown ModelCatalog unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *ModelCatalogMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown ModelCatalog edge %s", name)
 }
 
 // ScoreMutation represents an operation that mutates the Score nodes in the graph.

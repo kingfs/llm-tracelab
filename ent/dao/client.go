@@ -16,10 +16,14 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -38,6 +42,12 @@ type Client struct {
 	Schema *migrate.Schema
 	// APIToken is the client for interacting with the APIToken builders.
 	APIToken *APITokenClient
+	// ChannelConfig is the client for interacting with the ChannelConfig builders.
+	ChannelConfig *ChannelConfigClient
+	// ChannelModel is the client for interacting with the ChannelModel builders.
+	ChannelModel *ChannelModelClient
+	// ChannelProbeRun is the client for interacting with the ChannelProbeRun builders.
+	ChannelProbeRun *ChannelProbeRunClient
 	// Dataset is the client for interacting with the Dataset builders.
 	Dataset *DatasetClient
 	// DatasetExample is the client for interacting with the DatasetExample builders.
@@ -46,6 +56,8 @@ type Client struct {
 	EvalRun *EvalRunClient
 	// ExperimentRun is the client for interacting with the ExperimentRun builders.
 	ExperimentRun *ExperimentRunClient
+	// ModelCatalog is the client for interacting with the ModelCatalog builders.
+	ModelCatalog *ModelCatalogClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
 	// TraceLog is the client for interacting with the TraceLog builders.
@@ -68,10 +80,14 @@ func NewClient(opts ...Option) *Client {
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
 	c.APIToken = NewAPITokenClient(c.config)
+	c.ChannelConfig = NewChannelConfigClient(c.config)
+	c.ChannelModel = NewChannelModelClient(c.config)
+	c.ChannelProbeRun = NewChannelProbeRunClient(c.config)
 	c.Dataset = NewDatasetClient(c.config)
 	c.DatasetExample = NewDatasetExampleClient(c.config)
 	c.EvalRun = NewEvalRunClient(c.config)
 	c.ExperimentRun = NewExperimentRunClient(c.config)
+	c.ModelCatalog = NewModelCatalogClient(c.config)
 	c.Score = NewScoreClient(c.config)
 	c.TraceLog = NewTraceLogClient(c.config)
 	c.UpstreamModel = NewUpstreamModelClient(c.config)
@@ -169,18 +185,22 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:            ctx,
-		config:         cfg,
-		APIToken:       NewAPITokenClient(cfg),
-		Dataset:        NewDatasetClient(cfg),
-		DatasetExample: NewDatasetExampleClient(cfg),
-		EvalRun:        NewEvalRunClient(cfg),
-		ExperimentRun:  NewExperimentRunClient(cfg),
-		Score:          NewScoreClient(cfg),
-		TraceLog:       NewTraceLogClient(cfg),
-		UpstreamModel:  NewUpstreamModelClient(cfg),
-		UpstreamTarget: NewUpstreamTargetClient(cfg),
-		User:           NewUserClient(cfg),
+		ctx:             ctx,
+		config:          cfg,
+		APIToken:        NewAPITokenClient(cfg),
+		ChannelConfig:   NewChannelConfigClient(cfg),
+		ChannelModel:    NewChannelModelClient(cfg),
+		ChannelProbeRun: NewChannelProbeRunClient(cfg),
+		Dataset:         NewDatasetClient(cfg),
+		DatasetExample:  NewDatasetExampleClient(cfg),
+		EvalRun:         NewEvalRunClient(cfg),
+		ExperimentRun:   NewExperimentRunClient(cfg),
+		ModelCatalog:    NewModelCatalogClient(cfg),
+		Score:           NewScoreClient(cfg),
+		TraceLog:        NewTraceLogClient(cfg),
+		UpstreamModel:   NewUpstreamModelClient(cfg),
+		UpstreamTarget:  NewUpstreamTargetClient(cfg),
+		User:            NewUserClient(cfg),
 	}, nil
 }
 
@@ -198,18 +218,22 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:            ctx,
-		config:         cfg,
-		APIToken:       NewAPITokenClient(cfg),
-		Dataset:        NewDatasetClient(cfg),
-		DatasetExample: NewDatasetExampleClient(cfg),
-		EvalRun:        NewEvalRunClient(cfg),
-		ExperimentRun:  NewExperimentRunClient(cfg),
-		Score:          NewScoreClient(cfg),
-		TraceLog:       NewTraceLogClient(cfg),
-		UpstreamModel:  NewUpstreamModelClient(cfg),
-		UpstreamTarget: NewUpstreamTargetClient(cfg),
-		User:           NewUserClient(cfg),
+		ctx:             ctx,
+		config:          cfg,
+		APIToken:        NewAPITokenClient(cfg),
+		ChannelConfig:   NewChannelConfigClient(cfg),
+		ChannelModel:    NewChannelModelClient(cfg),
+		ChannelProbeRun: NewChannelProbeRunClient(cfg),
+		Dataset:         NewDatasetClient(cfg),
+		DatasetExample:  NewDatasetExampleClient(cfg),
+		EvalRun:         NewEvalRunClient(cfg),
+		ExperimentRun:   NewExperimentRunClient(cfg),
+		ModelCatalog:    NewModelCatalogClient(cfg),
+		Score:           NewScoreClient(cfg),
+		TraceLog:        NewTraceLogClient(cfg),
+		UpstreamModel:   NewUpstreamModelClient(cfg),
+		UpstreamTarget:  NewUpstreamTargetClient(cfg),
+		User:            NewUserClient(cfg),
 	}, nil
 }
 
@@ -239,7 +263,8 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.APIToken, c.Dataset, c.DatasetExample, c.EvalRun, c.ExperimentRun, c.Score,
+		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
+		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Score,
 		c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
@@ -250,7 +275,8 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.APIToken, c.Dataset, c.DatasetExample, c.EvalRun, c.ExperimentRun, c.Score,
+		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
+		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Score,
 		c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
@@ -262,6 +288,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
 	case *APITokenMutation:
 		return c.APIToken.mutate(ctx, m)
+	case *ChannelConfigMutation:
+		return c.ChannelConfig.mutate(ctx, m)
+	case *ChannelModelMutation:
+		return c.ChannelModel.mutate(ctx, m)
+	case *ChannelProbeRunMutation:
+		return c.ChannelProbeRun.mutate(ctx, m)
 	case *DatasetMutation:
 		return c.Dataset.mutate(ctx, m)
 	case *DatasetExampleMutation:
@@ -270,6 +302,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.EvalRun.mutate(ctx, m)
 	case *ExperimentRunMutation:
 		return c.ExperimentRun.mutate(ctx, m)
+	case *ModelCatalogMutation:
+		return c.ModelCatalog.mutate(ctx, m)
 	case *ScoreMutation:
 		return c.Score.mutate(ctx, m)
 	case *TraceLogMutation:
@@ -434,6 +468,405 @@ func (c *APITokenClient) mutate(ctx context.Context, m *APITokenMutation) (Value
 		return (&APITokenDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown APIToken mutation op: %q", m.Op())
+	}
+}
+
+// ChannelConfigClient is a client for the ChannelConfig schema.
+type ChannelConfigClient struct {
+	config
+}
+
+// NewChannelConfigClient returns a client for the ChannelConfig from the given config.
+func NewChannelConfigClient(c config) *ChannelConfigClient {
+	return &ChannelConfigClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `channelconfig.Hooks(f(g(h())))`.
+func (c *ChannelConfigClient) Use(hooks ...Hook) {
+	c.hooks.ChannelConfig = append(c.hooks.ChannelConfig, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `channelconfig.Intercept(f(g(h())))`.
+func (c *ChannelConfigClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ChannelConfig = append(c.inters.ChannelConfig, interceptors...)
+}
+
+// Create returns a builder for creating a ChannelConfig entity.
+func (c *ChannelConfigClient) Create() *ChannelConfigCreate {
+	mutation := newChannelConfigMutation(c.config, OpCreate)
+	return &ChannelConfigCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ChannelConfig entities.
+func (c *ChannelConfigClient) CreateBulk(builders ...*ChannelConfigCreate) *ChannelConfigCreateBulk {
+	return &ChannelConfigCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ChannelConfigClient) MapCreateBulk(slice any, setFunc func(*ChannelConfigCreate, int)) *ChannelConfigCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ChannelConfigCreateBulk{err: fmt.Errorf("calling to ChannelConfigClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ChannelConfigCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ChannelConfigCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ChannelConfig.
+func (c *ChannelConfigClient) Update() *ChannelConfigUpdate {
+	mutation := newChannelConfigMutation(c.config, OpUpdate)
+	return &ChannelConfigUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ChannelConfigClient) UpdateOne(_m *ChannelConfig) *ChannelConfigUpdateOne {
+	mutation := newChannelConfigMutation(c.config, OpUpdateOne, withChannelConfig(_m))
+	return &ChannelConfigUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ChannelConfigClient) UpdateOneID(id string) *ChannelConfigUpdateOne {
+	mutation := newChannelConfigMutation(c.config, OpUpdateOne, withChannelConfigID(id))
+	return &ChannelConfigUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ChannelConfig.
+func (c *ChannelConfigClient) Delete() *ChannelConfigDelete {
+	mutation := newChannelConfigMutation(c.config, OpDelete)
+	return &ChannelConfigDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ChannelConfigClient) DeleteOne(_m *ChannelConfig) *ChannelConfigDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ChannelConfigClient) DeleteOneID(id string) *ChannelConfigDeleteOne {
+	builder := c.Delete().Where(channelconfig.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ChannelConfigDeleteOne{builder}
+}
+
+// Query returns a query builder for ChannelConfig.
+func (c *ChannelConfigClient) Query() *ChannelConfigQuery {
+	return &ChannelConfigQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeChannelConfig},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ChannelConfig entity by its id.
+func (c *ChannelConfigClient) Get(ctx context.Context, id string) (*ChannelConfig, error) {
+	return c.Query().Where(channelconfig.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ChannelConfigClient) GetX(ctx context.Context, id string) *ChannelConfig {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ChannelConfigClient) Hooks() []Hook {
+	return c.hooks.ChannelConfig
+}
+
+// Interceptors returns the client interceptors.
+func (c *ChannelConfigClient) Interceptors() []Interceptor {
+	return c.inters.ChannelConfig
+}
+
+func (c *ChannelConfigClient) mutate(ctx context.Context, m *ChannelConfigMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ChannelConfigCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ChannelConfigUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ChannelConfigUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ChannelConfigDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ChannelConfig mutation op: %q", m.Op())
+	}
+}
+
+// ChannelModelClient is a client for the ChannelModel schema.
+type ChannelModelClient struct {
+	config
+}
+
+// NewChannelModelClient returns a client for the ChannelModel from the given config.
+func NewChannelModelClient(c config) *ChannelModelClient {
+	return &ChannelModelClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `channelmodel.Hooks(f(g(h())))`.
+func (c *ChannelModelClient) Use(hooks ...Hook) {
+	c.hooks.ChannelModel = append(c.hooks.ChannelModel, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `channelmodel.Intercept(f(g(h())))`.
+func (c *ChannelModelClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ChannelModel = append(c.inters.ChannelModel, interceptors...)
+}
+
+// Create returns a builder for creating a ChannelModel entity.
+func (c *ChannelModelClient) Create() *ChannelModelCreate {
+	mutation := newChannelModelMutation(c.config, OpCreate)
+	return &ChannelModelCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ChannelModel entities.
+func (c *ChannelModelClient) CreateBulk(builders ...*ChannelModelCreate) *ChannelModelCreateBulk {
+	return &ChannelModelCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ChannelModelClient) MapCreateBulk(slice any, setFunc func(*ChannelModelCreate, int)) *ChannelModelCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ChannelModelCreateBulk{err: fmt.Errorf("calling to ChannelModelClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ChannelModelCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ChannelModelCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ChannelModel.
+func (c *ChannelModelClient) Update() *ChannelModelUpdate {
+	mutation := newChannelModelMutation(c.config, OpUpdate)
+	return &ChannelModelUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ChannelModelClient) UpdateOne(_m *ChannelModel) *ChannelModelUpdateOne {
+	mutation := newChannelModelMutation(c.config, OpUpdateOne, withChannelModel(_m))
+	return &ChannelModelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ChannelModelClient) UpdateOneID(id int) *ChannelModelUpdateOne {
+	mutation := newChannelModelMutation(c.config, OpUpdateOne, withChannelModelID(id))
+	return &ChannelModelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ChannelModel.
+func (c *ChannelModelClient) Delete() *ChannelModelDelete {
+	mutation := newChannelModelMutation(c.config, OpDelete)
+	return &ChannelModelDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ChannelModelClient) DeleteOne(_m *ChannelModel) *ChannelModelDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ChannelModelClient) DeleteOneID(id int) *ChannelModelDeleteOne {
+	builder := c.Delete().Where(channelmodel.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ChannelModelDeleteOne{builder}
+}
+
+// Query returns a query builder for ChannelModel.
+func (c *ChannelModelClient) Query() *ChannelModelQuery {
+	return &ChannelModelQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeChannelModel},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ChannelModel entity by its id.
+func (c *ChannelModelClient) Get(ctx context.Context, id int) (*ChannelModel, error) {
+	return c.Query().Where(channelmodel.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ChannelModelClient) GetX(ctx context.Context, id int) *ChannelModel {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ChannelModelClient) Hooks() []Hook {
+	return c.hooks.ChannelModel
+}
+
+// Interceptors returns the client interceptors.
+func (c *ChannelModelClient) Interceptors() []Interceptor {
+	return c.inters.ChannelModel
+}
+
+func (c *ChannelModelClient) mutate(ctx context.Context, m *ChannelModelMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ChannelModelCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ChannelModelUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ChannelModelUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ChannelModelDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ChannelModel mutation op: %q", m.Op())
+	}
+}
+
+// ChannelProbeRunClient is a client for the ChannelProbeRun schema.
+type ChannelProbeRunClient struct {
+	config
+}
+
+// NewChannelProbeRunClient returns a client for the ChannelProbeRun from the given config.
+func NewChannelProbeRunClient(c config) *ChannelProbeRunClient {
+	return &ChannelProbeRunClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `channelproberun.Hooks(f(g(h())))`.
+func (c *ChannelProbeRunClient) Use(hooks ...Hook) {
+	c.hooks.ChannelProbeRun = append(c.hooks.ChannelProbeRun, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `channelproberun.Intercept(f(g(h())))`.
+func (c *ChannelProbeRunClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ChannelProbeRun = append(c.inters.ChannelProbeRun, interceptors...)
+}
+
+// Create returns a builder for creating a ChannelProbeRun entity.
+func (c *ChannelProbeRunClient) Create() *ChannelProbeRunCreate {
+	mutation := newChannelProbeRunMutation(c.config, OpCreate)
+	return &ChannelProbeRunCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ChannelProbeRun entities.
+func (c *ChannelProbeRunClient) CreateBulk(builders ...*ChannelProbeRunCreate) *ChannelProbeRunCreateBulk {
+	return &ChannelProbeRunCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ChannelProbeRunClient) MapCreateBulk(slice any, setFunc func(*ChannelProbeRunCreate, int)) *ChannelProbeRunCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ChannelProbeRunCreateBulk{err: fmt.Errorf("calling to ChannelProbeRunClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ChannelProbeRunCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ChannelProbeRunCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ChannelProbeRun.
+func (c *ChannelProbeRunClient) Update() *ChannelProbeRunUpdate {
+	mutation := newChannelProbeRunMutation(c.config, OpUpdate)
+	return &ChannelProbeRunUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ChannelProbeRunClient) UpdateOne(_m *ChannelProbeRun) *ChannelProbeRunUpdateOne {
+	mutation := newChannelProbeRunMutation(c.config, OpUpdateOne, withChannelProbeRun(_m))
+	return &ChannelProbeRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ChannelProbeRunClient) UpdateOneID(id string) *ChannelProbeRunUpdateOne {
+	mutation := newChannelProbeRunMutation(c.config, OpUpdateOne, withChannelProbeRunID(id))
+	return &ChannelProbeRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ChannelProbeRun.
+func (c *ChannelProbeRunClient) Delete() *ChannelProbeRunDelete {
+	mutation := newChannelProbeRunMutation(c.config, OpDelete)
+	return &ChannelProbeRunDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ChannelProbeRunClient) DeleteOne(_m *ChannelProbeRun) *ChannelProbeRunDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ChannelProbeRunClient) DeleteOneID(id string) *ChannelProbeRunDeleteOne {
+	builder := c.Delete().Where(channelproberun.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ChannelProbeRunDeleteOne{builder}
+}
+
+// Query returns a query builder for ChannelProbeRun.
+func (c *ChannelProbeRunClient) Query() *ChannelProbeRunQuery {
+	return &ChannelProbeRunQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeChannelProbeRun},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ChannelProbeRun entity by its id.
+func (c *ChannelProbeRunClient) Get(ctx context.Context, id string) (*ChannelProbeRun, error) {
+	return c.Query().Where(channelproberun.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ChannelProbeRunClient) GetX(ctx context.Context, id string) *ChannelProbeRun {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ChannelProbeRunClient) Hooks() []Hook {
+	return c.hooks.ChannelProbeRun
+}
+
+// Interceptors returns the client interceptors.
+func (c *ChannelProbeRunClient) Interceptors() []Interceptor {
+	return c.inters.ChannelProbeRun
+}
+
+func (c *ChannelProbeRunClient) mutate(ctx context.Context, m *ChannelProbeRunMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ChannelProbeRunCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ChannelProbeRunUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ChannelProbeRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ChannelProbeRunDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ChannelProbeRun mutation op: %q", m.Op())
 	}
 }
 
@@ -966,6 +1399,139 @@ func (c *ExperimentRunClient) mutate(ctx context.Context, m *ExperimentRunMutati
 		return (&ExperimentRunDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown ExperimentRun mutation op: %q", m.Op())
+	}
+}
+
+// ModelCatalogClient is a client for the ModelCatalog schema.
+type ModelCatalogClient struct {
+	config
+}
+
+// NewModelCatalogClient returns a client for the ModelCatalog from the given config.
+func NewModelCatalogClient(c config) *ModelCatalogClient {
+	return &ModelCatalogClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `modelcatalog.Hooks(f(g(h())))`.
+func (c *ModelCatalogClient) Use(hooks ...Hook) {
+	c.hooks.ModelCatalog = append(c.hooks.ModelCatalog, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `modelcatalog.Intercept(f(g(h())))`.
+func (c *ModelCatalogClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ModelCatalog = append(c.inters.ModelCatalog, interceptors...)
+}
+
+// Create returns a builder for creating a ModelCatalog entity.
+func (c *ModelCatalogClient) Create() *ModelCatalogCreate {
+	mutation := newModelCatalogMutation(c.config, OpCreate)
+	return &ModelCatalogCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ModelCatalog entities.
+func (c *ModelCatalogClient) CreateBulk(builders ...*ModelCatalogCreate) *ModelCatalogCreateBulk {
+	return &ModelCatalogCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ModelCatalogClient) MapCreateBulk(slice any, setFunc func(*ModelCatalogCreate, int)) *ModelCatalogCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ModelCatalogCreateBulk{err: fmt.Errorf("calling to ModelCatalogClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ModelCatalogCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ModelCatalogCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ModelCatalog.
+func (c *ModelCatalogClient) Update() *ModelCatalogUpdate {
+	mutation := newModelCatalogMutation(c.config, OpUpdate)
+	return &ModelCatalogUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ModelCatalogClient) UpdateOne(_m *ModelCatalog) *ModelCatalogUpdateOne {
+	mutation := newModelCatalogMutation(c.config, OpUpdateOne, withModelCatalog(_m))
+	return &ModelCatalogUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ModelCatalogClient) UpdateOneID(id string) *ModelCatalogUpdateOne {
+	mutation := newModelCatalogMutation(c.config, OpUpdateOne, withModelCatalogID(id))
+	return &ModelCatalogUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ModelCatalog.
+func (c *ModelCatalogClient) Delete() *ModelCatalogDelete {
+	mutation := newModelCatalogMutation(c.config, OpDelete)
+	return &ModelCatalogDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ModelCatalogClient) DeleteOne(_m *ModelCatalog) *ModelCatalogDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ModelCatalogClient) DeleteOneID(id string) *ModelCatalogDeleteOne {
+	builder := c.Delete().Where(modelcatalog.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ModelCatalogDeleteOne{builder}
+}
+
+// Query returns a query builder for ModelCatalog.
+func (c *ModelCatalogClient) Query() *ModelCatalogQuery {
+	return &ModelCatalogQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeModelCatalog},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ModelCatalog entity by its id.
+func (c *ModelCatalogClient) Get(ctx context.Context, id string) (*ModelCatalog, error) {
+	return c.Query().Where(modelcatalog.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ModelCatalogClient) GetX(ctx context.Context, id string) *ModelCatalog {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ModelCatalogClient) Hooks() []Hook {
+	return c.hooks.ModelCatalog
+}
+
+// Interceptors returns the client interceptors.
+func (c *ModelCatalogClient) Interceptors() []Interceptor {
+	return c.inters.ModelCatalog
+}
+
+func (c *ModelCatalogClient) mutate(ctx context.Context, m *ModelCatalogMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ModelCatalogCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ModelCatalogUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ModelCatalogUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ModelCatalogDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ModelCatalog mutation op: %q", m.Op())
 	}
 }
 
@@ -1656,12 +2222,14 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		APIToken, Dataset, DatasetExample, EvalRun, ExperimentRun, Score, TraceLog,
-		UpstreamModel, UpstreamTarget, User []ent.Hook
+		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
+		EvalRun, ExperimentRun, ModelCatalog, Score, TraceLog, UpstreamModel,
+		UpstreamTarget, User []ent.Hook
 	}
 	inters struct {
-		APIToken, Dataset, DatasetExample, EvalRun, ExperimentRun, Score, TraceLog,
-		UpstreamModel, UpstreamTarget, User []ent.Interceptor
+		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
+		EvalRun, ExperimentRun, ModelCatalog, Score, TraceLog, UpstreamModel,
+		UpstreamTarget, User []ent.Interceptor
 	}
 )
 

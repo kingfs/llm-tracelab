@@ -76,6 +76,61 @@ func TestNewWithDatabaseAcceptsRelativeSQLitePath(t *testing.T) {
 	}
 }
 
+func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	record, err := st.UpsertChannelConfig(ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          "https://api.openai.com/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-secret"),
+		APIKeyHint:       "sk-...cret",
+		HeadersJSON:      `{"X-Test":"true"}`,
+		Enabled:          true,
+		Priority:         100,
+		Weight:           1,
+		CapacityHint:     1,
+		ModelDiscovery:   "list_models",
+	})
+	if err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if record.ID != "openai-primary" {
+		t.Fatalf("record.ID = %q", record.ID)
+	}
+	if string(record.APIKeyCiphertext) != "sk-secret" {
+		t.Fatalf("APIKeyCiphertext = %q", string(record.APIKeyCiphertext))
+	}
+
+	if err := st.ReplaceChannelModels("openai-primary", []ChannelModelRecord{
+		{Model: "GPT-5", DisplayName: "GPT-5", Source: "manual", Enabled: true},
+		{Model: "gpt-4.1", Source: "manual", Enabled: false},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	models, err := st.ListChannelModels("openai-primary", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels(false) error = %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+
+	enabledModels, err := st.ListChannelModels("openai-primary", true)
+	if err != nil {
+		t.Fatalf("ListChannelModels(true) error = %v", err)
+	}
+	if len(enabledModels) != 1 || enabledModels[0].Model != "gpt-5" {
+		t.Fatalf("enabledModels = %#v", enabledModels)
+	}
+}
+
 func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "trace_index.sqlite3")

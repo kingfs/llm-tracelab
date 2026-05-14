@@ -135,6 +135,78 @@ func (f APITokenMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutati
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.APITokenMutation", m)
 }
 
+// The ChannelConfigQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ChannelConfigQueryRuleFunc func(context.Context, *dao.ChannelConfigQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ChannelConfigQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ChannelConfigQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ChannelConfigQuery", q)
+}
+
+// The ChannelConfigMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ChannelConfigMutationRuleFunc func(context.Context, *dao.ChannelConfigMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ChannelConfigMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ChannelConfigMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ChannelConfigMutation", m)
+}
+
+// The ChannelModelQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ChannelModelQueryRuleFunc func(context.Context, *dao.ChannelModelQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ChannelModelQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ChannelModelQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ChannelModelQuery", q)
+}
+
+// The ChannelModelMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ChannelModelMutationRuleFunc func(context.Context, *dao.ChannelModelMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ChannelModelMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ChannelModelMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ChannelModelMutation", m)
+}
+
+// The ChannelProbeRunQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ChannelProbeRunQueryRuleFunc func(context.Context, *dao.ChannelProbeRunQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ChannelProbeRunQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ChannelProbeRunQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ChannelProbeRunQuery", q)
+}
+
+// The ChannelProbeRunMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ChannelProbeRunMutationRuleFunc func(context.Context, *dao.ChannelProbeRunMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ChannelProbeRunMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ChannelProbeRunMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ChannelProbeRunMutation", m)
+}
+
 // The DatasetQueryRuleFunc type is an adapter to allow the use of ordinary
 // functions as a query rule.
 type DatasetQueryRuleFunc func(context.Context, *dao.DatasetQuery) error
@@ -229,6 +301,30 @@ func (f ExperimentRunMutationRuleFunc) EvalMutation(ctx context.Context, m dao.M
 		return f(ctx, m)
 	}
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ExperimentRunMutation", m)
+}
+
+// The ModelCatalogQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ModelCatalogQueryRuleFunc func(context.Context, *dao.ModelCatalogQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ModelCatalogQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ModelCatalogQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ModelCatalogQuery", q)
+}
+
+// The ModelCatalogMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ModelCatalogMutationRuleFunc func(context.Context, *dao.ModelCatalogMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ModelCatalogMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ModelCatalogMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ModelCatalogMutation", m)
 }
 
 // The ScoreQueryRuleFunc type is an adapter to allow the use of ordinary
@@ -388,6 +484,12 @@ func queryFilter(q dao.Query) (Filter, error) {
 	switch q := q.(type) {
 	case *dao.APITokenQuery:
 		return q.Filter(), nil
+	case *dao.ChannelConfigQuery:
+		return q.Filter(), nil
+	case *dao.ChannelModelQuery:
+		return q.Filter(), nil
+	case *dao.ChannelProbeRunQuery:
+		return q.Filter(), nil
 	case *dao.DatasetQuery:
 		return q.Filter(), nil
 	case *dao.DatasetExampleQuery:
@@ -395,6 +497,8 @@ func queryFilter(q dao.Query) (Filter, error) {
 	case *dao.EvalRunQuery:
 		return q.Filter(), nil
 	case *dao.ExperimentRunQuery:
+		return q.Filter(), nil
+	case *dao.ModelCatalogQuery:
 		return q.Filter(), nil
 	case *dao.ScoreQuery:
 		return q.Filter(), nil
@@ -415,6 +519,12 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	switch m := m.(type) {
 	case *dao.APITokenMutation:
 		return m.Filter(), nil
+	case *dao.ChannelConfigMutation:
+		return m.Filter(), nil
+	case *dao.ChannelModelMutation:
+		return m.Filter(), nil
+	case *dao.ChannelProbeRunMutation:
+		return m.Filter(), nil
 	case *dao.DatasetMutation:
 		return m.Filter(), nil
 	case *dao.DatasetExampleMutation:
@@ -422,6 +532,8 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	case *dao.EvalRunMutation:
 		return m.Filter(), nil
 	case *dao.ExperimentRunMutation:
+		return m.Filter(), nil
+	case *dao.ModelCatalogMutation:
 		return m.Filter(), nil
 	case *dao.ScoreMutation:
 		return m.Filter(), nil

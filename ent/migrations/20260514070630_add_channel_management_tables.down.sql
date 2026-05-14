@@ -1,0 +1,11 @@
+DROP TABLE IF EXISTS `model_catalog`;
+DROP INDEX IF EXISTS `channelproberun_status_started_at`;
+DROP INDEX IF EXISTS `channelproberun_channel_id_started_at`;
+DROP TABLE IF EXISTS `channel_probe_runs`;
+DROP INDEX IF EXISTS `channelmodel_channel_id_enabled`;
+DROP INDEX IF EXISTS `channelmodel_model`;
+DROP INDEX IF EXISTS `channelmodel_channel_id_model`;
+DROP TABLE IF EXISTS `channel_models`;
+DROP INDEX IF EXISTS `channelconfig_provider_preset`;
+DROP INDEX IF EXISTS `channelconfig_enabled_priority`;
+DROP TABLE IF EXISTS `channel_configs`;

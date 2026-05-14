@@ -9,10 +9,14 @@ import (
 	"entgo.io/ent/dialect/sql"
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
@@ -102,6 +106,87 @@ func (f TraverseAPIToken) Traverse(ctx context.Context, q dao.Query) error {
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *dao.APITokenQuery", q)
+}
+
+// The ChannelConfigFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ChannelConfigFunc func(context.Context, *dao.ChannelConfigQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ChannelConfigFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ChannelConfigQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ChannelConfigQuery", q)
+}
+
+// The TraverseChannelConfig type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseChannelConfig func(context.Context, *dao.ChannelConfigQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseChannelConfig) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseChannelConfig) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ChannelConfigQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ChannelConfigQuery", q)
+}
+
+// The ChannelModelFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ChannelModelFunc func(context.Context, *dao.ChannelModelQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ChannelModelFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ChannelModelQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ChannelModelQuery", q)
+}
+
+// The TraverseChannelModel type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseChannelModel func(context.Context, *dao.ChannelModelQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseChannelModel) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseChannelModel) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ChannelModelQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ChannelModelQuery", q)
+}
+
+// The ChannelProbeRunFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ChannelProbeRunFunc func(context.Context, *dao.ChannelProbeRunQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ChannelProbeRunFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ChannelProbeRunQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ChannelProbeRunQuery", q)
+}
+
+// The TraverseChannelProbeRun type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseChannelProbeRun func(context.Context, *dao.ChannelProbeRunQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseChannelProbeRun) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseChannelProbeRun) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ChannelProbeRunQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ChannelProbeRunQuery", q)
 }
 
 // The DatasetFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -210,6 +295,33 @@ func (f TraverseExperimentRun) Traverse(ctx context.Context, q dao.Query) error 
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *dao.ExperimentRunQuery", q)
+}
+
+// The ModelCatalogFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ModelCatalogFunc func(context.Context, *dao.ModelCatalogQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ModelCatalogFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ModelCatalogQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ModelCatalogQuery", q)
+}
+
+// The TraverseModelCatalog type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseModelCatalog func(context.Context, *dao.ModelCatalogQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseModelCatalog) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseModelCatalog) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ModelCatalogQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ModelCatalogQuery", q)
 }
 
 // The ScoreFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -352,6 +464,12 @@ func NewQuery(q dao.Query) (Query, error) {
 	switch q := q.(type) {
 	case *dao.APITokenQuery:
 		return &query[*dao.APITokenQuery, predicate.APIToken, apitoken.OrderOption]{typ: dao.TypeAPIToken, tq: q}, nil
+	case *dao.ChannelConfigQuery:
+		return &query[*dao.ChannelConfigQuery, predicate.ChannelConfig, channelconfig.OrderOption]{typ: dao.TypeChannelConfig, tq: q}, nil
+	case *dao.ChannelModelQuery:
+		return &query[*dao.ChannelModelQuery, predicate.ChannelModel, channelmodel.OrderOption]{typ: dao.TypeChannelModel, tq: q}, nil
+	case *dao.ChannelProbeRunQuery:
+		return &query[*dao.ChannelProbeRunQuery, predicate.ChannelProbeRun, channelproberun.OrderOption]{typ: dao.TypeChannelProbeRun, tq: q}, nil
 	case *dao.DatasetQuery:
 		return &query[*dao.DatasetQuery, predicate.Dataset, dataset.OrderOption]{typ: dao.TypeDataset, tq: q}, nil
 	case *dao.DatasetExampleQuery:
@@ -360,6 +478,8 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.EvalRunQuery, predicate.EvalRun, evalrun.OrderOption]{typ: dao.TypeEvalRun, tq: q}, nil
 	case *dao.ExperimentRunQuery:
 		return &query[*dao.ExperimentRunQuery, predicate.ExperimentRun, experimentrun.OrderOption]{typ: dao.TypeExperimentRun, tq: q}, nil
+	case *dao.ModelCatalogQuery:
+		return &query[*dao.ModelCatalogQuery, predicate.ModelCatalog, modelcatalog.OrderOption]{typ: dao.TypeModelCatalog, tq: q}, nil
 	case *dao.ScoreQuery:
 		return &query[*dao.ScoreQuery, predicate.Score, score.OrderOption]{typ: dao.TypeScore, tq: q}, nil
 	case *dao.TraceLogQuery:

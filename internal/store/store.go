@@ -21,6 +21,8 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/google/uuid"
 	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
@@ -130,6 +132,53 @@ type UpstreamModelRecord struct {
 	Model      string
 	Source     string
 	SeenAt     time.Time
+}
+
+type ChannelConfigRecord struct {
+	ID                 string
+	Name               string
+	Description        string
+	BaseURL            string
+	ProviderPreset     string
+	ProtocolFamily     string
+	RoutingProfile     string
+	APIVersion         string
+	Deployment         string
+	Project            string
+	Location           string
+	ModelResource      string
+	APIKeyCiphertext   []byte
+	APIKeyHint         string
+	HeadersJSON        string
+	Enabled            bool
+	Priority           int
+	Weight             float64
+	CapacityHint       float64
+	ModelDiscovery     string
+	AllowUnknownModels bool
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	LastProbeAt        time.Time
+	LastProbeStatus    string
+	LastProbeError     string
+}
+
+type ChannelModelRecord struct {
+	ChannelID               string
+	Model                   string
+	DisplayName             string
+	Source                  string
+	Enabled                 bool
+	SupportsResponses       *int
+	SupportsChatCompletions *int
+	SupportsEmbeddings      *int
+	ContextWindow           *int
+	InputModalitiesJSON     string
+	OutputModalitiesJSON    string
+	RawModelJSON            string
+	FirstSeenAt             time.Time
+	LastSeenAt              time.Time
+	LastProbeAt             time.Time
 }
 
 type UpstreamAnalyticsRecord struct {
@@ -336,6 +385,204 @@ func (s *Store) ListUpstreamModels() ([]UpstreamModelRecord, error) {
 		out = append(out, upstreamModelRecordFromEnt(row))
 	}
 	return out, nil
+}
+
+func (s *Store) ListChannelConfigs() ([]ChannelConfigRecord, error) {
+	rows, err := s.client.ChannelConfig.Query().
+		Order(channelconfig.ByPriority(entsql.OrderDesc()), channelconfig.ByID()).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]ChannelConfigRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, channelConfigRecordFromEnt(row))
+	}
+	return out, nil
+}
+
+func (s *Store) GetChannelConfig(channelID string) (ChannelConfigRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return ChannelConfigRecord{}, fmt.Errorf("channel id is required")
+	}
+	row, err := s.client.ChannelConfig.Get(context.Background(), channelID)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return ChannelConfigRecord{}, sql.ErrNoRows
+		}
+		return ChannelConfigRecord{}, err
+	}
+	return channelConfigRecordFromEnt(row), nil
+}
+
+func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRecord, error) {
+	record.ID = strings.TrimSpace(record.ID)
+	record.Name = strings.TrimSpace(record.Name)
+	record.BaseURL = strings.TrimSpace(record.BaseURL)
+	if record.ID == "" {
+		record.ID = uuid.NewString()
+	}
+	if record.Name == "" {
+		return ChannelConfigRecord{}, fmt.Errorf("channel name is required")
+	}
+	if record.BaseURL == "" {
+		return ChannelConfigRecord{}, fmt.Errorf("channel base_url is required")
+	}
+	if strings.TrimSpace(record.HeadersJSON) == "" {
+		record.HeadersJSON = "{}"
+	}
+	if strings.TrimSpace(record.ModelDiscovery) == "" {
+		record.ModelDiscovery = "list_models"
+	}
+	if record.Weight == 0 {
+		record.Weight = 1
+	}
+	if record.CapacityHint == 0 {
+		record.CapacityHint = 1
+	}
+	now := time.Now().UTC()
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	record.UpdatedAt = now
+
+	create := s.client.ChannelConfig.Create().
+		SetID(record.ID).
+		SetName(record.Name).
+		SetDescription(strings.TrimSpace(record.Description)).
+		SetBaseURL(record.BaseURL).
+		SetProviderPreset(strings.TrimSpace(record.ProviderPreset)).
+		SetProtocolFamily(strings.TrimSpace(record.ProtocolFamily)).
+		SetRoutingProfile(strings.TrimSpace(record.RoutingProfile)).
+		SetAPIVersion(strings.TrimSpace(record.APIVersion)).
+		SetDeployment(strings.TrimSpace(record.Deployment)).
+		SetProject(strings.TrimSpace(record.Project)).
+		SetLocation(strings.TrimSpace(record.Location)).
+		SetModelResource(strings.TrimSpace(record.ModelResource)).
+		SetAPIKeyHint(strings.TrimSpace(record.APIKeyHint)).
+		SetHeadersJSON(record.HeadersJSON).
+		SetEnabled(record.Enabled).
+		SetPriority(record.Priority).
+		SetWeight(record.Weight).
+		SetCapacityHint(record.CapacityHint).
+		SetModelDiscovery(record.ModelDiscovery).
+		SetAllowUnknownModels(record.AllowUnknownModels).
+		SetCreatedAt(record.CreatedAt).
+		SetUpdatedAt(record.UpdatedAt).
+		SetLastProbeStatus(strings.TrimSpace(record.LastProbeStatus)).
+		SetLastProbeError(strings.TrimSpace(record.LastProbeError))
+	if len(record.APIKeyCiphertext) > 0 {
+		create.SetAPIKeyCiphertext(record.APIKeyCiphertext)
+	}
+	if !record.LastProbeAt.IsZero() {
+		create.SetLastProbeAt(record.LastProbeAt.UTC())
+	}
+	if err := create.
+		OnConflictColumns(channelconfig.FieldID).
+		UpdateNewValues().
+		Exec(context.Background()); err != nil {
+		return ChannelConfigRecord{}, err
+	}
+	return s.GetChannelConfig(record.ID)
+}
+
+func (s *Store) SetChannelEnabled(channelID string, enabled bool) error {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return fmt.Errorf("channel id is required")
+	}
+	return s.client.ChannelConfig.UpdateOneID(channelID).
+		SetEnabled(enabled).
+		SetUpdatedAt(time.Now().UTC()).
+		Exec(context.Background())
+}
+
+func (s *Store) ListChannelModels(channelID string, enabledOnly bool) ([]ChannelModelRecord, error) {
+	query := s.client.ChannelModel.Query()
+	var predicates []predicate.ChannelModel
+	if channelID = strings.TrimSpace(channelID); channelID != "" {
+		predicates = append(predicates, channelmodel.ChannelIDEQ(channelID))
+	}
+	if enabledOnly {
+		predicates = append(predicates, channelmodel.EnabledEQ(true))
+	}
+	if len(predicates) > 0 {
+		query = query.Where(predicates...)
+	}
+	rows, err := query.Order(channelmodel.ByChannelID(), channelmodel.ByModel()).All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChannelModelRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, channelModelRecordFromEnt(row))
+	}
+	return out, nil
+}
+
+func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRecord) error {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return fmt.Errorf("channel id is required")
+	}
+
+	ctx := context.Background()
+	tx, err := s.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ChannelModel.Delete().Where(channelmodel.ChannelIDEQ(channelID)).Exec(ctx); err != nil {
+		return err
+	}
+	creates := make([]*dao.ChannelModelCreate, 0, len(records))
+	now := time.Now().UTC()
+	for _, record := range records {
+		model := strings.ToLower(strings.TrimSpace(record.Model))
+		if model == "" {
+			continue
+		}
+		firstSeenAt := record.FirstSeenAt
+		if firstSeenAt.IsZero() {
+			firstSeenAt = now
+		}
+		lastSeenAt := record.LastSeenAt
+		if lastSeenAt.IsZero() {
+			lastSeenAt = now
+		}
+		enabled := record.Enabled
+		create := tx.ChannelModel.Create().
+			SetChannelID(channelID).
+			SetModel(model).
+			SetDisplayName(strings.TrimSpace(record.DisplayName)).
+			SetSource(strings.TrimSpace(record.Source)).
+			SetEnabled(enabled).
+			SetNillableSupportsResponses(record.SupportsResponses).
+			SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
+			SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
+			SetNillableContextWindow(record.ContextWindow).
+			SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
+			SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
+			SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
+			SetFirstSeenAt(firstSeenAt.UTC()).
+			SetLastSeenAt(lastSeenAt.UTC())
+		if !record.LastProbeAt.IsZero() {
+			create.SetLastProbeAt(record.LastProbeAt.UTC())
+		}
+		creates = append(creates, create)
+	}
+	if len(creates) > 0 {
+		if err := tx.ChannelModel.CreateBulk(creates...).
+			OnConflictColumns(channelmodel.FieldChannelID, channelmodel.FieldModel).
+			UpdateNewValues().
+			Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
@@ -1069,6 +1316,85 @@ func (s *Store) initSchema() error {
 		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS upstreammodel_upstream_id_model ON upstream_models(upstream_id, model);`,
 		`CREATE INDEX IF NOT EXISTS idx_upstream_models_model ON upstream_models(model);`,
+		`CREATE TABLE IF NOT EXISTS channel_configs (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			base_url TEXT NOT NULL,
+			provider_preset TEXT NOT NULL DEFAULT '',
+			protocol_family TEXT NOT NULL DEFAULT '',
+			routing_profile TEXT NOT NULL DEFAULT '',
+			api_version TEXT NOT NULL DEFAULT '',
+			deployment TEXT NOT NULL DEFAULT '',
+			project TEXT NOT NULL DEFAULT '',
+			location TEXT NOT NULL DEFAULT '',
+			model_resource TEXT NOT NULL DEFAULT '',
+			api_key_ciphertext BLOB NULL,
+			api_key_hint TEXT NOT NULL DEFAULT '',
+			headers_json TEXT NOT NULL DEFAULT '{}',
+			enabled bool NOT NULL DEFAULT true,
+			priority INTEGER NOT NULL DEFAULT 0,
+			weight REAL NOT NULL DEFAULT 1,
+			capacity_hint REAL NOT NULL DEFAULT 1,
+			model_discovery TEXT NOT NULL DEFAULT 'list_models',
+			allow_unknown_models bool NOT NULL DEFAULT false,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			last_probe_at datetime NULL,
+			last_probe_status TEXT NOT NULL DEFAULT '',
+			last_probe_error TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE INDEX IF NOT EXISTS channelconfig_enabled_priority ON channel_configs(enabled, priority);`,
+		`CREATE INDEX IF NOT EXISTS channelconfig_provider_preset ON channel_configs(provider_preset);`,
+		`CREATE TABLE IF NOT EXISTS channel_models (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			channel_id TEXT NOT NULL,
+			model TEXT NOT NULL,
+			display_name TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT '',
+			enabled bool NOT NULL DEFAULT true,
+			supports_responses INTEGER NULL,
+			supports_chat_completions INTEGER NULL,
+			supports_embeddings INTEGER NULL,
+			context_window INTEGER NULL,
+			input_modalities_json TEXT NOT NULL DEFAULT '[]',
+			output_modalities_json TEXT NOT NULL DEFAULT '[]',
+			raw_model_json TEXT NOT NULL DEFAULT '{}',
+			first_seen_at datetime NOT NULL,
+			last_seen_at datetime NOT NULL,
+			last_probe_at datetime NULL
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS channelmodel_channel_id_model ON channel_models(channel_id, model);`,
+		`CREATE INDEX IF NOT EXISTS idx_channel_models_model ON channel_models(model);`,
+		`CREATE INDEX IF NOT EXISTS channelmodel_channel_id_enabled ON channel_models(channel_id, enabled);`,
+		`CREATE TABLE IF NOT EXISTS model_catalog (
+			model TEXT PRIMARY KEY,
+			display_name TEXT NOT NULL DEFAULT '',
+			family TEXT NOT NULL DEFAULT '',
+			vendor TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			tags_json TEXT NOT NULL DEFAULT '[]',
+			first_seen_at datetime NOT NULL,
+			last_seen_at datetime NOT NULL,
+			last_used_at datetime NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS channel_probe_runs (
+			id TEXT PRIMARY KEY,
+			channel_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			started_at datetime NOT NULL,
+			completed_at datetime NULL,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			discovered_count INTEGER NOT NULL DEFAULT 0,
+			enabled_count INTEGER NOT NULL DEFAULT 0,
+			endpoint TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL DEFAULT 0,
+			error_text TEXT NOT NULL DEFAULT '',
+			request_meta_json TEXT NOT NULL DEFAULT '{}',
+			response_sample_json TEXT NOT NULL DEFAULT '{}'
+		);`,
+		`CREATE INDEX IF NOT EXISTS channelproberun_channel_id_started_at ON channel_probe_runs(channel_id, started_at);`,
+		`CREATE INDEX IF NOT EXISTS channelproberun_status_started_at ON channel_probe_runs(status, started_at);`,
 		`CREATE TABLE IF NOT EXISTS datasets (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -3203,6 +3529,85 @@ func upstreamModelRecordFromEnt(row *dao.UpstreamModel) UpstreamModelRecord {
 		Source:     row.Source,
 		SeenAt:     row.SeenAt,
 	}
+}
+
+func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
+	record := ChannelConfigRecord{
+		ID:                 row.ID,
+		Name:               row.Name,
+		Description:        row.Description,
+		BaseURL:            row.BaseURL,
+		ProviderPreset:     row.ProviderPreset,
+		ProtocolFamily:     row.ProtocolFamily,
+		RoutingProfile:     row.RoutingProfile,
+		APIVersion:         row.APIVersion,
+		Deployment:         row.Deployment,
+		Project:            row.Project,
+		Location:           row.Location,
+		ModelResource:      row.ModelResource,
+		APIKeyHint:         row.APIKeyHint,
+		HeadersJSON:        row.HeadersJSON,
+		Enabled:            row.Enabled,
+		Priority:           row.Priority,
+		Weight:             row.Weight,
+		CapacityHint:       row.CapacityHint,
+		ModelDiscovery:     row.ModelDiscovery,
+		AllowUnknownModels: row.AllowUnknownModels,
+		CreatedAt:          row.CreatedAt,
+		UpdatedAt:          row.UpdatedAt,
+		LastProbeStatus:    row.LastProbeStatus,
+		LastProbeError:     row.LastProbeError,
+	}
+	if row.APIKeyCiphertext != nil {
+		record.APIKeyCiphertext = append([]byte(nil), (*row.APIKeyCiphertext)...)
+	}
+	if row.LastProbeAt != nil {
+		record.LastProbeAt = *row.LastProbeAt
+	}
+	return record
+}
+
+func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
+	record := ChannelModelRecord{
+		ChannelID:            row.ChannelID,
+		Model:                row.Model,
+		DisplayName:          row.DisplayName,
+		Source:               row.Source,
+		Enabled:              row.Enabled,
+		InputModalitiesJSON:  row.InputModalitiesJSON,
+		OutputModalitiesJSON: row.OutputModalitiesJSON,
+		RawModelJSON:         row.RawModelJSON,
+		FirstSeenAt:          row.FirstSeenAt,
+		LastSeenAt:           row.LastSeenAt,
+	}
+	if row.SupportsResponses != nil {
+		value := *row.SupportsResponses
+		record.SupportsResponses = &value
+	}
+	if row.SupportsChatCompletions != nil {
+		value := *row.SupportsChatCompletions
+		record.SupportsChatCompletions = &value
+	}
+	if row.SupportsEmbeddings != nil {
+		value := *row.SupportsEmbeddings
+		record.SupportsEmbeddings = &value
+	}
+	if row.ContextWindow != nil {
+		value := *row.ContextWindow
+		record.ContextWindow = &value
+	}
+	if row.LastProbeAt != nil {
+		record.LastProbeAt = *row.LastProbeAt
+	}
+	return record
+}
+
+func defaultJSON(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func datasetRecordFromEnt(row *dao.Dataset, exampleCount int) DatasetRecord {
