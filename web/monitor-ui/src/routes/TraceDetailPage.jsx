@@ -7,6 +7,7 @@ import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob } from "../lib/api";
 import {
   buildRoutingDecisionSummary,
+  buildChannelLink,
   buildTraceUpstreamHealthSummary,
   buildUpstreamLink,
   formatDateTime,
@@ -250,6 +251,11 @@ export function TraceDetailPage() {
                   <h2>{selectedUpstreamID ? "Selected upstream" : "Routing failure"}</h2>
                 </div>
                 <div className="panel-head-actions">
+                  {selectedUpstreamID ? (
+                    <Link className="ghost-button active" to={buildChannelLink(selectedUpstreamID)}>
+                      Open Channel
+                    </Link>
+                  ) : null}
                   {selectedUpstreamID ? (
                     <Link className="ghost-button" to={buildUpstreamLink(selectedUpstreamID)}>
                       Open Upstream
