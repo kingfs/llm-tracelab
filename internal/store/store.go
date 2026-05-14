@@ -97,6 +97,25 @@ type SecretStatus struct {
 	Error       string `json:"error,omitempty"`
 }
 
+type SecretRotationResult struct {
+	Mode           string `json:"mode"`
+	KeyPath        string `json:"key_path"`
+	BackupPath     string `json:"backup_path,omitempty"`
+	OldFingerprint string `json:"old_fingerprint"`
+	NewFingerprint string `json:"new_fingerprint"`
+	ChannelCount   int    `json:"channel_count"`
+	APIKeyCount    int    `json:"api_key_count"`
+	HeaderCount    int    `json:"header_count"`
+}
+
+type rotatedChannelSecret struct {
+	id             string
+	apiKey         []byte
+	hasAPIKey      bool
+	headersJSON    string
+	secretKeyCount int
+}
+
 type ListPageResult struct {
 	Items      []LogEntry
 	Total      int
@@ -2017,6 +2036,49 @@ func secretBoxFromKey(key []byte, keyPath string) (*secretBox, error) {
 	}, nil
 }
 
+func (b *secretBox) encryptSecretBytes(plaintext []byte) ([]byte, error) {
+	if len(plaintext) == 0 {
+		return nil, nil
+	}
+	if bytes.HasPrefix(plaintext, []byte(secretEnvelopeV1)) {
+		return append([]byte(nil), plaintext...), nil
+	}
+	if b == nil || b.aead == nil {
+		return append([]byte(nil), plaintext...), nil
+	}
+	nonce := make([]byte, b.aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	sealed := b.aead.Seal(nil, nonce, plaintext, nil)
+	payload := append(nonce, sealed...)
+	out := secretEnvelopeV1 + base64.RawStdEncoding.EncodeToString(payload)
+	return []byte(out), nil
+}
+
+func (b *secretBox) decryptSecretBytes(value []byte) ([]byte, error) {
+	if len(value) == 0 {
+		return nil, nil
+	}
+	if !bytes.HasPrefix(value, []byte(secretEnvelopeV1)) {
+		return append([]byte(nil), value...), nil
+	}
+	if b == nil || b.aead == nil {
+		return nil, fmt.Errorf("encrypted local secret cannot be decrypted without a local key")
+	}
+	encoded := strings.TrimPrefix(string(value), secretEnvelopeV1)
+	payload, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := b.aead.NonceSize()
+	if len(payload) < nonceSize {
+		return nil, fmt.Errorf("encrypted local secret payload is too short")
+	}
+	nonce, ciphertext := payload[:nonceSize], payload[nonceSize:]
+	return b.aead.Open(nil, nonce, ciphertext, nil)
+}
+
 func (s *Store) SecretStorageMode() string {
 	if s == nil || s.secrets == nil || s.secrets.aead == nil {
 		return "plaintext-local"
@@ -2067,6 +2129,107 @@ func (s *Store) ExportLocalSecretKey() ([]byte, SecretStatus, error) {
 	return encoded, status, nil
 }
 
+func (s *Store) RotateLocalSecretKey() (SecretRotationResult, error) {
+	if s == nil || s.secrets == nil || s.secrets.aead == nil {
+		return SecretRotationResult{}, fmt.Errorf("local secret encryption is not configured")
+	}
+	if strings.TrimSpace(s.secrets.keyPath) == "" {
+		return SecretRotationResult{}, fmt.Errorf("local secret key path is not configured")
+	}
+	oldKey, err := readLocalSecretKey(s.secrets.keyPath)
+	if err != nil {
+		return SecretRotationResult{}, err
+	}
+	oldBox, err := secretBoxFromKey(oldKey, s.secrets.keyPath)
+	if err != nil {
+		return SecretRotationResult{}, err
+	}
+	newKey := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, newKey); err != nil {
+		return SecretRotationResult{}, err
+	}
+	newBox, err := secretBoxFromKey(newKey, s.secrets.keyPath)
+	if err != nil {
+		return SecretRotationResult{}, err
+	}
+
+	rows, err := s.client.ChannelConfig.Query().
+		Order(channelconfig.ByID()).
+		All(context.Background())
+	if err != nil {
+		return SecretRotationResult{}, err
+	}
+	rotated := make([]rotatedChannelSecret, 0, len(rows))
+	result := SecretRotationResult{
+		Mode:           newBox.mode,
+		KeyPath:        s.secrets.keyPath,
+		OldFingerprint: oldBox.fingerprint,
+		NewFingerprint: newBox.fingerprint,
+		ChannelCount:   len(rows),
+	}
+	for _, row := range rows {
+		item := rotatedChannelSecret{id: row.ID}
+		if row.APIKeyCiphertext != nil && len(*row.APIKeyCiphertext) > 0 {
+			plaintext, err := oldBox.decryptSecretBytes(*row.APIKeyCiphertext)
+			if err != nil {
+				return SecretRotationResult{}, fmt.Errorf("decrypt channel %s api key: %w", row.ID, err)
+			}
+			encrypted, err := newBox.encryptSecretBytes(plaintext)
+			if err != nil {
+				return SecretRotationResult{}, fmt.Errorf("encrypt channel %s api key: %w", row.ID, err)
+			}
+			item.apiKey = encrypted
+			item.hasAPIKey = true
+			result.APIKeyCount++
+		}
+		headersJSON, secretKeyCount, err := reencryptHeadersJSONWithBoxes(oldBox, newBox, row.HeadersJSON)
+		if err != nil {
+			return SecretRotationResult{}, fmt.Errorf("reencrypt channel %s headers: %w", row.ID, err)
+		}
+		item.headersJSON = headersJSON
+		item.secretKeyCount = secretKeyCount
+		result.HeaderCount += secretKeyCount
+		rotated = append(rotated, item)
+	}
+
+	encodedNewKey := []byte(base64.RawStdEncoding.EncodeToString(newKey) + "\n")
+	backupPath := s.secrets.keyPath + ".bak." + time.Now().UTC().Format("20060102T150405Z")
+	if err := os.WriteFile(backupPath, []byte(base64.RawStdEncoding.EncodeToString(oldKey)+"\n"), 0o600); err != nil {
+		return SecretRotationResult{}, err
+	}
+	if err := os.WriteFile(s.secrets.keyPath, encodedNewKey, 0o600); err != nil {
+		_ = os.Remove(backupPath)
+		return SecretRotationResult{}, err
+	}
+	if err := s.applyRotatedChannelSecrets(rotated); err != nil {
+		_ = os.WriteFile(s.secrets.keyPath, []byte(base64.RawStdEncoding.EncodeToString(oldKey)+"\n"), 0o600)
+		return SecretRotationResult{}, err
+	}
+	s.secrets = newBox
+	result.BackupPath = backupPath
+	return result, nil
+}
+
+func (s *Store) applyRotatedChannelSecrets(items []rotatedChannelSecret) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, item := range items {
+		if item.hasAPIKey {
+			if _, err := tx.Exec(`UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func readLocalSecretKey(keyPath string) ([]byte, error) {
 	keyData, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -2083,46 +2246,17 @@ func readLocalSecretKey(keyPath string) ([]byte, error) {
 }
 
 func (s *Store) encryptSecretBytes(plaintext []byte) ([]byte, error) {
-	if len(plaintext) == 0 {
-		return nil, nil
-	}
-	if bytes.HasPrefix(plaintext, []byte(secretEnvelopeV1)) {
+	if s == nil {
 		return append([]byte(nil), plaintext...), nil
 	}
-	if s == nil || s.secrets == nil || s.secrets.aead == nil {
-		return append([]byte(nil), plaintext...), nil
-	}
-	nonce := make([]byte, s.secrets.aead.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
-	}
-	sealed := s.secrets.aead.Seal(nil, nonce, plaintext, nil)
-	payload := append(nonce, sealed...)
-	out := secretEnvelopeV1 + base64.RawStdEncoding.EncodeToString(payload)
-	return []byte(out), nil
+	return s.secrets.encryptSecretBytes(plaintext)
 }
 
 func (s *Store) decryptSecretBytes(value []byte) ([]byte, error) {
-	if len(value) == 0 {
-		return nil, nil
-	}
-	if !bytes.HasPrefix(value, []byte(secretEnvelopeV1)) {
+	if s == nil {
 		return append([]byte(nil), value...), nil
 	}
-	if s == nil || s.secrets == nil || s.secrets.aead == nil {
-		return nil, fmt.Errorf("encrypted local secret cannot be decrypted without a local key")
-	}
-	encoded := strings.TrimPrefix(string(value), secretEnvelopeV1)
-	payload, err := base64.RawStdEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, err
-	}
-	nonceSize := s.secrets.aead.NonceSize()
-	if len(payload) < nonceSize {
-		return nil, fmt.Errorf("encrypted local secret payload is too short")
-	}
-	nonce, ciphertext := payload[:nonceSize], payload[nonceSize:]
-	return s.secrets.aead.Open(nil, nonce, ciphertext, nil)
+	return s.secrets.decryptSecretBytes(value)
 }
 
 func (s *Store) encryptHeadersJSON(headersJSON string) (string, error) {
@@ -2175,6 +2309,38 @@ func (s *Store) decryptHeadersJSON(headersJSON string) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func reencryptHeadersJSONWithBoxes(oldBox *secretBox, newBox *secretBox, headersJSON string) (string, int, error) {
+	headersJSON = strings.TrimSpace(headersJSON)
+	if headersJSON == "" {
+		return "{}", 0, nil
+	}
+	headers := map[string]string{}
+	if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+		return "", 0, err
+	}
+	count := 0
+	for key, value := range headers {
+		if !isSecretChannelHeader(key) || strings.TrimSpace(value) == "" {
+			continue
+		}
+		plaintext, err := oldBox.decryptSecretBytes([]byte(value))
+		if err != nil {
+			return "", 0, err
+		}
+		encrypted, err := newBox.encryptSecretBytes(plaintext)
+		if err != nil {
+			return "", 0, err
+		}
+		headers[key] = string(encrypted)
+		count++
+	}
+	data, err := json.Marshal(headers)
+	if err != nil {
+		return "", 0, err
+	}
+	return string(data), count, nil
 }
 
 func isSecretChannelHeader(key string) bool {

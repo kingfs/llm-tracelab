@@ -164,7 +164,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "auth", "analyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "auth", "analyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -358,6 +358,86 @@ database:
 	}
 	if !exportEnvelope.OK || exportEnvelope.Result.Key != strings.TrimSpace(string(exported)) {
 		t.Fatalf("export envelope = %+v, want exported key", exportEnvelope)
+	}
+}
+
+func TestDBSecretRotateCommand(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + filepath.Join(dir, "trace_index.sqlite3") + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          "https://api.openai.com/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-cli-rotate"),
+		HeadersJSON:      `{"Authorization":"Bearer cli","X-Test":"visible"}`,
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	before := st.SecretStatus()
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if code := runDBSecretRotateWithOptions(dbSecretOptions{configPath: configPath, format: "text", stdout: &out}); code != 2 {
+		t.Fatalf("runDBSecretRotateWithOptions(no yes) = %d, output=%s", code, out.String())
+	}
+
+	out.Reset()
+	if code := runDBSecretRotateWithOptions(dbSecretOptions{configPath: configPath, format: "json", stdout: &out, yes: true}); code != 0 {
+		t.Fatalf("runDBSecretRotateWithOptions() = %d, output=%s", code, out.String())
+	}
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			OldFingerprint string `json:"old_fingerprint"`
+			NewFingerprint string `json:"new_fingerprint"`
+			BackupPath     string `json:"backup_path"`
+			ChannelCount   int    `json:"channel_count"`
+			APIKeyCount    int    `json:"api_key_count"`
+			HeaderCount    int    `json:"header_count"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal(rotate) error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Result.OldFingerprint != before.Fingerprint || envelope.Result.NewFingerprint == "" || envelope.Result.NewFingerprint == envelope.Result.OldFingerprint {
+		t.Fatalf("rotate envelope = %+v, before=%+v", envelope, before)
+	}
+	if envelope.Result.ChannelCount != 1 || envelope.Result.APIKeyCount != 1 || envelope.Result.HeaderCount != 1 || envelope.Result.BackupPath == "" {
+		t.Fatalf("rotate counts = %+v", envelope.Result)
+	}
+	if _, err := os.Stat(envelope.Result.BackupPath); err != nil {
+		t.Fatalf("Stat(backupPath) error = %v", err)
+	}
+
+	reopened, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	record, err := reopened.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if string(record.APIKeyCiphertext) != "sk-cli-rotate" || record.HeadersJSON != `{"Authorization":"Bearer cli","X-Test":"visible"}` {
+		t.Fatalf("record after rotate = api_key %q headers %q", string(record.APIKeyCiphertext), record.HeadersJSON)
 	}
 }
 

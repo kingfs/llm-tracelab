@@ -97,10 +97,11 @@ Use `task deps:verify` in checks because it does not edit module files. Use `tas
 ```bash
 llm-tracelab -c config/config.yaml db secret status
 llm-tracelab -c config/config.yaml db secret export --out trace_index.secret.backup
+llm-tracelab -c config/config.yaml db secret rotate --yes
 llm-tracelab -c config/config.yaml --format json db secret status
 ```
 
-`db secret status` reports the local channel secret key path, readability, and fingerprint without printing the key. `db secret export --out` writes the backup with `0600` permissions. Without `--out`, export writes the base64 key to stdout; reserve that for explicit backup automation.
+`db secret status` reports the local channel secret key path, readability, and fingerprint without printing the key. `db secret export --out` writes the backup with `0600` permissions. Without `--out`, export writes the base64 key to stdout; reserve that for explicit backup automation. `db secret rotate --yes` backs up the old key, writes a new key, and re-encrypts channel API keys and sensitive headers.
 
 ## Agent Guidance
 

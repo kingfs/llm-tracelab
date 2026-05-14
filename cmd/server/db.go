@@ -17,6 +17,7 @@ type dbSecretOptions struct {
 	format     string
 	stdout     io.Writer
 	outPath    string
+	yes        bool
 }
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
@@ -57,6 +58,7 @@ func newDBSecretCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	cmd.AddCommand(newDBSecretStatusCommand(runtime))
 	cmd.AddCommand(newDBSecretExportCommand(runtime))
+	cmd.AddCommand(newDBSecretRotateCommand(runtime))
 	return cmd
 }
 
@@ -96,6 +98,27 @@ func newDBSecretExportCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&outPath, "out", "", "Write the exported key to a file instead of stdout")
+	return cmd
+}
+
+func newDBSecretRotateCommand(runtime *cliRuntime) *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "rotate",
+		Short: "Rotate the local channel secret encryption key and re-encrypt channel secrets",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runDBSecretRotateWithOptions(dbSecretOptions{
+					configPath: runtime.configPath(),
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+					yes:        yes,
+				})
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "Confirm rotation and local master key replacement")
 	return cmd
 }
 
@@ -176,6 +199,38 @@ func runDBSecretExportWithOptions(opts dbSecretOptions) int {
 	}
 	if _, err := stdoutOrDefault(opts.stdout).Write(key); err != nil {
 		slog.Error("Write local secret key export failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func runDBSecretRotateWithOptions(opts dbSecretOptions) int {
+	if !opts.yes {
+		fmt.Fprintln(stdoutOrDefault(opts.stdout), "refusing to rotate local secret key without --yes")
+		return 2
+	}
+	st, closeStore, code := openTraceStoreForCommand(opts.configPath)
+	if code != 0 {
+		return code
+	}
+	defer closeStore()
+	result, err := st.RotateLocalSecretKey()
+	if err != nil {
+		slog.Error("Rotate local secret key failed", "error", err)
+		return 1
+	}
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.secret.rotate", result, func(w io.Writer) error {
+		fmt.Fprintf(w, "rotated local secret key\n")
+		fmt.Fprintf(w, "key_path: %s\n", result.KeyPath)
+		fmt.Fprintf(w, "backup_path: %s\n", result.BackupPath)
+		fmt.Fprintf(w, "old_fingerprint: %s\n", result.OldFingerprint)
+		fmt.Fprintf(w, "new_fingerprint: %s\n", result.NewFingerprint)
+		fmt.Fprintf(w, "channels: %d\n", result.ChannelCount)
+		fmt.Fprintf(w, "api_keys: %d\n", result.APIKeyCount)
+		fmt.Fprintf(w, "secret_headers: %d\n", result.HeaderCount)
+		return nil
+	}); err != nil {
+		slog.Error("Write db secret rotate result failed", "error", err)
 		return 1
 	}
 	return 0

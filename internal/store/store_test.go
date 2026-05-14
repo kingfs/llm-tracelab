@@ -216,6 +216,84 @@ func TestSecretStatusAndExportLocalSecretKey(t *testing.T) {
 	}
 }
 
+func TestRotateLocalSecretKeyReencryptsChannelSecrets(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          "https://api.openai.com/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-rotate-secret"),
+		APIKeyHint:       "sk-...cret",
+		HeadersJSON:      `{"Authorization":"Bearer rotate","X-Test":"visible"}`,
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	beforeStatus := st.SecretStatus()
+	var beforeAPIKey []byte
+	var beforeHeaders string
+	if err := st.db.QueryRow(`SELECT api_key_ciphertext, headers_json FROM channel_configs WHERE id = ?`, "openai-primary").Scan(&beforeAPIKey, &beforeHeaders); err != nil {
+		t.Fatalf("query before raw channel config error = %v", err)
+	}
+
+	result, err := st.RotateLocalSecretKey()
+	if err != nil {
+		t.Fatalf("RotateLocalSecretKey() error = %v", err)
+	}
+	if result.OldFingerprint != beforeStatus.Fingerprint || result.NewFingerprint == "" || result.NewFingerprint == result.OldFingerprint {
+		t.Fatalf("rotation result fingerprints = %+v, before=%q", result, beforeStatus.Fingerprint)
+	}
+	if result.ChannelCount != 1 || result.APIKeyCount != 1 || result.HeaderCount != 1 {
+		t.Fatalf("rotation counts = %+v", result)
+	}
+	if _, err := os.Stat(result.BackupPath); err != nil {
+		t.Fatalf("Stat(backupPath) error = %v", err)
+	}
+
+	var afterAPIKey []byte
+	var afterHeaders string
+	if err := st.db.QueryRow(`SELECT api_key_ciphertext, headers_json FROM channel_configs WHERE id = ?`, "openai-primary").Scan(&afterAPIKey, &afterHeaders); err != nil {
+		t.Fatalf("query after raw channel config error = %v", err)
+	}
+	if string(afterAPIKey) == string(beforeAPIKey) {
+		t.Fatalf("api key ciphertext did not change after rotation")
+	}
+	if afterHeaders == beforeHeaders {
+		t.Fatalf("headers ciphertext did not change after rotation")
+	}
+	if strings.Contains(afterHeaders, "Bearer rotate") || !strings.Contains(afterHeaders, `"X-Test":"visible"`) {
+		t.Fatalf("after headers_json = %q, want encrypted secret and plaintext non-secret", afterHeaders)
+	}
+
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() after rotate error = %v", err)
+	}
+	if string(record.APIKeyCiphertext) != "sk-rotate-secret" || record.HeadersJSON != `{"Authorization":"Bearer rotate","X-Test":"visible"}` {
+		t.Fatalf("decrypted record after rotate = api_key %q headers %q", string(record.APIKeyCiphertext), record.HeadersJSON)
+	}
+
+	reopened, err := New(dir)
+	if err != nil {
+		t.Fatalf("New(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	reopenedRecord, err := reopened.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("reopened.GetChannelConfig() error = %v", err)
+	}
+	if string(reopenedRecord.APIKeyCiphertext) != "sk-rotate-secret" || reopenedRecord.HeadersJSON != record.HeadersJSON {
+		t.Fatalf("reopened record = api_key %q headers %q", string(reopenedRecord.APIKeyCiphertext), reopenedRecord.HeadersJSON)
+	}
+}
+
 func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
