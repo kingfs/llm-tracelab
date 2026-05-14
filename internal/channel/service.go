@@ -3,28 +3,55 @@ package channel
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 )
 
 type Store interface {
 	ListChannelConfigs() ([]store.ChannelConfigRecord, error)
+	GetChannelConfig(channelID string) (store.ChannelConfigRecord, error)
 	UpsertChannelConfig(store.ChannelConfigRecord) (store.ChannelConfigRecord, error)
+	UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error
 	ListChannelModels(channelID string, enabledOnly bool) ([]store.ChannelModelRecord, error)
 	ReplaceChannelModels(channelID string, records []store.ChannelModelRecord) error
+	UpsertModelCatalog(store.ModelCatalogRecord) error
+	CreateChannelProbeRun(store.ChannelProbeRunRecord) (store.ChannelProbeRunRecord, error)
+	ReplaceUpstreamModels(upstreamID string, records []store.UpstreamModelRecord) error
 }
 
 type Service struct {
-	store Store
+	store      Store
+	httpClient *http.Client
 }
 
 func NewService(st Store) *Service {
 	return &Service{store: st}
+}
+
+func (s *Service) WithHTTPClient(client *http.Client) *Service {
+	s.httpClient = client
+	return s
+}
+
+type ProbeResult struct {
+	ChannelID       string
+	Status          string
+	Models          []string
+	DiscoveredCount int
+	EnabledCount    int
+	Endpoint        string
+	ErrorText       string
+	StartedAt       time.Time
+	CompletedAt     time.Time
+	DurationMs      int64
 }
 
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
@@ -167,6 +194,120 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		targets = append(targets, target)
 	}
 	return targets, nil
+}
+
+func (s *Service) Probe(channelID string) (ProbeResult, error) {
+	if s == nil || s.store == nil {
+		return ProbeResult{}, fmt.Errorf("channel service store is required")
+	}
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return ProbeResult{}, fmt.Errorf("channel id is required")
+	}
+	startedAt := time.Now().UTC()
+	result := ProbeResult{ChannelID: channelID, StartedAt: startedAt}
+
+	channel, err := s.store.GetChannelConfig(channelID)
+	if err != nil {
+		return result, err
+	}
+	resolved, err := upstream.Resolve(upstreamConfigFromChannel(channel))
+	if err != nil {
+		return s.finishProbe(result, resolved, nil, err)
+	}
+	models, err := upstream.DiscoverModelsResolved(resolved, s.httpClient)
+	return s.finishProbe(result, resolved, models, err)
+}
+
+func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpstream, models []string, probeErr error) (ProbeResult, error) {
+	completedAt := time.Now().UTC()
+	result.CompletedAt = completedAt
+	result.DurationMs = completedAt.Sub(result.StartedAt).Milliseconds()
+	if diagnostics, err := resolved.StartupDiagnostics(); err == nil {
+		result.Endpoint = diagnostics.ConnectivityEndpoint
+	}
+	result.Models = normalizeModels(models)
+	result.DiscoveredCount = len(result.Models)
+	result.EnabledCount = len(result.Models)
+	result.Status = "success"
+	if probeErr != nil {
+		result.Status = "failed"
+		result.ErrorText = probeErr.Error()
+	}
+
+	channelModels := make([]store.ChannelModelRecord, 0, len(result.Models))
+	upstreamModels := make([]store.UpstreamModelRecord, 0, len(result.Models))
+	for _, model := range result.Models {
+		channelModels = append(channelModels, store.ChannelModelRecord{
+			ChannelID:   result.ChannelID,
+			Model:       model,
+			DisplayName: model,
+			Source:      "discovered",
+			Enabled:     true,
+			FirstSeenAt: completedAt,
+			LastSeenAt:  completedAt,
+			LastProbeAt: completedAt,
+		})
+		upstreamModels = append(upstreamModels, store.UpstreamModelRecord{
+			UpstreamID: result.ChannelID,
+			Model:      model,
+			Source:     "discovered",
+			SeenAt:     completedAt,
+		})
+		if err := s.store.UpsertModelCatalog(store.ModelCatalogRecord{
+			Model:       model,
+			DisplayName: model,
+			FirstSeenAt: completedAt,
+			LastSeenAt:  completedAt,
+		}); err != nil {
+			return result, err
+		}
+	}
+	if probeErr == nil {
+		if err := s.store.ReplaceChannelModels(result.ChannelID, channelModels); err != nil {
+			return result, err
+		}
+		if err := s.store.ReplaceUpstreamModels(result.ChannelID, upstreamModels); err != nil {
+			return result, err
+		}
+	}
+	if err := s.store.UpdateChannelProbeStatus(result.ChannelID, completedAt, result.Status, result.ErrorText); err != nil {
+		return result, err
+	}
+	if _, err := s.store.CreateChannelProbeRun(store.ChannelProbeRunRecord{
+		ChannelID:       result.ChannelID,
+		Status:          result.Status,
+		StartedAt:       result.StartedAt,
+		CompletedAt:     result.CompletedAt,
+		DurationMs:      result.DurationMs,
+		DiscoveredCount: result.DiscoveredCount,
+		EnabledCount:    result.EnabledCount,
+		Endpoint:        result.Endpoint,
+		ErrorText:       result.ErrorText,
+	}); err != nil {
+		return result, err
+	}
+	return result, probeErr
+}
+
+func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.UpstreamConfig {
+	headers := map[string]string{}
+	if strings.TrimSpace(channel.HeadersJSON) != "" {
+		_ = json.Unmarshal([]byte(channel.HeadersJSON), &headers)
+	}
+	return config.UpstreamConfig{
+		BaseURL:        channel.BaseURL,
+		ApiKey:         string(channel.APIKeyCiphertext),
+		ProviderPreset: channel.ProviderPreset,
+		ProtocolFamily: channel.ProtocolFamily,
+		RoutingProfile: channel.RoutingProfile,
+		APIVersion:     channel.APIVersion,
+		Deployment:     channel.Deployment,
+		Project:        channel.Project,
+		Location:       channel.Location,
+		ModelResource:  channel.ModelResource,
+		Headers:        headers,
+	}
 }
 
 func stableChannelID(target config.UpstreamTargetConfig, idx int) string {

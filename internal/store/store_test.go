@@ -129,6 +129,17 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	if len(enabledModels) != 1 || enabledModels[0].Model != "gpt-5" {
 		t.Fatalf("enabledModels = %#v", enabledModels)
 	}
+
+	if err := st.SetChannelModelEnabled("openai-primary", "gpt-4.1", true); err != nil {
+		t.Fatalf("SetChannelModelEnabled() error = %v", err)
+	}
+	enabledModels, err = st.ListChannelModels("openai-primary", true)
+	if err != nil {
+		t.Fatalf("ListChannelModels(true after enable) error = %v", err)
+	}
+	if len(enabledModels) != 2 {
+		t.Fatalf("len(enabledModels after enable) = %d, want 2", len(enabledModels))
+	}
 }
 
 func TestNewUpgradesLegacySchemaWithoutSessionColumns(t *testing.T) {

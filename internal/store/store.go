@@ -23,10 +23,12 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
 	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
+	"github.com/kingfs/llm-tracelab/ent/dao/channelproberun"
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
@@ -179,6 +181,34 @@ type ChannelModelRecord struct {
 	FirstSeenAt             time.Time
 	LastSeenAt              time.Time
 	LastProbeAt             time.Time
+}
+
+type ModelCatalogRecord struct {
+	Model       string
+	DisplayName string
+	Family      string
+	Vendor      string
+	Description string
+	TagsJSON    string
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
+	LastUsedAt  time.Time
+}
+
+type ChannelProbeRunRecord struct {
+	ID                 string
+	ChannelID          string
+	Status             string
+	StartedAt          time.Time
+	CompletedAt        time.Time
+	DurationMs         int64
+	DiscoveredCount    int
+	EnabledCount       int
+	Endpoint           string
+	StatusCode         int
+	ErrorText          string
+	RequestMetaJSON    string
+	ResponseSampleJSON string
 }
 
 type UpstreamAnalyticsRecord struct {
@@ -499,6 +529,21 @@ func (s *Store) SetChannelEnabled(channelID string, enabled bool) error {
 		Exec(context.Background())
 }
 
+func (s *Store) UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return fmt.Errorf("channel id is required")
+	}
+	update := s.client.ChannelConfig.UpdateOneID(channelID).
+		SetUpdatedAt(time.Now().UTC()).
+		SetLastProbeStatus(strings.TrimSpace(status)).
+		SetLastProbeError(strings.TrimSpace(errorText))
+	if !probedAt.IsZero() {
+		update.SetLastProbeAt(probedAt.UTC())
+	}
+	return update.Exec(context.Background())
+}
+
 func (s *Store) ListChannelModels(channelID string, enabledOnly bool) ([]ChannelModelRecord, error) {
 	query := s.client.ChannelModel.Query()
 	var predicates []predicate.ChannelModel
@@ -583,6 +628,113 @@ func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRec
 		}
 	}
 	return tx.Commit()
+}
+
+func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled bool) error {
+	channelID = strings.TrimSpace(channelID)
+	model = strings.ToLower(strings.TrimSpace(model))
+	if channelID == "" {
+		return fmt.Errorf("channel id is required")
+	}
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	_, err := s.client.ChannelModel.Update().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		SetEnabled(enabled).
+		SetLastSeenAt(time.Now().UTC()).
+		Save(context.Background())
+	return err
+}
+
+func (s *Store) UpsertModelCatalog(record ModelCatalogRecord) error {
+	model := strings.ToLower(strings.TrimSpace(record.Model))
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	now := time.Now().UTC()
+	if record.FirstSeenAt.IsZero() {
+		record.FirstSeenAt = now
+	}
+	if record.LastSeenAt.IsZero() {
+		record.LastSeenAt = now
+	}
+	create := s.client.ModelCatalog.Create().
+		SetID(model).
+		SetDisplayName(strings.TrimSpace(record.DisplayName)).
+		SetFamily(strings.TrimSpace(record.Family)).
+		SetVendor(strings.TrimSpace(record.Vendor)).
+		SetDescription(strings.TrimSpace(record.Description)).
+		SetTagsJSON(defaultJSON(record.TagsJSON, "[]")).
+		SetFirstSeenAt(record.FirstSeenAt.UTC()).
+		SetLastSeenAt(record.LastSeenAt.UTC())
+	if !record.LastUsedAt.IsZero() {
+		create.SetLastUsedAt(record.LastUsedAt.UTC())
+	}
+	return create.
+		OnConflictColumns(modelcatalog.FieldID).
+		UpdateNewValues().
+		Exec(context.Background())
+}
+
+func (s *Store) CreateChannelProbeRun(record ChannelProbeRunRecord) (ChannelProbeRunRecord, error) {
+	record.ID = strings.TrimSpace(record.ID)
+	record.ChannelID = strings.TrimSpace(record.ChannelID)
+	record.Status = strings.TrimSpace(record.Status)
+	if record.ID == "" {
+		record.ID = uuid.NewString()
+	}
+	if record.ChannelID == "" {
+		return ChannelProbeRunRecord{}, fmt.Errorf("channel id is required")
+	}
+	if record.Status == "" {
+		return ChannelProbeRunRecord{}, fmt.Errorf("probe status is required")
+	}
+	if record.StartedAt.IsZero() {
+		record.StartedAt = time.Now().UTC()
+	}
+	create := s.client.ChannelProbeRun.Create().
+		SetID(record.ID).
+		SetChannelID(record.ChannelID).
+		SetStatus(record.Status).
+		SetStartedAt(record.StartedAt.UTC()).
+		SetDurationMs(record.DurationMs).
+		SetDiscoveredCount(record.DiscoveredCount).
+		SetEnabledCount(record.EnabledCount).
+		SetEndpoint(strings.TrimSpace(record.Endpoint)).
+		SetStatusCode(record.StatusCode).
+		SetErrorText(strings.TrimSpace(record.ErrorText)).
+		SetRequestMetaJSON(defaultJSON(record.RequestMetaJSON, "{}")).
+		SetResponseSampleJSON(defaultJSON(record.ResponseSampleJSON, "{}"))
+	if !record.CompletedAt.IsZero() {
+		create.SetCompletedAt(record.CompletedAt.UTC())
+	}
+	if err := create.Exec(context.Background()); err != nil {
+		return ChannelProbeRunRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *Store) ListChannelProbeRuns(channelID string, limit int) ([]ChannelProbeRunRecord, error) {
+	query := s.client.ChannelProbeRun.Query()
+	if channelID = strings.TrimSpace(channelID); channelID != "" {
+		query = query.Where(channelproberun.ChannelIDEQ(channelID))
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := query.
+		Order(channelproberun.ByStartedAt(entsql.OrderDesc()), channelproberun.ByID(entsql.OrderDesc())).
+		Limit(limit).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChannelProbeRunRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, channelProbeRunRecordFromEnt(row))
+	}
+	return out, nil
 }
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
@@ -3598,6 +3750,27 @@ func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 	}
 	if row.LastProbeAt != nil {
 		record.LastProbeAt = *row.LastProbeAt
+	}
+	return record
+}
+
+func channelProbeRunRecordFromEnt(row *dao.ChannelProbeRun) ChannelProbeRunRecord {
+	record := ChannelProbeRunRecord{
+		ID:                 row.ID,
+		ChannelID:          row.ChannelID,
+		Status:             row.Status,
+		StartedAt:          row.StartedAt,
+		DurationMs:         row.DurationMs,
+		DiscoveredCount:    row.DiscoveredCount,
+		EnabledCount:       row.EnabledCount,
+		Endpoint:           row.Endpoint,
+		StatusCode:         row.StatusCode,
+		ErrorText:          row.ErrorText,
+		RequestMetaJSON:    row.RequestMetaJSON,
+		ResponseSampleJSON: row.ResponseSampleJSON,
+	}
+	if row.CompletedAt != nil {
+		record.CompletedAt = *row.CompletedAt
 	}
 	return record
 }
