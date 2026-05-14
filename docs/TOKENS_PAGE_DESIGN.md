@@ -262,6 +262,11 @@ Validation:
 - `task ui:build`
 - `go test ./internal/monitor`
 
+Status:
+
+- Completed in this phase.
+- Account menu no longer contains `Get token`; token management is only available from the Tokens page.
+
 ### Phase 5: Review
 
 - Update this document with completed commits and any intentional deferrals.

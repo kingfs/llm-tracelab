@@ -18,7 +18,6 @@ const navItems = [
 
 export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed }) {
   const [accountOpen, setAccountOpen] = useState(false);
-  const [tokenOpen, setTokenOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -63,10 +62,6 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
             <AccountMenuContent
               user={user}
               onLogout={onLogout}
-              onToken={() => {
-                setTokenOpen(true);
-                setAccountOpen(false);
-              }}
               onPassword={() => {
                 setPasswordOpen(true);
                 setAccountOpen(false);
@@ -82,13 +77,12 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
           </span>
         </button>
       </div>
-      {tokenOpen ? <TokenDialog onClose={() => setTokenOpen(false)} /> : null}
       {passwordOpen ? <PasswordDialog onClose={() => setPasswordOpen(false)} /> : null}
     </nav>
   );
 }
 
-function AccountMenuContent({ user, onLogout, onToken, onPassword }) {
+function AccountMenuContent({ user, onLogout, onPassword }) {
   return (
     <>
       <div className="account-menu-head">
@@ -102,10 +96,6 @@ function AccountMenuContent({ user, onLogout, onToken, onPassword }) {
         <div className="account-menu-label">Theme</div>
         <ThemeSwitcher />
       </div>
-      <button className="account-menu-item" type="button" onClick={onToken}>
-        <NavIcon name="key" />
-        <span>Get token</span>
-      </button>
       <button className="account-menu-item" type="button" onClick={onPassword}>
         <NavIcon name="lock" />
         <span>Change password</span>
@@ -179,48 +169,6 @@ function ThemeSwitcher() {
         </button>
       ))}
     </div>
-  );
-}
-
-function TokenDialog({ onClose }) {
-  const [name, setName] = useState("monitor-ui");
-  const [ttl, setTTL] = useState("24h");
-  const [token, setToken] = useState("");
-  const [error, setError] = useState("");
-
-  const submit = async (event) => {
-    event.preventDefault();
-    setError("");
-    setToken("");
-    try {
-      const payload = await postJSON(apiPaths.authTokens, { name, ttl });
-      setToken(payload.token || "");
-    } catch (err) {
-      setError(err.message || "Unable to create token.");
-    }
-  };
-
-  return createPortal(
-    <div className="nav-modal-backdrop" role="presentation">
-      <form className="nav-modal" onSubmit={submit}>
-      <div className="nav-modal-head">
-        <div>
-          <p className="eyebrow">Access token</p>
-          <h2>Get token</h2>
-        </div>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
-      </div>
-      <label className="nav-field">Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-      <label className="nav-field">TTL<input value={ttl} onChange={(event) => setTTL(event.target.value)} placeholder="24h, 168h, or empty" /></label>
-      {error ? <p className="auth-error">{error}</p> : null}
-      {token ? <div className="token-result"><span>Token</span><code>{token}</code></div> : null}
-      <div className="nav-modal-actions">
-        <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
-        <button className="ghost-button active" type="submit">Create</button>
-      </div>
-      </form>
-    </div>,
-    document.body,
   );
 }
 
