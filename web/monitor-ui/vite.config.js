@@ -7,5 +7,6 @@ export default defineConfig({
     outDir: "../../internal/monitor/ui/dist",
     emptyOutDir: true,
     assetsDir: "assets",
+    chunkSizeWarningLimit: 900,
   },
 });

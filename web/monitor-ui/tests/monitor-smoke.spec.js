@@ -18,6 +18,9 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels") {
       return route.fulfill({ json: channelListPayload() });
     }
+    if (path === "/api/provider-presets") {
+      return route.fulfill({ json: { items: ["openai", "openrouter", "anthropic", "google_genai"] } });
+    }
     if (path === "/api/secrets/local-key" && method === "GET" && !url.searchParams.has("export")) {
       return route.fulfill({ json: localSecretPayload() });
     }
@@ -48,6 +51,9 @@ test.beforeEach(async ({ page }) => {
       const body = route.request().postDataJSON();
       expect(body).toEqual({ models: ["gpt-new"], enabled: true });
       return route.fulfill({ json: { updated: 1, models: ["gpt-new"], enabled: true } });
+    }
+    if (path === "/api/traces") {
+      return route.fulfill({ json: traceListPayload() });
     }
     if (path === "/api/traces/trace-routed") {
       return route.fulfill({ json: tracePayload() });
@@ -80,13 +86,17 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await expect(page.getByRole("heading", { name: "Channel secret storage" })).toBeVisible();
   await expect(page.getByText("abc123")).toBeVisible();
   await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
+  await page.getByRole("button", { name: "New channel" }).click();
+  await expect(page.getByRole("heading", { name: "Create channel" })).toBeVisible();
+  await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit" }).click();
+  await page.getByRole("button", { name: "Edit channel" }).click();
   await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
 
@@ -94,13 +104,20 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await page.getByRole("button", { name: "Add model" }).click();
   await expect(page.getByRole("button", { name: "Adding" })).toBeHidden();
 
-  await page.getByRole("button", { name: "Probe" }).click();
-  await expect(page.getByRole("button", { name: "Probing" })).toBeHidden();
+  await page.getByRole("button", { name: "Probe channel" }).click();
   await expect(page.getByText("auth_error").first()).toBeVisible();
   await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Enable new (1)" }).click();
   await expect(page.getByRole("button", { name: "Enabling" })).toBeHidden();
+});
+
+test("routing page renders selected route records", async ({ page }) => {
+  await page.goto("/routing");
+  await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible();
+  await expect(page.getByText("Recent selected routes")).toBeVisible();
+  await expect(page.getByText("openai-primary").first()).toBeVisible();
+  await expect(page.getByText("gpt-5").first()).toBeVisible();
 });
 
 test("trace routing links to channel and upstream views", async ({ page }) => {
@@ -245,6 +262,35 @@ function tracePayload() {
     messages: [{ role: "user", content: "hello", message_type: "message" }],
     events: [],
     tools: [],
+  };
+}
+
+function traceListPayload() {
+  return {
+    page: 1,
+    page_size: 100,
+    total: 1,
+    total_pages: 1,
+    refreshed_at: new Date().toISOString(),
+    stats: { total_request: 1, avg_ttft: 120, total_tokens: 120, success_request: 1, failed_request: 0, success_rate: 100 },
+    items: [{
+      id: "trace-routed",
+      recorded_at: new Date().toISOString(),
+      model: "gpt-5",
+      provider: "openai",
+      selected_upstream_id: "openai-primary",
+      operation: "responses.create",
+      endpoint: "/v1/responses",
+      method: "POST",
+      status_code: 200,
+      duration_ms: 1200,
+      ttft_ms: 120,
+      total_tokens: 120,
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      cached_tokens: 0,
+      is_stream: false,
+    }],
   };
 }
 

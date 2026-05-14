@@ -43,6 +43,7 @@ type traceListItem struct {
 	RecordedAt       time.Time `json:"recorded_at"`
 	Model            string    `json:"model"`
 	Provider         string    `json:"provider"`
+	SelectedUpstream string    `json:"selected_upstream_id,omitempty"`
 	Operation        string    `json:"operation"`
 	Endpoint         string    `json:"endpoint"`
 	Method           string    `json:"method"`
@@ -708,6 +709,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
+	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
@@ -851,6 +853,9 @@ func modelListAPIHandler(st *store.Store) http.HandlerFunc {
 		q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 		resp := modelListResponse{RefreshedAt: time.Now().UTC(), Window: windowLabel}
 		for _, item := range items {
+			if item.Summary.RequestCount == 0 {
+				continue
+			}
 			if q != "" && !strings.Contains(strings.ToLower(item.Model), q) && !strings.Contains(strings.ToLower(item.DisplayName), q) {
 				continue
 			}
@@ -898,6 +903,37 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			})
 		}
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func providerPresetAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string][]string{"items": []string{
+			"alibaba",
+			"anthropic",
+			"azure_openai",
+			"baseten",
+			"cerebras",
+			"deepseek",
+			"fireworks",
+			"github_models",
+			"google_genai",
+			"groq",
+			"hugging_face",
+			"moonshot",
+			"nvidia_nim",
+			"openai",
+			"openrouter",
+			"perplexity",
+			"together",
+			"vertex",
+			"vllm",
+			"xai",
+		}})
 	}
 }
 
@@ -2061,6 +2097,7 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 				RecordedAt:       entry.Header.Meta.Time,
 				Model:            entry.Header.Meta.Model,
 				Provider:         entry.Header.Meta.Provider,
+				SelectedUpstream: entry.Header.Meta.SelectedUpstreamID,
 				Operation:        entry.Header.Meta.Operation,
 				Endpoint:         entry.Header.Meta.Endpoint,
 				Method:           entry.Header.Meta.Method,
@@ -2802,9 +2839,10 @@ func parseListFilter(r *http.Request) store.ListFilter {
 	}
 	query := r.URL.Query()
 	return store.ListFilter{
-		Query:    strings.TrimSpace(query.Get("q")),
-		Provider: strings.TrimSpace(query.Get("provider")),
-		Model:    strings.TrimSpace(query.Get("model")),
+		Query:            strings.TrimSpace(query.Get("q")),
+		Provider:         strings.TrimSpace(query.Get("provider")),
+		Model:            strings.TrimSpace(query.Get("model")),
+		SelectedUpstream: strings.TrimSpace(query.Get("upstream")),
 	}
 }
 

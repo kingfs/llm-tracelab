@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DetailMetaPill, HomeIcon, InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
+import { SingleUsageCharts } from "../components/common/Charts";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
 import {
@@ -10,7 +11,6 @@ import {
   formatCount,
   formatDateTime,
   formatTime,
-  formatTimelineBucketLabel,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -97,7 +97,7 @@ export function ModelDetailPage() {
                 <h2>Requests and tokens</h2>
               </div>
             </div>
-            <UsageBars items={trends} />
+            <SingleUsageCharts items={trends} />
           </section>
 
           <section className="panel">
@@ -130,28 +130,5 @@ function ModelChannelRow({ item, windowValue }) {
       <span>{formatCount(summary.failed_request)} err</span>
       <span>{formatCount(summary.total_tokens)} tok</span>
     </Link>
-  );
-}
-
-function UsageBars({ items }) {
-  const maxTokens = Math.max(1, ...items.map((item) => Number(item.total_tokens || 0)));
-  if (!items.length) {
-    return <EmptyState title="No trend" detail="No usage buckets are available for this model." compact />;
-  }
-  return (
-    <div className="usage-bars">
-      {items.map((item) => {
-        const height = Math.max(6, Math.round((Number(item.total_tokens || 0) / maxTokens) * 120));
-        return (
-          <div className="usage-bar-item" key={item.time} title={`${formatTimelineBucketLabel(item.time)} · ${formatCount(item.total_tokens)} tokens · ${formatCount(item.request_count)} requests`}>
-            <span className="usage-bar-count">{formatCount(item.request_count)}</span>
-            <div className="usage-bar-wrap">
-              <span className={item.failed_request ? "usage-bar usage-bar-danger" : "usage-bar"} style={{ height }} />
-            </div>
-            <span className="usage-bar-label">{formatTimelineBucketLabel(item.time)}</span>
-          </div>
-        );
-      })}
-    </div>
   );
 }

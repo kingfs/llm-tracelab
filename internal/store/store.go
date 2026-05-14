@@ -125,9 +125,10 @@ type ListPageResult struct {
 }
 
 type ListFilter struct {
-	Query    string
-	Provider string
-	Model    string
+	Query            string
+	Provider         string
+	Model            string
+	SelectedUpstream string
 }
 
 type GroupingInfo struct {
@@ -5099,12 +5100,16 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	if model := strings.TrimSpace(filter.Model); model != "" {
 		predicates = append(predicates, tracelog.ModelContainsFold(model))
 	}
+	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
+		predicates = append(predicates, tracelog.SelectedUpstreamIDContainsFold(upstream))
+	}
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		predicates = append(predicates, tracelog.Or(
 			tracelog.SessionIDContainsFold(query),
 			tracelog.TraceIDContainsFold(query),
 			tracelog.ModelContainsFold(query),
 			tracelog.ProviderContainsFold(query),
+			tracelog.SelectedUpstreamIDContainsFold(query),
 			tracelog.EndpointContainsFold(query),
 			tracelog.URLContainsFold(query),
 		))
@@ -5159,6 +5164,10 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 		clauses = append(clauses, `LOWER(`+column("model")+`) LIKE LOWER(?)`)
 		args = append(args, "%"+escapeLike(model)+"%")
 	}
+	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
+		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?)`)
+		args = append(args, "%"+escapeLike(upstream)+"%")
+	}
 	if query := strings.TrimSpace(filter.Query); query != "" {
 		pattern := "%" + escapeLike(query) + "%"
 		clauses = append(clauses, `(
@@ -5166,10 +5175,11 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 			LOWER(`+column("trace_id")+`) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(`+column("model")+`) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(`+column("provider")+`) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(`+column("endpoint")+`) LIKE LOWER(?) ESCAPE '\' OR
 			LOWER(`+column("url")+`) LIKE LOWER(?) ESCAPE '\'
 		)`)
-		for range 6 {
+		for range 7 {
 			args = append(args, pattern)
 		}
 	}

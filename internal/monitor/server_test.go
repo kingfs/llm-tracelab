@@ -1062,6 +1062,7 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
 		{Model: "gpt-5", Source: "manual", Enabled: true},
+		{Model: "gpt-zero", Source: "manual", Enabled: true},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
 	}

@@ -62,6 +62,7 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
           <div className="trace-tag-group">
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
+            {item.selected_upstream_id ? <InlineTag tone="green">{item.selected_upstream_id}</InlineTag> : null}
             {item.session_id ? <InlineTag tone="green">session</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
           </div>

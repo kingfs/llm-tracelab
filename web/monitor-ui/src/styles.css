@@ -663,6 +663,47 @@ a {
   color: var(--accent-deep);
 }
 
+.icon-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch-control {
+  width: 44px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(100, 116, 139, 0.28);
+  cursor: pointer;
+}
+
+.switch-control span {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--muted);
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.switch-control-on {
+  border-color: rgba(52, 211, 153, 0.42);
+  background: rgba(52, 211, 153, 0.22);
+}
+
+.switch-control-on span {
+  transform: translateX(20px);
+  background: var(--green);
+}
+
+.switch-control:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
 button:focus-visible,
 input:focus-visible,
 a:focus-visible {
@@ -842,9 +883,7 @@ a:focus-visible {
 .upstream-card {
   border-radius: var(--radius-panel);
   border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgba(16, 31, 48, 0.78), rgba(12, 22, 36, 0.82)),
-    linear-gradient(120deg, rgba(56, 189, 248, 0.08), transparent 38%);
+  background: var(--panel);
   padding: 18px 20px;
   display: grid;
   gap: 16px;
@@ -854,9 +893,7 @@ a:focus-visible {
 .model-market-card {
   border-radius: var(--radius-panel);
   border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgba(16, 31, 48, 0.78), rgba(12, 22, 36, 0.82)),
-    linear-gradient(120deg, rgba(52, 211, 153, 0.08), transparent 38%);
+  background: var(--panel);
   padding: 18px 20px;
   display: grid;
   gap: 18px;
@@ -1239,6 +1276,7 @@ a:focus-visible {
 :root[data-theme="light"] .failure-node,
 :root[data-theme="light"] .channel-form-check,
 :root[data-theme="light"] .channel-model-row,
+:root[data-theme="light"] .channel-model-card,
 :root[data-theme="light"] .model-market-card,
 :root[data-theme="light"] .model-market-metric,
 :root[data-theme="light"] .model-catalog-row,
@@ -1249,6 +1287,7 @@ a:focus-visible {
 
 :root[data-theme="light"] .filter-input,
 :root[data-theme="light"] .channel-form input,
+:root[data-theme="light"] .channel-form select,
 :root[data-theme="light"] .channel-form textarea,
 :root[data-theme="light"] .token-form input,
 :root[data-theme="light"] .auth-panel input {
@@ -1275,6 +1314,15 @@ a:focus-visible {
   background: #ffffff;
 }
 
+:root[data-theme="light"] .upstream-card,
+:root[data-theme="light"] .channel-probe-card,
+:root[data-theme="light"] .usage-chart-panel,
+:root[data-theme="light"] .line-chart-card,
+:root[data-theme="light"] .empty-state {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #f7f7f5;
+}
+
 @media (prefers-color-scheme: light) {
   :root[data-theme="system"] .filter-bar,
   :root[data-theme="system"] .trace-table,
@@ -1293,6 +1341,7 @@ a:focus-visible {
   :root[data-theme="system"] .failure-node,
   :root[data-theme="system"] .channel-form-check,
   :root[data-theme="system"] .channel-model-row,
+  :root[data-theme="system"] .channel-model-card,
   :root[data-theme="system"] .model-market-card,
   :root[data-theme="system"] .model-market-metric,
   :root[data-theme="system"] .model-catalog-row,
@@ -1303,6 +1352,7 @@ a:focus-visible {
 
   :root[data-theme="system"] .filter-input,
   :root[data-theme="system"] .channel-form input,
+  :root[data-theme="system"] .channel-form select,
   :root[data-theme="system"] .channel-form textarea,
   :root[data-theme="system"] .token-form input,
   :root[data-theme="system"] .auth-panel input {
@@ -1326,9 +1376,19 @@ a:focus-visible {
   :root[data-theme="system"] .session-row:hover,
   :root[data-theme="system"] .tool-list-item:hover,
   :root[data-theme="system"] .channel-model-row:hover,
+  :root[data-theme="system"] .channel-model-card:hover,
   :root[data-theme="system"] .model-market-card:hover,
   :root[data-theme="system"] .model-catalog-row:hover {
     background: #ffffff;
+  }
+
+  :root[data-theme="system"] .upstream-card,
+  :root[data-theme="system"] .channel-probe-card,
+  :root[data-theme="system"] .usage-chart-panel,
+  :root[data-theme="system"] .line-chart-card,
+  :root[data-theme="system"] .empty-state {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: #f7f7f5;
   }
 }
 
@@ -1396,6 +1456,7 @@ a:focus-visible {
 }
 
 .channel-form input,
+.channel-form select,
 .channel-form textarea {
   min-height: 42px;
   width: 100%;
@@ -1404,6 +1465,18 @@ a:focus-visible {
   padding: 0 12px;
   background: rgba(2, 8, 23, 0.42);
   color: var(--text);
+}
+
+.channel-form select {
+  appearance: auto;
+}
+
+.channel-form-modal {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.channel-create-modal {
+  width: min(620px, 100%);
 }
 
 .channel-form textarea {
@@ -2717,6 +2790,43 @@ a:focus-visible {
   gap: 10px;
 }
 
+.channel-model-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.channel-model-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.channel-model-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.channel-model-card-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.channel-model-card strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .channel-model-row {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) auto auto auto auto auto auto;
@@ -2744,6 +2854,10 @@ a:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-market-metrics-compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .channel-probe-list {
@@ -2795,6 +2909,60 @@ a:focus-visible {
 
 .channel-probe-hint {
   color: var(--text);
+}
+
+.usage-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.usage-chart-panel,
+.line-chart-card {
+  min-width: 0;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.34);
+  padding: 12px;
+}
+
+.line-chart-card {
+  padding: 8px 4px 4px;
+}
+
+.chart-tooltip {
+  display: grid;
+  gap: 6px;
+  min-width: 160px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  color: var(--text);
+  padding: 10px 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.chart-tooltip span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.chart-tooltip i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.chart-empty {
+  display: grid;
+  place-items: center;
+  height: 180px;
+  color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .usage-bars {

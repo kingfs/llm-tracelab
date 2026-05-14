@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
-import { DetailMetaPill, HomeIcon, InlineTag } from "../components/common/Badges";
+import { DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
+import { SingleUsageCharts } from "../components/common/Charts";
+import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, patchJSON, postJSON } from "../lib/api";
-import { buildTraceLink, formatCount, formatDateTime, formatTime, formatTimelineBucketLabel, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 export function ChannelDetailPage() {
   const { channelID = "" } = useParams();
@@ -151,9 +153,9 @@ export function ChannelDetailPage() {
             <Link className="icon-button" to="/channels" title="Back to channels" aria-label="Back to channels">
               <HomeIcon />
             </Link>
-            <button className="ghost-button" type="button" onClick={probe} disabled={busy === "probe"}>{busy === "probe" ? "Probing" : "Probe"}</button>
-            <button className="ghost-button" type="button" onClick={() => setEditOpen((open) => !open)}>{editOpen ? "Close edit" : "Edit"}</button>
-            <button className="ghost-button" type="button" onClick={() => setChannelEnabled(!channel.enabled)} disabled={busy === "channel"}>{channel.enabled ? "Disable" : "Enable"}</button>
+            <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title="Probe channel" aria-label="Probe channel"><ProbeIcon /></button>
+            <button className="icon-button" type="button" onClick={() => setEditOpen((open) => !open)} title={editOpen ? "Close edit" : "Edit channel"} aria-label={editOpen ? "Close edit" : "Edit channel"}><EditIcon /></button>
+            <Switch checked={Boolean(channel.enabled)} onChange={setChannelEnabled} disabled={busy === "channel"} label="Channel enabled" />
           </div>
           <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
         </div>
@@ -227,7 +229,7 @@ export function ChannelDetailPage() {
                 <h2>Token and request buckets</h2>
               </div>
             </div>
-            <UsageBars items={trends} />
+            <SingleUsageCharts items={trends} />
           </section>
 
           <section className="panel">
@@ -242,7 +244,7 @@ export function ChannelDetailPage() {
               <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? "Adding" : "Add model"}</button>
               <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? "Enabling" : `Enable new (${formatCount(discoveredDisabledModels.length)})`}</button>
             </form>
-            <div className="channel-model-table">
+            <div className="channel-model-card-grid">
               {modelsUsage.length ? modelsUsage.map((model) => <ChannelModelRow key={model.model} item={model} busy={busy === model.model} onToggle={() => setModelEnabled(model.model, !model.enabled)} />) : <EmptyState title="No models" detail="Probe or manually configure models for this channel." compact />}
             </div>
           </section>
@@ -322,18 +324,33 @@ function ChannelModelRow({ item, busy, onToggle }) {
   const summary = item.summary || {};
   const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
   return (
-    <div className="channel-model-row">
-      <div>
-        <strong>{item.model}</strong>
-        <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : item.source || "unknown"}</span>
+    <div className="channel-model-card">
+      <div className="channel-model-card-head">
+        <div>
+          <strong>{item.model}</strong>
+          <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : item.source || "unknown"}</span>
+        </div>
+        <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} />
       </div>
-      <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? "enabled" : "disabled"}</InlineTag>
-      {isDiscoveredDisabled ? <InlineTag tone="gold">new</InlineTag> : null}
-      <span>{formatCount(summary.request_count)} req</span>
-      <span>{formatCount(summary.failed_request)} err</span>
-      <span>{formatCount(summary.total_tokens)} tok</span>
-      <button className="ghost-button" type="button" onClick={onToggle} disabled={busy}>{busy ? "Saving" : item.enabled ? "Disable" : "Enable"}</button>
+      <div className="trace-tag-group">
+        <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? "enabled" : "disabled"}</InlineTag>
+        {isDiscoveredDisabled ? <InlineTag tone="gold">new</InlineTag> : null}
+      </div>
+      <div className="model-market-metrics model-market-metrics-compact">
+        <Metric label="req" value={formatCount(summary.request_count)} />
+        <Metric label="err" value={formatCount(summary.failed_request)} danger={Number(summary.failed_request || 0) > 0} />
+        <Metric label="tok" value={formatCount(summary.total_tokens)} />
+      </div>
     </div>
+  );
+}
+
+function Metric({ label, value, danger = false }) {
+  return (
+    <span className={danger ? "model-market-metric model-market-metric-danger" : "model-market-metric"}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </span>
   );
 }
 
@@ -427,27 +444,4 @@ function parseHeadersText(value) {
     headers[key] = headerValue === "***" ? { keep: true } : headerValue;
   });
   return headers;
-}
-
-function UsageBars({ items }) {
-  const maxTokens = Math.max(1, ...items.map((item) => Number(item.total_tokens || 0)));
-  if (!items.length) {
-    return <EmptyState title="No trend" detail="No usage buckets are available for this channel." compact />;
-  }
-  return (
-    <div className="usage-bars">
-      {items.map((item) => {
-        const height = Math.max(6, Math.round((Number(item.total_tokens || 0) / maxTokens) * 120));
-        return (
-          <div className="usage-bar-item" key={item.time} title={`${formatTimelineBucketLabel(item.time)} · ${formatCount(item.total_tokens)} tokens · ${formatCount(item.request_count)} requests`}>
-            <span className="usage-bar-count">{formatCount(item.request_count)}</span>
-            <div className="usage-bar-wrap">
-              <span className={item.failed_request ? "usage-bar usage-bar-danger" : "usage-bar"} style={{ height }} />
-            </div>
-            <span className="usage-bar-label">{formatTimelineBucketLabel(item.time)}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
 }

@@ -129,6 +129,40 @@ function MetricIcon({ type = "total" }) {
   );
 }
 
+export function PlusIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 5v14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M5 12h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    </IconFrame>
+  );
+}
+
+export function EditIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <path d="m14 8 2 2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    </IconFrame>
+  );
+}
+
+export function ProbeIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+        <path d="m15 15 4 4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M11 8v3l2 1.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </IconFrame>
+  );
+}
+
 export function ViewIcon() {
   return (
     <IconFrame>

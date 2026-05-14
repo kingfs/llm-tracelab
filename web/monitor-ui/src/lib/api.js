@@ -27,6 +27,7 @@ export const apiPaths = {
   channelModels: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models`,
   channelModelsBatch: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models/batch`,
   channelModel: (channelID, model) => `/api/channels/${encodeURIComponent(channelID)}/models/${encodeURIComponent(model)}`,
+  providerPresets: "/api/provider-presets",
   localSecretKey: "/api/secrets/local-key",
   localSecretKeyExport: "/api/secrets/local-key?export=1",
   localSecretKeyRotate: "/api/secrets/local-key?rotate=1",
