@@ -164,6 +164,10 @@ Validation:
 
 - Documentation review against `AGENTS.md` and `docs/v1/frontend-redesign-plan.md`.
 
+Status:
+
+- Completed in `fc8d358 docs: design overview dashboard`.
+
 ### Phase 2: Backend Overview API
 
 - Add store-level overview aggregate types and queries.
@@ -175,6 +179,11 @@ Validation:
 
 - `go test ./internal/store ./internal/monitor`
 - Commit backend changes.
+
+Status:
+
+- Completed in `1ea8a4f feat: add monitor overview api`.
+- Verified with `go test ./internal/store ./internal/monitor`.
 
 ### Phase 3: Frontend Overview Dashboard
 
@@ -189,12 +198,32 @@ Validation:
 - `go test ./internal/monitor`
 - Commit frontend changes.
 
+Status:
+
+- Completed in `4244901 feat: redesign monitor overview dashboard`.
+- Verified with `task ui:build`.
+- Verified with `go test ./internal/monitor`.
+
 ### Phase 4: Review And Next Slice
 
 - Review this document against the implemented API and UI.
 - Record any intentional deferrals.
 - Plan the next narrow improvement, such as p95 latency, richer observation health, or deep-link filters.
 - Commit documentation updates if needed.
+
+Status:
+
+- This review confirms the implementation stayed within the intended Overview boundary:
+  - Overview now consumes `/api/overview`.
+  - `Latest traces` was removed from Overview.
+  - Trace search, pagination, and raw evidence remain owned by Traces.
+  - The first API version uses indexed SQLite data only and does not rescan cassette files.
+
+Next narrow slice:
+
+1. Add filtered drilldown URLs from Overview breakdown rows into Traces, Audit, Models, and Upstreams.
+2. Add observation health counts after parse job semantics are stable enough for global display.
+3. Add p95 TTFT/latency only if it can be computed from indexed `logs` without a storage migration.
 
 ## Explicit Deferrals
 
