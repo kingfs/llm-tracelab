@@ -349,6 +349,100 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	}
 }
 
+func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := auth.MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("auth.MigrateUp() error = %v", err)
+	}
+	authStore, err := auth.Open(dbPath)
+	if err != nil {
+		t.Fatalf("auth.Open() error = %v", err)
+	}
+	defer authStore.Close()
+	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser(admin) error = %v", err)
+	}
+	if _, err := authStore.CreateUser(context.Background(), "other", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser(other) error = %v", err)
+	}
+	loginToken, err := authStore.CreateToken(context.Background(), "admin", "monitor-login", auth.DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken(login) error = %v", err)
+	}
+	if _, err := authStore.CreateToken(context.Background(), "other", "other-token", auth.DefaultTokenScope, time.Hour); err != nil {
+		t.Fatalf("CreateToken(other) error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore})
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/auth/tokens", strings.NewReader(`{"name":"local-dev","scope":"api","ttl":"24h"}`))
+	createReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
+	createRR := httptest.NewRecorder()
+	mux.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body=%s", createRR.Code, createRR.Body.String())
+	}
+	var created createTokenResponse
+	if err := json.Unmarshal(createRR.Body.Bytes(), &created); err != nil {
+		t.Fatalf("json.Unmarshal(create) error = %v", err)
+	}
+	if created.Token == "" || created.Prefix == "" {
+		t.Fatalf("created token missing: %+v", created)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/auth/tokens", nil)
+	listReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
+	listRR := httptest.NewRecorder()
+	mux.ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body=%s", listRR.Code, listRR.Body.String())
+	}
+	var list tokenListResponse
+	if err := json.Unmarshal(listRR.Body.Bytes(), &list); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if list.Total != 2 {
+		t.Fatalf("list total = %d, want admin login + created token", list.Total)
+	}
+	var target tokenItem
+	for _, item := range list.Items {
+		if item.Name == "local-dev" {
+			target = item
+		}
+		if item.Name == "other-token" {
+			t.Fatalf("list leaked other user's token: %+v", list.Items)
+		}
+	}
+	if target.ID == 0 || target.Prefix == "" || target.Status != "active" || target.Scope != "api" {
+		t.Fatalf("target token = %+v", target)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/auth/tokens/"+strconv.Itoa(target.ID), nil)
+	deleteReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
+	deleteRR := httptest.NewRecorder()
+	mux.ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body=%s", deleteRR.Code, deleteRR.Body.String())
+	}
+
+	listRR = httptest.NewRecorder()
+	mux.ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list after revoke status = %d, body=%s", listRR.Code, listRR.Body.String())
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &list); err != nil {
+		t.Fatalf("json.Unmarshal(list after revoke) error = %v", err)
+	}
+	for _, item := range list.Items {
+		if item.ID == target.ID && item.Status != "revoked" {
+			t.Fatalf("revoked item = %+v, want status revoked", item)
+		}
+	}
+}
+
 func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	t.Parallel()
 

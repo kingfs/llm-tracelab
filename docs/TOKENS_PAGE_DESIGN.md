@@ -227,6 +227,12 @@ Validation:
 
 - `go test ./internal/auth ./internal/monitor`
 
+Status:
+
+- Completed in this phase.
+- `GET /api/auth/tokens`, `POST /api/auth/tokens`, and `DELETE /api/auth/tokens/{id}` are scoped to the current authenticated principal.
+- Token listing returns safe metadata only and never returns raw tokens or hashes.
+
 ### Phase 3: Frontend Tokens Page
 
 - Replace token-only form with list + create form.

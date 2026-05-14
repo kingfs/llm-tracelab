@@ -165,6 +165,63 @@ func TestStoreUserLoginAndTokenVerification(t *testing.T) {
 	}
 }
 
+func TestStoreListsAndRevokesUserTokens(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("MigrateUp() error = %v", err)
+	}
+	st, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser(admin) error = %v", err)
+	}
+	if _, err := st.CreateUser(ctx, "other", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser(other) error = %v", err)
+	}
+	adminToken, err := st.CreateToken(ctx, "admin", "local-dev", "api", time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken(admin) error = %v", err)
+	}
+	if _, err := st.CreateToken(ctx, "other", "other-dev", "api", time.Hour); err != nil {
+		t.Fatalf("CreateToken(other) error = %v", err)
+	}
+
+	tokens, err := st.ListTokens(ctx, "admin")
+	if err != nil {
+		t.Fatalf("ListTokens() error = %v", err)
+	}
+	if len(tokens) != 1 {
+		t.Fatalf("len(tokens) = %d, want 1", len(tokens))
+	}
+	if tokens[0].Name != "local-dev" || tokens[0].Prefix == "" || tokens[0].Scope != "api" || !tokens[0].Enabled {
+		t.Fatalf("token record = %+v", tokens[0])
+	}
+
+	if err := st.RevokeToken(ctx, "other", tokens[0].ID); err == nil {
+		t.Fatalf("RevokeToken(other owned token) error = nil, want error")
+	}
+	if err := st.RevokeToken(ctx, "admin", tokens[0].ID); err != nil {
+		t.Fatalf("RevokeToken(admin) error = %v", err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, adminToken.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(revoked) = ok %v err %v, want ok false err nil", ok, err)
+	}
+	tokens, err = st.ListTokens(ctx, "admin")
+	if err != nil {
+		t.Fatalf("ListTokens(after revoke) error = %v", err)
+	}
+	if len(tokens) != 1 || tokens[0].Enabled {
+		t.Fatalf("tokens after revoke = %+v, want disabled token", tokens)
+	}
+}
+
 func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	t.Parallel()
 

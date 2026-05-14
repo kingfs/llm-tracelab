@@ -463,6 +463,23 @@ type createTokenResponse struct {
 	Prefix string `json:"prefix"`
 }
 
+type tokenListResponse struct {
+	Items []tokenItem `json:"items"`
+	Total int         `json:"total"`
+}
+
+type tokenItem struct {
+	ID         int        `json:"id"`
+	Name       string     `json:"name"`
+	Prefix     string     `json:"prefix"`
+	Scope      string     `json:"scope"`
+	Enabled    bool       `json:"enabled"`
+	Status     string     `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+}
+
 type upstreamListResponse struct {
 	Items           []upstreamItem            `json:"items"`
 	RoutingFailures routingFailureSummaryView `json:"routing_failures"`
@@ -797,7 +814,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authCreateTokenAPIHandler(opt.AuthStore), opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), opt.AuthVerifier))
 	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
@@ -900,9 +918,79 @@ func authChangePasswordAPIHandler(authStore *auth.Store) http.HandlerFunc {
 	}
 }
 
-func authCreateTokenAPIHandler(authStore *auth.Store) http.HandlerFunc {
+func authTokensAPIHandler(authStore *auth.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		switch r.Method {
+		case http.MethodGet:
+			handleListAuthTokens(w, r, authStore)
+		case http.MethodPost:
+			handleCreateAuthToken(w, r, authStore)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func handleListAuthTokens(w http.ResponseWriter, r *http.Request, authStore *auth.Store) {
+	if authStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth store not configured"})
+		return
+	}
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.Username) == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	tokens, err := authStore.ListTokens(r.Context(), principal.Username)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	items := make([]tokenItem, 0, len(tokens))
+	for _, token := range tokens {
+		items = append(items, tokenItemFromRecord(token))
+	}
+	writeJSON(w, http.StatusOK, tokenListResponse{
+		Items: items,
+		Total: len(items),
+	})
+}
+
+func handleCreateAuthToken(w http.ResponseWriter, r *http.Request, authStore *auth.Store) {
+	if authStore == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth store not configured"})
+		return
+	}
+	principal, ok := auth.PrincipalFromContext(r.Context())
+	if !ok || strings.TrimSpace(principal.Username) == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var req createTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid token payload"})
+		return
+	}
+	var ttl time.Duration
+	if strings.TrimSpace(req.TTL) != "" {
+		parsed, err := time.ParseDuration(req.TTL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ttl"})
+			return
+		}
+		ttl = parsed
+	}
+	token, err := authStore.CreateToken(r.Context(), principal.Username, req.Name, req.Scope, ttl)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, createTokenResponse{Token: token.Token, Prefix: token.Prefix})
+}
+
+func authTokenDetailAPIHandler(authStore *auth.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
 			http.NotFound(w, r)
 			return
 		}
@@ -915,26 +1003,21 @@ func authCreateTokenAPIHandler(authStore *auth.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
-		var req createTokenRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid token payload"})
+		tokenIDText := strings.TrimPrefix(pathClean(r.URL.Path), "/api/auth/tokens/")
+		tokenID, err := strconv.Atoi(tokenIDText)
+		if err != nil || tokenID <= 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "token not found"})
 			return
 		}
-		var ttl time.Duration
-		if strings.TrimSpace(req.TTL) != "" {
-			parsed, err := time.ParseDuration(req.TTL)
-			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid ttl"})
+		if err := authStore.RevokeToken(r.Context(), principal.Username, tokenID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "token not found"})
 				return
 			}
-			ttl = parsed
-		}
-		token, err := authStore.CreateToken(r.Context(), principal.Username, req.Name, req.Scope, ttl)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, createTokenResponse{Token: token.Token, Prefix: token.Prefix})
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }
 
@@ -2883,6 +2966,30 @@ func parseJobViews(jobs []store.ParseJobRecord) []overviewParseJob {
 		})
 	}
 	return out
+}
+
+func tokenItemFromRecord(record auth.TokenRecord) tokenItem {
+	return tokenItem{
+		ID:         record.ID,
+		Name:       record.Name,
+		Prefix:     record.Prefix,
+		Scope:      record.Scope,
+		Enabled:    record.Enabled,
+		Status:     tokenStatus(record),
+		CreatedAt:  record.CreatedAt,
+		ExpiresAt:  record.ExpiresAt,
+		LastUsedAt: record.LastUsedAt,
+	}
+}
+
+func tokenStatus(record auth.TokenRecord) string {
+	if !record.Enabled {
+		return "revoked"
+	}
+	if record.ExpiresAt != nil && time.Now().UTC().After(*record.ExpiresAt) {
+		return "expired"
+	}
+	return "active"
 }
 
 func buildTimelineEventViews(parsed *ParsedData) []recordEventView {

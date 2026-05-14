@@ -42,6 +42,17 @@ type TokenResult struct {
 	Prefix string
 }
 
+type TokenRecord struct {
+	ID         int
+	Name       string
+	Prefix     string
+	Scope      string
+	Enabled    bool
+	CreatedAt  time.Time
+	ExpiresAt  *time.Time
+	LastUsedAt *time.Time
+}
+
 func DefaultDatabasePath(outputDir string) string {
 	return filepath.Join(outputDir, "control.sqlite3")
 }
@@ -253,6 +264,46 @@ func (s *Store) CreateToken(ctx context.Context, username string, name string, s
 	return TokenResult{Token: raw, Prefix: tokenDisplayPrefix(raw)}, nil
 }
 
+func (s *Store) ListTokens(ctx context.Context, username string) ([]TokenRecord, error) {
+	username = normalizeUsername(username)
+	if username == "" {
+		return nil, errors.New("username is required")
+	}
+	rows, err := s.client.APIToken.Query().
+		Where(apitoken.HasUserWith(user.UsernameEQ(username))).
+		Order(apitoken.ByCreatedAt(entsql.OrderDesc()), apitoken.ByID(entsql.OrderDesc())).
+		All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TokenRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, tokenRecordFromEnt(row))
+	}
+	return out, nil
+}
+
+func (s *Store) RevokeToken(ctx context.Context, username string, tokenID int) error {
+	username = normalizeUsername(username)
+	if username == "" {
+		return errors.New("username is required")
+	}
+	if tokenID <= 0 {
+		return errors.New("token id is required")
+	}
+	n, err := s.client.APIToken.Update().
+		Where(apitoken.IDEQ(tokenID), apitoken.HasUserWith(user.UsernameEQ(username))).
+		SetEnabled(false).
+		Save(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -282,6 +333,19 @@ func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool,
 		Role:     u.Role,
 		Scope:    row.Scope,
 	}, true, nil
+}
+
+func tokenRecordFromEnt(row *dao.APIToken) TokenRecord {
+	return TokenRecord{
+		ID:         row.ID,
+		Name:       row.Name,
+		Prefix:     row.Prefix,
+		Scope:      row.Scope,
+		Enabled:    row.Enabled,
+		CreatedAt:  row.CreatedAt,
+		ExpiresAt:  row.ExpiresAt,
+		LastUsedAt: row.LastUsedAt,
+	}
 }
 
 func hashPassword(password string) (string, error) {
