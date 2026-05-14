@@ -4,6 +4,8 @@ export const apiPaths = {
   authStatus: "/api/auth/status",
   authCheck: "/api/auth/check",
   authLogin: "/api/auth/login",
+  authMe: "/api/auth/me",
+  authPassword: "/api/auth/password",
   authTokens: "/api/auth/tokens",
   traces: "/api/traces",
   findings: "/api/findings",

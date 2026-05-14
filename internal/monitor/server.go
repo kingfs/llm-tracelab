@@ -341,6 +341,17 @@ type loginResponse struct {
 	Prefix string `json:"prefix"`
 }
 
+type meResponse struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	Scope    string `json:"scope"`
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 type createTokenRequest struct {
 	Name  string `json:"name"`
 	Scope string `json:"scope"`
@@ -466,6 +477,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.SessionTTL))
 	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authCreateTokenAPIHandler(opt.AuthStore), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
@@ -510,6 +523,53 @@ func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerF
 
 func authCheckAPIHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
+func authMeAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		writeJSON(w, http.StatusOK, meResponse{
+			Username: principal.Username,
+			Role:     principal.Role,
+			Scope:    principal.Scope,
+		})
+	}
+}
+
+func authChangePasswordAPIHandler(authStore *auth.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if authStore == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "auth store not configured"})
+			return
+		}
+		principal, ok := auth.PrincipalFromContext(r.Context())
+		if !ok || strings.TrimSpace(principal.Username) == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		var req changePasswordRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid password payload"})
+			return
+		}
+		if err := authStore.VerifyPassword(r.Context(), principal.Username, req.CurrentPassword); err != nil {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password is incorrect"})
+			return
+		}
+		if err := authStore.ResetPassword(r.Context(), principal.Username, req.NewPassword); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	}
 }

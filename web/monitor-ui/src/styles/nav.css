@@ -1,6 +1,14 @@
 .primary-nav {
   display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 18px;
+  min-height: calc(100vh - 44px);
+}
+
+.nav-top {
+  display: grid;
+  gap: 18px;
+  min-height: 0;
 }
 
 .nav-brand {
@@ -49,6 +57,7 @@
 .nav-section {
   display: grid;
   gap: 6px;
+  align-content: start;
 }
 
 .nav-chip {
@@ -90,6 +99,238 @@
   color: rgba(190, 220, 238, 0.84);
 }
 
+.nav-account {
+  position: relative;
+}
+
+.account-trigger,
+.account-menu-item,
+.theme-option {
+  font: inherit;
+}
+
+.account-trigger {
+  width: 100%;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid rgba(125, 211, 252, 0.18);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.56);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.account-trigger:hover {
+  border-color: rgba(125, 211, 252, 0.34);
+  background: rgba(30, 41, 59, 0.78);
+}
+
+.account-avatar {
+  width: 36px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.94), rgba(52, 211, 153, 0.76));
+  color: #04131f;
+  font-size: 0.8rem;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+
+.account-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-copy strong,
+.account-copy small,
+.account-menu-head,
+.account-menu-item,
+.theme-option,
+.nav-field {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.account-copy strong,
+.account-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-copy small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.account-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 40;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(18, 33, 51, 0.98), rgba(9, 19, 32, 0.98));
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.account-menu-head {
+  display: grid;
+  gap: 3px;
+  padding: 8px 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.account-menu-head span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.account-menu-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.account-menu-item:hover {
+  border-color: var(--line);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.account-menu-item small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.account-menu-danger span {
+  color: var(--danger);
+}
+
+.theme-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(2, 8, 23, 0.38);
+}
+
+.theme-option {
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.theme-option-active {
+  background: rgba(56, 189, 248, 0.18);
+  color: var(--text);
+}
+
+.nav-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 8, 23, 0.66);
+  backdrop-filter: blur(8px);
+}
+
+.nav-modal {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.nav-modal-head,
+.nav-modal-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nav-modal-head h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.nav-modal-actions {
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.nav-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.nav-field input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: rgba(2, 8, 23, 0.42);
+  color: var(--text);
+}
+
+:root[data-theme="light"] .app-sidebar,
+:root[data-theme="light"] .account-menu {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(237, 244, 251, 0.94));
+}
+
+:root[data-theme="light"] .account-trigger,
+:root[data-theme="light"] .theme-switcher,
+:root[data-theme="light"] .nav-field input {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .app-sidebar,
+  :root[data-theme="system"] .account-menu {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(237, 244, 251, 0.94));
+  }
+
+  :root[data-theme="system"] .account-trigger,
+  :root[data-theme="system"] .theme-switcher,
+  :root[data-theme="system"] .nav-field input {
+    background: rgba(255, 255, 255, 0.72);
+  }
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -108,6 +349,15 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    min-height: 0;
+  }
+
+  .nav-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .nav-brand {
@@ -120,6 +370,15 @@
     display: flex;
     gap: 8px;
     overflow-x: auto;
+  }
+
+  .nav-account {
+    flex: 0 0 220px;
+  }
+
+  .account-menu {
+    left: auto;
+    width: 280px;
   }
 }
 
@@ -136,5 +395,22 @@
   .nav-chip {
     min-height: 38px;
     padding: 0.52rem 0.72rem;
+  }
+
+  .nav-account {
+    flex-basis: auto;
+  }
+
+  .account-copy {
+    display: none;
+  }
+
+  .account-trigger {
+    width: 54px;
+  }
+
+  .account-menu {
+    right: 0;
+    width: min(280px, calc(100vw - 24px));
   }
 }

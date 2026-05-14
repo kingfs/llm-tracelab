@@ -14,7 +14,7 @@ import { TraceDetailPage } from "./routes/TraceDetailPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 
 function App() {
-  const [auth, setAuth] = useState({ loading: true, required: false, authorized: false, error: "" });
+  const [auth, setAuth] = useState({ loading: true, required: false, authorized: false, error: "", user: null });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
@@ -26,23 +26,24 @@ function App() {
         const status = await requestJSON(apiPaths.authStatus);
         if (!status.auth_required) {
           if (!cancelled) {
-            setAuth({ loading: false, required: false, authorized: true, error: "" });
+            setAuth({ loading: false, required: false, authorized: true, error: "", user: { username: "local", role: "local", scope: "all" } });
           }
           return;
         }
         try {
           await requestJSON(apiPaths.authCheck);
+          const user = await requestJSON(apiPaths.authMe).catch(() => null);
           if (!cancelled) {
-            setAuth({ loading: false, required: true, authorized: true, error: "" });
+            setAuth({ loading: false, required: true, authorized: true, error: "", user });
           }
         } catch {
           if (!cancelled) {
-            setAuth({ loading: false, required: true, authorized: false, error: "Invalid or missing monitor token." });
+            setAuth({ loading: false, required: true, authorized: false, error: "Invalid or missing monitor token.", user: null });
           }
         }
       } catch (error) {
         if (!cancelled) {
-          setAuth({ loading: false, required: true, authorized: false, error: error.message || "Unable to verify monitor token." });
+          setAuth({ loading: false, required: true, authorized: false, error: error.message || "Unable to verify monitor token.", user: null });
         }
       }
     }
@@ -59,13 +60,20 @@ function App() {
       try {
         const payload = await postJSON(apiPaths.authLogin, { username, password });
         window.localStorage.setItem(MONITOR_TOKEN_KEY, payload.token);
-        setAuth({ loading: false, required: true, authorized: true, error: "" });
+        const user = await requestJSON(apiPaths.authMe).catch(() => ({ username: username.trim(), role: "admin", scope: "all" }));
+        setAuth({ loading: false, required: true, authorized: true, error: "", user });
+        setPassword("");
       } catch {
-        setAuth({ loading: false, required: true, authorized: false, error: "Invalid username or password." });
+        setAuth({ loading: false, required: true, authorized: false, error: "Invalid username or password.", user: null });
       }
       return;
     }
-    setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password." });
+    setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password.", user: null });
+  };
+
+  const logout = () => {
+    window.localStorage.removeItem(MONITOR_TOKEN_KEY);
+    setAuth({ loading: false, required: true, authorized: false, error: "Signed out.", user: null });
   };
 
   if (auth.loading) {
@@ -90,7 +98,7 @@ function App() {
   }
 
   return (
-    <AppShell>
+    <AppShell user={auth.user} onLogout={logout}>
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<OverviewPage />} />

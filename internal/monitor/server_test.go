@@ -263,6 +263,35 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	if created.Token == "" {
 		t.Fatalf("created token missing")
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("me code = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	var me meResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &me); err != nil {
+		t.Fatalf("json.Unmarshal(me) error = %v", err)
+	}
+	if me.Username != "admin" || me.Role != "admin" {
+		t.Fatalf("me = %+v, want admin principal", me)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(`{"current_password":"change-me-123","new_password":"changed-again-123"}`))
+	req.Header.Set("Authorization", "Bearer "+payload.Token)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("change password code = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if _, err := authStore.Login(context.Background(), "admin", "change-me-123", time.Hour); err == nil {
+		t.Fatalf("Login() with old password succeeded, want failure")
+	}
+	if _, err := authStore.Login(context.Background(), "admin", "changed-again-123", time.Hour); err != nil {
+		t.Fatalf("Login() with new password error = %v", err)
+	}
 }
 
 func TestSessionListAPIHandlerReturnsGroupedItems(t *testing.T) {
