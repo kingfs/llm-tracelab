@@ -719,11 +719,12 @@ Headers 编辑：
 - 已增强 Routing 排障筛选：`/api/traces` 支持 selected route 视角的 status、duration、TTFT、token 区间过滤；Routing 页面提供 model、channel、status、latency/token 区间筛选并保留 URL 参数，便于复现排查上下文。
 - 已明确配置源可见性：YAML 仅作为服务启动配置和首次 bootstrap 输入；`channel_configs.source` 标记 `manual`/`bootstrap`，Monitor UI 展示 web-managed/bootstrap 来源，模型来源展示 manual/bootstrap static/probe discovered/seen in trace。
 - 已完善 token unknown 与 0 的展示口径：模型、渠道、趋势 API 返回 `missing_usage_request`，定义为成功请求中 usage token 三项均为 0 的记录数；模型、渠道和 Routing 页面在 token 统计旁展示 missing usage，避免误读为真实 0 消耗。
+- 已同步用户与维护者文档：README / README_EN / MONITOR_GUIDE / PROJECT_BASELINE / MAINTAINER_BASELINE 明确 channel/models 通过 Monitor Web 管理并入库，YAML 不再作为长期渠道配置入口。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 - 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路，并覆盖本地失败探测提示。
 - 已按产品取舍跳过渠道导入/导出能力，不作为 v1 必做项。
 
 下一步建议：
 
-1. 同步用户文档：更新 README / MONITOR_GUIDE，明确 channel/models 通过 Web 管理并入库，YAML 不再作为长期渠道配置入口。
-2. 对 v1 模型/渠道/路由管理闭环做一次收尾审查：检查 API 命名、文档入口、空状态文案和测试覆盖是否还能减少误解。
+1. 对 v1 模型/渠道/路由管理闭环做一次收尾审查：检查 API 命名、文档入口、空状态文案和测试覆盖是否还能减少误解。
+2. 根据收尾审查结果，只处理明确的阻塞项或高价值小修；避免继续扩展非必要功能。
