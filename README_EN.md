@@ -73,15 +73,13 @@ logs/
 
 ## Quick Start
 
-### 1. Configure
+### 1. Configure Startup Settings
 
-The recommended baseline is now the multi-upstream shape.
+Starting with v1, YAML should be limited to service startup settings: ports, database, trace output directory, auth, MCP, and router policy. Model channels and model enablement should be managed in the Monitor Web UI and persisted to SQLite.
 
-The legacy single `upstream` block is still supported for the simplest single-target setup, but if the same model may be served by multiple providers you should prefer `upstreams + router` so switching providers no longer requires stopping the proxy and editing config.
+[config/config.yaml](./config/config.yaml) is the tracked default example and should not contain real secrets. Production deployments can still override startup settings with environment variables.
 
-[config/config.yaml](./config/config.yaml) is the tracked default example and should not contain real secrets. Sensitive values use `$env:VAR_NAME` references, and production Docker Compose can still override defaults with environment variables.
-
-The default config shape is:
+The recommended base config shape is:
 
 ```yaml
 server:
@@ -120,50 +118,23 @@ router:
   fallback:
     on_missing_model: "reject"
 
-upstreams:
-  - id: "openai-primary"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "static_only" # the default example does not require a real key; use list_models in deployments
-    static_models:
-      - "gpt-4o-mini"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:LLM_API_KEY"
-      provider_preset: "openai"
-
-  - id: "openrouter-fallback"
-    enabled: true
-    priority: 80
-    weight: 0.8
-    capacity_hint: 1.2
-    model_discovery: "static_only"
-    static_models:
-      - "gpt-5"
-      - "gpt-4.1"
-    upstream:
-      base_url: "https://openrouter.ai/api/v1"
-      api_key: "$env:OPENROUTER_API_KEY"
-      provider_preset: "openrouter"
-      headers: {}                    # extra upstream headers such as HTTP-Referer
-
 debug:
   output_dir: "./logs"
   mask_key: false
 ```
 
-If you only need a single upstream proxy, the old format still works:
+Legacy `upstream` / `upstreams` YAML is still supported, but it should be treated as a first-run bootstrap or migration input. Once channel configuration exists in SQLite, runtime routing uses the database and does not continuously sync YAML upstreams. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
+
+Compatible bootstrap example:
 
 ```yaml
 upstream:
   base_url: "https://api.openai.com/v1"
-  api_key: "sk-xxx"
+  api_key: "$env:LLM_API_KEY"
   provider_preset: "openai"
 ```
 
-If you prefer starting from a ready-made config, use one of these examples:
+If you prefer starting from a ready-made bootstrap config, use one of these examples; long-lived channel configuration should still be managed in Monitor Web:
 
 - [config/examples/openai.yaml](./config/examples/openai.yaml)
 - [config/examples/anthropic.yaml](./config/examples/anthropic.yaml)
@@ -195,7 +166,7 @@ Supported environment variable overrides:
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
 
-With `upstreams`, the legacy `LLM_TRACELAB_UPSTREAM_*` variables override the first upstream target. This keeps Docker Compose simple for a single default upstream. For more complex multi-upstream deployments, mount a dedicated config file.
+The legacy `LLM_TRACELAB_UPSTREAM_*` variables still override the first bootstrap upstream target. This is useful for migrating a single default upstream. For more complex multi-channel deployments, manage channels in Monitor Web.
 
 Access control notes:
 
@@ -203,6 +174,7 @@ Access control notes:
 - Initialize the first user with `go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`.
 - The Monitor UI uses username/password login. After login, use the `Tokens` page to generate a personal API token for the current user.
 - The same personal token works for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
+- Channels / Models are managed in Monitor Web and stored in SQLite; YAML is no longer the long-lived channel configuration surface.
 
 Recommended compatibility pattern:
 

@@ -89,8 +89,12 @@ Additional additive SQLite tables now persist multi-upstream runtime state:
 
 - `upstream_targets`
 - `upstream_models`
+- `channel_configs`
+- `channel_models`
+- `model_catalog`
+- `channel_probe_runs`
 
-These tables provide warm-start model catalog state and monitor-facing upstream analytics without coupling replay to live providers.
+`channel_configs` and `channel_models` are the long-lived source of truth for channel/model management. YAML `upstream` / `upstreams` remains a compatibility bootstrap input when the database has no channels; after import, users should manage channels and model enablement through Monitor Web. `upstream_targets` and `upstream_models` remain runtime/compatibility projections for routing diagnostics and older monitor surfaces.
 
 ### Schema Upgrade Behavior
 
@@ -152,12 +156,12 @@ Multi-upstream routing is now an implemented feature, not just a plan.
 
 ### Configuration And Compatibility
 
-The current baseline supports both:
+The current baseline supports both compatibility inputs:
 
 - legacy single `upstream`
 - additive `upstreams` plus `router`
 
-The compatibility path keeps older configs working while allowing one proxy instance to serve multiple providers for the same model family.
+The compatibility path keeps older configs working as first-run bootstrap input. Long-lived channel and model configuration is stored in SQLite and edited through Monitor Web rather than repeatedly editing YAML.
 
 ### Routing Runtime
 

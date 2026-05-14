@@ -77,15 +77,13 @@ logs/
 
 ## 快速开始
 
-### 1. 配置
+### 1. 配置服务启动参数
 
-当前推荐优先使用多 upstream 配置。
+v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略等。模型渠道和模型启停应通过 Monitor Web 管理，并持久化到 SQLite。
 
-旧的单 `upstream` 仍然兼容，适合最简单的单目标场景；但如果你的同一模型可能由多个 provider 提供，应直接使用 `upstreams + router`，避免再通过停服改配置切换上游。
+[config/config.yaml](./config/config.yaml) 是提交到仓库的默认样例配置，不放真实密钥。生产部署可以继续用环境变量覆盖端口、数据库、输出目录等启动参数。
 
-[config/config.yaml](./config/config.yaml) 是提交到仓库的默认样例配置，不放真实密钥；敏感值使用 `$env:VAR_NAME` 从环境变量读取，生产 Docker Compose 也通过环境变量覆盖默认值。
-
-默认配置的结构如下：
+推荐的基础配置结构如下：
 
 ```yaml
 server:
@@ -124,50 +122,23 @@ router:
   fallback:
     on_missing_model: "reject"
 
-upstreams:
-  - id: "openai-primary"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "static_only" # 默认样例不依赖真实 key；线上可改为 list_models
-    static_models:
-      - "gpt-4o-mini"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:LLM_API_KEY"
-      provider_preset: "openai"
-
-  - id: "openrouter-fallback"
-    enabled: true
-    priority: 80
-    weight: 0.8
-    capacity_hint: 1.2
-    model_discovery: "static_only"
-    static_models:
-      - "gpt-5"
-      - "gpt-4.1"
-    upstream:
-      base_url: "https://openrouter.ai/api/v1"
-      api_key: "$env:OPENROUTER_API_KEY"
-      provider_preset: "openrouter"
-      headers: {}                 # 额外上游请求头，比如 HTTP-Referer
-
 debug:
   output_dir: "./logs"
   mask_key: false
 ```
 
-如果你只需要单目标代理，仍然可以继续使用旧格式：
+历史 `upstream` / `upstreams` YAML 仍然兼容，但只建议作为首次启动 bootstrap 或迁移入口使用。当 SQLite 中已经存在 channel 配置时，运行时以数据库为准，不再持续同步 YAML upstreams。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
+
+兼容的 bootstrap 示例：
 
 ```yaml
 upstream:
   base_url: "https://api.openai.com/v1"
-  api_key: "sk-xxx"
+  api_key: "$env:LLM_API_KEY"
   provider_preset: "openai"
 ```
 
-如果你不想从零开始写配置，直接参考这些现成样例：
+如果你不想从零开始写 bootstrap 配置，可参考这些现成样例；长期配置仍建议在 Monitor Web 中完成：
 
 - [config/examples/openai.yaml](./config/examples/openai.yaml)
 - [config/examples/anthropic.yaml](./config/examples/anthropic.yaml)
@@ -201,7 +172,7 @@ upstream:
 - `LLM_TRACELAB_OUTPUT_DIR`
 - `LLM_TRACELAB_MASK_KEY`
 
-在 `upstreams` 多目标配置中，兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 会覆盖第一个 upstream target，适合 Docker Compose 的单默认上游部署。更复杂的多上游生产配置建议直接维护一份挂载的配置文件。
+兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 仍会覆盖第一个 bootstrap upstream target，适合单默认上游迁移。更复杂的多渠道生产配置请在 Monitor Web 中管理。
 
 访问控制说明：
 
@@ -209,6 +180,7 @@ upstream:
 - 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
 - Monitor UI 使用用户名密码登录；登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
 - 同一个个人 token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
+- Channels / Models 通过 Monitor Web 管理并写入 SQLite；YAML 不再作为长期渠道配置入口。
 
 ### MCP Server
 

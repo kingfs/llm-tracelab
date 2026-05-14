@@ -18,7 +18,7 @@ Use it when changing:
 Current responsibility split:
 
 - raw `.http` cassettes are the source of truth for replay and detail reconstruction
-- the configured structured database is the source of truth for list pages, aggregate statistics, filtering, pagination, auth users/tokens, datasets, evals, experiments, upstream catalog state, and session grouping
+- the configured structured database is the source of truth for list pages, aggregate statistics, filtering, pagination, auth users/tokens, datasets, evals, experiments, channel/model configuration, upstream catalog state, and session grouping
 - monitor detail pages may read raw cassettes on demand
 - monitor list pages should not depend on rescanning raw files
 
@@ -33,12 +33,14 @@ Keep these paths ent-first:
 - auth users and API tokens
 - trace list/detail lookup by indexed identity
 - dataset, eval, score, experiment, and upstream catalog records
+- channel configuration, channel model enablement, probe runs, and model catalog records
 - simple aggregate reads that map cleanly to ent queries
 
 Raw SQL is still acceptable for compatibility upgrades, backfills, and monitor read models where the query is primarily analytical:
 
 - session grouping pages
 - upstream analytics and drilldowns
+- channel/model/routing analytics and drilldowns
 - routing failure analytics
 - complex joins that would require artificial ent edges without improving the domain model
 

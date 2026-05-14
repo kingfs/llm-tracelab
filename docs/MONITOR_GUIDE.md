@@ -6,7 +6,9 @@ This document explains what users can do with the current monitor and how to mov
 
 - `Requests`: one row per recorded HTTP exchange
 - `Sessions`: one row per grouped session of related requests
-- `Upstreams`: routing and health analytics across configured upstream targets
+- `Models`: traffic-oriented model marketplace and model detail
+- `Channels`: Web-managed upstream channel configuration, probing, model enablement, and channel analytics
+- `Routing`: selected route decisions for debugging which channel handled each request
 
 It reflects the current implemented behavior.
 
@@ -29,6 +31,8 @@ The monitor is backed by two data sources:
 
 This means the monitor is optimized for fast browsing without losing access to the original HTTP payload.
 
+Channels and model enablement are also stored in SQLite. YAML is only the service startup configuration surface and a first-run bootstrap compatibility input for legacy `upstream` / `upstreams` blocks. After bootstrap, manage channels, API keys, provider presets, probing, and model enablement from Monitor Web.
+
 ## Requests View
 
 Use `Requests` when you need to inspect traffic one HTTP exchange at a time.
@@ -42,7 +46,46 @@ This view is the best fit for:
 
 Each row corresponds to one recorded trace.
 
-The request list page also includes an upstream analytics section so you can inspect routing behavior without leaving the monitor home page.
+The request list can link into channel, model, and routing views when recorded traces include route metadata.
+
+## Models View
+
+Use `Models` when you want to start from a model name and understand where its traffic is going.
+
+This view is the best fit for:
+
+- seeing models that had traffic in the selected time window
+- checking enabled channel coverage for one model
+- comparing request, error, token, and today-token totals
+- opening model detail to inspect channel coverage and request/token trends
+
+Token totals only sum known usage values. When successful traces have no usage payload, the UI shows `missing usage` next to token totals so that missing provider data is not mistaken for a true zero-token request.
+
+## Channels View
+
+Use `Channels` when you need to manage upstream providers or inspect channel-level health and usage.
+
+This view is the best fit for:
+
+- creating a channel without editing YAML
+- setting provider preset, base URL, API key, custom headers, and advanced routing fields
+- probing `/models` or provider-specific model discovery
+- enabling or disabling a channel with a switch
+- enabling or disabling individual models with switches
+- comparing channel request and token trends
+- reviewing recent probe results and failed traces for one channel
+
+Configuration source is visible in the UI:
+
+- `web-managed`: created or edited through Monitor Web
+- `bootstrap`: imported once from legacy YAML when the database had no channel configuration
+
+Model source is also visible:
+
+- `manual`: added from Monitor Web
+- `bootstrap static`: imported from legacy YAML `static_models`
+- `probe discovered`: discovered by a channel probe
+- `seen in trace`: inferred from recorded traffic
 
 ## Sessions View
 
@@ -64,28 +107,27 @@ The current session grouping order is:
 
 The implementation is intentionally provider-extensible. OpenAI-compatible traffic is the first strong use case, but the monitor model is not limited to OpenAI.
 
-## Upstreams View
+## Routing View
 
-Use the upstream analytics section when you need to inspect routing behavior across configured providers and model catalogs.
+Use `Routing` when you need to inspect selected route decisions across recent traces.
 
 This view is the best fit for:
 
-- checking which upstreams are healthy right now
-- seeing which models are routed to which provider
-- spotting one provider accumulating failures
-- drilling into a specific upstream without rescanning raw cassettes
+- confirming which channel handled a model request
+- filtering route records by model, channel, status, duration, TTFT, or token range
+- seeing status code, token usage, duration, and TTFT without opening backend logs
+- jumping from a route record into trace detail
 
-Current upstream analytics capabilities include:
+Current routing capabilities include:
 
 - time-window filtering
-- model substring filtering
-- target health state
-- last refresh status
-- request / success / failure / token / TTFT aggregates
-- recent routed models
-- recent failures with deep links into trace detail
+- model and channel substring filtering
+- success/error filtering
+- duration, TTFT, and token range filtering
+- routed request, channel, error, token, and missing-usage summaries
+- selected channel tags in request rows
 
-Each upstream card also links to a dedicated drilldown page.
+The legacy `Upstreams` pages remain available as runtime diagnostics for existing selected-upstream metadata, but the primary v1 workflow is `Channels` for configuration and analytics, `Models` for model-centric usage, and `Routing` for selected-route debugging.
 
 ## Session Detail
 
@@ -175,13 +217,23 @@ These links are useful when the session page already knows the user likely wants
 4. jump into the most relevant trace from the grouped request list
 5. use deep links and focus targets to land at the likely failure area
 
-### Investigate one unstable upstream
+### Add or change a channel
 
-1. Start in the upstream analytics section on the monitor home page
-2. apply a window such as `1h` or `24h`
-3. optionally filter by model
-4. open the upstream drilldown page
-5. review recent failures, model distribution, endpoint distribution, and recent traces
+1. Start in `Channels`
+2. create or edit a channel from the modal form
+3. choose the provider preset and base URL, then enter API key or headers
+4. use advanced options only when protocol family, routing profile, deployment, project, location, or model resource needs to be explicit
+5. probe the channel to discover models
+6. enable the models you want routed
+7. send traffic through the proxy and inspect the channel/model statistics
+
+### Investigate one unstable channel
+
+1. Start in `Channels`
+2. choose a time window such as `24h`, `7d`, or `30d`
+3. open the channel detail page
+4. review request/token trends, model usage, recent probes, and recent failed traces
+5. use `Routing` if you need to filter selected-route records by status, latency, TTFT, or token range
 6. jump from a failed request into trace detail if you need raw protocol or timeline context
 
 ### Compare request-level and grouped perspectives
@@ -196,4 +248,5 @@ These links are useful when the session page already knows the user likely wants
 - The raw `.http` cassette remains the source of truth for replay and detail views.
 - Missing session metadata does not break trace visibility. Those traces remain available in `Requests` even when they cannot be grouped into `Sessions`.
 - Session grouping is additive metadata, not a replacement for the original request view.
-- Upstream analytics are also additive. They depend on recorded routing metadata and SQLite indexes, but replay still depends on the raw cassette bytes rather than live provider state.
+- Channel/model/routing analytics are additive. They depend on recorded routing metadata and SQLite indexes, but replay still depends on the raw cassette bytes rather than live provider state.
+- YAML `upstream` / `upstreams` blocks are compatibility bootstrap input. Long-lived channel and model state should be edited in Monitor Web.
