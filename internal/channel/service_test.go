@@ -3,6 +3,7 @@ package channel
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -191,6 +192,9 @@ func TestProbeFailureRecordsRunAndKeepsExistingModels(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].Status != "failed" || runs[0].ErrorText == "" {
 		t.Fatalf("probe runs = %#v", runs)
+	}
+	if !strings.Contains(runs[0].RequestMetaJSON, `"failure_reason":"upstream_error"`) {
+		t.Fatalf("RequestMetaJSON = %s, want upstream_error classification", runs[0].RequestMetaJSON)
 	}
 }
 

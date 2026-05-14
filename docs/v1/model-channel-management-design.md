@@ -704,10 +704,11 @@ Headers 编辑：
 - 已新增本地 master key 运维入口：`db secret status/export` 支持检查 key 文件、查看 fingerprint、导出备份；status 不返回原始 key。
 - 已新增本地 master key rotate：`db secret rotate --yes` 备份旧 key，生成新 key，并全量重加密渠道 API key 与敏感 headers。
 - 已在 Monitor UI 增加本地 secret key 运维入口：Channels 页面展示 key 状态、路径、fingerprint，支持下载备份和确认后轮换。
+- 已增强渠道探测失败 UX：`channel.Service.Probe` 对认证、404、网络、限流、上游 5xx、JSON/schema 和配置类错误做稳定分类；分类与 retry hint 写入 `channel_probe_runs.request_meta_json`，渠道详情 API 返回最近探测记录，Channel Detail 展示成功/失败探测、错误摘要和重试建议。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
-- 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路。
+- 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路，并覆盖本地失败探测提示。
 
 下一步建议：
 
-1. 扩展 UI 端到端校验，增加探测失败截图和移动端布局截图归档。
-2. 增加渠道探测失败 UX：失败原因分类、最近失败探测记录入口和重试建议。
+1. 扩展 UI E2E 截图归档：保存渠道详情、探测失败、移动端布局截图，作为后续 UI 变更的视觉回归基线。
+2. 增加渠道探测结果选择体验：探测成功后允许用户选择启用模型、保留现有手工模型，并明确展示 discovered/manual/static 来源差异。

@@ -123,6 +123,16 @@ func seedStore(outputDir string, st *store.Store, upstreamURL string) error {
 	}); err != nil {
 		return err
 	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "broken-auth",
+		Name:           "Broken Auth",
+		BaseURL:        upstreamURL + "/v1/missing",
+		ProviderPreset: "openai",
+		Enabled:        true,
+		ModelDiscovery: "list_models",
+	}); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	if err := writeTrace(outputDir, st, recordfile.RecordHeader{
 		Version: "LLM_PROXY_V3",

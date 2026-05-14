@@ -509,6 +509,22 @@ type channelItem struct {
 	Trends             []usageTrendView      `json:"trends,omitempty"`
 	ModelsUsage        []modelChannelItem    `json:"models_usage,omitempty"`
 	RecentFailures     []upstreamFailureItem `json:"recent_failures,omitempty"`
+	RecentProbeRuns    []channelProbeRunItem `json:"recent_probe_runs,omitempty"`
+}
+
+type channelProbeRunItem struct {
+	ID              string    `json:"id"`
+	Status          string    `json:"status"`
+	FailureReason   string    `json:"failure_reason,omitempty"`
+	RetryHint       string    `json:"retry_hint,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+	DurationMs      int64     `json:"duration_ms"`
+	DiscoveredCount int       `json:"discovered_count"`
+	EnabledCount    int       `json:"enabled_count"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	StatusCode      int       `json:"status_code,omitempty"`
+	ErrorText       string    `json:"error_text,omitempty"`
 }
 
 type channelModelsResponse struct {
@@ -529,6 +545,8 @@ type channelModelItem struct {
 type channelProbeResponse struct {
 	ChannelID       string    `json:"channel_id"`
 	Status          string    `json:"status"`
+	FailureReason   string    `json:"failure_reason,omitempty"`
+	RetryHint       string    `json:"retry_hint,omitempty"`
 	Models          []string  `json:"models"`
 	DiscoveredCount int       `json:"discovered_count"`
 	EnabledCount    int       `json:"enabled_count"`
@@ -1350,12 +1368,17 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID st
 	if failures, err := st.GetChannelRecentFailures(channelID, since, 10); err == nil {
 		item.RecentFailures = toUpstreamFailureItems(failures)
 	}
+	if probeRuns, err := st.ListChannelProbeRuns(channelID, 8); err == nil {
+		item.RecentProbeRuns = channelProbeRunItems(probeRuns)
+	}
 }
 
 func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResponse {
 	return channelProbeResponse{
 		ChannelID:       result.ChannelID,
 		Status:          result.Status,
+		FailureReason:   result.FailureReason,
+		RetryHint:       result.RetryHint,
 		Models:          result.Models,
 		DiscoveredCount: result.DiscoveredCount,
 		EnabledCount:    result.EnabledCount,
@@ -1365,6 +1388,39 @@ func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResp
 		CompletedAt:     result.CompletedAt,
 		DurationMs:      result.DurationMs,
 	}
+}
+
+func channelProbeRunItems(records []store.ChannelProbeRunRecord) []channelProbeRunItem {
+	items := make([]channelProbeRunItem, 0, len(records))
+	for _, record := range records {
+		reason, hint := probeRunMeta(record.RequestMetaJSON)
+		items = append(items, channelProbeRunItem{
+			ID:              record.ID,
+			Status:          record.Status,
+			FailureReason:   reason,
+			RetryHint:       hint,
+			StartedAt:       record.StartedAt,
+			CompletedAt:     record.CompletedAt,
+			DurationMs:      record.DurationMs,
+			DiscoveredCount: record.DiscoveredCount,
+			EnabledCount:    record.EnabledCount,
+			Endpoint:        record.Endpoint,
+			StatusCode:      record.StatusCode,
+			ErrorText:       record.ErrorText,
+		})
+	}
+	return items
+}
+
+func probeRunMeta(raw string) (string, string) {
+	var meta struct {
+		FailureReason string `json:"failure_reason"`
+		RetryHint     string `json:"retry_hint"`
+	}
+	if err := json.Unmarshal([]byte(raw), &meta); err != nil {
+		return "", ""
+	}
+	return meta.FailureReason, meta.RetryHint
 }
 
 func modelItemFromRecord(record store.ModelCatalogAnalyticsRecord) modelItem {

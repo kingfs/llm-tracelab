@@ -2,7 +2,9 @@ package channel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -44,6 +46,8 @@ func (s *Service) WithHTTPClient(client *http.Client) *Service {
 type ProbeResult struct {
 	ChannelID       string
 	Status          string
+	FailureReason   string
+	RetryHint       string
 	Models          []string
 	DiscoveredCount int
 	EnabledCount    int
@@ -234,6 +238,7 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 	if probeErr != nil {
 		result.Status = "failed"
 		result.ErrorText = probeErr.Error()
+		result.FailureReason, result.RetryHint = classifyProbeFailure(probeErr)
 	}
 
 	channelModels := make([]store.ChannelModelRecord, 0, len(result.Models))
@@ -285,10 +290,71 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 		EnabledCount:    result.EnabledCount,
 		Endpoint:        result.Endpoint,
 		ErrorText:       result.ErrorText,
+		RequestMetaJSON: probeRequestMetaJSON(result),
 	}); err != nil {
 		return result, err
 	}
 	return result, probeErr
+}
+
+func probeRequestMetaJSON(result ProbeResult) string {
+	meta := map[string]string{}
+	if result.FailureReason != "" {
+		meta["failure_reason"] = result.FailureReason
+	}
+	if result.RetryHint != "" {
+		meta["retry_hint"] = result.RetryHint
+	}
+	if len(meta) == 0 {
+		return "{}"
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func classifyProbeFailure(err error) (string, string) {
+	if err == nil {
+		return "", ""
+	}
+	text := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(text, "upstream status: 401") || strings.Contains(text, "upstream status: 403") ||
+		strings.Contains(text, "unauthorized") || strings.Contains(text, "forbidden") || strings.Contains(text, "api key"):
+		return "auth_error", "Verify the API key and custom authorization headers for this channel."
+	case strings.Contains(text, "upstream status: 404"):
+		return "not_found", "Check the base URL, provider preset, deployment, API version, and model discovery endpoint."
+	case strings.Contains(text, "invalid character") || strings.Contains(text, "cannot unmarshal") || strings.Contains(text, "unexpected end of json"):
+		return "invalid_json", "Confirm the model discovery endpoint returns a supported JSON models list."
+	case isNetworkProbeError(err, text):
+		return "network_error", "Check network reachability, DNS, proxy settings, and whether the upstream service is listening."
+	case strings.Contains(text, "upstream status: 429") || strings.Contains(text, "rate limit"):
+		return "rate_limited", "Retry later or adjust this channel's upstream quota, priority, or weight."
+	case strings.Contains(text, "upstream status: 5"):
+		return "upstream_error", "Retry after the provider recovers or temporarily disable this channel."
+	case strings.Contains(text, "build check url") || strings.Contains(text, "unsupported") || strings.Contains(text, "missing"):
+		return "configuration_error", "Review the channel base URL, provider preset, protocol family, and discovery settings."
+	default:
+		return "probe_error", "Inspect the upstream response and channel configuration, then retry the probe."
+	}
+}
+
+func isNetworkProbeError(err error, text string) bool {
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return true
+	}
+	return strings.Contains(text, "connection refused") ||
+		strings.Contains(text, "no such host") ||
+		strings.Contains(text, "i/o timeout") ||
+		strings.Contains(text, "context deadline exceeded") ||
+		strings.Contains(text, "tls handshake")
 }
 
 func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.UpstreamConfig {

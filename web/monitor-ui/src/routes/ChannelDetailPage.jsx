@@ -24,6 +24,7 @@ export function ChannelDetailPage() {
   const summary = channel.summary || {};
   const modelsUsage = channel.models_usage || [];
   const failures = channel.recent_failures || [];
+  const probeRuns = channel.recent_probe_runs || [];
   const trends = channel.trends || [];
 
   useEffect(() => {
@@ -46,7 +47,8 @@ export function ChannelDetailPage() {
       await postJSON(apiPaths.channelProbe(channelID), {});
       reload();
     } catch (err) {
-      setActionError(err.message || "Probe failed.");
+      setActionError(formatProbeActionError(err));
+      reload();
     } finally {
       setBusy("");
     }
@@ -231,6 +233,22 @@ export function ChannelDetailPage() {
           <section className="panel">
             <div className="panel-head">
               <div>
+                <p className="eyebrow">Discovery</p>
+                <h2>Recent probes</h2>
+              </div>
+            </div>
+            {probeRuns.length ? (
+              <div className="channel-probe-list">
+                {probeRuns.map((run) => <ProbeRunCard key={run.id} item={run} />)}
+              </div>
+            ) : (
+              <EmptyState title="No probe runs" detail="Run a channel probe to record discovery status and troubleshooting context." />
+            )}
+          </section>
+
+          <section className="panel">
+            <div className="panel-head">
+              <div>
                 <p className="eyebrow">Failures</p>
                 <h2>Recent failed traces</h2>
               </div>
@@ -259,6 +277,30 @@ export function ChannelDetailPage() {
   );
 }
 
+function ProbeRunCard({ item }) {
+  const failed = item.status !== "success";
+  return (
+    <div className={failed ? "channel-probe-card channel-probe-card-failed" : "channel-probe-card"}>
+      <div className="channel-probe-card-head">
+        <div className="trace-tag-group">
+          <InlineTag tone={failed ? "danger" : "green"}>{item.status || "unknown"}</InlineTag>
+          {item.failure_reason ? <InlineTag tone="accent">{item.failure_reason}</InlineTag> : null}
+          {item.status_code ? <InlineTag>{item.status_code}</InlineTag> : null}
+        </div>
+        <span>{formatDateTime(item.completed_at || item.started_at)}</span>
+      </div>
+      <div className="channel-probe-meta">
+        <span>{formatCount(item.discovered_count)} discovered</span>
+        <span>{formatCount(item.enabled_count)} enabled</span>
+        <span>{formatCount(item.duration_ms)} ms</span>
+      </div>
+      {item.endpoint ? <div className="channel-probe-endpoint">{item.endpoint}</div> : null}
+      {item.error_text ? <div className="upstream-failure-detail">{item.error_text}</div> : null}
+      {item.retry_hint ? <div className="channel-probe-hint">{item.retry_hint}</div> : null}
+    </div>
+  );
+}
+
 function ChannelModelRow({ item, busy, onToggle }) {
   const summary = item.summary || {};
   return (
@@ -274,6 +316,21 @@ function ChannelModelRow({ item, busy, onToggle }) {
       <button className="ghost-button" type="button" onClick={onToggle} disabled={busy}>{busy ? "Saving" : item.enabled ? "Disable" : "Enable"}</button>
     </div>
   );
+}
+
+function formatProbeActionError(err) {
+  const payload = err?.payload || {};
+  const parts = [];
+  if (payload.failure_reason) {
+    parts.push(payload.failure_reason);
+  }
+  if (payload.error_text || err?.message) {
+    parts.push(payload.error_text || err.message);
+  }
+  if (payload.retry_hint) {
+    parts.push(payload.retry_hint);
+  }
+  return parts.join(" · ") || "Probe failed.";
 }
 
 function emptyEditForm() {

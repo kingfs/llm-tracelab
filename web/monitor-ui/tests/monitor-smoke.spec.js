@@ -34,7 +34,7 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: channelDetailPayload() });
     }
     if (path === "/api/channels/openai-primary/probe") {
-      return route.fulfill({ json: probePayload() });
+      return route.fulfill({ status: 502, json: probeFailurePayload() });
     }
     if (path === "/api/channels/openai-primary/models") {
       return route.fulfill({ json: { model: "gpt-manual", enabled: true, source: "manual" } });
@@ -88,6 +88,8 @@ test("channel management renders and supports core actions", async ({ page }) =>
 
   await page.getByRole("button", { name: "Probe" }).click();
   await expect(page.getByRole("button", { name: "Probing" })).toBeHidden();
+  await expect(page.getByText("auth_error").first()).toBeVisible();
+  await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
 });
 
 test("trace routing links to channel and upstream views", async ({ page }) => {
@@ -171,6 +173,28 @@ function channelDetailPayload() {
       recorded_at: new Date().toISOString(),
       error_text: "rate limited",
     }],
+    recent_probe_runs: [{
+      id: "probe-success",
+      status: "success",
+      started_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      duration_ms: 10,
+      discovered_count: 2,
+      enabled_count: 2,
+      endpoint: "/v1/models",
+    }, {
+      id: "probe-failed",
+      status: "failed",
+      failure_reason: "auth_error",
+      retry_hint: "Verify the API key and custom authorization headers for this channel.",
+      started_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      completed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      duration_ms: 12,
+      discovered_count: 0,
+      enabled_count: 0,
+      endpoint: "/v1/models",
+      error_text: "upstream status: 401 Unauthorized",
+    }],
   };
 }
 
@@ -212,16 +236,20 @@ function tracePayload() {
   };
 }
 
-function probePayload() {
+function probeFailurePayload() {
   return {
     channel_id: "openai-primary",
-    status: "success",
-    models: ["gpt-5"],
-    discovered_count: 1,
-    enabled_count: 1,
+    status: "failed",
+    failure_reason: "auth_error",
+    retry_hint: "Verify the API key and custom authorization headers for this channel.",
+    models: [],
+    discovered_count: 0,
+    enabled_count: 0,
+    endpoint: "/v1/models",
+    error_text: "upstream status: 401 Unauthorized",
     started_at: new Date().toISOString(),
     completed_at: new Date().toISOString(),
-    duration_ms: 10,
+    duration_ms: 12,
   };
 }
 

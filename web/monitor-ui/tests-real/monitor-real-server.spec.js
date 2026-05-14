@@ -45,6 +45,16 @@ test("real monitor server supports probe and manual model mutation", async ({ pa
   await expect(page.getByText("success").first()).toBeVisible();
 });
 
+test("real monitor server shows probe failure guidance", async ({ page }) => {
+  await page.goto("/channels/broken-auth");
+  await expect(page.getByRole("heading", { name: "Broken Auth" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Probe" }).click();
+  await expect(page.getByRole("button", { name: "Probing" })).toBeHidden();
+  await expect(page.getByText("not_found").first()).toBeVisible();
+  await expect(page.getByText(/Check the base URL/i).first()).toBeVisible();
+});
+
 test("real monitor server serves trace routing links", async ({ page }) => {
   const fixture = await page.request.get("/__fixture/state").then((response) => response.json());
   await page.goto(`/traces/${fixture.routed_trace_id}`);

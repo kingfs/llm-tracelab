@@ -2746,6 +2746,57 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.channel-probe-list {
+  display: grid;
+  gap: 10px;
+}
+
+.channel-probe-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.channel-probe-card-failed {
+  border-color: rgba(248, 113, 113, 0.46);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.channel-probe-card-head,
+.channel-probe-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.channel-probe-card-head > span,
+.channel-probe-meta span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.channel-probe-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.channel-probe-endpoint,
+.channel-probe-hint {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.channel-probe-hint {
+  color: var(--text);
+}
+
 .usage-bars {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(42px, 1fr));

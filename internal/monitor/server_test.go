@@ -878,6 +878,62 @@ func TestChannelManagementAPI(t *testing.T) {
 	if len(detail.RecentFailures) != 1 || detail.RecentFailures[0].StatusCode != 429 {
 		t.Fatalf("recent failures = %+v", detail.RecentFailures)
 	}
+	if len(detail.RecentProbeRuns) != 1 || detail.RecentProbeRuns[0].Status != "success" || detail.RecentProbeRuns[0].DiscoveredCount != 2 {
+		t.Fatalf("recent probe runs = %+v", detail.RecentProbeRuns)
+	}
+}
+
+func TestChannelProbeFailureResponseIncludesClassification(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad key", http.StatusUnauthorized)
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        upstreamServer.URL + "/v1",
+		ProviderPreset: "openai",
+		Enabled:        true,
+		ModelDiscovery: "list_models",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
+	rr := httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("probe status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var probe channelProbeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &probe); err != nil {
+		t.Fatalf("json.Unmarshal(probe) error = %v", err)
+	}
+	if probe.Status != "failed" || probe.FailureReason != "auth_error" || probe.RetryHint == "" {
+		t.Fatalf("probe = %+v", probe)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/channels/openai-primary", nil)
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var detail channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("json.Unmarshal(detail) error = %v", err)
+	}
+	if len(detail.RecentProbeRuns) != 1 || detail.RecentProbeRuns[0].FailureReason != "auth_error" || detail.RecentProbeRuns[0].RetryHint == "" {
+		t.Fatalf("recent probe runs = %+v", detail.RecentProbeRuns)
+	}
 }
 
 func TestLocalSecretKeyAPI(t *testing.T) {

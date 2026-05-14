@@ -56,7 +56,10 @@ export async function requestJSON(path, { method = "GET", headers = {}, body, si
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error || `request failed: ${response.status}`);
+    const err = new Error(payload.error || payload.error_text || `request failed: ${response.status}`);
+    err.payload = payload;
+    err.status = response.status;
+    throw err;
   }
   return payload;
 }
