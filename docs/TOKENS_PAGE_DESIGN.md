@@ -272,6 +272,20 @@ Status:
 - Update this document with completed commits and any intentional deferrals.
 - Confirm token management has one entry point: Tokens page.
 
+Status:
+
+- Completed in this phase.
+- Implemented commits:
+  - `1530d73 feat: add auth token list and revoke api`
+  - `5aea8a9 feat: add token inventory page`
+  - `facee51 refactor: remove account token dialog`
+- Scope review:
+  - token management now has one UI entry point: primary navigation `Tokens`
+  - account menu keeps account operations only: theme, password, sign out
+  - raw tokens are still only shown once after creation
+  - token listing returns metadata only
+  - revoke disables tokens instead of deleting rows
+
 ## Explicit Deferrals
 
 - Admin view of all users' tokens.
