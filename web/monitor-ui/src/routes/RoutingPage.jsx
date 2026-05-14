@@ -107,7 +107,7 @@ export function RoutingPage() {
           <StatCard label="Routed requests" value={formatCount(summary.requests)} />
           <StatCard label="Channels" value={formatCount(summary.channels)} />
           <StatCard label="Errors" value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(summary.tokens)} />
+          <StatCard label="Tokens" value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing)} />
         </div>
       </section>
 
@@ -148,6 +148,9 @@ function summarizeRouting(items) {
   return items.reduce((state, item) => {
     state.requests += 1;
     state.tokens += Number(item.total_tokens || 0);
+    if (hasMissingUsage(item)) {
+      state.missing += 1;
+    }
     if (item.status_code < 200 || item.status_code >= 300) {
       state.errors += 1;
     }
@@ -156,5 +159,14 @@ function summarizeRouting(items) {
     }
     state.channels = channels.size;
     return state;
-  }, { requests: 0, errors: 0, tokens: 0, channels: 0 });
+  }, { requests: 0, errors: 0, tokens: 0, missing: 0, channels: 0 });
+}
+
+function hasMissingUsage(item) {
+  return item.status_code >= 200 && item.status_code < 300 && Number(item.total_tokens || 0) === 0 && Number(item.prompt_tokens || 0) === 0 && Number(item.completion_tokens || 0) === 0;
+}
+
+function usageCoverageDetail(missing) {
+  const count = Number(missing || 0);
+  return count > 0 ? `${formatCount(count)} missing usage` : "";
 }

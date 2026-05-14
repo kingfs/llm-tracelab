@@ -47,6 +47,7 @@ export function ModelDetailPage() {
           <div className="detail-meta-strip">
             <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
             <DetailMetaPill label="tokens" value={formatCount(summary.total_tokens)} />
+            {summary.missing_usage_request ? <DetailMetaPill label="missing usage" value={formatCount(summary.missing_usage_request)} /> : null}
             <DetailMetaPill label="failed" value={formatCount(summary.failed_request)} />
             <DetailMetaPill label="last seen" value={formatDateTime(summary.last_seen)} />
           </div>
@@ -80,8 +81,8 @@ export function ModelDetailPage() {
         <div className="hero-grid hero-grid-compact">
           <StatCard label="Requests" value={formatCount(summary.request_count)} />
           <StatCard label="Errors" value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(summary.total_tokens)} />
-          <StatCard label="Today tokens" value={formatCount(modelItem.today?.total_tokens)} />
+          <StatCard label="Tokens" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
+          <StatCard label="Today tokens" value={formatCount(modelItem.today?.total_tokens)} detail={usageCoverageDetail(modelItem.today?.missing_usage_request)} />
         </div>
       </section>
 
@@ -128,7 +129,12 @@ function ModelChannelRow({ item, windowValue }) {
       <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? "enabled" : "disabled"}</InlineTag>
       <span>{formatCount(summary.request_count)} req</span>
       <span>{formatCount(summary.failed_request)} err</span>
-      <span>{formatCount(summary.total_tokens)} tok</span>
+      <span>{formatCount(summary.total_tokens)} tok{summary.missing_usage_request ? ` · ${formatCount(summary.missing_usage_request)} missing usage` : ""}</span>
     </Link>
   );
+}
+
+function usageCoverageDetail(missing) {
+  const count = Number(missing || 0);
+  return count > 0 ? `${formatCount(count)} missing usage` : "";
 }

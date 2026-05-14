@@ -344,6 +344,7 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	writeAnalyticsLog("success.http", "openai", 200, 100, now)
+	writeAnalyticsLog("missing-usage.http", "openai", 200, 0, now)
 	writeAnalyticsLog("failed.http", "openrouter", 500, 50, now)
 
 	items, err := st.ListModelCatalogAnalytics(now.Add(-24*time.Hour), startOfDayForTest(now))
@@ -357,7 +358,7 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	if item.Model != "gpt-5" || item.ChannelCount != 2 || item.EnabledChannelCount != 1 || item.ProviderCount != 2 {
 		t.Fatalf("item = %+v", item)
 	}
-	if item.Summary.RequestCount != 2 || item.Summary.FailedRequest != 1 || item.Summary.TotalTokens != 150 {
+	if item.Summary.RequestCount != 3 || item.Summary.FailedRequest != 1 || item.Summary.MissingUsage != 1 || item.Summary.TotalTokens != 150 {
 		t.Fatalf("summary = %+v", item.Summary)
 	}
 
@@ -367,6 +368,9 @@ func TestModelCatalogAnalyticsCombinesChannelsAndLogs(t *testing.T) {
 	}
 	if len(detail.Channels) != 2 {
 		t.Fatalf("len(detail.Channels) = %d, want 2", len(detail.Channels))
+	}
+	if len(detail.Trends) == 0 || detail.Trends[len(detail.Trends)-1].MissingUsage != 1 {
+		t.Fatalf("trend missing usage not recorded: %+v", detail.Trends)
 	}
 	if len(detail.Trends) != 24 {
 		t.Fatalf("len(detail.Trends) = %d, want 24", len(detail.Trends))

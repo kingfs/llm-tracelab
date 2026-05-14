@@ -92,7 +92,7 @@ export function ModelsPage() {
           <StatCard label="Models" value={formatCount(items.length)} />
           <StatCard label="Requests" value={formatCount(totals.requests)} />
           <StatCard label="Failed" value={formatCount(totals.failed)} accent={totals.failed ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(totals.tokens)} />
+          <StatCard label="Tokens" value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing)} />
         </div>
       </section>
 
@@ -127,8 +127,8 @@ function ModelCard({ item, windowValue }) {
       <div className="model-market-metrics">
         <Metric label="requests" value={formatCount(summary.request_count)} />
         <Metric label="errors" value={formatCount(failed)} danger={failed > 0} />
-        <Metric label="tokens" value={formatCount(summary.total_tokens)} />
-        <Metric label="today" value={formatCount(today.total_tokens)} />
+        <Metric label="tokens" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
+        <Metric label="today" value={formatCount(today.total_tokens)} detail={usageCoverageDetail(today.missing_usage_request)} />
       </div>
       <div className="model-market-footer">
         <span>{(item.channels || []).slice(0, 4).join(" · ") || "no channel"}</span>
@@ -138,11 +138,12 @@ function ModelCard({ item, windowValue }) {
   );
 }
 
-function Metric({ label, value, danger = false }) {
+function Metric({ label, value, detail = "", danger = false }) {
   return (
     <span className={danger ? "model-market-metric model-market-metric-danger" : "model-market-metric"}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
     </span>
   );
 }
@@ -153,9 +154,15 @@ function summarizeModels(items) {
       const summary = item.summary || {};
       state.requests += Number(summary.request_count || 0);
       state.failed += Number(summary.failed_request || 0);
+      state.missing += Number(summary.missing_usage_request || 0);
       state.tokens += Number(summary.total_tokens || 0);
       return state;
     },
-    { requests: 0, failed: 0, tokens: 0 },
+    { requests: 0, failed: 0, tokens: 0, missing: 0 },
   );
+}
+
+function usageCoverageDetail(missing) {
+  const count = Number(missing || 0);
+  return count > 0 ? `${formatCount(count)} missing usage` : "";
 }

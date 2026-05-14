@@ -88,7 +88,7 @@ export function ChannelsPage() {
           <StatCard label="Channels" value={formatCount(items.length)} />
           <StatCard label="Enabled" value={formatCount(totals.enabled)} />
           <StatCard label="Requests" value={formatCount(totals.requests)} />
-          <StatCard label="Tokens" value={formatCount(totals.tokens)} />
+          <StatCard label="Tokens" value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing)} />
         </div>
         <div className="usage-chart-grid chart-grid-two">
           <section className="usage-chart-panel">
@@ -283,7 +283,7 @@ function ChannelCard({ item, windowValue, onRefresh }) {
       <div className="upstream-meta-grid">
         <Metric label="models" value={`${formatCount(item.enabled_model_count)} / ${formatCount(item.model_count)}`} />
         <Metric label="requests" value={formatCount(summary.request_count)} />
-        <Metric label="tokens" value={formatCount(summary.total_tokens)} />
+        <Metric label="tokens" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
       </div>
       <div className="upstream-card-footer">
         <span className="mono">{item.base_url}</span>
@@ -323,11 +323,12 @@ function buildChannelTrendItems(items) {
   return times.map((time) => byTime.get(time));
 }
 
-function Metric({ label, value }) {
+function Metric({ label, value, detail = "" }) {
   return (
     <span className="detail-meta-pill">
       <span className="detail-meta-label">{label}</span>
       <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
     </span>
   );
 }
@@ -413,9 +414,15 @@ function summarizeChannels(items) {
         state.enabled += 1;
       }
       state.requests += Number(summary.request_count || 0);
+      state.missing += Number(summary.missing_usage_request || 0);
       state.tokens += Number(summary.total_tokens || 0);
       return state;
     },
-    { enabled: 0, requests: 0, tokens: 0 },
+    { enabled: 0, requests: 0, tokens: 0, missing: 0 },
   );
+}
+
+function usageCoverageDetail(missing) {
+  const count = Number(missing || 0);
+  return count > 0 ? `${formatCount(count)} missing usage` : "";
 }

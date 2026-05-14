@@ -659,6 +659,7 @@ type usageSummaryView struct {
 	SuccessRequest   int       `json:"success_request"`
 	FailedRequest    int       `json:"failed_request"`
 	SuccessRate      float64   `json:"success_rate"`
+	MissingUsage     int       `json:"missing_usage_request"`
 	TotalTokens      int       `json:"total_tokens"`
 	PromptTokens     int       `json:"prompt_tokens"`
 	CompletionTokens int       `json:"completion_tokens"`
@@ -672,6 +673,7 @@ type usageTrendView struct {
 	Time          time.Time `json:"time"`
 	RequestCount  int       `json:"request_count"`
 	FailedRequest int       `json:"failed_request"`
+	MissingUsage  int       `json:"missing_usage_request"`
 	TotalTokens   int       `json:"total_tokens"`
 	ModelCount    int       `json:"model_count"`
 }
@@ -1605,6 +1607,7 @@ func usageSummaryViewFromRecord(record store.UsageSummaryRecord) usageSummaryVie
 		SuccessRequest:   record.SuccessRequest,
 		FailedRequest:    record.FailedRequest,
 		SuccessRate:      record.SuccessRate,
+		MissingUsage:     record.MissingUsage,
 		TotalTokens:      record.TotalTokens,
 		PromptTokens:     record.PromptTokens,
 		CompletionTokens: record.CompletionTokens,
@@ -1622,6 +1625,7 @@ func usageTrendViews(records []store.UsageTrendRecord) []usageTrendView {
 			Time:          record.Time,
 			RequestCount:  record.RequestCount,
 			FailedRequest: record.FailedRequest,
+			MissingUsage:  record.MissingUsage,
 			TotalTokens:   record.TotalTokens,
 			ModelCount:    record.ModelCount,
 		})

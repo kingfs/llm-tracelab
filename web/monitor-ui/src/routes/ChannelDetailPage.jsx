@@ -150,6 +150,7 @@ export function ChannelDetailPage() {
             <DetailMetaPill label="models" value={`${formatCount(channel.enabled_model_count)} / ${formatCount(channel.model_count)}`} />
             <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
             <DetailMetaPill label="tokens" value={formatCount(summary.total_tokens)} />
+            {summary.missing_usage_request ? <DetailMetaPill label="missing usage" value={formatCount(summary.missing_usage_request)} /> : null}
           </div>
         </div>
         <div className="topbar-meta detail-toolbar">
@@ -184,7 +185,7 @@ export function ChannelDetailPage() {
         <div className="hero-grid hero-grid-compact">
           <StatCard label="Requests" value={formatCount(summary.request_count)} />
           <StatCard label="Errors" value={formatCount(summary.failed_request)} accent={summary.failed_request ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(summary.total_tokens)} />
+          <StatCard label="Tokens" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
           <StatCard label="Success" value={`${Number(summary.success_rate || 0).toFixed(1)}%`} />
         </div>
       </section>
@@ -373,7 +374,7 @@ function ChannelModelRow({ item, busy, onToggle }) {
       <div className="model-market-metrics model-market-metrics-compact">
         <Metric label="req" value={formatCount(summary.request_count)} />
         <Metric label="err" value={formatCount(summary.failed_request)} danger={Number(summary.failed_request || 0) > 0} />
-        <Metric label="tok" value={formatCount(summary.total_tokens)} />
+        <Metric label="tok" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
       </div>
     </div>
   );
@@ -407,13 +408,19 @@ function modelSourceLabel(source) {
   }
 }
 
-function Metric({ label, value, danger = false }) {
+function Metric({ label, value, detail = "", danger = false }) {
   return (
     <span className={danger ? "model-market-metric model-market-metric-danger" : "model-market-metric"}>
       <span>{label}</span>
       <strong>{value}</strong>
+      {detail ? <small>{detail}</small> : null}
     </span>
   );
+}
+
+function usageCoverageDetail(missing) {
+  const count = Number(missing || 0);
+  return count > 0 ? `${formatCount(count)} missing usage` : "";
 }
 
 function formatProbeActionError(err) {

@@ -348,6 +348,7 @@ type UsageSummaryRecord struct {
 	SuccessRequest   int
 	FailedRequest    int
 	SuccessRate      float64
+	MissingUsage     int
 	TotalTokens      int
 	PromptTokens     int
 	CompletionTokens int
@@ -361,6 +362,7 @@ type UsageTrendRecord struct {
 	Time          time.Time
 	RequestCount  int
 	FailedRequest int
+	MissingUsage  int
 	TotalTokens   int
 	ModelCount    int
 }
@@ -1773,6 +1775,7 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(SUM(CASE WHEN status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
 			CASE WHEN COUNT(*) = 0 THEN 0 ELSE 100.0 * SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*) END AS success_rate,
+			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 AND total_tokens = 0 AND prompt_tokens = 0 AND completion_tokens = 0 THEN 1 ELSE 0 END), 0) AS missing_usage_request,
 			COALESCE(SUM(total_tokens), 0) AS total_tokens,
 			COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
 			COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
@@ -1786,6 +1789,7 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 		&record.SuccessRequest,
 		&record.FailedRequest,
 		&successRate,
+		&record.MissingUsage,
 		&record.TotalTokens,
 		&record.PromptTokens,
 		&record.CompletionTokens,
@@ -1841,7 +1845,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	queryArgs := append([]any(nil), args...)
 	queryArgs = append(queryArgs, bucketStart.Format(timeLayout))
 	rows, err := s.db.Query(`
-		SELECT recorded_at, status_code, total_tokens, model
+		SELECT recorded_at, status_code, total_tokens, prompt_tokens, completion_tokens, model
 		FROM logs
 		WHERE `+where+` AND recorded_at >= ?
 		ORDER BY recorded_at ASC
@@ -1854,6 +1858,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	type bucket struct {
 		requests int
 		failed   int
+		missing  int
 		tokens   int
 		models   map[string]struct{}
 	}
@@ -1867,9 +1872,11 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 			recordedAt  string
 			statusCode  int
 			totalTokens int
+			prompt      int
+			completion  int
 			model       string
 		)
-		if err := rows.Scan(&recordedAt, &statusCode, &totalTokens, &model); err != nil {
+		if err := rows.Scan(&recordedAt, &statusCode, &totalTokens, &prompt, &completion, &model); err != nil {
 			return nil, err
 		}
 		recordedTime, err := timeParse(recordedAt)
@@ -1884,6 +1891,9 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 		item.requests++
 		if statusCode < 200 || statusCode >= 300 {
 			item.failed++
+		}
+		if statusCode >= 200 && statusCode < 300 && totalTokens == 0 && prompt == 0 && completion == 0 {
+			item.missing++
 		}
 		item.tokens += totalTokens
 		if model = strings.TrimSpace(model); model != "" {
@@ -1901,6 +1911,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 			Time:          slot,
 			RequestCount:  item.requests,
 			FailedRequest: item.failed,
+			MissingUsage:  item.missing,
 			TotalTokens:   item.tokens,
 			ModelCount:    len(item.models),
 		})

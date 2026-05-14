@@ -78,6 +78,7 @@ test("models marketplace and detail render", async ({ page }) => {
   await page.goto("/models");
   await expect(page.getByRole("heading", { name: "Models", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /gpt-5/i })).toBeVisible();
+  await expect(page.getByText("1 missing usage").first()).toBeVisible();
 
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
@@ -105,6 +106,7 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("config source").first()).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
+  await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
 
@@ -137,6 +139,7 @@ test("routing page renders selected route records", async ({ page }) => {
   await expect(page.getByText("Recent selected routes")).toBeVisible();
   await expect(page.getByText("openai-primary").first()).toBeVisible();
   await expect(page.getByText("gpt-5").first()).toBeVisible();
+  await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await page.getByPlaceholder("Model").fill("gpt-5");
   await page.getByPlaceholder("Channel / upstream").fill("openai-primary");
   await page.getByLabel("Routing status").selectOption("error");
@@ -167,8 +170,8 @@ function modelListPayload() {
       channel_count: 1,
       enabled_channel_count: 1,
       channels: ["openai-primary"],
-      summary: usageSummary({ request_count: 12, total_tokens: 23000 }),
-      today: usageSummary({ request_count: 4, total_tokens: 7000 }),
+      summary: usageSummary({ request_count: 12, missing_usage_request: 1, total_tokens: 23000 }),
+      today: usageSummary({ request_count: 4, missing_usage_request: 1, total_tokens: 7000 }),
     }],
   };
 }
@@ -182,7 +185,7 @@ function modelDetailPayload() {
       model: "gpt-5",
       enabled: true,
       source: "manual",
-      summary: usageSummary({ request_count: 12, total_tokens: 23000 }),
+      summary: usageSummary({ request_count: 12, missing_usage_request: 1, total_tokens: 23000 }),
     }],
     refreshed_at: new Date().toISOString(),
     window: "24h",
@@ -244,10 +247,10 @@ function channelDetailPayload() {
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     last_probe_status: "success",
-    summary: usageSummary({ request_count: 12, failed_request: 1, total_tokens: 23000 }),
+    summary: usageSummary({ request_count: 12, failed_request: 1, missing_usage_request: 1, total_tokens: 23000 }),
     trends: trendItems(),
     models_usage: [
-      { channel_id: "openai-primary", model: "gpt-5", enabled: true, source: "manual", summary: usageSummary({ request_count: 10, total_tokens: 20000 }) },
+      { channel_id: "openai-primary", model: "gpt-5", enabled: true, source: "manual", summary: usageSummary({ request_count: 10, missing_usage_request: 1, total_tokens: 20000 }) },
       { channel_id: "openai-primary", model: "gpt-4.1", enabled: true, source: "manual", summary: usageSummary({ request_count: 2, total_tokens: 3000 }) },
       { channel_id: "openai-primary", model: "gpt-new", enabled: false, source: "discovered", summary: usageSummary() },
     ],
@@ -347,6 +350,23 @@ function traceListPayload() {
       completion_tokens: 20,
       cached_tokens: 0,
       is_stream: false,
+    }, {
+      id: "trace-missing-usage",
+      recorded_at: new Date().toISOString(),
+      model: "gpt-5",
+      provider: "openai",
+      selected_upstream_id: "openai-primary",
+      operation: "responses.create",
+      endpoint: "/v1/responses",
+      method: "POST",
+      status_code: 200,
+      duration_ms: 900,
+      ttft_ms: 90,
+      total_tokens: 0,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      cached_tokens: 0,
+      is_stream: false,
     }],
   };
 }
@@ -385,6 +405,7 @@ function usageSummary(overrides = {}) {
     success_request: 0,
     failed_request: 0,
     success_rate: 100,
+    missing_usage_request: 0,
     total_tokens: 0,
     prompt_tokens: 0,
     completion_tokens: 0,
