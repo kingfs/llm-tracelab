@@ -19,6 +19,13 @@ export const apiPaths = {
   sessions: "/api/sessions",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,
   sessionAnalysis: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/analysis`,
+  models: "/api/models",
+  model: (model) => `/api/models/${encodeURIComponent(model)}`,
+  channels: "/api/channels",
+  channel: (channelID) => `/api/channels/${encodeURIComponent(channelID)}`,
+  channelProbe: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/probe`,
+  channelModels: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models`,
+  channelModel: (channelID, model) => `/api/channels/${encodeURIComponent(channelID)}/models/${encodeURIComponent(model)}`,
   upstreams: "/api/upstreams",
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };
@@ -55,6 +62,18 @@ export function postJSON(path, payload, options = {}) {
   return requestJSON(path, {
     ...options,
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function patchJSON(path, payload, options = {}) {
+  return requestJSON(path, {
+    ...options,
+    method: "PATCH",
     headers: {
       "Content-Type": "application/json",
       ...(options.headers || {}),

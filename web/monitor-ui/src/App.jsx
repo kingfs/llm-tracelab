@@ -4,6 +4,10 @@ import { AppShell } from "./components/AppShell";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
 import { AnalysisPage } from "./routes/AnalysisPage";
 import { AuditPage } from "./routes/AuditPage";
+import { ChannelDetailPage } from "./routes/ChannelDetailPage";
+import { ChannelsPage } from "./routes/ChannelsPage";
+import { ModelDetailPage } from "./routes/ModelDetailPage";
+import { ModelsPage } from "./routes/ModelsPage";
 import { OverviewPage } from "./routes/OverviewPage";
 import { RequestsPage } from "./routes/RequestsPage";
 import { RoutingPage } from "./routes/RoutingPage";
@@ -106,6 +110,10 @@ function App() {
         <Route path="/traces" element={<RequestsPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/models" element={<ModelsPage />} />
+        <Route path="/models/:model" element={<ModelDetailPage />} />
+        <Route path="/channels" element={<ChannelsPage />} />
+        <Route path="/channels/:channelID" element={<ChannelDetailPage />} />
         <Route path="/routing" element={<RoutingPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/tokens" element={<TokensPage />} />

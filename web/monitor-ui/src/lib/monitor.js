@@ -176,6 +176,24 @@ export function buildUpstreamLink(upstreamID, windowValue = "24h", modelValue = 
   return query ? `/upstreams/${encodeURIComponent(upstreamID)}?${query}` : `/upstreams/${encodeURIComponent(upstreamID)}`;
 }
 
+export function buildModelLink(model, windowValue = "24h") {
+  const params = new URLSearchParams();
+  if (windowValue && windowValue !== "24h") {
+    params.set("window", windowValue);
+  }
+  const query = params.toString();
+  return query ? `/models/${encodeURIComponent(model)}?${query}` : `/models/${encodeURIComponent(model)}`;
+}
+
+export function buildChannelLink(channelID, windowValue = "24h") {
+  const params = new URLSearchParams();
+  if (windowValue && windowValue !== "24h") {
+    params.set("window", windowValue);
+  }
+  const query = params.toString();
+  return query ? `/channels/${encodeURIComponent(channelID)}?${query}` : `/channels/${encodeURIComponent(channelID)}`;
+}
+
 export function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
   const params = new URLSearchParams();
   if (upstreamWindow && upstreamWindow !== "24h") {
@@ -186,6 +204,18 @@ export function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
   }
   const query = params.toString();
   return query ? `/routing?${query}` : "/routing";
+}
+
+export function normalizeAnalyticsWindow(value = "") {
+  switch (value) {
+    case "1h":
+    case "7d":
+    case "30d":
+    case "all":
+      return value;
+    default:
+      return "24h";
+  }
 }
 
 export function normalizeTraceTab(value = "") {
@@ -310,6 +340,23 @@ function formatCompactNumber(value = 0) {
     return number.toFixed(1).replace(/\.0$/, "");
   }
   return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+export function formatCount(value = 0) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  if (Math.abs(number) >= 1_000_000_000) {
+    return `${(number / 1_000_000_000).toFixed(1).replace(/\.0$/, "")}B`;
+  }
+  if (Math.abs(number) >= 1_000_000) {
+    return `${(number / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  }
+  if (Math.abs(number) >= 1_000) {
+    return `${(number / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  }
+  return String(Math.round(number));
 }
 
 export function buildFailureSummary(context) {

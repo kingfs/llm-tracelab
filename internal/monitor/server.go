@@ -558,7 +558,7 @@ type channelUpsertRequest struct {
 	Weight             *float64          `json:"weight"`
 	CapacityHint       *float64          `json:"capacity_hint"`
 	ModelDiscovery     string            `json:"model_discovery"`
-	AllowUnknownModels bool              `json:"allow_unknown_models"`
+	AllowUnknownModels *bool             `json:"allow_unknown_models"`
 }
 
 type channelModelPatchRequest struct {
@@ -1166,7 +1166,9 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.ModelDiscovery) != "" {
 		record.ModelDiscovery = strings.TrimSpace(req.ModelDiscovery)
 	}
-	record.AllowUnknownModels = req.AllowUnknownModels
+	if req.AllowUnknownModels != nil {
+		record.AllowUnknownModels = *req.AllowUnknownModels
+	}
 	return record
 }
 

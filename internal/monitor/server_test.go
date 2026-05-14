@@ -697,7 +697,8 @@ func TestChannelManagementAPI(t *testing.T) {
 		"priority":100,
 		"weight":1,
 		"capacity_hint":1,
-		"model_discovery":"list_models"
+		"model_discovery":"list_models",
+		"allow_unknown_models":true
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/channels", createBody)
 	rr := httptest.NewRecorder()
@@ -714,6 +715,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if created.APIKeyHint == "" || created.Headers["Authorization"] != "***" || created.Headers["X-Test"] != "visible" {
 		t.Fatalf("created channel redaction = %+v", created)
+	}
+	if !created.AllowUnknownModels {
+		t.Fatalf("created.AllowUnknownModels = false, want true")
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
@@ -756,6 +760,20 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if len(enabledModels) != 1 || enabledModels[0].Model != "gpt-4.1" {
 		t.Fatalf("enabledModels = %#v", enabledModels)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary", strings.NewReader(`{"enabled":false}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch channel status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	patched, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if patched.AllowUnknownModels != true {
+		t.Fatalf("patched.AllowUnknownModels = false, want preserved true")
 	}
 
 	writeChannelLog := func(name string, model string, statusCode int, totalTokens int) {

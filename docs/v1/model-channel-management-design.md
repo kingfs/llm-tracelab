@@ -684,3 +684,19 @@ Headers 编辑：
 7. 渠道详情显示模型分布、错误、token 和最近失败。
 
 这条闭环完成后，再扩展 provider-specific 能力、secret 加密和更复杂趋势。
+
+## 开发进度
+
+截至 2026-05-14：
+
+- 已完成 Phase 1/2 后端主链路：渠道配置表、渠道模型表、模型目录、探测记录、YAML bootstrap 导入、DB 优先 router 配置源、router reload、探测写入模型供应关系、模型启停影响路由。
+- 已完成 Phase 3 分析 API：`/api/models`、`/api/models/{model}`、`/api/channels`、`/api/channels/{channel}` 返回模型/渠道视角的请求数、错误数、token、趋势、渠道覆盖、模型用量和最近失败。
+- 已完成 Phase 4 首版 UI：Monitor 新增 Models、Model Detail、Channels、Channel Detail 页面；支持渠道创建、探测、渠道启停、模型启停、模型卡片、渠道卡片、趋势和失败明细。
+- 已修正渠道 PATCH 语义：部分更新渠道时保留未提交的 `allow_unknown_models` 等既有配置，避免 UI 启停操作造成隐式配置回退。
+
+下一步建议：
+
+1. 补齐渠道编辑能力，尤其是 headers 的 keep/redact 更新协议和人工添加模型。
+2. 为 Trace detail 的 selected upstream 增加跳转到 Channel detail 的入口，同时保留旧 Upstream 诊断页。
+3. 引入本地 secret 加密或至少明确展示 `plaintext-local` secret storage mode。
+4. 增加 UI 层端到端/截图校验，覆盖模型广场、渠道创建、探测失败和移动端布局。
