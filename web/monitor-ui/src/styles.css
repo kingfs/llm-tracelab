@@ -238,7 +238,7 @@ a {
 
 .token-form {
   display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(180px, 220px) minmax(140px, 180px) auto;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.8fr) 44px;
   align-items: end;
   gap: 12px;
 }
@@ -246,12 +246,15 @@ a {
 .token-field {
   display: grid;
   gap: 6px;
+  min-width: 0;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   color: var(--muted);
 }
 
 .token-form input {
   min-height: 44px;
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
   padding: 0 12px;
