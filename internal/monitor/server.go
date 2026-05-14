@@ -45,6 +45,7 @@ type overviewResponse struct {
 	Breakdown   overviewBreakdownView   `json:"breakdown"`
 	Attention   overviewAttentionView   `json:"attention"`
 	Analysis    overviewAnalysisSummary `json:"analysis"`
+	Observation overviewObservationView `json:"observation"`
 }
 
 type overviewSummaryView struct {
@@ -88,6 +89,26 @@ type overviewAnalysisSummary struct {
 	Total  int               `json:"total"`
 	Failed int               `json:"failed"`
 	Recent []analysisRunView `json:"recent"`
+}
+
+type overviewObservationView struct {
+	TotalObservations int                `json:"total_observations"`
+	Parsed            int                `json:"parsed"`
+	Failed            int                `json:"failed"`
+	Queued            int                `json:"queued"`
+	Running           int                `json:"running"`
+	Unparsed          int                `json:"unparsed"`
+	RecentFailures    []overviewParseJob `json:"recent_failures"`
+}
+
+type overviewParseJob struct {
+	ID        int64     `json:"id"`
+	TraceID   string    `json:"trace_id"`
+	Status    string    `json:"status"`
+	Attempts  int       `json:"attempts"`
+	LastError string    `json:"last_error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type traceListItem struct {
@@ -2790,6 +2811,15 @@ func overviewResponseFromStore(window string, dashboard store.OverviewDashboard)
 			Failed: dashboard.Analysis.Failed,
 			Recent: analysisRunViews(dashboard.Analysis.Recent),
 		},
+		Observation: overviewObservationView{
+			TotalObservations: dashboard.Observation.TotalObservations,
+			Parsed:            dashboard.Observation.Parsed,
+			Failed:            dashboard.Observation.Failed,
+			Queued:            dashboard.Observation.Queued,
+			Running:           dashboard.Observation.Running,
+			Unparsed:          dashboard.Observation.Unparsed,
+			RecentFailures:    parseJobViews(dashboard.Observation.RecentFailures),
+		},
 	}
 }
 
@@ -2831,6 +2861,22 @@ func findingViewsFromObservations(findings []observe.Finding) []findingView {
 	out := make([]findingView, 0, len(findings))
 	for _, finding := range findings {
 		out = append(out, findingViewFromObservation(finding))
+	}
+	return out
+}
+
+func parseJobViews(jobs []store.ParseJobRecord) []overviewParseJob {
+	out := make([]overviewParseJob, 0, len(jobs))
+	for _, job := range jobs {
+		out = append(out, overviewParseJob{
+			ID:        job.ID,
+			TraceID:   job.TraceID,
+			Status:    job.Status,
+			Attempts:  job.Attempts,
+			LastError: job.LastError,
+			CreatedAt: job.CreatedAt,
+			UpdatedAt: job.UpdatedAt,
+		})
 	}
 	return out
 }

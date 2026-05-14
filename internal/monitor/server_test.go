@@ -295,6 +295,9 @@ func TestOverviewAPIHandlerReturnsDashboardFromIndexedData(t *testing.T) {
 	if payload.Analysis.Total != 1 || payload.Analysis.Failed != 1 || len(payload.Analysis.Recent) != 1 {
 		t.Fatalf("analysis = %+v, want 1 failed recent run", payload.Analysis)
 	}
+	if payload.Observation.TotalObservations != 0 || payload.Observation.Unparsed != 2 {
+		t.Fatalf("observation = %+v, want 0 observations and 2 unparsed", payload.Observation)
+	}
 }
 
 func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {

@@ -729,6 +729,10 @@ a:focus-visible {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.overview-health-grid {
+  margin-bottom: 16px;
+}
+
 .hero-grid-compact {
   margin-bottom: 0;
 }
@@ -911,6 +915,10 @@ a:focus-visible {
 .overview-queue {
   display: grid;
   gap: 10px;
+}
+
+.overview-parse-queue {
+  margin-top: 16px;
 }
 
 .overview-queue-row {

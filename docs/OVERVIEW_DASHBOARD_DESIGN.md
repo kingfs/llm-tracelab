@@ -250,6 +250,29 @@ Status:
 - Completed in this phase.
 - The next slice remains observation health counts or p95 latency, not additional Overview list features.
 
+### Phase 6: Observation Health Counts
+
+Goal:
+
+- Show whether Overview's derived protocol/audit data is complete enough to trust.
+
+Scope:
+
+- Add observation and parse job health to `/api/overview`.
+- Count parsed, failed, queued, running, and unparsed traces from SQLite.
+- Show recent parse failures as a small evidence queue.
+- Add a derived-data panel to Overview for parse and analysis health.
+
+Validation:
+
+- `go test ./internal/store ./internal/monitor`
+- `task ui:build`
+
+Status:
+
+- Completed in this phase.
+- The next slice should be p95 TTFT/latency only if it can be implemented from indexed `logs` without schema migration.
+
 ## Explicit Deferrals
 
 - Cost estimation is deferred until provider/model pricing configuration exists.

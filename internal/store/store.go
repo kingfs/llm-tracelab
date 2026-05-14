@@ -357,12 +357,23 @@ type OverviewAnalysisSummary struct {
 	Recent []AnalysisRunRecord
 }
 
+type OverviewObservationSummary struct {
+	TotalObservations int
+	Parsed            int
+	Failed            int
+	Queued            int
+	Running           int
+	Unparsed          int
+	RecentFailures    []ParseJobRecord
+}
+
 type OverviewDashboard struct {
-	Summary   OverviewSummary
-	Timeline  []OverviewTimelineItem
-	Breakdown OverviewBreakdown
-	Attention OverviewAttention
-	Analysis  OverviewAnalysisSummary
+	Summary     OverviewSummary
+	Timeline    []OverviewTimelineItem
+	Breakdown   OverviewBreakdown
+	Attention   OverviewAttention
+	Analysis    OverviewAnalysisSummary
+	Observation OverviewObservationSummary
 }
 
 type RoutingFailureAnalytics struct {
@@ -4254,23 +4265,7 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 	}
 	defer rows.Close()
 
-	var out []ParseJobRecord
-	for rows.Next() {
-		var job ParseJobRecord
-		var createdAt, updatedAt any
-		if err := rows.Scan(&job.ID, &job.TraceID, &job.Status, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
-			return nil, err
-		}
-		var err error
-		if job.CreatedAt, err = timeParseValue(createdAt); err != nil {
-			return nil, err
-		}
-		if job.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, job)
-	}
-	return out, rows.Err()
+	return scanParseJobs(rows)
 }
 
 func (s *Store) MarkParseJobRunning(id int64) error {
@@ -4711,12 +4706,17 @@ func (s *Store) Overview(opts OverviewOptions) (OverviewDashboard, error) {
 	if err != nil {
 		return OverviewDashboard{}, err
 	}
+	observation, err := s.overviewObservation(opts.Limit)
+	if err != nil {
+		return OverviewDashboard{}, err
+	}
 	return OverviewDashboard{
-		Summary:   summary,
-		Timeline:  timeline,
-		Breakdown: breakdown,
-		Attention: attention,
-		Analysis:  analysis,
+		Summary:     summary,
+		Timeline:    timeline,
+		Breakdown:   breakdown,
+		Attention:   attention,
+		Analysis:    analysis,
+		Observation: observation,
 	}, nil
 }
 
@@ -5030,6 +5030,49 @@ func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 	}
 	summary.Recent = runs
 	return summary, nil
+}
+
+func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, error) {
+	var summary OverviewObservationSummary
+	if err := s.db.QueryRow(`
+		SELECT
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed,
+			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
+		FROM trace_observations
+	`).Scan(&summary.TotalObservations, &summary.Parsed, &summary.Failed); err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE trace_id NOT IN (SELECT trace_id FROM trace_observations)`).Scan(&summary.Unparsed); err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'running'`).Scan(&summary.Running); err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	jobs, err := s.overviewRecentParseFailures(limit)
+	if err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	summary.RecentFailures = jobs
+	return summary, nil
+}
+
+func (s *Store) overviewRecentParseFailures(limit int) ([]ParseJobRecord, error) {
+	rows, err := s.db.Query(`
+		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
+		FROM parse_jobs
+		WHERE status = 'failed'
+		ORDER BY updated_at DESC, id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanParseJobs(rows)
 }
 
 func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
@@ -5611,6 +5654,26 @@ func scanFindings(rows *sql.Rows) ([]observe.Finding, error) {
 			return nil, err
 		}
 		out = append(out, finding)
+	}
+	return out, rows.Err()
+}
+
+func scanParseJobs(rows *sql.Rows) ([]ParseJobRecord, error) {
+	var out []ParseJobRecord
+	for rows.Next() {
+		var job ParseJobRecord
+		var createdAt, updatedAt any
+		if err := rows.Scan(&job.ID, &job.TraceID, &job.Status, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		var err error
+		if job.CreatedAt, err = timeParseValue(createdAt); err != nil {
+			return nil, err
+		}
+		if job.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, job)
 	}
 	return out, rows.Err()
 }
