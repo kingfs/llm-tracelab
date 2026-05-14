@@ -60,11 +60,11 @@ test("models marketplace and detail render", async ({ page }) => {
 test("channel management renders and supports core actions", async ({ page }) => {
   await page.goto("/channels");
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
-  await expect(page.getByText("plaintext-local")).toBeVisible();
+  await expect(page.getByText("encrypted-local")).toBeVisible();
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
-  await expect(page.getByText("Local plaintext secret storage")).toBeVisible();
+  await expect(page.getByText("encrypted-local")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
@@ -132,7 +132,7 @@ function channelDetailPayload() {
     base_url: "https://api.openai.example/v1",
     provider_preset: "openai",
     api_key_hint: "sk-...test",
-    secret_storage_mode: "plaintext-local",
+    secret_storage_mode: "encrypted-local",
     headers: { Authorization: "***", "X-Test": "visible" },
     enabled: true,
     priority: 100,

@@ -933,7 +933,7 @@ func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelSer
 			counts := channelModelCounts(models)
 			items := make([]channelItem, 0, len(channels))
 			for _, record := range channels {
-				item := channelItemFromRecord(record, counts[record.ID], enabledChannelModelCount(models, record.ID))
+				item := channelItemFromRecord(st, record, counts[record.ID], enabledChannelModelCount(models, record.ID))
 				enrichChannelItemAnalytics(st, &item, record.ID, since, bucketSize, bucketCount, false)
 				items = append(items, item)
 			}
@@ -953,7 +953,7 @@ func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelSer
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
 				return
 			}
-			writeJSON(w, http.StatusOK, channelItemFromRecord(record, 0, 0))
+			writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, 0, 0))
 		default:
 			http.NotFound(w, r)
 		}
@@ -1033,7 +1033,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		item := channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID))
+		item := channelItemFromRecord(st, record, len(models), enabledChannelModelCount(models, channelID))
 		windowLabel, since := parseAnalyticsWindow(r.URL.Query().Get("window"))
 		bucketSize, bucketCount := analyticsBucketSpec(windowLabel)
 		enrichChannelItemAnalytics(st, &item, channelID, since, bucketSize, bucketCount, true)
@@ -1064,7 +1064,7 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 			return
 		}
 		models, _ := st.ListChannelModels(channelID, false)
-		writeJSON(w, http.StatusOK, channelItemFromRecord(record, len(models), enabledChannelModelCount(models, channelID)))
+		writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, len(models), enabledChannelModelCount(models, channelID)))
 	default:
 		http.NotFound(w, r)
 	}
@@ -1232,7 +1232,7 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	return record
 }
 
-func channelItemFromRecord(record store.ChannelConfigRecord, modelCount int, enabledModelCount int) channelItem {
+func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, modelCount int, enabledModelCount int) channelItem {
 	headers := map[string]string{}
 	if strings.TrimSpace(record.HeadersJSON) != "" {
 		_ = json.Unmarshal([]byte(record.HeadersJSON), &headers)
@@ -1251,7 +1251,7 @@ func channelItemFromRecord(record store.ChannelConfigRecord, modelCount int, ena
 		Location:           record.Location,
 		ModelResource:      record.ModelResource,
 		APIKeyHint:         record.APIKeyHint,
-		SecretStorageMode:  "plaintext-local",
+		SecretStorageMode:  st.SecretStorageMode(),
 		Headers:            redactHeaders(headers),
 		Enabled:            record.Enabled,
 		Priority:           record.Priority,

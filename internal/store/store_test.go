@@ -77,7 +77,8 @@ func TestNewWithDatabaseAcceptsRelativeSQLitePath(t *testing.T) {
 }
 
 func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
-	st, err := New(t.TempDir())
+	dir := t.TempDir()
+	st, err := New(dir)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -90,7 +91,7 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 		ProviderPreset:   "openai",
 		APIKeyCiphertext: []byte("sk-secret"),
 		APIKeyHint:       "sk-...cret",
-		HeadersJSON:      `{"X-Test":"true"}`,
+		HeadersJSON:      `{"Authorization":"Bearer hidden","X-Test":"true"}`,
 		Enabled:          true,
 		Priority:         100,
 		Weight:           1,
@@ -105,6 +106,34 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	}
 	if string(record.APIKeyCiphertext) != "sk-secret" {
 		t.Fatalf("APIKeyCiphertext = %q", string(record.APIKeyCiphertext))
+	}
+	if record.HeadersJSON != `{"Authorization":"Bearer hidden","X-Test":"true"}` {
+		t.Fatalf("HeadersJSON = %q", record.HeadersJSON)
+	}
+
+	var rawAPIKey []byte
+	var rawHeaders string
+	if err := st.db.QueryRow(`SELECT api_key_ciphertext, headers_json FROM channel_configs WHERE id = ?`, "openai-primary").Scan(&rawAPIKey, &rawHeaders); err != nil {
+		t.Fatalf("query raw channel config error = %v", err)
+	}
+	if string(rawAPIKey) == "sk-secret" || !strings.HasPrefix(string(rawAPIKey), secretEnvelopeV1) {
+		t.Fatalf("raw api_key_ciphertext = %q, want encrypted envelope", string(rawAPIKey))
+	}
+	if strings.Contains(rawHeaders, "Bearer hidden") || !strings.Contains(rawHeaders, secretEnvelopeV1) || !strings.Contains(rawHeaders, `"X-Test":"true"`) {
+		t.Fatalf("raw headers_json = %q, want encrypted secret header and plaintext non-secret header", rawHeaders)
+	}
+
+	reopened, err := New(dir)
+	if err != nil {
+		t.Fatalf("reopen New() error = %v", err)
+	}
+	defer reopened.Close()
+	reopenedRecord, err := reopened.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("reopened.GetChannelConfig() error = %v", err)
+	}
+	if string(reopenedRecord.APIKeyCiphertext) != "sk-secret" || reopenedRecord.HeadersJSON != record.HeadersJSON {
+		t.Fatalf("reopened secrets = api_key %q headers %q", string(reopenedRecord.APIKeyCiphertext), reopenedRecord.HeadersJSON)
 	}
 
 	if err := st.ReplaceChannelModels("openai-primary", []ChannelModelRecord{

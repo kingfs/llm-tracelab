@@ -3,10 +3,15 @@ package store
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/textproto"
 	"net/url"
@@ -65,7 +70,18 @@ type Store struct {
 	client    *dao.Client
 	outputDir string
 	dbPath    string
+	secrets   *secretBox
 	syncMu    sync.Mutex
+}
+
+const (
+	localSecretKeyFile = "trace_index.secret"
+	secretEnvelopeV1   = "tlsec:v1:"
+)
+
+type secretBox struct {
+	aead cipher.AEAD
+	mode string
 }
 
 type ListPageResult struct {
@@ -474,7 +490,11 @@ func (s *Store) ListChannelConfigs() ([]ChannelConfigRecord, error) {
 
 	out := make([]ChannelConfigRecord, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, channelConfigRecordFromEnt(row))
+		record, err := s.channelConfigRecordFromEnt(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
 	}
 	return out, nil
 }
@@ -491,7 +511,7 @@ func (s *Store) GetChannelConfig(channelID string) (ChannelConfigRecord, error) 
 		}
 		return ChannelConfigRecord{}, err
 	}
-	return channelConfigRecordFromEnt(row), nil
+	return s.channelConfigRecordFromEnt(row)
 }
 
 func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRecord, error) {
@@ -524,6 +544,14 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		record.CreatedAt = now
 	}
 	record.UpdatedAt = now
+	storedAPIKey, err := s.encryptSecretBytes(record.APIKeyCiphertext)
+	if err != nil {
+		return ChannelConfigRecord{}, err
+	}
+	storedHeaders, err := s.encryptHeadersJSON(record.HeadersJSON)
+	if err != nil {
+		return ChannelConfigRecord{}, err
+	}
 
 	create := s.client.ChannelConfig.Create().
 		SetID(record.ID).
@@ -539,7 +567,7 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetLocation(strings.TrimSpace(record.Location)).
 		SetModelResource(strings.TrimSpace(record.ModelResource)).
 		SetAPIKeyHint(strings.TrimSpace(record.APIKeyHint)).
-		SetHeadersJSON(record.HeadersJSON).
+		SetHeadersJSON(storedHeaders).
 		SetEnabled(record.Enabled).
 		SetPriority(record.Priority).
 		SetWeight(record.Weight).
@@ -550,8 +578,8 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetUpdatedAt(record.UpdatedAt).
 		SetLastProbeStatus(strings.TrimSpace(record.LastProbeStatus)).
 		SetLastProbeError(strings.TrimSpace(record.LastProbeError))
-	if len(record.APIKeyCiphertext) > 0 {
-		create.SetAPIKeyCiphertext(record.APIKeyCiphertext)
+	if len(storedAPIKey) > 0 {
+		create.SetAPIKeyCiphertext(storedAPIKey)
 	}
 	if !record.LastProbeAt.IsZero() {
 		create.SetLastProbeAt(record.LastProbeAt.UTC())
@@ -1866,6 +1894,10 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, err
 	}
+	secrets, err := newLocalSecretBox(outputDir)
+	if err != nil {
+		return nil, err
+	}
 	driver = strings.ToLower(strings.TrimSpace(driver))
 	if driver == "" {
 		driver = "sqlite"
@@ -1898,6 +1930,7 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 		client:    dao.NewClient(dao.Driver(entsql.OpenDB(dialect.SQLite, db))),
 		outputDir: outputDir,
 		dbPath:    dbPath,
+		secrets:   secrets,
 	}
 	if err := st.initSchema(); err != nil {
 		_ = st.Close()
@@ -1905,6 +1938,152 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	}
 
 	return st, nil
+}
+
+func newLocalSecretBox(outputDir string) (*secretBox, error) {
+	if strings.TrimSpace(outputDir) == "" {
+		outputDir = "."
+	}
+	keyPath := filepath.Join(outputDir, localSecretKeyFile)
+	key, err := os.ReadFile(keyPath)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		key = make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, key); err != nil {
+			return nil, err
+		}
+		encoded := []byte(base64.RawStdEncoding.EncodeToString(key) + "\n")
+		if err := os.WriteFile(keyPath, encoded, 0o600); err != nil {
+			return nil, err
+		}
+	} else {
+		decoded, err := base64.RawStdEncoding.DecodeString(strings.TrimSpace(string(key)))
+		if err != nil {
+			return nil, fmt.Errorf("decode local secret key: %w", err)
+		}
+		key = decoded
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("local secret key must be 32 bytes, got %d", len(key))
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	return &secretBox{aead: aead, mode: "encrypted-local"}, nil
+}
+
+func (s *Store) SecretStorageMode() string {
+	if s == nil || s.secrets == nil || s.secrets.aead == nil {
+		return "plaintext-local"
+	}
+	return s.secrets.mode
+}
+
+func (s *Store) encryptSecretBytes(plaintext []byte) ([]byte, error) {
+	if len(plaintext) == 0 {
+		return nil, nil
+	}
+	if bytes.HasPrefix(plaintext, []byte(secretEnvelopeV1)) {
+		return append([]byte(nil), plaintext...), nil
+	}
+	if s == nil || s.secrets == nil || s.secrets.aead == nil {
+		return append([]byte(nil), plaintext...), nil
+	}
+	nonce := make([]byte, s.secrets.aead.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	sealed := s.secrets.aead.Seal(nil, nonce, plaintext, nil)
+	payload := append(nonce, sealed...)
+	out := secretEnvelopeV1 + base64.RawStdEncoding.EncodeToString(payload)
+	return []byte(out), nil
+}
+
+func (s *Store) decryptSecretBytes(value []byte) ([]byte, error) {
+	if len(value) == 0 {
+		return nil, nil
+	}
+	if !bytes.HasPrefix(value, []byte(secretEnvelopeV1)) {
+		return append([]byte(nil), value...), nil
+	}
+	if s == nil || s.secrets == nil || s.secrets.aead == nil {
+		return nil, fmt.Errorf("encrypted local secret cannot be decrypted without a local key")
+	}
+	encoded := strings.TrimPrefix(string(value), secretEnvelopeV1)
+	payload, err := base64.RawStdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := s.secrets.aead.NonceSize()
+	if len(payload) < nonceSize {
+		return nil, fmt.Errorf("encrypted local secret payload is too short")
+	}
+	nonce, ciphertext := payload[:nonceSize], payload[nonceSize:]
+	return s.secrets.aead.Open(nil, nonce, ciphertext, nil)
+}
+
+func (s *Store) encryptHeadersJSON(headersJSON string) (string, error) {
+	headersJSON = strings.TrimSpace(headersJSON)
+	if headersJSON == "" {
+		return "{}", nil
+	}
+	headers := map[string]string{}
+	if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+		return "", err
+	}
+	for key, value := range headers {
+		if !isSecretChannelHeader(key) || strings.TrimSpace(value) == "" {
+			continue
+		}
+		encrypted, err := s.encryptSecretBytes([]byte(value))
+		if err != nil {
+			return "", err
+		}
+		headers[key] = string(encrypted)
+	}
+	data, err := json.Marshal(headers)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func (s *Store) decryptHeadersJSON(headersJSON string) (string, error) {
+	headersJSON = strings.TrimSpace(headersJSON)
+	if headersJSON == "" {
+		return "{}", nil
+	}
+	headers := map[string]string{}
+	if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+		return "", err
+	}
+	for key, value := range headers {
+		if !isSecretChannelHeader(key) || !strings.HasPrefix(value, secretEnvelopeV1) {
+			continue
+		}
+		plaintext, err := s.decryptSecretBytes([]byte(value))
+		if err != nil {
+			return "", err
+		}
+		headers[key] = string(plaintext)
+	}
+	data, err := json.Marshal(headers)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func isSecretChannelHeader(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	return key == "authorization" || strings.Contains(key, "api-key") || strings.Contains(key, "apikey") || strings.Contains(key, "token")
 }
 
 func sqliteDSN(dbPath string) string {
@@ -4266,6 +4445,25 @@ func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 		record.LastProbeAt = *row.LastProbeAt
 	}
 	return record
+}
+
+func (s *Store) channelConfigRecordFromEnt(row *dao.ChannelConfig) (ChannelConfigRecord, error) {
+	record := channelConfigRecordFromEnt(row)
+	if len(record.APIKeyCiphertext) > 0 {
+		plaintext, err := s.decryptSecretBytes(record.APIKeyCiphertext)
+		if err != nil {
+			return ChannelConfigRecord{}, fmt.Errorf("decrypt channel %s api key: %w", row.ID, err)
+		}
+		record.APIKeyCiphertext = plaintext
+	}
+	if strings.TrimSpace(record.HeadersJSON) != "" {
+		headers, err := s.decryptHeadersJSON(record.HeadersJSON)
+		if err != nil {
+			return ChannelConfigRecord{}, fmt.Errorf("decrypt channel %s headers: %w", row.ID, err)
+		}
+		record.HeadersJSON = headers
+	}
+	return record, nil
 }
 
 func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {

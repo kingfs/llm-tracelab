@@ -529,8 +529,9 @@ Headers 编辑：
 
 生产目标：
 
-- 使用本地 master key 加密 `api_key_ciphertext`。
-- master key 来源优先级：OS keyring、环境变量、用户指定文件。
+- 使用本地 master key 加密 `api_key_ciphertext` 和敏感 header 值。
+- 当前实现使用 `{{output_dir}}/trace_index.secret` 作为本地 AES-GCM master key 文件，权限为 `0600`；旧版明文值保持可读，下一次写入会转换为加密 envelope。
+- 后续 master key 来源优先级：OS keyring、环境变量、用户指定文件。
 - 无加密能力时明确标记 DB secret storage mode 为 `plaintext-local`，UI 显示本地风险提示。
 
 ## 存储与迁移
@@ -696,10 +697,11 @@ Headers 编辑：
 - 已补齐人工模型添加闭环：`POST /api/channels/{channel}/models` 可手动添加模型并写入模型目录，Channel Detail 可直接添加模型，用于不支持模型列表探测的 provider。
 - 已完成渠道编辑首版：Channel Detail 支持编辑基础字段、API key、权重、探测模式和 headers；headers 支持字符串更新与 `{ "keep": true }` 保留 redacted secret，避免 UI 回传 `***` 覆盖真实密钥。
 - 已完成 Trace detail 入口衔接：selected upstream 同时提供 Open Channel 与 Open Upstream，前者面向托管渠道配置与分析，后者保留旧运行时诊断视角。
-- 已显式标记 secret 存储模式：渠道 API 返回 `secret_storage_mode=plaintext-local`，UI 在渠道卡片与详情页提示本地 SQLite 明文存储风险。
+- 已显式标记 secret 存储模式：渠道 API 返回 `secret_storage_mode`，UI 在渠道卡片与详情页展示本地 secret 存储模式。
+- 已引入本地加密存储：API key 与 `Authorization`、`api-key`、`token` 类敏感 header 在 SQLite 中以 `tlsec:v1:` envelope 保存，运行时读取仍返回明文供代理调用；历史明文数据保持兼容。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 
 下一步建议：
 
-1. 引入本地 secret 加密，可选本地 master key 或 OS keyring。
+1. 增加 master key 轮换/导入导出流程，补齐 key 文件丢失时的用户提示。
 2. 扩展 UI 端到端校验，增加真实 Go monitor server fixture、探测失败截图和移动端布局截图归档。

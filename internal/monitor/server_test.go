@@ -716,8 +716,8 @@ func TestChannelManagementAPI(t *testing.T) {
 	if created.APIKeyHint == "" || created.Headers["Authorization"] != "***" || created.Headers["X-Test"] != "visible" {
 		t.Fatalf("created channel redaction = %+v", created)
 	}
-	if created.SecretStorageMode != "plaintext-local" {
-		t.Fatalf("created.SecretStorageMode = %q, want plaintext-local", created.SecretStorageMode)
+	if created.SecretStorageMode != "encrypted-local" {
+		t.Fatalf("created.SecretStorageMode = %q, want encrypted-local", created.SecretStorageMode)
 	}
 	if !created.AllowUnknownModels {
 		t.Fatalf("created.AllowUnknownModels = false, want true")
