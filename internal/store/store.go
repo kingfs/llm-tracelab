@@ -677,6 +677,67 @@ func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRec
 	return tx.Commit()
 }
 
+func (s *Store) UpsertChannelModel(channelID string, record ChannelModelRecord) (ChannelModelRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	model := strings.ToLower(strings.TrimSpace(record.Model))
+	if channelID == "" {
+		return ChannelModelRecord{}, fmt.Errorf("channel id is required")
+	}
+	if model == "" {
+		return ChannelModelRecord{}, fmt.Errorf("model is required")
+	}
+	now := time.Now().UTC()
+	if record.FirstSeenAt.IsZero() {
+		record.FirstSeenAt = now
+	}
+	if record.LastSeenAt.IsZero() {
+		record.LastSeenAt = now
+	}
+	source := strings.TrimSpace(record.Source)
+	if source == "" {
+		source = "manual"
+	}
+	create := s.client.ChannelModel.Create().
+		SetChannelID(channelID).
+		SetModel(model).
+		SetDisplayName(strings.TrimSpace(record.DisplayName)).
+		SetSource(source).
+		SetEnabled(record.Enabled).
+		SetNillableSupportsResponses(record.SupportsResponses).
+		SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
+		SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
+		SetNillableContextWindow(record.ContextWindow).
+		SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
+		SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
+		SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
+		SetFirstSeenAt(record.FirstSeenAt.UTC()).
+		SetLastSeenAt(record.LastSeenAt.UTC())
+	if !record.LastProbeAt.IsZero() {
+		create.SetLastProbeAt(record.LastProbeAt.UTC())
+	}
+	if err := create.
+		OnConflictColumns(channelmodel.FieldChannelID, channelmodel.FieldModel).
+		UpdateNewValues().
+		Exec(context.Background()); err != nil {
+		return ChannelModelRecord{}, err
+	}
+	if err := s.UpsertModelCatalog(ModelCatalogRecord{
+		Model:       model,
+		DisplayName: strings.TrimSpace(record.DisplayName),
+		FirstSeenAt: record.FirstSeenAt,
+		LastSeenAt:  record.LastSeenAt,
+	}); err != nil {
+		return ChannelModelRecord{}, err
+	}
+	row, err := s.client.ChannelModel.Query().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		Only(context.Background())
+	if err != nil {
+		return ChannelModelRecord{}, err
+	}
+	return channelModelRecordFromEnt(row), nil
+}
+
 func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled bool) error {
 	channelID = strings.TrimSpace(channelID)
 	model = strings.ToLower(strings.TrimSpace(model))

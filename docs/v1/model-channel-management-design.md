@@ -693,10 +693,11 @@ Headers 编辑：
 - 已完成 Phase 3 分析 API：`/api/models`、`/api/models/{model}`、`/api/channels`、`/api/channels/{channel}` 返回模型/渠道视角的请求数、错误数、token、趋势、渠道覆盖、模型用量和最近失败。
 - 已完成 Phase 4 首版 UI：Monitor 新增 Models、Model Detail、Channels、Channel Detail 页面；支持渠道创建、探测、渠道启停、模型启停、模型卡片、渠道卡片、趋势和失败明细。
 - 已修正渠道 PATCH 语义：部分更新渠道时保留未提交的 `allow_unknown_models` 等既有配置，避免 UI 启停操作造成隐式配置回退。
+- 已补齐人工模型添加闭环：`POST /api/channels/{channel}/models` 可手动添加模型并写入模型目录，Channel Detail 可直接添加模型，用于不支持模型列表探测的 provider。
 
 下一步建议：
 
-1. 补齐渠道编辑能力，尤其是 headers 的 keep/redact 更新协议和人工添加模型。
+1. 补齐渠道编辑能力，尤其是 headers 的 keep/redact 更新协议。
 2. 为 Trace detail 的 selected upstream 增加跳转到 Channel detail 的入口，同时保留旧 Upstream 诊断页。
 3. 引入本地 secret 加密或至少明确展示 `plaintext-local` secret storage mode。
 4. 增加 UI 层端到端/截图校验，覆盖模型广场、渠道创建、探测失败和移动端布局。

@@ -14,6 +14,7 @@ export function ChannelDetailPage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState("");
+  const [modelDraft, setModelDraft] = useState("");
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const detail = useJSON(apiURL(apiPaths.channel(channelID), params), [channelID, windowValue, refreshTick]);
@@ -61,6 +62,24 @@ export function ChannelDetailPage() {
       reload();
     } catch (err) {
       setActionError(err.message || "Unable to update model.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const addModel = async (event) => {
+    event.preventDefault();
+    const model = modelDraft.trim();
+    if (!model) {
+      return;
+    }
+    setBusy("add-model");
+    setActionError("");
+    try {
+      await postJSON(apiPaths.channelModels(channelID), { model, display_name: model, enabled: true });
+      setModelDraft("");
+      reload();
+    } catch (err) {
+      setActionError(err.message || "Unable to add model.");
     } finally {
       setBusy("");
     }
@@ -144,6 +163,10 @@ export function ChannelDetailPage() {
                 <h2>Usage by model</h2>
               </div>
             </div>
+            <form className="filter-bar" onSubmit={addModel}>
+              <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder="Add model manually" />
+              <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? "Adding" : "Add model"}</button>
+            </form>
             <div className="channel-model-table">
               {modelsUsage.length ? modelsUsage.map((model) => <ChannelModelRow key={model.model} item={model} busy={busy === model.model} onToggle={() => setModelEnabled(model.model, !model.enabled)} />) : <EmptyState title="No models" detail="Probe or manually configure models for this channel." compact />}
             </div>

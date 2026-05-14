@@ -776,6 +776,20 @@ func TestChannelManagementAPI(t *testing.T) {
 		t.Fatalf("patched.AllowUnknownModels = false, want preserved true")
 	}
 
+	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/models", strings.NewReader(`{"model":"gpt-manual","display_name":"GPT Manual","enabled":true}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var manualModel channelModelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &manualModel); err != nil {
+		t.Fatalf("json.Unmarshal(manualModel) error = %v", err)
+	}
+	if manualModel.Model != "gpt-manual" || manualModel.Source != "manual" || !manualModel.Enabled {
+		t.Fatalf("manualModel = %+v", manualModel)
+	}
+
 	writeChannelLog := func(name string, model string, statusCode int, totalTokens int) {
 		t.Helper()
 		path := filepath.Join(dir, name)
@@ -834,7 +848,7 @@ func TestChannelManagementAPI(t *testing.T) {
 	if detail.Summary.RequestCount != 2 || detail.Summary.FailedRequest != 1 || detail.Summary.TotalTokens != 150 {
 		t.Fatalf("detail summary = %+v", detail.Summary)
 	}
-	if len(detail.ModelsUsage) != 2 || detail.ModelsUsage[0].Model != "gpt-4.1" || detail.ModelsUsage[0].Summary.TotalTokens != 120 {
+	if len(detail.ModelsUsage) != 3 || detail.ModelsUsage[0].Model != "gpt-4.1" || detail.ModelsUsage[0].Summary.TotalTokens != 120 {
 		t.Fatalf("models usage = %+v", detail.ModelsUsage)
 	}
 	if len(detail.RecentFailures) != 1 || detail.RecentFailures[0].StatusCode != 429 {

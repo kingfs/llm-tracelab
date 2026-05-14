@@ -565,6 +565,12 @@ type channelModelPatchRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+type channelModelCreateRequest struct {
+	Model       string `json:"model"`
+	DisplayName string `json:"display_name"`
+	Enabled     *bool  `json:"enabled"`
+}
+
 type usageSummaryView struct {
 	RequestCount     int       `json:"request_count"`
 	SuccessRequest   int       `json:"success_request"`
@@ -969,7 +975,7 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService
 			writeJSON(w, status, channelProbeResponseFromResult(result))
 		case "models":
 			if len(parts) == 2 {
-				handleChannelModels(w, r, st, channelID)
+				handleChannelModels(w, r, st, rtr, channelService, channelID)
 				return
 			}
 			if len(parts) == 3 {
@@ -1037,21 +1043,47 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 	}
 }
 
-func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store, channelID string) {
-	if r.Method != http.MethodGet {
+func handleChannelModels(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string) {
+	switch r.Method {
+	case http.MethodGet:
+		models, err := st.ListChannelModels(channelID, false)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		items := make([]channelModelItem, 0, len(models))
+		for _, model := range models {
+			items = append(items, channelModelItemFromRecord(model))
+		}
+		writeJSON(w, http.StatusOK, channelModelsResponse{Items: items, RefreshedAt: time.Now().UTC()})
+	case http.MethodPost:
+		var req channelModelCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
+			return
+		}
+		enabled := true
+		if req.Enabled != nil {
+			enabled = *req.Enabled
+		}
+		record, err := st.UpsertChannelModel(channelID, store.ChannelModelRecord{
+			Model:       req.Model,
+			DisplayName: req.DisplayName,
+			Source:      "manual",
+			Enabled:     enabled,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, channelModelItemFromRecord(record))
+	default:
 		http.NotFound(w, r)
-		return
 	}
-	models, err := st.ListChannelModels(channelID, false)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	items := make([]channelModelItem, 0, len(models))
-	for _, model := range models {
-		items = append(items, channelModelItemFromRecord(model))
-	}
-	writeJSON(w, http.StatusOK, channelModelsResponse{Items: items, RefreshedAt: time.Now().UTC()})
 }
 
 func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string, model string) {
