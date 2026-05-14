@@ -198,6 +198,67 @@ func TestProbeFailureRecordsRunAndKeepsExistingModels(t *testing.T) {
 	}
 }
 
+func TestProbeWithOptionsDiscoversDisabledModelsWithoutReplacingManual(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Fatalf("request path = %q, want /v1/models", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-new"},{"id":"gpt-manual"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "probe-channel",
+		Name:           "Probe Channel",
+		BaseURL:        upstreamServer.URL + "/v1",
+		ProviderPreset: "openai",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("probe-channel", store.ChannelModelRecord{
+		Model:       "gpt-manual",
+		DisplayName: "Manual Model",
+		Source:      "manual",
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelModel(manual) error = %v", err)
+	}
+
+	enable := false
+	result, err := NewService(st).ProbeWithOptions("probe-channel", ProbeOptions{EnableDiscovered: &enable})
+	if err != nil {
+		t.Fatalf("ProbeWithOptions() error = %v", err)
+	}
+	if result.EnabledCount != 1 {
+		t.Fatalf("EnabledCount = %d, want 1", result.EnabledCount)
+	}
+	models, err := st.ListChannelModels("probe-channel", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels() error = %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2: %#v", len(models), models)
+	}
+	byModel := map[string]store.ChannelModelRecord{}
+	for _, model := range models {
+		byModel[model.Model] = model
+	}
+	if byModel["gpt-manual"].Source != "manual" || !byModel["gpt-manual"].Enabled || byModel["gpt-manual"].DisplayName != "Manual Model" {
+		t.Fatalf("manual model was not preserved: %+v", byModel["gpt-manual"])
+	}
+	if byModel["gpt-new"].Source != "discovered" || byModel["gpt-new"].Enabled {
+		t.Fatalf("new discovered model = %+v, want disabled discovered", byModel["gpt-new"])
+	}
+}
+
 func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {

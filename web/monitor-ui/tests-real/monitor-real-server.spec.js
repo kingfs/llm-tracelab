@@ -43,6 +43,7 @@ test("real monitor server supports probe and manual model mutation", async ({ pa
   await page.getByRole("button", { name: "Probe" }).click();
   await expect(page.getByRole("button", { name: "Probing" })).toBeHidden();
   await expect(page.getByText("success").first()).toBeVisible();
+  await expect(page.getByText("discovered, awaiting enable").first()).toBeVisible();
 });
 
 test("real monitor server shows probe failure guidance", async ({ page }) => {

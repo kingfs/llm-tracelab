@@ -737,6 +737,20 @@ func TestChannelManagementAPI(t *testing.T) {
 		t.Fatalf("probe = %+v", probe)
 	}
 
+	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", strings.NewReader(`{"enable_discovered":false}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe disabled status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var disabledProbe channelProbeResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &disabledProbe); err != nil {
+		t.Fatalf("json.Unmarshal(disabledProbe) error = %v", err)
+	}
+	if disabledProbe.Status != "success" || disabledProbe.DiscoveredCount != 2 || disabledProbe.EnabledCount != 2 {
+		t.Fatalf("disabledProbe = %+v, want existing enabled models preserved", disabledProbe)
+	}
+
 	req = httptest.NewRequest(http.MethodGet, "/api/channels/openai-primary/models", nil)
 	rr = httptest.NewRecorder()
 	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
@@ -878,7 +892,7 @@ func TestChannelManagementAPI(t *testing.T) {
 	if len(detail.RecentFailures) != 1 || detail.RecentFailures[0].StatusCode != 429 {
 		t.Fatalf("recent failures = %+v", detail.RecentFailures)
 	}
-	if len(detail.RecentProbeRuns) != 1 || detail.RecentProbeRuns[0].Status != "success" || detail.RecentProbeRuns[0].DiscoveredCount != 2 {
+	if len(detail.RecentProbeRuns) != 2 || detail.RecentProbeRuns[0].Status != "success" || detail.RecentProbeRuns[0].DiscoveredCount != 2 {
 		t.Fatalf("recent probe runs = %+v", detail.RecentProbeRuns)
 	}
 }

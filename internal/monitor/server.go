@@ -557,6 +557,10 @@ type channelProbeResponse struct {
 	DurationMs      int64     `json:"duration_ms"`
 }
 
+type channelProbeRequest struct {
+	EnableDiscovered *bool `json:"enable_discovered"`
+}
+
 type channelUpsertRequest struct {
 	ID                 string                         `json:"id"`
 	Name               string                         `json:"name"`
@@ -1042,8 +1046,13 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService
 				http.NotFound(w, r)
 				return
 			}
+			req, err := decodeChannelProbeRequest(r)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
 			svc := effectiveChannelService(st, channelService)
-			result, err := svc.Probe(channelID)
+			result, err := svc.ProbeWithOptions(channelID, channel.ProbeOptions{EnableDiscovered: req.EnableDiscovered})
 			if err != nil && result.Status == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -1073,6 +1082,17 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService
 			http.NotFound(w, r)
 		}
 	}
+}
+
+func decodeChannelProbeRequest(r *http.Request) (channelProbeRequest, error) {
+	var req channelProbeRequest
+	if r == nil || r.Body == nil || r.Body == http.NoBody {
+		return req, nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return channelProbeRequest{}, fmt.Errorf("invalid probe payload")
+	}
+	return req, nil
 }
 
 func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string) {

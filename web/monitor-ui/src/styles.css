@@ -2719,7 +2719,7 @@ a:focus-visible {
 
 .channel-model-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto auto auto auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto auto auto auto auto;
   gap: 12px;
   align-items: center;
   padding: 12px 14px;

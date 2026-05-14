@@ -34,6 +34,8 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: channelDetailPayload() });
     }
     if (path === "/api/channels/openai-primary/probe") {
+      const body = route.request().postDataJSON();
+      expect(body.enable_discovered).toBe(false);
       return route.fulfill({ status: 502, json: probeFailurePayload() });
     }
     if (path === "/api/channels/openai-primary/models") {
@@ -77,6 +79,7 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
+  await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
@@ -164,6 +167,7 @@ function channelDetailPayload() {
     models_usage: [
       { channel_id: "openai-primary", model: "gpt-5", enabled: true, source: "manual", summary: usageSummary({ request_count: 10, total_tokens: 20000 }) },
       { channel_id: "openai-primary", model: "gpt-4.1", enabled: true, source: "manual", summary: usageSummary({ request_count: 2, total_tokens: 3000 }) },
+      { channel_id: "openai-primary", model: "gpt-new", enabled: false, source: "discovered", summary: usageSummary() },
     ],
     recent_failures: [{
       trace_id: "trace-failed",

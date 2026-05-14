@@ -44,6 +44,7 @@ func run() error {
 			"data": []map[string]any{
 				{"id": "gpt-5", "object": "model"},
 				{"id": "gpt-4.1", "object": "model"},
+				{"id": "gpt-new-real", "object": "model"},
 			},
 		})
 	}))

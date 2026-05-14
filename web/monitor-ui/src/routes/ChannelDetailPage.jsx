@@ -44,7 +44,7 @@ export function ChannelDetailPage() {
     setBusy("probe");
     setActionError("");
     try {
-      await postJSON(apiPaths.channelProbe(channelID), {});
+      await postJSON(apiPaths.channelProbe(channelID), { enable_discovered: false });
       reload();
     } catch (err) {
       setActionError(formatProbeActionError(err));
@@ -303,13 +303,15 @@ function ProbeRunCard({ item }) {
 
 function ChannelModelRow({ item, busy, onToggle }) {
   const summary = item.summary || {};
+  const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
   return (
     <div className="channel-model-row">
       <div>
         <strong>{item.model}</strong>
-        <span>{item.source || "unknown"}</span>
+        <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : item.source || "unknown"}</span>
       </div>
       <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? "enabled" : "disabled"}</InlineTag>
+      {isDiscoveredDisabled ? <InlineTag tone="gold">new</InlineTag> : null}
       <span>{formatCount(summary.request_count)} req</span>
       <span>{formatCount(summary.failed_request)} err</span>
       <span>{formatCount(summary.total_tokens)} tok</span>

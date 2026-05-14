@@ -24,6 +24,7 @@ type Store interface {
 	UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error
 	ListChannelModels(channelID string, enabledOnly bool) ([]store.ChannelModelRecord, error)
 	ReplaceChannelModels(channelID string, records []store.ChannelModelRecord) error
+	UpsertChannelModel(channelID string, record store.ChannelModelRecord) (store.ChannelModelRecord, error)
 	UpsertModelCatalog(store.ModelCatalogRecord) error
 	CreateChannelProbeRun(store.ChannelProbeRunRecord) (store.ChannelProbeRunRecord, error)
 	ReplaceUpstreamModels(upstreamID string, records []store.UpstreamModelRecord) error
@@ -56,6 +57,10 @@ type ProbeResult struct {
 	StartedAt       time.Time
 	CompletedAt     time.Time
 	DurationMs      int64
+}
+
+type ProbeOptions struct {
+	EnableDiscovered *bool
 }
 
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
@@ -202,6 +207,10 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 }
 
 func (s *Service) Probe(channelID string) (ProbeResult, error) {
+	return s.ProbeWithOptions(channelID, ProbeOptions{})
+}
+
+func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (ProbeResult, error) {
 	if s == nil || s.store == nil {
 		return ProbeResult{}, fmt.Errorf("channel service store is required")
 	}
@@ -218,13 +227,13 @@ func (s *Service) Probe(channelID string) (ProbeResult, error) {
 	}
 	resolved, err := upstream.Resolve(upstreamConfigFromChannel(channel))
 	if err != nil {
-		return s.finishProbe(result, resolved, nil, err)
+		return s.finishProbe(result, resolved, nil, err, options)
 	}
 	models, err := upstream.DiscoverModelsResolved(resolved, s.httpClient)
-	return s.finishProbe(result, resolved, models, err)
+	return s.finishProbe(result, resolved, models, err, options)
 }
 
-func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpstream, models []string, probeErr error) (ProbeResult, error) {
+func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpstream, models []string, probeErr error, options ProbeOptions) (ProbeResult, error) {
 	completedAt := time.Now().UTC()
 	result.CompletedAt = completedAt
 	result.DurationMs = completedAt.Sub(result.StartedAt).Milliseconds()
@@ -233,7 +242,6 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 	}
 	result.Models = normalizeModels(models)
 	result.DiscoveredCount = len(result.Models)
-	result.EnabledCount = len(result.Models)
 	result.Status = "success"
 	if probeErr != nil {
 		result.Status = "failed"
@@ -270,9 +278,11 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 		}
 	}
 	if probeErr == nil {
-		if err := s.store.ReplaceChannelModels(result.ChannelID, channelModels); err != nil {
+		merged, err := s.mergeDiscoveredChannelModels(result.ChannelID, channelModels, enableDiscoveredByDefault(options))
+		if err != nil {
 			return result, err
 		}
+		result.EnabledCount = countEnabledModels(merged)
 		if err := s.store.ReplaceUpstreamModels(result.ChannelID, upstreamModels); err != nil {
 			return result, err
 		}
@@ -295,6 +305,60 @@ func (s *Service) finishProbe(result ProbeResult, resolved upstream.ResolvedUpst
 		return result, err
 	}
 	return result, probeErr
+}
+
+func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []store.ChannelModelRecord, enableNew bool) ([]store.ChannelModelRecord, error) {
+	existing, err := s.store.ListChannelModels(channelID, false)
+	if err != nil {
+		return nil, err
+	}
+	existingByModel := make(map[string]store.ChannelModelRecord, len(existing))
+	for _, record := range existing {
+		existingByModel[record.Model] = record
+	}
+	merged := make([]store.ChannelModelRecord, 0, len(discovered))
+	for _, record := range discovered {
+		model := strings.ToLower(strings.TrimSpace(record.Model))
+		if model == "" {
+			continue
+		}
+		record.Enabled = enableNew
+		if previous, ok := existingByModel[model]; ok {
+			record.Enabled = previous.Enabled
+			if strings.TrimSpace(previous.Source) != "" && previous.Source != "discovered" {
+				record.Source = previous.Source
+			}
+			if strings.TrimSpace(previous.DisplayName) != "" {
+				record.DisplayName = previous.DisplayName
+			}
+			if !previous.FirstSeenAt.IsZero() {
+				record.FirstSeenAt = previous.FirstSeenAt
+			}
+		}
+		saved, err := s.store.UpsertChannelModel(channelID, record)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, saved)
+	}
+	return merged, nil
+}
+
+func enableDiscoveredByDefault(options ProbeOptions) bool {
+	if options.EnableDiscovered == nil {
+		return true
+	}
+	return *options.EnableDiscovered
+}
+
+func countEnabledModels(records []store.ChannelModelRecord) int {
+	count := 0
+	for _, record := range records {
+		if record.Enabled {
+			count++
+		}
+	}
+	return count
 }
 
 func probeRequestMetaJSON(result ProbeResult) string {
