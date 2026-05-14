@@ -76,8 +76,8 @@ export function OverviewPage() {
         <StatCard label="Success" value={`${Number(summary.success_rate ?? 0).toFixed(1)}%`} detail={`${summary.success_request ?? 0} successful`} accent="accent-green" />
         <StatCard label="Failed" value={summary.failed_request ?? 0} detail={`${attention.recent_failures?.length ?? 0} recent failures`} accent={(summary.failed_request ?? 0) > 0 ? "accent-red" : ""} />
         <StatCard label="Tokens" value={formatOverviewCount(summary.total_tokens ?? 0)} detail={`${summary.stream_count ?? 0} streaming traces`} accent="accent-gold" />
-        <StatCard label="Avg TTFT" value={formatDuration(summary.avg_ttft_ms ?? 0)} />
-        <StatCard label="Avg Latency" value={formatDuration(summary.avg_duration_ms ?? 0)} />
+        <StatCard label="TTFT" value={formatDuration(summary.avg_ttft_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_ttft_ms ?? 0)}`} />
+        <StatCard label="Latency" value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
         <StatCard label="Findings" value={breakdown.finding_categories?.reduce((sum, item) => sum + Number(item.count || 0), 0) ?? 0} detail={`${attention.high_risk_findings?.length ?? 0} high risk`} accent={(attention.high_risk_findings?.length ?? 0) ? "accent-red" : ""} />
         <StatCard label="Parse Health" value={`${observation.parsed ?? 0}/${summary.request_count ?? 0}`} detail={`${observation.failed ?? 0} failed, ${observation.unparsed ?? 0} unparsed`} accent={(observation.failed ?? 0) ? "accent-red" : ""} />
       </section>

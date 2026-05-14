@@ -273,9 +273,31 @@ Status:
 - Completed in this phase.
 - The next slice should be p95 TTFT/latency only if it can be implemented from indexed `logs` without schema migration.
 
+### Phase 7: Summary P95 Latency
+
+Goal:
+
+- Add tail-latency context to the Overview KPI row without introducing rollup tables or storage migration.
+
+Scope:
+
+- Compute window-level p95 TTFT and p95 duration from indexed `logs`.
+- Expose `p95_ttft_ms` and `p95_duration_ms` in `/api/overview.summary`.
+- Show p95 values as detail text on the existing TTFT and latency cards.
+- Do not add per-bucket p95 yet; that would make timeline queries heavier and is not needed for the first dashboard iteration.
+
+Validation:
+
+- `go test ./internal/store ./internal/monitor`
+- `task ui:build`
+
+Status:
+
+- Completed in this phase.
+
 ## Explicit Deferrals
 
 - Cost estimation is deferred until provider/model pricing configuration exists.
-- Percentile latency is deferred unless the first implementation can compute it simply from indexed data without schema changes.
+- Per-bucket percentile latency is deferred unless a future rollup/indexing design needs it.
 - Long-range historical rollups are deferred; the first version can bucket directly from `logs`.
 - No destructive storage migration is required.

@@ -271,6 +271,9 @@ func TestOverviewAPIHandlerReturnsDashboardFromIndexedData(t *testing.T) {
 	if payload.Summary.StreamCount != 1 || payload.Summary.SessionCount != 1 {
 		t.Fatalf("summary streams/sessions = %+v, want 1/1", payload.Summary)
 	}
+	if payload.Summary.P95DurationMs == 0 || payload.Summary.P95TTFTMs == 0 {
+		t.Fatalf("summary p95 = %+v, want non-zero indexed duration and ttft percentiles", payload.Summary)
+	}
 	if len(payload.Timeline) == 0 {
 		t.Fatalf("timeline missing")
 	}

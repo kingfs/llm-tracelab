@@ -56,6 +56,8 @@ type overviewSummaryView struct {
 	TotalTokens    int     `json:"total_tokens"`
 	AvgTTFTMs      int     `json:"avg_ttft_ms"`
 	AvgDurationMs  int64   `json:"avg_duration_ms"`
+	P95TTFTMs      int     `json:"p95_ttft_ms"`
+	P95DurationMs  int64   `json:"p95_duration_ms"`
 	StreamCount    int     `json:"stream_count"`
 	SessionCount   int     `json:"session_count"`
 }
@@ -2788,6 +2790,8 @@ func overviewResponseFromStore(window string, dashboard store.OverviewDashboard)
 			TotalTokens:    dashboard.Summary.TotalTokens,
 			AvgTTFTMs:      dashboard.Summary.AvgTTFTMs,
 			AvgDurationMs:  dashboard.Summary.AvgDurationMs,
+			P95TTFTMs:      dashboard.Summary.P95TTFTMs,
+			P95DurationMs:  dashboard.Summary.P95DurationMs,
 			StreamCount:    dashboard.Summary.StreamCount,
 			SessionCount:   dashboard.Summary.SessionCount,
 		},

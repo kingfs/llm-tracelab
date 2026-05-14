@@ -322,6 +322,8 @@ type OverviewSummary struct {
 	TotalTokens    int
 	AvgTTFTMs      int
 	AvgDurationMs  int64
+	P95TTFTMs      int
+	P95DurationMs  int64
 	StreamCount    int
 	SessionCount   int
 }
@@ -4751,7 +4753,47 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 	}
 	summary.AvgTTFTMs = int(math.Round(avgTTFT))
 	summary.AvgDurationMs = int64(math.Round(avgDuration))
+	if summary.RequestCount > 0 {
+		p95TTFT, err := s.overviewPercentile("ttft_ms", whereSQL, whereArgs, 0.95)
+		if err != nil {
+			return OverviewSummary{}, err
+		}
+		p95Duration, err := s.overviewPercentile("duration_ms", whereSQL, whereArgs, 0.95)
+		if err != nil {
+			return OverviewSummary{}, err
+		}
+		summary.P95TTFTMs = int(p95TTFT)
+		summary.P95DurationMs = p95Duration
+	}
 	return summary, nil
+}
+
+func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []any, percentile float64) (int64, error) {
+	var count int
+	countArgs := append([]any{}, whereArgs...)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+whereSQL+` AND `+column+` > 0`, countArgs...).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count == 0 {
+		return 0, nil
+	}
+	offset := int(math.Ceil(float64(count)*percentile)) - 1
+	if offset < 0 {
+		offset = 0
+	}
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, offset)
+	var value int64
+	if err := s.db.QueryRow(`
+		SELECT `+column+`
+		FROM logs
+		WHERE `+whereSQL+` AND `+column+` > 0
+		ORDER BY `+column+` ASC
+		LIMIT 1 OFFSET ?
+	`, queryArgs...).Scan(&value); err != nil {
+		return 0, err
+	}
+	return value, nil
 }
 
 func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, error) {
