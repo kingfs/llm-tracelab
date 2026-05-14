@@ -700,8 +700,9 @@ Headers 编辑：
 - 已显式标记 secret 存储模式：渠道 API 返回 `secret_storage_mode`，UI 在渠道卡片与详情页展示本地 secret 存储模式。
 - 已引入本地加密存储：API key 与 `Authorization`、`api-key`、`token` 类敏感 header 在 SQLite 中以 `tlsec:v1:` envelope 保存，运行时读取仍返回明文供代理调用；历史明文数据保持兼容。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
+- 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路。
 
 下一步建议：
 
 1. 增加 master key 轮换/导入导出流程，补齐 key 文件丢失时的用户提示。
-2. 扩展 UI 端到端校验，增加真实 Go monitor server fixture、探测失败截图和移动端布局截图归档。
+2. 扩展 UI 端到端校验，增加探测失败截图和移动端布局截图归档。

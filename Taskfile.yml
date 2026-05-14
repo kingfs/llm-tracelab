@@ -23,6 +23,13 @@ tasks:
       - bun install --frozen-lockfile
       - bun run test:ui
 
+  ui:test:real:
+    desc: Run browser tests against the real Go Monitor server fixture
+    dir: web/monitor-ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run test:ui:real
+
   generate:ent:
     desc: Generate ent control-plane DAO code
     cmds:

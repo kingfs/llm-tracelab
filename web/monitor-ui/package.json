@@ -4,7 +4,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test:ui": "playwright test"
+    "test:ui": "playwright test",
+    "test:ui:real": "playwright test --config playwright.real.config.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.7.0",
