@@ -725,6 +725,10 @@ a:focus-visible {
   margin-bottom: 20px;
 }
 
+.overview-kpi-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .hero-grid-compact {
   margin-bottom: 0;
 }
@@ -865,6 +869,81 @@ a:focus-visible {
 
 .routing-timeline-bar-active {
   background: linear-gradient(180deg, rgba(251, 191, 36, 0.92), rgba(56, 189, 248, 0.92));
+}
+
+.overview-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-breakdown-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.overview-attention-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.overview-attention-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: rgba(15, 23, 42, 0.4);
+  padding: 16px;
+}
+
+.overview-attention-panel .trace-table {
+  gap: 8px;
+}
+
+.overview-attention-panel .trace-table-head {
+  display: none;
+}
+
+.overview-attention-panel .trace-row {
+  grid-template-columns: minmax(0, 1.2fr) auto minmax(160px, 0.8fr) minmax(170px, 0.8fr) auto;
+  padding: 12px;
+}
+
+.overview-queue {
+  display: grid;
+  gap: 10px;
+}
+
+.overview-queue-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(15, 23, 42, 0.42);
+  padding: 12px;
+}
+
+.overview-queue-row:hover {
+  border-color: var(--line-strong);
+  background: rgba(30, 41, 59, 0.6);
+}
+
+.overview-queue-row strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 0.94rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.overview-queue-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  overflow-wrap: anywhere;
 }
 
 .upstream-grid {
@@ -3047,9 +3126,13 @@ a:focus-visible {
   .upstream-grid,
   .channel-grid,
   .model-market-grid,
+  .overview-chart-grid,
+  .overview-breakdown-grid,
+  .overview-attention-grid,
   .upstream-failure-list,
   .trace-table-head,
   .trace-row,
+  .overview-attention-panel .trace-row,
   .session-table-head,
   .session-row {
     grid-template-columns: 1fr;
