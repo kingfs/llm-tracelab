@@ -8,6 +8,8 @@
   align-items: center;
   gap: 12px;
   min-height: 52px;
+  padding: 4px 4px 14px;
+  border-bottom: 1px solid rgba(125, 211, 252, 0.12);
 }
 
 .nav-brand-mark {
@@ -15,13 +17,15 @@
   width: 42px;
   height: 42px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(125, 211, 252, 0.38);
   border-radius: 8px;
-  background: #ffffff;
-  color: var(--accent-deep);
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.98), rgba(52, 211, 153, 0.78));
+  color: #04131f;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-size: 0.82rem;
   font-weight: 700;
+  box-shadow: 0 14px 28px rgba(56, 189, 248, 0.22);
 }
 
 .nav-brand strong,
@@ -38,7 +42,7 @@
 
 .nav-brand span {
   display: block;
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(190, 220, 238, 0.68);
   font-size: 0.72rem;
 }
 
@@ -55,36 +59,61 @@
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.76);
+  color: rgba(220, 238, 255, 0.78);
   font-size: 0.88rem;
   transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease;
+  position: relative;
+  overflow: hidden;
 }
 
 .nav-chip small {
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(159, 178, 199, 0.72);
   font-size: 0.7rem;
 }
 
 .nav-chip:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(125, 211, 252, 0.18);
   color: #ffffff;
   transform: translateY(-1px);
 }
 
 .nav-chip-active {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(52, 211, 153, 0.08));
+  border-color: rgba(125, 211, 252, 0.32);
   color: #ffffff;
+  box-shadow: inset 3px 0 0 rgba(56, 189, 248, 0.92), 0 12px 26px rgba(0, 0, 0, 0.18);
 }
 
 .nav-chip-active small {
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(190, 220, 238, 0.84);
 }
 
 @media (max-width: 1100px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .app-sidebar {
+    position: sticky;
+    z-index: 20;
+    height: auto;
+    padding: 12px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(125, 211, 252, 0.12);
+  }
+
+  .primary-nav {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
   .nav-brand {
     min-width: 220px;
+    padding: 0;
+    border-bottom: 0;
   }
 
   .nav-section {
