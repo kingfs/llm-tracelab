@@ -4,7 +4,7 @@ import { StatCard } from "../components/common/Display";
 import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, postJSON } from "../lib/api";
+import { apiPaths, apiURL, downloadBlob, postJSON } from "../lib/api";
 import { buildChannelLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_FORM = {
@@ -29,9 +29,11 @@ export function ChannelsPage() {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [secretTick, setSecretTick] = useState(0);
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const channels = useJSON(apiURL(apiPaths.channels, params), [windowValue, refreshTick]);
+  const secret = useJSON(apiPaths.localSecretKey, [secretTick]);
   const items = channels.data?.items || [];
   const totals = useMemo(() => summarizeChannels(items), [items]);
 
@@ -93,6 +95,8 @@ export function ChannelsPage() {
         </div>
       </section>
 
+      <LocalSecretPanel data={secret.data} loading={secret.loading} error={secret.error} onRefresh={() => setSecretTick((tick) => tick + 1)} />
+
       {formOpen ? (
         <section className="panel">
           <div className="panel-head">
@@ -129,6 +133,77 @@ export function ChannelsPage() {
         </section>
       ) : null}
     </div>
+  );
+}
+
+function LocalSecretPanel({ data, loading, error, onRefresh }) {
+  const [busy, setBusy] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [confirmRotate, setConfirmRotate] = useState(false);
+
+  const downloadKey = async () => {
+    setBusy("download");
+    setActionError("");
+    try {
+      const blob = await downloadBlob(apiPaths.localSecretKeyExport);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `trace_index.secret.${data?.fingerprint || "backup"}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setActionError(err.message || "Unable to download key backup.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const rotateKey = async () => {
+    if (!confirmRotate) {
+      return;
+    }
+    setBusy("rotate");
+    setActionError("");
+    try {
+      await postJSON(apiPaths.localSecretKeyRotate, {});
+      setConfirmRotate(false);
+      onRefresh();
+    } catch (err) {
+      setActionError(err.message || "Unable to rotate local key.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const readable = data?.readable && !data?.error;
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Local secret key</p>
+          <h2>Channel secret storage</h2>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone={readable ? "green" : "danger"}>{loading && !data ? "loading" : readable ? "readable" : "attention"}</InlineTag>
+          {data?.mode ? <InlineTag tone="accent">{data.mode}</InlineTag> : null}
+        </div>
+      </div>
+      <div className="detail-meta-strip">
+        <Metric label="fingerprint" value={data?.fingerprint || "-"} />
+        <Metric label="exists" value={data ? String(Boolean(data.exists)) : "-"} />
+        <Metric label="readable" value={data ? String(Boolean(data.readable)) : "-"} />
+      </div>
+      {data?.key_path ? <p className="trace-subline mono">{data.key_path}</p> : null}
+      {error || data?.error || actionError ? <EmptyState title="Secret key action failed" detail={actionError || data?.error || error} tone="danger" compact /> : null}
+      <div className="channel-form-actions">
+        <button className="ghost-button" type="button" onClick={downloadKey} disabled={!readable || busy === "download"}>{busy === "download" ? "Downloading" : "Download backup"}</button>
+        <label className="channel-form-check"><input type="checkbox" checked={confirmRotate} onChange={(event) => setConfirmRotate(event.target.checked)} /> Confirm rotate</label>
+        <button className="ghost-button" type="button" onClick={rotateKey} disabled={!readable || !confirmRotate || busy === "rotate"}>{busy === "rotate" ? "Rotating" : "Rotate key"}</button>
+      </div>
+    </section>
   );
 }
 

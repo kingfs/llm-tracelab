@@ -880,6 +880,75 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 }
 
+func TestLocalSecretKeyAPI(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          "https://api.openai.com/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-monitor-secret"),
+		HeadersJSON:      `{"Authorization":"Bearer monitor","X-Test":"visible"}`,
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	handler := localSecretKeyAPIHandler(st)
+	req := httptest.NewRequest(http.MethodGet, "/api/secrets/local-key", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status code = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-monitor-secret") || strings.Contains(rr.Body.String(), "Bearer monitor") {
+		t.Fatalf("status leaked secret: %s", rr.Body.String())
+	}
+	var status store.SecretStatus
+	if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil {
+		t.Fatalf("json.Unmarshal(status) error = %v", err)
+	}
+	if status.Mode != "encrypted-local" || !status.Exists || !status.Readable || status.Fingerprint == "" {
+		t.Fatalf("status = %+v", status)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/secrets/local-key?export=1", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("export code = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Header().Get("Content-Disposition"), "attachment") || strings.TrimSpace(rr.Body.String()) == "" {
+		t.Fatalf("export headers/body = %q %q", rr.Header().Get("Content-Disposition"), rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/secrets/local-key?rotate=1", nil)
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("rotate code = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var rotation store.SecretRotationResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &rotation); err != nil {
+		t.Fatalf("json.Unmarshal(rotation) error = %v", err)
+	}
+	if rotation.OldFingerprint != status.Fingerprint || rotation.NewFingerprint == "" || rotation.NewFingerprint == rotation.OldFingerprint || rotation.APIKeyCount != 1 || rotation.HeaderCount != 1 {
+		t.Fatalf("rotation = %+v, status=%+v", rotation, status)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if string(record.APIKeyCiphertext) != "sk-monitor-secret" || record.HeadersJSON != `{"Authorization":"Bearer monitor","X-Test":"visible"}` {
+		t.Fatalf("record after rotate = api_key %q headers %q", string(record.APIKeyCiphertext), record.HeadersJSON)
+	}
+}
+
 func TestModelCatalogAPI(t *testing.T) {
 	t.Parallel()
 

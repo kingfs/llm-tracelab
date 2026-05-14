@@ -13,12 +13,24 @@ test("real monitor server renders seeded model and channel data", async ({ page 
 
   await page.goto("/channels/openai-primary");
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
-  await expect(page.getByText("encrypted-local")).toBeVisible();
+  await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("rate limited")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await expect(page.locator("textarea")).toContainText("X-Test: visible");
+});
+
+test("real monitor server supports local secret key operations", async ({ page }) => {
+  await page.goto("/channels");
+  await expect(page.getByRole("heading", { name: "Channel secret storage" })).toBeVisible();
+  await expect(page.getByText("encrypted-local").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
+
+  await page.getByLabel("Confirm rotate").check();
+  await page.getByRole("button", { name: "Rotate key" }).click();
+  await expect(page.getByRole("button", { name: "Rotating" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
 });
 
 test("real monitor server supports probe and manual model mutation", async ({ page }) => {

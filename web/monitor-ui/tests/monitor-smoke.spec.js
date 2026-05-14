@@ -18,6 +18,15 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels") {
       return route.fulfill({ json: channelListPayload() });
     }
+    if (path === "/api/secrets/local-key" && method === "GET" && !url.searchParams.has("export")) {
+      return route.fulfill({ json: localSecretPayload() });
+    }
+    if (path === "/api/secrets/local-key" && method === "GET" && url.searchParams.get("export") === "1") {
+      return route.fulfill({ body: "mock-secret-key\n", headers: { "Content-Type": "text/plain" } });
+    }
+    if (path === "/api/secrets/local-key" && method === "POST" && url.searchParams.get("rotate") === "1") {
+      return route.fulfill({ json: { old_fingerprint: "abc123", new_fingerprint: "def456", channel_count: 1, api_key_count: 1, header_count: 1 } });
+    }
     if (path === "/api/channels/openai-primary" && method === "GET") {
       return route.fulfill({ json: channelDetailPayload() });
     }
@@ -60,11 +69,14 @@ test("models marketplace and detail render", async ({ page }) => {
 test("channel management renders and supports core actions", async ({ page }) => {
   await page.goto("/channels");
   await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
-  await expect(page.getByText("encrypted-local")).toBeVisible();
+  await expect(page.getByText("encrypted-local").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Channel secret storage" })).toBeVisible();
+  await expect(page.getByText("abc123")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
-  await expect(page.getByText("encrypted-local")).toBeVisible();
+  await expect(page.getByText("encrypted-local").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Edit" }).click();
   await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
@@ -159,6 +171,16 @@ function channelDetailPayload() {
       recorded_at: new Date().toISOString(),
       error_text: "rate limited",
     }],
+  };
+}
+
+function localSecretPayload() {
+  return {
+    mode: "encrypted-local",
+    key_path: "/tmp/traces/trace_index.secret",
+    exists: true,
+    readable: true,
+    fingerprint: "abc123",
   };
 }
 

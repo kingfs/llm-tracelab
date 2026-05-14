@@ -672,6 +672,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
@@ -864,6 +865,46 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			})
 		}
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func localSecretKeyAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("export") == "1" {
+				key, status, err := st.ExportLocalSecretKey()
+				if err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				name := "trace_index.secret." + valueOrExisting(status.Fingerprint, "backup")
+				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(key)
+				return
+			}
+			status := st.SecretStatus()
+			writeJSON(w, http.StatusOK, status)
+		case http.MethodPost:
+			if r.URL.Query().Get("rotate") != "1" {
+				http.NotFound(w, r)
+				return
+			}
+			result, err := st.RotateLocalSecretKey()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, result)
+		default:
+			http.NotFound(w, r)
+		}
 	}
 }
 

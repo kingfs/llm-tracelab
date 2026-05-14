@@ -26,6 +26,9 @@ export const apiPaths = {
   channelProbe: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/probe`,
   channelModels: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models`,
   channelModel: (channelID, model) => `/api/channels/${encodeURIComponent(channelID)}/models/${encodeURIComponent(model)}`,
+  localSecretKey: "/api/secrets/local-key",
+  localSecretKeyExport: "/api/secrets/local-key?export=1",
+  localSecretKeyRotate: "/api/secrets/local-key?rotate=1",
   upstreams: "/api/upstreams",
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };

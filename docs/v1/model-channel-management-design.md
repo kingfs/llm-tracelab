@@ -703,10 +703,11 @@ Headers 编辑：
 - 已引入本地加密存储：API key 与 `Authorization`、`api-key`、`token` 类敏感 header 在 SQLite 中以 `tlsec:v1:` envelope 保存，运行时读取仍返回明文供代理调用；历史明文数据保持兼容。
 - 已新增本地 master key 运维入口：`db secret status/export` 支持检查 key 文件、查看 fingerprint、导出备份；status 不返回原始 key。
 - 已新增本地 master key rotate：`db secret rotate --yes` 备份旧 key，生成新 key，并全量重加密渠道 API key 与敏感 headers。
+- 已在 Monitor UI 增加本地 secret key 运维入口：Channels 页面展示 key 状态、路径、fingerprint，支持下载备份和确认后轮换。
 - 已新增 UI 浏览器 smoke：`task ui:test` 使用 Playwright 和 mock Monitor API 覆盖模型广场、模型详情、渠道列表、渠道详情、核心操作与 Trace 到 Channel/Upstream 跳转。
 - 已新增真实 Monitor server 浏览器 E2E：`task ui:test:real` 启动本地 Go Monitor fixture、临时 SQLite 和本地假上游，覆盖嵌入式 UI 到真实 API 的模型/渠道/trace 主链路。
 
 下一步建议：
 
-1. 在 Monitor UI 增加 secret key 状态提示和备份/轮换操作入口。
-2. 扩展 UI 端到端校验，增加探测失败截图和移动端布局截图归档。
+1. 扩展 UI 端到端校验，增加探测失败截图和移动端布局截图归档。
+2. 增加渠道探测失败 UX：失败原因分类、最近失败探测记录入口和重试建议。
