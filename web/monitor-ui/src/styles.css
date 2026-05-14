@@ -26,47 +26,47 @@
 }
 
 :root[data-theme="light"] {
-  --bg: #f4f7fb;
-  --bg-strong: #e8eef6;
-  --panel: rgba(255, 255, 255, 0.86);
-  --panel-strong: rgba(255, 255, 255, 0.96);
-  --panel-soft: rgba(255, 255, 255, 0.68);
-  --line: rgba(15, 23, 42, 0.12);
-  --line-strong: rgba(14, 116, 144, 0.26);
-  --text: #111827;
-  --muted: #526071;
-  --muted-soft: #7a8798;
-  --accent: #0ea5e9;
-  --accent-deep: #0891b2;
-  --accent-soft: rgba(14, 165, 233, 0.13);
+  --bg: #ffffff;
+  --bg-strong: #f7f7f5;
+  --panel: rgba(255, 255, 255, 0.96);
+  --panel-strong: #ffffff;
+  --panel-soft: #f7f7f5;
+  --line: rgba(15, 23, 42, 0.1);
+  --line-strong: rgba(15, 23, 42, 0.18);
+  --text: #202123;
+  --muted: #6b6f76;
+  --muted-soft: #8c9199;
+  --accent: #10a37f;
+  --accent-deep: #0f8f70;
+  --accent-soft: rgba(16, 163, 127, 0.1);
   --gold: #b7791f;
   --danger: #be123c;
   --green: #047857;
-  --shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
-  --shadow-soft: 0 14px 34px rgba(15, 23, 42, 0.1);
+  --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+  --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.06);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: light) {
   :root[data-theme="system"] {
-    --bg: #f4f7fb;
-    --bg-strong: #e8eef6;
-    --panel: rgba(255, 255, 255, 0.86);
-    --panel-strong: rgba(255, 255, 255, 0.96);
-    --panel-soft: rgba(255, 255, 255, 0.68);
-    --line: rgba(15, 23, 42, 0.12);
-    --line-strong: rgba(14, 116, 144, 0.26);
-    --text: #111827;
-    --muted: #526071;
-    --muted-soft: #7a8798;
-    --accent: #0ea5e9;
-    --accent-deep: #0891b2;
-    --accent-soft: rgba(14, 165, 233, 0.13);
+    --bg: #ffffff;
+    --bg-strong: #f7f7f5;
+    --panel: rgba(255, 255, 255, 0.96);
+    --panel-strong: #ffffff;
+    --panel-soft: #f7f7f5;
+    --line: rgba(15, 23, 42, 0.1);
+    --line-strong: rgba(15, 23, 42, 0.18);
+    --text: #202123;
+    --muted: #6b6f76;
+    --muted-soft: #8c9199;
+    --accent: #10a37f;
+    --accent-deep: #0f8f70;
+    --accent-soft: rgba(16, 163, 127, 0.1);
     --gold: #b7791f;
     --danger: #be123c;
     --green: #047857;
-    --shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
-    --shadow-soft: 0 14px 34px rgba(15, 23, 42, 0.1);
+    --shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+    --shadow-soft: 0 8px 24px rgba(15, 23, 42, 0.06);
     color-scheme: light;
   }
 }
@@ -91,18 +91,12 @@ body {
 }
 
 :root[data-theme="light"] body {
-  background:
-    radial-gradient(circle at 14% 2%, rgba(14, 165, 233, 0.18), transparent 26rem),
-    radial-gradient(circle at 84% 8%, rgba(16, 185, 129, 0.12), transparent 28rem),
-    linear-gradient(135deg, #f4f7fb 0%, #eef4fa 48%, #e8eef6 100%);
+  background: #ffffff;
 }
 
 @media (prefers-color-scheme: light) {
   :root[data-theme="system"] body {
-    background:
-      radial-gradient(circle at 14% 2%, rgba(14, 165, 233, 0.18), transparent 26rem),
-      radial-gradient(circle at 84% 8%, rgba(16, 185, 129, 0.12), transparent 28rem),
-      linear-gradient(135deg, #f4f7fb 0%, #eef4fa 48%, #e8eef6 100%);
+    background: #ffffff;
   }
 }
 
@@ -116,6 +110,16 @@ body::before {
     linear-gradient(90deg, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
   background-size: 48px 48px;
   mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.78), transparent 76%);
+}
+
+:root[data-theme="light"] body::before {
+  display: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] body::before {
+    display: none;
+  }
 }
 
 button, input, a {
@@ -137,6 +141,16 @@ a {
     radial-gradient(circle at 24% 80%, rgba(52, 211, 153, 0.14), transparent 24rem);
 }
 
+:root[data-theme="light"] .auth-screen {
+  background: #ffffff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .auth-screen {
+    background: #ffffff;
+  }
+}
+
 .auth-panel {
   width: min(420px, 100%);
   display: grid;
@@ -149,6 +163,22 @@ a {
     var(--panel-strong);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+}
+
+:root[data-theme="light"] .auth-panel {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.08);
+  backdrop-filter: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .auth-panel {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.08);
+    backdrop-filter: none;
+  }
 }
 
 .auth-panel h1 {
@@ -170,6 +200,20 @@ a {
   padding: 0 12px;
   background: rgba(2, 8, 23, 0.45);
   color: var(--text);
+}
+
+:root[data-theme="light"] .auth-panel input {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .auth-panel input {
+    border-color: rgba(0, 0, 0, 0.12);
+    background: #ffffff;
+    color: var(--text);
+  }
 }
 
 .auth-error {
@@ -234,15 +278,19 @@ a {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   isolation: isolate;
+}
+
+.app-shell-collapsed {
+  grid-template-columns: 64px minmax(0, 1fr);
 }
 
 .app-sidebar {
   position: sticky;
   top: 0;
   height: 100vh;
-  padding: 22px 16px;
+  padding: 8px;
   background:
     linear-gradient(180deg, rgba(6, 15, 26, 0.94), rgba(8, 18, 31, 0.88)),
     radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.14), transparent 18rem);
@@ -257,9 +305,10 @@ a {
 }
 
 .shell {
-  width: min(1680px, calc(100vw - 32px));
+  width: 100%;
+  max-width: none;
   margin: 0 auto;
-  padding: 22px 0 56px;
+  padding: 18px 22px 56px;
 }
 
 .topbar {
@@ -276,6 +325,44 @@ a {
     radial-gradient(circle at 84% 18%, rgba(56, 189, 248, 0.16), transparent 18rem);
   box-shadow: var(--shadow);
   backdrop-filter: blur(18px);
+}
+
+:root[data-theme="light"] .topbar {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+:root[data-theme="light"] .panel,
+:root[data-theme="light"] .stat-card,
+:root[data-theme="light"] .message-card,
+:root[data-theme="light"] .collapse-card,
+:root[data-theme="light"] .protocol-column {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .topbar {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  :root[data-theme="system"] .panel,
+  :root[data-theme="system"] .stat-card,
+  :root[data-theme="system"] .message-card,
+  :root[data-theme="system"] .collapse-card,
+  :root[data-theme="system"] .protocol-column {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
 }
 
 .topbar h1,
@@ -338,6 +425,32 @@ a {
   transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
   position: relative;
   overflow: hidden;
+}
+
+:root[data-theme="light"] .overview-tile {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  box-shadow: none;
+}
+
+:root[data-theme="light"] .overview-tile:hover {
+  border-color: rgba(0, 0, 0, 0.14);
+  background: #f7f7f5;
+  transform: none;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .overview-tile {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+    box-shadow: none;
+  }
+
+  :root[data-theme="system"] .overview-tile:hover {
+    border-color: rgba(0, 0, 0, 0.14);
+    background: #f7f7f5;
+    transform: none;
+  }
 }
 
 .overview-tile:hover {
@@ -469,6 +582,60 @@ a {
   background: rgba(15, 23, 42, 0.54);
   color: var(--text);
   padding: 0.72rem 0.96rem;
+}
+
+:root[data-theme="light"] .badge,
+:root[data-theme="light"] .ghost-button,
+:root[data-theme="light"] .icon-button,
+:root[data-theme="light"] .detail-meta-pill,
+:root[data-theme="light"] .inline-tag,
+:root[data-theme="light"] .mini-token,
+:root[data-theme="light"] .token-badge {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  color: var(--text);
+}
+
+:root[data-theme="light"] .ghost-button:hover,
+:root[data-theme="light"] .icon-button:hover {
+  border-color: rgba(0, 0, 0, 0.14);
+  background: #f7f7f5;
+}
+
+:root[data-theme="light"] .ghost-button.active,
+:root[data-theme="light"] .view-toggle .ghost-button.active,
+:root[data-theme="light"] .badge-live {
+  border-color: transparent;
+  background: #202123;
+  color: #ffffff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .badge,
+  :root[data-theme="system"] .ghost-button,
+  :root[data-theme="system"] .icon-button,
+  :root[data-theme="system"] .detail-meta-pill,
+  :root[data-theme="system"] .inline-tag,
+  :root[data-theme="system"] .mini-token,
+  :root[data-theme="system"] .token-badge {
+    border-color: rgba(0, 0, 0, 0.1);
+    background: #ffffff;
+    color: var(--text);
+  }
+
+  :root[data-theme="system"] .ghost-button:hover,
+  :root[data-theme="system"] .icon-button:hover {
+    border-color: rgba(0, 0, 0, 0.14);
+    background: #f7f7f5;
+  }
+
+  :root[data-theme="system"] .ghost-button.active,
+  :root[data-theme="system"] .view-toggle .ghost-button.active,
+  :root[data-theme="system"] .badge-live {
+    border-color: transparent;
+    background: #202123;
+    color: #ffffff;
+  }
 }
 
 .ghost-button,
@@ -966,6 +1133,102 @@ a:focus-visible {
   background:
     linear-gradient(180deg, rgba(17, 34, 53, 0.78), rgba(10, 22, 36, 0.84)),
     linear-gradient(135deg, rgba(56, 189, 248, 0.08), transparent 32%);
+}
+
+:root[data-theme="light"] .filter-bar,
+:root[data-theme="light"] .trace-table,
+:root[data-theme="light"] .session-table,
+:root[data-theme="light"] .routing-failure-summary,
+:root[data-theme="light"] .breakdown-card,
+:root[data-theme="light"] .payload-card,
+:root[data-theme="light"] .semantic-node,
+:root[data-theme="light"] .finding-card,
+:root[data-theme="light"] .trace-reading-card,
+:root[data-theme="light"] .tool-call-box,
+:root[data-theme="light"] .tool-list-item,
+:root[data-theme="light"] .timeline-card,
+:root[data-theme="light"] .timeline-node,
+:root[data-theme="light"] .failure-context-card,
+:root[data-theme="light"] .failure-node,
+:root[data-theme="light"] .model-catalog-row,
+:root[data-theme="light"] .token-result {
+  border-color: rgba(0, 0, 0, 0.08);
+  background: #f7f7f5;
+}
+
+:root[data-theme="light"] .filter-input,
+:root[data-theme="light"] .token-form input,
+:root[data-theme="light"] .auth-panel input {
+  border-color: rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  color: var(--text);
+}
+
+:root[data-theme="light"] .trace-table-head,
+:root[data-theme="light"] .session-table-head {
+  background: #f7f7f5;
+  border-bottom-color: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="light"] .trace-row,
+:root[data-theme="light"] .session-row {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+:root[data-theme="light"] .trace-row:hover,
+:root[data-theme="light"] .session-row:hover,
+:root[data-theme="light"] .tool-list-item:hover,
+:root[data-theme="light"] .model-catalog-row:hover {
+  background: #ffffff;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-theme="system"] .filter-bar,
+  :root[data-theme="system"] .trace-table,
+  :root[data-theme="system"] .session-table,
+  :root[data-theme="system"] .routing-failure-summary,
+  :root[data-theme="system"] .breakdown-card,
+  :root[data-theme="system"] .payload-card,
+  :root[data-theme="system"] .semantic-node,
+  :root[data-theme="system"] .finding-card,
+  :root[data-theme="system"] .trace-reading-card,
+  :root[data-theme="system"] .tool-call-box,
+  :root[data-theme="system"] .tool-list-item,
+  :root[data-theme="system"] .timeline-card,
+  :root[data-theme="system"] .timeline-node,
+  :root[data-theme="system"] .failure-context-card,
+  :root[data-theme="system"] .failure-node,
+  :root[data-theme="system"] .model-catalog-row,
+  :root[data-theme="system"] .token-result {
+    border-color: rgba(0, 0, 0, 0.08);
+    background: #f7f7f5;
+  }
+
+  :root[data-theme="system"] .filter-input,
+  :root[data-theme="system"] .token-form input,
+  :root[data-theme="system"] .auth-panel input {
+    border-color: rgba(0, 0, 0, 0.12);
+    background: #ffffff;
+    color: var(--text);
+  }
+
+  :root[data-theme="system"] .trace-table-head,
+  :root[data-theme="system"] .session-table-head {
+    background: #f7f7f5;
+    border-bottom-color: rgba(0, 0, 0, 0.08);
+  }
+
+  :root[data-theme="system"] .trace-row,
+  :root[data-theme="system"] .session-row {
+    border-top-color: rgba(0, 0, 0, 0.08);
+  }
+
+  :root[data-theme="system"] .trace-row:hover,
+  :root[data-theme="system"] .session-row:hover,
+  :root[data-theme="system"] .tool-list-item:hover,
+  :root[data-theme="system"] .model-catalog-row:hover {
+    background: #ffffff;
+  }
 }
 
 .panel-head {
