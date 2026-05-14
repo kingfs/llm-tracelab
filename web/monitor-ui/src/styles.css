@@ -2122,6 +2122,16 @@ a:focus-visible {
   gap: 10px;
 }
 
+.breakdown-row-link {
+  border-radius: var(--radius-control);
+  margin: -4px;
+  padding: 4px;
+}
+
+.breakdown-row-link:hover {
+  background: rgba(56, 189, 248, 0.08);
+}
+
 .breakdown-label {
   color: var(--muted);
 }

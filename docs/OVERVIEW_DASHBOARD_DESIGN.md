@@ -225,6 +225,31 @@ Next narrow slice:
 2. Add observation health counts after parse job semantics are stable enough for global display.
 3. Add p95 TTFT/latency only if it can be computed from indexed `logs` without a storage migration.
 
+### Phase 5: Breakdown Drilldowns
+
+Goal:
+
+- Make Overview breakdown rows actionable without turning Overview into a list/search page.
+
+Scope:
+
+- Add optional links to reusable breakdown rows.
+- Link model rows to model detail.
+- Link provider and endpoint rows to filtered Traces.
+- Link upstream and routing failure rows to Routing.
+- Link finding category rows to filtered Audit.
+- Add Audit URL filters for category and severity.
+
+Validation:
+
+- `task ui:build`
+- `go test ./internal/monitor`
+
+Status:
+
+- Completed in this phase.
+- The next slice remains observation health counts or p95 latency, not additional Overview list features.
+
 ## Explicit Deferrals
 
 - Cost estimation is deferred until provider/model pricing configuration exists.

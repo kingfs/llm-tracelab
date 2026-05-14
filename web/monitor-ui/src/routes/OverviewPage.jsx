@@ -145,12 +145,12 @@ export function OverviewPage() {
           </div>
         </div>
         <div className="session-breakdown-grid overview-breakdown-grid">
-          <BreakdownList title="Models" items={breakdown.models || []} formatter={(item) => item.label || "unknown-model"} />
-          <BreakdownList title="Providers" items={breakdown.providers || []} formatter={(item) => formatProviderTag(item.label)} />
-          <BreakdownList title="Endpoints" items={breakdown.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} />
-          <BreakdownList title="Upstreams" items={breakdown.upstreams || []} formatter={(item) => item.label || "unknown-upstream"} />
-          <BreakdownList title="Routing failures" items={breakdown.routing_failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} />
-          <BreakdownList title="Finding categories" items={breakdown.finding_categories || []} formatter={(item) => formatFailureReason(item.label)} />
+          <BreakdownList title="Models" items={breakdown.models || []} formatter={(item) => item.label || "unknown-model"} linkFor={(item) => buildOverviewBreakdownLink("model", item.label, windowValue)} />
+          <BreakdownList title="Providers" items={breakdown.providers || []} formatter={(item) => formatProviderTag(item.label)} linkFor={(item) => buildOverviewBreakdownLink("provider", item.label, windowValue)} />
+          <BreakdownList title="Endpoints" items={breakdown.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} linkFor={(item) => buildOverviewBreakdownLink("endpoint", item.label, windowValue)} />
+          <BreakdownList title="Upstreams" items={breakdown.upstreams || []} formatter={(item) => item.label || "unknown-upstream"} linkFor={(item) => buildOverviewBreakdownLink("upstream", item.label, windowValue)} />
+          <BreakdownList title="Routing failures" items={breakdown.routing_failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} linkFor={(item) => buildOverviewBreakdownLink("routing_failure", item.label, windowValue)} />
+          <BreakdownList title="Finding categories" items={breakdown.finding_categories || []} formatter={(item) => formatFailureReason(item.label)} linkFor={(item) => buildOverviewBreakdownLink("finding_category", item.label, windowValue)} />
         </div>
       </section>
 
@@ -255,4 +255,27 @@ function formatOverviewCount(value = 0) {
     return `${(number / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
   }
   return String(Math.round(number));
+}
+
+function buildOverviewBreakdownLink(kind, value, windowValue) {
+  const label = String(value || "").trim();
+  if (!label) {
+    return "";
+  }
+  switch (kind) {
+    case "model":
+      return `/models/${encodeURIComponent(label)}${windowValue && windowValue !== "24h" ? `?window=${encodeURIComponent(windowValue)}` : ""}`;
+    case "provider":
+      return `/traces?provider=${encodeURIComponent(label)}`;
+    case "endpoint":
+      return `/traces?q=${encodeURIComponent(label)}`;
+    case "upstream":
+      return buildRoutingLink(normalizeUpstreamWindow(windowValue), label);
+    case "routing_failure":
+      return `/routing?status=error${windowValue && windowValue !== "24h" ? `&window=${encodeURIComponent(windowValue)}` : ""}`;
+    case "finding_category":
+      return `/audit?category=${encodeURIComponent(label)}`;
+    default:
+      return "";
+  }
 }

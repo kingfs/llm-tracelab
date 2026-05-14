@@ -1,13 +1,36 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../components/common/Badges";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { setOrDeleteParam } from "../lib/monitor";
 
 export function AuditPage() {
-  const findings = useJSON(apiURL(apiPaths.findings, { limit: "50" }), []);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const category = searchParams.get("category") || "";
+  const severity = searchParams.get("severity") || "";
+  const params = new URLSearchParams({ limit: "50" });
+  if (category) {
+    params.set("category", category);
+  }
+  if (severity) {
+    params.set("severity", severity);
+  }
+  const findings = useJSON(apiURL(apiPaths.findings, params), [category, severity]);
   const items = findings.data?.items || [];
+  const setFilter = (key, value) => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, key, value);
+    setSearchParams(next);
+  };
+  const resetFilters = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("category");
+    next.delete("severity");
+    setSearchParams(next);
+  };
+
   return (
     <div className="shell shell-list">
       <header className="topbar">
@@ -24,6 +47,17 @@ export function AuditPage() {
           </div>
           <InlineTag tone={items.length ? "danger" : "green"}>{findings.data?.total ?? 0} total</InlineTag>
         </div>
+        <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
+          <input className="filter-input" type="search" placeholder="category" value={category} onChange={(event) => setFilter("category", event.target.value)} />
+          <select className="filter-input" aria-label="Finding severity" value={severity} onChange={(event) => setFilter("severity", event.target.value)}>
+            <option value="">Any severity</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <button className="ghost-button" type="button" onClick={resetFilters}>Reset</button>
+        </form>
         {findings.error ? <EmptyState title="Unable to load findings" detail={findings.error} tone="danger" /> : null}
         {findings.loading && !findings.data ? <EmptyState title="Loading findings" detail="Reading deterministic findings across traces." /> : null}
         {items.length ? (
