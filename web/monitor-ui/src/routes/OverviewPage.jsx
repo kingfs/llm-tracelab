@@ -28,6 +28,7 @@ export function OverviewPage() {
   const windowValue = normalizeOverviewWindow(searchParams.get("window") || "24h");
   const [refreshTick, setRefreshTick] = useState(0);
   const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue, refreshTick]);
+  const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -79,7 +80,7 @@ export function OverviewPage() {
         <StatCard label="TTFT" value={formatDuration(summary.avg_ttft_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_ttft_ms ?? 0)}`} />
         <StatCard label="Latency" value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
         <StatCard label="Findings" value={breakdown.finding_categories?.reduce((sum, item) => sum + Number(item.count || 0), 0) ?? 0} detail={`${attention.high_risk_findings?.length ?? 0} high risk`} accent={(attention.high_risk_findings?.length ?? 0) ? "accent-red" : ""} />
-        <StatCard label="Parse Health" value={`${observation.parsed ?? 0}/${summary.request_count ?? 0}`} detail={`${observation.failed ?? 0} failed, ${observation.unparsed ?? 0} unparsed`} accent={(observation.failed ?? 0) ? "accent-red" : ""} />
+        <StatCard label="System Events" value={eventSummary?.unread ?? 0} detail={`${eventSummary?.error ?? 0} errors, ${eventSummary?.warning ?? 0} warnings`} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
       </section>
 
       <section className="panel">
@@ -90,12 +91,15 @@ export function OverviewPage() {
           </div>
         </div>
         <div className="hero-grid hero-grid-compact overview-health-grid">
+          <StatCard label="Unread Events" value={eventSummary?.unread ?? 0} detail={eventSummary?.last_seen_at ? `latest ${formatDateTime(eventSummary.last_seen_at)}` : "no runtime exceptions"} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
           <StatCard label="Parsed" value={observation.parsed ?? 0} detail={`${observation.total_observations ?? 0} observation rows`} accent="accent-green" />
           <StatCard label="Unparsed" value={observation.unparsed ?? 0} detail="indexed traces without observation" />
           <StatCard label="Parse Queue" value={(observation.queued ?? 0) + (observation.running ?? 0)} detail={`${observation.queued ?? 0} queued, ${observation.running ?? 0} running`} accent={(observation.queued ?? 0) || (observation.running ?? 0) ? "accent-gold" : ""} />
           <StatCard label="Analysis" value={analysis.total ?? 0} detail={`${analysis.failed ?? 0} failed runs`} accent={(analysis.failed ?? 0) ? "accent-red" : "accent-gold"} />
         </div>
-        {(observation.recent_failures || []).length ? <ParseFailureQueue items={observation.recent_failures || []} /> : null}
+        <div className="panel-foot-actions overview-events-link">
+          <Link className="ghost-button active" to="/events">Open Events</Link>
+        </div>
       </section>
 
       <section className="panel">
@@ -242,25 +246,6 @@ function RoutingFailureQueue({ items }) {
             <InlineTag tone="danger">{item.status_code}</InlineTag>
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint)}</InlineTag>
             <InlineTag>{formatFailureReason(item.reason)}</InlineTag>
-          </div>
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-function ParseFailureQueue({ items }) {
-  return (
-    <div className="overview-queue overview-parse-queue">
-      {items.map((item) => (
-        <Link className="overview-queue-row" key={item.id} to={buildTraceLink(item.trace_id, "overview", "", "protocol", "observation")}>
-          <div>
-            <strong>{item.trace_id || "parse job"}</strong>
-            <span>{item.last_error || formatDateTime(item.updated_at)}</span>
-          </div>
-          <div className="trace-tag-group">
-            <InlineTag tone="danger">{item.status}</InlineTag>
-            <InlineTag>{item.attempts || 0} attempts</InlineTag>
           </div>
         </Link>
       ))}

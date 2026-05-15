@@ -6,6 +6,7 @@ import { AnalysisPage } from "./routes/AnalysisPage";
 import { AuditPage } from "./routes/AuditPage";
 import { ChannelDetailPage } from "./routes/ChannelDetailPage";
 import { ChannelsPage } from "./routes/ChannelsPage";
+import { EventsPage } from "./routes/EventsPage";
 import { ModelDetailPage } from "./routes/ModelDetailPage";
 import { ModelsPage } from "./routes/ModelsPage";
 import { OverviewPage } from "./routes/OverviewPage";
@@ -106,6 +107,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/overview" element={<OverviewPage />} />
+        <Route path="/events" element={<EventsPage />} />
         <Route path="/requests" element={<RequestsPage />} />
         <Route path="/traces" element={<RequestsPage />} />
         <Route path="/sessions" element={<SessionsPage />} />

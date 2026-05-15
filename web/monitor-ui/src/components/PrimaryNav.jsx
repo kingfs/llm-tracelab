@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
-import { apiPaths, postJSON } from "../lib/api";
+import { apiPaths, postJSON, requestJSON } from "../lib/api";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 
 const navItems = [
   { to: "/overview", label: "Overview", icon: "grid" },
+  { to: "/events", label: "Events", icon: "bell", badge: "events" },
   { to: "/sessions", label: "Sessions", icon: "layers" },
   { to: "/traces", label: "Traces", icon: "activity" },
   { to: "/audit", label: "Audit", icon: "shield" },
@@ -19,6 +20,7 @@ const navItems = [
 export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapsed }) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [eventSummary, setEventSummary] = useState(null);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -29,6 +31,29 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
     };
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    const refresh = async () => {
+      try {
+        const payload = await requestJSON(apiPaths.eventsSummary);
+        if (!cancelled) {
+          setEventSummary(payload);
+        }
+      } catch {
+        if (!cancelled) {
+          setEventSummary(null);
+        }
+      }
+    };
+    refresh();
+    timer = window.setInterval(refresh, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, []);
 
   return (
@@ -52,6 +77,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
             >
               <NavIcon name={item.icon} />
               <span>{item.label}</span>
+              {item.badge === "events" && Number(eventSummary?.unread || 0) > 0 ? <span className="nav-badge">{formatBadgeCount(eventSummary.unread)}</span> : null}
             </NavLink>
           ))}
         </div>
@@ -116,6 +142,8 @@ function NavIcon({ name }) {
       return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /><path d="M14 9l3 3-3 3" /></svg>;
     case "grid":
       return <svg {...common}><rect x="4" y="4" width="6" height="6" rx="1.5" /><rect x="14" y="4" width="6" height="6" rx="1.5" /><rect x="4" y="14" width="6" height="6" rx="1.5" /><rect x="14" y="14" width="6" height="6" rx="1.5" /></svg>;
+    case "bell":
+      return <svg {...common}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></svg>;
     case "layers":
       return <svg {...common}><path d="m12 3 8 4-8 4-8-4 8-4Z" /><path d="m4 12 8 4 8-4" /><path d="m4 17 8 4 8-4" /></svg>;
     case "activity":
@@ -222,6 +250,11 @@ function displayName(user) {
 
 function initials(user) {
   return displayName(user).slice(0, 2).toUpperCase();
+}
+
+function formatBadgeCount(value) {
+  const count = Number(value || 0);
+  return count > 99 ? "99+" : String(count);
 }
 
 function isLegacyActive(path) {

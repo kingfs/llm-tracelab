@@ -684,6 +684,22 @@ task ui:build
 go test ./internal/monitor
 ```
 
+Status:
+
+- Completed in Phase 5 implementation.
+- Added an `Events` primary navigation item with an unread-count badge backed by `/api/events/summary`.
+- Added an Events page with status/severity/source/search/window filters, event list, detail panel, related links, and read/resolve/ignore actions.
+- Updated Overview to show compact system event health and link to Events instead of acting as the parser failure inbox.
+- Rebuilt embedded monitor UI assets.
+- Verified with `task ui:build` and `go test ./internal/monitor`.
+
+Review:
+
+- Scope stayed limited to Monitor UI and embedded asset rebuild.
+- MCP tools and server push were not added in this phase.
+- The nav badge still uses periodic summary polling; Phase 7 will replace or supplement that with SSE.
+- Next phase should add read-only MCP event tools only: `list_system_events`, `get_system_event`, `summarize_system_events`, and `query_unread_system_events`.
+
 ## Phase 6: MCP Event Tools
 
 Scope:
