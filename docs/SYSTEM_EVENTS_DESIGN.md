@@ -648,6 +648,20 @@ Validation:
 go test ./internal/monitor
 ```
 
+Status:
+
+- Completed in Phase 4 implementation.
+- Added Monitor HTTP endpoints for event list, summary, mark read, mark all read, resolve, and ignore.
+- Event list supports status, severity, source, category, text query, window, page, and page size filters.
+- Summary exposes unread/severity counts plus source/category breakdowns for the future nav badge and Overview health card.
+- Verified with `go test ./internal/monitor` and `go test ./internal/store ./internal/monitor`.
+
+Review:
+
+- Scope stayed limited to Monitor API and JSON view mapping.
+- No frontend navigation, Events page, MCP tools, or server push were added in this phase.
+- Next phase should implement only the monitor UI wiring: Events nav item, unread badge using `/api/events/summary`, Events page list/actions, and compact Overview system health entry.
+
 ## Phase 5: Monitor UI
 
 Scope:

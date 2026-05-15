@@ -129,6 +129,161 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	}
 }
 
+func TestSystemEventListAndSummaryAPIHandlers(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	parserEvent, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "parser:save_observation:semantic_nodes_unique_constraint",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+		Message:     "constraint failed",
+		TraceID:     "trace-parser",
+		JobID:       "36",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(parser) error = %v", err)
+	}
+	_, err = st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "router:gpt_5:all_targets_open",
+		Source:      "router",
+		Category:    "routing_failure",
+		Severity:    "warning",
+		Title:       "Routing failed",
+		Message:     "no available channel target",
+		Model:       "gpt-5",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(router) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events?status=unread&source=parser&q=trace-parser&page=1&page_size=10&window=all", nil)
+	rr := httptest.NewRecorder()
+	systemEventListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var listPayload systemEventListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if listPayload.Total != 1 || len(listPayload.Items) != 1 || listPayload.Items[0].ID != parserEvent.ID {
+		t.Fatalf("list payload = %+v", listPayload)
+	}
+	if listPayload.Items[0].TraceID != "trace-parser" || listPayload.Items[0].JobID != "36" {
+		t.Fatalf("list item = %+v", listPayload.Items[0])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/events/summary?window=all", nil)
+	rr = httptest.NewRecorder()
+	systemEventSummaryAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("summary status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var summary systemEventSummaryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("json.Unmarshal(summary) error = %v", err)
+	}
+	if summary.Total != 2 || summary.Unread != 2 || summary.Error != 1 || summary.Warning != 1 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if summary.LastSeenAt == nil || len(summary.BySource) != 2 || len(summary.ByCategory) != 2 {
+		t.Fatalf("summary details = %+v", summary)
+	}
+}
+
+func TestSystemEventStatusAPIHandlers(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	parserEvent, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "parser:bad-json",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Parse failed",
+		Message:     "bad json",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(parser) error = %v", err)
+	}
+	routerEvent, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "router:gpt_5:all_targets_open",
+		Source:      "router",
+		Category:    "routing_failure",
+		Severity:    "warning",
+		Title:       "Routing failed",
+		Message:     "selection failed",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(router) error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/events/"+parserEvent.ID+"/read", nil)
+	rr := httptest.NewRecorder()
+	systemEventDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var readPayload systemEventView
+	if err := json.Unmarshal(rr.Body.Bytes(), &readPayload); err != nil {
+		t.Fatalf("json.Unmarshal(read) error = %v", err)
+	}
+	if readPayload.Status != store.SystemEventStatusRead || readPayload.ReadAt == nil {
+		t.Fatalf("read payload = %+v", readPayload)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/events/read-all?source=router&window=all", nil)
+	rr = httptest.NewRecorder()
+	systemEventReadAllAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("read all status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var readAllPayload map[string]int
+	if err := json.Unmarshal(rr.Body.Bytes(), &readAllPayload); err != nil {
+		t.Fatalf("json.Unmarshal(read-all) error = %v", err)
+	}
+	if readAllPayload["updated"] != 1 {
+		t.Fatalf("read-all payload = %+v", readAllPayload)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/events/"+routerEvent.ID+"/resolve", nil)
+	rr = httptest.NewRecorder()
+	systemEventDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("resolve status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var resolvedPayload systemEventView
+	if err := json.Unmarshal(rr.Body.Bytes(), &resolvedPayload); err != nil {
+		t.Fatalf("json.Unmarshal(resolve) error = %v", err)
+	}
+	if resolvedPayload.Status != store.SystemEventStatusResolved || resolvedPayload.ResolvedAt == nil {
+		t.Fatalf("resolved payload = %+v", resolvedPayload)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/events/"+routerEvent.ID+"/ignore", nil)
+	rr = httptest.NewRecorder()
+	systemEventDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ignore status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var ignoredPayload systemEventView
+	if err := json.Unmarshal(rr.Body.Bytes(), &ignoredPayload); err != nil {
+		t.Fatalf("json.Unmarshal(ignore) error = %v", err)
+	}
+	if ignoredPayload.Status != store.SystemEventStatusIgnored {
+		t.Fatalf("ignored payload = %+v", ignoredPayload)
+	}
+}
+
 func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	t.Parallel()
 

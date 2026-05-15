@@ -113,6 +113,52 @@ type overviewParseJob struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type systemEventListResponse struct {
+	Items       []systemEventView `json:"items"`
+	Page        int               `json:"page"`
+	PageSize    int               `json:"page_size"`
+	Total       int               `json:"total"`
+	TotalPages  int               `json:"total_pages"`
+	Window      string            `json:"window"`
+	RefreshedAt time.Time         `json:"refreshed_at"`
+}
+
+type systemEventSummaryResponse struct {
+	Total      int                `json:"total"`
+	Unread     int                `json:"unread"`
+	Critical   int                `json:"critical"`
+	Error      int                `json:"error"`
+	Warning    int                `json:"warning"`
+	LastSeenAt *time.Time         `json:"last_seen_at,omitempty"`
+	BySource   []sessionCountItem `json:"by_source"`
+	ByCategory []sessionCountItem `json:"by_category"`
+	Window     string             `json:"window"`
+}
+
+type systemEventView struct {
+	ID              string          `json:"id"`
+	Fingerprint     string          `json:"fingerprint"`
+	Source          string          `json:"source"`
+	Category        string          `json:"category"`
+	Severity        string          `json:"severity"`
+	Status          string          `json:"status"`
+	Title           string          `json:"title"`
+	Message         string          `json:"message"`
+	Details         json.RawMessage `json:"details_json"`
+	TraceID         string          `json:"trace_id,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+	JobID           string          `json:"job_id,omitempty"`
+	UpstreamID      string          `json:"upstream_id,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	OccurrenceCount int             `json:"occurrence_count"`
+	FirstSeenAt     time.Time       `json:"first_seen_at"`
+	LastSeenAt      time.Time       `json:"last_seen_at"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	ReadAt          *time.Time      `json:"read_at,omitempty"`
+	ResolvedAt      *time.Time      `json:"resolved_at,omitempty"`
+}
+
 type traceListItem struct {
 	ID               string    `json:"id"`
 	SessionID        string    `json:"session_id,omitempty"`
@@ -817,6 +863,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), opt.AuthVerifier))
 	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
@@ -868,6 +918,126 @@ func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerF
 func authCheckAPIHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+}
+
+func systemEventListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		windowLabel, since := parseSystemEventWindow(r.URL.Query().Get("window"))
+		filter := systemEventFilterFromRequest(r, since)
+		page, err := st.ListSystemEvents(filter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, systemEventListResponse{
+			Items:       systemEventViews(page.Items),
+			Page:        page.Page,
+			PageSize:    page.PageSize,
+			Total:       page.Total,
+			TotalPages:  page.TotalPages,
+			Window:      windowLabel,
+			RefreshedAt: time.Now().UTC(),
+		})
+	}
+}
+
+func systemEventSummaryAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		windowLabel, since := parseSystemEventWindow(r.URL.Query().Get("window"))
+		summary, err := st.SystemEventSummary(since)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "summary error: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, systemEventSummaryView(summary, windowLabel))
+	}
+}
+
+func systemEventReadAllAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		_, since := parseSystemEventWindow(r.URL.Query().Get("window"))
+		filter := systemEventFilterFromRequest(r, since)
+		if strings.TrimSpace(filter.Status) == "" {
+			filter.Status = store.SystemEventStatusUnread
+		}
+		count, err := st.MarkAllSystemEventsRead(filter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mark read error: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"updated": count})
+	}
+}
+
+func systemEventDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		rest := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/events/"), "/")
+		parts := strings.Split(rest, "/")
+		if len(parts) != 2 || parts[0] == "" {
+			http.NotFound(w, r)
+			return
+		}
+		eventID := parts[0]
+		action := parts[1]
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var err error
+		switch action {
+		case "read":
+			err = st.MarkSystemEventRead(eventID)
+		case "resolve":
+			err = st.ResolveSystemEvent(eventID)
+		case "ignore":
+			err = st.IgnoreSystemEvent(eventID)
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "update error: " + err.Error()})
+			return
+		}
+		event, err := st.GetSystemEvent(eventID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "event not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, systemEventViewFromStore(event))
 	}
 }
 
@@ -2264,6 +2434,36 @@ func parseAnalyticsWindow(value string) (string, time.Time) {
 	}
 }
 
+func parseSystemEventWindow(value string) (string, time.Time) {
+	now := time.Now().UTC()
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1h":
+		return "1h", now.Add(-time.Hour)
+	case "7d":
+		return "7d", now.Add(-7 * 24 * time.Hour)
+	case "all":
+		return "all", time.Time{}
+	case "", "24h":
+		return "24h", now.Add(-24 * time.Hour)
+	default:
+		return "24h", now.Add(-24 * time.Hour)
+	}
+}
+
+func systemEventFilterFromRequest(r *http.Request, since time.Time) store.SystemEventFilter {
+	q := r.URL.Query()
+	return store.SystemEventFilter{
+		Status:   q.Get("status"),
+		Severity: q.Get("severity"),
+		Source:   q.Get("source"),
+		Category: q.Get("category"),
+		Query:    q.Get("q"),
+		Since:    since,
+		Page:     parseInt(q.Get("page"), 1),
+		PageSize: parseInt(q.Get("page_size"), 50),
+	}
+}
+
 func startOfUTCDay(now time.Time) time.Time {
 	year, month, day := now.UTC().Date()
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
@@ -3059,6 +3259,68 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		IsStream:         entry.Header.Layout.IsStream,
 		Error:            entry.Header.Meta.Error,
 	}
+}
+
+func systemEventViews(events []store.SystemEvent) []systemEventView {
+	if len(events) == 0 {
+		return []systemEventView{}
+	}
+	out := make([]systemEventView, 0, len(events))
+	for _, event := range events {
+		out = append(out, systemEventViewFromStore(event))
+	}
+	return out
+}
+
+func systemEventViewFromStore(event store.SystemEvent) systemEventView {
+	details := json.RawMessage(`{}`)
+	if len(event.DetailsJSON) > 0 {
+		details = event.DetailsJSON
+	}
+	return systemEventView{
+		ID:              event.ID,
+		Fingerprint:     event.Fingerprint,
+		Source:          event.Source,
+		Category:        event.Category,
+		Severity:        event.Severity,
+		Status:          event.Status,
+		Title:           event.Title,
+		Message:         event.Message,
+		Details:         details,
+		TraceID:         event.TraceID,
+		SessionID:       event.SessionID,
+		JobID:           event.JobID,
+		UpstreamID:      event.UpstreamID,
+		Model:           event.Model,
+		OccurrenceCount: event.OccurrenceCount,
+		FirstSeenAt:     event.FirstSeenAt,
+		LastSeenAt:      event.LastSeenAt,
+		CreatedAt:       event.CreatedAt,
+		UpdatedAt:       event.UpdatedAt,
+		ReadAt:          optionalTime(event.ReadAt),
+		ResolvedAt:      optionalTime(event.ResolvedAt),
+	}
+}
+
+func systemEventSummaryView(summary store.SystemEventSummary, window string) systemEventSummaryResponse {
+	return systemEventSummaryResponse{
+		Total:      summary.Total,
+		Unread:     summary.Unread,
+		Critical:   summary.Critical,
+		Error:      summary.Error,
+		Warning:    summary.Warning,
+		LastSeenAt: optionalTime(summary.LastSeenAt),
+		BySource:   countItemViews(summary.BySource),
+		ByCategory: countItemViews(summary.ByCategory),
+		Window:     window,
+	}
+}
+
+func optionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	return &value
 }
 
 func buildTracePerformance(entry store.LogEntry) performanceView {
