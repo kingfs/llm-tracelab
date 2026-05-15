@@ -16,6 +16,7 @@ Related documents:
 - [Monitor Guide](./MONITOR_GUIDE.md) for user-facing monitor workflows
 - [MCP Guide](./MCP_GUIDE.md) for agent-facing MCP workflows
 - [Maintainer Baseline](./MAINTAINER_BASELINE.md) for implementation constraints and upgrade expectations
+- [Reanalysis Pipeline Design](./REANALYSIS_PIPELINE_DESIGN.md) for rebuilding derived observations, findings, usage, and session analysis from raw cassettes
 
 ## Product Scope
 

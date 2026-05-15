@@ -187,6 +187,9 @@ analysis job
 - 单 session reparse。
 - 按 parser version 批量 reparse。
 - 按 detector version 批量 reanalyze。
+- 对历史 cassette 进行 usage repair，回填 SQLite token 指标，并在显式请求时重写 V3 prelude。
+
+完整设计以 [`../REANALYSIS_PIPELINE_DESIGN.md`](../REANALYSIS_PIPELINE_DESIGN.md) 为准。
 
 CLI 示例：
 
