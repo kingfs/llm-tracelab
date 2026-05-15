@@ -3903,7 +3903,10 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Meta.RoutingFailureReason,
 	)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
 
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
@@ -4358,6 +4361,27 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 	return scanParseJobs(rows)
 }
 
+func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
+	row := s.db.QueryRow(`
+		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
+		FROM parse_jobs
+		WHERE id = ?
+	`, id)
+	var job ParseJobRecord
+	var createdAt, updatedAt any
+	if err := row.Scan(&job.ID, &job.TraceID, &job.Status, &job.Attempts, &job.LastError, &createdAt, &updatedAt); err != nil {
+		return ParseJobRecord{}, err
+	}
+	var err error
+	if job.CreatedAt, err = timeParseValue(createdAt); err != nil {
+		return ParseJobRecord{}, err
+	}
+	if job.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+		return ParseJobRecord{}, err
+	}
+	return job, nil
+}
+
 func (s *Store) MarkParseJobRunning(id int64) error {
 	_, err := s.db.Exec(`
 		UPDATE parse_jobs
@@ -4382,6 +4406,14 @@ func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
 		SET status = 'failed', last_error = ?, updated_at = ?
 		WHERE id = ?
 	`, textPreview(lastError, 2000), time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	job, err := s.getParseJob(id)
+	if err != nil {
+		return err
+	}
+	_, err = s.UpsertSystemEvent(systemEventForParseFailure(job))
 	return err
 }
 
@@ -4732,7 +4764,17 @@ func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	run.ID = id
+	if isAnalysisRunFailure(run.Status) {
+		if _, err := s.UpsertSystemEvent(systemEventForAnalysisFailure(run)); err != nil {
+			return 0, err
+		}
+	}
+	return id, nil
 }
 
 func (s *Store) ListAnalysisRuns(sessionID string, traceID string, kind string, limit int) ([]AnalysisRunRecord, error) {
@@ -6326,6 +6368,197 @@ func (s *Store) systemEventCountBy(column string, whereSQL string, args []any, l
 	}
 	defer rows.Close()
 	return scanCountItems(rows)
+}
+
+func (s *Store) upsertSystemEventsForLog(traceID string, header recordfile.RecordHeader, grouping GroupingInfo) error {
+	if reason := strings.TrimSpace(header.Meta.RoutingFailureReason); reason != "" {
+		if _, err := s.UpsertSystemEvent(systemEventForRoutingFailure(traceID, header, grouping, reason)); err != nil {
+			return err
+		}
+		return nil
+	}
+	if errorText := strings.TrimSpace(header.Meta.Error); errorText != "" {
+		if _, err := s.UpsertSystemEvent(systemEventForTransportError(traceID, header, grouping, errorText)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func systemEventForParseFailure(job ParseJobRecord) SystemEvent {
+	return SystemEvent{
+		Fingerprint: "parser:parse_job:" + normalizeEventFingerprintPart(job.LastError),
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+		Message:     job.LastError,
+		TraceID:     job.TraceID,
+		JobID:       fmt.Sprint(job.ID),
+		DetailsJSON: mustMarshalSystemEventDetails(map[string]any{
+			"attempts": job.Attempts,
+			"status":   job.Status,
+		}),
+	}
+}
+
+func systemEventForAnalysisFailure(run AnalysisRunRecord) SystemEvent {
+	return SystemEvent{
+		Fingerprint: strings.Join([]string{
+			"analyzer",
+			normalizeEventFingerprintPart(run.Kind),
+			normalizeEventFingerprintPart(run.Analyzer),
+			normalizeEventFingerprintPart(run.Status),
+			firstNonEmpty(run.TraceID, run.SessionID, "workspace"),
+		}, ":"),
+		Source:    "analyzer",
+		Category:  "analysis_failure",
+		Severity:  "error",
+		Title:     "Analysis run failed",
+		Message:   firstNonEmpty(run.OutputJSON, run.Status),
+		TraceID:   run.TraceID,
+		SessionID: run.SessionID,
+		JobID:     fmt.Sprint(run.ID),
+		Model:     run.Model,
+		DetailsJSON: mustMarshalSystemEventDetails(map[string]any{
+			"kind":             run.Kind,
+			"analyzer":         run.Analyzer,
+			"analyzer_version": run.AnalyzerVersion,
+			"input_ref":        run.InputRef,
+			"status":           run.Status,
+		}),
+	}
+}
+
+func systemEventForRoutingFailure(traceID string, header recordfile.RecordHeader, grouping GroupingInfo, reason string) SystemEvent {
+	model := firstNonEmpty(header.Meta.Model, "unknown-model")
+	return SystemEvent{
+		Fingerprint: strings.Join([]string{
+			"router",
+			normalizeEventFingerprintPart(model),
+			normalizeEventFingerprintPart(reason),
+		}, ":"),
+		Source:     "router",
+		Category:   "routing_failure",
+		Severity:   "error",
+		Title:      "Routing failed",
+		Message:    firstNonEmpty(header.Meta.Error, reason),
+		TraceID:    traceID,
+		SessionID:  grouping.SessionID,
+		UpstreamID: header.Meta.SelectedUpstreamID,
+		Model:      header.Meta.Model,
+		DetailsJSON: mustMarshalSystemEventDetails(map[string]any{
+			"endpoint":                 header.Meta.Endpoint,
+			"routing_policy":           header.Meta.RoutingPolicy,
+			"routing_failure_reason":   reason,
+			"routing_candidate_count":  header.Meta.RoutingCandidateCount,
+			"status_code":              header.Meta.StatusCode,
+			"selected_upstream_id":     header.Meta.SelectedUpstreamID,
+			"selected_upstream_preset": header.Meta.SelectedUpstreamProviderPreset,
+		}),
+	}
+}
+
+func systemEventForTransportError(traceID string, header recordfile.RecordHeader, grouping GroupingInfo, errorText string) SystemEvent {
+	class := classifySystemTransportError(errorText, header.Meta.StatusCode)
+	severity := "error"
+	if class == "client_disconnect" {
+		severity = "warning"
+	}
+	return SystemEvent{
+		Fingerprint: strings.Join([]string{
+			"upstream",
+			normalizeEventFingerprintPart(firstNonEmpty(header.Meta.SelectedUpstreamID, "unknown-upstream")),
+			normalizeEventFingerprintPart(header.Meta.Endpoint),
+			class,
+		}, ":"),
+		Source:     "upstream",
+		Category:   "transport_error",
+		Severity:   severity,
+		Title:      "Upstream transport error",
+		Message:    errorText,
+		TraceID:    traceID,
+		SessionID:  grouping.SessionID,
+		UpstreamID: header.Meta.SelectedUpstreamID,
+		Model:      header.Meta.Model,
+		DetailsJSON: mustMarshalSystemEventDetails(map[string]any{
+			"endpoint":             header.Meta.Endpoint,
+			"status_code":          header.Meta.StatusCode,
+			"error_class":          class,
+			"selected_upstream_id": header.Meta.SelectedUpstreamID,
+			"is_stream":            header.Layout.IsStream,
+		}),
+	}
+}
+
+func isAnalysisRunFailure(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "completed", "success":
+		return false
+	default:
+		return true
+	}
+}
+
+func classifySystemTransportError(errorText string, statusCode int) string {
+	text := strings.ToLower(strings.TrimSpace(errorText))
+	switch {
+	case strings.Contains(text, "broken pipe") || strings.Contains(text, "client disconnected") || strings.Contains(text, "connection reset by peer"):
+		return "client_disconnect"
+	case strings.Contains(text, "timeout") || strings.Contains(text, "timed out") || strings.Contains(text, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(text, "goaway"):
+		return "http2_goaway"
+	case statusCode >= 500:
+		return "upstream_5xx"
+	default:
+		return "transport_error"
+	}
+}
+
+func normalizeEventFingerprintPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "unknown"
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "unknown"
+	}
+	if len(out) > 80 {
+		out = out[:80]
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mustMarshalSystemEventDetails(details map[string]any) json.RawMessage {
+	data, err := json.Marshal(details)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(data)
 }
 
 func escapeLike(value string) string {

@@ -1963,6 +1963,213 @@ func TestSystemEventsListSummaryAndStatusActions(t *testing.T) {
 	}
 }
 
+func TestMarkParseJobFailedCreatesSystemEvent(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	if err := st.EnqueueParseJob("trace-parse-failed"); err != nil {
+		t.Fatalf("EnqueueParseJob() error = %v", err)
+	}
+	jobs, err := st.ListParseJobs("queued", 10)
+	if err != nil {
+		t.Fatalf("ListParseJobs() error = %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("jobs = %+v, want one queued job", jobs)
+	}
+
+	const parseError = "constraint failed: UNIQUE constraint failed: semantic_nodes.trace_id, semantic_nodes.node_id (2067)"
+	if err := st.MarkParseJobFailed(jobs[0].ID, parseError); err != nil {
+		t.Fatalf("MarkParseJobFailed() error = %v", err)
+	}
+
+	page, err := st.ListSystemEvents(SystemEventFilter{
+		Status:   SystemEventStatusUnread,
+		Source:   "parser",
+		Category: "parse_failure",
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSystemEvents() error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("page = %+v, want one parser event", page)
+	}
+	event := page.Items[0]
+	if event.TraceID != "trace-parse-failed" || event.JobID != "1" || event.Severity != "error" {
+		t.Fatalf("event = %+v", event)
+	}
+	if !strings.Contains(event.Message, "semantic_nodes.trace_id") {
+		t.Fatalf("event message = %q, want parse error", event.Message)
+	}
+}
+
+func TestSaveAnalysisRunFailureCreatesSystemEvent(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	id, err := st.SaveAnalysisRun(AnalysisRunRecord{
+		SessionID:       "sess-analysis-failed",
+		TraceID:         "trace-analysis-failed",
+		Kind:            "trace_audit",
+		Analyzer:        "deterministic",
+		AnalyzerVersion: "0.1.0",
+		InputRef:        "trace:trace-analysis-failed",
+		OutputJSON:      `{"error":"detector crashed"}`,
+		Status:          "failed",
+		Model:           "gpt-test",
+	})
+	if err != nil {
+		t.Fatalf("SaveAnalysisRun() error = %v", err)
+	}
+	if id == 0 {
+		t.Fatalf("analysis run id = 0")
+	}
+
+	page, err := st.ListSystemEvents(SystemEventFilter{
+		Status:   SystemEventStatusUnread,
+		Source:   "analyzer",
+		Category: "analysis_failure",
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSystemEvents() error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("page = %+v, want one analyzer event", page)
+	}
+	event := page.Items[0]
+	if event.TraceID != "trace-analysis-failed" || event.SessionID != "sess-analysis-failed" || event.JobID != "1" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.Model != "gpt-test" || event.Severity != "error" {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
+func TestUpsertLogWithGroupingCreatesRoutingFailureSystemEvents(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeRoutingFailure := func(name string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:             name,
+				Time:                  time.Date(2026, 5, 15, 2, 0, 0, 0, time.UTC),
+				Model:                 "gpt-5",
+				Provider:              "openai_compatible",
+				Operation:             "responses",
+				Endpoint:              "/v1/responses",
+				URL:                   "/v1/responses",
+				Method:                "POST",
+				StatusCode:            503,
+				Error:                 "no available channel target",
+				RoutingPolicy:         "priority",
+				RoutingCandidateCount: 3,
+				RoutingFailureReason:  "all_targets_open",
+			},
+		}
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{SessionID: "sess-routing-failed"}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+		}
+	}
+
+	writeRoutingFailure("routing-a.http")
+	writeRoutingFailure("routing-b.http")
+
+	page, err := st.ListSystemEvents(SystemEventFilter{
+		Status:   SystemEventStatusUnread,
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSystemEvents() error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].Source != "router" {
+		t.Fatalf("page = %+v, want one grouped router event and no duplicate transport event", page)
+	}
+	event := page.Items[0]
+	if event.OccurrenceCount != 2 || event.Model != "gpt-5" || event.SessionID != "sess-routing-failed" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.Fingerprint != "router:gpt_5:all_targets_open" {
+		t.Fatalf("fingerprint = %q", event.Fingerprint)
+	}
+}
+
+func TestUpsertLogWithGroupingCreatesTransportSystemEvent(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	path := filepath.Join(dir, "broken-pipe.http")
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          "broken-pipe",
+			Time:               time.Date(2026, 5, 15, 2, 5, 0, 0, time.UTC),
+			Model:              "gpt-5",
+			Provider:           "openai_compatible",
+			Operation:          "responses",
+			Endpoint:           "/v1/responses",
+			URL:                "/v1/responses",
+			Method:             "POST",
+			StatusCode:         200,
+			Error:              "failed to copy response body: write tcp 127.0.0.1:8080->127.0.0.1:54211: write: broken pipe",
+			SelectedUpstreamID: "openai-primary",
+		},
+		Layout: recordfile.LayoutInfo{IsStream: true},
+	}
+	if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{SessionID: "sess-transport"}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
+	}
+
+	page, err := st.ListSystemEvents(SystemEventFilter{
+		Status:   SystemEventStatusUnread,
+		Source:   "upstream",
+		Category: "transport_error",
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSystemEvents() error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("page = %+v, want one transport event", page)
+	}
+	event := page.Items[0]
+	if event.Severity != "warning" || event.UpstreamID != "openai-primary" || event.SessionID != "sess-transport" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.Fingerprint != "upstream:openai_primary:v1_responses:client_disconnect" {
+		t.Fatalf("fingerprint = %q", event.Fingerprint)
+	}
+}
+
 func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {

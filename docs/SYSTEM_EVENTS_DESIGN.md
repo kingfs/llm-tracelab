@@ -612,6 +612,22 @@ Validation:
 go test ./internal/store ./internal/observeworker ./internal/proxy ./cmd/server
 ```
 
+Status:
+
+- Completed in Phase 3 implementation.
+- Parse job failures, failed analysis runs, routing failures, and upstream transport errors now upsert system events from existing store-level write paths.
+- Routing failures are grouped by model and routing failure reason.
+- Upstream transport errors are grouped by upstream, endpoint, and normalized error class.
+- Client disconnect signals such as broken pipe are classified as warning-level `client_disconnect` events.
+- Verified with `go test ./internal/store ./internal/observeworker ./internal/proxy ./cmd/server`.
+
+Review:
+
+- Scope stayed limited to event producers and fingerprint/classification helpers.
+- No Monitor HTTP API, UI, MCP tools, or server push were added in this phase.
+- Routing failures are treated as router events first and are not duplicated as upstream transport events when both `routing_failure_reason` and `error` are present.
+- Next phase should expose the persisted event store through Monitor API endpoints only; frontend navigation, badges, and MCP tools remain later phases.
+
 ## Phase 4: Monitor Events API
 
 Scope:
