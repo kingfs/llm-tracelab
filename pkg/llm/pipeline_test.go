@@ -2,6 +2,7 @@ package llm
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -49,6 +50,23 @@ func TestResponsePipelineStream(t *testing.T) {
 	assert.Equal(t, "llm.output_text.delta", events[0].Type)
 	assert.Equal(t, "hello", events[0].Message)
 	assert.Equal(t, "llm.usage", events[len(events)-1].Type)
+}
+
+func TestResponsePipelineStreamParsesUsageFromLongResponsesCompletedLine(t *testing.T) {
+	pipeline := NewResponsePipeline(ProviderOpenAICompatible, "/v1/responses", true)
+	filler := strings.Repeat("x", 70*1024)
+	line := `data: {"type":"response.completed","response":{"id":"resp_1","output":[{"type":"message","content":[{"type":"output_text","text":"` +
+		filler +
+		`"}]}],"usage":{"input_tokens":7048,"output_tokens":28,"total_tokens":7076}}}` + "\n"
+
+	pipeline.Feed([]byte(line[:1024]))
+	pipeline.Feed([]byte(line[1024:]))
+
+	usage, ok := pipeline.Usage()
+	require.True(t, ok)
+	assert.Equal(t, 7048, usage.PromptTokens)
+	assert.Equal(t, 28, usage.CompletionTokens)
+	assert.Equal(t, 7076, usage.TotalTokens)
 }
 
 func TestResponsePipelineResponsesCustomToolCallPreservesArguments(t *testing.T) {

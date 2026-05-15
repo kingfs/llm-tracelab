@@ -18,11 +18,12 @@ type ResponsePipeline struct {
 	isStream  bool
 	startedAt time.Time
 
-	lineBuf  []byte
-	tailBuf  []byte
-	usage    UsageSummary
-	hasUsage bool
-	events   []recordfile.RecordEvent
+	lineBuf       []byte
+	lineDiscarded bool
+	tailBuf       []byte
+	usage         UsageSummary
+	hasUsage      bool
+	events        []recordfile.RecordEvent
 }
 
 func NewResponsePipeline(provider string, endpoint string, isStream bool) *ResponsePipeline {
@@ -80,10 +81,24 @@ func (p *ResponsePipeline) Events() []recordfile.RecordEvent {
 }
 
 func (p *ResponsePipeline) feedStream(chunk []byte) {
+	const maxStreamLineBytes = 4 * 1024 * 1024
+
+	if p.lineDiscarded {
+		if idx := bytes.IndexByte(chunk, '\n'); idx >= 0 {
+			p.lineDiscarded = false
+			p.lineBuf = p.lineBuf[:0]
+			p.Feed(chunk[idx+1:])
+		}
+		return
+	}
+
 	p.lineBuf = append(p.lineBuf, chunk...)
-	if len(p.lineBuf) > 64*1024 {
-		copy(p.lineBuf, p.lineBuf[len(p.lineBuf)-64*1024:])
-		p.lineBuf = p.lineBuf[:64*1024]
+	if len(p.lineBuf) > maxStreamLineBytes {
+		if idx := bytes.IndexByte(p.lineBuf, '\n'); idx == -1 {
+			p.lineBuf = p.lineBuf[:0]
+			p.lineDiscarded = true
+			return
+		}
 	}
 
 	for {
