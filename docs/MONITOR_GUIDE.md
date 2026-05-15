@@ -9,6 +9,7 @@ This document explains what users can do with the current monitor and how to mov
 - `Models`: traffic-oriented model marketplace and model detail
 - `Channels`: Web-managed upstream channel configuration, probing, model enablement, and channel analytics
 - `Routing`: selected route decisions for debugging which channel handled each request
+- `Events`: TraceLab runtime and derived-pipeline exceptions
 
 It reflects the current implemented behavior.
 
@@ -32,6 +33,33 @@ The monitor is backed by two data sources:
 This means the monitor is optimized for fast browsing without losing access to the original HTTP payload.
 
 Channels and model enablement are also stored in SQLite. YAML is only the service startup configuration surface and a first-run bootstrap compatibility input for legacy `upstream` / `upstreams` blocks. After bootstrap, manage channels, API keys, provider presets, probing, and model enablement from Monitor Web.
+
+System events are stored in SQLite as operational metadata. They describe TraceLab's own runtime or derived-pipeline health, not ordinary user traffic health.
+
+## Events View
+
+Use `Events` when you need to review TraceLab internal exceptions without mixing them into request failure analytics.
+
+This view is the best fit for:
+
+- parser failures
+- analysis failures
+- routing selection failures
+- upstream transport errors
+- future monitor/store/MCP handler failures
+
+The Events navigation item shows an unread badge. The badge is updated from `/api/events/stream` when SSE is available and falls back to periodic summary polling.
+
+Event statuses are:
+
+- `unread`: not yet reviewed
+- `read`: reviewed but not resolved
+- `resolved`: considered handled
+- `ignored`: intentionally not actionable
+
+Repeated events are grouped by fingerprint. If a read or resolved event happens again, it becomes unread again. Ignored events stay ignored.
+
+Overview shows only a compact system event summary and a link to Events. It should not be used as the durable exception inbox.
 
 ## Requests View
 

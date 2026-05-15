@@ -17,7 +17,7 @@ Current MCP support is:
 
 - transport: streamable HTTP
 - implementation library: official `github.com/modelcontextprotocol/go-sdk`
-- scope: local inspection and failure-oriented triage tools
+- scope: local inspection, failure-oriented triage, and TraceLab system-event diagnostics
 
 Current MCP support is not:
 
@@ -109,6 +109,60 @@ Important limitation:
 - this tool currently filters one paginated `list_traces` result
 - it is not yet a dedicated failure index
 
+### `summarize_failure_clusters`
+
+Summarize failed traces from a paginated scan by:
+
+- reason
+- status
+- model
+- provider
+- endpoint
+- upstream
+
+It also returns bounded top failed traces.
+
+### `list_system_events`
+
+List TraceLab runtime and derived-pipeline events.
+
+Optional filters:
+
+- `page`
+- `page_size`
+- `status`: `unread`, `read`, `resolved`, `ignored`, `all`
+- `severity`: `info`, `warning`, `error`, `critical`
+- `source`
+- `category`
+- `q`
+- `window`: `1h`, `24h`, `7d`, `all`
+
+### `get_system_event`
+
+Get one system event by `event_id`.
+
+Optional input:
+
+- `include_details`: when true, include `details_json`
+
+### `summarize_system_events`
+
+Return compact system event counts and newest events for agent triage.
+
+Optional inputs:
+
+- `window`: `1h`, `24h`, `7d`, `all`
+- `status`: default `unread` for newest events
+
+### `query_unread_system_events`
+
+Return unread system events ordered by severity and recency.
+
+Optional inputs:
+
+- `limit`
+- `min_severity`: default `warning`
+
 ## Design Notes
 
 The MCP server intentionally reuses existing monitor JSON APIs in-process rather than adding a parallel query stack.
@@ -120,6 +174,8 @@ This keeps the first MCP slice:
 - low-risk
 - focused on inspection and triage rather than local workflow orchestration
 - aligned with current monitor semantics
+
+System event MCP tools are read-only. Write-capable event tools such as marking events read or resolved should remain opt-in behind an explicit milestone and configuration gate.
 
 ## Next Likely Step
 

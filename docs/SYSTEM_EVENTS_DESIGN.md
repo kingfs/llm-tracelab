@@ -792,3 +792,16 @@ Exit criteria:
 
 - Event center is documented as part of the stable monitor capability baseline.
 - Any MCP mutation tools are explicitly gated and documented.
+
+Status:
+
+- Completed in Phase 8 documentation pass.
+- Updated `MONITOR_GUIDE.md`, `MCP_GUIDE.md`, `PROJECT_BASELINE.md`, and `MAINTAINER_BASELINE.md`.
+- Documented Events as the durable exception inbox, SSE badge behavior, read-only MCP event tools, and maintenance constraints.
+
+Review:
+
+- Scope stayed limited to documentation and hardening notes.
+- No additional feature implementation was added in this phase.
+- Write-capable MCP event tools remain intentionally out of scope unless a future milestone adds an explicit config gate.
+- Retention/compaction remains a future operational policy decision after observing deployed event volume.

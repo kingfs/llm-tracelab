@@ -132,7 +132,7 @@ Current MCP baseline is intentionally narrow:
 
 - transport is streamable HTTP on the management server
 - implementation uses the official Go MCP SDK
-- tool surface is intentionally minimal and read-only for trace/session/upstream inspection and failure triage
+- tool surface is intentionally read-only for trace/session/upstream inspection, failure triage, and system-event diagnostics
 - MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
 - baseline evaluator keys and built-in threshold semantics should be treated as versioned contract surface once recorded scores depend on them
 - evaluator profile selection should stay explicit and additive; do not silently change the meaning of an existing profile name
@@ -140,8 +140,28 @@ Current MCP baseline is intentionally narrow:
 Do not:
 
 - make MCP the source of truth for replay or storage
-- add broad write-capable mutation tools without an explicit milestone
+- add broad write-capable mutation tools without an explicit milestone and configuration gate
 - fork monitor semantics into a divergent MCP-only query model unless there is a strong reason
+
+## System Events Baseline
+
+System events are TraceLab operational metadata, not request replay data.
+
+Current event sources include:
+
+- parse job failures
+- failed analysis runs
+- routing selection failures
+- upstream transport errors
+
+Maintenance constraints:
+
+- keep system event schema additive
+- keep event details bounded and free of raw request/response bodies
+- preserve fingerprint grouping so repeated failures do not create unbounded rows
+- keep Overview as a compact health summary; Events is the durable exception inbox
+- keep `/api/events/stream` one-way and optional, with polling fallback
+- defer retention/compaction policy until deployed event volume justifies it
 
 ## SQLite Upgrade Constraints
 

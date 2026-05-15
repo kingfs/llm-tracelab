@@ -96,6 +96,17 @@ Additional additive SQLite tables now persist multi-upstream runtime state:
 
 `channel_configs` and `channel_models` are the long-lived source of truth for channel/model management. YAML `upstream` / `upstreams` remains a compatibility bootstrap input when the database has no channels; after import, users should manage channels and model enablement through Monitor Web. `upstream_targets` and `upstream_models` remain runtime/compatibility projections for routing diagnostics and older monitor surfaces.
 
+System events are persisted in `system_events`.
+
+This table is operational metadata for TraceLab's own health:
+
+- parser failures
+- analysis failures
+- routing failures
+- upstream transport errors
+
+System events are grouped by fingerprint and carry unread/read/resolved/ignored state. They are not a replay source of truth and must not duplicate raw request or response bodies.
+
 ### Schema Upgrade Behavior
 
 The project now expects old SQLite indexes to upgrade in place at startup.
@@ -199,6 +210,7 @@ The monitor home page now has stable perspectives for:
 - requests
 - sessions
 - upstream routing analytics
+- system events
 
 ### Request Detail Tabs
 
@@ -226,6 +238,21 @@ Current routing context includes:
 
 The trace detail page links directly from an individual request to the upstream drilldown page.
 
+### System Events
+
+Monitor includes an Events page for TraceLab runtime and derived-pipeline exceptions.
+
+Current system event UI capabilities include:
+
+- unread badge in primary navigation
+- status, severity, source, search, and window filters
+- list/detail inspection
+- related trace/session/upstream links
+- mark read, resolve, and ignore actions
+- SSE updates from `/api/events/stream` with polling fallback
+
+Overview shows system event health as a compact summary and links to Events. It is not the durable exception inbox.
+
 ### Cross-View Navigation
 
 The current baseline includes deep links from session pages into trace detail.
@@ -246,10 +273,17 @@ Current MCP tool surface includes:
 
 - `list_traces`
 - `get_trace`
+- `list_trace_findings`
+- `query_dangerous_tool_calls`
+- `query_sensitive_data_findings`
 - `list_sessions`
 - `list_upstreams`
 - `query_failures`
 - `summarize_failure_clusters`
+- `list_system_events`
+- `get_system_event`
+- `summarize_system_events`
+- `query_unread_system_events`
 
 Important constraint:
 
