@@ -85,6 +85,32 @@ type summarizeFailureClustersInput struct {
 	Limit    int    `json:"limit,omitempty" jsonschema:"maximum grouped items per section, default 10"`
 }
 
+type listSystemEventsInput struct {
+	Page     int    `json:"page,omitempty" jsonschema:"1-based page number"`
+	PageSize int    `json:"page_size,omitempty" jsonschema:"number of events per page, max 200"`
+	Status   string `json:"status,omitempty" jsonschema:"optional status filter: unread, read, resolved, ignored, or all"`
+	Severity string `json:"severity,omitempty" jsonschema:"optional severity filter: info, warning, error, or critical"`
+	Source   string `json:"source,omitempty" jsonschema:"optional source filter such as parser, analyzer, router, upstream, monitor, store, or mcp"`
+	Category string `json:"category,omitempty" jsonschema:"optional category filter"`
+	Query    string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
+	Window   string `json:"window,omitempty" jsonschema:"time window: 1h, 24h, 7d, or all"`
+}
+
+type getSystemEventInput struct {
+	EventID        string `json:"event_id" jsonschema:"system event id from list_system_events"`
+	IncludeDetails bool   `json:"include_details,omitempty" jsonschema:"include details_json in the response"`
+}
+
+type summarizeSystemEventsInput struct {
+	Window string `json:"window,omitempty" jsonschema:"time window: 1h, 24h, 7d, or all"`
+	Status string `json:"status,omitempty" jsonschema:"optional status filter for newest events, default unread"`
+}
+
+type queryUnreadSystemEventsInput struct {
+	Limit       int    `json:"limit,omitempty" jsonschema:"maximum unread events to return, default 20, max 200"`
+	MinSeverity string `json:"min_severity,omitempty" jsonschema:"minimum severity: info, warning, error, or critical"`
+}
+
 type traceListOutput struct {
 	Items       []map[string]any `json:"items"`
 	Stats       map[string]any   `json:"stats"`
@@ -160,6 +186,29 @@ type summarizeFailureClustersOutput struct {
 	RefreshedAt time.Time            `json:"refreshed_at"`
 }
 
+type systemEventListOutput struct {
+	Items       []map[string]any `json:"items"`
+	Page        int              `json:"page"`
+	PageSize    int              `json:"page_size"`
+	Total       int              `json:"total"`
+	TotalPages  int              `json:"total_pages"`
+	Window      string           `json:"window"`
+	RefreshedAt time.Time        `json:"refreshed_at"`
+}
+
+type systemEventSummaryOutput struct {
+	Total      int              `json:"total"`
+	Unread     int              `json:"unread"`
+	Critical   int              `json:"critical"`
+	Error      int              `json:"error"`
+	Warning    int              `json:"warning"`
+	LastSeenAt string           `json:"last_seen_at,omitempty"`
+	BySource   []map[string]any `json:"by_source"`
+	ByCategory []map[string]any `json:"by_category"`
+	Window     string           `json:"window"`
+	Newest     []map[string]any `json:"newest,omitempty"`
+}
+
 type serverAPI struct {
 	handler http.Handler
 	store   *store.Store
@@ -211,6 +260,22 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "summarize_failure_clusters",
 		Description: "Summarize clustered failures from a filtered trace scan by reason, status, model, provider, endpoint, upstream, and top failed traces.",
 	}, api.summarizeFailureClusters)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_system_events",
+		Description: "List TraceLab runtime and analysis exception events with pagination and filters.",
+	}, api.listSystemEvents)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_system_event",
+		Description: "Get one TraceLab system event detail by event_id.",
+	}, api.getSystemEvent)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "summarize_system_events",
+		Description: "Return compact TraceLab system event counts and newest events for agent triage.",
+	}, api.summarizeSystemEvents)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "query_unread_system_events",
+		Description: "Return unread warning/error/critical TraceLab system events ordered by severity and recency.",
+	}, api.queryUnreadSystemEvents)
 
 	return server
 }
@@ -419,6 +484,89 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 	return nil, out, nil
 }
 
+func (a *serverAPI) listSystemEvents(ctx context.Context, req *mcp.CallToolRequest, in *listSystemEventsInput) (*mcp.CallToolResult, *systemEventListOutput, error) {
+	values := systemEventValues(in.Page, in.PageSize, in.Status, in.Severity, in.Source, in.Category, in.Query, in.Window)
+	var out systemEventListOutput
+	if err := a.getJSON(ctx, "/api/events", values, &out); err != nil {
+		return nil, nil, err
+	}
+	return nil, &out, nil
+}
+
+func (a *serverAPI) getSystemEvent(ctx context.Context, req *mcp.CallToolRequest, in *getSystemEventInput) (*mcp.CallToolResult, map[string]any, error) {
+	eventID := strings.TrimSpace(in.EventID)
+	if eventID == "" {
+		return nil, nil, fmt.Errorf("event_id is required")
+	}
+	if a.store == nil {
+		return nil, nil, fmt.Errorf("store not configured")
+	}
+	event, err := a.store.GetSystemEvent(eventID)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := systemEventMap(event, in.IncludeDetails)
+	return nil, out, nil
+}
+
+func (a *serverAPI) summarizeSystemEvents(ctx context.Context, req *mcp.CallToolRequest, in *summarizeSystemEventsInput) (*mcp.CallToolResult, *systemEventSummaryOutput, error) {
+	values := url.Values{}
+	setIfNotEmpty(values, "window", in.Window)
+	var out systemEventSummaryOutput
+	if err := a.getJSON(ctx, "/api/events/summary", values, &out); err != nil {
+		return nil, nil, err
+	}
+
+	status := strings.TrimSpace(in.Status)
+	if status == "" {
+		status = store.SystemEventStatusUnread
+	}
+	listValues := systemEventValues(1, 5, status, "", "", "", "", in.Window)
+	var page systemEventListOutput
+	if err := a.getJSON(ctx, "/api/events", listValues, &page); err != nil {
+		return nil, nil, err
+	}
+	out.Newest = conciseSystemEvents(page.Items, false)
+	return nil, &out, nil
+}
+
+func (a *serverAPI) queryUnreadSystemEvents(ctx context.Context, req *mcp.CallToolRequest, in *queryUnreadSystemEventsInput) (*mcp.CallToolResult, *systemEventListOutput, error) {
+	limit := normalizePageSize(firstPositive(in.Limit, 20))
+	values := systemEventValues(1, maxPageSize, store.SystemEventStatusUnread, "", "", "", "", "all")
+	var page systemEventListOutput
+	if err := a.getJSON(ctx, "/api/events", values, &page); err != nil {
+		return nil, nil, err
+	}
+	minRank := severityRank(firstNonEmpty(in.MinSeverity, "warning"))
+	filtered := make([]map[string]any, 0, len(page.Items))
+	for _, item := range page.Items {
+		severity, _ := item["severity"].(string)
+		if severityRank(severity) >= minRank {
+			delete(item, "details_json")
+			filtered = append(filtered, item)
+		}
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		leftSeverity, _ := filtered[i]["severity"].(string)
+		rightSeverity, _ := filtered[j]["severity"].(string)
+		if severityRank(leftSeverity) != severityRank(rightSeverity) {
+			return severityRank(leftSeverity) > severityRank(rightSeverity)
+		}
+		leftSeen, _ := filtered[i]["last_seen_at"].(string)
+		rightSeen, _ := filtered[j]["last_seen_at"].(string)
+		return leftSeen > rightSeen
+	})
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	page.Items = filtered
+	page.Page = 1
+	page.PageSize = limit
+	page.Total = len(filtered)
+	page.TotalPages = totalPages(len(filtered), limit)
+	return nil, &page, nil
+}
+
 func (a *serverAPI) traceFindings(ctx context.Context, traceID string, severity string, category string) (*mcp.CallToolResult, map[string]any, error) {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
@@ -526,6 +674,102 @@ func setIfNotEmpty(values url.Values, key string, value string) {
 	if trimmed != "" {
 		values.Set(key, trimmed)
 	}
+}
+
+func systemEventValues(page int, pageSize int, status string, severity string, source string, category string, query string, window string) url.Values {
+	values := url.Values{}
+	values.Set("page", fmt.Sprintf("%d", normalizePage(page)))
+	values.Set("page_size", fmt.Sprintf("%d", normalizePageSize(pageSize)))
+	setIfNotEmpty(values, "status", status)
+	setIfNotEmpty(values, "severity", severity)
+	setIfNotEmpty(values, "source", source)
+	setIfNotEmpty(values, "category", category)
+	setIfNotEmpty(values, "q", query)
+	setIfNotEmpty(values, "window", window)
+	return values
+}
+
+func conciseSystemEvents(items []map[string]any, includeDetails bool) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		copyItem := make(map[string]any, len(item))
+		for key, value := range item {
+			if key == "details_json" && !includeDetails {
+				continue
+			}
+			copyItem[key] = value
+		}
+		out = append(out, copyItem)
+	}
+	return out
+}
+
+func systemEventMap(event store.SystemEvent, includeDetails bool) map[string]any {
+	out := map[string]any{
+		"id":               event.ID,
+		"fingerprint":      event.Fingerprint,
+		"source":           event.Source,
+		"category":         event.Category,
+		"severity":         event.Severity,
+		"status":           event.Status,
+		"title":            event.Title,
+		"message":          event.Message,
+		"trace_id":         event.TraceID,
+		"session_id":       event.SessionID,
+		"job_id":           event.JobID,
+		"upstream_id":      event.UpstreamID,
+		"model":            event.Model,
+		"occurrence_count": event.OccurrenceCount,
+		"first_seen_at":    event.FirstSeenAt,
+		"last_seen_at":     event.LastSeenAt,
+		"created_at":       event.CreatedAt,
+		"updated_at":       event.UpdatedAt,
+	}
+	if !event.ReadAt.IsZero() {
+		out["read_at"] = event.ReadAt
+	}
+	if !event.ResolvedAt.IsZero() {
+		out["resolved_at"] = event.ResolvedAt
+	}
+	if includeDetails {
+		out["details_json"] = json.RawMessage(firstNonEmpty(string(event.DetailsJSON), "{}"))
+	}
+	return out
+}
+
+func severityRank(severity string) int {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "critical":
+		return 4
+	case "error":
+		return 3
+	case "warning":
+		return 2
+	case "info":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func totalPages(total int, pageSize int) int {
+	if pageSize <= 0 || total <= 0 {
+		return 0
+	}
+	pages := total / pageSize
+	if total%pageSize != 0 {
+		pages++
+	}
+	return pages
 }
 
 func firstNonEmpty(values ...string) string {

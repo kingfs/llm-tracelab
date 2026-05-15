@@ -112,6 +112,31 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("SaveFindings() error = %v", err)
 	}
+	parserEvent, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "parser:save_observation:semantic_nodes_unique_constraint",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+		Message:     "constraint failed",
+		TraceID:     failureEntry.ID,
+		JobID:       "36",
+		DetailsJSON: []byte(`{"operation":"save_observation"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(parser) error = %v", err)
+	}
+	if _, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "upstream:openai_primary:v1_responses:client_disconnect",
+		Source:      "upstream",
+		Category:    "transport_error",
+		Severity:    "warning",
+		Title:       "Upstream transport error",
+		Message:     "broken pipe",
+		UpstreamID:  "openai-primary",
+	}); err != nil {
+		t.Fatalf("UpsertSystemEvent(upstream) error = %v", err)
+	}
 
 	server := New(st, Options{})
 	session, err := connectClient(context.Background(), server)
@@ -124,8 +149,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 9 {
-		t.Fatalf("len(tools.Tools) = %d, want 9", len(tools.Tools))
+	if len(tools.Tools) != 13 {
+		t.Fatalf("len(tools.Tools) = %d, want 13", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -246,6 +271,70 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := len(failureClustersPayload["top_failures"].([]any)); got != 1 {
 		t.Fatalf("len(summarize_failure_clusters.top_failures) = %d, want 1", got)
+	}
+
+	systemEvents, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_system_events",
+		Arguments: map[string]any{"status": "unread", "source": "parser", "page_size": 10, "window": "all"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_system_events) error = %v", err)
+	}
+	systemEventsPayload := systemEvents.StructuredContent.(map[string]any)
+	systemEventItems := systemEventsPayload["items"].([]any)
+	if len(systemEventItems) != 1 {
+		t.Fatalf("len(list_system_events.items) = %d, want 1", len(systemEventItems))
+	}
+	if got := systemEventItems[0].(map[string]any)["id"].(string); got != parserEvent.ID {
+		t.Fatalf("list_system_events id = %q, want %q", got, parserEvent.ID)
+	}
+
+	systemEventDetail, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_system_event",
+		Arguments: map[string]any{"event_id": parserEvent.ID, "include_details": true},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(get_system_event) error = %v", err)
+	}
+	systemEventDetailPayload := systemEventDetail.StructuredContent.(map[string]any)
+	if systemEventDetailPayload["id"].(string) != parserEvent.ID {
+		t.Fatalf("get_system_event.id = %q, want %q", systemEventDetailPayload["id"], parserEvent.ID)
+	}
+	if _, ok := systemEventDetailPayload["details_json"]; !ok {
+		t.Fatalf("get_system_event.details_json missing")
+	}
+
+	systemEventSummary, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "summarize_system_events",
+		Arguments: map[string]any{"window": "all"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(summarize_system_events) error = %v", err)
+	}
+	systemEventSummaryPayload := systemEventSummary.StructuredContent.(map[string]any)
+	if got := int(systemEventSummaryPayload["unread"].(float64)); got < 2 {
+		t.Fatalf("summarize_system_events.unread = %d, want at least 2", got)
+	}
+	if got := len(systemEventSummaryPayload["newest"].([]any)); got == 0 {
+		t.Fatalf("summarize_system_events.newest empty")
+	}
+
+	unreadEvents, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_unread_system_events",
+		Arguments: map[string]any{"limit": 10, "min_severity": "error"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_unread_system_events) error = %v", err)
+	}
+	unreadPayload := unreadEvents.StructuredContent.(map[string]any)
+	unreadItems := unreadPayload["items"].([]any)
+	if len(unreadItems) == 0 {
+		t.Fatalf("query_unread_system_events.items empty")
+	}
+	for _, item := range unreadItems {
+		if got := item.(map[string]any)["severity"].(string); got != "error" && got != "critical" {
+			t.Fatalf("query_unread_system_events severity = %q, want error or critical", got)
+		}
 	}
 }
 

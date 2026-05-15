@@ -724,6 +724,24 @@ Validation:
 go test ./internal/mcpserver
 ```
 
+Status:
+
+- Completed in Phase 6 implementation.
+- Added read-only MCP tools:
+  - `list_system_events`
+  - `get_system_event`
+  - `summarize_system_events`
+  - `query_unread_system_events`
+- Tool outputs are paginated or bounded and omit `details_json` unless explicitly requested where applicable.
+- Verified with `go test ./internal/mcpserver`.
+
+Review:
+
+- Scope stayed limited to read-only MCP diagnostics.
+- No write-capable MCP event mutation tools were added.
+- No server push implementation was added in this phase.
+- Next phase should add an in-process event broadcaster and `/api/events/stream` SSE, then update the nav badge to consume SSE with existing polling as fallback.
+
 ## Phase 7: Server Push
 
 Scope:
