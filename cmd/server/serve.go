@@ -15,6 +15,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
+	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
@@ -96,6 +97,12 @@ func runServeWithConfig(configPath string) int {
 	go func() {
 		defer background.Done()
 		parseWorker.Run(syncCtx)
+	}()
+	analysisWorker := reanalysis.NewWorker(traceStore, reanalysis.WorkerOptions{Interval: 5 * time.Second, BatchSize: 5})
+	background.Add(1)
+	go func() {
+		defer background.Done()
+		analysisWorker.Run(syncCtx)
 	}()
 
 	channelService := channel.NewService(traceStore)

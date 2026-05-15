@@ -17,6 +17,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
+	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -248,6 +249,43 @@ type analysisRunView struct {
 	Output          any       `json:"output"`
 	Status          string    `json:"status"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+type analysisJobListResponse struct {
+	Items []analysisJobView `json:"items"`
+	Total int               `json:"total"`
+}
+
+type analysisJobResponse struct {
+	Job analysisJobView `json:"job"`
+}
+
+type reanalysisResponse struct {
+	Job    analysisJobView `json:"job"`
+	Result any             `json:"result,omitempty"`
+}
+
+type reanalysisRequest struct {
+	Mode            string `json:"mode"`
+	Scan            bool   `json:"scan"`
+	RewriteCassette bool   `json:"rewrite_cassette"`
+	Reparse         bool   `json:"reparse"`
+}
+
+type analysisJobView struct {
+	ID         int64     `json:"id"`
+	JobType    string    `json:"job_type"`
+	TargetType string    `json:"target_type"`
+	TargetID   string    `json:"target_id"`
+	Status     string    `json:"status"`
+	Steps      []string  `json:"steps"`
+	Result     any       `json:"result"`
+	LastError  string    `json:"last_error,omitempty"`
+	Attempts   int       `json:"attempts"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	StartedAt  time.Time `json:"started_at,omitempty"`
+	FinishedAt time.Time `json:"finished_at,omitempty"`
 }
 
 type sessionBreakdownView struct {
@@ -885,6 +923,8 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
@@ -2651,6 +2691,10 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 				handleSessionAnalysis(w, r, st, sessionID)
 				return
 			}
+			if parts[1] == "reanalyze" && r.Method == http.MethodPost {
+				handleSessionReanalyze(w, r, st, sessionID)
+				return
+			}
 			http.NotFound(w, r)
 			return
 		}
@@ -2721,6 +2765,38 @@ func handleSessionAnalysis(w http.ResponseWriter, r *http.Request, st *store.Sto
 	})
 }
 
+func handleSessionReanalyze(w http.ResponseWriter, r *http.Request, st *store.Store, sessionID string) {
+	req, ok := decodeReanalysisRequest(w, r)
+	if !ok {
+		return
+	}
+	opts := reanalysis.SessionOptions{
+		Reparse: req.Reparse,
+		Scan:    req.Scan,
+	}
+	mode := requestMode(req.Mode, "async")
+	svc := reanalysis.New(st, reanalysis.Options{})
+	if mode == "async" {
+		job, err := svc.EnqueueSessionReanalyze(sessionID, opts)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, reanalysisResponse{Job: analysisJobViewFromStore(job)})
+		return
+	}
+	if mode != "sync" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be sync or async"})
+		return
+	}
+	result, err := svc.ReanalyzeSession(r.Context(), sessionID, opts)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, reanalysisResponse{Job: analysisJobViewFromStore(result.Job), Result: result})
+}
+
 func findingListAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -2767,6 +2843,77 @@ func analysisListAPIHandler(st *store.Store) http.HandlerFunc {
 			Items: analysisRunViews(runs),
 			Total: len(runs),
 		})
+	}
+}
+
+func analysisJobListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		status := strings.TrimSpace(r.URL.Query().Get("status"))
+		targetType := strings.TrimSpace(r.URL.Query().Get("target_type"))
+		targetID := strings.TrimSpace(r.URL.Query().Get("target_id"))
+		limit := parseInt(r.URL.Query().Get("limit"), 50)
+		jobs, err := st.ListAnalysisJobs(status, targetType, targetID, limit)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		items := make([]analysisJobView, 0, len(jobs))
+		for _, job := range jobs {
+			items = append(items, analysisJobViewFromStore(job))
+		}
+		writeJSON(w, http.StatusOK, analysisJobListResponse{Items: items, Total: len(items)})
+	}
+}
+
+func analysisJobDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(pathClean(r.URL.Path), "/api/analysis/jobs/")
+		path = strings.Trim(path, "/")
+		if path == "" {
+			http.NotFound(w, r)
+			return
+		}
+		parts := strings.Split(path, "/")
+		id, err := strconv.ParseInt(parts[0], 10, 64)
+		if err != nil || id <= 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid job id"})
+			return
+		}
+		if len(parts) == 2 {
+			if parts[1] == "cancel" && r.Method == http.MethodPost {
+				if err := st.MarkAnalysisJobCanceled(id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				job, err := st.GetAnalysisJob(id)
+				if err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusOK, analysisJobResponse{Job: analysisJobViewFromStore(job)})
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+		if len(parts) != 1 || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		job, err := st.GetAnalysisJob(id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, analysisJobResponse{Job: analysisJobViewFromStore(job)})
 	}
 }
 
@@ -2830,10 +2977,121 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 			handleTracePerformance(w, entry)
 		case len(parts) == 2 && parts[1] == "download" && r.Method == http.MethodGet:
 			serveTraceDownload(w, r, absPath)
+		case len(parts) == 2 && parts[1] == "reparse" && r.Method == http.MethodPost:
+			handleTraceReparse(w, r, st, entry)
+		case len(parts) == 2 && parts[1] == "scan" && r.Method == http.MethodPost:
+			handleTraceScan(w, r, st, entry)
+		case len(parts) == 2 && parts[1] == "repair-usage" && r.Method == http.MethodPost:
+			handleTraceRepairUsage(w, r, st, entry)
+		case len(parts) == 2 && parts[1] == "reanalyze" && r.Method == http.MethodPost:
+			handleTraceReanalyze(w, r, st, entry)
 		default:
 			http.NotFound(w, r)
 		}
 	}
+}
+
+func handleTraceReparse(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+	req, ok := decodeReanalysisRequest(w, r)
+	if !ok {
+		return
+	}
+	runTraceReanalysis(w, r, st, requestMode(req.Mode, "sync"), func(svc *reanalysis.Service) (store.AnalysisJobRecord, error) {
+		return svc.EnqueueTraceReparse(entry.ID, reanalysis.TraceOptions{Scan: req.Scan})
+	}, func(svc *reanalysis.Service) (reanalysis.Result, error) {
+		return svc.ReparseTrace(r.Context(), entry.ID, reanalysis.TraceOptions{Scan: req.Scan})
+	})
+}
+
+func handleTraceScan(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+	req, ok := decodeReanalysisRequest(w, r)
+	if !ok {
+		return
+	}
+	runTraceReanalysis(w, r, st, requestMode(req.Mode, "sync"), func(svc *reanalysis.Service) (store.AnalysisJobRecord, error) {
+		return svc.EnqueueTraceRescan(entry.ID)
+	}, func(svc *reanalysis.Service) (reanalysis.Result, error) {
+		return svc.RescanTrace(r.Context(), entry.ID)
+	})
+}
+
+func handleTraceRepairUsage(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+	req, ok := decodeReanalysisRequest(w, r)
+	if !ok {
+		return
+	}
+	if req.RewriteCassette && requestMode(req.Mode, "sync") == "async" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "rewrite_cassette is only supported in sync mode"})
+		return
+	}
+	runTraceReanalysis(w, r, st, requestMode(req.Mode, "sync"), func(svc *reanalysis.Service) (store.AnalysisJobRecord, error) {
+		return svc.EnqueueTraceRepairUsage(entry.ID)
+	}, func(svc *reanalysis.Service) (reanalysis.Result, error) {
+		return svc.RepairTraceUsage(r.Context(), entry.ID, reanalysis.RepairUsageOptions{RewriteCassette: req.RewriteCassette})
+	})
+}
+
+func handleTraceReanalyze(w http.ResponseWriter, r *http.Request, st *store.Store, entry store.LogEntry) {
+	req, ok := decodeReanalysisRequest(w, r)
+	if !ok {
+		return
+	}
+	runTraceReanalysis(w, r, st, requestMode(req.Mode, "sync"), func(svc *reanalysis.Service) (store.AnalysisJobRecord, error) {
+		return svc.EnqueueTraceReanalyze(entry.ID)
+	}, func(svc *reanalysis.Service) (reanalysis.Result, error) {
+		return svc.ReanalyzeTrace(r.Context(), entry.ID)
+	})
+}
+
+func runTraceReanalysis(
+	w http.ResponseWriter,
+	r *http.Request,
+	st *store.Store,
+	mode string,
+	enqueue func(*reanalysis.Service) (store.AnalysisJobRecord, error),
+	runSync func(*reanalysis.Service) (reanalysis.Result, error),
+) {
+	svc := reanalysis.New(st, reanalysis.Options{})
+	switch mode {
+	case "async":
+		job, err := enqueue(svc)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusAccepted, reanalysisResponse{Job: analysisJobViewFromStore(job)})
+	case "sync":
+		result, err := runSync(svc)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, reanalysisResponse{Job: analysisJobViewFromStore(result.Job), Result: result})
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be sync or async"})
+	}
+}
+
+func decodeReanalysisRequest(w http.ResponseWriter, r *http.Request) (reanalysisRequest, bool) {
+	var req reanalysisRequest
+	if r.Body == nil || r.ContentLength == 0 {
+		return req, true
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+		return reanalysisRequest{}, false
+	}
+	return req, true
+}
+
+func requestMode(mode string, fallback string) string {
+	mode = strings.TrimSpace(strings.ToLower(mode))
+	if mode == "" {
+		return fallback
+	}
+	return mode
 }
 
 func handleTraceObservation(w http.ResponseWriter, st *store.Store, entry store.LogEntry) {
@@ -3117,6 +3375,32 @@ func analysisRunViews(runs []store.AnalysisRunRecord) []analysisRunView {
 		})
 	}
 	return out
+}
+
+func analysisJobViewFromStore(job store.AnalysisJobRecord) analysisJobView {
+	var steps []string
+	if strings.TrimSpace(job.StepsJSON) != "" {
+		_ = json.Unmarshal([]byte(job.StepsJSON), &steps)
+	}
+	var result any = map[string]any{}
+	if strings.TrimSpace(job.ResultJSON) != "" {
+		_ = json.Unmarshal([]byte(job.ResultJSON), &result)
+	}
+	return analysisJobView{
+		ID:         job.ID,
+		JobType:    job.JobType,
+		TargetType: job.TargetType,
+		TargetID:   job.TargetID,
+		Status:     job.Status,
+		Steps:      steps,
+		Result:     result,
+		LastError:  job.LastError,
+		Attempts:   job.Attempts,
+		CreatedAt:  job.CreatedAt,
+		UpdatedAt:  job.UpdatedAt,
+		StartedAt:  job.StartedAt,
+		FinishedAt: job.FinishedAt,
+	}
 }
 
 func overviewResponseFromStore(window string, dashboard store.OverviewDashboard) overviewResponse {

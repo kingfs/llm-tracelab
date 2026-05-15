@@ -10,6 +10,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/analyzer"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
+	"github.com/kingfs/llm-tracelab/internal/sessionanalysis"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -17,16 +18,19 @@ import (
 )
 
 const (
-	JobTypeTraceReparse   = "trace_reparse"
-	JobTypeTraceRescan    = "trace_rescan"
-	JobTypeTraceRepair    = "trace_repair_usage"
-	JobTypeTraceReanalyze = "trace_reanalyze"
+	JobTypeTraceReparse     = "trace_reparse"
+	JobTypeTraceRescan      = "trace_rescan"
+	JobTypeTraceRepair      = "trace_repair_usage"
+	JobTypeTraceReanalyze   = "trace_reanalyze"
+	JobTypeSessionReanalyze = "session_reanalyze"
 
-	TargetTypeTrace = "trace"
+	TargetTypeTrace   = "trace"
+	TargetTypeSession = "session"
 
 	StepReparseObservation = "reparse_observation"
 	StepScanFindings       = "scan_findings"
 	StepRepairUsage        = "repair_usage"
+	StepSessionAnalysis    = "session_analysis"
 )
 
 type Service struct {
@@ -50,17 +54,30 @@ type RepairUsageOptions struct {
 	RewriteCassette bool
 }
 
+type SessionOptions struct {
+	Reparse bool
+	Scan    bool
+}
+
 type Result struct {
 	Job              store.AnalysisJobRecord `json:"job"`
 	Usage            *UsageRepairResult      `json:"usage,omitempty"`
 	Observation      *ObservationResult      `json:"observation,omitempty"`
 	Findings         *FindingsResult         `json:"findings,omitempty"`
+	Session          *SessionResult          `json:"session,omitempty"`
 	RequestNodes     int                     `json:"request_nodes,omitempty"`
 	ResponseNodes    int                     `json:"response_nodes,omitempty"`
 	StreamEvents     int                     `json:"stream_events,omitempty"`
 	FindingCount     int                     `json:"finding_count,omitempty"`
 	CriticalFindings int                     `json:"critical_findings,omitempty"`
 	HighFindings     int                     `json:"high_findings,omitempty"`
+}
+
+type SessionResult struct {
+	SessionID     string `json:"session_id"`
+	TraceCount    int    `json:"trace_count"`
+	AnalysisRunID int64  `json:"analysis_run_id"`
+	FindingRefs   int    `json:"finding_refs"`
 }
 
 type UsageRepairResult struct {
@@ -151,6 +168,58 @@ func (s *Service) ReanalyzeTrace(ctx context.Context, traceID string) (Result, e
 		return Result{}, err
 	}
 	return result, nil
+}
+
+func (s *Service) EnqueueTraceReparse(traceID string, opts TraceOptions) (store.AnalysisJobRecord, error) {
+	steps := []string{StepReparseObservation}
+	if opts.Scan {
+		steps = append(steps, StepScanFindings)
+	}
+	return s.createTraceJob(JobTypeTraceReparse, traceID, steps)
+}
+
+func (s *Service) EnqueueTraceRescan(traceID string) (store.AnalysisJobRecord, error) {
+	return s.createTraceJob(JobTypeTraceRescan, traceID, []string{StepScanFindings})
+}
+
+func (s *Service) EnqueueTraceRepairUsage(traceID string) (store.AnalysisJobRecord, error) {
+	return s.createTraceJob(JobTypeTraceRepair, traceID, []string{StepRepairUsage})
+}
+
+func (s *Service) EnqueueTraceReanalyze(traceID string) (store.AnalysisJobRecord, error) {
+	return s.createTraceJob(JobTypeTraceReanalyze, traceID, []string{StepReparseObservation, StepScanFindings})
+}
+
+func (s *Service) ReanalyzeSession(ctx context.Context, sessionID string, opts SessionOptions) (Result, error) {
+	job, err := s.createSessionJob(sessionID, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.runSessionJob(ctx, job, opts)
+}
+
+func (s *Service) EnqueueSessionReanalyze(sessionID string, opts SessionOptions) (store.AnalysisJobRecord, error) {
+	return s.createSessionJob(sessionID, opts)
+}
+
+func (s *Service) ExecuteJob(ctx context.Context, job store.AnalysisJobRecord) (Result, error) {
+	switch job.JobType {
+	case JobTypeTraceReparse:
+		return s.runTraceJob(ctx, job, TraceOptions{Scan: stepsContain(job.StepsJSON, StepScanFindings)})
+	case JobTypeTraceRescan:
+		return s.runTraceJob(ctx, job, TraceOptions{Scan: true})
+	case JobTypeTraceRepair:
+		return s.runRepairUsageJob(ctx, job, RepairUsageOptions{})
+	case JobTypeTraceReanalyze:
+		return s.runTraceJob(ctx, job, TraceOptions{Scan: true})
+	case JobTypeSessionReanalyze:
+		return s.runSessionJob(ctx, job, SessionOptions{
+			Reparse: stepsContain(job.StepsJSON, StepReparseObservation),
+			Scan:    stepsContain(job.StepsJSON, StepScanFindings),
+		})
+	default:
+		return Result{}, fmt.Errorf("unsupported analysis job type %q", job.JobType)
+	}
 }
 
 func (s *Service) runRepairUsageJob(ctx context.Context, job store.AnalysisJobRecord, opts RepairUsageOptions) (Result, error) {
@@ -275,6 +344,38 @@ func (s *Service) createTraceJob(jobType string, traceID string, steps []string)
 	})
 }
 
+func (s *Service) createSessionJob(sessionID string, opts SessionOptions) (store.AnalysisJobRecord, error) {
+	if s == nil || s.store == nil {
+		return store.AnalysisJobRecord{}, fmt.Errorf("reanalysis store is nil")
+	}
+	if sessionID == "" {
+		return store.AnalysisJobRecord{}, fmt.Errorf("session id is required")
+	}
+	steps := []string{}
+	if opts.Reparse {
+		steps = append(steps, StepReparseObservation)
+	}
+	if opts.Scan {
+		steps = append(steps, StepScanFindings)
+	}
+	steps = append(steps, StepSessionAnalysis)
+	stepsJSON, err := json.Marshal(steps)
+	if err != nil {
+		return store.AnalysisJobRecord{}, err
+	}
+	now := s.now()
+	return s.store.CreateAnalysisJob(store.AnalysisJobRecord{
+		JobType:    JobTypeSessionReanalyze,
+		TargetType: TargetTypeSession,
+		TargetID:   sessionID,
+		Status:     "queued",
+		StepsJSON:  string(stepsJSON),
+		ResultJSON: "{}",
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	})
+}
+
 func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, opts TraceOptions) (Result, error) {
 	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
 		return Result{}, err
@@ -344,6 +445,104 @@ func (s *Service) runTraceJob(ctx context.Context, job store.AnalysisJobRecord, 
 	return result, nil
 }
 
+func (s *Service) runSessionJob(ctx context.Context, job store.AnalysisJobRecord, opts SessionOptions) (Result, error) {
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
+		return Result{}, err
+	}
+	result := Result{Job: job}
+	var err error
+	defer func() {
+		if err != nil {
+			_ = s.store.MarkAnalysisJobFailed(job.ID, err.Error())
+		}
+	}()
+
+	summary, err := s.store.GetSession(job.TargetID)
+	if err != nil {
+		return Result{}, err
+	}
+	traces, err := s.store.ListTracesBySession(job.TargetID)
+	if err != nil {
+		return Result{}, err
+	}
+	if opts.Reparse || opts.Scan {
+		for _, trace := range traces {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+				return Result{}, err
+			default:
+			}
+			if opts.Reparse && opts.Scan {
+				if _, err = s.ReanalyzeTrace(ctx, trace.ID); err != nil {
+					return Result{}, err
+				}
+				continue
+			}
+			if opts.Reparse {
+				if _, err = s.ReparseTrace(ctx, trace.ID, TraceOptions{}); err != nil {
+					return Result{}, err
+				}
+				continue
+			}
+			if opts.Scan {
+				if _, err = s.RescanTrace(ctx, trace.ID); err != nil {
+					return Result{}, err
+				}
+			}
+		}
+		traces, err = s.store.ListTracesBySession(job.TargetID)
+		if err != nil {
+			return Result{}, err
+		}
+	}
+	findingsByTrace := map[string][]observe.Finding{}
+	for _, trace := range traces {
+		findings, findErr := s.store.ListFindings(trace.ID, store.FindingFilter{})
+		if findErr != nil {
+			err = findErr
+			return Result{}, err
+		}
+		findingsByTrace[trace.ID] = findings
+	}
+	output := sessionanalysis.Build(summary, traces, findingsByTrace)
+	outputJSON, err := sessionanalysis.Marshal(output)
+	if err != nil {
+		return Result{}, err
+	}
+	runID, err := s.store.SaveAnalysisRun(store.AnalysisRunRecord{
+		SessionID:       job.TargetID,
+		Kind:            sessionanalysis.Kind,
+		Analyzer:        sessionanalysis.AnalyzerName,
+		AnalyzerVersion: sessionanalysis.AnalyzerVersion,
+		InputRef:        "session:" + job.TargetID,
+		OutputJSON:      outputJSON,
+		Status:          "completed",
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	result.Session = &SessionResult{
+		SessionID:     job.TargetID,
+		TraceCount:    len(output.TraceRefs),
+		AnalysisRunID: runID,
+		FindingRefs:   len(output.FindingRefs),
+	}
+	resultJSON, marshalErr := json.Marshal(resultSummary(result))
+	if marshalErr != nil {
+		err = marshalErr
+		return Result{}, err
+	}
+	if err = s.store.MarkAnalysisJobCompleted(job.ID, string(resultJSON)); err != nil {
+		return Result{}, err
+	}
+	result.Job, err = s.store.GetAnalysisJob(job.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
 func findingsResult(traceID string, findings []observe.Finding) FindingsResult {
 	out := FindingsResult{
 		TraceID:  traceID,
@@ -370,7 +569,23 @@ func resultSummary(result Result) map[string]any {
 	if result.Usage != nil {
 		out["usage"] = result.Usage
 	}
+	if result.Session != nil {
+		out["session"] = result.Session
+	}
 	return out
+}
+
+func stepsContain(stepsJSON string, step string) bool {
+	var steps []string
+	if err := json.Unmarshal([]byte(stepsJSON), &steps); err != nil {
+		return false
+	}
+	for _, current := range steps {
+		if current == step {
+			return true
+		}
+	}
+	return false
 }
 
 func usageEqual(a recordfile.UsageInfo, b recordfile.UsageInfo) bool {

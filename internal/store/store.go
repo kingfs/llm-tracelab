@@ -5014,6 +5014,25 @@ func (s *Store) ListAnalysisJobs(status string, targetType string, targetID stri
 	return scanAnalysisJobs(rows)
 }
 
+func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(`
+		SELECT id, job_type, target_type, target_id, status, steps_json, result_json, last_error,
+			attempts, created_at, updated_at, started_at, finished_at
+		FROM analysis_jobs
+		WHERE status = 'queued'
+		ORDER BY updated_at ASC, id ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAnalysisJobs(rows)
+}
+
 func (s *Store) MarkAnalysisJobRunning(id int64) error {
 	_, err := s.db.Exec(`
 		UPDATE analysis_jobs

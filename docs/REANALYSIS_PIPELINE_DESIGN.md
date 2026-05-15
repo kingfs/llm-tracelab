@@ -534,35 +534,20 @@ feat: repair usage from recorded cassettes
 
 ### P4. Monitor API
 
+Status: completed in `feat: expose reanalysis monitor api`.
+
 Scope:
 
 - Add trace reparse/scan/repair/reanalyze endpoints.
 - Add session reanalyze endpoint.
 - Add job list/detail endpoints.
 - Surface failures as system events.
+- Add `analysis_jobs` worker and session reanalysis execution.
 
 Acceptance:
 
 - API tests cover sync trace actions and async session job creation.
 - Auth wrapper applies to all write endpoints.
-
-Commit:
-
-```text
-feat: expose reanalysis monitor api
-```
-
-### P5. Async Worker And Session/Batch Execution
-
-Scope:
-
-- Add worker for `analysis_jobs`.
-- Implement session reanalysis.
-- Implement filtered batch reanalysis if filters are stable enough.
-- Add cancellation status support where safe.
-
-Acceptance:
-
 - Worker processes queued jobs.
 - Session reanalysis rebuilds selected trace derived data and writes a new
   session analysis run.
@@ -570,7 +555,25 @@ Acceptance:
 Commit:
 
 ```text
-feat: run async reanalysis jobs
+feat: expose reanalysis monitor api
+```
+
+### P5. Batch Reanalysis
+
+Scope:
+
+- Implement filtered batch reanalysis if filters are stable enough.
+- Reuse `analysis_jobs` worker and cancellation model.
+
+Acceptance:
+
+- Batch reanalysis expands a stable trace/session selection into auditable
+  child jobs.
+
+Commit:
+
+```text
+feat: run batch reanalysis jobs
 ```
 
 ### P6. Monitor UI

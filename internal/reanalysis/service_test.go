@@ -149,6 +149,82 @@ func TestServiceRepairTraceUsageCanRewriteV3Prelude(t *testing.T) {
 	}
 }
 
+func TestWorkerExecutesQueuedTraceReanalyzeJob(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedResponseTrace(t, st, dir)
+	job, err := New(st, Options{}).EnqueueTraceReanalyze(traceID)
+	if err != nil {
+		t.Fatalf("EnqueueTraceReanalyze() error = %v", err)
+	}
+	NewWorker(st, WorkerOptions{Interval: time.Hour}).RunOnce(context.Background())
+
+	got, err := st.GetAnalysisJob(job.ID)
+	if err != nil {
+		t.Fatalf("GetAnalysisJob() error = %v", err)
+	}
+	if got.Status != "completed" {
+		t.Fatalf("job status = %q, want completed: %+v", got.Status, got)
+	}
+	if _, err := st.GetObservationSummary(traceID); err != nil {
+		t.Fatalf("GetObservationSummary() error = %v", err)
+	}
+	findings, err := st.ListFindings(traceID, store.FindingFilter{})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(findings))
+	}
+}
+
+func TestServiceReanalyzeSessionSavesAnalysisRun(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedResponseTrace(t, st, dir)
+	entry, err := st.GetByID(traceID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	header := entry.Header
+	header.Meta.RequestID = "req-reanalysis-session"
+	if err := st.UpsertLogWithGrouping(entry.LogPath, header, store.GroupingInfo{SessionID: "sess-reanalysis", SessionSource: "test"}); err != nil {
+		t.Fatalf("UpsertLog(session) error = %v", err)
+	}
+	entry, err = st.GetByRequestID("req-reanalysis-session")
+	if err != nil {
+		t.Fatalf("GetByRequestID(session) error = %v", err)
+	}
+
+	result, err := New(st, Options{}).ReanalyzeSession(context.Background(), "sess-reanalysis", SessionOptions{Reparse: true, Scan: true})
+	if err != nil {
+		t.Fatalf("ReanalyzeSession() error = %v", err)
+	}
+	if result.Session == nil || result.Session.TraceCount != 1 || result.Session.AnalysisRunID == 0 || result.Session.FindingRefs != 1 {
+		t.Fatalf("session result = %+v", result.Session)
+	}
+	runs, err := st.ListAnalysisRuns("sess-reanalysis", "", "session_summary", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisRuns() error = %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("analysis runs = %d, want 1", len(runs))
+	}
+	if _, err := st.GetObservationSummary(entry.ID); err != nil {
+		t.Fatalf("GetObservationSummary() error = %v", err)
+	}
+}
+
 func writeIndexedResponseTrace(t *testing.T, st *store.Store, dir string) string {
 	t.Helper()
 	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\n\r\n"

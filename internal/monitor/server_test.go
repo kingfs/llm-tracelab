@@ -2852,6 +2852,120 @@ func TestTraceAPIHandlerReturnsNotFoundForUnknownID(t *testing.T) {
 	}
 }
 
+func TestTraceAPIHandlerReanalysisActions(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	content := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
+		`{"model":"gpt-5.1","input":"hello with sk-test_abcdefghijklmnopqrstuvwxyz"}`,
+		`{"id":"resp_1","object":"response","status":"completed","model":"gpt-5.1","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.Provider = "openai_compatible"
+			header.Meta.Operation = "responses"
+			header.Meta.Endpoint = "/v1/responses"
+		})
+	writeTraceFixture(t, outputDir, "reanalysis-action.http", content)
+	syncStore(t, st)
+	entry, err := st.GetByRequestID("req_1")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/traces/"+entry.ID+"/reanalyze", bytes.NewBufferString(`{}`))
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var resp reanalysisResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Job.Status != "completed" || resp.Job.JobType != "trace_reanalyze" {
+		t.Fatalf("job = %+v", resp.Job)
+	}
+	if _, err := st.GetObservationSummary(entry.ID); err != nil {
+		t.Fatalf("GetObservationSummary() error = %v", err)
+	}
+	findings, err := st.ListFindings(entry.ID, store.FindingFilter{})
+	if err != nil {
+		t.Fatalf("ListFindings() error = %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1", len(findings))
+	}
+}
+
+func TestAnalysisJobAPIHandlerListsDetailsAndCancels(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	content := buildRecordFixture(t, "/v1/responses", false, `{"model":"gpt-5.1","input":"hello"}`, `{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	writeTraceFixture(t, outputDir, "queued-reanalysis.http", content)
+	syncStore(t, st)
+	entry, err := st.GetByRequestID("req_1")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/traces/"+entry.ID+"/reparse", bytes.NewBufferString(`{"mode":"async","scan":true}`))
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var created reanalysisResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.Job.Status != "queued" || created.Job.ID == 0 {
+		t.Fatalf("created job = %+v", created.Job)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/analysis/jobs?status=queued&target_type=trace&target_id="+entry.ID, nil)
+	rr = httptest.NewRecorder()
+	analysisJobListAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var listed analysisJobListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if listed.Total != 1 || listed.Items[0].ID != created.Job.ID {
+		t.Fatalf("listed = %+v, want job %d", listed, created.Job.ID)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/analysis/jobs/"+strconv.FormatInt(created.Job.ID, 10), nil)
+	rr = httptest.NewRecorder()
+	analysisJobDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/analysis/jobs/"+strconv.FormatInt(created.Job.ID, 10)+"/cancel", nil)
+	rr = httptest.NewRecorder()
+	analysisJobDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("cancel status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var canceled analysisJobResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &canceled); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if canceled.Job.Status != "canceled" {
+		t.Fatalf("canceled job = %+v", canceled.Job)
+	}
+}
+
 func TestListAPIHandlerReturnsStoreNotConfiguredError(t *testing.T) {
 	t.Parallel()
 
