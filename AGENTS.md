@@ -82,6 +82,7 @@ Compatibility note:
 - `docs/PRODUCT_EVOLUTION_DESIGN.md`: v1 设计兼容入口，正文以 `docs/v1/README.md` 及其子文档为准
 - `docs/AI_BRANCH_BASELINE.md`: branch-specific summary of the current AI-agent evolution work and implemented closed loop
 - `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
+- `docs/SYSTEM_EVENTS_DESIGN.md`: proposed event center for TraceLab runtime/analysis exceptions, unread status, server push, and MCP event tools
 - `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants
 - `docs/DEVELOPMENT_COMMANDS.md`: stable test, lint, build, benchmark, and dependency command entry points
 - add focused docs under `docs/` only when they clarify architecture or storage decisions
