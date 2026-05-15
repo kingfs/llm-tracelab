@@ -149,8 +149,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 13 {
-		t.Fatalf("len(tools.Tools) = %d, want 13", len(tools.Tools))
+	if len(tools.Tools) != 17 {
+		t.Fatalf("len(tools.Tools) = %d, want 17", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -335,6 +335,54 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		if got := item.(map[string]any)["severity"].(string); got != "error" && got != "critical" {
 			t.Fatalf("query_unread_system_events severity = %q, want error or critical", got)
 		}
+	}
+
+	reanalyzeTrace, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "reanalyze_trace",
+		Arguments: map[string]any{"trace_id": failureEntry.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(reanalyze_trace) error = %v", err)
+	}
+	reanalyzeTracePayload := reanalyzeTrace.StructuredContent.(map[string]any)
+	traceJob := reanalyzeTracePayload["job"].(map[string]any)
+	if traceJob["job_type"].(string) != "trace_reanalyze" || traceJob["status"].(string) != "completed" {
+		t.Fatalf("reanalyze_trace job = %+v", traceJob)
+	}
+
+	reanalyzeSession, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "reanalyze_session",
+		Arguments: map[string]any{"session_id": sessionID, "async": true},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(reanalyze_session) error = %v", err)
+	}
+	sessionJobID := int64(reanalyzeSession.StructuredContent.(map[string]any)["id"].(float64))
+	if sessionJobID == 0 {
+		t.Fatalf("reanalyze_session job id = 0")
+	}
+
+	analysisJobs, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_analysis_jobs",
+		Arguments: map[string]any{"target_type": "session", "target_id": sessionID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_analysis_jobs) error = %v", err)
+	}
+	jobItems := analysisJobs.StructuredContent.(map[string]any)["items"].([]any)
+	if len(jobItems) != 1 {
+		t.Fatalf("len(list_analysis_jobs.items) = %d, want 1", len(jobItems))
+	}
+
+	analysisJob, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_analysis_job",
+		Arguments: map[string]any{"job_id": sessionJobID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(get_analysis_job) error = %v", err)
+	}
+	if got := analysisJob.StructuredContent.(map[string]any)["job_type"].(string); got != "session_reanalyze" {
+		t.Fatalf("get_analysis_job.job_type = %q, want session_reanalyze", got)
 	}
 }
 

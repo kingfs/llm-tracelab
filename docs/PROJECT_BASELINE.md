@@ -108,6 +108,21 @@ This table is operational metadata for TraceLab's own health:
 
 System events are grouped by fingerprint and carry unread/read/resolved/ignored state. They are not a replay source of truth and must not duplicate raw request or response bodies.
 
+Reanalysis jobs are persisted in `analysis_jobs`.
+
+Current job types include:
+
+- `trace_reparse`
+- `trace_rescan`
+- `trace_repair_usage`
+- `trace_reanalyze`
+- `session_reanalyze`
+- `batch_reanalyze`
+
+Jobs are auditable operational records for rebuilding derived SQLite state from
+raw cassettes. They are not replay artifacts and must not replace the `.http`
+cassette as source of truth.
+
 ### Schema Upgrade Behavior
 
 The project now expects old SQLite indexes to upgrade in place at startup.
@@ -254,13 +269,30 @@ Current system event UI capabilities include:
 
 Overview shows system event health as a compact summary and links to Events. It is not the durable exception inbox.
 
+### Reanalysis
+
+Monitor exposes controlled reanalysis from trace, session, and analysis views.
+
+Current reanalysis capabilities include:
+
+- repair usage from recorded response payloads
+- rebuild Observation IR
+- rerun deterministic findings
+- compose trace reanalysis as reparse plus scan
+- enqueue session reanalysis
+- enqueue batch missing-usage repair
+- inspect recent `analysis_jobs`
+
+Reanalysis is local-only: it reads `.http` cassettes and updates derived SQLite
+state. It does not call upstream providers.
+
 ### Cross-View Navigation
 
 The current baseline includes deep links from session pages into trace detail.
 
 ## MCP Baseline
 
-Read-only MCP support is now an implemented feature.
+MCP support is now an implemented feature.
 
 Current MCP transport baseline:
 
@@ -285,12 +317,17 @@ Current MCP tool surface includes:
 - `get_system_event`
 - `summarize_system_events`
 - `query_unread_system_events`
+- `reanalyze_trace`
+- `reanalyze_session`
+- `list_analysis_jobs`
+- `get_analysis_job`
 
 Important constraint:
 
 - the MCP server currently reuses the existing monitor/store query behavior
 - it does not introduce a second source of truth or a separate query engine
-- it is intentionally narrower than the full internal dataset/eval/experiment surface
+- write-capable MCP tools are restricted to controlled, auditable reanalysis
+  jobs and never call upstream providers
 
 Supported query parameters now include:
 

@@ -17,7 +17,8 @@ Current MCP support is:
 
 - transport: streamable HTTP
 - implementation library: official `github.com/modelcontextprotocol/go-sdk`
-- scope: local inspection, failure-oriented triage, and TraceLab system-event diagnostics
+- scope: local inspection, failure-oriented triage, TraceLab system-event
+  diagnostics, and controlled reanalysis jobs
 
 Current MCP support is not:
 
@@ -163,9 +164,48 @@ Optional inputs:
 - `limit`
 - `min_severity`: default `warning`
 
+### `reanalyze_trace`
+
+Run or enqueue controlled reanalysis for one trace.
+
+Inputs:
+
+- `trace_id`
+- `repair_usage`: optional usage repair before other selected work
+- `reparse`: rebuild Observation IR, default true when no step is selected
+- `scan`: rerun deterministic audit scan, default true when no step is selected
+- `async`: enqueue and return the job without executing immediately
+
+### `reanalyze_session`
+
+Run or enqueue controlled reanalysis for one session.
+
+Inputs:
+
+- `session_id`
+- `reparse`: rebuild Observation IR for session traces
+- `scan`: rerun deterministic audit scan for session traces
+- `async`: enqueue and return the job without executing immediately
+
+### `list_analysis_jobs`
+
+List reanalysis jobs.
+
+Optional filters:
+
+- `status`
+- `target_type`: `trace`, `session`, or `batch`
+- `target_id`
+- `limit`
+
+### `get_analysis_job`
+
+Get one reanalysis job by `job_id`.
+
 ## Design Notes
 
-The MCP server intentionally reuses existing monitor JSON APIs in-process rather than adding a parallel query stack.
+The MCP server intentionally reuses existing monitor/store behavior in-process
+rather than adding a parallel query stack.
 
 This keeps the first MCP slice:
 
@@ -175,7 +215,9 @@ This keeps the first MCP slice:
 - focused on inspection and triage rather than local workflow orchestration
 - aligned with current monitor semantics
 
-System event MCP tools are read-only. Write-capable event tools such as marking events read or resolved should remain opt-in behind an explicit milestone and configuration gate.
+System event MCP tools are read-only. Reanalysis MCP tools are write-capable but
+narrow: they only create or execute auditable `analysis_jobs` against local raw
+cassettes and derived SQLite state. They do not call upstream providers.
 
 ## Next Likely Step
 

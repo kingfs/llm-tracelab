@@ -169,6 +169,8 @@ Current capabilities include:
 - grouped request list
 - failed-only filtering
 - failure context windows around failed requests
+- async session reanalysis, which can rebuild trace observations/findings and
+  persist a fresh session analysis run
 
 This page is meant to answer two questions quickly:
 
@@ -185,6 +187,32 @@ Each trace detail page currently supports these tabs:
 - `Declared Tools` when the request declares tools
 
 These tabs are stable navigation targets and are used by session-to-trace deep links.
+
+Trace detail also exposes controlled reanalysis actions:
+
+- `Repair usage`: re-extract usage from the recorded response and repair SQLite
+  token metrics
+- `Reparse`: rebuild Observation IR from the raw cassette
+- `Rescan`: rerun deterministic audit detectors against existing Observation IR
+- `Reanalyze`: rebuild Observation IR and rerun deterministic scan
+
+These actions do not call the upstream provider. They read local cassettes and
+write auditable rows in `analysis_jobs`.
+
+## Analysis View
+
+Use `Analysis` to inspect persisted session analysis runs and reanalysis jobs.
+
+Current capabilities include:
+
+- recent `analysis_runs`
+- recent `analysis_jobs`
+- job status, target, steps, request, result, and last error
+- a batch action for repairing successful traces with missing usage
+
+Batch reanalysis expands a stable filter selection into per-trace child jobs.
+The child jobs perform the actual trace work so failures remain attributable to
+specific trace IDs.
 
 ## Trace Routing Context
 

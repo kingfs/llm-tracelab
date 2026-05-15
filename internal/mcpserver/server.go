@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/monitor"
+	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -109,6 +110,32 @@ type summarizeSystemEventsInput struct {
 type queryUnreadSystemEventsInput struct {
 	Limit       int    `json:"limit,omitempty" jsonschema:"maximum unread events to return, default 20, max 200"`
 	MinSeverity string `json:"min_severity,omitempty" jsonschema:"minimum severity: info, warning, error, or critical"`
+}
+
+type reanalyzeTraceInput struct {
+	TraceID     string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
+	RepairUsage bool   `json:"repair_usage,omitempty" jsonschema:"repair indexed usage before reparse/scan"`
+	Reparse     bool   `json:"reparse,omitempty" jsonschema:"rebuild Observation IR, default true"`
+	Scan        bool   `json:"scan,omitempty" jsonschema:"run deterministic audit scan, default true"`
+	Async       bool   `json:"async,omitempty" jsonschema:"enqueue and return without executing immediately"`
+}
+
+type reanalyzeSessionInput struct {
+	SessionID string `json:"session_id" jsonschema:"session identifier from list_sessions"`
+	Reparse   bool   `json:"reparse,omitempty" jsonschema:"rebuild Observation IR for session traces, default true"`
+	Scan      bool   `json:"scan,omitempty" jsonschema:"run deterministic audit scan for session traces, default true"`
+	Async     bool   `json:"async,omitempty" jsonschema:"enqueue and return without executing immediately, default true"`
+}
+
+type listAnalysisJobsInput struct {
+	Status     string `json:"status,omitempty" jsonschema:"optional job status filter"`
+	TargetType string `json:"target_type,omitempty" jsonschema:"optional target type filter: trace, session, or batch"`
+	TargetID   string `json:"target_id,omitempty" jsonschema:"optional target identifier filter"`
+	Limit      int    `json:"limit,omitempty" jsonschema:"maximum jobs to return, default 50"`
+}
+
+type getAnalysisJobInput struct {
+	JobID int64 `json:"job_id" jsonschema:"analysis job id from list_analysis_jobs"`
 }
 
 type traceListOutput struct {
@@ -276,6 +303,22 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "query_unread_system_events",
 		Description: "Return unread warning/error/critical TraceLab system events ordered by severity and recency.",
 	}, api.queryUnreadSystemEvents)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "reanalyze_trace",
+		Description: "Run or enqueue controlled reanalysis for one trace.",
+	}, api.reanalyzeTrace)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "reanalyze_session",
+		Description: "Run or enqueue controlled reanalysis for one session.",
+	}, api.reanalyzeSession)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_analysis_jobs",
+		Description: "List reanalysis jobs with optional status and target filters.",
+	}, api.listAnalysisJobs)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_analysis_job",
+		Description: "Get one reanalysis job by job_id.",
+	}, api.getAnalysisJob)
 
 	return server
 }
@@ -567,6 +610,112 @@ func (a *serverAPI) queryUnreadSystemEvents(ctx context.Context, req *mcp.CallTo
 	return nil, &page, nil
 }
 
+func (a *serverAPI) reanalyzeTrace(ctx context.Context, req *mcp.CallToolRequest, in *reanalyzeTraceInput) (*mcp.CallToolResult, map[string]any, error) {
+	traceID := strings.TrimSpace(in.TraceID)
+	if traceID == "" {
+		return nil, nil, fmt.Errorf("trace_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	reparse, scan := defaultReanalysisSteps(in.Reparse, in.Scan)
+	svc := reanalysis.New(a.store, reanalysis.Options{})
+	if in.Async {
+		if in.RepairUsage {
+			job, err := svc.EnqueueTraceRepairUsage(traceID)
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, analysisJobMap(job), nil
+		}
+		job, err := enqueueTraceSteps(svc, traceID, reparse, scan)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, analysisJobMap(job), nil
+	}
+	var result reanalysis.Result
+	var err error
+	if in.RepairUsage {
+		if result, err = svc.RepairTraceUsage(ctx, traceID, reanalysis.RepairUsageOptions{}); err != nil {
+			return nil, nil, err
+		}
+	}
+	switch {
+	case reparse && scan:
+		result, err = svc.ReanalyzeTrace(ctx, traceID)
+	case reparse:
+		result, err = svc.ReparseTrace(ctx, traceID, reanalysis.TraceOptions{})
+	case scan:
+		result, err = svc.RescanTrace(ctx, traceID)
+	default:
+		if result.Job.ID == 0 {
+			return nil, nil, fmt.Errorf("at least one reanalysis step is required")
+		}
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, reanalysisResultMap(result), nil
+}
+
+func (a *serverAPI) reanalyzeSession(ctx context.Context, req *mcp.CallToolRequest, in *reanalyzeSessionInput) (*mcp.CallToolResult, map[string]any, error) {
+	sessionID := strings.TrimSpace(in.SessionID)
+	if sessionID == "" {
+		return nil, nil, fmt.Errorf("session_id is required")
+	}
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	reparse, scan := defaultReanalysisSteps(in.Reparse, in.Scan)
+	svc := reanalysis.New(a.store, reanalysis.Options{})
+	if in.Async {
+		job, err := svc.EnqueueSessionReanalyze(sessionID, reanalysis.SessionOptions{Reparse: reparse, Scan: scan})
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, analysisJobMap(job), nil
+	}
+	result, err := svc.ReanalyzeSession(ctx, sessionID, reanalysis.SessionOptions{Reparse: reparse, Scan: scan})
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, reanalysisResultMap(result), nil
+}
+
+func (a *serverAPI) listAnalysisJobs(ctx context.Context, req *mcp.CallToolRequest, in *listAnalysisJobsInput) (*mcp.CallToolResult, map[string]any, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	jobs, err := a.store.ListAnalysisJobs(in.Status, in.TargetType, in.TargetID, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]map[string]any, 0, len(jobs))
+	for _, job := range jobs {
+		items = append(items, analysisJobMap(job))
+	}
+	return nil, map[string]any{"items": items, "total": len(items)}, nil
+}
+
+func (a *serverAPI) getAnalysisJob(ctx context.Context, req *mcp.CallToolRequest, in *getAnalysisJobInput) (*mcp.CallToolResult, map[string]any, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	if in.JobID <= 0 {
+		return nil, nil, fmt.Errorf("job_id is required")
+	}
+	job, err := a.store.GetAnalysisJob(in.JobID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, analysisJobMap(job), nil
+}
+
 func (a *serverAPI) traceFindings(ctx context.Context, traceID string, severity string, category string) (*mcp.CallToolResult, map[string]any, error) {
 	traceID = strings.TrimSpace(traceID)
 	if traceID == "" {
@@ -700,6 +849,82 @@ func conciseSystemEvents(items []map[string]any, includeDetails bool) []map[stri
 			copyItem[key] = value
 		}
 		out = append(out, copyItem)
+	}
+	return out
+}
+
+func defaultReanalysisSteps(reparse bool, scan bool) (bool, bool) {
+	if !reparse && !scan {
+		return true, true
+	}
+	return reparse, scan
+}
+
+func enqueueTraceSteps(svc *reanalysis.Service, traceID string, reparse bool, scan bool) (store.AnalysisJobRecord, error) {
+	switch {
+	case reparse && scan:
+		return svc.EnqueueTraceReanalyze(traceID)
+	case reparse:
+		return svc.EnqueueTraceReparse(traceID, reanalysis.TraceOptions{})
+	case scan:
+		return svc.EnqueueTraceRescan(traceID)
+	default:
+		return store.AnalysisJobRecord{}, fmt.Errorf("at least one reanalysis step is required")
+	}
+}
+
+func reanalysisResultMap(result reanalysis.Result) map[string]any {
+	out := map[string]any{
+		"job": analysisJobMap(result.Job),
+	}
+	if result.Usage != nil {
+		out["usage"] = result.Usage
+	}
+	if result.Observation != nil {
+		out["observation"] = result.Observation
+		out["request_nodes"] = result.RequestNodes
+		out["response_nodes"] = result.ResponseNodes
+		out["stream_events"] = result.StreamEvents
+	}
+	if result.Findings != nil {
+		out["findings"] = result.Findings
+	}
+	if result.Session != nil {
+		out["session"] = result.Session
+	}
+	if result.Batch != nil {
+		out["batch"] = result.Batch
+	}
+	return out
+}
+
+func analysisJobMap(job store.AnalysisJobRecord) map[string]any {
+	return map[string]any{
+		"id":          job.ID,
+		"job_type":    job.JobType,
+		"target_type": job.TargetType,
+		"target_id":   job.TargetID,
+		"status":      job.Status,
+		"steps":       jsonRawOrString(job.StepsJSON),
+		"request":     jsonRawOrString(job.RequestJSON),
+		"result":      jsonRawOrString(job.ResultJSON),
+		"last_error":  job.LastError,
+		"attempts":    job.Attempts,
+		"created_at":  job.CreatedAt,
+		"updated_at":  job.UpdatedAt,
+		"started_at":  job.StartedAt,
+		"finished_at": job.FinishedAt,
+	}
+}
+
+func jsonRawOrString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return map[string]any{}
+	}
+	var out any
+	if err := json.Unmarshal([]byte(value), &out); err != nil {
+		return value
 	}
 	return out
 }

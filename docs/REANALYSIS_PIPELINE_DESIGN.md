@@ -607,6 +607,8 @@ feat: add reanalysis controls to monitor
 
 ### P7. CLI/MCP Completion And Docs
 
+Status: completed in `docs: document reanalysis workflows`.
+
 Scope:
 
 - Add CLI usage repair and composed reanalyze commands.

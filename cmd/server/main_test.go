@@ -164,7 +164,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "auth", "analyze", "analyze repair-usage", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -692,6 +692,32 @@ debug:
 	}
 
 	out.Reset()
+	code = runAnalyzeReanalyze(analyzeReanalyzeOptions{
+		configPath: configPath,
+		traceID:    traceID,
+		reparse:    true,
+		scan:       true,
+		format:     "json",
+		stdout:     &out,
+	})
+	if code != 0 {
+		t.Fatalf("runAnalyzeReanalyze(trace) = %d, want 0", code)
+	}
+	var reanalyzeEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			TraceID string `json:"trace_id"`
+			JobType string `json:"job_type"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &reanalyzeEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(reanalyze trace) error = %v, output=%q", err, out.String())
+	}
+	if !reanalyzeEnvelope.OK || reanalyzeEnvelope.Result.TraceID != traceID || reanalyzeEnvelope.Result.JobType != "trace_reanalyze" {
+		t.Fatalf("reanalyze trace envelope = %+v", reanalyzeEnvelope)
+	}
+
+	out.Reset()
 	code = runAnalyzeSession(analyzeSessionOptions{
 		configPath: configPath,
 		sessionID:  "sess-analysis-cli",
@@ -707,6 +733,19 @@ debug:
 	}
 	if len(runs) != 1 || !strings.Contains(runs[0].OutputJSON, `"trace_refs"`) {
 		t.Fatalf("analysis runs = %+v", runs)
+	}
+
+	out.Reset()
+	code = runAnalyzeReanalyze(analyzeReanalyzeOptions{
+		configPath: configPath,
+		sessionID:  "sess-analysis-cli",
+		reparse:    true,
+		scan:       true,
+		format:     "json",
+		stdout:     &out,
+	})
+	if code != 0 {
+		t.Fatalf("runAnalyzeReanalyze(session) = %d, want 0", code)
 	}
 }
 
@@ -1117,8 +1156,8 @@ func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 13 {
-		t.Fatalf("len(tools.Tools) = %d, want 13", len(tools.Tools))
+	if len(tools.Tools) != 17 {
+		t.Fatalf("len(tools.Tools) = %d, want 17", len(tools.Tools))
 	}
 }
 
@@ -1192,8 +1231,8 @@ func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 13 {
-		t.Fatalf("len(tools.Tools) = %d, want 13", len(tools.Tools))
+	if len(tools.Tools) != 17 {
+		t.Fatalf("len(tools.Tools) = %d, want 17", len(tools.Tools))
 	}
 }
 
