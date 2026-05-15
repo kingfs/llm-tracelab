@@ -272,6 +272,21 @@ type reanalysisRequest struct {
 	Reparse         bool   `json:"reparse"`
 }
 
+type batchReanalysisRequest struct {
+	Mode         string `json:"mode"`
+	Query        string `json:"q"`
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	Endpoint     string `json:"endpoint"`
+	Upstream     string `json:"upstream"`
+	Status       string `json:"status"`
+	MissingUsage bool   `json:"missing_usage"`
+	Limit        int    `json:"limit"`
+	RepairUsage  bool   `json:"repair_usage"`
+	Reparse      bool   `json:"reparse"`
+	Scan         bool   `json:"scan"`
+}
+
 type analysisJobView struct {
 	ID         int64     `json:"id"`
 	JobType    string    `json:"job_type"`
@@ -279,6 +294,7 @@ type analysisJobView struct {
 	TargetID   string    `json:"target_id"`
 	Status     string    `json:"status"`
 	Steps      []string  `json:"steps"`
+	Request    any       `json:"request"`
 	Result     any       `json:"result"`
 	LastError  string    `json:"last_error,omitempty"`
 	Attempts   int       `json:"attempts"`
@@ -923,6 +939,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAuthRequired(analysisBatchReanalyzeAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
@@ -2869,6 +2886,57 @@ func analysisJobListAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
+func analysisBatchReanalyzeAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req batchReanalysisRequest
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json: " + err.Error()})
+			return
+		}
+		opts := reanalysis.BatchOptions{
+			Filter: store.ListFilter{
+				Query:            strings.TrimSpace(req.Query),
+				Provider:         strings.TrimSpace(req.Provider),
+				Model:            strings.TrimSpace(req.Model),
+				Endpoint:         strings.TrimSpace(req.Endpoint),
+				SelectedUpstream: strings.TrimSpace(req.Upstream),
+				Status:           strings.TrimSpace(req.Status),
+				MissingUsage:     req.MissingUsage,
+			},
+			Limit:       req.Limit,
+			RepairUsage: req.RepairUsage,
+			Reparse:     req.Reparse,
+			Scan:        req.Scan,
+		}
+		mode := requestMode(req.Mode, "async")
+		svc := reanalysis.New(st, reanalysis.Options{})
+		switch mode {
+		case "async":
+			job, err := svc.EnqueueBatchReanalyze(opts)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusAccepted, reanalysisResponse{Job: analysisJobViewFromStore(job)})
+		case "sync":
+			result, err := svc.ReanalyzeBatch(r.Context(), opts)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, reanalysisResponse{Job: analysisJobViewFromStore(result.Job), Result: result})
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be sync or async"})
+		}
+	}
+}
+
 func analysisJobDetailAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(pathClean(r.URL.Path), "/api/analysis/jobs/")
@@ -3382,6 +3450,10 @@ func analysisJobViewFromStore(job store.AnalysisJobRecord) analysisJobView {
 	if strings.TrimSpace(job.StepsJSON) != "" {
 		_ = json.Unmarshal([]byte(job.StepsJSON), &steps)
 	}
+	var request any = map[string]any{}
+	if strings.TrimSpace(job.RequestJSON) != "" {
+		_ = json.Unmarshal([]byte(job.RequestJSON), &request)
+	}
 	var result any = map[string]any{}
 	if strings.TrimSpace(job.ResultJSON) != "" {
 		_ = json.Unmarshal([]byte(job.ResultJSON), &result)
@@ -3393,6 +3465,7 @@ func analysisJobViewFromStore(job store.AnalysisJobRecord) analysisJobView {
 		TargetID:   job.TargetID,
 		Status:     job.Status,
 		Steps:      steps,
+		Request:    request,
 		Result:     result,
 		LastError:  job.LastError,
 		Attempts:   job.Attempts,
@@ -3829,8 +3902,10 @@ func parseListFilter(r *http.Request) store.ListFilter {
 		Query:            strings.TrimSpace(query.Get("q")),
 		Provider:         strings.TrimSpace(query.Get("provider")),
 		Model:            strings.TrimSpace(query.Get("model")),
+		Endpoint:         strings.TrimSpace(query.Get("endpoint")),
 		SelectedUpstream: strings.TrimSpace(query.Get("upstream")),
 		Status:           strings.TrimSpace(query.Get("status")),
+		MissingUsage:     parseBool(query.Get("missing_usage")),
 		MinDurationMs:    int64(parseInt(query.Get("min_duration_ms"), 0)),
 		MaxDurationMs:    int64(parseInt(query.Get("max_duration_ms"), 0)),
 		MinTTFTMs:        int64(parseInt(query.Get("min_ttft_ms"), 0)),
@@ -4219,6 +4294,15 @@ func parseInt(v string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func parseBool(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func pathClean(v string) string {

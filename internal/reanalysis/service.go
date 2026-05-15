@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/analyzer"
@@ -23,9 +24,11 @@ const (
 	JobTypeTraceRepair      = "trace_repair_usage"
 	JobTypeTraceReanalyze   = "trace_reanalyze"
 	JobTypeSessionReanalyze = "session_reanalyze"
+	JobTypeBatchReanalyze   = "batch_reanalyze"
 
 	TargetTypeTrace   = "trace"
 	TargetTypeSession = "session"
+	TargetTypeBatch   = "batch"
 
 	StepReparseObservation = "reparse_observation"
 	StepScanFindings       = "scan_findings"
@@ -59,12 +62,21 @@ type SessionOptions struct {
 	Scan    bool
 }
 
+type BatchOptions struct {
+	Filter      store.ListFilter `json:"filter"`
+	Limit       int              `json:"limit"`
+	RepairUsage bool             `json:"repair_usage"`
+	Reparse     bool             `json:"reparse"`
+	Scan        bool             `json:"scan"`
+}
+
 type Result struct {
 	Job              store.AnalysisJobRecord `json:"job"`
 	Usage            *UsageRepairResult      `json:"usage,omitempty"`
 	Observation      *ObservationResult      `json:"observation,omitempty"`
 	Findings         *FindingsResult         `json:"findings,omitempty"`
 	Session          *SessionResult          `json:"session,omitempty"`
+	Batch            *BatchResult            `json:"batch,omitempty"`
 	RequestNodes     int                     `json:"request_nodes,omitempty"`
 	ResponseNodes    int                     `json:"response_nodes,omitempty"`
 	StreamEvents     int                     `json:"stream_events,omitempty"`
@@ -78,6 +90,11 @@ type SessionResult struct {
 	TraceCount    int    `json:"trace_count"`
 	AnalysisRunID int64  `json:"analysis_run_id"`
 	FindingRefs   int    `json:"finding_refs"`
+}
+
+type BatchResult struct {
+	TraceCount int     `json:"trace_count"`
+	JobIDs     []int64 `json:"job_ids"`
 }
 
 type UsageRepairResult struct {
@@ -202,6 +219,18 @@ func (s *Service) EnqueueSessionReanalyze(sessionID string, opts SessionOptions)
 	return s.createSessionJob(sessionID, opts)
 }
 
+func (s *Service) ReanalyzeBatch(ctx context.Context, opts BatchOptions) (Result, error) {
+	job, err := s.createBatchJob(opts)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.runBatchJob(ctx, job, opts)
+}
+
+func (s *Service) EnqueueBatchReanalyze(opts BatchOptions) (store.AnalysisJobRecord, error) {
+	return s.createBatchJob(opts)
+}
+
 func (s *Service) ExecuteJob(ctx context.Context, job store.AnalysisJobRecord) (Result, error) {
 	switch job.JobType {
 	case JobTypeTraceReparse:
@@ -217,6 +246,12 @@ func (s *Service) ExecuteJob(ctx context.Context, job store.AnalysisJobRecord) (
 			Reparse: stepsContain(job.StepsJSON, StepReparseObservation),
 			Scan:    stepsContain(job.StepsJSON, StepScanFindings),
 		})
+	case JobTypeBatchReanalyze:
+		opts, err := batchOptionsFromJob(job)
+		if err != nil {
+			return Result{}, err
+		}
+		return s.runBatchJob(ctx, job, opts)
 	default:
 		return Result{}, fmt.Errorf("unsupported analysis job type %q", job.JobType)
 	}
@@ -373,6 +408,48 @@ func (s *Service) createSessionJob(sessionID string, opts SessionOptions) (store
 		ResultJSON: "{}",
 		CreatedAt:  now,
 		UpdatedAt:  now,
+	})
+}
+
+func (s *Service) createBatchJob(opts BatchOptions) (store.AnalysisJobRecord, error) {
+	if s == nil || s.store == nil {
+		return store.AnalysisJobRecord{}, fmt.Errorf("reanalysis store is nil")
+	}
+	if !opts.RepairUsage && !opts.Reparse && !opts.Scan {
+		return store.AnalysisJobRecord{}, fmt.Errorf("batch reanalysis requires at least one step")
+	}
+	if opts.Limit <= 0 {
+		opts.Limit = 1000
+	}
+	steps := []string{}
+	if opts.RepairUsage {
+		steps = append(steps, StepRepairUsage)
+	}
+	if opts.Reparse {
+		steps = append(steps, StepReparseObservation)
+	}
+	if opts.Scan {
+		steps = append(steps, StepScanFindings)
+	}
+	stepsJSON, err := json.Marshal(steps)
+	if err != nil {
+		return store.AnalysisJobRecord{}, err
+	}
+	requestJSON, err := json.Marshal(opts)
+	if err != nil {
+		return store.AnalysisJobRecord{}, err
+	}
+	now := s.now()
+	return s.store.CreateAnalysisJob(store.AnalysisJobRecord{
+		JobType:     JobTypeBatchReanalyze,
+		TargetType:  TargetTypeBatch,
+		TargetID:    "trace_filter",
+		Status:      "queued",
+		StepsJSON:   string(stepsJSON),
+		RequestJSON: string(requestJSON),
+		ResultJSON:  "{}",
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 }
 
@@ -543,6 +620,83 @@ func (s *Service) runSessionJob(ctx context.Context, job store.AnalysisJobRecord
 	return result, nil
 }
 
+func (s *Service) runBatchJob(ctx context.Context, job store.AnalysisJobRecord, opts BatchOptions) (Result, error) {
+	if err := s.store.MarkAnalysisJobRunning(job.ID); err != nil {
+		return Result{}, err
+	}
+	result := Result{Job: job}
+	var err error
+	defer func() {
+		if err != nil {
+			_ = s.store.MarkAnalysisJobFailed(job.ID, err.Error())
+		}
+	}()
+	if opts.Limit <= 0 {
+		opts.Limit = 1000
+	}
+	traceIDs, err := s.store.ListTraceIDs(opts.Filter, opts.Limit)
+	if err != nil {
+		return Result{}, err
+	}
+	batch := BatchResult{TraceCount: len(traceIDs)}
+	for _, traceID := range traceIDs {
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			return Result{}, err
+		default:
+		}
+		if opts.RepairUsage {
+			child, childErr := s.EnqueueTraceRepairUsage(traceID)
+			if childErr != nil {
+				err = childErr
+				return Result{}, err
+			}
+			batch.JobIDs = append(batch.JobIDs, child.ID)
+		}
+		if opts.Reparse && opts.Scan {
+			child, childErr := s.EnqueueTraceReanalyze(traceID)
+			if childErr != nil {
+				err = childErr
+				return Result{}, err
+			}
+			batch.JobIDs = append(batch.JobIDs, child.ID)
+			continue
+		}
+		if opts.Reparse {
+			child, childErr := s.EnqueueTraceReparse(traceID, TraceOptions{})
+			if childErr != nil {
+				err = childErr
+				return Result{}, err
+			}
+			batch.JobIDs = append(batch.JobIDs, child.ID)
+			continue
+		}
+		if opts.Scan {
+			child, childErr := s.EnqueueTraceRescan(traceID)
+			if childErr != nil {
+				err = childErr
+				return Result{}, err
+			}
+			batch.JobIDs = append(batch.JobIDs, child.ID)
+		}
+	}
+	result.Batch = &batch
+	resultJSON, marshalErr := json.Marshal(resultSummary(result))
+	if marshalErr != nil {
+		err = marshalErr
+		return Result{}, err
+	}
+	if err = s.store.MarkAnalysisJobCompleted(job.ID, string(resultJSON)); err != nil {
+		return Result{}, err
+	}
+	result.Job, err = s.store.GetAnalysisJob(job.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	return result, nil
+}
+
 func findingsResult(traceID string, findings []observe.Finding) FindingsResult {
 	out := FindingsResult{
 		TraceID:  traceID,
@@ -572,7 +726,21 @@ func resultSummary(result Result) map[string]any {
 	if result.Session != nil {
 		out["session"] = result.Session
 	}
+	if result.Batch != nil {
+		out["batch"] = result.Batch
+	}
 	return out
+}
+
+func batchOptionsFromJob(job store.AnalysisJobRecord) (BatchOptions, error) {
+	var opts BatchOptions
+	if strings.TrimSpace(job.RequestJSON) == "" {
+		return opts, fmt.Errorf("batch job request is empty")
+	}
+	if err := json.Unmarshal([]byte(job.RequestJSON), &opts); err != nil {
+		return opts, err
+	}
+	return opts, nil
 }
 
 func stepsContain(stepsJSON string, step string) bool {

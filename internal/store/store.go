@@ -131,8 +131,10 @@ type ListFilter struct {
 	Query            string
 	Provider         string
 	Model            string
+	Endpoint         string
 	SelectedUpstream string
 	Status           string
+	MissingUsage     bool
 	MinDurationMs    int64
 	MaxDurationMs    int64
 	MinTTFTMs        int64
@@ -484,19 +486,20 @@ type AnalysisRunRecord struct {
 }
 
 type AnalysisJobRecord struct {
-	ID         int64
-	JobType    string
-	TargetType string
-	TargetID   string
-	Status     string
-	StepsJSON  string
-	ResultJSON string
-	LastError  string
-	Attempts   int
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	StartedAt  time.Time
-	FinishedAt time.Time
+	ID          int64
+	JobType     string
+	TargetType  string
+	TargetID    string
+	Status      string
+	StepsJSON   string
+	RequestJSON string
+	ResultJSON  string
+	LastError   string
+	Attempts    int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	StartedAt   time.Time
+	FinishedAt  time.Time
 }
 
 type TimeCountItem struct {
@@ -2873,6 +2876,7 @@ func (s *Store) initSchema() error {
 			target_id TEXT NOT NULL,
 			status TEXT NOT NULL,
 			steps_json TEXT NOT NULL DEFAULT '[]',
+			request_json TEXT NOT NULL DEFAULT '{}',
 			result_json TEXT NOT NULL DEFAULT '{}',
 			last_error TEXT NOT NULL DEFAULT '',
 			attempts INTEGER NOT NULL DEFAULT 0,
@@ -2977,6 +2981,9 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("analysis_jobs", "request_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("channel_configs", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
@@ -4180,6 +4187,36 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 	return result, nil
 }
 
+func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	whereSQL, whereArgs := buildLogFilterClause(filter, "")
+	if whereSQL == "" {
+		whereSQL = "1 = 1"
+	}
+	rows, err := s.db.Query(`
+		SELECT trace_id
+		FROM logs
+		WHERE `+whereSQL+`
+		ORDER BY recorded_at DESC, trace_id DESC
+		LIMIT ?
+	`, append(whereArgs, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (s *Store) GetByID(traceID string) (LogEntry, error) {
 	row, err := s.client.TraceLog.Query().
 		Where(tracelog.TraceIDEQ(traceID)).
@@ -4941,6 +4978,9 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 	if strings.TrimSpace(job.StepsJSON) == "" {
 		job.StepsJSON = "[]"
 	}
+	if strings.TrimSpace(job.RequestJSON) == "" {
+		job.RequestJSON = "{}"
+	}
 	if strings.TrimSpace(job.ResultJSON) == "" {
 		job.ResultJSON = "{}"
 	}
@@ -4953,11 +4993,11 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 	}
 	result, err := s.db.Exec(`
 		INSERT INTO analysis_jobs (
-			job_type, target_type, target_id, status, steps_json, result_json, last_error,
+			job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, job.JobType, job.TargetType, job.TargetID, job.Status, job.StepsJSON, job.ResultJSON, job.LastError,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, job.JobType, job.TargetType, job.TargetID, job.Status, job.StepsJSON, job.RequestJSON, job.ResultJSON, job.LastError,
 		job.Attempts, job.CreatedAt, job.UpdatedAt, nullableTime(job.StartedAt), nullableTime(job.FinishedAt))
 	if err != nil {
 		return AnalysisJobRecord{}, err
@@ -4972,7 +5012,7 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 
 func (s *Store) GetAnalysisJob(id int64) (AnalysisJobRecord, error) {
 	row := s.db.QueryRow(`
-		SELECT id, job_type, target_type, target_id, status, steps_json, result_json, last_error,
+		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
 		WHERE id = ?
@@ -4985,7 +5025,7 @@ func (s *Store) ListAnalysisJobs(status string, targetType string, targetID stri
 		limit = 50
 	}
 	query := `
-		SELECT id, job_type, target_type, target_id, status, steps_json, result_json, last_error,
+		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
 		WHERE 1 = 1
@@ -5019,7 +5059,7 @@ func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error
 		limit = 10
 	}
 	rows, err := s.db.Query(`
-		SELECT id, job_type, target_type, target_id, status, steps_json, result_json, last_error,
+		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
 		WHERE status = 'queued'
@@ -6263,8 +6303,14 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	if model := strings.TrimSpace(filter.Model); model != "" {
 		predicates = append(predicates, tracelog.ModelContainsFold(model))
 	}
+	if endpoint := strings.TrimSpace(filter.Endpoint); endpoint != "" {
+		predicates = append(predicates, tracelog.EndpointContainsFold(endpoint))
+	}
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		predicates = append(predicates, tracelog.SelectedUpstreamIDContainsFold(upstream))
+	}
+	if filter.MissingUsage {
+		predicates = append(predicates, tracelog.TotalTokensEQ(0), tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":
@@ -6372,7 +6418,7 @@ type analysisJobScanner interface {
 func scanAnalysisJob(row analysisJobScanner) (AnalysisJobRecord, error) {
 	var job AnalysisJobRecord
 	var createdAt, updatedAt, startedAt, finishedAt any
-	if err := row.Scan(&job.ID, &job.JobType, &job.TargetType, &job.TargetID, &job.Status, &job.StepsJSON, &job.ResultJSON, &job.LastError,
+	if err := row.Scan(&job.ID, &job.JobType, &job.TargetType, &job.TargetID, &job.Status, &job.StepsJSON, &job.RequestJSON, &job.ResultJSON, &job.LastError,
 		&job.Attempts, &createdAt, &updatedAt, &startedAt, &finishedAt); err != nil {
 		return AnalysisJobRecord{}, err
 	}
@@ -6539,9 +6585,16 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 		clauses = append(clauses, `LOWER(`+column("model")+`) LIKE LOWER(?)`)
 		args = append(args, "%"+escapeLike(model)+"%")
 	}
+	if endpoint := strings.TrimSpace(filter.Endpoint); endpoint != "" {
+		clauses = append(clauses, `LOWER(`+column("endpoint")+`) LIKE LOWER(?)`)
+		args = append(args, "%"+escapeLike(endpoint)+"%")
+	}
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?)`)
 		args = append(args, "%"+escapeLike(upstream)+"%")
+	}
+	if filter.MissingUsage {
+		clauses = append(clauses, `(`+column("total_tokens")+` = 0 AND `+column("status_code")+` >= 200 AND `+column("status_code")+` < 300)`)
 	}
 	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
 	case "success":

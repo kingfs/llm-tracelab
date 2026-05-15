@@ -183,6 +183,36 @@ func TestWorkerExecutesQueuedTraceReanalyzeJob(t *testing.T) {
 	}
 }
 
+func TestServiceReanalyzeBatchExpandsTraceJobs(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedResponseTrace(t, st, dir)
+	result, err := New(st, Options{}).ReanalyzeBatch(context.Background(), BatchOptions{
+		Filter:  store.ListFilter{Model: "gpt-5.1"},
+		Limit:   10,
+		Reparse: true,
+		Scan:    true,
+	})
+	if err != nil {
+		t.Fatalf("ReanalyzeBatch() error = %v", err)
+	}
+	if result.Batch == nil || result.Batch.TraceCount != 1 || len(result.Batch.JobIDs) != 1 {
+		t.Fatalf("batch result = %+v", result.Batch)
+	}
+	child, err := st.GetAnalysisJob(result.Batch.JobIDs[0])
+	if err != nil {
+		t.Fatalf("GetAnalysisJob(child) error = %v", err)
+	}
+	if child.TargetID != traceID || child.JobType != JobTypeTraceReanalyze || child.Status != "queued" {
+		t.Fatalf("child job = %+v", child)
+	}
+}
+
 func TestServiceReanalyzeSessionSavesAnalysisRun(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.New(dir)

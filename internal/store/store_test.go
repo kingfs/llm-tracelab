@@ -2274,15 +2274,16 @@ func TestAnalysisJobLifecycle(t *testing.T) {
 	defer st.Close()
 
 	job, err := st.CreateAnalysisJob(AnalysisJobRecord{
-		JobType:    "trace_reanalyze",
-		TargetType: "trace",
-		TargetID:   "trace-job",
-		StepsJSON:  `["reparse_observation","scan_findings"]`,
+		JobType:     "trace_reanalyze",
+		TargetType:  "trace",
+		TargetID:    "trace-job",
+		StepsJSON:   `["reparse_observation","scan_findings"]`,
+		RequestJSON: `{"mode":"async"}`,
 	})
 	if err != nil {
 		t.Fatalf("CreateAnalysisJob() error = %v", err)
 	}
-	if job.ID == 0 || job.Status != "queued" || job.ResultJSON != "{}" {
+	if job.ID == 0 || job.Status != "queued" || job.ResultJSON != "{}" || job.RequestJSON != `{"mode":"async"}` {
 		t.Fatalf("job = %+v, want queued with id and empty result", job)
 	}
 
@@ -2314,6 +2315,53 @@ func TestAnalysisJobLifecycle(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].ID != job.ID {
 		t.Fatalf("jobs = %+v, want completed job %d", jobs, job.ID)
+	}
+}
+
+func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:  "req-batch-missing",
+			Time:       time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+			Model:      "gpt-5.1",
+			Provider:   "openai_compatible",
+			Operation:  "responses",
+			Endpoint:   "/v1/responses",
+			URL:        "/v1/responses",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+	}
+	path := filepath.Join(t.TempDir(), "batch-missing.http")
+	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(path, header); err != nil {
+		t.Fatalf("UpsertLog(missing) error = %v", err)
+	}
+	header.Meta.RequestID = "req-batch-usage"
+	header.Usage = recordfile.UsageInfo{TotalTokens: 3}
+	path = filepath.Join(t.TempDir(), "batch-usage.http")
+	if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(path, header); err != nil {
+		t.Fatalf("UpsertLog(usage) error = %v", err)
+	}
+
+	ids, err := st.ListTraceIDs(ListFilter{Endpoint: "responses", MissingUsage: true}, 10)
+	if err != nil {
+		t.Fatalf("ListTraceIDs() error = %v", err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("ids = %+v, want one missing-usage trace", ids)
 	}
 }
 

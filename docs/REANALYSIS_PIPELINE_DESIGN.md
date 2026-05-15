@@ -560,15 +560,20 @@ feat: expose reanalysis monitor api
 
 ### P5. Batch Reanalysis
 
+Status: completed in `feat: run batch reanalysis jobs`.
+
 Scope:
 
 - Implement filtered batch reanalysis if filters are stable enough.
 - Reuse `analysis_jobs` worker and cancellation model.
+- Persist batch request filters in `analysis_jobs.request_json`.
 
 Acceptance:
 
 - Batch reanalysis expands a stable trace/session selection into auditable
   child jobs.
+- Batch jobs never rewrite cassettes directly; trace child jobs perform the
+  selected work.
 
 Commit:
 

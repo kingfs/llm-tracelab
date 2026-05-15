@@ -2966,6 +2966,49 @@ func TestAnalysisJobAPIHandlerListsDetailsAndCancels(t *testing.T) {
 	}
 }
 
+func TestAnalysisBatchReanalyzeAPIHandlerCreatesBatchJob(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	content := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
+		`{"model":"gpt-5.1","input":"hello"}`,
+		`{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.Provider = "openai_compatible"
+			header.Meta.Operation = "responses"
+			header.Meta.Endpoint = "/v1/responses"
+			header.Meta.Model = "gpt-5.1"
+		})
+	writeTraceFixture(t, outputDir, "batch-reanalysis.http", content)
+	syncStore(t, st)
+
+	body := `{"mode":"sync","model":"gpt-5.1","endpoint":"responses","limit":10,"reparse":true,"scan":true}`
+	req := httptest.NewRequest(http.MethodPost, "/api/analysis/batch/reanalyze", bytes.NewBufferString(body))
+	rr := httptest.NewRecorder()
+	analysisBatchReanalyzeAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var resp reanalysisResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Job.JobType != "batch_reanalyze" || resp.Job.Status != "completed" {
+		t.Fatalf("batch job = %+v", resp.Job)
+	}
+	jobs, err := st.ListAnalysisJobs("queued", "trace", "", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisJobs() error = %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].JobType != "trace_reanalyze" {
+		t.Fatalf("child jobs = %+v", jobs)
+	}
+}
+
 func TestListAPIHandlerReturnsStoreNotConfiguredError(t *testing.T) {
 	t.Parallel()
 
