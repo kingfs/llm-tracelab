@@ -483,6 +483,22 @@ type AnalysisRunRecord struct {
 	CreatedAt       time.Time
 }
 
+type AnalysisJobRecord struct {
+	ID         int64
+	JobType    string
+	TargetType string
+	TargetID   string
+	Status     string
+	StepsJSON  string
+	ResultJSON string
+	LastError  string
+	Attempts   int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	StartedAt  time.Time
+	FinishedAt time.Time
+}
+
 type TimeCountItem struct {
 	Time  time.Time
 	Count int
@@ -2850,6 +2866,23 @@ func (s *Store) initSchema() error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_analysis_runs_session_kind ON analysis_runs(session_id, kind, created_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_analysis_runs_trace_kind ON analysis_runs(trace_id, kind, created_at DESC);`,
+		`CREATE TABLE IF NOT EXISTS analysis_jobs (
+			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+			job_type TEXT NOT NULL,
+			target_type TEXT NOT NULL,
+			target_id TEXT NOT NULL,
+			status TEXT NOT NULL,
+			steps_json TEXT NOT NULL DEFAULT '[]',
+			result_json TEXT NOT NULL DEFAULT '{}',
+			last_error TEXT NOT NULL DEFAULT '',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			started_at datetime NULL,
+			finished_at datetime NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_analysis_jobs_status_updated ON analysis_jobs(status, updated_at ASC);`,
+		`CREATE INDEX IF NOT EXISTS idx_analysis_jobs_target ON analysis_jobs(target_type, target_id, created_at DESC);`,
 		`CREATE TABLE IF NOT EXISTS parse_jobs (
 			id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
 			trace_id TEXT NOT NULL,
@@ -4875,6 +4908,145 @@ func (s *Store) ListAnalysisRuns(sessionID string, traceID string, kind string, 
 	return out, rows.Err()
 }
 
+func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, error) {
+	if strings.TrimSpace(job.JobType) == "" {
+		return AnalysisJobRecord{}, fmt.Errorf("create analysis job: job type is required")
+	}
+	if strings.TrimSpace(job.TargetType) == "" {
+		return AnalysisJobRecord{}, fmt.Errorf("create analysis job: target type is required")
+	}
+	if strings.TrimSpace(job.TargetID) == "" {
+		return AnalysisJobRecord{}, fmt.Errorf("create analysis job: target id is required")
+	}
+	if strings.TrimSpace(job.Status) == "" {
+		job.Status = "queued"
+	}
+	if strings.TrimSpace(job.StepsJSON) == "" {
+		job.StepsJSON = "[]"
+	}
+	if strings.TrimSpace(job.ResultJSON) == "" {
+		job.ResultJSON = "{}"
+	}
+	now := time.Now().UTC()
+	if job.CreatedAt.IsZero() {
+		job.CreatedAt = now
+	}
+	if job.UpdatedAt.IsZero() {
+		job.UpdatedAt = job.CreatedAt
+	}
+	result, err := s.db.Exec(`
+		INSERT INTO analysis_jobs (
+			job_type, target_type, target_id, status, steps_json, result_json, last_error,
+			attempts, created_at, updated_at, started_at, finished_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, job.JobType, job.TargetType, job.TargetID, job.Status, job.StepsJSON, job.ResultJSON, job.LastError,
+		job.Attempts, job.CreatedAt, job.UpdatedAt, nullableTime(job.StartedAt), nullableTime(job.FinishedAt))
+	if err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	job.ID = id
+	return job, nil
+}
+
+func (s *Store) GetAnalysisJob(id int64) (AnalysisJobRecord, error) {
+	row := s.db.QueryRow(`
+		SELECT id, job_type, target_type, target_id, status, steps_json, result_json, last_error,
+			attempts, created_at, updated_at, started_at, finished_at
+		FROM analysis_jobs
+		WHERE id = ?
+	`, id)
+	return scanAnalysisJob(row)
+}
+
+func (s *Store) ListAnalysisJobs(status string, targetType string, targetID string, limit int) ([]AnalysisJobRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT id, job_type, target_type, target_id, status, steps_json, result_json, last_error,
+			attempts, created_at, updated_at, started_at, finished_at
+		FROM analysis_jobs
+		WHERE 1 = 1
+	`
+	var args []any
+	if status = strings.TrimSpace(status); status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	if targetType = strings.TrimSpace(targetType); targetType != "" {
+		query += ` AND target_type = ?`
+		args = append(args, targetType)
+	}
+	if targetID = strings.TrimSpace(targetID); targetID != "" {
+		query += ` AND target_id = ?`
+		args = append(args, targetID)
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAnalysisJobs(rows)
+}
+
+func (s *Store) MarkAnalysisJobRunning(id int64) error {
+	_, err := s.db.Exec(`
+		UPDATE analysis_jobs
+		SET status = 'running', attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
+		WHERE id = ?
+	`, time.Now().UTC(), time.Now().UTC(), id)
+	return err
+}
+
+func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
+	if strings.TrimSpace(resultJSON) == "" {
+		resultJSON = "{}"
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		UPDATE analysis_jobs
+		SET status = 'completed', result_json = ?, last_error = '', finished_at = ?, updated_at = ?
+		WHERE id = ?
+	`, resultJSON, now, now, id)
+	return err
+}
+
+func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		UPDATE analysis_jobs
+		SET status = 'failed', last_error = ?, finished_at = ?, updated_at = ?
+		WHERE id = ?
+	`, textPreview(lastError, 2000), now, now, id)
+	if err != nil {
+		return err
+	}
+	job, err := s.GetAnalysisJob(id)
+	if err != nil {
+		return err
+	}
+	_, err = s.UpsertSystemEvent(systemEventForAnalysisJobFailure(job))
+	return err
+}
+
+func (s *Store) MarkAnalysisJobCanceled(id int64) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		UPDATE analysis_jobs
+		SET status = 'canceled', finished_at = ?, updated_at = ?
+		WHERE id = ? AND status IN ('queued', 'running')
+	`, now, now, id)
+	return err
+}
+
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
 	if page < 1 {
 		page = 1
@@ -5943,6 +6115,13 @@ func timeParseNullableValue(v any) (time.Time, error) {
 	}
 }
 
+func nullableTime(v time.Time) any {
+	if v.IsZero() {
+		return nil
+	}
+	return v
+}
+
 func boolToInt(v bool) int {
 	if v {
 		return 1
@@ -6143,6 +6322,45 @@ func scanParseJobs(rows *sql.Rows) ([]ParseJobRecord, error) {
 			return nil, err
 		}
 		if job.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, job)
+	}
+	return out, rows.Err()
+}
+
+type analysisJobScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAnalysisJob(row analysisJobScanner) (AnalysisJobRecord, error) {
+	var job AnalysisJobRecord
+	var createdAt, updatedAt, startedAt, finishedAt any
+	if err := row.Scan(&job.ID, &job.JobType, &job.TargetType, &job.TargetID, &job.Status, &job.StepsJSON, &job.ResultJSON, &job.LastError,
+		&job.Attempts, &createdAt, &updatedAt, &startedAt, &finishedAt); err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	var err error
+	if job.CreatedAt, err = timeParseValue(createdAt); err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	if job.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	if job.StartedAt, err = timeParseNullableValue(startedAt); err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	if job.FinishedAt, err = timeParseNullableValue(finishedAt); err != nil {
+		return AnalysisJobRecord{}, err
+	}
+	return job, nil
+}
+
+func scanAnalysisJobs(rows *sql.Rows) ([]AnalysisJobRecord, error) {
+	var out []AnalysisJobRecord
+	for rows.Next() {
+		job, err := scanAnalysisJob(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, job)
@@ -6511,6 +6729,42 @@ func systemEventForAnalysisFailure(run AnalysisRunRecord) SystemEvent {
 			"analyzer_version": run.AnalyzerVersion,
 			"input_ref":        run.InputRef,
 			"status":           run.Status,
+		}),
+	}
+}
+
+func systemEventForAnalysisJobFailure(job AnalysisJobRecord) SystemEvent {
+	traceID := ""
+	sessionID := ""
+	switch job.TargetType {
+	case "trace":
+		traceID = job.TargetID
+	case "session":
+		sessionID = job.TargetID
+	}
+	return SystemEvent{
+		Fingerprint: strings.Join([]string{
+			"analysis_job",
+			normalizeEventFingerprintPart(job.JobType),
+			normalizeEventFingerprintPart(job.TargetType),
+			normalizeEventFingerprintPart(job.TargetID),
+			normalizeEventFingerprintPart(job.LastError),
+		}, ":"),
+		Source:    "analyzer",
+		Category:  "analysis_job_failure",
+		Severity:  "error",
+		Title:     "Reanalysis job failed",
+		Message:   job.LastError,
+		TraceID:   traceID,
+		SessionID: sessionID,
+		JobID:     fmt.Sprint(job.ID),
+		DetailsJSON: mustMarshalSystemEventDetails(map[string]any{
+			"job_type":    job.JobType,
+			"target_type": job.TargetType,
+			"target_id":   job.TargetID,
+			"status":      job.Status,
+			"attempts":    job.Attempts,
+			"steps":       job.StepsJSON,
 		}),
 	}
 }

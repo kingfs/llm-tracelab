@@ -2266,6 +2266,86 @@ func TestSaveAndListAnalysisRuns(t *testing.T) {
 	}
 }
 
+func TestAnalysisJobLifecycle(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	job, err := st.CreateAnalysisJob(AnalysisJobRecord{
+		JobType:    "trace_reanalyze",
+		TargetType: "trace",
+		TargetID:   "trace-job",
+		StepsJSON:  `["reparse_observation","scan_findings"]`,
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysisJob() error = %v", err)
+	}
+	if job.ID == 0 || job.Status != "queued" || job.ResultJSON != "{}" {
+		t.Fatalf("job = %+v, want queued with id and empty result", job)
+	}
+
+	if err := st.MarkAnalysisJobRunning(job.ID); err != nil {
+		t.Fatalf("MarkAnalysisJobRunning() error = %v", err)
+	}
+	running, err := st.GetAnalysisJob(job.ID)
+	if err != nil {
+		t.Fatalf("GetAnalysisJob(running) error = %v", err)
+	}
+	if running.Status != "running" || running.Attempts != 1 || running.StartedAt.IsZero() {
+		t.Fatalf("running job = %+v", running)
+	}
+
+	if err := st.MarkAnalysisJobCompleted(job.ID, `{"findings":1}`); err != nil {
+		t.Fatalf("MarkAnalysisJobCompleted() error = %v", err)
+	}
+	completed, err := st.GetAnalysisJob(job.ID)
+	if err != nil {
+		t.Fatalf("GetAnalysisJob(completed) error = %v", err)
+	}
+	if completed.Status != "completed" || completed.ResultJSON != `{"findings":1}` || completed.FinishedAt.IsZero() {
+		t.Fatalf("completed job = %+v", completed)
+	}
+
+	jobs, err := st.ListAnalysisJobs("completed", "trace", "trace-job", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisJobs() error = %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].ID != job.ID {
+		t.Fatalf("jobs = %+v, want completed job %d", jobs, job.ID)
+	}
+}
+
+func TestMarkAnalysisJobFailedCreatesSystemEvent(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	job, err := st.CreateAnalysisJob(AnalysisJobRecord{
+		JobType:    "trace_reanalyze",
+		TargetType: "trace",
+		TargetID:   "trace-failed-job",
+		StepsJSON:  `["reparse_observation"]`,
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysisJob() error = %v", err)
+	}
+	if err := st.MarkAnalysisJobFailed(job.ID, "parser failed"); err != nil {
+		t.Fatalf("MarkAnalysisJobFailed() error = %v", err)
+	}
+
+	events, err := st.ListSystemEvents(SystemEventFilter{Source: "analyzer", Status: "all", PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListSystemEvents() error = %v", err)
+	}
+	if len(events.Items) != 1 || events.Items[0].Category != "analysis_job_failure" || events.Items[0].TraceID != "trace-failed-job" {
+		t.Fatalf("events = %+v", events)
+	}
+}
+
 func mustTraceID(t *testing.T, st *Store, path string) string {
 	t.Helper()
 	var traceID string

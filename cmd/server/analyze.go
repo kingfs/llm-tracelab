@@ -6,9 +6,8 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/kingfs/llm-tracelab/internal/analyzer"
 	"github.com/kingfs/llm-tracelab/internal/config"
-	"github.com/kingfs/llm-tracelab/internal/observeworker"
+	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	"github.com/kingfs/llm-tracelab/internal/sessionanalysis"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -149,28 +148,24 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 	}
 	defer traceStore.Close()
 
-	registry := observe.NewDefaultRegistry()
-	obs, err := observeworker.ReparseTrace(context.Background(), traceStore, registry, opts.traceID)
+	reanalysisResult, err := reanalysis.New(traceStore, reanalysis.Options{}).ReparseTrace(context.Background(), opts.traceID, reanalysis.TraceOptions{})
 	if err != nil {
 		slog.Error("Failed to reparse trace", "trace_id", opts.traceID, "error", err)
 		return 1
 	}
-	if err := traceStore.SaveObservation(obs); err != nil {
-		slog.Error("Failed to save observation", "trace_id", obs.TraceID, "error", err)
-		return 1
+	output := map[string]any{
+		"trace_id":       opts.traceID,
+		"parser":         reanalysisResult.Observation.Parser,
+		"parser_version": reanalysisResult.Observation.ParserVersion,
+		"status":         reanalysisResult.Observation.Status,
+		"request_nodes":  reanalysisResult.RequestNodes,
+		"response_nodes": reanalysisResult.ResponseNodes,
+		"stream_events":  reanalysisResult.StreamEvents,
+		"job_id":         reanalysisResult.Job.ID,
 	}
-	result := map[string]any{
-		"trace_id":       obs.TraceID,
-		"parser":         obs.Parser,
-		"parser_version": obs.ParserVersion,
-		"status":         obs.Status,
-		"request_nodes":  len(obs.Request.Nodes),
-		"response_nodes": len(obs.Response.Nodes),
-		"stream_events":  len(obs.Stream.Events),
-	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reparse", result, func(w io.Writer) error {
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reparse", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "reparsed trace %s with %s@%s (%d request nodes, %d response nodes, %d stream events)\n",
-			obs.TraceID, obs.Parser, obs.ParserVersion, len(obs.Request.Nodes), len(obs.Response.Nodes), len(obs.Stream.Events))
+			opts.traceID, output["parser"], output["parser_version"], output["request_nodes"], output["response_nodes"], output["stream_events"])
 		return err
 	}); err != nil {
 		slog.Error("Write command result failed", "error", err)
@@ -274,26 +269,18 @@ func runAnalyzeScan(opts analyzeScanOptions) int {
 	}
 	defer traceStore.Close()
 
-	obs, err := traceStore.GetObservation(opts.traceID)
-	if err != nil {
-		slog.Error("Failed to load observation", "trace_id", opts.traceID, "error", err)
-		return 1
-	}
-	findings, err := analyzer.NewRunner().Analyze(context.Background(), obs)
+	result, err := reanalysis.New(traceStore, reanalysis.Options{}).RescanTrace(context.Background(), opts.traceID)
 	if err != nil {
 		slog.Error("Failed to scan trace", "trace_id", opts.traceID, "error", err)
 		return 1
 	}
-	if err := traceStore.SaveFindings(opts.traceID, findings); err != nil {
-		slog.Error("Failed to save findings", "trace_id", opts.traceID, "error", err)
-		return 1
-	}
-	result := map[string]any{
+	output := map[string]any{
 		"trace_id": opts.traceID,
-		"findings": len(findings),
+		"findings": result.FindingCount,
+		"job_id":   result.Job.ID,
 	}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze scan", result, func(w io.Writer) error {
-		_, err := fmt.Fprintf(w, "scanned trace %s (%d findings)\n", opts.traceID, len(findings))
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze scan", output, func(w io.Writer) error {
+		_, err := fmt.Fprintf(w, "scanned trace %s (%d findings)\n", opts.traceID, result.FindingCount)
 		return err
 	}); err != nil {
 		slog.Error("Write command result failed", "error", err)
