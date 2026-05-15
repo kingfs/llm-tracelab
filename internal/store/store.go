@@ -378,6 +378,67 @@ type OverviewDashboard struct {
 	Observation OverviewObservationSummary
 }
 
+const (
+	SystemEventStatusUnread   = "unread"
+	SystemEventStatusRead     = "read"
+	SystemEventStatusResolved = "resolved"
+	SystemEventStatusIgnored  = "ignored"
+)
+
+type SystemEvent struct {
+	ID              string
+	Fingerprint     string
+	Source          string
+	Category        string
+	Severity        string
+	Status          string
+	Title           string
+	Message         string
+	DetailsJSON     json.RawMessage
+	TraceID         string
+	SessionID       string
+	JobID           string
+	UpstreamID      string
+	Model           string
+	OccurrenceCount int
+	FirstSeenAt     time.Time
+	LastSeenAt      time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	ReadAt          time.Time
+	ResolvedAt      time.Time
+}
+
+type SystemEventFilter struct {
+	Status   string
+	Severity string
+	Source   string
+	Category string
+	Query    string
+	Since    time.Time
+	Page     int
+	PageSize int
+}
+
+type SystemEventPageResult struct {
+	Items      []SystemEvent
+	Total      int
+	Page       int
+	PageSize   int
+	TotalPages int
+}
+
+type SystemEventSummary struct {
+	Total      int
+	Unread     int
+	Critical   int
+	Error      int
+	Warning    int
+	LastSeenAt time.Time
+	BySource   []CountItem
+	ByCategory []CountItem
+}
+
 type RoutingFailureAnalytics struct {
 	Total    int
 	Reasons  []CountItem
@@ -2793,6 +2854,33 @@ func (s *Store) initSchema() error {
 			created_at datetime NOT NULL,
 			PRIMARY KEY(parser, version)
 		);`,
+		`CREATE TABLE IF NOT EXISTS system_events (
+			id TEXT PRIMARY KEY,
+			fingerprint TEXT NOT NULL,
+			source TEXT NOT NULL,
+			category TEXT NOT NULL,
+			severity TEXT NOT NULL,
+			status TEXT NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT '',
+			details_json TEXT NOT NULL DEFAULT '{}',
+			trace_id TEXT NOT NULL DEFAULT '',
+			session_id TEXT NOT NULL DEFAULT '',
+			job_id TEXT NOT NULL DEFAULT '',
+			upstream_id TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			occurrence_count INTEGER NOT NULL DEFAULT 1,
+			first_seen_at datetime NOT NULL,
+			last_seen_at datetime NOT NULL,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL,
+			read_at datetime NULL,
+			resolved_at datetime NULL
+		);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS system_events_fingerprint_key ON system_events(fingerprint);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen ON system_events(status, last_seen_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category ON system_events(source, category, last_seen_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_trace_id ON system_events(trace_id, last_seen_at DESC) WHERE trace_id <> '';`,
 	}
 
 	for _, stmt := range stmts {
@@ -4297,6 +4385,216 @@ func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
 	return err
 }
 
+func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
+	event.Fingerprint = strings.TrimSpace(event.Fingerprint)
+	if event.Fingerprint == "" {
+		return SystemEvent{}, fmt.Errorf("upsert system event: fingerprint is required")
+	}
+	event.Source = strings.TrimSpace(event.Source)
+	if event.Source == "" {
+		return SystemEvent{}, fmt.Errorf("upsert system event: source is required")
+	}
+	event.Category = strings.TrimSpace(event.Category)
+	if event.Category == "" {
+		return SystemEvent{}, fmt.Errorf("upsert system event: category is required")
+	}
+	event.Severity = strings.TrimSpace(event.Severity)
+	if event.Severity == "" {
+		event.Severity = "error"
+	}
+	now := time.Now().UTC()
+	if event.ID == "" {
+		event.ID = uuid.NewString()
+	}
+	if event.FirstSeenAt.IsZero() {
+		event.FirstSeenAt = now
+	}
+	if event.LastSeenAt.IsZero() {
+		event.LastSeenAt = now
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = now
+	}
+	event.UpdatedAt = now
+	if event.Status == "" {
+		event.Status = SystemEventStatusUnread
+	}
+	if event.OccurrenceCount <= 0 {
+		event.OccurrenceCount = 1
+	}
+	detailsJSON := strings.TrimSpace(string(event.DetailsJSON))
+	if detailsJSON == "" {
+		detailsJSON = "{}"
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO system_events (
+			id, fingerprint, source, category, severity, status, title, message, details_json,
+			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
+			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+		ON CONFLICT(fingerprint) DO UPDATE SET
+			source=excluded.source,
+			category=excluded.category,
+			severity=excluded.severity,
+			status=CASE
+				WHEN system_events.status = 'ignored' THEN system_events.status
+				ELSE 'unread'
+			END,
+			title=excluded.title,
+			message=excluded.message,
+			details_json=excluded.details_json,
+			trace_id=excluded.trace_id,
+			session_id=excluded.session_id,
+			job_id=excluded.job_id,
+			upstream_id=excluded.upstream_id,
+			model=excluded.model,
+			occurrence_count=system_events.occurrence_count + 1,
+			last_seen_at=excluded.last_seen_at,
+			updated_at=excluded.updated_at,
+			read_at=CASE
+				WHEN system_events.status = 'ignored' THEN system_events.read_at
+				ELSE NULL
+			END,
+			resolved_at=CASE
+				WHEN system_events.status = 'ignored' THEN system_events.resolved_at
+				ELSE NULL
+			END
+	`, event.ID, event.Fingerprint, event.Source, event.Category, event.Severity, event.Status,
+		textPreview(event.Title, 300), textPreview(event.Message, 2000), detailsJSON,
+		event.TraceID, event.SessionID, event.JobID, event.UpstreamID, event.Model, event.OccurrenceCount,
+		event.FirstSeenAt, event.LastSeenAt, event.CreatedAt, event.UpdatedAt)
+	if err != nil {
+		return SystemEvent{}, err
+	}
+	return s.GetSystemEventByFingerprint(event.Fingerprint)
+}
+
+func (s *Store) GetSystemEvent(id string) (SystemEvent, error) {
+	return s.getSystemEvent(`id = ?`, strings.TrimSpace(id))
+}
+
+func (s *Store) GetSystemEventByFingerprint(fingerprint string) (SystemEvent, error) {
+	return s.getSystemEvent(`fingerprint = ?`, strings.TrimSpace(fingerprint))
+}
+
+func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResult, error) {
+	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	whereSQL, args := buildSystemEventFilterClause(filter)
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM system_events WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return SystemEventPageResult{}, err
+	}
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
+	rows, err := s.db.Query(`
+		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
+			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
+			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
+		FROM system_events
+		WHERE `+whereSQL+`
+		ORDER BY last_seen_at DESC, id DESC
+		LIMIT ? OFFSET ?
+	`, queryArgs...)
+	if err != nil {
+		return SystemEventPageResult{}, err
+	}
+	defer rows.Close()
+	items, err := scanSystemEvents(rows)
+	if err != nil {
+		return SystemEventPageResult{}, err
+	}
+	return SystemEventPageResult{
+		Items:      items,
+		Total:      total,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalPages: totalPages(total, pageSize),
+	}, nil
+}
+
+func (s *Store) SystemEventSummary(since time.Time) (SystemEventSummary, error) {
+	whereSQL := `1 = 1`
+	var args []any
+	if !since.IsZero() {
+		whereSQL = `last_seen_at >= ?`
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	var summary SystemEventSummary
+	var lastSeen any
+	if err := s.db.QueryRow(`
+		SELECT
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END), 0) AS unread,
+			COALESCE(SUM(CASE WHEN severity = 'critical' AND status = 'unread' THEN 1 ELSE 0 END), 0) AS critical,
+			COALESCE(SUM(CASE WHEN severity = 'error' AND status = 'unread' THEN 1 ELSE 0 END), 0) AS error,
+			COALESCE(SUM(CASE WHEN severity = 'warning' AND status = 'unread' THEN 1 ELSE 0 END), 0) AS warning,
+			MAX(last_seen_at) AS last_seen_at
+		FROM system_events
+		WHERE `+whereSQL, args...).Scan(&summary.Total, &summary.Unread, &summary.Critical, &summary.Error, &summary.Warning, &lastSeen); err != nil {
+		return SystemEventSummary{}, err
+	}
+	var err error
+	summary.LastSeenAt, err = timeParseNullableValue(lastSeen)
+	if err != nil {
+		return SystemEventSummary{}, err
+	}
+	summary.BySource, err = s.systemEventCountBy("source", whereSQL, args, 10)
+	if err != nil {
+		return SystemEventSummary{}, err
+	}
+	summary.ByCategory, err = s.systemEventCountBy("category", whereSQL, args, 10)
+	if err != nil {
+		return SystemEventSummary{}, err
+	}
+	return summary, nil
+}
+
+func (s *Store) MarkSystemEventRead(id string) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		UPDATE system_events
+		SET status = 'read', read_at = ?, updated_at = ?
+		WHERE id = ? AND status != 'ignored'
+	`, now, now, strings.TrimSpace(id))
+	return err
+}
+
+func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
+	whereSQL, args := buildSystemEventFilterClause(filter)
+	now := time.Now().UTC()
+	args = append([]any{now, now}, args...)
+	result, err := s.db.Exec(`
+		UPDATE system_events
+		SET status = 'read', read_at = ?, updated_at = ?
+		WHERE status != 'ignored' AND `+whereSQL, args...)
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	return int(count), err
+}
+
+func (s *Store) ResolveSystemEvent(id string) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		UPDATE system_events
+		SET status = 'resolved', resolved_at = ?, updated_at = ?
+		WHERE id = ?
+	`, now, now, strings.TrimSpace(id))
+	return err
+}
+
+func (s *Store) IgnoreSystemEvent(id string) error {
+	_, err := s.db.Exec(`
+		UPDATE system_events
+		SET status = 'ignored', updated_at = ?
+		WHERE id = ?
+	`, time.Now().UTC(), strings.TrimSpace(id))
+	return err
+}
+
 func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 	if strings.TrimSpace(traceID) == "" {
 		return fmt.Errorf("save findings: trace id is required")
@@ -5502,6 +5800,16 @@ func timeParseValue(v any) (time.Time, error) {
 	switch value := v.(type) {
 	case time.Time:
 		return value, nil
+	case sql.NullTime:
+		if !value.Valid {
+			return time.Time{}, nil
+		}
+		return value.Time, nil
+	case sql.NullString:
+		if !value.Valid || strings.TrimSpace(value.String) == "" {
+			return time.Time{}, nil
+		}
+		return timeParse(value.String)
 	case string:
 		return timeParse(value)
 	case []byte:
@@ -5510,6 +5818,35 @@ func timeParseValue(v any) (time.Time, error) {
 		return time.Time{}, nil
 	default:
 		return timeParse(fmt.Sprint(value))
+	}
+}
+
+func timeParseNullableValue(v any) (time.Time, error) {
+	switch value := v.(type) {
+	case nil:
+		return time.Time{}, nil
+	case sql.NullTime:
+		if !value.Valid {
+			return time.Time{}, nil
+		}
+		return value.Time, nil
+	case sql.NullString:
+		if !value.Valid || strings.TrimSpace(value.String) == "" {
+			return time.Time{}, nil
+		}
+		return timeParse(value.String)
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return time.Time{}, nil
+		}
+		return timeParse(value)
+	case []byte:
+		if strings.TrimSpace(string(value)) == "" {
+			return time.Time{}, nil
+		}
+		return timeParse(string(value))
+	default:
+		return timeParseValue(v)
 	}
 }
 
@@ -5720,6 +6057,74 @@ func scanParseJobs(rows *sql.Rows) ([]ParseJobRecord, error) {
 	return out, rows.Err()
 }
 
+func scanSystemEvents(rows *sql.Rows) ([]SystemEvent, error) {
+	var out []SystemEvent
+	for rows.Next() {
+		event, err := scanSystemEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}
+
+type systemEventScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanSystemEvent(row systemEventScanner) (SystemEvent, error) {
+	var event SystemEvent
+	var detailsJSON string
+	var firstSeenAt, lastSeenAt, createdAt, updatedAt, readAt, resolvedAt any
+	if err := row.Scan(
+		&event.ID,
+		&event.Fingerprint,
+		&event.Source,
+		&event.Category,
+		&event.Severity,
+		&event.Status,
+		&event.Title,
+		&event.Message,
+		&detailsJSON,
+		&event.TraceID,
+		&event.SessionID,
+		&event.JobID,
+		&event.UpstreamID,
+		&event.Model,
+		&event.OccurrenceCount,
+		&firstSeenAt,
+		&lastSeenAt,
+		&createdAt,
+		&updatedAt,
+		&readAt,
+		&resolvedAt,
+	); err != nil {
+		return SystemEvent{}, err
+	}
+	event.DetailsJSON = json.RawMessage(detailsJSON)
+	var err error
+	if event.FirstSeenAt, err = timeParseValue(firstSeenAt); err != nil {
+		return SystemEvent{}, err
+	}
+	if event.LastSeenAt, err = timeParseValue(lastSeenAt); err != nil {
+		return SystemEvent{}, err
+	}
+	if event.CreatedAt, err = timeParseValue(createdAt); err != nil {
+		return SystemEvent{}, err
+	}
+	if event.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+		return SystemEvent{}, err
+	}
+	if event.ReadAt, err = timeParseNullableValue(readAt); err != nil {
+		return SystemEvent{}, err
+	}
+	if event.ResolvedAt, err = timeParseNullableValue(resolvedAt); err != nil {
+		return SystemEvent{}, err
+	}
+	return event, nil
+}
+
 func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
 	return map[string]any{
 		"request_nodes":  len(obs.Request.Nodes),
@@ -5840,11 +6245,114 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 	return strings.Join(clauses, " AND "), args
 }
 
+func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
+	var clauses []string
+	var args []any
+	if status := strings.ToLower(strings.TrimSpace(filter.Status)); status != "" && status != "all" {
+		clauses = append(clauses, `status = ?`)
+		args = append(args, status)
+	}
+	if severity := strings.ToLower(strings.TrimSpace(filter.Severity)); severity != "" {
+		clauses = append(clauses, `severity = ?`)
+		args = append(args, severity)
+	}
+	if source := strings.ToLower(strings.TrimSpace(filter.Source)); source != "" {
+		clauses = append(clauses, `source = ?`)
+		args = append(args, source)
+	}
+	if category := strings.ToLower(strings.TrimSpace(filter.Category)); category != "" {
+		clauses = append(clauses, `category = ?`)
+		args = append(args, category)
+	}
+	if !filter.Since.IsZero() {
+		clauses = append(clauses, `last_seen_at >= ?`)
+		args = append(args, filter.Since.UTC().Format(timeLayout))
+	}
+	if query := strings.TrimSpace(filter.Query); query != "" {
+		pattern := "%" + escapeLike(query) + "%"
+		clauses = append(clauses, `(
+			LOWER(fingerprint) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(title) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(message) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(trace_id) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(session_id) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(upstream_id) LIKE LOWER(?) ESCAPE '\' OR
+			LOWER(model) LIKE LOWER(?) ESCAPE '\'
+		)`)
+		for range 7 {
+			args = append(args, pattern)
+		}
+	}
+	if len(clauses) == 0 {
+		return "1 = 1", nil
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func (s *Store) getSystemEvent(whereSQL string, arg any) (SystemEvent, error) {
+	var event SystemEvent
+	row := s.db.QueryRow(`
+		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
+			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
+			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
+		FROM system_events
+		WHERE `+whereSQL+`
+	`, arg)
+	event, err := scanSystemEvent(row)
+	if err != nil {
+		return SystemEvent{}, err
+	}
+	return event, nil
+}
+
+func (s *Store) systemEventCountBy(column string, whereSQL string, args []any, limit int) ([]CountItem, error) {
+	switch column {
+	case "source", "category", "severity", "status":
+	default:
+		return nil, fmt.Errorf("unsupported system event count column %q", column)
+	}
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, limit)
+	rows, err := s.db.Query(`
+		SELECT `+column+`, COUNT(*) AS count
+		FROM system_events
+		WHERE `+whereSQL+` AND `+column+` != ''
+		GROUP BY `+column+`
+		ORDER BY count DESC, `+column+` ASC
+		LIMIT ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanCountItems(rows)
+}
+
 func escapeLike(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `%`, `\%`)
 	value = strings.ReplaceAll(value, `_`, `\_`)
 	return value
+}
+
+func normalizePage(page int, pageSize int) (int, int) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	return page, pageSize
+}
+
+func totalPages(total int, pageSize int) int {
+	if total <= 0 || pageSize <= 0 {
+		return 0
+	}
+	return int(math.Ceil(float64(total) / float64(pageSize)))
 }
 
 func (s *Store) backfillGrouping() error {

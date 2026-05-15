@@ -578,6 +578,18 @@ Validation:
 go test ./internal/store
 ```
 
+Status:
+
+- Completed in Phase 2 implementation.
+- Added `system_events` schema, store-level event upsert/list/summary/status APIs, fingerprint deduplication, and status transition tests.
+- Verified with `go test ./internal/store`.
+
+Review:
+
+- Scope stayed limited to storage and store APIs.
+- No event producers, Monitor API, UI, MCP tools, or server push were added in this phase.
+- Next phase should only connect existing failure sources to `UpsertSystemEvent` and add focused producer tests.
+
 ## Phase 3: Event Producers
 
 Scope:
@@ -700,4 +712,3 @@ Exit criteria:
 
 - Event center is documented as part of the stable monitor capability baseline.
 - Any MCP mutation tools are explicitly gated and documented.
-

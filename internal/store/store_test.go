@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1813,6 +1814,152 @@ func TestSaveObservationDeduplicatesSemanticNodes(t *testing.T) {
 	}
 	if nodes[0].Node.ID != "node-tool-call" {
 		t.Fatalf("node id = %q, want node-tool-call", nodes[0].Node.ID)
+	}
+}
+
+func TestSystemEventUpsertDeduplicatesAndReopens(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	first, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "parser:save_observation:semantic_nodes_unique_constraint",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Observation parse job failed",
+		Message:     "constraint failed",
+		TraceID:     "trace-system-event",
+		JobID:       "36",
+		DetailsJSON: json.RawMessage(`{"parser":"openai"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent() error = %v", err)
+	}
+	if first.ID == "" || first.Status != SystemEventStatusUnread || first.OccurrenceCount != 1 {
+		t.Fatalf("first event = %+v", first)
+	}
+	if err := st.MarkSystemEventRead(first.ID); err != nil {
+		t.Fatalf("MarkSystemEventRead() error = %v", err)
+	}
+	read, err := st.GetSystemEvent(first.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(read) error = %v", err)
+	}
+	if read.Status != SystemEventStatusRead || read.ReadAt.IsZero() {
+		t.Fatalf("read event = %+v", read)
+	}
+
+	second, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: first.Fingerprint,
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "critical",
+		Title:       "Observation parse job failed again",
+		Message:     "constraint failed again",
+		TraceID:     "trace-system-event-2",
+		JobID:       "37",
+	})
+	if err != nil {
+		t.Fatalf("second UpsertSystemEvent() error = %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("second id = %q, want %q", second.ID, first.ID)
+	}
+	if second.Status != SystemEventStatusUnread || second.OccurrenceCount != 2 || !second.ReadAt.IsZero() {
+		t.Fatalf("second event = %+v", second)
+	}
+	if second.Severity != "critical" || second.TraceID != "trace-system-event-2" {
+		t.Fatalf("updated event = %+v", second)
+	}
+}
+
+func TestSystemEventsListSummaryAndStatusActions(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	parserEvent, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "parser:trace-a:bad-json",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Parse failed",
+		Message:     "bad json",
+		TraceID:     "trace-a",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(parser) error = %v", err)
+	}
+	routerEvent, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "router:gpt-5.5:all_targets_open",
+		Source:      "router",
+		Category:    "routing_failure",
+		Severity:    "warning",
+		Title:       "Routing failed",
+		Message:     "all targets open",
+		Model:       "gpt-5.5",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(router) error = %v", err)
+	}
+	if err := st.ResolveSystemEvent(routerEvent.ID); err != nil {
+		t.Fatalf("ResolveSystemEvent() error = %v", err)
+	}
+
+	page, err := st.ListSystemEvents(SystemEventFilter{Status: SystemEventStatusUnread, Query: "trace-a", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListSystemEvents() error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != parserEvent.ID {
+		t.Fatalf("page = %+v", page)
+	}
+	summary, err := st.SystemEventSummary(time.Time{})
+	if err != nil {
+		t.Fatalf("SystemEventSummary() error = %v", err)
+	}
+	if summary.Total != 2 || summary.Unread != 1 || summary.Error != 1 || summary.Warning != 0 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if len(summary.BySource) != 2 {
+		t.Fatalf("summary by source = %+v, want two sources", summary.BySource)
+	}
+
+	count, err := st.MarkAllSystemEventsRead(SystemEventFilter{Status: SystemEventStatusUnread})
+	if err != nil {
+		t.Fatalf("MarkAllSystemEventsRead() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("marked count = %d, want 1", count)
+	}
+	afterRead, err := st.GetSystemEvent(parserEvent.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(after read) error = %v", err)
+	}
+	if afterRead.Status != SystemEventStatusRead || afterRead.ReadAt.IsZero() {
+		t.Fatalf("after read = %+v", afterRead)
+	}
+
+	if err := st.IgnoreSystemEvent(afterRead.ID); err != nil {
+		t.Fatalf("IgnoreSystemEvent() error = %v", err)
+	}
+	ignored, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: afterRead.Fingerprint,
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "critical",
+		Title:       "Ignored parse failure repeated",
+		Message:     "still ignored",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(ignored) error = %v", err)
+	}
+	if ignored.Status != SystemEventStatusIgnored || ignored.OccurrenceCount != 2 {
+		t.Fatalf("ignored repeated event = %+v", ignored)
 	}
 }
 
