@@ -30,7 +30,7 @@ func (p openAIParser) Version() string {
 
 func (p openAIParser) CanParse(input ParseInput) bool {
 	operation := input.Header.Meta.Operation
-	if operation != llm.OperationChatCompletions && operation != llm.OperationResponses {
+	if operation != llm.OperationChatCompletions && operation != llm.OperationResponses && operation != llm.OperationModels {
 		return false
 	}
 	provider := input.Header.Meta.Provider
@@ -75,9 +75,65 @@ func (p openAIParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 		return parseOpenAIChatObservation(input, obs)
 	case llm.OperationResponses:
 		return parseOpenAIResponsesObservation(input, obs)
+	case llm.OperationModels:
+		return parseOpenAIModelsObservation(input, obs)
 	default:
 		return TraceObservation{}, fmt.Errorf("observe: unsupported openai operation %q", input.Header.Meta.Operation)
 	}
+}
+
+func parseOpenAIModelsObservation(input ParseInput, obs TraceObservation) (TraceObservation, error) {
+	if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
+		obs.Response.Errors = append(obs.Response.Errors, providerErr)
+		obs.Response.Nodes = append(obs.Response.Nodes, providerErr)
+		return obs, nil
+	}
+
+	resp, err := decodeJSONObject(input.ResponseBody)
+	if err != nil {
+		return obs, fmt.Errorf("parse openai models response: %w", err)
+	}
+
+	nodes := parseOpenAIModelListNodes(resp["data"])
+	obs.Response.Outputs = append(obs.Response.Outputs, nodes...)
+	obs.Response.Nodes = append(obs.Response.Nodes, nodes...)
+	if obs.Model == "" {
+		obs.Model = "list_models"
+	}
+	return obs, nil
+}
+
+func parseOpenAIModelListNodes(raw json.RawMessage) []SemanticNode {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return []SemanticNode{unknownNode("response", "$.data", "model_list", 0, raw)}
+	}
+
+	nodes := make([]SemanticNode, 0, len(items))
+	for i, item := range items {
+		itemRaw, _ := json.Marshal(item)
+		id := stringField(item, "id")
+		node := SemanticNode{
+			ID:             StableNodeID("response", fmt.Sprintf("$.data[%d]", i), "model", i),
+			ProviderType:   "model",
+			NormalizedType: NodeUnknown,
+			Path:           fmt.Sprintf("$.data[%d]", i),
+			Index:          i,
+			Text:           id,
+			Raw:            cloneRaw(itemRaw),
+			Metadata: map[string]any{
+				"id":       id,
+				"object":   stringField(item, "object"),
+				"owned_by": stringField(item, "owned_by"),
+			},
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes
 }
 
 func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceObservation, error) {

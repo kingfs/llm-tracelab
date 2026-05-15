@@ -70,6 +70,48 @@ func TestOpenAIParserParsesChatCompletion(t *testing.T) {
 	}
 }
 
+func TestOpenAIParserParsesModelList(t *testing.T) {
+	registry := NewDefaultRegistry()
+	input := ParseInput{
+		TraceID: "trace-models",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationModels,
+				Endpoint:  "/v1/models",
+				Model:     "list_models",
+			},
+		},
+		ResponseBody: []byte(`{
+			"object":"list",
+			"data":[
+				{"id":"gpt-5","object":"model","owned_by":"llm-tracelab"},
+				{"id":"qwen-plus","object":"model","owned_by":"llm-tracelab"}
+			]
+		}`),
+	}
+
+	obs, err := registry.Parse(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Status != ParseStatusParsed {
+		t.Fatalf("Status = %q, want parsed", obs.Status)
+	}
+	if obs.Parser != "openai" || obs.Operation != llm.OperationModels {
+		t.Fatalf("parser/operation = %s/%s", obs.Parser, obs.Operation)
+	}
+	if obs.Model != "list_models" {
+		t.Fatalf("Model = %q", obs.Model)
+	}
+	if len(obs.Response.Outputs) != 2 || len(obs.Response.Nodes) != 2 {
+		t.Fatalf("model nodes = outputs %d nodes %d", len(obs.Response.Outputs), len(obs.Response.Nodes))
+	}
+	if got := obs.Response.Outputs[0]; got.ProviderType != "model" || got.Text != "gpt-5" {
+		t.Fatalf("first model node = %+v", got)
+	}
+}
+
 func TestOpenAIParserParsesResponsesOutputAndUnknown(t *testing.T) {
 	parser := NewOpenAIParser()
 	input := ParseInput{
