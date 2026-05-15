@@ -1767,6 +1767,55 @@ func TestSaveObservationPersistsSummaryAndSemanticNodes(t *testing.T) {
 	}
 }
 
+func TestSaveObservationDeduplicatesSemanticNodes(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	toolCall := observe.SemanticNode{
+		ID:             "node-tool-call",
+		ProviderType:   "tool_call",
+		NormalizedType: observe.NodeToolCall,
+		Path:           "$.stream.tool_calls[0]",
+		Index:          0,
+		Text:           "lookup",
+	}
+	obs := observe.TraceObservation{
+		TraceID:       "trace-observe-duplicate",
+		Provider:      "openai_compatible",
+		Operation:     "chat.completions",
+		Model:         "gpt-5.1",
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+		Response: observe.ObservationResponse{
+			Nodes: []observe.SemanticNode{toolCall},
+		},
+		Stream: observe.ObservationStream{
+			AccumulatedToolCalls: []observe.SemanticNode{toolCall},
+		},
+	}
+	if err := st.SaveObservation(obs); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+	if err := st.SaveObservation(obs); err != nil {
+		t.Fatalf("second SaveObservation() error = %v", err)
+	}
+
+	nodes, err := st.ListSemanticNodes("trace-observe-duplicate")
+	if err != nil {
+		t.Fatalf("ListSemanticNodes() error = %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(nodes))
+	}
+	if nodes[0].Node.ID != "node-tool-call" {
+		t.Fatalf("node id = %q, want node-tool-call", nodes[0].Node.ID)
+	}
+}
+
 func TestSaveFindingsRebuildsTraceFindings(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {

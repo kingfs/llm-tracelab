@@ -5736,7 +5736,27 @@ func observationFlatNodes(obs observe.TraceObservation) []observe.FlatSemanticNo
 	roots = append(roots, obs.Request.Nodes...)
 	roots = append(roots, obs.Response.Nodes...)
 	roots = append(roots, obs.Stream.AccumulatedToolCalls...)
-	return observe.FlattenNodes(roots)
+	return dedupeFlatSemanticNodes(observe.FlattenNodes(roots))
+}
+
+func dedupeFlatSemanticNodes(nodes []observe.FlatSemanticNode) []observe.FlatSemanticNode {
+	if len(nodes) < 2 {
+		return nodes
+	}
+	out := make([]observe.FlatSemanticNode, 0, len(nodes))
+	seen := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		if node.Node.ID == "" {
+			out = append(out, node)
+			continue
+		}
+		if _, ok := seen[node.Node.ID]; ok {
+			continue
+		}
+		seen[node.Node.ID] = struct{}{}
+		out = append(out, node)
+	}
+	return out
 }
 
 func textPreview(text string, limit int) string {
