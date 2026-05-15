@@ -583,17 +583,21 @@ feat: run batch reanalysis jobs
 
 ### P6. Monitor UI
 
+Status: completed in `feat: add reanalysis controls to monitor`.
+
 Scope:
 
 - Add trace action buttons and confirmation flows.
 - Add session reanalysis modal.
 - Add job status list/detail.
 - Refresh affected tabs after completion.
+- Add batch missing-usage repair entry from Analysis.
 
 Acceptance:
 
 - Users can reparse, rescan, repair usage, and reanalyze from Monitor.
 - Failed jobs link to Events.
+- Analysis view lists recent reanalysis jobs and batch queue actions.
 
 Commit:
 

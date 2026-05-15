@@ -67,8 +67,23 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/traces/trace-routed/raw") {
       return route.fulfill({ json: { data: { request_protocol: "{}", response_protocol: "{}" } } });
     }
+    if (path === "/api/traces/trace-routed/reanalyze" && method === "POST") {
+      return route.fulfill({ json: { job: analysisJobPayload({ id: 301, job_type: "trace_reanalyze", target_type: "trace", target_id: "trace-routed", status: "completed" }) } });
+    }
     if (path === "/api/traces/trace-routed/observation" || path === "/api/traces/trace-routed/findings" || path === "/api/traces/trace-routed/performance") {
       return route.fulfill({ json: {} });
+    }
+    if (path === "/api/analysis") {
+      return route.fulfill({ json: analysisPayload() });
+    }
+    if (path === "/api/analysis/jobs") {
+      return route.fulfill({ json: { total: 1, items: [analysisJobPayload()] } });
+    }
+    if (path === "/api/analysis/batch/reanalyze" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.missing_usage).toBe(true);
+      expect(body.repair_usage).toBe(true);
+      return route.fulfill({ json: { job: analysisJobPayload({ id: 202, job_type: "batch_reanalyze", target_type: "batch", target_id: "trace_filter", status: "queued" }) } });
     }
     return route.fulfill({ status: 404, json: { error: `unhandled ${method} ${path}` } });
   });
@@ -157,6 +172,18 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByText("Routing decision")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/channels/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
+  await page.getByRole("button", { name: "Reanalyze" }).click();
+  await expect(page.getByText(/Reanalysis job #301 completed/)).toBeVisible();
+});
+
+test("analysis page renders runs and reanalysis jobs", async ({ page }) => {
+  await page.goto("/analysis");
+  await expect(page.getByRole("heading", { name: "Analysis", exact: true })).toBeVisible();
+  await expect(page.getByText("Job queue")).toBeVisible();
+  await expect(page.getByText("trace_reanalyze")).toBeVisible();
+  await expect(page.getByText("session_summary", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Repair missing usage" }).click();
+  await expect(page.getByText(/Batch reanalysis job #202 queued/)).toBeVisible();
 });
 
 function modelListPayload() {
@@ -368,6 +395,40 @@ function traceListPayload() {
       cached_tokens: 0,
       is_stream: false,
     }],
+  };
+}
+
+function analysisPayload() {
+  return {
+    total: 1,
+    items: [{
+      id: 1,
+      session_id: "sess-demo",
+      kind: "session_summary",
+      analyzer: "session_summary",
+      analyzer_version: "0.1.0",
+      input_ref: "session:sess-demo",
+      output: { session_id: "sess-demo" },
+      status: "completed",
+      created_at: new Date().toISOString(),
+    }],
+  };
+}
+
+function analysisJobPayload(overrides = {}) {
+  return {
+    id: 101,
+    job_type: "trace_reanalyze",
+    target_type: "trace",
+    target_id: "trace-routed",
+    status: "completed",
+    steps: ["reparse_observation", "scan_findings"],
+    request: {},
+    result: { findings: { count: 0 } },
+    attempts: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    ...overrides,
   };
 }
 

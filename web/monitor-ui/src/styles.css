@@ -1697,6 +1697,15 @@ a:focus-visible {
   flex-wrap: wrap;
 }
 
+.trace-reanalysis-actions {
+  justify-content: flex-end;
+  max-width: 560px;
+}
+
+.trace-reanalysis-actions .ghost-button {
+  padding: 0.58rem 0.72rem;
+}
+
 .session-filter-count {
   color: var(--muted);
   font-size: 0.8rem;

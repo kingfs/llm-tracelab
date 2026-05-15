@@ -4,7 +4,7 @@ import { CollapsibleCard, CodeBlock, MessageContent } from "../components/common
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, downloadBlob } from "../lib/api";
+import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import {
   buildRoutingDecisionSummary,
   buildChannelLink,
@@ -41,6 +41,8 @@ export function TraceDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState(() => normalizeTraceTab(searchParams.get("tab")));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
+  const [jobNotice, setJobNotice] = useState(null);
+  const [jobBusy, setJobBusy] = useState("");
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
   const raw = useJSON(apiPaths.traceRaw(traceID), [traceID, tab === "raw" ? "raw" : "summary"]);
@@ -93,6 +95,22 @@ export function TraceDetailPage() {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
+  };
+
+  const runTraceAction = async (action, path, payload = {}) => {
+    setJobBusy(action);
+    setJobNotice(null);
+    try {
+      const response = await postJSON(path, payload);
+      setJobNotice({
+        tone: response.job?.status === "failed" ? "danger" : "green",
+        text: `${labelTraceAction(action)} job #${response.job?.id || "-"} ${response.job?.status || "queued"}`,
+      });
+    } catch (error) {
+      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+    } finally {
+      setJobBusy("");
+    }
   };
 
   useEffect(() => {
@@ -154,6 +172,20 @@ export function TraceDetailPage() {
               <DownloadIcon />
             </button>
           </div>
+          <div className="detail-toolbar-actions trace-reanalysis-actions">
+            <button className="ghost-button" type="button" disabled={jobBusy === "repair"} onClick={() => runTraceAction("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
+              {jobBusy === "repair" ? "Repairing" : "Repair usage"}
+            </button>
+            <button className="ghost-button" type="button" disabled={jobBusy === "reparse"} onClick={() => runTraceAction("reparse", apiPaths.traceReparse(traceID), { mode: "sync" })}>
+              {jobBusy === "reparse" ? "Reparsing" : "Reparse"}
+            </button>
+            <button className="ghost-button" type="button" disabled={jobBusy === "scan"} onClick={() => runTraceAction("scan", apiPaths.traceScan(traceID), { mode: "sync" })}>
+              {jobBusy === "scan" ? "Scanning" : "Rescan"}
+            </button>
+            <button className="ghost-button active" type="button" disabled={jobBusy === "reanalyze"} onClick={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
+              {jobBusy === "reanalyze" ? "Running" : "Reanalyze"}
+            </button>
+          </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label="in" value={usage?.prompt_tokens || 0} icon="input" />
             <TokenBadge label="out" value={usage?.completion_tokens || 0} icon="output" />
@@ -162,6 +194,8 @@ export function TraceDetailPage() {
           </div>
         </div>
       </header>
+
+      {jobNotice ? <EmptyState title="Reanalysis job" detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
       {failureSummary ? (
         <section
@@ -1020,4 +1054,19 @@ function hasConversation(detail) {
       detail?.ai_blocks?.length ||
       detail?.tool_calls?.length
   );
+}
+
+function labelTraceAction(action) {
+  switch (action) {
+    case "repair":
+      return "Usage repair";
+    case "reparse":
+      return "Reparse";
+    case "scan":
+      return "Rescan";
+    case "reanalyze":
+      return "Reanalysis";
+    default:
+      return "Analysis";
+  }
 }

@@ -6,7 +6,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths } from "../lib/api";
+import { apiPaths, postJSON } from "../lib/api";
 import {
   buildFailureContexts,
   buildFailureDelta,
@@ -26,6 +26,8 @@ export function SessionDetailPage() {
   const { sessionID = "" } = useParams();
   const [traceFilter, setTraceFilter] = useState("all");
   const [tab, setTab] = useState("timeline");
+  const [jobNotice, setJobNotice] = useState(null);
+  const [jobBusy, setJobBusy] = useState(false);
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
@@ -35,6 +37,20 @@ export function SessionDetailPage() {
   const analysis = detail.data?.analysis ?? [];
   const visibleTraces = traceFilter === "failed" ? traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300) : traces;
   const failureContexts = buildFailureContexts(timeline);
+
+  const reanalyzeSession = async () => {
+    setJobBusy(true);
+    setJobNotice(null);
+    try {
+      const response = await postJSON(apiPaths.sessionReanalyze(sessionID), { mode: "async", reparse: true, scan: true });
+      setJobNotice({ tone: "green", text: `Session reanalysis job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      setTab("analysis");
+    } catch (error) {
+      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+    } finally {
+      setJobBusy(false);
+    }
+  };
 
   return (
     <div className="shell shell-detail">
@@ -62,6 +78,9 @@ export function SessionDetailPage() {
             <Link className="icon-button" to="/sessions" title="Back to sessions" aria-label="Back to sessions">
               <HomeIcon />
             </Link>
+            <button className="ghost-button active" type="button" disabled={jobBusy} onClick={reanalyzeSession}>
+              {jobBusy ? "Queueing" : "Reanalyze"}
+            </button>
           </div>
           <div className="detail-toolbar-tokens">
             <TokenBadge label="ttft" value={summary?.avg_ttft ?? 0} icon="total" />
@@ -70,6 +89,8 @@ export function SessionDetailPage() {
           </div>
         </div>
       </header>
+
+      {jobNotice ? <EmptyState title="Reanalysis job" detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
       {detail.error ? <EmptyState title="Unable to load session detail" detail={detail.error} tone="danger" /> : null}
       {detail.loading && !detail.data ? <EmptyState title="Loading session detail" detail="Resolving timeline, breakdown, and grouped traces for this session." /> : null}
