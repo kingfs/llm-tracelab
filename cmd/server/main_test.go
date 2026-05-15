@@ -164,7 +164,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "auth", "analyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "auth", "analyze", "analyze repair-usage", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -665,6 +665,30 @@ debug:
 	}
 	if len(findings) != 1 || findings[0].EvidencePath == "" || findings[0].NodeID == "" {
 		t.Fatalf("findings = %+v", findings)
+	}
+
+	out.Reset()
+	code = runAnalyzeRepairUsage(analyzeRepairUsageOptions{
+		configPath: configPath,
+		traceID:    traceID,
+		format:     "json",
+		stdout:     &out,
+	})
+	if code != 0 {
+		t.Fatalf("runAnalyzeRepairUsage() = %d, want 0", code)
+	}
+	var repairEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			TraceID     string `json:"trace_id"`
+			TotalTokens int    `json:"total_tokens"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &repairEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(repair) error = %v, output=%q", err, out.String())
+	}
+	if !repairEnvelope.OK || repairEnvelope.Result.TraceID != traceID || repairEnvelope.Result.TotalTokens != 2 {
+		t.Fatalf("repair envelope = %+v, want total tokens 2", repairEnvelope)
 	}
 
 	out.Reset()

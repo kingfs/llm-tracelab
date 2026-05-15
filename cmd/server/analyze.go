@@ -28,6 +28,14 @@ type analyzeScanOptions struct {
 	stdout     io.Writer
 }
 
+type analyzeRepairUsageOptions struct {
+	configPath      string
+	traceID         string
+	rewriteCassette bool
+	format          string
+	stdout          io.Writer
+}
+
 type analyzeSessionOptions struct {
 	configPath string
 	sessionID  string
@@ -47,6 +55,7 @@ func newAnalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	cmd.AddCommand(newAnalyzeReparseCommand(runtime))
 	cmd.AddCommand(newAnalyzeScanCommand(runtime))
+	cmd.AddCommand(newAnalyzeRepairUsageCommand(runtime))
 	cmd.AddCommand(newAnalyzeSessionCommand(runtime))
 	return cmd
 }
@@ -100,6 +109,35 @@ func newAnalyzeScanCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&traceID, "trace-id", "", "Trace ID to scan")
+	return cmd
+}
+
+func newAnalyzeRepairUsageCommand(runtime *cliRuntime) *cobra.Command {
+	var traceID string
+	var rewriteCassette bool
+	cmd := &cobra.Command{
+		Use:           "repair-usage",
+		Short:         "Re-extract usage from a recorded trace and repair derived token metrics",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if traceID == "" {
+				return cliUsageError("--trace-id is required", "trace-id")
+			}
+			return runCode(func() int {
+				return runAnalyzeRepairUsage(analyzeRepairUsageOptions{
+					configPath:      runtime.configPath(),
+					traceID:         traceID,
+					rewriteCassette: rewriteCassette,
+					format:          runtime.outputFormat(),
+					stdout:          cmd.OutOrStdout(),
+				})
+			})
+		},
+	}
+	cmd.Flags().StringVar(&traceID, "trace-id", "", "Trace ID to repair")
+	cmd.Flags().BoolVar(&rewriteCassette, "rewrite-cassette", false, "Rewrite V3 cassette prelude with repaired usage")
 	return cmd
 }
 
@@ -166,6 +204,53 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze reparse", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "reparsed trace %s with %s@%s (%d request nodes, %d response nodes, %d stream events)\n",
 			opts.traceID, output["parser"], output["parser_version"], output["request_nodes"], output["response_nodes"], output["stream_events"])
+		return err
+	}); err != nil {
+		slog.Error("Write command result failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func runAnalyzeRepairUsage(opts analyzeRepairUsageOptions) int {
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
+		return 1
+	}
+	traceStore, err := store.NewWithDatabase(
+		cfg.TraceOutputDir(),
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
+	if err != nil {
+		slog.Error("Failed to initialize trace store", "error", err)
+		return 1
+	}
+	defer traceStore.Close()
+
+	result, err := reanalysis.New(traceStore, reanalysis.Options{}).RepairTraceUsage(context.Background(), opts.traceID, reanalysis.RepairUsageOptions{
+		RewriteCassette: opts.rewriteCassette,
+	})
+	if err != nil {
+		slog.Error("Failed to repair usage", "trace_id", opts.traceID, "error", err)
+		return 1
+	}
+	output := map[string]any{
+		"trace_id":          opts.traceID,
+		"changed":           result.Usage.Changed,
+		"index_updated":     result.Usage.IndexUpdated,
+		"cassette_rewrote":  result.Usage.CassetteRewrote,
+		"prompt_tokens":     result.Usage.After.PromptTokens,
+		"completion_tokens": result.Usage.After.CompletionTokens,
+		"total_tokens":      result.Usage.After.TotalTokens,
+		"job_id":            result.Job.ID,
+	}
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze repair-usage", output, func(w io.Writer) error {
+		_, err := fmt.Fprintf(w, "repaired usage for trace %s (total tokens %d, cassette rewrite %t)\n",
+			opts.traceID, result.Usage.After.TotalTokens, result.Usage.CassetteRewrote)
 		return err
 	}); err != nil {
 		slog.Error("Write command result failed", "error", err)

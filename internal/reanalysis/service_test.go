@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,83 @@ func TestServiceRescanTraceRequiresObservation(t *testing.T) {
 	}
 	if len(jobs) != 1 || jobs[0].JobType != JobTypeTraceRescan {
 		t.Fatalf("jobs = %+v, want failed rescan job", jobs)
+	}
+}
+
+func TestServiceRepairTraceUsageUpdatesIndex(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedResponseTrace(t, st, dir)
+	result, err := New(st, Options{}).RepairTraceUsage(context.Background(), traceID, RepairUsageOptions{})
+	if err != nil {
+		t.Fatalf("RepairTraceUsage() error = %v", err)
+	}
+	if result.Usage == nil || !result.Usage.Changed || !result.Usage.IndexUpdated || result.Usage.CassetteRewrote {
+		t.Fatalf("usage result = %+v", result.Usage)
+	}
+	if result.Usage.After.PromptTokens != 1 || result.Usage.After.CompletionTokens != 1 || result.Usage.After.TotalTokens != 2 {
+		t.Fatalf("usage after = %+v", result.Usage.After)
+	}
+	entry, err := st.GetByID(traceID)
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if entry.Header.Usage.TotalTokens != 2 {
+		t.Fatalf("indexed usage = %+v, want total 2", entry.Header.Usage)
+	}
+}
+
+func TestServiceRepairTraceUsageCanRewriteV3Prelude(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.New(dir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	traceID := writeIndexedResponseTrace(t, st, dir)
+	entry, err := st.GetByID(traceID)
+	if err != nil {
+		t.Fatalf("GetByID(before) error = %v", err)
+	}
+	beforeContent, err := os.ReadFile(entry.LogPath)
+	if err != nil {
+		t.Fatalf("ReadFile(before) error = %v", err)
+	}
+	beforeParsed, err := recordfile.ParsePrelude(beforeContent)
+	if err != nil {
+		t.Fatalf("ParsePrelude(before) error = %v", err)
+	}
+	beforePayload := string(beforeContent[beforeParsed.PayloadOffset:])
+
+	result, err := New(st, Options{}).RepairTraceUsage(context.Background(), traceID, RepairUsageOptions{RewriteCassette: true})
+	if err != nil {
+		t.Fatalf("RepairTraceUsage(rewrite) error = %v", err)
+	}
+	if result.Usage == nil || !result.Usage.CassetteRewrote {
+		t.Fatalf("usage result = %+v", result.Usage)
+	}
+	afterContent, err := os.ReadFile(entry.LogPath)
+	if err != nil {
+		t.Fatalf("ReadFile(after) error = %v", err)
+	}
+	afterParsed, err := recordfile.ParsePrelude(afterContent)
+	if err != nil {
+		t.Fatalf("ParsePrelude(after) error = %v", err)
+	}
+	if afterParsed.Header.Usage.TotalTokens != 2 {
+		t.Fatalf("rewritten header usage = %+v, want total 2", afterParsed.Header.Usage)
+	}
+	if got := string(afterContent[afterParsed.PayloadOffset:]); got != beforePayload {
+		t.Fatalf("payload changed after rewrite")
+	}
+	if !strings.Contains(string(afterContent[:afterParsed.PayloadOffset]), `"total_tokens":2`) {
+		t.Fatalf("rewritten prelude does not contain repaired total tokens")
 	}
 }
 

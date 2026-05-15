@@ -3955,6 +3955,23 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
 
+func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return fmt.Errorf("update log usage: trace id is required")
+	}
+	cachedTokens := 0
+	if usage.PromptTokenDetails != nil {
+		cachedTokens = usage.PromptTokenDetails.CachedTokens
+	}
+	_, err := s.db.Exec(`
+		UPDATE logs
+		SET prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?
+		WHERE trace_id = ?
+	`, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, cachedTokens, traceID)
+	return err
+}
+
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
 
 func (s *Store) Sync() error {
