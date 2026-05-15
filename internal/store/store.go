@@ -74,6 +74,9 @@ type Store struct {
 	dbPath    string
 	secrets   *secretBox
 	syncMu    sync.Mutex
+	eventMu   sync.Mutex
+	eventSeq  uint64
+	eventSubs map[chan SystemEventNotification]struct{}
 }
 
 const (
@@ -437,6 +440,16 @@ type SystemEventSummary struct {
 	LastSeenAt time.Time
 	BySource   []CountItem
 	ByCategory []CountItem
+}
+
+type SystemEventNotification struct {
+	Sequence uint64
+	EventID  string
+	Status   string
+	Severity string
+	Source   string
+	Category string
+	At       time.Time
 }
 
 type RoutingFailureAnalytics struct {
@@ -4500,7 +4513,12 @@ func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 	if err != nil {
 		return SystemEvent{}, err
 	}
-	return s.GetSystemEventByFingerprint(event.Fingerprint)
+	saved, err := s.GetSystemEventByFingerprint(event.Fingerprint)
+	if err != nil {
+		return SystemEvent{}, err
+	}
+	s.notifySystemEventChanged(saved)
+	return saved, nil
 }
 
 func (s *Store) GetSystemEvent(id string) (SystemEvent, error) {
@@ -4590,6 +4608,9 @@ func (s *Store) MarkSystemEventRead(id string) error {
 		SET status = 'read', read_at = ?, updated_at = ?
 		WHERE id = ? AND status != 'ignored'
 	`, now, now, strings.TrimSpace(id))
+	if err == nil {
+		s.notifySystemEventIDChanged(id)
+	}
 	return err
 }
 
@@ -4605,6 +4626,9 @@ func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 		return 0, err
 	}
 	count, err := result.RowsAffected()
+	if err == nil && count > 0 {
+		s.notifySystemEventChanged(SystemEvent{Status: SystemEventStatusRead})
+	}
 	return int(count), err
 }
 
@@ -4615,6 +4639,9 @@ func (s *Store) ResolveSystemEvent(id string) error {
 		SET status = 'resolved', resolved_at = ?, updated_at = ?
 		WHERE id = ?
 	`, now, now, strings.TrimSpace(id))
+	if err == nil {
+		s.notifySystemEventIDChanged(id)
+	}
 	return err
 }
 
@@ -4624,7 +4651,31 @@ func (s *Store) IgnoreSystemEvent(id string) error {
 		SET status = 'ignored', updated_at = ?
 		WHERE id = ?
 	`, time.Now().UTC(), strings.TrimSpace(id))
+	if err == nil {
+		s.notifySystemEventIDChanged(id)
+	}
 	return err
+}
+
+func (s *Store) SubscribeSystemEvents(buffer int) (<-chan SystemEventNotification, func()) {
+	if buffer <= 0 {
+		buffer = 8
+	}
+	ch := make(chan SystemEventNotification, buffer)
+	s.eventMu.Lock()
+	if s.eventSubs == nil {
+		s.eventSubs = map[chan SystemEventNotification]struct{}{}
+	}
+	s.eventSubs[ch] = struct{}{}
+	s.eventMu.Unlock()
+	return ch, func() {
+		s.eventMu.Lock()
+		if _, ok := s.eventSubs[ch]; ok {
+			delete(s.eventSubs, ch)
+			close(ch)
+		}
+		s.eventMu.Unlock()
+	}
 }
 
 func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
@@ -6383,6 +6434,40 @@ func (s *Store) upsertSystemEventsForLog(traceID string, header recordfile.Recor
 		}
 	}
 	return nil
+}
+
+func (s *Store) notifySystemEventIDChanged(id string) {
+	event, err := s.GetSystemEvent(strings.TrimSpace(id))
+	if err != nil {
+		return
+	}
+	s.notifySystemEventChanged(event)
+}
+
+func (s *Store) notifySystemEventChanged(event SystemEvent) {
+	s.eventMu.Lock()
+	s.eventSeq++
+	notification := SystemEventNotification{
+		Sequence: s.eventSeq,
+		EventID:  event.ID,
+		Status:   event.Status,
+		Severity: event.Severity,
+		Source:   event.Source,
+		Category: event.Category,
+		At:       time.Now().UTC(),
+	}
+	subs := make([]chan SystemEventNotification, 0, len(s.eventSubs))
+	for ch := range s.eventSubs {
+		subs = append(subs, ch)
+	}
+	s.eventMu.Unlock()
+
+	for _, ch := range subs {
+		select {
+		case ch <- notification:
+		default:
+		}
+	}
 }
 
 func systemEventForParseFailure(job ParseJobRecord) SystemEvent {

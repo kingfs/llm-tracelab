@@ -135,6 +135,18 @@ type systemEventSummaryResponse struct {
 	Window     string             `json:"window"`
 }
 
+type systemEventStreamMessage struct {
+	Type       string                     `json:"type"`
+	EventID    string                     `json:"event_id,omitempty"`
+	Status     string                     `json:"status,omitempty"`
+	Severity   string                     `json:"severity,omitempty"`
+	Source     string                     `json:"source,omitempty"`
+	Category   string                     `json:"category,omitempty"`
+	Summary    systemEventSummaryResponse `json:"summary"`
+	Unread     int                        `json:"unread"`
+	LastSeenAt *time.Time                 `json:"last_seen_at,omitempty"`
+}
+
 type systemEventView struct {
 	ID              string          `json:"id"`
 	Fingerprint     string          `json:"fingerprint"`
@@ -865,6 +877,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
@@ -991,6 +1004,51 @@ func systemEventReadAllAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"updated": count})
+	}
+}
+
+func systemEventStreamAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		ch, unsubscribe := st.SubscribeSystemEvents(16)
+		defer unsubscribe()
+
+		writeSystemEventStreamMessage(w, "system_event.summary", store.SystemEventNotification{}, st)
+		flusher.Flush()
+
+		heartbeat := time.NewTicker(25 * time.Second)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case notification, ok := <-ch:
+				if !ok {
+					return
+				}
+				writeSystemEventStreamMessage(w, "system_event.updated", notification, st)
+				flusher.Flush()
+			case <-heartbeat.C:
+				_, _ = w.Write([]byte(": ping\n\n"))
+				flusher.Flush()
+			}
+		}
 	}
 }
 
@@ -3840,6 +3898,32 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeSystemEventStreamMessage(w http.ResponseWriter, eventType string, notification store.SystemEventNotification, st *store.Store) {
+	summary, err := st.SystemEventSummary(time.Time{})
+	if err != nil {
+		payload, _ := json.Marshal(map[string]string{"error": err.Error()})
+		_, _ = fmt.Fprintf(w, "event: system_event.error\ndata: %s\n\n", payload)
+		return
+	}
+	summaryView := systemEventSummaryView(summary, "all")
+	payload := systemEventStreamMessage{
+		Type:       eventType,
+		EventID:    notification.EventID,
+		Status:     notification.Status,
+		Severity:   notification.Severity,
+		Source:     notification.Source,
+		Category:   notification.Category,
+		Summary:    summaryView,
+		Unread:     summaryView.Unread,
+		LastSeenAt: summaryView.LastSeenAt,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, data)
 }
 
 func parseInt(v string, fallback int) int {

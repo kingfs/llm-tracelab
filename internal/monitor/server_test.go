@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -82,6 +83,42 @@ func embeddedUIAssets(indexHTML string) []string {
 		out = append(out, "/"+match[1])
 	}
 	return out
+}
+
+func waitForLine(lines <-chan string, want string, timeout time.Duration) error {
+	return waitForLineMatch(lines, timeout, func(line string) bool {
+		return line == want
+	})
+}
+
+func waitForLinePrefix(lines <-chan string, prefix string, timeout time.Duration) (string, error) {
+	var matched string
+	err := waitForLineMatch(lines, timeout, func(line string) bool {
+		if strings.HasPrefix(line, prefix) {
+			matched = line
+			return true
+		}
+		return false
+	})
+	return matched, err
+}
+
+func waitForLineMatch(lines <-chan string, timeout time.Duration, match func(string) bool) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return io.EOF
+			}
+			if match(line) {
+				return nil
+			}
+		case <-timer.C:
+			return context.DeadlineExceeded
+		}
+	}
 }
 
 func syncStore(t *testing.T, st *store.Store) {
@@ -281,6 +318,85 @@ func TestSystemEventStatusAPIHandlers(t *testing.T) {
 	}
 	if ignoredPayload.Status != store.SystemEventStatusIgnored {
 		t.Fatalf("ignored payload = %+v", ignoredPayload)
+	}
+}
+
+func TestSystemEventStreamAPIHandlerPushesUpdates(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	srv := httptest.NewServer(systemEventStreamAPIHandler(st))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do(stream) error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream status = %d", resp.StatusCode)
+	}
+
+	lines := make(chan string, 16)
+	go func() {
+		defer close(lines)
+		buf := make([]byte, 1)
+		var b strings.Builder
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				if buf[0] == '\n' {
+					lines <- b.String()
+					b.Reset()
+				} else if buf[0] != '\r' {
+					b.WriteByte(buf[0])
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					lines <- "read error: " + err.Error()
+				}
+				return
+			}
+		}
+	}()
+
+	if err := waitForLine(lines, "event: system_event.summary", time.Second); err != nil {
+		t.Fatalf("initial summary event: %v", err)
+	}
+	created, err := st.UpsertSystemEvent(store.SystemEvent{
+		Fingerprint: "parser:stream-test",
+		Source:      "parser",
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Parse failed",
+		Message:     "stream test",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent() error = %v", err)
+	}
+	if err := waitForLine(lines, "event: system_event.updated", time.Second); err != nil {
+		t.Fatalf("updated event: %v", err)
+	}
+	line, err := waitForLinePrefix(lines, "data: ", time.Second)
+	if err != nil {
+		t.Fatalf("updated data: %v", err)
+	}
+	var payload systemEventStreamMessage
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(stream data) error = %v line=%q", err, line)
+	}
+	if payload.EventID != created.ID || payload.Unread != 1 {
+		t.Fatalf("stream payload = %+v, want event %s unread 1", payload, created.ID)
 	}
 }
 

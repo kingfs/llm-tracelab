@@ -49,6 +49,20 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
       }
     };
     refresh();
+    if (window.EventSource) {
+      const source = new EventSource(apiPaths.eventsStream);
+      source.addEventListener("system_event.summary", (event) => applyEventSummary(event, setEventSummary));
+      source.addEventListener("system_event.updated", (event) => applyEventSummary(event, setEventSummary));
+      source.onerror = () => {
+        refresh();
+      };
+      timer = window.setInterval(refresh, 60_000);
+      return () => {
+        cancelled = true;
+        window.clearInterval(timer);
+        source.close();
+      };
+    }
     timer = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
@@ -255,6 +269,17 @@ function initials(user) {
 function formatBadgeCount(value) {
   const count = Number(value || 0);
   return count > 99 ? "99+" : String(count);
+}
+
+function applyEventSummary(event, setEventSummary) {
+  try {
+    const payload = JSON.parse(event.data || "{}");
+    if (payload.summary) {
+      setEventSummary(payload.summary);
+    }
+  } catch {
+    // Ignore malformed stream payloads; polling remains active as fallback.
+  }
 }
 
 function isLegacyActive(path) {

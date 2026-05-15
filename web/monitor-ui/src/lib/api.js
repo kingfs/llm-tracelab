@@ -10,6 +10,7 @@ export const apiPaths = {
   overview: "/api/overview",
   events: "/api/events",
   eventsSummary: "/api/events/summary",
+  eventsStream: "/api/events/stream",
   eventsReadAll: "/api/events/read-all",
   eventRead: (eventID) => `/api/events/${encodeURIComponent(eventID)}/read`,
   eventResolve: (eventID) => `/api/events/${encodeURIComponent(eventID)}/resolve`,

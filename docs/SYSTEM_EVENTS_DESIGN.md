@@ -763,6 +763,22 @@ go test ./internal/monitor
 task ui:build
 ```
 
+Status:
+
+- Completed in Phase 7 implementation.
+- Added store-level system event notifications for event upserts and status changes.
+- Added `/api/events/stream` SSE with initial summary, update events, and heartbeat comments.
+- Updated the monitor nav badge to consume SSE updates while keeping 60s polling as fallback.
+- Rebuilt embedded monitor UI assets.
+- Verified with `go test ./internal/store ./internal/monitor`, `go test ./internal/monitor ./internal/mcpserver`, and `task ui:build`.
+
+Review:
+
+- Scope stayed limited to one-way server push for system event summary updates.
+- Existing HTTP polling remains available when SSE is unsupported or unavailable.
+- No bidirectional WebSocket control or write-capable MCP tools were added.
+- Next phase should be documentation and hardening only: baseline docs, monitor/MCP guides, and retention/compaction policy review notes.
+
 ## Phase 8: Review And Hardening
 
 Scope:
