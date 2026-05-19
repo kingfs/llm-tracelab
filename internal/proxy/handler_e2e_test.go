@@ -1372,6 +1372,101 @@ func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
 	}
 }
 
+func TestHandlerRetryQueueSaturationReturns503(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	for {
+		select {
+		case <-upstreamRetryWaitSlots:
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	for i := 0; i < upstreamRetryWaitCapacity; i++ {
+		if !tryAcquireRetryWaitSlot() {
+			t.Fatalf("tryAcquireRetryWaitSlot() failed while pre-filling slot %d", i)
+		}
+	}
+	t.Cleanup(func() {
+		for i := 0; i < upstreamRetryWaitCapacity; i++ {
+			releaseRetryWaitSlot()
+		}
+	})
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	firstReq, _ := http.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	selection, err := handler.router.Select(firstReq)
+	if err != nil {
+		t.Fatalf("router.Select() error = %v", err)
+	}
+	handler.router.Complete(selection, router.Outcome{Success: false, StatusCode: 0})
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("resp.StatusCode = %d, want 503", resp.StatusCode)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	for _, event := range parsed.Events {
+		if event.Type == "routing.retry_queue_saturated" {
+			return
+		}
+	}
+	t.Fatalf("routing.retry_queue_saturated event not found: %+v", parsed.Events)
+}
+
 func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

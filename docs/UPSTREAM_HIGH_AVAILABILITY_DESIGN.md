@@ -136,6 +136,8 @@ Review:
 
 ### Phase 4: Request Queue Guardrails
 
+Status: implemented.
+
 Scope:
 
 - cap concurrent waiters when all candidates are open
@@ -146,6 +148,16 @@ Acceptance:
 
 - stress tests show bounded goroutines and bounded active waits
 - clients get deterministic overload errors instead of connection pileups
+
+Review:
+
+- proxy now has a bounded global wait-slot pool for requests waiting on
+  all-targets-open recovery
+- saturated wait queue returns `503 Service Unavailable` immediately with a
+  `routing.retry_queue_saturated` event
+- unit and e2e tests cover slot capacity and recorded saturation behavior
+- next phase should focus on surfacing these signals in Monitor/MCP rather than
+  adding more router behavior
 
 ### Phase 5: Monitor And MCP Visibility
 

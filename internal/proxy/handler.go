@@ -44,11 +44,16 @@ const (
 	selectionContextKey contextKey = "router_selection"
 )
 
-const upstreamRetryBudget = 30 * time.Second
+const (
+	upstreamRetryBudget       = 30 * time.Second
+	upstreamRetryWaitCapacity = 16
+)
 
 type retrySleeper func(context.Context, time.Duration) bool
 
 var sleepForRetry retrySleeper = defaultSleepForRetry
+
+var upstreamRetryWaitSlots = make(chan struct{}, upstreamRetryWaitCapacity)
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
@@ -375,7 +380,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		retryAttempt  int
 		retryDeadline = start.Add(upstreamRetryBudget)
 		retryEvents   []recorder.RecordEvent
+		waitSlotHeld  bool
 	)
+	defer func() {
+		if waitSlotHeld {
+			releaseRetryWaitSlot()
+		}
+	}()
 
 	// 重试循环：优先快速尝试候选上游目标；所有候选短时不可用时，在
 	// 30s 预算内做指数退避后重新选择，避免把短暂上游抖动直接暴露成 502。
@@ -388,6 +399,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if selErr != nil {
 			if router.SelectionFailureReason(selErr) == router.SelectionFailureAllTargetsOpen && time.Now().Before(retryDeadline) {
+				if !waitSlotHeld {
+					if !tryAcquireRetryWaitSlot() {
+						retryEvents = append(retryEvents, retryEvent("routing.retry_queue_saturated", retryAttempt, 0, "", 0, "all_targets_open", false))
+						slog.Warn("Upstream retry wait queue saturated")
+						h.recordSelectionFailureWithBody(r, start, http.StatusServiceUnavailable, selErr, bodyBytes, retryEvents)
+						http.Error(w, "Proxy overloaded: upstream retry wait queue saturated", http.StatusServiceUnavailable)
+						return
+					}
+					waitSlotHeld = true
+				}
 				delay := retryDelay(retryAttempt, nil, retryDeadline)
 				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, "", 0, "all_targets_open", true))
 				if !sleepBeforeRetry(r.Context(), delay) {
@@ -651,6 +672,22 @@ func retryEvent(eventType string, attempt int, delay time.Duration, upstreamID s
 		Type:       eventType,
 		Time:       time.Now().UTC(),
 		Attributes: attrs,
+	}
+}
+
+func tryAcquireRetryWaitSlot() bool {
+	select {
+	case upstreamRetryWaitSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func releaseRetryWaitSlot() {
+	select {
+	case <-upstreamRetryWaitSlots:
+	default:
 	}
 }
 

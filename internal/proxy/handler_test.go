@@ -182,6 +182,35 @@ func TestRetryDelayHonorsRetryAfterWithinDeadline(t *testing.T) {
 	}
 }
 
+func TestRetryWaitSlotsBoundConcurrentWaiters(t *testing.T) {
+	for {
+		select {
+		case <-upstreamRetryWaitSlots:
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	acquired := 0
+	for i := 0; i < upstreamRetryWaitCapacity; i++ {
+		if !tryAcquireRetryWaitSlot() {
+			t.Fatalf("tryAcquireRetryWaitSlot() = false at slot %d", i)
+		}
+		acquired++
+	}
+	if tryAcquireRetryWaitSlot() {
+		t.Fatalf("tryAcquireRetryWaitSlot() = true after capacity exhausted")
+	}
+	for i := 0; i < acquired; i++ {
+		releaseRetryWaitSlot()
+	}
+	if !tryAcquireRetryWaitSlot() {
+		t.Fatalf("tryAcquireRetryWaitSlot() = false after release")
+	}
+	releaseRetryWaitSlot()
+}
+
 type nopReadCloser struct{ Reader *bytes.Buffer }
 
 func (n nopReadCloser) Read(p []byte) (int, error) { return n.Reader.Read(p) }
