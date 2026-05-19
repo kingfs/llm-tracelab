@@ -43,11 +43,12 @@ export function TraceDetailPage() {
   const [renderMarkdown, setRenderMarkdown] = useState(true);
   const [jobNotice, setJobNotice] = useState(null);
   const [jobBusy, setJobBusy] = useState("");
+  const [derivedRefreshTick, setDerivedRefreshTick] = useState(0);
   const failureSummaryRef = useRef(null);
   const detail = useJSON(apiPaths.trace(traceID), [traceID]);
   const raw = useJSON(apiPaths.traceRaw(traceID), [traceID, tab === "raw" ? "raw" : "summary"]);
-  const observation = useJSON(apiPaths.traceObservation(traceID), [traceID, tab === "protocol" ? "protocol" : "idle"]);
-  const findings = useJSON(apiPaths.traceFindings(traceID), [traceID, tab === "audit" ? "audit" : "idle"]);
+  const observation = useJSON(apiPaths.traceObservation(traceID), [traceID, tab === "protocol" ? "protocol" : "idle", derivedRefreshTick]);
+  const findings = useJSON(apiPaths.traceFindings(traceID), [traceID, tab === "audit" ? "audit" : "idle", derivedRefreshTick]);
   const performance = useJSON(apiPaths.tracePerformance(traceID), [traceID, tab === "performance" ? "performance" : "idle"]);
   const header = detail.data?.header?.meta;
   const usage = detail.data?.header?.usage;
@@ -106,6 +107,7 @@ export function TraceDetailPage() {
         tone: response.job?.status === "failed" ? "danger" : "green",
         text: `${labelTraceAction(action)} job #${response.job?.id || "-"} ${response.job?.status || "queued"}`,
       });
+      setDerivedRefreshTick((value) => value + 1);
     } catch (error) {
       setJobNotice({ tone: "danger", text: error.message || "request failed" });
     } finally {
@@ -422,7 +424,15 @@ export function TraceDetailPage() {
         </div>
       ) : null}
 
-      {tab === "protocol" ? <ProtocolPanel observation={observation} CodeBlock={CodeBlock} InlineTag={InlineTag} /> : null}
+      {tab === "protocol" ? (
+        <ProtocolPanel
+          observation={observation}
+          CodeBlock={CodeBlock}
+          InlineTag={InlineTag}
+          busy={jobBusy === "reparse"}
+          onReparse={() => runTraceAction("reparse", apiPaths.traceReparse(traceID), { mode: "sync" })}
+        />
+      ) : null}
       {tab === "audit" ? <AuditPanel findings={findings} InlineTag={InlineTag} CodeBlock={CodeBlock} /> : null}
       {tab === "performance" ? <PerformancePanel performance={performance} /> : null}
       {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} /> : null}
@@ -549,9 +559,22 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
   );
 }
 
-function ProtocolPanel({ observation, CodeBlock, InlineTag }) {
+function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onReparse }) {
   if (observation.error) {
-    return <EmptyState title="Protocol observation unavailable" detail={observation.error} tone="danger" />;
+    return (
+      <section className="panel protocol-panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Observation IR</p>
+            <h2>Protocol</h2>
+          </div>
+          <button className="ghost-button active" type="button" disabled={busy} onClick={onReparse}>
+            {busy ? "Reparsing" : "Reparse"}
+          </button>
+        </div>
+        <EmptyState title="Protocol observation unavailable" detail={observation.error} tone="danger" compact />
+      </section>
+    );
   }
   if (observation.loading && !observation.data) {
     return <EmptyState title="Loading protocol observation" detail="Reading derived semantic nodes for this trace." />;
@@ -559,7 +582,20 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag }) {
   const summary = observation.data?.summary;
   const tree = observation.data?.tree || [];
   if (!observation.data) {
-    return <EmptyState title="No protocol observation" detail="Run analyze reparse for this trace to build Observation IR." />;
+    return (
+      <section className="panel protocol-panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Observation IR</p>
+            <h2>Protocol</h2>
+          </div>
+          <button className="ghost-button active" type="button" disabled={busy} onClick={onReparse}>
+            {busy ? "Reparsing" : "Reparse"}
+          </button>
+        </div>
+        <EmptyState title="No protocol observation" detail="Run reparse for this trace to build Observation IR." compact />
+      </section>
+    );
   }
   return (
     <section className="panel protocol-panel">
@@ -573,6 +609,9 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag }) {
           <InlineTag>{summary?.parser || "parser"}</InlineTag>
           <InlineTag>{summary?.provider || "provider"}</InlineTag>
         </div>
+        <button className="ghost-button" type="button" disabled={busy} onClick={onReparse}>
+          {busy ? "Reparsing" : "Reparse"}
+        </button>
       </div>
       <div className="detail-meta-strip">
         <DetailMetaPill label="model" value={summary?.model || "-"} />

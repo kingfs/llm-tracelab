@@ -16,8 +16,9 @@ export function RequestsPage() {
   const query = searchParams.get("q") || "";
   const provider = searchParams.get("provider") || "";
   const model = searchParams.get("model") || "";
+  const observation = searchParams.get("observation") || "";
   const [refreshTick, setRefreshTick] = useState(0);
-  const [filters, setFilters] = useState({ query, provider, model });
+  const [filters, setFilters] = useState({ query, provider, model, observation });
   const requestParams = new URLSearchParams({
     page: String(page),
     page_size: String(PAGE_SIZE),
@@ -31,7 +32,10 @@ export function RequestsPage() {
   if (model) {
     requestParams.set("model", model);
   }
-  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, refreshTick]);
+  if (observation) {
+    requestParams.set("observation", observation);
+  }
+  const { loading, data, error } = useJSON(apiURL(apiPaths.traces, requestParams), [page, query, provider, model, observation, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -41,8 +45,8 @@ export function RequestsPage() {
   }, []);
 
   useEffect(() => {
-    setFilters({ query, provider, model });
-  }, [query, provider, model]);
+    setFilters({ query, provider, model, observation });
+  }, [query, provider, model, observation]);
 
   const items = data?.items ?? [];
   const stats = data?.stats ?? {};
@@ -58,15 +62,17 @@ export function RequestsPage() {
     setOrDeleteParam(next, "q", filters.query);
     setOrDeleteParam(next, "provider", filters.provider);
     setOrDeleteParam(next, "model", filters.model);
+    setOrDeleteParam(next, "observation", filters.observation);
     setSearchParams(next);
   };
   const resetFilters = () => {
-    setFilters({ query: "", provider: "", model: "" });
+    setFilters({ query: "", provider: "", model: "", observation: "" });
     const next = new URLSearchParams(searchParams);
     next.set("page", "1");
     next.delete("q");
     next.delete("provider");
     next.delete("model");
+    next.delete("observation");
     setSearchParams(next);
   };
 
@@ -131,6 +137,19 @@ export function RequestsPage() {
             value={filters.model}
             onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
           />
+          <select
+            className="filter-input filter-select"
+            value={filters.observation}
+            onChange={(event) => setFilters((current) => ({ ...current, observation: event.target.value }))}
+            aria-label="Observation status"
+          >
+            <option value="">all observations</option>
+            <option value="unparsed">unparsed</option>
+            <option value="parsed">parsed</option>
+            <option value="failed">parse failed</option>
+            <option value="queued">parse queued</option>
+            <option value="running">parse running</option>
+          </select>
           <button className="ghost-button" type="submit">
             Apply
           </button>

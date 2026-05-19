@@ -93,7 +93,11 @@ export function OverviewPage() {
         <div className="hero-grid hero-grid-compact overview-health-grid">
           <StatCard label="Unread Events" value={eventSummary?.unread ?? 0} detail={eventSummary?.last_seen_at ? `latest ${formatDateTime(eventSummary.last_seen_at)}` : "no runtime exceptions"} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
           <StatCard label="Parsed" value={observation.parsed ?? 0} detail={`${observation.total_observations ?? 0} observation rows`} accent="accent-green" />
-          <StatCard label="Unparsed" value={observation.unparsed ?? 0} detail="indexed traces without observation" />
+          <Link className="stat-card stat-card-link" to="/requests?observation=unparsed">
+            <span>Unparsed</span>
+            <strong>{observation.unparsed ?? 0}</strong>
+            <small className="stat-detail">indexed traces without observation</small>
+          </Link>
           <StatCard label="Parse Queue" value={(observation.queued ?? 0) + (observation.running ?? 0)} detail={`${observation.queued ?? 0} queued, ${observation.running ?? 0} running`} accent={(observation.queued ?? 0) || (observation.running ?? 0) ? "accent-gold" : ""} />
           <StatCard label="Analysis" value={analysis.total ?? 0} detail={`${analysis.failed ?? 0} failed runs`} accent={(analysis.failed ?? 0) ? "accent-red" : "accent-gold"} />
         </div>

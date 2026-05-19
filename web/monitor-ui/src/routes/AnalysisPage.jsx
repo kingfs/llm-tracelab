@@ -29,6 +29,20 @@ export function AnalysisPage() {
     }
   };
 
+  const runUnparsedBatch = async () => {
+    setBatchBusy(true);
+    setJobNotice(null);
+    try {
+      const response = await postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true });
+      setJobNotice({ tone: "green", text: `Batch reanalysis job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      setRefreshTick((value) => value + 1);
+    } catch (error) {
+      setJobNotice({ tone: "danger", text: error.message || "request failed" });
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   return (
     <div className="shell shell-list">
       <header className="topbar">
@@ -37,6 +51,9 @@ export function AnalysisPage() {
           <h1>Analysis</h1>
         </div>
         <div className="topbar-meta">
+          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runUnparsedBatch}>
+            {batchBusy ? "Queueing" : "Reparse unparsed"}
+          </button>
           <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runMissingUsageBatch}>
             {batchBusy ? "Queueing" : "Repair missing usage"}
           </button>

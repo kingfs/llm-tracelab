@@ -65,6 +65,7 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
             {item.selected_upstream_id ? <InlineTag tone="green">{item.selected_upstream_id}</InlineTag> : null}
             {item.session_id ? <InlineTag tone="green">session</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
+            <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status)}</InlineTag>
           </div>
         </div>
         <div className="trace-subline-group">
@@ -86,6 +87,35 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
       <RowActions item={item} fromView={fromView} fromSessionID={fromSessionID} focus={focus} />
     </article>
   );
+}
+
+function formatObservationStatus(status = "") {
+  switch (String(status || "").toLowerCase()) {
+    case "parsed":
+      return "parsed";
+    case "failed":
+      return "parse failed";
+    case "queued":
+      return "parse queued";
+    case "running":
+      return "parse running";
+    default:
+      return "unparsed";
+  }
+}
+
+function observationTone(status = "") {
+  switch (String(status || "").toLowerCase()) {
+    case "parsed":
+      return "green";
+    case "failed":
+      return "danger";
+    case "queued":
+    case "running":
+      return "gold";
+    default:
+      return "default";
+  }
 }
 
 function FailureGroupRow({ group, isOpen, onToggle }) {
