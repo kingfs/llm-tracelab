@@ -1314,6 +1314,75 @@ func TestListPageAppliesRoutingDecisionFilters(t *testing.T) {
 	}
 }
 
+func TestListPageAppliesObservationStatusFilter(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string) string {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:  name,
+				Time:       time.Date(2026, 5, 19, 9, 0, 0, 0, time.UTC),
+				Model:      "gpt-5",
+				Provider:   "openai_compatible",
+				Operation:  "responses",
+				Endpoint:   "/v1/responses",
+				URL:        "/v1/responses",
+				Method:     "POST",
+				StatusCode: 200,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		}
+		entry, err := st.GetByRequestID(name)
+		if err != nil {
+			t.Fatalf("GetByRequestID(%q) error = %v", name, err)
+		}
+		return entry.ID
+	}
+
+	parsedID := writeLog("parsed.http")
+	unparsedID := writeLog("unparsed.http")
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       parsedID,
+		Provider:      "openai_compatible",
+		Operation:     "responses",
+		Model:         "gpt-5",
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+	}); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+
+	result, err := st.ListPage(1, 50, ListFilter{ObservationStatus: "parsed"})
+	if err != nil {
+		t.Fatalf("ListPage(parsed) error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ID != parsedID || result.Items[0].Observation.Status != "parsed" {
+		t.Fatalf("parsed result = %+v", result.Items)
+	}
+
+	result, err = st.ListPage(1, 50, ListFilter{ObservationStatus: "unparsed"})
+	if err != nil {
+		t.Fatalf("ListPage(unparsed) error = %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ID != unparsedID || result.Items[0].Observation.Status != "unparsed" {
+		t.Fatalf("unparsed result = %+v", result.Items)
+	}
+}
+
 func TestListSessionPageAppliesFilters(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
@@ -2363,6 +2432,69 @@ func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
 	}
 	if len(ids) != 1 {
 		t.Fatalf("ids = %+v, want one missing-usage trace", ids)
+	}
+}
+
+func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:  "req-batch-unparsed",
+			Time:       time.Date(2026, 5, 19, 9, 10, 0, 0, time.UTC),
+			Model:      "gpt-5",
+			Provider:   "openai_compatible",
+			Operation:  "responses",
+			Endpoint:   "/v1/responses",
+			URL:        "/v1/responses",
+			Method:     "POST",
+			StatusCode: 200,
+		},
+	}
+	unparsedPath := filepath.Join(t.TempDir(), "batch-unparsed.http")
+	if err := os.WriteFile(unparsedPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(unparsedPath, header); err != nil {
+		t.Fatalf("UpsertLog(unparsed) error = %v", err)
+	}
+	unparsedEntry, err := st.GetByRequestID("req-batch-unparsed")
+	if err != nil {
+		t.Fatalf("GetByRequestID(unparsed) error = %v", err)
+	}
+
+	header.Meta.RequestID = "req-batch-parsed"
+	parsedPath := filepath.Join(t.TempDir(), "batch-parsed.http")
+	if err := os.WriteFile(parsedPath, []byte("payload"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := st.UpsertLog(parsedPath, header); err != nil {
+		t.Fatalf("UpsertLog(parsed) error = %v", err)
+	}
+	parsedEntry, err := st.GetByRequestID("req-batch-parsed")
+	if err != nil {
+		t.Fatalf("GetByRequestID(parsed) error = %v", err)
+	}
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       parsedEntry.ID,
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+	}); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+
+	ids, err := st.ListTraceIDs(ListFilter{ObservationStatus: "unparsed"}, 10)
+	if err != nil {
+		t.Fatalf("ListTraceIDs() error = %v", err)
+	}
+	if len(ids) != 1 || ids[0] != unparsedEntry.ID {
+		t.Fatalf("ids = %+v, want unparsed trace %s", ids, unparsedEntry.ID)
 	}
 }
 

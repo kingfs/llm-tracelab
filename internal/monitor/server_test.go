@@ -438,6 +438,69 @@ func TestListAPIHandlerReturnsPagedItems(t *testing.T) {
 	if payload.Items[0].Operation != "chat.completions" {
 		t.Fatalf("operation = %q, want chat.completions", payload.Items[0].Operation)
 	}
+	if payload.Items[0].Observation.Status != "unparsed" {
+		t.Fatalf("observation = %+v, want unparsed", payload.Items[0].Observation)
+	}
+}
+
+func TestListAPIHandlerFiltersByObservationStatus(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	writeTraceFixture(t, outputDir, "parsed.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
+		`{"model":"gpt-5.1","input":"parsed"}`,
+		`{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-list-parsed"
+			header.Meta.Provider = "openai_compatible"
+			header.Meta.Operation = "responses"
+			header.Meta.Endpoint = "/v1/responses"
+			header.Meta.Model = "gpt-5.1"
+		}))
+	writeTraceFixture(t, outputDir, "unparsed.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
+		`{"model":"gpt-5.1","input":"unparsed"}`,
+		`{"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-list-unparsed"
+			header.Meta.Provider = "openai_compatible"
+			header.Meta.Operation = "responses"
+			header.Meta.Endpoint = "/v1/responses"
+			header.Meta.Model = "gpt-5.1"
+		}))
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+	parsedEntry, err := st.GetByRequestID("req-list-parsed")
+	if err != nil {
+		t.Fatalf("GetByRequestID(parsed) error = %v", err)
+	}
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       parsedEntry.ID,
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+	}); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces?observation=unparsed&page=1&page_size=50", nil)
+	rr := httptest.NewRecorder()
+	listAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload listResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Items) != 1 || payload.Items[0].Observation.Status != "unparsed" {
+		t.Fatalf("payload = %+v, want one unparsed trace", payload.Items)
+	}
 }
 
 func TestListAPIHandlerDoesNotSyncFilesystem(t *testing.T) {
@@ -2986,7 +3049,7 @@ func TestAnalysisBatchReanalyzeAPIHandlerCreatesBatchJob(t *testing.T) {
 	writeTraceFixture(t, outputDir, "batch-reanalysis.http", content)
 	syncStore(t, st)
 
-	body := `{"mode":"sync","model":"gpt-5.1","endpoint":"responses","limit":10,"reparse":true,"scan":true}`
+	body := `{"mode":"sync","model":"gpt-5.1","endpoint":"responses","observation":"unparsed","limit":10,"reparse":true,"scan":true}`
 	req := httptest.NewRequest(http.MethodPost, "/api/analysis/batch/reanalyze", bytes.NewBufferString(body))
 	rr := httptest.NewRecorder()
 	analysisBatchReanalyzeAPIHandler(st).ServeHTTP(rr, req)

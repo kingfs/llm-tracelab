@@ -56,6 +56,7 @@ type LogEntry struct {
 	SessionSource   string
 	WindowID        string
 	ClientRequestID string
+	Observation     ObservationMetadata
 }
 
 type Stats struct {
@@ -128,19 +129,20 @@ type ListPageResult struct {
 }
 
 type ListFilter struct {
-	Query            string
-	Provider         string
-	Model            string
-	Endpoint         string
-	SelectedUpstream string
-	Status           string
-	MissingUsage     bool
-	MinDurationMs    int64
-	MaxDurationMs    int64
-	MinTTFTMs        int64
-	MaxTTFTMs        int64
-	MinTokens        int
-	MaxTokens        int
+	Query             string
+	Provider          string
+	Model             string
+	Endpoint          string
+	SelectedUpstream  string
+	Status            string
+	ObservationStatus string
+	MissingUsage      bool
+	MinDurationMs     int64
+	MaxDurationMs     int64
+	MinTTFTMs         int64
+	MaxTTFTMs         int64
+	MinTokens         int
+	MaxTokens         int
 }
 
 type GroupingInfo struct {
@@ -632,6 +634,13 @@ type ObservationSummary struct {
 	SummaryJSON   string
 	WarningsJSON  string
 	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type ObservationMetadata struct {
+	Status        string
+	Parser        string
+	ParserVersion string
 	UpdatedAt     time.Time
 }
 
@@ -4181,12 +4190,130 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 	for _, row := range rows {
 		result.Items = append(result.Items, logEntryFromTraceLog(row))
 	}
+	if err := s.populateObservationMetadata(result.Items); err != nil {
+		return ListPageResult{}, err
+	}
 	if total == 0 {
 		result.TotalPages = 0
 		return result, nil
 	}
 	result.TotalPages = int(math.Ceil(float64(total) / float64(pageSize)))
 	return result, nil
+}
+
+func (s *Store) populateObservationMetadata(entries []LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	traceIDs := make([]string, 0, len(entries))
+	byTraceID := make(map[string]int, len(entries))
+	for idx := range entries {
+		entries[idx].Observation.Status = "unparsed"
+		traceIDs = append(traceIDs, entries[idx].ID)
+		byTraceID[entries[idx].ID] = idx
+	}
+	meta, err := s.LoadObservationMetadata(traceIDs)
+	if err != nil {
+		return err
+	}
+	for traceID, observation := range meta {
+		idx, ok := byTraceID[traceID]
+		if !ok {
+			continue
+		}
+		entries[idx].Observation = observation
+	}
+	return nil
+}
+
+func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]ObservationMetadata, error) {
+	out := make(map[string]ObservationMetadata, len(traceIDs))
+	if len(traceIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(traceIDs))
+	for _, traceID := range traceIDs {
+		traceID = strings.TrimSpace(traceID)
+		if traceID == "" {
+			continue
+		}
+		out[traceID] = ObservationMetadata{Status: "unparsed"}
+		args = append(args, traceID)
+	}
+	if len(args) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(args)), ",")
+	rows, err := s.db.Query(`
+		SELECT trace_id, parser, parser_version, status, updated_at
+		FROM trace_observations
+		WHERE trace_id IN (`+placeholders+`)
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var (
+			traceID   string
+			meta      ObservationMetadata
+			updatedAt any
+		)
+		if err := rows.Scan(&traceID, &meta.Parser, &meta.ParserVersion, &meta.Status, &updatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if meta.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		out[traceID] = meta
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	missingArgs := make([]any, 0, len(out))
+	for traceID, meta := range out {
+		if strings.TrimSpace(meta.Parser) == "" {
+			missingArgs = append(missingArgs, traceID)
+		}
+	}
+	if len(missingArgs) == 0 {
+		return out, nil
+	}
+	missingPlaceholders := strings.TrimRight(strings.Repeat("?,", len(missingArgs)), ",")
+	rows, err = s.db.Query(`
+		SELECT p.trace_id, p.status, p.updated_at
+		FROM parse_jobs p
+		INNER JOIN (
+			SELECT trace_id, MAX(id) AS id
+			FROM parse_jobs
+			WHERE trace_id IN (`+missingPlaceholders+`)
+			GROUP BY trace_id
+		) latest ON latest.id = p.id
+	`, missingArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			traceID   string
+			meta      ObservationMetadata
+			updatedAt any
+		)
+		if err := rows.Scan(&traceID, &meta.Status, &updatedAt); err != nil {
+			return nil, err
+		}
+		if meta.UpdatedAt, err = timeParseValue(updatedAt); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(meta.Status) == "" {
+			meta.Status = "unparsed"
+		}
+		out[traceID] = meta
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
@@ -5261,6 +5388,9 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 		}
 		entries = append(entries, entry)
 	}
+	if err := s.populateObservationMetadata(entries); err != nil {
+		return nil, err
+	}
 	return entries, rows.Err()
 }
 
@@ -6311,6 +6441,35 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		predicates = append(predicates, tracelog.SelectedUpstreamIDContainsFold(upstream))
 	}
+	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
+	case "parsed", "failed", "queued", "running":
+		status := strings.ToLower(strings.TrimSpace(filter.ObservationStatus))
+		predicates = append(predicates, predicate.TraceLog(func(s *entsql.Selector) {
+			obs := entsql.Table("trace_observations")
+			job := entsql.Table("parse_jobs")
+			obsStatus := entsql.Select(obs.C("trace_id")).
+				From(obs).
+				Where(entsql.And(
+					entsql.ColumnsEQ(obs.C("trace_id"), s.C(tracelog.FieldTraceID)),
+					entsql.EQ(obs.C("status"), status),
+				))
+			jobStatus := entsql.Select(job.C("trace_id")).
+				From(job).
+				Where(entsql.And(
+					entsql.ColumnsEQ(job.C("trace_id"), s.C(tracelog.FieldTraceID)),
+					entsql.EQ(job.C("status"), status),
+				))
+			s.Where(entsql.Or(entsql.Exists(obsStatus), entsql.Exists(jobStatus)))
+		}))
+	case "unparsed":
+		predicates = append(predicates, predicate.TraceLog(func(s *entsql.Selector) {
+			obs := entsql.Table("trace_observations")
+			sub := entsql.Select(obs.C("trace_id")).
+				From(obs).
+				Where(entsql.ColumnsEQ(obs.C("trace_id"), s.C(tracelog.FieldTraceID)))
+			s.Where(entsql.NotExists(sub))
+		}))
+	}
 	if filter.MissingUsage {
 		predicates = append(predicates, tracelog.TotalTokensEQ(0), tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
 	}
@@ -6573,6 +6732,10 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 		}
 		return alias + "." + name
 	}
+	outerTraceColumn := column("trace_id")
+	if alias == "" {
+		outerTraceColumn = "logs.trace_id"
+	}
 
 	var (
 		clauses []string
@@ -6594,6 +6757,17 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 	if upstream := strings.TrimSpace(filter.SelectedUpstream); upstream != "" {
 		clauses = append(clauses, `LOWER(`+column("selected_upstream_id")+`) LIKE LOWER(?)`)
 		args = append(args, "%"+escapeLike(upstream)+"%")
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.ObservationStatus)) {
+	case "parsed", "failed", "queued", "running":
+		clauses = append(clauses, `(
+			EXISTS (SELECT 1 FROM trace_observations o WHERE o.trace_id = `+outerTraceColumn+` AND o.status = ?) OR
+			EXISTS (SELECT 1 FROM parse_jobs p WHERE p.trace_id = `+outerTraceColumn+` AND p.status = ?)
+		)`)
+		status := strings.ToLower(strings.TrimSpace(filter.ObservationStatus))
+		args = append(args, status, status)
+	case "unparsed":
+		clauses = append(clauses, `NOT EXISTS (SELECT 1 FROM trace_observations o WHERE o.trace_id = `+outerTraceColumn+`)`)
 	}
 	if filter.MissingUsage {
 		clauses = append(clauses, `(`+column("total_tokens")+` = 0 AND `+column("status_code")+` >= 200 AND `+column("status_code")+` < 300)`)

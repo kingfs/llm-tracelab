@@ -173,26 +173,34 @@ type systemEventView struct {
 }
 
 type traceListItem struct {
-	ID               string    `json:"id"`
-	SessionID        string    `json:"session_id,omitempty"`
-	SessionSource    string    `json:"session_source,omitempty"`
-	RecordedAt       time.Time `json:"recorded_at"`
-	Model            string    `json:"model"`
-	Provider         string    `json:"provider"`
-	SelectedUpstream string    `json:"selected_upstream_id,omitempty"`
-	Operation        string    `json:"operation"`
-	Endpoint         string    `json:"endpoint"`
-	Method           string    `json:"method"`
-	URL              string    `json:"url"`
-	StatusCode       int       `json:"status_code"`
-	DurationMs       int64     `json:"duration_ms"`
-	TTFTMs           int64     `json:"ttft_ms"`
-	TotalTokens      int       `json:"total_tokens"`
-	PromptTokens     int       `json:"prompt_tokens"`
-	CompletionTokens int       `json:"completion_tokens"`
-	CachedTokens     int       `json:"cached_tokens"`
-	IsStream         bool      `json:"is_stream"`
-	Error            string    `json:"error,omitempty"`
+	ID               string              `json:"id"`
+	SessionID        string              `json:"session_id,omitempty"`
+	SessionSource    string              `json:"session_source,omitempty"`
+	RecordedAt       time.Time           `json:"recorded_at"`
+	Model            string              `json:"model"`
+	Provider         string              `json:"provider"`
+	SelectedUpstream string              `json:"selected_upstream_id,omitempty"`
+	Operation        string              `json:"operation"`
+	Endpoint         string              `json:"endpoint"`
+	Method           string              `json:"method"`
+	URL              string              `json:"url"`
+	StatusCode       int                 `json:"status_code"`
+	DurationMs       int64               `json:"duration_ms"`
+	TTFTMs           int64               `json:"ttft_ms"`
+	TotalTokens      int                 `json:"total_tokens"`
+	PromptTokens     int                 `json:"prompt_tokens"`
+	CompletionTokens int                 `json:"completion_tokens"`
+	CachedTokens     int                 `json:"cached_tokens"`
+	IsStream         bool                `json:"is_stream"`
+	Error            string              `json:"error,omitempty"`
+	Observation      observationListView `json:"observation"`
+}
+
+type observationListView struct {
+	Status        string    `json:"status"`
+	Parser        string    `json:"parser,omitempty"`
+	ParserVersion string    `json:"parser_version,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
 type sessionListResponse struct {
@@ -280,6 +288,7 @@ type batchReanalysisRequest struct {
 	Endpoint     string `json:"endpoint"`
 	Upstream     string `json:"upstream"`
 	Status       string `json:"status"`
+	Observation  string `json:"observation"`
 	MissingUsage bool   `json:"missing_usage"`
 	Limit        int    `json:"limit"`
 	RepairUsage  bool   `json:"repair_usage"`
@@ -2631,28 +2640,7 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 			RefreshedAt: time.Now().UTC(),
 		}
 		for _, entry := range result.Items {
-			resp.Items = append(resp.Items, traceListItem{
-				ID:               entry.ID,
-				SessionID:        entry.SessionID,
-				SessionSource:    entry.SessionSource,
-				RecordedAt:       entry.Header.Meta.Time,
-				Model:            entry.Header.Meta.Model,
-				Provider:         entry.Header.Meta.Provider,
-				SelectedUpstream: entry.Header.Meta.SelectedUpstreamID,
-				Operation:        entry.Header.Meta.Operation,
-				Endpoint:         entry.Header.Meta.Endpoint,
-				Method:           entry.Header.Meta.Method,
-				URL:              entry.Header.Meta.URL,
-				StatusCode:       entry.Header.Meta.StatusCode,
-				DurationMs:       entry.Header.Meta.DurationMs,
-				TTFTMs:           entry.Header.Meta.TTFTMs,
-				TotalTokens:      entry.Header.Usage.TotalTokens,
-				PromptTokens:     entry.Header.Usage.PromptTokens,
-				CompletionTokens: entry.Header.Usage.CompletionTokens,
-				CachedTokens:     cachedTokens(entry),
-				IsStream:         entry.Header.Layout.IsStream,
-				Error:            entry.Header.Meta.Error,
-			})
+			resp.Items = append(resp.Items, traceListItemFromEntry(entry))
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -2735,27 +2723,7 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			Summary: sessionSummaryItem(summary),
 		}
 		for _, entry := range traces {
-			resp.Traces = append(resp.Traces, traceListItem{
-				ID:               entry.ID,
-				SessionID:        entry.SessionID,
-				SessionSource:    entry.SessionSource,
-				RecordedAt:       entry.Header.Meta.Time,
-				Model:            entry.Header.Meta.Model,
-				Provider:         entry.Header.Meta.Provider,
-				Operation:        entry.Header.Meta.Operation,
-				Endpoint:         entry.Header.Meta.Endpoint,
-				Method:           entry.Header.Meta.Method,
-				URL:              entry.Header.Meta.URL,
-				StatusCode:       entry.Header.Meta.StatusCode,
-				DurationMs:       entry.Header.Meta.DurationMs,
-				TTFTMs:           entry.Header.Meta.TTFTMs,
-				TotalTokens:      entry.Header.Usage.TotalTokens,
-				PromptTokens:     entry.Header.Usage.PromptTokens,
-				CompletionTokens: entry.Header.Usage.CompletionTokens,
-				CachedTokens:     cachedTokens(entry),
-				IsStream:         entry.Header.Layout.IsStream,
-				Error:            entry.Header.Meta.Error,
-			})
+			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
 		}
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		resp.Timeline = buildSessionTimeline(resp.Traces)
@@ -2901,13 +2869,14 @@ func analysisBatchReanalyzeAPIHandler(st *store.Store) http.HandlerFunc {
 		}
 		opts := reanalysis.BatchOptions{
 			Filter: store.ListFilter{
-				Query:            strings.TrimSpace(req.Query),
-				Provider:         strings.TrimSpace(req.Provider),
-				Model:            strings.TrimSpace(req.Model),
-				Endpoint:         strings.TrimSpace(req.Endpoint),
-				SelectedUpstream: strings.TrimSpace(req.Upstream),
-				Status:           strings.TrimSpace(req.Status),
-				MissingUsage:     req.MissingUsage,
+				Query:             strings.TrimSpace(req.Query),
+				Provider:          strings.TrimSpace(req.Provider),
+				Model:             strings.TrimSpace(req.Model),
+				Endpoint:          strings.TrimSpace(req.Endpoint),
+				SelectedUpstream:  strings.TrimSpace(req.Upstream),
+				Status:            strings.TrimSpace(req.Status),
+				ObservationStatus: strings.TrimSpace(req.Observation),
+				MissingUsage:      req.MissingUsage,
 			},
 			Limit:       req.Limit,
 			RepairUsage: req.RepairUsage,
@@ -3660,6 +3629,7 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		RecordedAt:       entry.Header.Meta.Time,
 		Model:            entry.Header.Meta.Model,
 		Provider:         entry.Header.Meta.Provider,
+		SelectedUpstream: entry.Header.Meta.SelectedUpstreamID,
 		Operation:        entry.Header.Meta.Operation,
 		Endpoint:         entry.Header.Meta.Endpoint,
 		Method:           entry.Header.Meta.Method,
@@ -3673,6 +3643,20 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		CachedTokens:     cachedTokens(entry),
 		IsStream:         entry.Header.Layout.IsStream,
 		Error:            entry.Header.Meta.Error,
+		Observation:      observationListViewFromStore(entry.Observation),
+	}
+}
+
+func observationListViewFromStore(meta store.ObservationMetadata) observationListView {
+	status := strings.TrimSpace(meta.Status)
+	if status == "" {
+		status = "unparsed"
+	}
+	return observationListView{
+		Status:        status,
+		Parser:        meta.Parser,
+		ParserVersion: meta.ParserVersion,
+		UpdatedAt:     meta.UpdatedAt,
 	}
 }
 
@@ -3899,19 +3883,20 @@ func parseListFilter(r *http.Request) store.ListFilter {
 	}
 	query := r.URL.Query()
 	return store.ListFilter{
-		Query:            strings.TrimSpace(query.Get("q")),
-		Provider:         strings.TrimSpace(query.Get("provider")),
-		Model:            strings.TrimSpace(query.Get("model")),
-		Endpoint:         strings.TrimSpace(query.Get("endpoint")),
-		SelectedUpstream: strings.TrimSpace(query.Get("upstream")),
-		Status:           strings.TrimSpace(query.Get("status")),
-		MissingUsage:     parseBool(query.Get("missing_usage")),
-		MinDurationMs:    int64(parseInt(query.Get("min_duration_ms"), 0)),
-		MaxDurationMs:    int64(parseInt(query.Get("max_duration_ms"), 0)),
-		MinTTFTMs:        int64(parseInt(query.Get("min_ttft_ms"), 0)),
-		MaxTTFTMs:        int64(parseInt(query.Get("max_ttft_ms"), 0)),
-		MinTokens:        parseInt(query.Get("min_tokens"), 0),
-		MaxTokens:        parseInt(query.Get("max_tokens"), 0),
+		Query:             strings.TrimSpace(query.Get("q")),
+		Provider:          strings.TrimSpace(query.Get("provider")),
+		Model:             strings.TrimSpace(query.Get("model")),
+		Endpoint:          strings.TrimSpace(query.Get("endpoint")),
+		SelectedUpstream:  strings.TrimSpace(query.Get("upstream")),
+		Status:            strings.TrimSpace(query.Get("status")),
+		ObservationStatus: strings.TrimSpace(firstNonEmptyLocal(query.Get("observation"), query.Get("observation_status"))),
+		MissingUsage:      parseBool(query.Get("missing_usage")),
+		MinDurationMs:     int64(parseInt(query.Get("min_duration_ms"), 0)),
+		MaxDurationMs:     int64(parseInt(query.Get("max_duration_ms"), 0)),
+		MinTTFTMs:         int64(parseInt(query.Get("min_ttft_ms"), 0)),
+		MaxTTFTMs:         int64(parseInt(query.Get("max_ttft_ms"), 0)),
+		MinTokens:         parseInt(query.Get("min_tokens"), 0),
+		MaxTokens:         parseInt(query.Get("max_tokens"), 0),
 	}
 }
 
@@ -4303,6 +4288,15 @@ func parseBool(v string) bool {
 	default:
 		return false
 	}
+}
+
+func firstNonEmptyLocal(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func pathClean(v string) string {
