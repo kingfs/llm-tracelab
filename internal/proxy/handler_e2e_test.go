@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -1267,6 +1268,107 @@ func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("upstream calls = %d, want 2", calls)
+	}
+}
+
+func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var calls int
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":"temporary overload"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"resp_retry","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	var slept []time.Duration
+	oldSleeper := sleepForRetry
+	sleepForRetry = func(ctx context.Context, delay time.Duration) bool {
+		slept = append(slept, delay)
+		return true
+	}
+	t.Cleanup(func() {
+		sleepForRetry = oldSleeper
+	})
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200 after Retry-After retry", resp.StatusCode)
+	}
+	if len(slept) != 1 || slept[0] < 2*time.Second {
+		t.Fatalf("slept = %v, want one delay >= 2s", slept)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	var foundWait bool
+	for _, event := range parsed.Events {
+		if event.Type != "routing.retry_wait" {
+			continue
+		}
+		foundWait = true
+		if got := event.Attributes["delay_ms"]; got == nil || got.(float64) < 2000 {
+			t.Fatalf("retry wait delay_ms = %v, want >= 2000", got)
+		}
+		if got := event.Attributes["status_code"]; got != float64(http.StatusServiceUnavailable) {
+			t.Fatalf("retry wait status_code = %v, want %d", got, http.StatusServiceUnavailable)
+		}
+	}
+	if !foundWait {
+		t.Fatalf("routing.retry_wait event not found: %+v", parsed.Events)
 	}
 }
 

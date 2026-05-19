@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,6 +45,10 @@ const (
 )
 
 const upstreamRetryBudget = 30 * time.Second
+
+type retrySleeper func(context.Context, time.Duration) bool
+
+var sleepForRetry retrySleeper = defaultSleepForRetry
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
@@ -157,8 +163,7 @@ func (s *UsageSniffer) Close() error {
 		}
 		if s.Events != nil {
 			events := s.Pipeline.Events()
-			*s.Events = make([]recorder.RecordEvent, len(events))
-			copy(*s.Events, events)
+			*s.Events = append(*s.Events, events...)
 		}
 	}
 	return s.Source.Close()
@@ -369,6 +374,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		triedIDs      []string
 		retryAttempt  int
 		retryDeadline = start.Add(upstreamRetryBudget)
+		retryEvents   []recorder.RecordEvent
 	)
 
 	// 重试循环：优先快速尝试候选上游目标；所有候选短时不可用时，在
@@ -382,7 +388,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if selErr != nil {
 			if router.SelectionFailureReason(selErr) == router.SelectionFailureAllTargetsOpen && time.Now().Before(retryDeadline) {
-				if !sleepBeforeRetry(r.Context(), retryAttempt, retryDeadline) {
+				delay := retryDelay(retryAttempt, nil, retryDeadline)
+				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, "", 0, "all_targets_open", true))
+				if !sleepBeforeRetry(r.Context(), delay) {
 					if r.Context().Err() != nil {
 						return
 					}
@@ -390,13 +398,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					retryAttempt++
 					triedIDs = nil
 					_, _ = h.router.RefreshNow()
+					retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, "", 0, "all_targets_open", true))
 					continue
 				}
 			}
 			slog.Error("Failed to select upstream target", "error", selErr)
 			// 如果是第一次就失败，保持原有的 selection-failure 记录行为。
 			if len(triedIDs) == 0 {
-				h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selErr, bodyBytes)
+				h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selErr, bodyBytes, retryEvents)
 				http.Error(w, selErr.Error(), http.StatusBadGateway)
 				return
 			}
@@ -461,9 +470,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				StatusCode: 0,
 				Stream:     selection.Request.Stream,
 			})
+			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, 0, reqErr.Error(), false))
 			h.closeLogFile(logInfo)
 			if len(triedIDs) >= selection.CandidateCount {
-				if !sleepBeforeRetry(r.Context(), retryAttempt, retryDeadline) {
+				delay := retryDelay(retryAttempt, nil, retryDeadline)
+				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, 0, reqErr.Error(), true))
+				if !sleepBeforeRetry(r.Context(), delay) {
 					if r.Context().Err() != nil {
 						return
 					}
@@ -472,6 +484,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				retryAttempt++
 				triedIDs = nil
 				_, _ = h.router.RefreshNow()
+				retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, 0, reqErr.Error(), true))
 			}
 			continue
 		}
@@ -491,12 +504,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				DurationMs: float64(time.Since(start).Milliseconds()),
 				Stream:     selection.Request.Stream,
 			})
+			retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, false))
+			retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 			h.closeLogFile(logInfo)
 			if len(triedIDs) >= selection.CandidateCount {
 				if !isTransientRetryStatus(resp.StatusCode) {
 					break
 				}
-				if !sleepBeforeRetry(r.Context(), retryAttempt, retryDeadline) {
+				delay := retryDelay(retryAttempt, retryAfter, retryDeadline)
+				retryEvents = append(retryEvents, retryEvent("routing.retry_wait", retryAttempt, delay, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, true))
+				if !sleepBeforeRetry(r.Context(), delay) {
 					if r.Context().Err() != nil {
 						return
 					}
@@ -505,12 +522,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				retryAttempt++
 				triedIDs = nil
 				_, _ = h.router.RefreshNow()
+				retryEvents = append(retryEvents, retryEvent("routing.refresh", retryAttempt, 0, selection.Target.ID, resp.StatusCode, logInfo.Header.Meta.Error, true))
 			}
 			continue
 		}
 
 		// 成功 —— 将上游响应写入客户端
-		h.writeUpstreamResponse(irw, resp, logInfo, selection, start, r)
+		h.writeUpstreamResponse(irw, resp, logInfo, selection, start, r, retryEvents)
 		return
 	}
 
@@ -527,23 +545,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Record the failure with a fresh log file (previous attempt logs were already
 	// closed by closeLogFile in the retry loop).
 	if h.recorder != nil {
-		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes)
+		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes, retryEvents)
 	}
 	http.Error(w, "Proxy Error: "+lastErr.Error(), http.StatusBadGateway)
 }
 
-func sleepBeforeRetry(ctx context.Context, attempt int, deadline time.Time) bool {
-	if time.Now().After(deadline) {
+func sleepBeforeRetry(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
 		return false
 	}
-	delay := retryBackoff(attempt)
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
-		return false
-	}
-	if delay > remaining {
-		delay = remaining
-	}
+	return sleepForRetry(ctx, delay)
+}
+
+func defaultSleepForRetry(ctx context.Context, delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
@@ -552,6 +566,21 @@ func sleepBeforeRetry(ctx context.Context, attempt int, deadline time.Time) bool
 	case <-ctx.Done():
 		return false
 	}
+}
+
+func retryDelay(attempt int, retryAfter *time.Duration, deadline time.Time) time.Duration {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0
+	}
+	delay := retryBackoffWithJitter(attempt)
+	if retryAfter != nil && *retryAfter > delay {
+		delay = *retryAfter
+	}
+	if delay > remaining {
+		delay = remaining
+	}
+	return delay
 }
 
 func retryBackoff(attempt int) time.Duration {
@@ -566,6 +595,63 @@ func retryBackoff(attempt int) time.Duration {
 		return 5 * time.Second
 	}
 	return delay
+}
+
+func retryBackoffWithJitter(attempt int) time.Duration {
+	base := retryBackoff(attempt)
+	if base <= 0 {
+		return 0
+	}
+	// 20% positive jitter prevents coordinated wakeups while preserving the
+	// minimum backoff expected by tests and operators.
+	jitter := time.Duration(rand.Int63n(int64(base/5) + 1))
+	return base + jitter
+}
+
+func parseRetryAfter(raw string, now time.Time) *time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil {
+		if seconds <= 0 {
+			zero := time.Duration(0)
+			return &zero
+		}
+		delay := time.Duration(seconds) * time.Second
+		return &delay
+	}
+	when, err := http.ParseTime(raw)
+	if err != nil {
+		return nil
+	}
+	delay := when.Sub(now)
+	if delay < 0 {
+		delay = 0
+	}
+	return &delay
+}
+
+func retryEvent(eventType string, attempt int, delay time.Duration, upstreamID string, statusCode int, reason string, refresh bool) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"attempt":      attempt,
+		"delay_ms":     delay.Milliseconds(),
+		"refresh_next": refresh,
+	}
+	if upstreamID != "" {
+		attrs["upstream_id"] = upstreamID
+	}
+	if statusCode > 0 {
+		attrs["status_code"] = statusCode
+	}
+	if reason != "" {
+		attrs["reason"] = reason
+	}
+	return recorder.RecordEvent{
+		Type:       eventType,
+		Time:       time.Now().UTC(),
+		Attributes: attrs,
+	}
 }
 
 // sendUpstreamRequest prepares a request targeting the given upstream and executes it.
@@ -618,7 +704,9 @@ func (h *Handler) writeUpstreamResponse(
 	selection *router.Selection,
 	start time.Time,
 	originalReq *http.Request,
+	retryEvents []recorder.RecordEvent,
 ) {
+	logInfo.Events = append(logInfo.Events, retryEvents...)
 	// Write separator and response header to log file.
 	logInfo.File.Write([]byte("\n"))
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
@@ -817,7 +905,7 @@ func (h *Handler) routerPolicy() string {
 	return h.router.Policy()
 }
 
-func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte) {
+func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
 	}
@@ -862,6 +950,7 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	logInfo.Header.Meta.ContentLength = int64(len(body))
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
+	logInfo.Events = append(logInfo.Events, retryEvents...)
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
 		Type:    "routing.failure",
 		Time:    time.Now().UTC(),

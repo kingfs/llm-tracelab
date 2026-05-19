@@ -137,6 +137,51 @@ func TestRetryBackoffCapsAtFiveSeconds(t *testing.T) {
 	}
 }
 
+func TestRetryBackoffWithJitterStaysWithinBounds(t *testing.T) {
+	base := retryBackoff(2)
+	for i := 0; i < 100; i++ {
+		got := retryBackoffWithJitter(2)
+		if got < base {
+			t.Fatalf("retryBackoffWithJitter(2) = %s, below base %s", got, base)
+		}
+		if got > base+base/5 {
+			t.Fatalf("retryBackoffWithJitter(2) = %s, above max %s", got, base+base/5)
+		}
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 5, 19, 3, 20, 0, 0, time.UTC)
+
+	seconds := parseRetryAfter("2", now)
+	if seconds == nil || *seconds != 2*time.Second {
+		t.Fatalf("parseRetryAfter seconds = %v, want 2s", seconds)
+	}
+
+	date := parseRetryAfter(now.Add(3*time.Second).Format(http.TimeFormat), now)
+	if date == nil || *date != 3*time.Second {
+		t.Fatalf("parseRetryAfter date = %v, want 3s", date)
+	}
+
+	if got := parseRetryAfter("invalid", now); got != nil {
+		t.Fatalf("parseRetryAfter invalid = %v, want nil", *got)
+	}
+}
+
+func TestRetryDelayHonorsRetryAfterWithinDeadline(t *testing.T) {
+	retryAfter := 2 * time.Second
+	got := retryDelay(0, &retryAfter, time.Now().Add(10*time.Second))
+	if got < retryAfter {
+		t.Fatalf("retryDelay = %s, want at least Retry-After %s", got, retryAfter)
+	}
+
+	shortDeadline := time.Now().Add(100 * time.Millisecond)
+	got = retryDelay(0, &retryAfter, shortDeadline)
+	if got > 150*time.Millisecond {
+		t.Fatalf("retryDelay with short deadline = %s, want capped near deadline", got)
+	}
+}
+
 type nopReadCloser struct{ Reader *bytes.Buffer }
 
 func (n nopReadCloser) Read(p []byte) (int, error) { return n.Reader.Read(p) }
