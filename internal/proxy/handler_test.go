@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -121,6 +122,18 @@ func TestHandlerTransportVerifiesUpstreamTLSByDefault(t *testing.T) {
 	}
 	if transport.TLSClientConfig != nil && transport.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("proxy transport disables upstream TLS certificate verification")
+	}
+}
+
+func TestRetryBackoffCapsAtFiveSeconds(t *testing.T) {
+	if got := retryBackoff(0); got != 250*time.Millisecond {
+		t.Fatalf("retryBackoff(0) = %s, want 250ms", got)
+	}
+	if got := retryBackoff(5); got != 5*time.Second {
+		t.Fatalf("retryBackoff(5) = %s, want 5s", got)
+	}
+	if got := retryBackoff(20); got != 5*time.Second {
+		t.Fatalf("retryBackoff(20) = %s, want 5s", got)
 	}
 }
 

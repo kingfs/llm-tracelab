@@ -42,6 +42,8 @@ const (
 	selectionContextKey contextKey = "router_selection"
 )
 
+const upstreamRetryBudget = 30 * time.Second
+
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
 	_, _ = readAndNormalizeRequestBody(req)
@@ -361,13 +363,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	irw := NewInstrumentedResponseWriter(w)
 
 	var (
-		lastErr   error
-		logInfo   *recorder.LogInfo
-		selection *router.Selection
-		triedIDs  []string
+		lastErr       error
+		logInfo       *recorder.LogInfo
+		selection     *router.Selection
+		triedIDs      []string
+		retryAttempt  int
+		retryDeadline = start.Add(upstreamRetryBudget)
 	)
 
-	// 重试循环：逐个尝试候选上游目标，遇到可重试失败时自动降级到下一个。
+	// 重试循环：优先快速尝试候选上游目标；所有候选短时不可用时，在
+	// 30s 预算内做指数退避后重新选择，避免把短暂上游抖动直接暴露成 502。
 	for {
 		var selErr error
 		if len(triedIDs) == 0 {
@@ -376,6 +381,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			selection, selErr = h.router.SelectWithExclusion(r, bodyBytes, triedIDs)
 		}
 		if selErr != nil {
+			if router.SelectionFailureReason(selErr) == router.SelectionFailureAllTargetsOpen && time.Now().Before(retryDeadline) {
+				if !sleepBeforeRetry(r.Context(), retryAttempt, retryDeadline) {
+					if r.Context().Err() != nil {
+						return
+					}
+				} else {
+					retryAttempt++
+					triedIDs = nil
+					_, _ = h.router.RefreshNow()
+					continue
+				}
+			}
 			slog.Error("Failed to select upstream target", "error", selErr)
 			// 如果是第一次就失败，保持原有的 selection-failure 记录行为。
 			if len(triedIDs) == 0 {
@@ -445,6 +462,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Stream:     selection.Request.Stream,
 			})
 			h.closeLogFile(logInfo)
+			if len(triedIDs) >= selection.CandidateCount {
+				if !sleepBeforeRetry(r.Context(), retryAttempt, retryDeadline) {
+					if r.Context().Err() != nil {
+						return
+					}
+					break
+				}
+				retryAttempt++
+				triedIDs = nil
+				_, _ = h.router.RefreshNow()
+			}
 			continue
 		}
 
@@ -465,7 +493,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			})
 			h.closeLogFile(logInfo)
 			if len(triedIDs) >= selection.CandidateCount {
-				break
+				if !isTransientRetryStatus(resp.StatusCode) {
+					break
+				}
+				if !sleepBeforeRetry(r.Context(), retryAttempt, retryDeadline) {
+					if r.Context().Err() != nil {
+						return
+					}
+					break
+				}
+				retryAttempt++
+				triedIDs = nil
+				_, _ = h.router.RefreshNow()
 			}
 			continue
 		}
@@ -491,6 +530,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes)
 	}
 	http.Error(w, "Proxy Error: "+lastErr.Error(), http.StatusBadGateway)
+}
+
+func sleepBeforeRetry(ctx context.Context, attempt int, deadline time.Time) bool {
+	if time.Now().After(deadline) {
+		return false
+	}
+	delay := retryBackoff(attempt)
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
+	if delay > remaining {
+		delay = remaining
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func retryBackoff(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	delay := 250 * time.Millisecond
+	for i := 0; i < attempt && delay < 5*time.Second; i++ {
+		delay *= 2
+	}
+	if delay > 5*time.Second {
+		return 5 * time.Second
+	}
+	return delay
 }
 
 // sendUpstreamRequest prepares a request targeting the given upstream and executes it.
@@ -635,6 +710,20 @@ func isRetryableStatus(code int) bool {
 		http.StatusBadGateway,         // 502
 		http.StatusServiceUnavailable, // 503
 		http.StatusGatewayTimeout:     // 504
+		return true
+	default:
+		return code >= http.StatusInternalServerError
+	}
+}
+
+func isTransientRetryStatus(code int) bool {
+	switch code {
+	case http.StatusTooManyRequests,
+		http.StatusRequestTimeout,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
 		return true
 	default:
 		return code >= http.StatusInternalServerError

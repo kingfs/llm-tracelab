@@ -414,11 +414,28 @@ func (r *Router) StartBackgroundRefresh() {
 				if _, err := r.refreshAll(); err != nil {
 					continue
 				}
+				r.mu.Lock()
+				r.rebuildCatalog()
+				r.mu.Unlock()
 			case <-r.stopCh:
 				return
 			}
 		}
 	}()
+}
+
+func (r *Router) RefreshNow() (int, error) {
+	if r == nil {
+		return 0, nil
+	}
+	usable, err := r.refreshAll()
+	if err != nil {
+		return usable, err
+	}
+	r.mu.Lock()
+	r.rebuildCatalog()
+	r.mu.Unlock()
+	return usable, nil
 }
 
 func (r *Router) Close() {

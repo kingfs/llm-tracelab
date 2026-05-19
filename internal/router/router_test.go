@@ -888,3 +888,50 @@ func TestRouterSelectWithExclusion(t *testing.T) {
 		t.Fatalf("SelectWithExclusion(nil) = %q, want primary (same as SelectWithBody)", sel5.Target.ID)
 	}
 }
+
+func TestRouterRefreshNowRebuildsCatalog(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	target := rtr.Targets()[0]
+	target.StaticModels = []string{"gpt-5.5"}
+
+	if _, err := rtr.RefreshNow(); err != nil {
+		t.Fatalf("RefreshNow() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() after RefreshNow error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
+	}
+}

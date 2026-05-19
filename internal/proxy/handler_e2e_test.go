@@ -1202,6 +1202,72 @@ func TestHandlerRetryOnUpstream500(t *testing.T) {
 	}
 }
 
+func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var calls int
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		if calls == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, `{"error":"temporary overload"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"resp_retry","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200 after transient retry", resp.StatusCode)
+	}
+	if calls != 2 {
+		t.Fatalf("upstream calls = %d, want 2", calls)
+	}
+}
+
 func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
