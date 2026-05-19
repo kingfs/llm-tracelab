@@ -78,6 +78,8 @@ Review:
 
 ### Phase 2: Probation Traffic Control
 
+Status: implemented.
+
 Scope:
 
 - restrict concurrent traffic sent to `probation` targets
@@ -89,6 +91,18 @@ Acceptance:
 - router tests prove probation concurrency limit
 - proxy e2e proves recovered target does not receive a burst of concurrent
   requests
+
+Review:
+
+- router now treats `probation` as a half-open state with one in-flight probe
+  allowed per target
+- concurrent requests see the target as temporarily unavailable and reuse the
+  proxy retry budget instead of bursting into the recovering upstream
+- successful probation probes recover the target to `healthy`
+- fixed EWMA handling so zero-valued success samples decay error and timeout
+  rates instead of leaving stale failure rates permanently high
+- next phase should stay on model-scoped health because whole-upstream health is
+  now bounded at recovery time
 
 ### Phase 3: Model-Scoped Health
 

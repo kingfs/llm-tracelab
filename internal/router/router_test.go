@@ -990,6 +990,67 @@ func TestRouterRefreshNowRecoversOpenTargetToProbation(t *testing.T) {
 	}
 }
 
+func TestRouterProbationTargetAllowsOnlyOneProbe(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	first, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	rtr.Complete(first, Outcome{Success: false, StatusCode: http.StatusServiceUnavailable})
+	if _, err := rtr.RefreshNow(); err != nil {
+		t.Fatalf("RefreshNow() error = %v", err)
+	}
+
+	probe, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() probation probe error = %v", err)
+	}
+
+	_, err = rtr.Select(req)
+	if err == nil {
+		t.Fatalf("Select() concurrent probation request error = nil, want all targets open")
+	}
+	if SelectionFailureReason(err) != SelectionFailureAllTargetsOpen {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureAllTargetsOpen)
+	}
+
+	rtr.Complete(probe, Outcome{Success: true, StatusCode: http.StatusOK})
+	if _, err := rtr.Select(req); err != nil {
+		t.Fatalf("Select() after successful probation probe error = %v", err)
+	}
+}
+
 func TestTargetRefreshFailureCanOpenHealthState(t *testing.T) {
 	target := &Target{
 		ID:          "primary",

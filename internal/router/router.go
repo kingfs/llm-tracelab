@@ -38,6 +38,8 @@ const (
 	HealthProbation = "probation"
 )
 
+const probationInflightLimit int64 = 1
+
 type costConfig struct {
 	FastAlpha           float64
 	SlowAlpha           float64
@@ -580,7 +582,7 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 
 	available := make([]*Target, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.isOpen(time.Now()) {
+		if !candidate.canSelect(time.Now()) {
 			continue
 		}
 		if _, excluded := excludeSet[candidate.ID]; excluded {
@@ -922,13 +924,19 @@ func (t *Target) snapshot() Snapshot {
 	}
 }
 
-func (t *Target) isOpen(now time.Time) bool {
+func (t *Target) canSelect(now time.Time) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.After(t.openUntil) {
 		t.healthState = HealthProbation
 	}
-	return t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil)
+	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil) {
+		return false
+	}
+	if t.healthState == HealthProbation && t.inflight >= probationInflightLimit {
+		return false
+	}
+	return true
 }
 
 func (t *Target) onStart(req RequestFeatures) {
@@ -988,12 +996,14 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 
 	ttftRatio := ratio(t.ttftFastMs, t.ttftSlowMs)
 	switch {
+	case t.healthState == HealthProbation && outcome.Success:
+		t.healthState = HealthHealthy
+		t.openUntil = time.Time{}
+		t.consecutiveFailures = 0
 	case t.consecutiveFailures >= failureThreshold || t.errorRate >= costs.ErrorRateOpen || t.timeoutRate >= costs.TimeoutRateOpen:
 		t.healthState = HealthOpen
 		t.openUntil = time.Now().Add(openWindow)
 		t.consecutiveFailures = 0
-	case t.healthState == HealthProbation && outcome.Success:
-		t.healthState = HealthHealthy
 	case t.errorRate >= costs.ErrorRateDegraded || t.timeoutRate >= costs.TimeoutRateDegraded || ttftRatio >= costs.TTFTDegradedRatio:
 		if t.healthState != HealthProbation {
 			t.healthState = HealthDegraded
@@ -1252,7 +1262,7 @@ func defaultFloat(v float64, fallback float64) float64 {
 }
 
 func ewma(old, sample, alpha float64) float64 {
-	if sample <= 0 {
+	if sample < 0 {
 		return old
 	}
 	if old <= 0 {
