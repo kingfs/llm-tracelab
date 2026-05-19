@@ -698,7 +698,7 @@ func TestRouterCostAwareSelectionAvoidsDegradedTarget(t *testing.T) {
 	}
 	stable.onFinish(reqFeatures, Outcome{Success: true, StatusCode: 200, DurationMs: 700, TTFTMs: 120}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
 	for i := 0; i < 3; i++ {
-		flaky.onFinish(reqFeatures, Outcome{Success: false, StatusCode: 500, DurationMs: 1200, TTFTMs: 0}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
+		flaky.onFinish(reqFeatures, Outcome{Success: false, StatusCode: 0, DurationMs: 1200, TTFTMs: 0}, rtr.costs, rtr.failureThreshold, rtr.openWindow)
 	}
 
 	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
@@ -974,7 +974,7 @@ func TestRouterRefreshNowRecoversOpenTargetToProbation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	rtr.Complete(selection, Outcome{Success: false, StatusCode: http.StatusServiceUnavailable})
+	rtr.Complete(selection, Outcome{Success: false, StatusCode: 0})
 	if got := rtr.Snapshots()[0].HealthState; got != HealthOpen {
 		t.Fatalf("HealthState after failure = %q, want %q", got, HealthOpen)
 	}
@@ -1027,7 +1027,7 @@ func TestRouterProbationTargetAllowsOnlyOneProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select() error = %v", err)
 	}
-	rtr.Complete(first, Outcome{Success: false, StatusCode: http.StatusServiceUnavailable})
+	rtr.Complete(first, Outcome{Success: false, StatusCode: 0})
 	if _, err := rtr.RefreshNow(); err != nil {
 		t.Fatalf("RefreshNow() error = %v", err)
 	}
@@ -1048,6 +1048,66 @@ func TestRouterProbationTargetAllowsOnlyOneProbe(t *testing.T) {
 	rtr.Complete(probe, Outcome{Success: true, StatusCode: http.StatusOK})
 	if _, err := rtr.Select(req); err != nil {
 		t.Fatalf("Select() after successful probation probe error = %v", err)
+	}
+}
+
+func TestRouterModelScopedFailureDoesNotOpenWholeTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5", "gpt-5.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	failingReq, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	failingReq.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(failingReq)
+	if err != nil {
+		t.Fatalf("Select(gpt-5.5) error = %v", err)
+	}
+	rtr.Complete(selection, Outcome{Success: false, StatusCode: http.StatusServiceUnavailable})
+
+	_, err = rtr.Select(failingReq)
+	if err == nil {
+		t.Fatalf("Select(gpt-5.5) after model failure error = nil, want unavailable")
+	}
+	if SelectionFailureReason(err) != SelectionFailureAllTargetsOpen {
+		t.Fatalf("SelectionFailureReason(gpt-5.5) = %q, want %q", SelectionFailureReason(err), SelectionFailureAllTargetsOpen)
+	}
+
+	healthyReq, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5.1","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	healthyReq.Header.Set("Content-Type", "application/json")
+	selection, err = rtr.Select(healthyReq)
+	if err != nil {
+		t.Fatalf("Select(gpt-5.1) after gpt-5.5 model failure error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
 	}
 }
 

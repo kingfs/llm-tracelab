@@ -106,6 +106,8 @@ Review:
 
 ### Phase 3: Model-Scoped Health
 
+Status: implemented.
+
 Scope:
 
 - track health by `(upstream_id, model)` for model-specific upstream failures
@@ -116,6 +118,21 @@ Acceptance:
 
 - one failing model does not make unrelated models unavailable
 - failure analytics can distinguish upstream-level and model-level open reasons
+
+Review:
+
+- router now tracks model-level health for retryable HTTP failures with an
+  explicit request model
+- network errors still update upstream-level health
+- model-level open state blocks only the affected model
+- successful catalog refresh moves discovered model health back to probation so
+  one real request can probe recovery
+- existing single-upstream transient recovery e2e remains fast because refresh
+  can recover both upstream and model state
+- failure analytics still needs explicit model-level reason exposure; keep this
+  as monitor/MCP visibility work instead of expanding router behavior now
+- next phase is request queue guardrails: bound how many requests may wait while
+  all candidates are unavailable
 
 ### Phase 4: Request Queue Guardrails
 

@@ -156,6 +156,14 @@ type Target struct {
 	timeoutRate         float64
 	cancelRate          float64
 	healthState         string
+	modelHealth         map[string]*modelHealthState
+}
+
+type modelHealthState struct {
+	consecutiveFailures int64
+	openUntil           time.Time
+	healthState         string
+	errorRate           float64
 }
 
 type Snapshot struct {
@@ -322,6 +330,7 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 			reqLatencyFastMs:   800,
 			reqLatencySlowMs:   800,
 			healthState:        HealthHealthy,
+			modelHealth:        map[string]*modelHealthState{},
 		}
 		if _, exists := seenIDs[target.ID]; exists {
 			return nil, fmt.Errorf("duplicate upstream target id %q", target.ID)
@@ -582,7 +591,7 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 
 	available := make([]*Target, 0, len(candidates))
 	for _, candidate := range candidates {
-		if !candidate.canSelect(time.Now()) {
+		if !candidate.canSelect(time.Now(), model) {
 			continue
 		}
 		if _, excluded := excludeSet[candidate.ID]; excluded {
@@ -823,10 +832,10 @@ func (t *Target) setRefreshResult(models []string, status string, refreshErr err
 	} else {
 		t.lastRefreshError = ""
 	}
-	t.applyRefreshHealthLocked(status, refreshErr, failureThreshold, openWindow, costs)
+	t.applyRefreshHealthLocked(models, status, refreshErr, failureThreshold, openWindow, costs)
 }
 
-func (t *Target) applyRefreshHealthLocked(status string, refreshErr error, failureThreshold int64, openWindow time.Duration, costs costConfig) {
+func (t *Target) applyRefreshHealthLocked(models []string, status string, refreshErr error, failureThreshold int64, openWindow time.Duration, costs costConfig) {
 	if status != "ready" && status != "empty" && status != "static" && status != "error" {
 		return
 	}
@@ -858,6 +867,18 @@ func (t *Target) applyRefreshHealthLocked(status string, refreshErr error, failu
 	if t.healthState == HealthOpen || t.healthState == HealthDegraded || t.healthState == HealthProbation {
 		t.healthState = HealthProbation
 		t.openUntil = time.Time{}
+	}
+	for _, model := range models {
+		state := t.modelHealth[strings.ToLower(strings.TrimSpace(model))]
+		if state == nil {
+			continue
+		}
+		if state.healthState == HealthOpen || state.healthState == HealthDegraded || state.healthState == HealthProbation {
+			state.healthState = HealthProbation
+			state.openUntil = time.Time{}
+			state.consecutiveFailures = 0
+			state.errorRate = ewma(state.errorRate, 0, costs.FastAlpha)
+		}
 	}
 }
 
@@ -924,7 +945,7 @@ func (t *Target) snapshot() Snapshot {
 	}
 }
 
-func (t *Target) canSelect(now time.Time) bool {
+func (t *Target) canSelect(now time.Time, model string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.After(t.openUntil) {
@@ -935,6 +956,21 @@ func (t *Target) canSelect(now time.Time) bool {
 	}
 	if t.healthState == HealthProbation && t.inflight >= probationInflightLimit {
 		return false
+	}
+	modelKey := strings.ToLower(strings.TrimSpace(model))
+	if modelKey != "" {
+		state := t.modelHealth[modelKey]
+		if state != nil {
+			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.After(state.openUntil) {
+				state.healthState = HealthProbation
+			}
+			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.Before(state.openUntil) {
+				return false
+			}
+			if state.healthState == HealthProbation && t.inflight >= probationInflightLimit {
+				return false
+			}
+		}
 	}
 	return true
 }
@@ -980,11 +1016,15 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 	t.cancelRate = ewma(t.cancelRate, 0, costs.FastAlpha)
 
 	healthFailure := countsAsUpstreamHealthFailure(outcome)
+	modelScoped := shouldUpdateModelHealth(req, outcome)
+	if modelScoped {
+		t.updateModelHealthLocked(req.ModelName, outcome, costs, failureThreshold, openWindow)
+	}
 	if outcome.Success {
 		t.errorRate = ewma(t.errorRate, 0, costs.FastAlpha)
 		t.timeoutRate = ewma(t.timeoutRate, 0, costs.FastAlpha)
 		t.consecutiveFailures = 0
-	} else if healthFailure {
+	} else if healthFailure && !modelScoped {
 		t.errorRate = ewma(t.errorRate, 1, costs.FastAlpha)
 		t.consecutiveFailures++
 		if countsAsUpstreamTimeout(outcome) {
@@ -1012,6 +1052,63 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 		if t.healthState != HealthOpen {
 			t.healthState = HealthHealthy
 		}
+	}
+}
+
+func shouldUpdateModelHealth(req RequestFeatures, outcome Outcome) bool {
+	if strings.TrimSpace(req.ModelName) == "" || outcome.ClientCanceled {
+		return false
+	}
+	if outcome.Success {
+		return true
+	}
+	if outcome.StatusCode == 0 {
+		return false
+	}
+	return countsAsUpstreamHealthFailure(outcome)
+}
+
+func (t *Target) updateModelHealthLocked(model string, outcome Outcome, costs costConfig, failureThreshold int64, openWindow time.Duration) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return
+	}
+	if t.modelHealth == nil {
+		t.modelHealth = map[string]*modelHealthState{}
+	}
+	state := t.modelHealth[model]
+	if state == nil {
+		state = &modelHealthState{healthState: HealthHealthy}
+		t.modelHealth[model] = state
+	}
+	if failureThreshold <= 0 {
+		failureThreshold = 3
+	}
+	if openWindow <= 0 {
+		openWindow = 15 * time.Second
+	}
+	if outcome.Success {
+		state.errorRate = ewma(state.errorRate, 0, costs.FastAlpha)
+		state.consecutiveFailures = 0
+		if state.healthState == HealthOpen || state.healthState == HealthProbation || state.healthState == HealthDegraded {
+			state.healthState = HealthHealthy
+			state.openUntil = time.Time{}
+		}
+		return
+	}
+	state.errorRate = ewma(state.errorRate, 1, costs.FastAlpha)
+	state.consecutiveFailures++
+	switch {
+	case state.healthState == HealthProbation:
+		state.healthState = HealthOpen
+		state.openUntil = time.Now().Add(openWindow)
+		state.consecutiveFailures = 0
+	case state.consecutiveFailures >= failureThreshold || state.errorRate >= costs.ErrorRateOpen:
+		state.healthState = HealthOpen
+		state.openUntil = time.Now().Add(openWindow)
+		state.consecutiveFailures = 0
+	case state.errorRate >= costs.ErrorRateDegraded:
+		state.healthState = HealthDegraded
 	}
 }
 
