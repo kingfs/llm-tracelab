@@ -30,11 +30,12 @@ type Options struct {
 }
 
 type listTracesInput struct {
-	Page     int    `json:"page,omitempty" jsonschema:"1-based page number"`
-	PageSize int    `json:"page_size,omitempty" jsonschema:"number of items per page, max 200"`
-	Provider string `json:"provider,omitempty" jsonschema:"optional provider filter"`
-	Model    string `json:"model,omitempty" jsonschema:"optional model substring filter"`
-	Query    string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
+	Page              int    `json:"page,omitempty" jsonschema:"1-based page number"`
+	PageSize          int    `json:"page_size,omitempty" jsonschema:"number of items per page, max 200"`
+	Provider          string `json:"provider,omitempty" jsonschema:"optional provider filter"`
+	Model             string `json:"model,omitempty" jsonschema:"optional model substring filter"`
+	Query             string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
+	ObservationStatus string `json:"observation,omitempty" jsonschema:"optional Observation IR status filter: parsed, failed, queued, running, or unparsed"`
 }
 
 type getTraceInput struct {
@@ -253,7 +254,7 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_traces",
-		Description: "List recorded traces with pagination and optional provider/model/query filters.",
+		Description: "List recorded traces with pagination and optional provider/model/query/Observation status filters.",
 	}, api.listTraces)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_trace",
@@ -330,6 +331,7 @@ func (a *serverAPI) listTraces(ctx context.Context, req *mcp.CallToolRequest, in
 	setIfNotEmpty(values, "provider", in.Provider)
 	setIfNotEmpty(values, "model", in.Model)
 	setIfNotEmpty(values, "q", in.Query)
+	setIfNotEmpty(values, "observation", in.ObservationStatus)
 
 	var out traceListOutput
 	if err := a.getJSON(ctx, "/api/traces", values, &out); err != nil {

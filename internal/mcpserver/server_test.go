@@ -83,6 +83,18 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err := st.Sync(); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
+	successEntry, err := st.GetByRequestID("req-success")
+	if err != nil {
+		t.Fatalf("GetByRequestID(req-success) error = %v", err)
+	}
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       successEntry.ID,
+		Parser:        "openai",
+		ParserVersion: "0.1.0",
+		Status:        observe.ParseStatusParsed,
+	}); err != nil {
+		t.Fatalf("SaveObservation(success) error = %v", err)
+	}
 	failureEntry, err := st.GetByRequestID("req-failure")
 	if err != nil {
 		t.Fatalf("GetByRequestID(req-failure) error = %v", err)
@@ -172,6 +184,28 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	traceID := items[0].(map[string]any)["id"].(string)
 	if strings.TrimSpace(traceID) == "" {
 		t.Fatalf("trace id missing from list_traces")
+	}
+	if _, ok := items[0].(map[string]any)["observation"].(map[string]any); !ok {
+		t.Fatalf("list_traces observation metadata missing: %+v", items[0])
+	}
+
+	unparsedTraces, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "list_traces",
+		Arguments: map[string]any{"page_size": 10, "observation": "unparsed"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(list_traces unparsed) error = %v", err)
+	}
+	unparsedItems := unparsedTraces.StructuredContent.(map[string]any)["items"].([]any)
+	if len(unparsedItems) != 1 {
+		t.Fatalf("len(list_traces unparsed.items) = %d, want 1", len(unparsedItems))
+	}
+	unparsedItem := unparsedItems[0].(map[string]any)
+	if got := unparsedItem["id"].(string); got != failureEntry.ID {
+		t.Fatalf("list_traces unparsed id = %q, want %q", got, failureEntry.ID)
+	}
+	if got := unparsedItem["observation"].(map[string]any)["status"].(string); got != "unparsed" {
+		t.Fatalf("list_traces unparsed observation = %q, want unparsed", got)
 	}
 
 	traceDetail, err := session.CallTool(context.Background(), &mcp.CallToolParams{
