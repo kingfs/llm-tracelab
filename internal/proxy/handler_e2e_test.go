@@ -1239,6 +1239,8 @@ func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 		},
 	}
 	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 

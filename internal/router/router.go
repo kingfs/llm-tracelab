@@ -102,6 +102,9 @@ type Router struct {
 	random           *rand.Rand
 	stopCh           chan struct{}
 	stopOnce         sync.Once
+	refreshMu        sync.Mutex
+	refreshCond      *sync.Cond
+	refreshing       bool
 }
 
 func (r *Router) HealthThresholds() HealthThresholds {
@@ -262,6 +265,7 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		random:           rand.New(rand.NewSource(time.Now().UnixNano())),
 		stopCh:           make(chan struct{}),
 	}
+	r.refreshCond = sync.NewCond(&r.refreshMu)
 	if cfg.Router.Selection.Epsilon > 0 {
 		r.costs.Epsilon = cfg.Router.Selection.Epsilon
 	}
@@ -428,6 +432,23 @@ func (r *Router) RefreshNow() (int, error) {
 	if r == nil {
 		return 0, nil
 	}
+	r.refreshMu.Lock()
+	if r.refreshing {
+		for r.refreshing {
+			r.refreshCond.Wait()
+		}
+		r.refreshMu.Unlock()
+		return 0, nil
+	}
+	r.refreshing = true
+	r.refreshMu.Unlock()
+	defer func() {
+		r.refreshMu.Lock()
+		r.refreshing = false
+		r.refreshCond.Broadcast()
+		r.refreshMu.Unlock()
+	}()
+
 	usable, err := r.refreshAll()
 	if err != nil {
 		return usable, err
@@ -730,7 +751,7 @@ func (r *Router) refreshTargets(targets []*Target) (int, error) {
 		if refreshErr == nil || len(models) > 0 || target.allowUnknownModels {
 			usable++
 		}
-		target.setRefreshResult(models, status, refreshErr)
+		target.setRefreshResult(models, status, refreshErr, r.failureThreshold, r.openWindow, r.costs)
 		if r.store != nil {
 			record := store.UpstreamTargetRecord{
 				ID:                target.ID,
@@ -784,7 +805,7 @@ func (r *Router) rebuildCatalog() {
 	r.modelToTargets = catalog
 }
 
-func (t *Target) setRefreshResult(models []string, status string, refreshErr error) {
+func (t *Target) setRefreshResult(models []string, status string, refreshErr error, failureThreshold int64, openWindow time.Duration, costs costConfig) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.models = make(map[string]struct{}, len(models))
@@ -799,6 +820,42 @@ func (t *Target) setRefreshResult(models []string, status string, refreshErr err
 		t.lastRefreshError = refreshErr.Error()
 	} else {
 		t.lastRefreshError = ""
+	}
+	t.applyRefreshHealthLocked(status, refreshErr, failureThreshold, openWindow, costs)
+}
+
+func (t *Target) applyRefreshHealthLocked(status string, refreshErr error, failureThreshold int64, openWindow time.Duration, costs costConfig) {
+	if status != "ready" && status != "empty" && status != "static" && status != "error" {
+		return
+	}
+	if failureThreshold <= 0 {
+		failureThreshold = 3
+	}
+	if openWindow <= 0 {
+		openWindow = 15 * time.Second
+	}
+	if refreshErr != nil {
+		t.consecutiveFailures++
+		if t.errorRate > 0 {
+			t.errorRate = ewma(t.errorRate, 1, costs.FastAlpha)
+		}
+		if t.consecutiveFailures >= failureThreshold {
+			t.healthState = HealthOpen
+			t.openUntil = time.Now().Add(openWindow)
+			t.consecutiveFailures = 0
+			return
+		}
+		if t.healthState != HealthOpen {
+			t.healthState = HealthDegraded
+		}
+		return
+	}
+	t.errorRate = ewma(t.errorRate, 0, costs.FastAlpha)
+	t.timeoutRate = ewma(t.timeoutRate, 0, costs.FastAlpha)
+	t.consecutiveFailures = 0
+	if t.healthState == HealthOpen || t.healthState == HealthDegraded || t.healthState == HealthProbation {
+		t.healthState = HealthProbation
+		t.openUntil = time.Time{}
 	}
 }
 

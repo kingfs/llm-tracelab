@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -933,5 +934,81 @@ func TestRouterRefreshNowRebuildsCatalog(t *testing.T) {
 	}
 	if selection.Target.ID != "primary" {
 		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
+	}
+}
+
+func TestRouterRefreshNowRecoversOpenTargetToProbation(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.FailureThreshold = 1
+	cfg.Router.Selection.OpenWindow = time.Hour
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5.5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	rtr.Complete(selection, Outcome{Success: false, StatusCode: http.StatusServiceUnavailable})
+	if got := rtr.Snapshots()[0].HealthState; got != HealthOpen {
+		t.Fatalf("HealthState after failure = %q, want %q", got, HealthOpen)
+	}
+
+	if _, err := rtr.RefreshNow(); err != nil {
+		t.Fatalf("RefreshNow() error = %v", err)
+	}
+	if got := rtr.Snapshots()[0].HealthState; got != HealthProbation {
+		t.Fatalf("HealthState after successful refresh = %q, want %q", got, HealthProbation)
+	}
+	if _, err := rtr.Select(req); err != nil {
+		t.Fatalf("Select() after successful refresh error = %v", err)
+	}
+}
+
+func TestTargetRefreshFailureCanOpenHealthState(t *testing.T) {
+	target := &Target{
+		ID:          "primary",
+		models:      map[string]struct{}{},
+		healthState: HealthHealthy,
+	}
+	costs := defaultCostConfig()
+
+	target.setRefreshResult(nil, "error", errors.New("temporary discovery failure"), 2, time.Minute, costs)
+	if got := target.snapshot().HealthState; got != HealthDegraded {
+		t.Fatalf("HealthState after first refresh failure = %q, want %q", got, HealthDegraded)
+	}
+
+	target.setRefreshResult(nil, "error", errors.New("temporary discovery failure"), 2, time.Minute, costs)
+	snapshot := target.snapshot()
+	if snapshot.HealthState != HealthOpen {
+		t.Fatalf("HealthState after second refresh failure = %q, want %q", snapshot.HealthState, HealthOpen)
+	}
+	if snapshot.OpenUntil.IsZero() {
+		t.Fatalf("OpenUntil is zero after refresh failures opened target")
 	}
 }
