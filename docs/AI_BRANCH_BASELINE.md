@@ -50,6 +50,9 @@ The following branch slices are implemented and already committed:
 14. `4de0b99` `feat: explain experiment regressions`
 15. `6ac856a` `feat: create datasets from experiment regressions`
 16. `e5b3661` `docs: align mcp capability baseline`
+17. `8298cff` `feat: expose trace observation filters`
+18. `4aa0254` `feat: filter MCP traces by observation status`
+19. `6c43ab1` `feat: surface unparsed traces in monitor`
 
 ## Current Implemented Loop
 
@@ -58,6 +61,8 @@ An AI agent can now do all of the following locally through MCP:
 1. inspect traces, sessions, upstreams, and failures
 2. query failed traces with the same filters as `list_traces`
 3. summarize clustered failures before drilling into trace detail
+4. locate traces with missing Observation IR by calling `list_traces` with
+   `observation=unparsed`
 
 This is enough to support:
 
@@ -74,6 +79,14 @@ Implemented MCP tools on this branch:
 - `list_upstreams`
 - `query_failures`
 - `summarize_failure_clusters`
+- `list_system_events`
+- `get_system_event`
+- `summarize_system_events`
+- `query_unread_system_events`
+- `reanalyze_trace`
+- `reanalyze_session`
+- `list_analysis_jobs`
+- `get_analysis_job`
 
 Implementation constraints:
 

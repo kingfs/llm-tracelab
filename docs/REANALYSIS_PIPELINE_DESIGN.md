@@ -583,7 +583,9 @@ feat: run batch reanalysis jobs
 
 ### P6. Monitor UI
 
-Status: completed in `feat: add reanalysis controls to monitor`.
+Status: completed in `feat: add reanalysis controls to monitor`, then tightened
+in `feat: expose trace observation filters`, `feat: filter MCP traces by
+observation status`, and `feat: surface unparsed traces in monitor`.
 
 Scope:
 
@@ -592,17 +594,25 @@ Scope:
 - Add job status list/detail.
 - Refresh affected tabs after completion.
 - Add batch missing-usage repair entry from Analysis.
+- Make `Unparsed` actionable from Overview, request lists, trace detail, batch
+  reanalysis, and MCP trace listing.
 
 Acceptance:
 
 - Users can reparse, rescan, repair usage, and reanalyze from Monitor.
 - Failed jobs link to Events.
 - Analysis view lists recent reanalysis jobs and batch queue actions.
+- Users can locate `unparsed` traces without manually opening each trace page.
+- Batch reanalysis can target `unparsed` traces without broadening to unrelated
+  parsed traffic.
 
 Commit:
 
 ```text
 feat: add reanalysis controls to monitor
+feat: expose trace observation filters
+feat: filter MCP traces by observation status
+feat: surface unparsed traces in monitor
 ```
 
 ### P7. CLI/MCP Completion And Docs

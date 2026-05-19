@@ -68,6 +68,10 @@ List recorded traces with pagination and optional filters:
 - `provider`
 - `model`
 - `q`
+- `observation`: `parsed`, `failed`, `queued`, `running`, or `unparsed`
+
+Trace list items include Observation metadata under `observation`, including
+the current status and parser metadata when an Observation row exists.
 
 ### `get_trace`
 
@@ -109,6 +113,8 @@ Important limitation:
 
 - this tool currently filters one paginated `list_traces` result
 - it is not yet a dedicated failure index
+- use `list_traces` with `observation=unparsed` when the goal is to locate
+  traces that need protocol reparse rather than transport failures
 
 ### `summarize_failure_clusters`
 

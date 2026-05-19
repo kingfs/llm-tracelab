@@ -281,6 +281,9 @@ Current reanalysis capabilities include:
 - compose trace reanalysis as reparse plus scan
 - enqueue session reanalysis
 - enqueue batch missing-usage repair
+- filter trace lists and batch reanalysis by Observation status, including
+  `unparsed`
+- enqueue batch reparse for traces that do not yet have Observation IR
 - inspect recent `analysis_jobs`
 
 Reanalysis is local-only: it reads `.http` cassettes and updates derived SQLite

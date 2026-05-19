@@ -152,8 +152,11 @@ Current routing capabilities include:
 - model and channel substring filtering
 - success/error filtering
 - duration, TTFT, and token range filtering
+- Observation status filtering for `parsed`, `failed`, `queued`, `running`, and
+  `unparsed`
 - routed request, channel, error, token, and missing-usage summaries
 - selected channel tags in request rows
+- parse-state tags in request rows
 
 The legacy `Upstreams` pages remain available as runtime diagnostics for existing selected-upstream metadata, but the primary v1 workflow is `Channels` for configuration and analytics, `Models` for model-centric usage, and `Routing` for selected-route debugging.
 
@@ -199,6 +202,11 @@ Trace detail also exposes controlled reanalysis actions:
 These actions do not call the upstream provider. They read local cassettes and
 write auditable rows in `analysis_jobs`.
 
+When the `Protocol` tab has no persisted Observation IR, the page shows the
+trace as unavailable for protocol inspection and keeps `Reparse` available in
+that tab. A successful reparse refreshes the derived protocol/audit data for the
+current detail page.
+
 ## Analysis View
 
 Use `Analysis` to inspect persisted session analysis runs and reanalysis jobs.
@@ -209,6 +217,7 @@ Current capabilities include:
 - recent `analysis_jobs`
 - job status, target, steps, request, result, and last error
 - a batch action for repairing successful traces with missing usage
+- a batch action for reparsing traces currently marked `unparsed`
 
 Batch reanalysis expands a stable filter selection into per-trace child jobs.
 The child jobs perform the actual trace work so failures remain attributable to
