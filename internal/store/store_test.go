@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2391,6 +2392,13 @@ func TestMarkAnalysisJobFailedCreatesSystemEvent(t *testing.T) {
 	}
 	if len(events.Items) != 1 || events.Items[0].Category != "analysis_job_failure" || events.Items[0].TraceID != "trace-failed-job" {
 		t.Fatalf("events = %+v", events)
+	}
+}
+
+func TestClassifyUpstreamFailureSeparatesRetryQueueSaturation(t *testing.T) {
+	got := classifyUpstreamFailure(http.StatusServiceUnavailable, "Proxy overloaded: upstream retry wait queue saturated")
+	if got != "retry_queue_saturated" {
+		t.Fatalf("classifyUpstreamFailure() = %q, want retry_queue_saturated", got)
 	}
 }
 

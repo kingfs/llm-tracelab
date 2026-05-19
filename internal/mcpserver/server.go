@@ -1034,6 +1034,8 @@ func toFailureSummaryItems(counts map[string]int, limit int) []failureSummaryIte
 func classifyFailureReason(statusCode int, errorText string) string {
 	text := strings.ToLower(strings.TrimSpace(errorText))
 	switch {
+	case strings.Contains(text, "retry wait queue saturated") || strings.Contains(text, "retry_queue_saturated"):
+		return "retry_queue_saturated"
 	case statusCode == 408 || statusCode == 504 || strings.Contains(text, "timeout") || strings.Contains(text, "timed out") || strings.Contains(text, "deadline exceeded") || strings.Contains(text, "context deadline exceeded"):
 		return "timeout"
 	case statusCode == 429 || strings.Contains(text, "rate limit") || strings.Contains(text, "too many requests"):

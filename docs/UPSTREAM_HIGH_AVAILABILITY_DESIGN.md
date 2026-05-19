@@ -161,6 +161,8 @@ Review:
 
 ### Phase 5: Monitor And MCP Visibility
 
+Status: partially implemented.
+
 Scope:
 
 - show retry count, retry delay, recovery probe, and open/probation transitions
@@ -171,6 +173,15 @@ Acceptance:
 - upstream detail explains why a request waited, retried, or failed
 - MCP failure clustering can separate upstream overload, retry exhaustion, and
   queue saturation
+
+Review:
+
+- store and MCP failure classifiers now separate retry wait queue saturation as
+  `retry_queue_saturated`
+- trace events already include retry wait, candidate retry, refresh, and queue
+  saturation events for detail inspection
+- frontend detail rendering of these events remains future work; avoid changing
+  Monitor UI until the backend signal vocabulary has stabilized in real traces
 
 ## Stage Review Rule
 

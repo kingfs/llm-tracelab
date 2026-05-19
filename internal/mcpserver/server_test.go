@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -491,4 +492,11 @@ func errorForStatus(status string) string {
 		return "failed"
 	}
 	return ""
+}
+
+func TestClassifyFailureReasonSeparatesRetryQueueSaturation(t *testing.T) {
+	got := classifyFailureReason(http.StatusServiceUnavailable, "Proxy overloaded: upstream retry wait queue saturated")
+	if got != "retry_queue_saturated" {
+		t.Fatalf("classifyFailureReason() = %q, want retry_queue_saturated", got)
+	}
 }
