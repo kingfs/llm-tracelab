@@ -807,15 +807,6 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 	return nil, out, nil
 }
 
-func (a *serverAPI) traceFailureReason(entry store.LogEntry, statusCode int, errorText string) (reason string, routingEventReason string, err error) {
-	evidence, err := a.traceRoutingEvidence(entry)
-	if err != nil {
-		return "", "", err
-	}
-	reason, routingEventReason = failureReasonFromEvidence(entry, statusCode, errorText, evidence)
-	return reason, routingEventReason, nil
-}
-
 func failureReasonFromEvidence(entry store.LogEntry, statusCode int, errorText string, evidence routingEvidence) (reason string, routingEventReason string) {
 	if evidence.FailureReason != "" {
 		return evidence.FailureReason, evidence.FailureReason
@@ -824,14 +815,6 @@ func failureReasonFromEvidence(entry store.LogEntry, statusCode int, errorText s
 		return reason, ""
 	}
 	return classifyFailureReason(statusCode, errorText), ""
-}
-
-func (a *serverAPI) traceRoutingEventFailureReason(entry store.LogEntry) (string, error) {
-	evidence, err := a.traceRoutingEvidence(entry)
-	if err != nil {
-		return "", err
-	}
-	return evidence.FailureReason, nil
 }
 
 type routingIdentity struct {

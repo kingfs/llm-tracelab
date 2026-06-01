@@ -779,15 +779,6 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	}, nil
 }
 
-func findTargetByID(targets []*Target, id string) *Target {
-	for _, target := range targets {
-		if target != nil && target.ID == id {
-			return target
-		}
-	}
-	return nil
-}
-
 func findTargetByRouteTargetID(targets []*Target, routeTargetID string) *Target {
 	for _, target := range targets {
 		if target != nil && target.RouteTargetID == routeTargetID {
@@ -1320,20 +1311,6 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 		}
 	}
 	return decision
-}
-
-func credentialDecisionFromCandidates(candidates []CandidateDecision, id string) CredentialDecisionInfo {
-	for _, candidate := range candidates {
-		if candidate.ID == id {
-			return CredentialDecisionInfo{
-				RouteTargetID:  candidate.RouteTargetID,
-				ChannelID:      candidate.ChannelID,
-				CredentialID:   candidate.CredentialID,
-				CredentialHint: candidate.CredentialHint,
-			}
-		}
-	}
-	return CredentialDecisionInfo{}
 }
 
 func credentialDecisionFromTarget(target *Target) CredentialDecisionInfo {
