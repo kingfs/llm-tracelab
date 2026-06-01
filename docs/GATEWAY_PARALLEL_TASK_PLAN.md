@@ -366,7 +366,8 @@ Integration order:
 
 Branch: `feature/gateway-credential-config`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-config`
-Status: planned
+Agent: Sagan (`019e8261-4a51-7331-9a35-22e28f71fa60`)
+Status: assigned
 
 Owner scope:
 
@@ -391,7 +392,8 @@ Acceptance:
 
 Branch: `feature/gateway-credential-router`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-router`
-Status: planned
+Agent: Heisenberg (`019e8261-703a-7f52-bfeb-caaa11123b4d`)
+Status: assigned
 
 Owner scope:
 
@@ -417,7 +419,8 @@ Acceptance:
 
 Branch: `feature/gateway-credential-events`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-events`
-Status: planned
+Agent: Curie (`019e8261-8e98-7c90-b044-5706e34238d8`)
+Status: assigned
 
 Owner scope:
 
@@ -441,7 +444,8 @@ Acceptance:
 
 Branch: `feature/gateway-credential-readside`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-readside`
-Status: planned
+Agent: Parfit (`019e824b-227c-73c3-b412-62b324e27785`)
+Status: assigned
 
 Owner scope:
 
