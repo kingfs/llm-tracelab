@@ -504,6 +504,206 @@ func TestRouterSelectWithoutStickyKeyUnchanged(t *testing.T) {
 	}
 }
 
+func TestRouterImplicitDefaultRouteTargetPreservesTargetID(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ApiKey:         "sk-primary-secret",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	targets := rtr.Targets()
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	target := targets[0]
+	if target.ID != "primary" || target.RouteTargetID != "primary:default" || target.ChannelID != "primary" || target.CredentialID != "default" {
+		t.Fatalf("target identity = %+v, want old id with implicit default credential", target.snapshot())
+	}
+
+	selection, err := rtr.Select(stickyRequest(t, "implicit-default"))
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
+	}
+	if selection.Decision.SelectedID != "primary" || selection.Decision.SelectedRouteTargetID != "primary:default" || selection.Decision.SelectedChannelID != "primary" || selection.Decision.SelectedCredentialID != "default" {
+		t.Fatalf("decision selection = %+v, want implicit default identity", selection.Decision)
+	}
+	if len(selection.Decision.Candidates) != 1 {
+		t.Fatalf("len(candidates) = %d, want 1", len(selection.Decision.Candidates))
+	}
+	candidate := selection.Decision.Candidates[0]
+	if candidate.ID != "primary" || candidate.RouteTargetID != "primary:default" || candidate.ChannelID != "primary" || candidate.CredentialID != "default" {
+		t.Fatalf("candidate = %+v, want implicit default identity", candidate)
+	}
+}
+
+func TestRouterExpandsExplicitCredentialsIntoRouteTargets(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ApiKey:         "sk-inline-ignored",
+					ProviderPreset: "openai",
+				},
+				Credentials: []config.CredentialConfig{
+					{ID: "personal", Name: "personal key", ApiKey: "sk-personal-secret"},
+					{ID: "backup", Name: "backup key", ApiKey: "sk-backup-secret"},
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	targets := rtr.Targets()
+	if len(targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(targets))
+	}
+	gotIDs := []string{targets[0].ID, targets[1].ID}
+	wantIDs := []string{"openai-primary:backup", "openai-primary:personal"}
+	if strings.Join(gotIDs, ",") != strings.Join(wantIDs, ",") {
+		t.Fatalf("target IDs = %#v, want %#v", gotIDs, wantIDs)
+	}
+	for _, target := range targets {
+		if target.ChannelID != "openai-primary" {
+			t.Fatalf("target %q channel = %q, want openai-primary", target.ID, target.ChannelID)
+		}
+		if target.RouteTargetID != target.ID {
+			t.Fatalf("target %q RouteTargetID = %q, want same as ID", target.ID, target.RouteTargetID)
+		}
+	}
+
+	selection, err := rtr.Select(stickyRequest(t, "explicit-credentials"))
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "openai-primary:backup" {
+		t.Fatalf("selected target = %q, want deterministic first route target", selection.Target.ID)
+	}
+	if selection.Decision.SelectedRouteTargetID != "openai-primary:backup" || selection.Decision.SelectedChannelID != "openai-primary" || selection.Decision.SelectedCredentialID != "backup" {
+		t.Fatalf("decision selection = %+v, want backup route target fields", selection.Decision)
+	}
+	if len(selection.Decision.Candidates) != 2 {
+		t.Fatalf("len(candidates) = %d, want 2", len(selection.Decision.Candidates))
+	}
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ChannelID != "openai-primary" || candidate.RouteTargetID == "" || candidate.CredentialID == "" {
+			t.Fatalf("candidate missing credential route fields: %+v", candidate)
+		}
+	}
+}
+
+func TestRouterStickyBindsConcreteCredentialRouteTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+				Credentials: []config.CredentialConfig{
+					{ID: "a", ApiKey: "sk-a-secret"},
+					{ID: "b", ApiKey: "sk-b-secret"},
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	first, err := rtr.SelectWithBody(stickyRequest(t, "credential-sticky"), body)
+	if err != nil {
+		t.Fatalf("Select(first) error = %v", err)
+	}
+	if first.Target.ID != "openai-primary:a" || first.Decision.StickyStatus != "bind" {
+		t.Fatalf("first selection target/status = %q/%q, want openai-primary:a bind", first.Target.ID, first.Decision.StickyStatus)
+	}
+	if first.Decision.StickyTargetID != "openai-primary:a" || first.Decision.SelectedRouteTargetID != "openai-primary:a" {
+		t.Fatalf("first decision = %+v, want concrete route target binding", first.Decision)
+	}
+
+	second, err := rtr.SelectWithBody(stickyRequest(t, "credential-sticky"), body)
+	if err != nil {
+		t.Fatalf("Select(second) error = %v", err)
+	}
+	if second.Target.ID != "openai-primary:a" || second.Decision.StickyStatus != "hit" {
+		t.Fatalf("second selection target/status = %q/%q, want openai-primary:a hit", second.Target.ID, second.Decision.StickyStatus)
+	}
+	if !hasStickyRouteDecision(second.Decision, "hit", "openai-primary:a", "") {
+		t.Fatalf("sticky events = %+v, want hit for concrete route target", second.Decision.StickyEvents)
+	}
+
+	rebound, err := rtr.SelectWithExclusion(stickyRequest(t, "credential-sticky"), body, []string{"openai-primary:a"})
+	if err != nil {
+		t.Fatalf("SelectWithExclusion() error = %v", err)
+	}
+	if rebound.Target.ID != "openai-primary:b" {
+		t.Fatalf("rebound target = %q, want openai-primary:b", rebound.Target.ID)
+	}
+	if !hasStickyRouteDecision(rebound.Decision, "break", "openai-primary:a", "openai-primary:a") {
+		t.Fatalf("sticky events = %+v, want break for openai-primary:a", rebound.Decision.StickyEvents)
+	}
+	if !hasStickyRouteDecision(rebound.Decision, "bind", "openai-primary:b", "openai-primary:a") {
+		t.Fatalf("sticky events = %+v, want rebind to openai-primary:b", rebound.Decision.StickyEvents)
+	}
+
+	third, err := rtr.SelectWithBody(stickyRequest(t, "credential-sticky"), body)
+	if err != nil {
+		t.Fatalf("Select(third) error = %v", err)
+	}
+	if third.Target.ID != "openai-primary:b" || third.Decision.StickyStatus != "hit" {
+		t.Fatalf("third selection target/status = %q/%q, want openai-primary:b hit", third.Target.ID, third.Decision.StickyStatus)
+	}
+}
+
 func stickyRequest(t *testing.T, sessionID string) *http.Request {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
@@ -521,6 +721,18 @@ func hasStickyDecision(decision *DecisionTrace, status string, breakID string) b
 	}
 	for _, event := range decision.StickyEvents {
 		if event.Status == status && event.BreakID == breakID {
+			return true
+		}
+	}
+	return false
+}
+
+func hasStickyRouteDecision(decision *DecisionTrace, status string, routeTargetID string, breakID string) bool {
+	if decision == nil {
+		return false
+	}
+	for _, event := range decision.StickyEvents {
+		if event.Status == status && event.RouteTargetID == routeTargetID && event.BreakID == breakID {
 			return true
 		}
 	}

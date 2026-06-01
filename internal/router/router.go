@@ -129,6 +129,10 @@ func (r *Router) HealthThresholds() HealthThresholds {
 
 type Target struct {
 	ID             string
+	RouteTargetID  string
+	ChannelID      string
+	CredentialID   string
+	CredentialHint string
 	Enabled        bool
 	Priority       int
 	Weight         float64
@@ -169,6 +173,10 @@ type modelHealthState struct {
 
 type Snapshot struct {
 	ID                string    `json:"id"`
+	RouteTargetID     string    `json:"route_target_id,omitempty"`
+	ChannelID         string    `json:"channel_id,omitempty"`
+	CredentialID      string    `json:"credential_id,omitempty"`
+	CredentialHint    string    `json:"credential_hint,omitempty"`
 	Enabled           bool      `json:"enabled"`
 	Priority          int       `json:"priority"`
 	Weight            float64   `json:"weight"`
@@ -256,25 +264,33 @@ type RequestFeatures struct {
 }
 
 type DecisionTrace struct {
-	ModelName      string              `json:"model_name,omitempty"`
-	Endpoint       string              `json:"endpoint,omitempty"`
-	Policy         string              `json:"policy,omitempty"`
-	FallbackPolicy string              `json:"fallback_policy,omitempty"`
-	ExcludedIDs    []string            `json:"excluded_ids,omitempty"`
-	Candidates     []CandidateDecision `json:"candidates,omitempty"`
-	AvailableCount int                 `json:"available_count"`
-	SelectedID     string              `json:"selected_id,omitempty"`
-	SelectedScore  float64             `json:"selected_score,omitempty"`
-	FailureReason  string              `json:"failure_reason,omitempty"`
-	StickyKey      string              `json:"sticky_key,omitempty"`
-	StickyStatus   string              `json:"sticky_status,omitempty"`
-	StickyTargetID string              `json:"sticky_target_id,omitempty"`
-	StickyBreakID  string              `json:"sticky_break_id,omitempty"`
-	StickyEvents   []StickyDecision    `json:"sticky_events,omitempty"`
+	ModelName              string              `json:"model_name,omitempty"`
+	Endpoint               string              `json:"endpoint,omitempty"`
+	Policy                 string              `json:"policy,omitempty"`
+	FallbackPolicy         string              `json:"fallback_policy,omitempty"`
+	ExcludedIDs            []string            `json:"excluded_ids,omitempty"`
+	Candidates             []CandidateDecision `json:"candidates,omitempty"`
+	AvailableCount         int                 `json:"available_count"`
+	SelectedID             string              `json:"selected_id,omitempty"`
+	SelectedRouteTargetID  string              `json:"route_target_id,omitempty"`
+	SelectedChannelID      string              `json:"channel_id,omitempty"`
+	SelectedCredentialID   string              `json:"credential_id,omitempty"`
+	SelectedCredentialHint string              `json:"credential_hint,omitempty"`
+	SelectedScore          float64             `json:"selected_score,omitempty"`
+	FailureReason          string              `json:"failure_reason,omitempty"`
+	StickyKey              string              `json:"sticky_key,omitempty"`
+	StickyStatus           string              `json:"sticky_status,omitempty"`
+	StickyTargetID         string              `json:"sticky_target_id,omitempty"`
+	StickyBreakID          string              `json:"sticky_break_id,omitempty"`
+	StickyEvents           []StickyDecision    `json:"sticky_events,omitempty"`
 }
 
 type CandidateDecision struct {
 	ID             string  `json:"id"`
+	RouteTargetID  string  `json:"route_target_id,omitempty"`
+	ChannelID      string  `json:"channel_id,omitempty"`
+	CredentialID   string  `json:"credential_id,omitempty"`
+	CredentialHint string  `json:"credential_hint,omitempty"`
 	ProviderPreset string  `json:"provider_preset,omitempty"`
 	BaseURL        string  `json:"base_url,omitempty"`
 	Priority       int     `json:"priority"`
@@ -288,10 +304,14 @@ type CandidateDecision struct {
 }
 
 type StickyDecision struct {
-	Status   string `json:"status,omitempty"`
-	Key      string `json:"key,omitempty"`
-	TargetID string `json:"target_id,omitempty"`
-	BreakID  string `json:"break_id,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Key            string `json:"key,omitempty"`
+	TargetID       string `json:"target_id,omitempty"`
+	RouteTargetID  string `json:"route_target_id,omitempty"`
+	ChannelID      string `json:"channel_id,omitempty"`
+	CredentialID   string `json:"credential_id,omitempty"`
+	CredentialHint string `json:"credential_hint,omitempty"`
+	BreakID        string `json:"break_id,omitempty"`
 }
 
 type Outcome struct {
@@ -365,35 +385,70 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 			return nil, fmt.Errorf("resolve upstream target %q: %w", targetID(targetCfg, idx), err)
 		}
 
-		target := &Target{
-			ID:                 targetID(targetCfg, idx),
-			Enabled:            enabled,
-			Priority:           targetCfg.Priority,
-			Weight:             defaultFloat(targetCfg.Weight, 1),
-			CapacityHint:       defaultFloat(targetCfg.CapacityHint, 1),
-			ModelDiscovery:     normalizeDiscoveryMode(targetCfg.ModelDiscovery),
-			StaticModels:       normalizeModels(targetCfg.StaticModels),
-			Upstream:           resolved,
-			allowUnknownModels: allowUnknownModels(targetCfg, len(targetCfgs) == 1),
-			models:             map[string]struct{}{},
-			ttftFastMs:         500,
-			ttftSlowMs:         500,
-			reqLatencyFastMs:   800,
-			reqLatencySlowMs:   800,
-			healthState:        HealthHealthy,
-			modelHealth:        map[string]*modelHealthState{},
+		channelID := targetID(targetCfg, idx)
+		credentials := explicitCredentials(targetCfg.Credentials)
+		if len(credentials) == 0 {
+			target := newTargetFromConfig(targetCfg, resolved, channelID, routeTargetID(channelID, "default"), channelID, "default", credentialHintFromUpstream(resolved), len(targetCfgs) == 1)
+			if err := appendTarget(&targets, seenIDs, target); err != nil {
+				return nil, err
+			}
+			continue
 		}
-		if _, exists := seenIDs[target.ID]; exists {
-			return nil, fmt.Errorf("duplicate upstream target id %q", target.ID)
+		for credIdx, credential := range credentials {
+			credentialID := credentialID(credential, credIdx)
+			resolvedForCredential := resolved
+			if strings.TrimSpace(credential.ApiKey) != "" {
+				resolvedForCredential.APIKey = credential.ApiKey
+			}
+			routeTargetID := routeTargetID(channelID, credentialID)
+			target := newTargetFromConfig(targetCfg, resolvedForCredential, routeTargetID, routeTargetID, channelID, credentialID, credentialHint(credential, resolvedForCredential), len(targetCfgs) == 1)
+			if err := appendTarget(&targets, seenIDs, target); err != nil {
+				return nil, err
+			}
 		}
-		seenIDs[target.ID] = struct{}{}
-		targets = append(targets, target)
 	}
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no enabled upstream targets configured")
 	}
 	sortTargets(targets)
 	return targets, nil
+}
+
+func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstream.ResolvedUpstream, id string, routeTargetID string, channelID string, credentialID string, credentialHint string, singleConfiguredTarget bool) *Target {
+	return &Target{
+		ID:                 id,
+		RouteTargetID:      routeTargetID,
+		ChannelID:          channelID,
+		CredentialID:       credentialID,
+		CredentialHint:     credentialHint,
+		Enabled:            true,
+		Priority:           targetCfg.Priority,
+		Weight:             defaultFloat(targetCfg.Weight, 1),
+		CapacityHint:       defaultFloat(targetCfg.CapacityHint, 1),
+		ModelDiscovery:     normalizeDiscoveryMode(targetCfg.ModelDiscovery),
+		StaticModels:       normalizeModels(targetCfg.StaticModels),
+		Upstream:           resolved,
+		allowUnknownModels: allowUnknownModels(targetCfg, singleConfiguredTarget),
+		models:             map[string]struct{}{},
+		ttftFastMs:         500,
+		ttftSlowMs:         500,
+		reqLatencyFastMs:   800,
+		reqLatencySlowMs:   800,
+		healthState:        HealthHealthy,
+		modelHealth:        map[string]*modelHealthState{},
+	}
+}
+
+func appendTarget(targets *[]*Target, seenIDs map[string]struct{}, target *Target) error {
+	if target == nil {
+		return nil
+	}
+	if _, exists := seenIDs[target.ID]; exists {
+		return fmt.Errorf("duplicate upstream target id %q", target.ID)
+	}
+	seenIDs[target.ID] = struct{}{}
+	*targets = append(*targets, target)
+	return nil
 }
 
 func sortTargets(targets []*Target) {
@@ -673,12 +728,13 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	var selected *Target
 	var score float64
 	if hasStickyBinding {
-		if stickyTarget := findTargetByID(available, stickyTargetID); stickyTarget != nil {
+		if stickyTarget := findTargetByRouteTargetID(available, stickyTargetID); stickyTarget != nil {
 			selected = stickyTarget
 			score = r.expectedCost(selected, features)
-			decision.withSticky("hit", stickyKey, stickyTargetID, "")
+			decision.withStickyTarget("hit", stickyKey, stickyTarget, stickyTarget.ID, "")
 		} else {
-			decision.withSticky("break", stickyKey, stickyTargetID, stickyTargetID)
+			stickyTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
+			decision.withStickyTarget("break", stickyKey, stickyTarget, targetAlias(stickyTarget, stickyTargetID), targetAlias(stickyTarget, stickyTargetID))
 		}
 	} else if stickyKey != "" {
 		decision.withSticky("miss", stickyKey, "", "")
@@ -686,11 +742,12 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	if selected == nil {
 		selected, score = r.pick(available, features)
 		if stickyKey != "" {
-			r.sticky.Bind(stickyKey, selected.ID)
+			r.sticky.Bind(stickyKey, selected.RouteTargetID)
 			if hasStickyBinding {
-				decision.withSticky("bind", stickyKey, selected.ID, stickyTargetID)
+				previousTarget := findTargetByRouteTargetID(candidates, stickyTargetID)
+				decision.withStickyTarget("bind", stickyKey, selected, selected.ID, targetAlias(previousTarget, stickyTargetID))
 			} else {
-				decision.withSticky("bind", stickyKey, selected.ID, "")
+				decision.withStickyTarget("bind", stickyKey, selected, selected.ID, "")
 			}
 		}
 	}
@@ -706,7 +763,7 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 		CandidateCount: len(available),
 		Candidates:     candidateIDs,
 		Request:        features,
-		Decision:       decision.withSelection(selected.ID, score),
+		Decision:       decision.withSelectedTarget(selected, score),
 	}, nil
 }
 
@@ -717,6 +774,22 @@ func findTargetByID(targets []*Target, id string) *Target {
 		}
 	}
 	return nil
+}
+
+func findTargetByRouteTargetID(targets []*Target, routeTargetID string) *Target {
+	for _, target := range targets {
+		if target != nil && target.RouteTargetID == routeTargetID {
+			return target
+		}
+	}
+	return nil
+}
+
+func targetAlias(target *Target, fallback string) string {
+	if target != nil && target.ID != "" {
+		return target.ID
+	}
+	return fallback
 }
 
 func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string) *DecisionTrace {
@@ -769,6 +842,23 @@ func (d *DecisionTrace) withSelection(selectedID string, score float64) *Decisio
 		return nil
 	}
 	d.SelectedID = selectedID
+	d.SelectedRouteTargetID = selectedID
+	d.SelectedScore = score
+	return d
+}
+
+func (d *DecisionTrace) withSelectedTarget(target *Target, score float64) *DecisionTrace {
+	if d == nil {
+		return nil
+	}
+	if target == nil {
+		return d.withSelection("", score)
+	}
+	d.SelectedID = target.ID
+	d.SelectedRouteTargetID = target.RouteTargetID
+	d.SelectedChannelID = target.ChannelID
+	d.SelectedCredentialID = target.CredentialID
+	d.SelectedCredentialHint = target.CredentialHint
 	d.SelectedScore = score
 	return d
 }
@@ -785,16 +875,30 @@ func (d *DecisionTrace) withSticky(status string, key string, targetID string, b
 	if d == nil {
 		return nil
 	}
+	return d.withStickyTarget(status, key, nil, targetID, breakID)
+}
+
+func (d *DecisionTrace) withStickyTarget(status string, key string, target *Target, targetID string, breakID string) *DecisionTrace {
+	if d == nil {
+		return nil
+	}
 	d.StickyStatus = status
 	d.StickyKey = key
 	d.StickyTargetID = targetID
 	d.StickyBreakID = breakID
-	d.StickyEvents = append(d.StickyEvents, StickyDecision{
+	event := StickyDecision{
 		Status:   status,
 		Key:      key,
 		TargetID: targetID,
 		BreakID:  breakID,
-	})
+	}
+	if target != nil {
+		event.RouteTargetID = target.RouteTargetID
+		event.ChannelID = target.ChannelID
+		event.CredentialID = target.CredentialID
+		event.CredentialHint = target.CredentialHint
+	}
+	d.StickyEvents = append(d.StickyEvents, event)
 	return d
 }
 
@@ -1087,6 +1191,10 @@ func (t *Target) snapshot() Snapshot {
 	}
 	return Snapshot{
 		ID:                t.ID,
+		RouteTargetID:     t.RouteTargetID,
+		ChannelID:         t.ChannelID,
+		CredentialID:      t.CredentialID,
+		CredentialHint:    t.CredentialHint,
 		Enabled:           t.Enabled,
 		Priority:          t.Priority,
 		Weight:            t.Weight,
@@ -1151,6 +1259,10 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 
 	decision := CandidateDecision{
 		ID:             t.ID,
+		RouteTargetID:  t.RouteTargetID,
+		ChannelID:      t.ChannelID,
+		CredentialID:   t.CredentialID,
+		CredentialHint: t.CredentialHint,
 		ProviderPreset: t.Upstream.ProviderPreset,
 		BaseURL:        t.Upstream.BaseURL,
 		Priority:       t.Priority,
@@ -1543,6 +1655,68 @@ func targetID(cfg config.UpstreamTargetConfig, idx int) string {
 		return id
 	}
 	return fmt.Sprintf("upstream-%d", idx+1)
+}
+
+func explicitCredentials(credentials []config.CredentialConfig) []config.CredentialConfig {
+	out := make([]config.CredentialConfig, 0, len(credentials))
+	for _, credential := range credentials {
+		if strings.TrimSpace(credential.ID) == "" && strings.TrimSpace(credential.Name) == "" && strings.TrimSpace(credential.ApiKey) == "" {
+			continue
+		}
+		out = append(out, credential)
+	}
+	return out
+}
+
+func credentialID(credential config.CredentialConfig, idx int) string {
+	if id := strings.TrimSpace(credential.ID); id != "" {
+		return id
+	}
+	if name := strings.TrimSpace(credential.Name); name != "" {
+		return slugID(name)
+	}
+	return fmt.Sprintf("credential-%d", idx+1)
+}
+
+func routeTargetID(channelID string, credentialID string) string {
+	channelID = strings.TrimSpace(channelID)
+	credentialID = strings.TrimSpace(credentialID)
+	if credentialID == "" {
+		credentialID = "default"
+	}
+	return channelID + ":" + credentialID
+}
+
+func credentialHint(credential config.CredentialConfig, resolved upstream.ResolvedUpstream) string {
+	if id := strings.TrimSpace(credential.ID); id != "" {
+		return id
+	}
+	if name := strings.TrimSpace(credential.Name); name != "" {
+		return name
+	}
+	return credentialHintFromUpstream(resolved)
+}
+
+func credentialHintFromUpstream(resolved upstream.ResolvedUpstream) string {
+	return "default"
+}
+
+func slugID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func normalizePolicy(policy string) string {
