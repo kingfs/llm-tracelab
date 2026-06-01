@@ -24,6 +24,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	successPath := filepath.Join(outputDir, "success.http")
 	failurePath := filepath.Join(outputDir, "failure.http")
 	stickyPath := filepath.Join(outputDir, "sticky-break.http")
+	credentialPath := filepath.Join(outputDir, "credential-failure.http")
 
 	if err := os.WriteFile(successPath, buildRecordFixture(t, fixtureSpec{
 		URL:                            "/v1/responses",
@@ -76,6 +77,36 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}), 0o644); err != nil {
 		t.Fatalf("WriteFile(sticky) error = %v", err)
 	}
+	if err := os.WriteFile(credentialPath, buildRecordFixture(t, fixtureSpec{
+		URL:                            "/v1/responses",
+		Status:                         "500 Internal Server Error",
+		SessionID:                      sessionID,
+		RequestID:                      "req-credential-failure",
+		RequestBody:                    `{"model":"gpt-5.1-codex","input":"credential failure"}`,
+		ResponseBody:                   `{"error":{"message":"credential limit"}}`,
+		SelectedUpstreamID:             "openai-primary",
+		SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
+		SelectedUpstreamProviderPreset: "openai",
+		RoutingEvents:                  true,
+		RoutingFailureEventReason:      "credential_concurrency_full",
+		RouteTargetID:                  "openai-primary:cred-a",
+		ChannelID:                      "openai-primary",
+		CredentialID:                   "cred-a",
+		StickyEvents: []stickyFixtureEvent{{
+			Status:                "break",
+			UpstreamID:            "openai-primary",
+			PreviousUpstreamID:    "openai-primary",
+			RouteTargetID:         "openai-primary:cred-b",
+			PreviousRouteTargetID: "openai-primary:cred-a",
+			ChannelID:             "openai-primary",
+			PreviousChannelID:     "openai-primary",
+			CredentialID:          "cred-b",
+			PreviousCredentialID:  "cred-a",
+			StickyKeyFingerprint:  "sticky-fp-credential",
+		}},
+	}), 0o644); err != nil {
+		t.Fatalf("WriteFile(credential) error = %v", err)
+	}
 
 	st, err := store.New(outputDir)
 	if err != nil {
@@ -124,6 +155,10 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	failureEntry, err := st.GetByRequestID("req-failure")
 	if err != nil {
 		t.Fatalf("GetByRequestID(req-failure) error = %v", err)
+	}
+	credentialEntry, err := st.GetByRequestID("req-credential-failure")
+	if err != nil {
+		t.Fatalf("GetByRequestID(req-credential-failure) error = %v", err)
 	}
 	if err := st.SaveFindings(failureEntry.ID, []observe.Finding{{
 		ID:              "finding-danger",
@@ -204,8 +239,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	tracePayload := traceList.StructuredContent.(map[string]any)
 	items := tracePayload["items"].([]any)
-	if len(items) != 3 {
-		t.Fatalf("len(list_traces.items) = %d, want 3", len(items))
+	if len(items) != 4 {
+		t.Fatalf("len(list_traces.items) = %d, want 4", len(items))
 	}
 	traceID := items[0].(map[string]any)["id"].(string)
 	if strings.TrimSpace(traceID) == "" {
@@ -223,8 +258,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("CallTool(list_traces unparsed) error = %v", err)
 	}
 	unparsedItems := unparsedTraces.StructuredContent.(map[string]any)["items"].([]any)
-	if len(unparsedItems) != 2 {
-		t.Fatalf("len(list_traces unparsed.items) = %d, want 2", len(unparsedItems))
+	if len(unparsedItems) != 3 {
+		t.Fatalf("len(list_traces unparsed.items) = %d, want 3", len(unparsedItems))
 	}
 	seenFailureUnparsed := false
 	for _, item := range unparsedItems {
@@ -276,6 +311,27 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("query_routing_decisions events empty")
 	}
 
+	credentialRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_routing_decisions",
+		Arguments: map[string]any{"trace_id": credentialEntry.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_routing_decisions credential) error = %v", err)
+	}
+	credentialRoutingPayload := credentialRouting.StructuredContent.(map[string]any)
+	if got := credentialRoutingPayload["selected_upstream_id"].(string); got != "openai-primary" {
+		t.Fatalf("credential selected_upstream_id = %q, want openai-primary", got)
+	}
+	if got := credentialRoutingPayload["selected_route_target_id"].(string); got != "openai-primary:cred-a" {
+		t.Fatalf("credential selected_route_target_id = %q, want openai-primary:cred-a", got)
+	}
+	if got := credentialRoutingPayload["selected_channel_id"].(string); got != "openai-primary" {
+		t.Fatalf("credential selected_channel_id = %q, want openai-primary", got)
+	}
+	if got := credentialRoutingPayload["selected_credential_id"].(string); got != "cred-a" {
+		t.Fatalf("credential selected_credential_id = %q, want cred-a", got)
+	}
+
 	stickyRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "query_sticky_routing",
 		Arguments: map[string]any{
@@ -314,6 +370,34 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprintf("%v", stickyPayload), "raw-session-id-must-not-leak") {
 		t.Fatalf("query_sticky_routing leaked raw sticky key: %+v", stickyPayload)
+	}
+
+	credentialSticky, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_sticky_routing",
+		Arguments: map[string]any{"sticky_key_fingerprint": "sticky-fp-credential"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_sticky_routing credential) error = %v", err)
+	}
+	credentialStickyItems := credentialSticky.StructuredContent.(map[string]any)["items"].([]any)
+	if len(credentialStickyItems) != 1 {
+		t.Fatalf("len(query_sticky_routing credential items) = %d, want 1", len(credentialStickyItems))
+	}
+	credentialStickyItem := credentialStickyItems[0].(map[string]any)
+	if got := credentialStickyItem["route_target_id"].(string); got != "openai-primary:cred-b" {
+		t.Fatalf("credential sticky route_target_id = %q, want openai-primary:cred-b", got)
+	}
+	if got := credentialStickyItem["previous_route_target_id"].(string); got != "openai-primary:cred-a" {
+		t.Fatalf("credential sticky previous_route_target_id = %q, want openai-primary:cred-a", got)
+	}
+	if got := credentialStickyItem["channel_id"].(string); got != "openai-primary" {
+		t.Fatalf("credential sticky channel_id = %q, want openai-primary", got)
+	}
+	if got := credentialStickyItem["credential_id"].(string); got != "cred-b" {
+		t.Fatalf("credential sticky credential_id = %q, want cred-b", got)
+	}
+	if got := credentialStickyItem["previous_credential_id"].(string); got != "cred-a" {
+		t.Fatalf("credential sticky previous_credential_id = %q, want cred-a", got)
 	}
 
 	stickyNoMatch, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -393,15 +477,29 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("CallTool(query_failures) error = %v", err)
 	}
 	failurePayload := failures.StructuredContent.(map[string]any)
-	if got := int(failurePayload["returned"].(float64)); got != 1 {
-		t.Fatalf("query_failures.returned = %d, want 1", got)
+	if got := int(failurePayload["returned"].(float64)); got != 2 {
+		t.Fatalf("query_failures.returned = %d, want 2", got)
 	}
 	failureItems := failurePayload["items"].([]any)
-	if got := failureItems[0].(map[string]any)["failure_reason"].(string); got != "all_targets_filtered" {
-		t.Fatalf("query_failures failure_reason = %q, want all_targets_filtered", got)
+	legacyFailure := findMCPItemByID(t, failureItems, failureEntry.ID)
+	if got := legacyFailure["failure_reason"].(string); got != "all_targets_filtered" {
+		t.Fatalf("query_failures legacy failure_reason = %q, want all_targets_filtered", got)
 	}
-	if got := failureItems[0].(map[string]any)["routing_event_reason"].(string); got != "all_targets_filtered" {
-		t.Fatalf("query_failures routing_event_reason = %q, want all_targets_filtered", got)
+	if got := legacyFailure["routing_event_reason"].(string); got != "all_targets_filtered" {
+		t.Fatalf("query_failures legacy routing_event_reason = %q, want all_targets_filtered", got)
+	}
+	credentialFailure := findMCPItemByID(t, failureItems, credentialEntry.ID)
+	if got := credentialFailure["failure_reason"].(string); got != "credential_concurrency_full" {
+		t.Fatalf("query_failures credential failure_reason = %q, want credential_concurrency_full", got)
+	}
+	if got := credentialFailure["route_target_id"].(string); got != "openai-primary:cred-a" {
+		t.Fatalf("query_failures route_target_id = %q, want openai-primary:cred-a", got)
+	}
+	if got := credentialFailure["channel_id"].(string); got != "openai-primary" {
+		t.Fatalf("query_failures channel_id = %q, want openai-primary", got)
+	}
+	if got := credentialFailure["credential_id"].(string); got != "cred-a" {
+		t.Fatalf("query_failures credential_id = %q, want cred-a", got)
 	}
 
 	failureClusters, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -412,19 +510,17 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("CallTool(summarize_failure_clusters) error = %v", err)
 	}
 	failureClustersPayload := failureClusters.StructuredContent.(map[string]any)
-	if got := len(failureClustersPayload["by_reason"].([]any)); got != 1 {
-		t.Fatalf("len(summarize_failure_clusters.by_reason) = %d, want 1", got)
+	assertMCPCountItem(t, failureClustersPayload["by_reason"].([]any), "all_targets_filtered", 1)
+	assertMCPCountItem(t, failureClustersPayload["by_reason"].([]any), "credential_concurrency_full", 1)
+	assertMCPCountItem(t, failureClustersPayload["by_route_target"].([]any), "openai-primary:cred-a", 1)
+	assertMCPCountItem(t, failureClustersPayload["by_channel"].([]any), "openai-primary", 1)
+	assertMCPCountItem(t, failureClustersPayload["by_credential"].([]any), "cred-a", 1)
+	if got := len(failureClustersPayload["top_failures"].([]any)); got != 2 {
+		t.Fatalf("len(summarize_failure_clusters.top_failures) = %d, want 2", got)
 	}
-	reasonItem := failureClustersPayload["by_reason"].([]any)[0].(map[string]any)
-	if got := reasonItem["label"].(string); got != "all_targets_filtered" {
-		t.Fatalf("summarize_failure_clusters.by_reason[0].label = %q, want all_targets_filtered", got)
-	}
-	if got := len(failureClustersPayload["top_failures"].([]any)); got != 1 {
-		t.Fatalf("len(summarize_failure_clusters.top_failures) = %d, want 1", got)
-	}
-	topFailure := failureClustersPayload["top_failures"].([]any)[0].(map[string]any)
-	if got := topFailure["routing_event_reason"].(string); got != "all_targets_filtered" {
-		t.Fatalf("summarize_failure_clusters.top_failures[0].routing_event_reason = %q, want all_targets_filtered", got)
+	topCredentialFailure := findMCPTraceItem(t, failureClustersPayload["top_failures"].([]any), credentialEntry.ID)
+	if got := topCredentialFailure["route_target_id"].(string); got != "openai-primary:cred-a" {
+		t.Fatalf("summarize_failure_clusters credential route_target_id = %q, want openai-primary:cred-a", got)
 	}
 
 	systemEvents, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -549,6 +645,44 @@ func connectClient(ctx context.Context, server *mcp.Server) (*mcp.ClientSession,
 	return client.Connect(ctx, t2, nil)
 }
 
+func findMCPItemByID(t *testing.T, items []any, id string) map[string]any {
+	t.Helper()
+	for _, item := range items {
+		mapped := item.(map[string]any)
+		if mapped["id"] == id {
+			return mapped
+		}
+	}
+	t.Fatalf("missing MCP item id %q in %+v", id, items)
+	return nil
+}
+
+func findMCPTraceItem(t *testing.T, items []any, traceID string) map[string]any {
+	t.Helper()
+	for _, item := range items {
+		mapped := item.(map[string]any)
+		if mapped["trace_id"] == traceID {
+			return mapped
+		}
+	}
+	t.Fatalf("missing MCP trace item %q in %+v", traceID, items)
+	return nil
+}
+
+func assertMCPCountItem(t *testing.T, items []any, label string, count int) {
+	t.Helper()
+	for _, item := range items {
+		mapped := item.(map[string]any)
+		if mapped["label"] == label {
+			if got := int(mapped["count"].(float64)); got != count {
+				t.Fatalf("count item %q = %d, want %d in %+v", label, got, count, items)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing count item %q in %+v", label, items)
+}
+
 type fixtureSpec struct {
 	URL                            string
 	Status                         string
@@ -564,14 +698,23 @@ type fixtureSpec struct {
 	RoutingFailureEventReason      string
 	RetryQueueSaturatedEvent       bool
 	StickyEvents                   []stickyFixtureEvent
+	RouteTargetID                  string
+	ChannelID                      string
+	CredentialID                   string
 }
 
 type stickyFixtureEvent struct {
-	Status               string
-	UpstreamID           string
-	PreviousUpstreamID   string
-	StickyKeyFingerprint string
-	RawStickyKey         string
+	Status                string
+	UpstreamID            string
+	PreviousUpstreamID    string
+	RouteTargetID         string
+	PreviousRouteTargetID string
+	ChannelID             string
+	PreviousChannelID     string
+	CredentialID          string
+	PreviousCredentialID  string
+	StickyKeyFingerprint  string
+	RawStickyKey          string
 }
 
 func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
@@ -627,15 +770,17 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 
 	events := recordfile.BuildEvents(header)
 	if spec.RoutingEvents {
-		events = append(events, routingFixtureEvents(header)...)
+		events = append(events, routingFixtureEvents(header, spec)...)
 	}
 	if spec.RoutingFailureEventReason != "" {
+		attrs := map[string]interface{}{
+			"routing_failure_reason": spec.RoutingFailureEventReason,
+		}
+		addCredentialFixtureAttrs(attrs, spec.RouteTargetID, spec.ChannelID, spec.CredentialID)
 		events = append(events, recordfile.RecordEvent{
-			Type: "routing.filtered",
-			Time: header.Meta.Time,
-			Attributes: map[string]interface{}{
-				"routing_failure_reason": spec.RoutingFailureEventReason,
-			},
+			Type:       "routing.filtered",
+			Time:       header.Meta.Time,
+			Attributes: attrs,
 		})
 	}
 	if spec.RetryQueueSaturatedEvent {
@@ -653,6 +798,16 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 		}
 		if sticky.PreviousUpstreamID != "" {
 			attrs["previous_upstream_id"] = sticky.PreviousUpstreamID
+		}
+		addCredentialFixtureAttrs(attrs, sticky.RouteTargetID, sticky.ChannelID, sticky.CredentialID)
+		if sticky.PreviousRouteTargetID != "" {
+			attrs["previous_route_target_id"] = sticky.PreviousRouteTargetID
+		}
+		if sticky.PreviousChannelID != "" {
+			attrs["previous_channel_id"] = sticky.PreviousChannelID
+		}
+		if sticky.PreviousCredentialID != "" {
+			attrs["previous_credential_id"] = sticky.PreviousCredentialID
 		}
 		if sticky.StickyKeyFingerprint != "" {
 			attrs["sticky_key_fingerprint"] = sticky.StickyKeyFingerprint
@@ -673,8 +828,32 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 	return append(prelude, []byte(request+"\n"+responseHeader+spec.ResponseBody)...)
 }
 
-func routingFixtureEvents(header recordfile.RecordHeader) []recordfile.RecordEvent {
+func routingFixtureEvents(header recordfile.RecordHeader, spec fixtureSpec) []recordfile.RecordEvent {
 	eventTime := header.Meta.Time
+	candidate := map[string]any{
+		"id":              header.Meta.SelectedUpstreamID,
+		"provider_preset": header.Meta.SelectedUpstreamProviderPreset,
+		"base_url":        header.Meta.SelectedUpstreamBaseURL,
+		"priority":        100,
+		"weight":          1,
+		"health_state":    "healthy",
+		"supports_path":   true,
+		"supports_model":  true,
+		"selectable":      true,
+	}
+	addCredentialFixtureAttrs(candidate, spec.RouteTargetID, spec.ChannelID, spec.CredentialID)
+	selectedAttrs := map[string]interface{}{
+		"upstream_id":   header.Meta.SelectedUpstreamID,
+		"routing_score": header.Meta.RoutingScore,
+	}
+	addCredentialFixtureAttrs(selectedAttrs, spec.RouteTargetID, spec.ChannelID, spec.CredentialID)
+	outcomeAttrs := map[string]interface{}{
+		"upstream_id": header.Meta.SelectedUpstreamID,
+		"model":       header.Meta.Model,
+		"status_code": header.Meta.StatusCode,
+		"duration_ms": header.Meta.DurationMs,
+	}
+	addCredentialFixtureAttrs(outcomeAttrs, spec.RouteTargetID, spec.ChannelID, spec.CredentialID)
 	return []recordfile.RecordEvent{
 		{
 			Type: "routing.classified",
@@ -691,39 +870,31 @@ func routingFixtureEvents(header recordfile.RecordHeader) []recordfile.RecordEve
 			Time: eventTime,
 			Attributes: map[string]interface{}{
 				"available_count": 1,
-				"candidates": []any{
-					map[string]any{
-						"id":              header.Meta.SelectedUpstreamID,
-						"provider_preset": header.Meta.SelectedUpstreamProviderPreset,
-						"base_url":        header.Meta.SelectedUpstreamBaseURL,
-						"priority":        100,
-						"weight":          1,
-						"health_state":    "healthy",
-						"supports_path":   true,
-						"supports_model":  true,
-						"selectable":      true,
-					},
-				},
+				"candidates":      []any{candidate},
 			},
 		},
 		{
-			Type: "routing.selected",
-			Time: eventTime,
-			Attributes: map[string]interface{}{
-				"upstream_id":   header.Meta.SelectedUpstreamID,
-				"routing_score": header.Meta.RoutingScore,
-			},
+			Type:       "routing.selected",
+			Time:       eventTime,
+			Attributes: selectedAttrs,
 		},
 		{
-			Type: "routing.outcome",
-			Time: eventTime.Add(time.Duration(header.Meta.DurationMs) * time.Millisecond),
-			Attributes: map[string]interface{}{
-				"upstream_id": header.Meta.SelectedUpstreamID,
-				"model":       header.Meta.Model,
-				"status_code": header.Meta.StatusCode,
-				"duration_ms": header.Meta.DurationMs,
-			},
+			Type:       "routing.outcome",
+			Time:       eventTime.Add(time.Duration(header.Meta.DurationMs) * time.Millisecond),
+			Attributes: outcomeAttrs,
 		},
+	}
+}
+
+func addCredentialFixtureAttrs(attrs map[string]any, routeTargetID string, channelID string, credentialID string) {
+	if routeTargetID != "" {
+		attrs["route_target_id"] = routeTargetID
+	}
+	if channelID != "" {
+		attrs["channel_id"] = channelID
+	}
+	if credentialID != "" {
+		attrs["credential_id"] = credentialID
 	}
 }
 

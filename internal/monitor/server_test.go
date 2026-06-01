@@ -2081,6 +2081,20 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 		{Type: "routing.sticky.hit", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "hit", "upstream_id": "openai-primary"}},
 		{Type: "routing.sticky.break", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "break", "previous_upstream_id": "openai-primary", "upstream_id": "openrouter-fallback"}},
 	})
+	writeRoutingSummaryTrace(t, outputDir, "credential.http", reqBody, resBody, []recordfile.RecordEvent{
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 3, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openai-primary", "route_target_id": "openai-primary:cred-a", "channel_id": "openai-primary", "credential_id": "cred-a"}},
+		{Type: "routing.sticky.break", Time: time.Date(2026, 4, 18, 8, 3, 0, 0, time.UTC), Attributes: map[string]interface{}{
+			"sticky_status":            "break",
+			"previous_upstream_id":     "openai-primary",
+			"upstream_id":              "openai-primary",
+			"previous_route_target_id": "openai-primary:cred-old",
+			"route_target_id":          "openai-primary:cred-a",
+			"previous_channel_id":      "openai-primary",
+			"channel_id":               "openai-primary",
+			"previous_credential_id":   "cred-old",
+			"credential_id":            "cred-a",
+		}},
+	})
 	writeLegacyRoutingSummaryTrace(t, outputDir, "legacy.http", reqBody, resBody)
 
 	st, err := store.New(outputDir)
@@ -2101,23 +2115,33 @@ func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.TotalTraces != 4 || payload.ScannedTraces != 4 || payload.EventfulTraces != 3 || payload.LegacyOrMissingEvents != 1 || payload.ParseErrors != 0 {
+	if payload.TotalTraces != 5 || payload.ScannedTraces != 5 || payload.EventfulTraces != 4 || payload.LegacyOrMissingEvents != 1 || payload.ParseErrors != 0 {
 		t.Fatalf("summary counters = %+v", payload)
 	}
 	assertCountItem(t, payload.FailureReasons, "all_excluded", 1)
 	assertCountItem(t, payload.FailureReasons, "no_support", 1)
 	assertCountItem(t, payload.FailureReasons, "retry_queue_saturated", 1)
-	assertCountItem(t, payload.SelectedUpstreams, "openai-primary", 1)
+	assertCountItem(t, payload.SelectedUpstreams, "openai-primary", 2)
 	assertCountItem(t, payload.SelectedUpstreams, "openrouter-fallback", 1)
+	assertCountItem(t, payload.SelectedRouteTargets, "openai-primary:cred-a", 1)
+	assertCountItem(t, payload.SelectedChannels, "openai-primary", 1)
+	assertCountItem(t, payload.SelectedCredentials, "cred-a", 1)
 	assertCountItem(t, payload.StickyStatuses, "miss", 1)
 	assertCountItem(t, payload.StickyStatuses, "bind", 1)
 	assertCountItem(t, payload.StickyStatuses, "hit", 1)
-	assertCountItem(t, payload.StickyStatuses, "break", 1)
-	if payload.StickyBreaks.Total != 1 {
-		t.Fatalf("sticky break total = %d, want 1", payload.StickyBreaks.Total)
+	assertCountItem(t, payload.StickyStatuses, "break", 2)
+	if payload.StickyBreaks.Total != 2 {
+		t.Fatalf("sticky break total = %d, want 2", payload.StickyBreaks.Total)
 	}
-	assertCountItem(t, payload.StickyBreaks.PreviousUpstreams, "openai-primary", 1)
+	assertCountItem(t, payload.StickyBreaks.PreviousUpstreams, "openai-primary", 2)
 	assertCountItem(t, payload.StickyBreaks.NextUpstreams, "openrouter-fallback", 1)
+	assertCountItem(t, payload.StickyBreaks.NextUpstreams, "openai-primary", 1)
+	assertCountItem(t, payload.StickyBreaks.PreviousRouteTargets, "openai-primary:cred-old", 1)
+	assertCountItem(t, payload.StickyBreaks.NextRouteTargets, "openai-primary:cred-a", 1)
+	assertCountItem(t, payload.StickyBreaks.PreviousChannels, "openai-primary", 1)
+	assertCountItem(t, payload.StickyBreaks.NextChannels, "openai-primary", 1)
+	assertCountItem(t, payload.StickyBreaks.PreviousCredentials, "cred-old", 1)
+	assertCountItem(t, payload.StickyBreaks.NextCredentials, "cred-a", 1)
 }
 
 func TestRoutingSummaryAPIHandlerRejectsWriteMethods(t *testing.T) {

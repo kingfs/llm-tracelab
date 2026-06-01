@@ -182,19 +182,22 @@ type upstreamListOutput struct {
 }
 
 type routingDecisionOutput struct {
-	TraceID            string           `json:"trace_id"`
-	Model              string           `json:"model,omitempty"`
-	Endpoint           string           `json:"endpoint,omitempty"`
-	RoutingPolicy      string           `json:"routing_policy,omitempty"`
-	FallbackPolicy     string           `json:"fallback_policy,omitempty"`
-	SelectedUpstreamID string           `json:"selected_upstream_id,omitempty"`
-	FailureReason      string           `json:"failure_reason,omitempty"`
-	StatusCode         int              `json:"status_code,omitempty"`
-	CandidateCount     int              `json:"candidate_count"`
-	AvailableCount     int              `json:"available_count"`
-	Events             []map[string]any `json:"events"`
-	Candidates         []map[string]any `json:"candidates,omitempty"`
-	Outcome            map[string]any   `json:"outcome,omitempty"`
+	TraceID               string           `json:"trace_id"`
+	Model                 string           `json:"model,omitempty"`
+	Endpoint              string           `json:"endpoint,omitempty"`
+	RoutingPolicy         string           `json:"routing_policy,omitempty"`
+	FallbackPolicy        string           `json:"fallback_policy,omitempty"`
+	SelectedUpstreamID    string           `json:"selected_upstream_id,omitempty"`
+	SelectedRouteTargetID string           `json:"selected_route_target_id,omitempty"`
+	SelectedChannelID     string           `json:"selected_channel_id,omitempty"`
+	SelectedCredentialID  string           `json:"selected_credential_id,omitempty"`
+	FailureReason         string           `json:"failure_reason,omitempty"`
+	StatusCode            int              `json:"status_code,omitempty"`
+	CandidateCount        int              `json:"candidate_count"`
+	AvailableCount        int              `json:"available_count"`
+	Events                []map[string]any `json:"events"`
+	Candidates            []map[string]any `json:"candidates,omitempty"`
+	Outcome               map[string]any   `json:"outcome,omitempty"`
 }
 
 type stickyRoutingOutput struct {
@@ -214,14 +217,20 @@ type stickyRoutingOutput struct {
 }
 
 type stickyRoutingRow struct {
-	TraceID              string    `json:"trace_id"`
-	CreatedAt            time.Time `json:"created_at,omitempty"`
-	StickyStatus         string    `json:"sticky_status"`
-	UpstreamID           string    `json:"upstream_id,omitempty"`
-	PreviousUpstreamID   string    `json:"previous_upstream_id,omitempty"`
-	StickyKeyFingerprint string    `json:"sticky_key_fingerprint,omitempty"`
-	CassettePath         string    `json:"cassette_path"`
-	LogPath              string    `json:"log_path"`
+	TraceID               string    `json:"trace_id"`
+	CreatedAt             time.Time `json:"created_at,omitempty"`
+	StickyStatus          string    `json:"sticky_status"`
+	UpstreamID            string    `json:"upstream_id,omitempty"`
+	PreviousUpstreamID    string    `json:"previous_upstream_id,omitempty"`
+	RouteTargetID         string    `json:"route_target_id,omitempty"`
+	PreviousRouteTargetID string    `json:"previous_route_target_id,omitempty"`
+	ChannelID             string    `json:"channel_id,omitempty"`
+	PreviousChannelID     string    `json:"previous_channel_id,omitempty"`
+	CredentialID          string    `json:"credential_id,omitempty"`
+	PreviousCredentialID  string    `json:"previous_credential_id,omitempty"`
+	StickyKeyFingerprint  string    `json:"sticky_key_fingerprint,omitempty"`
+	CassettePath          string    `json:"cassette_path"`
+	LogPath               string    `json:"log_path"`
 }
 
 type queryFailuresOutput struct {
@@ -252,25 +261,31 @@ type failureTraceItem struct {
 	Reason             string    `json:"reason"`
 	Error              string    `json:"error,omitempty"`
 	SelectedUpstreamID string    `json:"selected_upstream_id,omitempty"`
+	RouteTargetID      string    `json:"route_target_id,omitempty"`
+	ChannelID          string    `json:"channel_id,omitempty"`
+	CredentialID       string    `json:"credential_id,omitempty"`
 	RoutingEventReason string    `json:"routing_event_reason,omitempty"`
 }
 
 type summarizeFailureClustersOutput struct {
-	Page        int                  `json:"page"`
-	PageSize    int                  `json:"page_size"`
-	Scanned     int                  `json:"scanned"`
-	Returned    int                  `json:"returned"`
-	Provider    string               `json:"provider,omitempty"`
-	Model       string               `json:"model,omitempty"`
-	Query       string               `json:"q,omitempty"`
-	ByReason    []failureSummaryItem `json:"by_reason"`
-	ByStatus    []failureSummaryItem `json:"by_status"`
-	ByModel     []failureSummaryItem `json:"by_model"`
-	ByProvider  []failureSummaryItem `json:"by_provider"`
-	ByEndpoint  []failureSummaryItem `json:"by_endpoint"`
-	ByUpstream  []failureSummaryItem `json:"by_upstream"`
-	TopFailures []failureTraceItem   `json:"top_failures"`
-	RefreshedAt time.Time            `json:"refreshed_at"`
+	Page          int                  `json:"page"`
+	PageSize      int                  `json:"page_size"`
+	Scanned       int                  `json:"scanned"`
+	Returned      int                  `json:"returned"`
+	Provider      string               `json:"provider,omitempty"`
+	Model         string               `json:"model,omitempty"`
+	Query         string               `json:"q,omitempty"`
+	ByReason      []failureSummaryItem `json:"by_reason"`
+	ByStatus      []failureSummaryItem `json:"by_status"`
+	ByModel       []failureSummaryItem `json:"by_model"`
+	ByProvider    []failureSummaryItem `json:"by_provider"`
+	ByEndpoint    []failureSummaryItem `json:"by_endpoint"`
+	ByUpstream    []failureSummaryItem `json:"by_upstream"`
+	ByRouteTarget []failureSummaryItem `json:"by_route_target"`
+	ByChannel     []failureSummaryItem `json:"by_channel"`
+	ByCredential  []failureSummaryItem `json:"by_credential"`
+	TopFailures   []failureTraceItem   `json:"top_failures"`
+	RefreshedAt   time.Time            `json:"refreshed_at"`
 }
 
 type systemEventListOutput struct {
@@ -483,11 +498,31 @@ func (a *serverAPI) queryRoutingDecisions(ctx context.Context, req *mcp.CallTool
 			if out.SelectedUpstreamID == "" {
 				out.SelectedUpstreamID, _ = event.Attributes["upstream_id"].(string)
 			}
+			identity := routingIdentityFromAttrs(event.Attributes)
+			if out.SelectedRouteTargetID == "" {
+				out.SelectedRouteTargetID = identity.RouteTargetID
+			}
+			if out.SelectedChannelID == "" {
+				out.SelectedChannelID = identity.ChannelID
+			}
+			if out.SelectedCredentialID == "" {
+				out.SelectedCredentialID = identity.CredentialID
+			}
 		case "routing.filtered":
 			if out.FailureReason == "" {
 				out.FailureReason, _ = event.Attributes["routing_failure_reason"].(string)
 			}
 		case "routing.outcome":
+			identity := routingIdentityFromAttrs(event.Attributes)
+			if out.SelectedRouteTargetID == "" {
+				out.SelectedRouteTargetID = identity.RouteTargetID
+			}
+			if out.SelectedChannelID == "" {
+				out.SelectedChannelID = identity.ChannelID
+			}
+			if out.SelectedCredentialID == "" {
+				out.SelectedCredentialID = identity.CredentialID
+			}
 			out.Outcome = eventMap
 		}
 	}
@@ -650,16 +685,18 @@ func (a *serverAPI) queryFailures(ctx context.Context, req *mcp.CallToolRequest,
 			if err != nil {
 				return nil, nil, err
 			}
-			reason, routingEventReason, err := a.traceFailureReason(entry, int(statusCode), errText)
+			routingEvidence, err := a.traceRoutingEvidence(entry)
 			if err != nil {
 				return nil, nil, err
 			}
+			reason, routingEventReason := failureReasonFromEvidence(entry, int(statusCode), errText, routingEvidence)
 			if reason != "" {
 				item["failure_reason"] = reason
 			}
 			if routingEventReason != "" {
 				item["routing_event_reason"] = routingEventReason
 			}
+			addRoutingIdentityFields(item, routingEvidence.Identity)
 			out.Items = append(out.Items, item)
 		}
 	}
@@ -699,6 +736,9 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 	byProvider := map[string]int{}
 	byEndpoint := map[string]int{}
 	byUpstream := map[string]int{}
+	byRouteTarget := map[string]int{}
+	byChannel := map[string]int{}
+	byCredential := map[string]int{}
 
 	for _, item := range page.Items {
 		statusCode, _ := item["status_code"].(float64)
@@ -711,16 +751,20 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 		if err != nil {
 			return nil, nil, err
 		}
-		reason, routingEventReason, err := a.traceFailureReason(entry, int(statusCode), errorText)
+		routingEvidence, err := a.traceRoutingEvidence(entry)
 		if err != nil {
 			return nil, nil, err
 		}
+		reason, routingEventReason := failureReasonFromEvidence(entry, int(statusCode), errorText, routingEvidence)
 		incrementCount(byReason, reason)
 		incrementCount(byStatus, fmt.Sprintf("%d", int(statusCode)))
 		incrementCount(byModel, entry.Header.Meta.Model)
 		incrementCount(byProvider, entry.Header.Meta.Provider)
 		incrementCount(byEndpoint, firstNonEmpty(entry.Header.Meta.Endpoint, entry.Header.Meta.URL))
 		incrementCount(byUpstream, entry.Header.Meta.SelectedUpstreamID)
+		incrementCount(byRouteTarget, routingEvidence.Identity.RouteTargetID)
+		incrementCount(byChannel, routingEvidence.Identity.ChannelID)
+		incrementCount(byCredential, routingEvidence.Identity.CredentialID)
 		out.TopFailures = append(out.TopFailures, failureTraceItem{
 			TraceID:            entry.ID,
 			SessionID:          entry.SessionID,
@@ -732,6 +776,9 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 			Reason:             reason,
 			Error:              entry.Header.Meta.Error,
 			SelectedUpstreamID: entry.Header.Meta.SelectedUpstreamID,
+			RouteTargetID:      routingEvidence.Identity.RouteTargetID,
+			ChannelID:          routingEvidence.Identity.ChannelID,
+			CredentialID:       routingEvidence.Identity.CredentialID,
 			RoutingEventReason: routingEventReason,
 		})
 	}
@@ -742,6 +789,9 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 	out.ByProvider = toFailureSummaryItems(byProvider, limit)
 	out.ByEndpoint = toFailureSummaryItems(byEndpoint, limit)
 	out.ByUpstream = toFailureSummaryItems(byUpstream, limit)
+	out.ByRouteTarget = toFailureSummaryItems(byRouteTarget, limit)
+	out.ByChannel = toFailureSummaryItems(byChannel, limit)
+	out.ByCredential = toFailureSummaryItems(byCredential, limit)
 	sort.Slice(out.TopFailures, func(i, j int) bool {
 		if out.TopFailures[i].Reason != out.TopFailures[j].Reason {
 			return out.TopFailures[i].Reason < out.TopFailures[j].Reason
@@ -758,42 +808,78 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 }
 
 func (a *serverAPI) traceFailureReason(entry store.LogEntry, statusCode int, errorText string) (reason string, routingEventReason string, err error) {
-	routingEventReason, err = a.traceRoutingEventFailureReason(entry)
+	evidence, err := a.traceRoutingEvidence(entry)
 	if err != nil {
 		return "", "", err
 	}
-	if routingEventReason != "" {
-		return routingEventReason, routingEventReason, nil
+	reason, routingEventReason = failureReasonFromEvidence(entry, statusCode, errorText, evidence)
+	return reason, routingEventReason, nil
+}
+
+func failureReasonFromEvidence(entry store.LogEntry, statusCode int, errorText string, evidence routingEvidence) (reason string, routingEventReason string) {
+	if evidence.FailureReason != "" {
+		return evidence.FailureReason, evidence.FailureReason
 	}
 	if reason := strings.TrimSpace(entry.Header.Meta.RoutingFailureReason); reason != "" {
-		return reason, "", nil
+		return reason, ""
 	}
-	return classifyFailureReason(statusCode, errorText), "", nil
+	return classifyFailureReason(statusCode, errorText), ""
 }
 
 func (a *serverAPI) traceRoutingEventFailureReason(entry store.LogEntry) (string, error) {
+	evidence, err := a.traceRoutingEvidence(entry)
+	if err != nil {
+		return "", err
+	}
+	return evidence.FailureReason, nil
+}
+
+type routingIdentity struct {
+	RouteTargetID string
+	ChannelID     string
+	CredentialID  string
+}
+
+type routingEvidence struct {
+	FailureReason string
+	Identity      routingIdentity
+}
+
+func (a *serverAPI) traceRoutingEvidence(entry store.LogEntry) (routingEvidence, error) {
 	content, err := os.ReadFile(entry.LogPath)
 	if err != nil {
-		return "", fmt.Errorf("read trace cassette %q: %w", entry.ID, err)
+		return routingEvidence{}, fmt.Errorf("read trace cassette %q: %w", entry.ID, err)
 	}
 	parsed, err := recordfile.ParsePrelude(content)
 	if err != nil {
-		return "", fmt.Errorf("parse trace prelude %q: %w", entry.ID, err)
+		return routingEvidence{}, fmt.Errorf("parse trace prelude %q: %w", entry.ID, err)
+	}
+	evidence := routingEvidence{}
+	for _, event := range parsed.Events {
+		switch event.Type {
+		case "routing.selected", "routing.outcome":
+			evidence.Identity = evidence.Identity.merge(routingIdentityFromAttrs(event.Attributes))
+		}
 	}
 	for _, event := range parsed.Events {
 		if event.Type != "routing.filtered" {
 			continue
 		}
 		if reason, _ := event.Attributes["routing_failure_reason"].(string); strings.TrimSpace(reason) != "" {
-			return strings.TrimSpace(reason), nil
+			evidence.FailureReason = strings.TrimSpace(reason)
+			if isEmptyRoutingIdentity(evidence.Identity) {
+				evidence.Identity = routingIdentityFromAttrs(event.Attributes)
+			}
+			return evidence, nil
 		}
 	}
 	for _, event := range parsed.Events {
 		if event.Type == "routing.retry_queue_saturated" {
-			return "retry_queue_saturated", nil
+			evidence.FailureReason = "retry_queue_saturated"
+			return evidence, nil
 		}
 	}
-	return "", nil
+	return evidence, nil
 }
 
 func (a *serverAPI) listSystemEvents(ctx context.Context, req *mcp.CallToolRequest, in *listSystemEventsInput) (*mcp.CallToolResult, *systemEventListOutput, error) {
@@ -1115,14 +1201,20 @@ func stickyRoutingRowFromEvent(entry store.LogEntry, event recordfile.RecordEven
 		status = strings.TrimSpace(attrStatus)
 	}
 	row := stickyRoutingRow{
-		TraceID:              entry.ID,
-		CreatedAt:            entry.Header.Meta.Time,
-		StickyStatus:         status,
-		CassettePath:         entry.LogPath,
-		LogPath:              entry.LogPath,
-		UpstreamID:           stringAttr(attrs, "upstream_id"),
-		PreviousUpstreamID:   stringAttr(attrs, "previous_upstream_id"),
-		StickyKeyFingerprint: stringAttr(attrs, "sticky_key_fingerprint"),
+		TraceID:               entry.ID,
+		CreatedAt:             entry.Header.Meta.Time,
+		StickyStatus:          status,
+		CassettePath:          entry.LogPath,
+		LogPath:               entry.LogPath,
+		UpstreamID:            stringAttr(attrs, "upstream_id"),
+		PreviousUpstreamID:    stringAttr(attrs, "previous_upstream_id"),
+		RouteTargetID:         stringAttr(attrs, "route_target_id"),
+		PreviousRouteTargetID: stringAttr(attrs, "previous_route_target_id"),
+		ChannelID:             stringAttr(attrs, "channel_id"),
+		PreviousChannelID:     stringAttr(attrs, "previous_channel_id"),
+		CredentialID:          stringAttr(attrs, "credential_id"),
+		PreviousCredentialID:  stringAttr(attrs, "previous_credential_id"),
+		StickyKeyFingerprint:  stringAttr(attrs, "sticky_key_fingerprint"),
 	}
 	return row, true
 }
@@ -1146,6 +1238,46 @@ func stickyRoutingRowMatches(row stickyRoutingRow, status string, upstreamID str
 func stringAttr(attrs map[string]interface{}, key string) string {
 	value, _ := attrs[key].(string)
 	return strings.TrimSpace(value)
+}
+
+func routingIdentityFromAttrs(attrs map[string]interface{}) routingIdentity {
+	if len(attrs) == 0 {
+		return routingIdentity{}
+	}
+	return routingIdentity{
+		RouteTargetID: stringAttr(attrs, "route_target_id"),
+		ChannelID:     stringAttr(attrs, "channel_id"),
+		CredentialID:  stringAttr(attrs, "credential_id"),
+	}
+}
+
+func (identity routingIdentity) merge(next routingIdentity) routingIdentity {
+	if identity.RouteTargetID == "" {
+		identity.RouteTargetID = next.RouteTargetID
+	}
+	if identity.ChannelID == "" {
+		identity.ChannelID = next.ChannelID
+	}
+	if identity.CredentialID == "" {
+		identity.CredentialID = next.CredentialID
+	}
+	return identity
+}
+
+func isEmptyRoutingIdentity(identity routingIdentity) bool {
+	return identity.RouteTargetID == "" && identity.ChannelID == "" && identity.CredentialID == ""
+}
+
+func addRoutingIdentityFields(item map[string]any, identity routingIdentity) {
+	if identity.RouteTargetID != "" {
+		item["route_target_id"] = identity.RouteTargetID
+	}
+	if identity.ChannelID != "" {
+		item["channel_id"] = identity.ChannelID
+	}
+	if identity.CredentialID != "" {
+		item["credential_id"] = identity.CredentialID
+	}
 }
 
 func intFromAny(value any) int {
