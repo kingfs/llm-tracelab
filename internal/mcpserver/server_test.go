@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	sessionID := "sess-mcp"
 	successPath := filepath.Join(outputDir, "success.http")
 	failurePath := filepath.Join(outputDir, "failure.http")
+	stickyPath := filepath.Join(outputDir, "sticky-break.http")
 
 	if err := os.WriteFile(successPath, buildRecordFixture(t, fixtureSpec{
 		URL:                            "/v1/responses",
@@ -52,6 +54,27 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		RoutingFailureEventReason:      "all_targets_filtered",
 	}), 0o644); err != nil {
 		t.Fatalf("WriteFile(failure) error = %v", err)
+	}
+
+	if err := os.WriteFile(stickyPath, buildRecordFixture(t, fixtureSpec{
+		URL:                            "/v1/responses",
+		Status:                         "200 OK",
+		SessionID:                      sessionID,
+		RequestID:                      "req-sticky-break",
+		RequestBody:                    `{"input":"continue"}`,
+		ResponseBody:                   `{"output_text":"rebound"}`,
+		SelectedUpstreamID:             "openai-fallback",
+		SelectedUpstreamBaseURL:        "https://fallback.example.com/v1",
+		SelectedUpstreamProviderPreset: "openai",
+		StickyEvents: []stickyFixtureEvent{{
+			Status:               "break",
+			UpstreamID:           "openai-fallback",
+			PreviousUpstreamID:   "openai-primary",
+			StickyKeyFingerprint: "sticky-fp-001",
+			RawStickyKey:         "raw-session-id-must-not-leak",
+		}},
+	}), 0o644); err != nil {
+		t.Fatalf("WriteFile(sticky) error = %v", err)
 	}
 
 	st, err := store.New(outputDir)
@@ -165,8 +188,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 18 {
-		t.Fatalf("len(tools.Tools) = %d, want 18", len(tools.Tools))
+	if len(tools.Tools) != 19 {
+		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -181,8 +204,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	tracePayload := traceList.StructuredContent.(map[string]any)
 	items := tracePayload["items"].([]any)
-	if len(items) != 2 {
-		t.Fatalf("len(list_traces.items) = %d, want 2", len(items))
+	if len(items) != 3 {
+		t.Fatalf("len(list_traces.items) = %d, want 3", len(items))
 	}
 	traceID := items[0].(map[string]any)["id"].(string)
 	if strings.TrimSpace(traceID) == "" {
@@ -200,15 +223,21 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		t.Fatalf("CallTool(list_traces unparsed) error = %v", err)
 	}
 	unparsedItems := unparsedTraces.StructuredContent.(map[string]any)["items"].([]any)
-	if len(unparsedItems) != 1 {
-		t.Fatalf("len(list_traces unparsed.items) = %d, want 1", len(unparsedItems))
+	if len(unparsedItems) != 2 {
+		t.Fatalf("len(list_traces unparsed.items) = %d, want 2", len(unparsedItems))
 	}
-	unparsedItem := unparsedItems[0].(map[string]any)
-	if got := unparsedItem["id"].(string); got != failureEntry.ID {
-		t.Fatalf("list_traces unparsed id = %q, want %q", got, failureEntry.ID)
+	seenFailureUnparsed := false
+	for _, item := range unparsedItems {
+		unparsedItem := item.(map[string]any)
+		if got := unparsedItem["observation"].(map[string]any)["status"].(string); got != "unparsed" {
+			t.Fatalf("list_traces unparsed observation = %q, want unparsed", got)
+		}
+		if got := unparsedItem["id"].(string); got == failureEntry.ID {
+			seenFailureUnparsed = true
+		}
 	}
-	if got := unparsedItem["observation"].(map[string]any)["status"].(string); got != "unparsed" {
-		t.Fatalf("list_traces unparsed observation = %q, want unparsed", got)
+	if !seenFailureUnparsed {
+		t.Fatalf("list_traces unparsed missing failure trace %q", failureEntry.ID)
 	}
 
 	traceDetail, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -245,6 +274,57 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if len(routingPayload["events"].([]any)) == 0 {
 		t.Fatalf("query_routing_decisions events empty")
+	}
+
+	stickyRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "query_sticky_routing",
+		Arguments: map[string]any{
+			"status":                 "break",
+			"upstream_id":            "openai-fallback",
+			"previous_upstream_id":   "openai-primary",
+			"sticky_key_fingerprint": "sticky-fp-001",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_sticky_routing) error = %v", err)
+	}
+	stickyPayload := stickyRouting.StructuredContent.(map[string]any)
+	if got := int(stickyPayload["total"].(float64)); got != 1 {
+		t.Fatalf("query_sticky_routing.total = %d, want 1", got)
+	}
+	stickyItems := stickyPayload["items"].([]any)
+	stickyItem := stickyItems[0].(map[string]any)
+	if got := stickyItem["sticky_status"].(string); got != "break" {
+		t.Fatalf("query_sticky_routing sticky_status = %q, want break", got)
+	}
+	if got := stickyItem["upstream_id"].(string); got != "openai-fallback" {
+		t.Fatalf("query_sticky_routing upstream_id = %q, want openai-fallback", got)
+	}
+	if got := stickyItem["previous_upstream_id"].(string); got != "openai-primary" {
+		t.Fatalf("query_sticky_routing previous_upstream_id = %q, want openai-primary", got)
+	}
+	if got := stickyItem["sticky_key_fingerprint"].(string); got != "sticky-fp-001" {
+		t.Fatalf("query_sticky_routing sticky_key_fingerprint = %q, want sticky-fp-001", got)
+	}
+	if _, ok := stickyItem["cassette_path"].(string); !ok {
+		t.Fatalf("query_sticky_routing cassette_path missing: %+v", stickyItem)
+	}
+	if _, ok := stickyItem["sticky_key"]; ok {
+		t.Fatalf("query_sticky_routing leaked sticky_key: %+v", stickyItem)
+	}
+	if strings.Contains(fmt.Sprintf("%v", stickyPayload), "raw-session-id-must-not-leak") {
+		t.Fatalf("query_sticky_routing leaked raw sticky key: %+v", stickyPayload)
+	}
+
+	stickyNoMatch, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_sticky_routing",
+		Arguments: map[string]any{"sticky_key_fingerprint": "missing-fp"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_sticky_routing no match) error = %v", err)
+	}
+	if got := int(stickyNoMatch.StructuredContent.(map[string]any)["total"].(float64)); got != 0 {
+		t.Fatalf("query_sticky_routing no match total = %d, want 0", got)
 	}
 
 	traceFindings, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -483,6 +563,15 @@ type fixtureSpec struct {
 	HeaderRoutingFailureReason     string
 	RoutingFailureEventReason      string
 	RetryQueueSaturatedEvent       bool
+	StickyEvents                   []stickyFixtureEvent
+}
+
+type stickyFixtureEvent struct {
+	Status               string
+	UpstreamID           string
+	PreviousUpstreamID   string
+	StickyKeyFingerprint string
+	RawStickyKey         string
 }
 
 func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
@@ -553,6 +642,28 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 		events = append(events, recordfile.RecordEvent{
 			Type: "routing.retry_queue_saturated",
 			Time: header.Meta.Time,
+		})
+	}
+	for _, sticky := range spec.StickyEvents {
+		attrs := map[string]interface{}{
+			"sticky_status": sticky.Status,
+		}
+		if sticky.UpstreamID != "" {
+			attrs["upstream_id"] = sticky.UpstreamID
+		}
+		if sticky.PreviousUpstreamID != "" {
+			attrs["previous_upstream_id"] = sticky.PreviousUpstreamID
+		}
+		if sticky.StickyKeyFingerprint != "" {
+			attrs["sticky_key_fingerprint"] = sticky.StickyKeyFingerprint
+		}
+		if sticky.RawStickyKey != "" {
+			attrs["sticky_key"] = sticky.RawStickyKey
+		}
+		events = append(events, recordfile.RecordEvent{
+			Type:       "routing.sticky." + sticky.Status,
+			Time:       header.Meta.Time,
+			Attributes: attrs,
 		})
 	}
 	prelude, err := recordfile.MarshalPrelude(header, events)

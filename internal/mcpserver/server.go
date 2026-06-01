@@ -49,6 +49,15 @@ type queryRoutingDecisionsInput struct {
 	TraceID string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
 }
 
+type queryStickyRoutingInput struct {
+	Page                 int    `json:"page,omitempty" jsonschema:"1-based page number"`
+	PageSize             int    `json:"page_size,omitempty" jsonschema:"number of matching sticky rows per page, max 200"`
+	Status               string `json:"status,omitempty" jsonschema:"optional sticky status filter: hit, miss, bind, or break"`
+	UpstreamID           string `json:"upstream_id,omitempty" jsonschema:"optional upstream id filter"`
+	PreviousUpstreamID   string `json:"previous_upstream_id,omitempty" jsonschema:"optional previous upstream id filter"`
+	StickyKeyFingerprint string `json:"sticky_key_fingerprint,omitempty" jsonschema:"optional sticky key fingerprint filter"`
+}
+
 type listTraceFindingsInput struct {
 	TraceID  string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
 	Severity string `json:"severity,omitempty" jsonschema:"optional severity filter"`
@@ -188,6 +197,33 @@ type routingDecisionOutput struct {
 	Outcome            map[string]any   `json:"outcome,omitempty"`
 }
 
+type stickyRoutingOutput struct {
+	Items                []stickyRoutingRow `json:"items"`
+	Page                 int                `json:"page"`
+	PageSize             int                `json:"page_size"`
+	Total                int                `json:"total"`
+	TotalPages           int                `json:"total_pages"`
+	Scanned              int                `json:"scanned"`
+	Skipped              int                `json:"skipped"`
+	Errors               []string           `json:"errors,omitempty"`
+	Status               string             `json:"status,omitempty"`
+	UpstreamID           string             `json:"upstream_id,omitempty"`
+	PreviousUpstreamID   string             `json:"previous_upstream_id,omitempty"`
+	StickyKeyFingerprint string             `json:"sticky_key_fingerprint,omitempty"`
+	RefreshedAt          time.Time          `json:"refreshed_at"`
+}
+
+type stickyRoutingRow struct {
+	TraceID              string    `json:"trace_id"`
+	CreatedAt            time.Time `json:"created_at,omitempty"`
+	StickyStatus         string    `json:"sticky_status"`
+	UpstreamID           string    `json:"upstream_id,omitempty"`
+	PreviousUpstreamID   string    `json:"previous_upstream_id,omitempty"`
+	StickyKeyFingerprint string    `json:"sticky_key_fingerprint,omitempty"`
+	CassettePath         string    `json:"cassette_path"`
+	LogPath              string    `json:"log_path"`
+}
+
 type queryFailuresOutput struct {
 	Items       []map[string]any `json:"items"`
 	Page        int              `json:"page"`
@@ -287,6 +323,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "query_routing_decisions",
 		Description: "Return routing decision events for one trace, including candidates, selected upstream, outcome, and failure reason.",
 	}, api.queryRoutingDecisions)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "query_sticky_routing",
+		Description: "Find traces with routing.sticky.* cassette events, with optional status, upstream, previous upstream, and fingerprint filters.",
+	}, api.queryStickyRouting)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_trace_findings",
 		Description: "List deterministic audit findings for one trace, with optional severity and category filters.",
@@ -452,6 +492,81 @@ func (a *serverAPI) queryRoutingDecisions(ctx context.Context, req *mcp.CallTool
 		}
 	}
 	return nil, &out, nil
+}
+
+func (a *serverAPI) queryStickyRouting(ctx context.Context, req *mcp.CallToolRequest, in *queryStickyRoutingInput) (*mcp.CallToolResult, *stickyRoutingOutput, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, nil, err
+	}
+	page := normalizePage(in.Page)
+	pageSize := normalizePageSize(in.PageSize)
+	status := strings.TrimSpace(in.Status)
+	upstreamID := strings.TrimSpace(in.UpstreamID)
+	previousUpstreamID := strings.TrimSpace(in.PreviousUpstreamID)
+	fingerprint := strings.TrimSpace(in.StickyKeyFingerprint)
+
+	out := &stickyRoutingOutput{
+		Page:                 page,
+		PageSize:             pageSize,
+		Status:               status,
+		UpstreamID:           upstreamID,
+		PreviousUpstreamID:   previousUpstreamID,
+		StickyKeyFingerprint: fingerprint,
+		RefreshedAt:          time.Now().UTC(),
+	}
+	entries, err := a.allTraceEntries()
+	if err != nil {
+		return nil, nil, err
+	}
+	out.Scanned = len(entries)
+
+	var matches []stickyRoutingRow
+	for _, entry := range entries {
+		content, err := os.ReadFile(entry.LogPath)
+		if err != nil {
+			out.Skipped++
+			out.Errors = append(out.Errors, fmt.Sprintf("%s: read cassette: %v", entry.ID, err))
+			continue
+		}
+		parsed, err := recordfile.ParsePrelude(content)
+		if err != nil {
+			out.Skipped++
+			out.Errors = append(out.Errors, fmt.Sprintf("%s: parse prelude failed", entry.ID))
+			continue
+		}
+		for _, event := range parsed.Events {
+			row, ok := stickyRoutingRowFromEvent(entry, event)
+			if !ok {
+				continue
+			}
+			if !stickyRoutingRowMatches(row, status, upstreamID, previousUpstreamID, fingerprint) {
+				continue
+			}
+			matches = append(matches, row)
+		}
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		if !matches[i].CreatedAt.Equal(matches[j].CreatedAt) {
+			return matches[i].CreatedAt.After(matches[j].CreatedAt)
+		}
+		if matches[i].TraceID != matches[j].TraceID {
+			return matches[i].TraceID < matches[j].TraceID
+		}
+		return matches[i].StickyStatus < matches[j].StickyStatus
+	})
+	out.Total = len(matches)
+	out.TotalPages = totalPages(out.Total, pageSize)
+	start := (page - 1) * pageSize
+	if start < len(matches) {
+		end := start + pageSize
+		if end > len(matches) {
+			end = len(matches)
+		}
+		out.Items = matches[start:end]
+	} else {
+		out.Items = []stickyRoutingRow{}
+	}
+	return nil, out, nil
 }
 
 func (a *serverAPI) listTraceFindings(ctx context.Context, req *mcp.CallToolRequest, in *listTraceFindingsInput) (*mcp.CallToolResult, map[string]any, error) {
@@ -947,6 +1062,24 @@ func (a *serverAPI) lookupTrace(traceID string) (store.LogEntry, error) {
 	return entry, nil
 }
 
+func (a *serverAPI) allTraceEntries() ([]store.LogEntry, error) {
+	if err := a.requireStoreSync(); err != nil {
+		return nil, err
+	}
+	var entries []store.LogEntry
+	for page := 1; ; page++ {
+		result, err := a.store.ListPage(page, maxPageSize, store.ListFilter{})
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, result.Items...)
+		if result.TotalPages == 0 || page >= result.TotalPages {
+			break
+		}
+	}
+	return entries, nil
+}
+
 func (a *serverAPI) requireStoreSync() error {
 	if a.store == nil {
 		return fmt.Errorf("store not configured")
@@ -967,6 +1100,52 @@ func routingEventMap(event recordfile.RecordEvent) map[string]any {
 		out["status_code"] = event.StatusCode
 	}
 	return out
+}
+
+func stickyRoutingRowFromEvent(entry store.LogEntry, event recordfile.RecordEvent) (stickyRoutingRow, bool) {
+	if !strings.HasPrefix(event.Type, "routing.sticky.") {
+		return stickyRoutingRow{}, false
+	}
+	attrs := event.Attributes
+	if attrs == nil {
+		attrs = map[string]interface{}{}
+	}
+	status := strings.TrimSpace(strings.TrimPrefix(event.Type, "routing.sticky."))
+	if attrStatus, _ := attrs["sticky_status"].(string); strings.TrimSpace(attrStatus) != "" {
+		status = strings.TrimSpace(attrStatus)
+	}
+	row := stickyRoutingRow{
+		TraceID:              entry.ID,
+		CreatedAt:            entry.Header.Meta.Time,
+		StickyStatus:         status,
+		CassettePath:         entry.LogPath,
+		LogPath:              entry.LogPath,
+		UpstreamID:           stringAttr(attrs, "upstream_id"),
+		PreviousUpstreamID:   stringAttr(attrs, "previous_upstream_id"),
+		StickyKeyFingerprint: stringAttr(attrs, "sticky_key_fingerprint"),
+	}
+	return row, true
+}
+
+func stickyRoutingRowMatches(row stickyRoutingRow, status string, upstreamID string, previousUpstreamID string, fingerprint string) bool {
+	if status != "" && row.StickyStatus != status {
+		return false
+	}
+	if upstreamID != "" && row.UpstreamID != upstreamID {
+		return false
+	}
+	if previousUpstreamID != "" && row.PreviousUpstreamID != previousUpstreamID {
+		return false
+	}
+	if fingerprint != "" && row.StickyKeyFingerprint != fingerprint {
+		return false
+	}
+	return true
+}
+
+func stringAttr(attrs map[string]interface{}, key string) string {
+	value, _ := attrs[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func intFromAny(value any) int {
