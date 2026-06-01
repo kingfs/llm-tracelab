@@ -692,6 +692,7 @@ func TestRouterAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 		},
 	}
 	cfg.Router.Fallback.OnMissingModel = "allow_static"
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
 
 	rtr, err := New(cfg, nil)
 	if err != nil {
