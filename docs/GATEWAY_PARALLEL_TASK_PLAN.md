@@ -367,7 +367,7 @@ Integration order:
 Branch: `feature/gateway-credential-config`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-config`
 Agent: Sagan (`019e8261-4a51-7331-9a35-22e28f71fa60`)
-Status: assigned
+Status: integrated as `644cbf3 docs: design credential storage migration`
 
 Owner scope:
 
@@ -420,7 +420,7 @@ Acceptance:
 Branch: `feature/gateway-credential-events`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-events`
 Agent: Curie (`019e8261-8e98-7c90-b044-5706e34238d8`)
-Status: assigned
+Status: integrated as `dfc7195 feat: add scoped local limit keys`
 
 Owner scope:
 
@@ -573,7 +573,7 @@ Acceptance:
 Branch: `feature/gateway-credential-docs`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-docs`
 Agent: Parfit (`019e824b-227c-73c3-b412-62b324e27785`)
-Status: completed in branch as `docs: add credential routing operator guide`
+Status: integrated as `f3c3156 docs: add credential routing operator guide`
 
 Owner scope:
 
