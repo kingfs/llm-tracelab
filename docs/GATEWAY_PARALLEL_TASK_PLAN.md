@@ -335,3 +335,128 @@ Acceptance:
 Spec:
 
 - [Credential Routing Decision Chain Spec](./GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md)
+
+## Parallel Batch 3 Plan
+
+Baseline:
+
+```text
+b2fb659 test: update management mcp tool count
+```
+
+Coordinator branch:
+
+```text
+feature/gateway-credential-implementation
+/data/src/github.com/kingfs/llm-tracelab-gateway-credential-implementation
+```
+
+Batch 3 objective:
+
+Implement the first credential-aware routing slice without breaking existing channel config, cassette replay, or local-first workflows.
+
+Integration order:
+
+1. Config/runtime projection, because router work needs typed credential inputs.
+2. Router route-target expansion, because proxy events should consume router decisions.
+3. Proxy event/redaction, because it writes additive cassette evidence.
+4. Monitor/MCP credential read-side grouping, because it consumes emitted fields.
+
+### H. Credential Config Runtime Projection
+
+Branch: `feature/gateway-credential-config`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-config`
+Status: planned
+
+Owner scope:
+
+- Add optional credential config under upstream targets.
+- Preserve existing single-key behavior by compiling an implicit `default` credential when explicit credentials are absent.
+- Add runtime/config tests showing explicit credentials win over inline key and existing configs still load.
+- Avoid DB migrations; this is config/runtime projection only.
+
+Constraints:
+
+- No router selection behavior changes.
+- No secret values in logs, docs examples beyond env references, events, or tests.
+- Existing `upstream` and `upstreams` YAML remain valid.
+
+Acceptance:
+
+- `config.Load` parses optional `credentials`.
+- `EffectiveUpstreams` or an adjacent helper exposes enough data for router target expansion.
+- `go test ./internal/config ./cmd/server` passes.
+
+### I. Router RouteTarget Expansion
+
+Branch: `feature/gateway-credential-router`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-router`
+Status: planned
+
+Owner scope:
+
+- Expand each upstream/channel into route targets by credential when credential data is available.
+- Add additive `CandidateDecision` / `DecisionTrace` fields: `route_target_id`, `channel_id`, `credential_id`, `credential_hint`.
+- Sticky binding should continue using concrete route target IDs.
+- Add router tests for implicit default credential, explicit credential expansion, and sticky rebind at route target granularity.
+
+Constraints:
+
+- Depend only on config/runtime structures from task H.
+- Do not add DB migrations.
+- Do not write cassette events directly.
+- Keep requests with no explicit credentials behavior-compatible.
+
+Acceptance:
+
+- Existing router tests pass.
+- New tests prove route target IDs remain stable and explainable.
+- `go test ./internal/router` passes.
+
+### J. Credential Event Emission And Redaction
+
+Branch: `feature/gateway-credential-events`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-events`
+Status: planned
+
+Owner scope:
+
+- Emit additive credential fields in `routing.candidates`, `routing.selected`, `routing.outcome`, and sticky events when router decisions include them.
+- Add redaction tests to ensure credential hints are safe and raw auth material never appears in cassette metadata.
+- Add proxy e2e assertions for credential event fields.
+
+Constraints:
+
+- Consume router decision fields from task I.
+- Do not alter raw HTTP request/response bytes.
+- Do not expose API keys, bearer tokens, OAuth tokens, service-account JSON, or raw custom auth headers.
+
+Acceptance:
+
+- Existing V3 cassette parsing remains compatible.
+- New credential fields are additive and omitted when absent.
+- `go test ./internal/proxy ./internal/redaction` passes.
+
+### K. Credential Read-Side Grouping
+
+Branch: `feature/gateway-credential-readside`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-readside`
+Status: planned
+
+Owner scope:
+
+- Extend MCP routing/sticky/failure queries and Monitor routing summary to group by `channel_id`, `credential_id`, and `route_target_id` when present.
+- Preserve fallback behavior for old cassettes with only `upstream_id`.
+- Add focused tests with mixed old/new event fixtures.
+
+Constraints:
+
+- Read-only over cassette/store.
+- No router/proxy changes.
+- No DB migrations.
+
+Acceptance:
+
+- MCP and Monitor outputs expose credential grouping without breaking existing fields.
+- Old cassette fixtures still pass.
+- `go test ./internal/mcpserver ./internal/monitor` passes.
