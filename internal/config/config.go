@@ -48,6 +48,8 @@ type Config struct {
 
 	Router RouterConfig `yaml:"router"`
 
+	Limits LimitConfig `yaml:"limits"`
+
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
 		MaskKey   bool   `yaml:"mask_key"`
@@ -101,6 +103,17 @@ type RouterConfig struct {
 	Fallback struct {
 		OnMissingModel string `yaml:"on_missing_model"`
 	} `yaml:"fallback"`
+}
+
+type LimitConfig struct {
+	Enabled          bool   `yaml:"enabled"`
+	MaxConcurrent    int    `yaml:"max_concurrent"`
+	MaxQueued        int    `yaml:"max_queued"`
+	ChannelKeyHeader string `yaml:"channel_key_header"`
+}
+
+func (c LimitConfig) LocalConcurrencyEnabled() bool {
+	return c.Enabled && c.MaxConcurrent > 0
 }
 
 type ChaosRule struct {

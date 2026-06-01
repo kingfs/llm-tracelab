@@ -21,6 +21,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/chaos"
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/limit"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/redaction"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -225,6 +226,7 @@ type Handler struct {
 	cfg          *config.Config
 	router       *router.Router
 	authVerifier auth.TokenVerifier
+	limiter      *limit.Limiter
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
@@ -245,6 +247,13 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 
 	rec := recorder.New(cfg.Debug.OutputDir, cfg.Debug.MaskKey, st)
 	cm := chaos.New(cfg)
+	localLimiter := limit.New(limit.Config{
+		MaxConcurrent: cfg.Limits.MaxConcurrent,
+		MaxQueued:     cfg.Limits.MaxQueued,
+	})
+	if !cfg.Limits.LocalConcurrencyEnabled() {
+		localLimiter = nil
+	}
 
 	rp := &httputil.ReverseProxy{
 		Transport: &http.Transport{
@@ -338,6 +347,7 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		chaosManager: cm,
 		cfg:          cfg,
 		router:       rtr,
+		limiter:      localLimiter,
 	}, nil
 }
 
@@ -370,6 +380,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Failed to read request body", "error", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
+	}
+	if h.limiter != nil {
+		limitKey := h.limitKey(r)
+		lease, rejectReason := h.limiter.Acquire(r.Context(), limitKey)
+		if rejectReason != limit.RejectNone {
+			statusCode := http.StatusTooManyRequests
+			eventType := "limit.concurrency_rejected"
+			if rejectReason == limit.RejectQueueSaturated {
+				statusCode = http.StatusServiceUnavailable
+				eventType = "limit.queue_saturated"
+			}
+			h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, limitKey, bodyBytes)
+			http.Error(w, http.StatusText(statusCode), statusCode)
+			return
+		}
+		if lease != nil {
+			defer lease.Release()
+		}
 	}
 
 	irw := NewInstrumentedResponseWriter(w)
@@ -1153,5 +1181,80 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 
 	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
 		slog.Error("Failed to update selection-failure log file", "path", logInfo.Path, "err", err)
+	}
+}
+
+func (h *Handler) limitKey(r *http.Request) string {
+	if h == nil || h.cfg == nil {
+		return "global"
+	}
+	headerName := strings.TrimSpace(h.cfg.Limits.ChannelKeyHeader)
+	if headerName == "" {
+		return "global"
+	}
+	value := strings.TrimSpace(r.Header.Get(headerName))
+	if value == "" {
+		return "global"
+	}
+	return headerName + ":" + value
+}
+
+func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time, statusCode int, eventType string, reason limit.RejectReason, limitKey string, bodyBytes []byte) {
+	if h == nil || h.recorder == nil || r == nil {
+		return
+	}
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+		RoutingPolicy: h.routerPolicy(),
+	}, bodyBytes)
+	if err != nil {
+		slog.Error("Failed to prepare limit-rejection log file", "err", err)
+		return
+	}
+
+	body := []byte(http.StatusText(statusCode) + "\n")
+	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, http.StatusText(statusCode)))
+	headerBuf.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	headerBuf.WriteString("X-Content-Type-Options: nosniff\r\n")
+	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(body))
+	headerBuf.WriteString("\r\n")
+
+	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
+		slog.Error("Failed to write limit-rejection separator", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+	nHead, err := logInfo.File.Write(headerBuf.Bytes())
+	if err != nil {
+		slog.Error("Failed to write limit-rejection response header", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+	nBody, err := logInfo.File.Write(body)
+	if err != nil {
+		slog.Error("Failed to write limit-rejection response body", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		return
+	}
+
+	logInfo.Header.Meta.Error = string(reason)
+	logInfo.Header.Meta.StatusCode = statusCode
+	logInfo.Header.Meta.DurationMs = time.Since(start).Milliseconds()
+	logInfo.Header.Meta.ContentLength = int64(len(body))
+	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
+	logInfo.Header.Layout.ResBodyLen = int64(nBody)
+	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+		Type:    eventType,
+		Time:    time.Now().UTC(),
+		Message: string(reason),
+		Attributes: map[string]interface{}{
+			"http_status":           statusCode,
+			"limit_key_fingerprint": stickyKeyFingerprint(limitKey),
+			"max_concurrent":        h.cfg.Limits.MaxConcurrent,
+			"max_queued":            h.cfg.Limits.MaxQueued,
+		},
+	})
+
+	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+		slog.Error("Failed to update limit-rejection log file", "path", logInfo.Path, "err", err)
 	}
 }

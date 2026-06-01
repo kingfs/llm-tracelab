@@ -164,6 +164,37 @@ upstreams:
 	}
 }
 
+func TestLoadLimitConfigDisabledByDefault(t *testing.T) {
+	cfg := Config{}
+	if cfg.Limits.Enabled {
+		t.Fatalf("Limits.Enabled = true, want false")
+	}
+	if cfg.Limits.LocalConcurrencyEnabled() {
+		t.Fatalf("LocalConcurrencyEnabled() = true, want false")
+	}
+}
+
+func TestLoadLimitConfigFromYAML(t *testing.T) {
+	path := writeTempConfig(t, `
+limits:
+  enabled: true
+  max_concurrent: 1
+  max_queued: 2
+  channel_key_header: "X-TraceLab-Channel"
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Limits.LocalConcurrencyEnabled() {
+		t.Fatalf("LocalConcurrencyEnabled() = false, want true")
+	}
+	if cfg.Limits.MaxConcurrent != 1 || cfg.Limits.MaxQueued != 2 || cfg.Limits.ChannelKeyHeader != "X-TraceLab-Channel" {
+		t.Fatalf("Limits = %+v", cfg.Limits)
+	}
+}
+
 func TestLoadFailsWhenEnvReferenceMissing(t *testing.T) {
 	path := writeTempConfig(t, `
 server:

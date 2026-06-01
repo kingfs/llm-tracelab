@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1580,6 +1581,209 @@ drained:
 		}
 	}
 	t.Fatalf("routing.retry_queue_saturated event not found: %+v", parsed.Events)
+}
+
+func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	releaseUpstream := make(chan struct{})
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-releaseUpstream
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+	cfg.Limits.Enabled = true
+	cfg.Limits.MaxConcurrent = 1
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	firstDone := make(chan error, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hold"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := proxyServer.Client().Do(req)
+		if err != nil {
+			firstDone <- err
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			firstDone <- fmt.Errorf("first status = %d, want 200", resp.StatusCode)
+			return
+		}
+		firstDone <- nil
+	}()
+
+	for i := 0; i < 100; i++ {
+		inflight, _ := handler.limiter.Counts("global")
+		if inflight > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"reject"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("resp.StatusCode = %d, want 429", resp.StatusCode)
+	}
+
+	close(releaseUpstream)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first request error = %v", err)
+	}
+
+	entries, err := waitForRecentEntries(st, 2, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	for _, entry := range entries {
+		parsed, err := waitForRecordedPrelude(entry.LogPath, time.Second)
+		if err != nil {
+			t.Fatalf("waitForRecordedPrelude(%q) error = %v", entry.LogPath, err)
+		}
+		for _, event := range parsed.Events {
+			if event.Type == "limit.concurrency_rejected" {
+				if got := event.Attributes["http_status"]; got != float64(http.StatusTooManyRequests) {
+					t.Fatalf("http_status = %v, want %d", got, http.StatusTooManyRequests)
+				}
+				if _, ok := event.Attributes["limit_key_fingerprint"]; !ok {
+					t.Fatalf("limit event missing limit_key_fingerprint: %+v", event.Attributes)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("limit.concurrency_rejected event not found in entries: %+v", entries)
+}
+
+func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	releaseUpstream := make(chan struct{})
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-releaseUpstream
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+	cfg.Limits.Enabled = true
+	cfg.Limits.MaxConcurrent = 1
+	cfg.Limits.MaxQueued = 1
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	startRequest := func(input string) chan error {
+		done := make(chan error, 1)
+		go func() {
+			req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"`+input+`"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := proxyServer.Client().Do(req)
+			if err != nil {
+				done <- err
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			done <- nil
+		}()
+		return done
+	}
+
+	firstDone := startRequest("hold")
+	for i := 0; i < 100; i++ {
+		inflight, _ := handler.limiter.Counts("global")
+		if inflight > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	queuedDone := startRequest("queue")
+	for i := 0; i < 100; i++ {
+		_, queued := handler.limiter.Counts("global")
+		if queued > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"saturate"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("resp.StatusCode = %d, want 503", resp.StatusCode)
+	}
+
+	close(releaseUpstream)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first request error = %v", err)
+	}
+	if err := <-queuedDone; err != nil {
+		t.Fatalf("queued request error = %v", err)
+	}
+
+	entries, err := waitForRecentEntries(st, 3, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	for _, entry := range entries {
+		parsed, err := waitForRecordedPrelude(entry.LogPath, time.Second)
+		if err != nil {
+			t.Fatalf("waitForRecordedPrelude(%q) error = %v", entry.LogPath, err)
+		}
+		for _, event := range parsed.Events {
+			if event.Type == "limit.queue_saturated" {
+				if got := event.Attributes["http_status"]; got != float64(http.StatusServiceUnavailable) {
+					t.Fatalf("http_status = %v, want %d", got, http.StatusServiceUnavailable)
+				}
+				return
+			}
+		}
+	}
+	t.Fatalf("limit.queue_saturated event not found in entries: %+v", entries)
 }
 
 func TestHandlerRetryExhaustedReturns502(t *testing.T) {
