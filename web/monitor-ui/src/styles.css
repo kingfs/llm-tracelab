@@ -2323,6 +2323,19 @@ a:focus-visible {
   gap: 8px;
 }
 
+.credential-break-row {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.credential-break-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .routing-decision-panel {
   display: grid;
   gap: 14px;

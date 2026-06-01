@@ -74,6 +74,8 @@ export function TraceDetailPage() {
   const messageCount = detail.data?.messages?.length || 0;
   const toolCount = declaredTools.length;
   const routingDecision = buildRoutingDecision(detail.data?.events || []);
+  const selectedRouteIdentity = routingDecision.selectedRouteTargetID || selectedUpstreamID;
+  const selectedChannelID = routingDecision.selectedChannelID || selectedUpstreamID;
 
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
@@ -280,16 +282,16 @@ export function TraceDetailPage() {
 
       {tab === "conversation" && detail.data ? (
         <div className="detail-grid">
-          {selectedUpstreamID || routingFailureReason ? (
+          {selectedUpstreamID || routingFailureReason || routingDecision.events.length ? (
             <section className="panel">
               <div className="panel-head">
                 <div>
                   <p className="eyebrow">Routing decision</p>
-                  <h2>{selectedUpstreamID ? "Selected upstream" : "Routing failure"}</h2>
+                  <h2>{selectedRouteIdentity ? "Selected route target" : "Routing failure"}</h2>
                 </div>
                 <div className="panel-head-actions">
-                  {selectedUpstreamID ? (
-                    <Link className="ghost-button active" to={buildChannelLink(selectedUpstreamID)}>
+                  {selectedChannelID ? (
+                    <Link className="ghost-button active" to={buildChannelLink(selectedChannelID)}>
                       Open Channel
                     </Link>
                   ) : null}
@@ -301,7 +303,10 @@ export function TraceDetailPage() {
                 </div>
               </div>
               <div className="detail-meta-strip">
-                <DetailMetaPill label="upstream" value={selectedUpstreamID || "-"} mono />
+                <DetailMetaPill label="route target" value={selectedRouteIdentity || "-"} mono />
+                <DetailMetaPill label="channel" value={selectedChannelID || "-"} mono />
+                {routingDecision.selectedCredentialID ? <DetailMetaPill label="credential" value={routingDecision.selectedCredentialID} mono /> : null}
+                {routingDecision.selectedCredentialHint ? <DetailMetaPill label="hint" value={routingDecision.selectedCredentialHint} mono /> : null}
                 <DetailMetaPill label="provider" value={selectedUpstreamProviderPreset || "-"} />
                 <DetailMetaPill label="policy" value={routingPolicy || "-"} />
                 <DetailMetaPill label="score" value={formatRoutingScore(routingScore)} />
@@ -310,13 +315,14 @@ export function TraceDetailPage() {
               </div>
               <div className="routing-summary-grid">
                 <section className="breakdown-card">
-                  <div className="breakdown-title">{selectedUpstreamID ? "Resolved upstream" : "Failure class"}</div>
+                  <div className="breakdown-title">{selectedRouteIdentity ? "Resolved route target" : "Failure class"}</div>
                   <div className="routing-summary-stack">
-                    <strong className="trace-model-name">{selectedUpstreamID || formatFailureReason(routingFailureReason) || "routing failure"}</strong>
+                    <strong className="trace-model-name">{selectedRouteIdentity || formatFailureReason(routingFailureReason) || "routing failure"}</strong>
                     <span className="trace-subline mono">{selectedUpstreamBaseURL || "-"}</span>
-                    {selectedUpstreamID || routingPolicy ? (
+                    {selectedRouteIdentity || routingPolicy ? (
                       <div className="trace-tag-group">
                         {selectedUpstreamProviderPreset ? <InlineTag tone="accent">{selectedUpstreamProviderPreset}</InlineTag> : null}
+                        {routingDecision.selectedCredentialID ? <InlineTag tone="gold">{routingDecision.selectedCredentialID}</InlineTag> : null}
                         {routingPolicy ? <InlineTag>{routingPolicy}</InlineTag> : null}
                       </div>
                     ) : null}
@@ -327,7 +333,7 @@ export function TraceDetailPage() {
                   <div className="routing-summary-stack">
                     <span className="trace-subline">
                       {buildRoutingDecisionSummary({
-                        upstreamID: selectedUpstreamID,
+                        upstreamID: selectedRouteIdentity,
                         policy: routingPolicy,
                         score: routingScore,
                         candidateCount: routingCandidateCount,
@@ -336,6 +342,26 @@ export function TraceDetailPage() {
                     </span>
                   </div>
                 </section>
+                {routingDecision.stickyBreaks.length ? (
+                  <section className="breakdown-card">
+                    <div className="breakdown-title">Sticky credential break</div>
+                    <div className="routing-summary-stack">
+                      {routingDecision.stickyBreaks.map((event, index) => (
+                        <div className="credential-break-row" key={`sticky-break-${index}`}>
+                          <div className="trace-tag-group">
+                            <InlineTag tone="danger">break</InlineTag>
+                            {event.channelID ? <InlineTag>{event.channelID}</InlineTag> : null}
+                            {event.credentialID ? <InlineTag tone="gold">{event.credentialID}</InlineTag> : null}
+                          </div>
+                          <span className="trace-subline mono">
+                            {event.previousRouteTargetID || event.previousUpstreamID || "-"} {"->"} {event.routeTargetID || event.upstreamID || "-"}
+                          </span>
+                          {event.breakReason ? <span className="trace-subline">{formatFailureReason(event.breakReason)}</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
                 {selectedUpstreamHealth ? (
                   <section className="breakdown-card">
                     <div className="breakdown-title">Upstream health at review time</div>
@@ -861,7 +887,7 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock }) {
   if (!decision || (!decision.candidates.length && !decision.events.length)) {
     return null;
   }
-  const selectedID = decision.selectedID || "";
+  const selectedID = decision.selectedRouteTargetID || decision.selectedID || "";
   return (
     <section className="routing-decision-panel">
       <div className="routing-decision-head">
@@ -872,6 +898,8 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock }) {
         <div className="trace-tag-group">
           {decision.policy ? <InlineTag>{decision.policy}</InlineTag> : null}
           {decision.fallbackPolicy ? <InlineTag>{decision.fallbackPolicy}</InlineTag> : null}
+          {decision.selectedChannelID ? <InlineTag tone="accent">{decision.selectedChannelID}</InlineTag> : null}
+          {decision.selectedCredentialID ? <InlineTag tone="gold">{decision.selectedCredentialID}</InlineTag> : null}
           {decision.outcome?.attributes?.status_code ? <InlineTag tone={Number(decision.outcome.attributes.status_code) >= 400 ? "danger" : "green"}>{decision.outcome.attributes.status_code}</InlineTag> : null}
         </div>
       </div>
@@ -881,11 +909,13 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock }) {
             <article key={`${candidate.id || "candidate"}-${index}`} className={candidate.selectable ? "routing-candidate-card routing-candidate-card-active" : "routing-candidate-card"}>
               <div className="routing-candidate-head">
                 <div>
-                  <strong>{candidate.id || "unknown target"}</strong>
+                  <strong>{candidate.route_target_id || candidate.id || "unknown target"}</strong>
                   <span className="trace-subline mono">{candidate.base_url || "-"}</span>
                 </div>
                 <div className="trace-tag-group">
                   {candidate.provider_preset ? <InlineTag tone="accent">{candidate.provider_preset}</InlineTag> : null}
+                  {candidate.channel_id ? <InlineTag>{candidate.channel_id}</InlineTag> : null}
+                  {candidate.credential_id ? <InlineTag tone="gold">{candidate.credential_id}</InlineTag> : null}
                   <InlineTag tone={candidate.selectable ? "green" : "gold"}>{candidate.selectable ? "selectable" : candidate.filter_reason || "filtered"}</InlineTag>
                   {candidate.health_state ? <InlineTag tone={healthTone(candidate.health_state)}>{formatHealthLabel(candidate.health_state)}</InlineTag> : null}
                 </div>
@@ -895,6 +925,7 @@ function RoutingDecisionPanel({ decision, InlineTag, CodeBlock }) {
                 <DetailMetaPill label="weight" value={candidate.weight ?? "-"} />
                 <DetailMetaPill label="path" value={candidate.supports_path ? "yes" : "no"} />
                 <DetailMetaPill label="model" value={candidate.supports_model ? "yes" : "no"} />
+                {candidate.credential_hint ? <DetailMetaPill label="hint" value={candidate.credential_hint} mono /> : null}
               </div>
             </article>
           ))}
@@ -982,13 +1013,20 @@ function TimelineNodeHeading({ item }) {
 function buildRoutingDecision(events = []) {
   const routingEvents = events.filter((event) => event.type?.startsWith("routing."));
   if (!routingEvents.length) {
-    return { events: [], candidates: [] };
+    return { events: [], candidates: [], stickyBreaks: [] };
   }
   const classified = routingEvents.find((event) => event.type === "routing.classified")?.attributes || {};
   const candidatesEvent = routingEvents.find((event) => event.type === "routing.candidates")?.attributes || {};
   const selected = routingEvents.find((event) => event.type === "routing.selected")?.attributes || {};
   const filtered = routingEvents.find((event) => event.type === "routing.filtered")?.attributes || {};
   const outcome = [...routingEvents].reverse().find((event) => event.type === "routing.outcome") || null;
+  const stickyBreaks = routingEvents
+    .filter((event) => event.type === "routing.sticky.break")
+    .map((event) => normalizeStickyBreak(event.attributes || {}));
+  const selectedRouteTargetID = selected.route_target_id || outcome?.attributes?.route_target_id || selected.upstream_id || outcome?.attributes?.upstream_id || "";
+  const selectedChannelID = selected.channel_id || outcome?.attributes?.channel_id || selected.upstream_id || outcome?.attributes?.upstream_id || "";
+  const selectedCredentialID = selected.credential_id || outcome?.attributes?.credential_id || "";
+  const selectedCredentialHint = selected.credential_hint || outcome?.attributes?.credential_hint || "";
   return {
     events: routingEvents,
     model: classified.model || outcome?.attributes?.model || "",
@@ -996,10 +1034,28 @@ function buildRoutingDecision(events = []) {
     policy: classified.routing_policy || "",
     fallbackPolicy: classified.fallback_policy || "",
     selectedID: selected.upstream_id || outcome?.attributes?.upstream_id || "",
+    selectedRouteTargetID,
+    selectedChannelID,
+    selectedCredentialID,
+    selectedCredentialHint,
     failureReason: filtered.routing_failure_reason || "",
     availableCount: Number(candidatesEvent.available_count || 0),
     candidates: Array.isArray(candidatesEvent.candidates) ? candidatesEvent.candidates : [],
+    stickyBreaks,
     outcome,
+  };
+}
+
+function normalizeStickyBreak(attrs = {}) {
+  return {
+    routeTargetID: attrs.route_target_id || attrs.upstream_id || "",
+    upstreamID: attrs.upstream_id || attrs.target_id || "",
+    channelID: attrs.channel_id || "",
+    credentialID: attrs.credential_id || "",
+    credentialHint: attrs.credential_hint || "",
+    previousRouteTargetID: attrs.previous_route_target_id || attrs.previous_upstream_id || "",
+    previousUpstreamID: attrs.previous_upstream_id || attrs.break_id || "",
+    breakReason: attrs.break_reason || attrs.reason || attrs.routing_failure_reason || "",
   };
 }
 

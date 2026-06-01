@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
+import { InlineTag } from "../components/common/Badges";
+import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
@@ -25,9 +27,16 @@ export function RoutingPage() {
       params.set(key, activeFilters[key]);
     }
   });
+  const summaryParams = new URLSearchParams();
+  summaryParams.set("window", routingSummaryWindow(windowValue));
+  if (activeFilters.model) {
+    summaryParams.set("model", activeFilters.model);
+  }
   const traces = useJSON(apiURL(apiPaths.traces, params), [refreshTick, windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
+  const routingSummary = useJSON(apiURL(apiPaths.routingSummary, summaryParams), [refreshTick, windowValue, activeFilters.model]);
   const routedItems = useMemo(() => filterByWindow(traces.data?.items || [], windowValue), [traces.data, windowValue]);
   const summary = useMemo(() => summarizeRouting(routedItems), [routedItems]);
+  const credentialSummary = useMemo(() => normalizeCredentialRoutingSummary(routingSummary.data), [routingSummary.data]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), REFRESH_MS);
@@ -112,7 +121,9 @@ export function RoutingPage() {
       </section>
 
       {traces.error ? <EmptyState title="Unable to load routing records" detail={traces.error} tone="danger" /> : null}
+      {routingSummary.error ? <EmptyState title="Unable to load routing event summary" detail={routingSummary.error} tone="danger" compact /> : null}
       {traces.loading && !traces.data ? <EmptyState title="Loading routing records" detail="Reading recent traces with selected channels, status, tokens, duration, and TTFT." /> : null}
+      {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
       {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
     </div>
   );
@@ -169,4 +180,121 @@ function hasMissingUsage(item) {
 function usageCoverageDetail(missing) {
   const count = Number(missing || 0);
   return count > 0 ? `${formatCount(count)} missing usage` : "";
+}
+
+function routingSummaryWindow(windowValue) {
+  return windowValue === "30d" ? "all" : windowValue;
+}
+
+function normalizeCredentialRoutingSummary(payload) {
+  const routeTargets = arrayItems(payload?.selected_route_targets);
+  const channels = arrayItems(payload?.selected_channels);
+  const credentials = arrayItems(payload?.selected_credentials);
+  const stickyBreaks = payload?.sticky_breaks || {};
+  return {
+    eventfulTraces: Number(payload?.eventful_traces || 0),
+    missingEvents: Number(payload?.legacy_or_missing_events || 0),
+    parseErrors: Number(payload?.parse_errors || 0),
+    routeTargets,
+    channels,
+    credentials,
+    selectedUpstreams: arrayItems(payload?.selected_upstreams),
+    failureReasons: arrayItems(payload?.failure_reasons),
+    stickyStatuses: arrayItems(payload?.sticky_statuses),
+    stickyBreakTotal: Number(stickyBreaks.total || 0),
+    stickyBreakRouteTargets: mergeCountItems(stickyBreaks.previous_route_targets, stickyBreaks.next_route_targets),
+    stickyBreakChannels: mergeCountItems(stickyBreaks.previous_channels, stickyBreaks.next_channels),
+    stickyBreakCredentials: mergeCountItems(stickyBreaks.previous_credentials, stickyBreaks.next_credentials),
+    stickyBreakPreviousRouteTargets: arrayItems(stickyBreaks.previous_route_targets),
+    stickyBreakPreviousUpstreams: arrayItems(stickyBreaks.previous_upstreams),
+    stickyBreakNextUpstreams: arrayItems(stickyBreaks.next_upstreams),
+  };
+}
+
+function arrayItems(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function mergeCountItems(...groups) {
+  const counts = new Map();
+  groups.flatMap(arrayItems).forEach((item) => {
+    const label = item?.label || "";
+    if (!label) {
+      return;
+    }
+    counts.set(label, (counts.get(label) || 0) + Number(item.count || 0));
+  });
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => (b.count !== a.count ? b.count - a.count : a.label.localeCompare(b.label)));
+}
+
+function CredentialRoutingSummaryPanel({ summary, windowValue }) {
+  const hasCredentialData = summary.routeTargets.length || summary.channels.length || summary.credentials.length || summary.stickyBreakTotal > 0;
+  const stickyBreakContext = firstNonEmptyItem(summary.stickyBreakRouteTargets, summary.stickyBreakPreviousRouteTargets, summary.stickyBreakPreviousUpstreams);
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Credential routing</p>
+          <h2>Event-backed route target summary</h2>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag>{windowValue}</InlineTag>
+          <InlineTag tone={summary.eventfulTraces ? "green" : "default"}>{formatCount(summary.eventfulTraces)} eventful</InlineTag>
+          {summary.missingEvents ? <InlineTag tone="gold">{formatCount(summary.missingEvents)} legacy / missing</InlineTag> : null}
+          {summary.parseErrors ? <InlineTag tone="danger">{formatCount(summary.parseErrors)} parse errors</InlineTag> : null}
+        </div>
+      </div>
+      <div className="hero-grid hero-grid-compact">
+        <StatCard label="Route targets" value={formatCount(summary.routeTargets.length)} detail={topCountDetail(summary.routeTargets)} mono />
+        <StatCard label="Channels" value={formatCount(summary.channels.length || summary.selectedUpstreams.length)} detail={topCountDetail(summary.channels.length ? summary.channels : summary.selectedUpstreams)} mono />
+        <StatCard label="Credentials" value={formatCount(summary.credentials.length)} detail={topCountDetail(summary.credentials)} mono />
+        <StatCard label="Sticky breaks" value={formatCount(summary.stickyBreakTotal)} detail={stickyBreakContext ? stickyBreakContext.label : ""} accent={summary.stickyBreakTotal ? "accent-red" : ""} mono />
+      </div>
+      {hasCredentialData ? (
+        <div className="session-breakdown-grid">
+          <BreakdownList title="Route targets" items={summary.routeTargets} formatter={(item) => item.label} />
+          <BreakdownList title="Channels" items={summary.channels.length ? summary.channels : summary.selectedUpstreams} formatter={(item) => item.label} />
+          <BreakdownList title="Credentials" items={summary.credentials} formatter={(item) => item.label} />
+          <BreakdownList title="Sticky credential breaks" items={stickyBreakItems(summary)} formatter={(item) => item.label} />
+        </div>
+      ) : (
+        <EmptyState title="No credential routing events" detail="Recent routing events do not include credential fields yet. Legacy route and sticky counts still appear in the selected route list." compact />
+      )}
+    </section>
+  );
+}
+
+function topCountDetail(items = []) {
+  const first = items[0];
+  if (!first?.label) {
+    return "";
+  }
+  return `${first.label} · ${formatCount(first.count || 0)}`;
+}
+
+function firstNonEmptyItem(...groups) {
+  for (const group of groups) {
+    if (group?.[0]?.label) {
+      return group[0];
+    }
+  }
+  return null;
+}
+
+function stickyBreakItems(summary) {
+  if (summary.stickyBreakRouteTargets.length) {
+    return summary.stickyBreakRouteTargets;
+  }
+  if (summary.stickyBreakCredentials.length) {
+    return summary.stickyBreakCredentials;
+  }
+  if (summary.stickyBreakChannels.length) {
+    return summary.stickyBreakChannels;
+  }
+  if (summary.stickyBreakPreviousRouteTargets.length) {
+    return summary.stickyBreakPreviousRouteTargets;
+  }
+  return summary.stickyBreakPreviousUpstreams.length ? summary.stickyBreakPreviousUpstreams : summary.stickyBreakNextUpstreams;
 }
