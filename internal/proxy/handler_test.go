@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 )
@@ -72,6 +74,40 @@ func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 	}
 	if _, ok := payload["stream_options"]; ok {
 		t.Fatalf("stream_options unexpectedly injected for responses payload: %s", string(body))
+	}
+}
+
+func TestRedactRoutingBaseURLRemovesCredentialsAndSensitiveQuery(t *testing.T) {
+	raw := "https://user:secret@example.com/v1?api_key=abc&token=def&model=gpt-5&signature=sig"
+	got := redactRoutingBaseURL(raw)
+	if strings.Contains(got, "secret") || strings.Contains(got, "api_key=abc") || strings.Contains(got, "token=def") || strings.Contains(got, "signature=sig") {
+		t.Fatalf("redactRoutingBaseURL leaked sensitive value: %q", got)
+	}
+	for _, want := range []string{"user:REDACTED@", "api_key=REDACTED", "token=REDACTED", "signature=REDACTED", "model=gpt-5"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("redactRoutingBaseURL() = %q, missing %q", got, want)
+		}
+	}
+}
+
+func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
+	attrs := candidateEventAttributes([]router.CandidateDecision{{
+		ID:             "primary",
+		ProviderPreset: "openai",
+		BaseURL:        "https://user:secret@example.com/v1?api_key=abc&region=us",
+		SupportsPath:   true,
+		SupportsModel:  true,
+		Selectable:     true,
+	}})
+	if len(attrs) != 1 {
+		t.Fatalf("len(attrs) = %d, want 1", len(attrs))
+	}
+	baseURL, _ := attrs[0]["base_url"].(string)
+	if strings.Contains(baseURL, "secret") || strings.Contains(baseURL, "abc") {
+		t.Fatalf("candidateEventAttributes leaked sensitive base_url: %q", baseURL)
+	}
+	if !strings.Contains(baseURL, "api_key=REDACTED") || !strings.Contains(baseURL, "region=us") {
+		t.Fatalf("candidateEventAttributes base_url = %q, want redacted api_key and preserved region", baseURL)
 	}
 }
 
