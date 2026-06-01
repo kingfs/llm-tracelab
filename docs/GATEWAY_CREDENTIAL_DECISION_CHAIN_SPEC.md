@@ -80,6 +80,8 @@ No migration is performed in this branch. A later implementation should add only
 
 Add a new credential table or ent schema with these fields:
 
+Implementation-ready migration details are tracked in [GATEWAY_CREDENTIAL_STORAGE_MIGRATION_DESIGN.md](./GATEWAY_CREDENTIAL_STORAGE_MIGRATION_DESIGN.md).
+
 - `id TEXT PRIMARY KEY`
 - `channel_id TEXT NOT NULL`
 - `name TEXT NOT NULL`

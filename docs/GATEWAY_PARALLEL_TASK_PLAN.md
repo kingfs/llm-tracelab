@@ -498,6 +498,8 @@ Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-storage-d
 Agent: Sagan (`019e8261-4a51-7331-9a35-22e28f71fa60`)
 Status: assigned
 
+Design doc: [GATEWAY_CREDENTIAL_STORAGE_MIGRATION_DESIGN.md](./GATEWAY_CREDENTIAL_STORAGE_MIGRATION_DESIGN.md)
+
 Owner scope:
 
 - Produce an implementation-ready storage migration plan for explicit credential records.
