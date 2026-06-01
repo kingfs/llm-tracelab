@@ -32,6 +32,8 @@ These are explicitly not primary goals:
 
 The project should normalize only what is replay-critical, monitor-critical, or compatibility-critical.
 
+The gateway ecosystem direction review in [GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./GATEWAY_REFERENCE_EVOLUTION_DESIGN.md) refines this boundary after comparing Sub2API, LiteLLM, Portkey, and Helicone. The short version: TraceLab should absorb mature gateway ideas such as channel management, route decision tracing, sticky sessions, rate limits, health, cost estimation, and guardrails, but only when they reinforce record/replay, debugging, audit, and evaluation. Payment, recharge, public relay operations, and SaaS quota distribution remain non-goals.
+
 ## Current State
 
 The project already has:
