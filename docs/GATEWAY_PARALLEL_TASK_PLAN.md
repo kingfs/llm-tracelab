@@ -331,3 +331,7 @@ Acceptance:
 - The next implementation batch can split storage, router snapshot, monitor, and MCP work without ambiguity.
 - Spec explains how credentials interact with sticky bindings, health, limit events, and route decision traces.
 - Documentation is linked from the gateway plan or design entry.
+
+Spec:
+
+- [Credential Routing Decision Chain Spec](./GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md)

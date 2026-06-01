@@ -401,6 +401,8 @@ guardrails 不能只做在线拦截。每个规则应满足：
 
 目标：补齐 coding agent 场景下的账号级调度能力。
 
+实施边界参考：[Credential Routing Decision Chain Spec](./GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md)。
+
 任务：
 
 - 在 channel 之下引入 optional credential model。
