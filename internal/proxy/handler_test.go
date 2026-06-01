@@ -233,6 +233,59 @@ func TestRoutingOutcomeEventRedactsCredentialError(t *testing.T) {
 	}
 }
 
+func TestLimitDecisionScopes(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	req.Header.Set("X-Limit-Bucket", "raw-secret-bucket")
+
+	h := &Handler{cfg: &config.Config{}}
+	h.cfg.Limits.Scope = "header"
+	h.cfg.Limits.ChannelKeyHeader = "X-Limit-Bucket"
+	decision, ok := h.preSelectionLimitDecision(req)
+	if !ok || decision.Scope != "header" || decision.Key != "header:raw-secret-bucket" {
+		t.Fatalf("preSelectionLimitDecision() = %+v, %v", decision, ok)
+	}
+
+	h.cfg.Limits.Scope = "credential"
+	selection := &router.Selection{Credential: router.CredentialDecisionInfo{
+		RouteTargetID: "channel-a:cred-1",
+		ChannelID:     "channel-a",
+		CredentialID:  "cred-1",
+	}}
+	decision, ok = h.postSelectionLimitDecision(selection)
+	if !ok || decision.Scope != "credential" || decision.Key != "credential:channel-a:cred-1" || decision.Identity.CredentialID != "cred-1" {
+		t.Fatalf("postSelectionLimitDecision() = %+v, %v", decision, ok)
+	}
+}
+
+func TestLimitEventAttributesAreScopedAndSafe(t *testing.T) {
+	attrs := limitEventAttributes(config.LimitConfig{MaxConcurrent: 1, MaxQueued: 2}, http.StatusTooManyRequests, limitDecision{
+		Scope: "header",
+		Key:   "header:raw-secret-bucket",
+	})
+	if attrs["scope"] != "header" {
+		t.Fatalf("scope = %v, want header", attrs["scope"])
+	}
+	if strings.Contains(fmt.Sprint(attrs), "raw-secret-bucket") {
+		t.Fatalf("limit attrs leaked raw key: %+v", attrs)
+	}
+	if attrs["limit_key_fingerprint"] == "" || attrs["max_concurrent"] != 1 || attrs["max_queued"] != 2 {
+		t.Fatalf("limit attrs missing expected fields: %+v", attrs)
+	}
+
+	credentialAttrs := limitEventAttributes(config.LimitConfig{MaxConcurrent: 1}, http.StatusTooManyRequests, limitDecision{
+		Scope: "credential",
+		Key:   "credential:channel-a:cred-1",
+		Identity: router.CredentialDecisionInfo{
+			RouteTargetID: "channel-a:cred-1",
+			ChannelID:     "channel-a",
+			CredentialID:  "cred-1",
+		},
+	})
+	if credentialAttrs["route_target_id"] != "channel-a:cred-1" || credentialAttrs["channel_id"] != "channel-a" || credentialAttrs["credential_id"] != "cred-1" {
+		t.Fatalf("credential attrs missing identity: %+v", credentialAttrs)
+	}
+}
+
 func eventAttrsByType(t *testing.T, events []recorder.RecordEvent, eventType string) map[string]interface{} {
 	t.Helper()
 	for _, event := range events {

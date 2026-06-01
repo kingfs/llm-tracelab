@@ -912,6 +912,13 @@ func (r *Router) Complete(selection *Selection, outcome Outcome) {
 	selection.Target.onFinish(selection.Request, outcome, r.costs, r.failureThreshold, r.openWindow)
 }
 
+func (r *Router) Release(selection *Selection) {
+	if selection == nil || selection.Target == nil {
+		return
+	}
+	selection.Target.onRelease(selection.Request)
+}
+
 func (r *Router) pick(candidates []*Target, req RequestFeatures) (*Target, float64) {
 	if len(candidates) == 1 || r.policy == PolicyFirstAvailable {
 		best := candidates[0]
@@ -1347,7 +1354,7 @@ func (t *Target) onStart(req RequestFeatures) {
 	}
 }
 
-func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig, failureThreshold int64, openWindow time.Duration) {
+func (t *Target) onRelease(req RequestFeatures) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.inflight > 0 {
@@ -1360,6 +1367,12 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 	} else if t.inflightNonStream > 0 {
 		t.inflightNonStream--
 	}
+}
+
+func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig, failureThreshold int64, openWindow time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.releaseLocked(req)
 
 	if outcome.DurationMs > 0 {
 		t.reqLatencyFastMs = ewma(t.reqLatencyFastMs, outcome.DurationMs, costs.FastAlpha)
@@ -1413,6 +1426,19 @@ func (t *Target) onFinish(req RequestFeatures, outcome Outcome, costs costConfig
 		if t.healthState != HealthOpen {
 			t.healthState = HealthHealthy
 		}
+	}
+}
+
+func (t *Target) releaseLocked(req RequestFeatures) {
+	if t.inflight > 0 {
+		t.inflight--
+	}
+	if req.Stream {
+		if t.inflightStreaming > 0 {
+			t.inflightStreaming--
+		}
+	} else if t.inflightNonStream > 0 {
+		t.inflightNonStream--
 	}
 }
 

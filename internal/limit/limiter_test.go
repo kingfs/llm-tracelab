@@ -93,3 +93,16 @@ func TestLimiterKeysAreIndependent(t *testing.T) {
 	}
 	otherLease.Release()
 }
+
+func TestLimiterBlankKeyUsesGlobalBucket(t *testing.T) {
+	lim := New(Config{MaxConcurrent: 1})
+	lease, reason := lim.Acquire(context.Background(), "")
+	if reason != RejectNone || lease == nil {
+		t.Fatalf("blank-key Acquire reason=%q lease=%v, want lease", reason, lease)
+	}
+	defer lease.Release()
+
+	if gotLease, gotReason := lim.Acquire(context.Background(), "global"); gotLease != nil || gotReason != RejectConcurrencyExceeded {
+		t.Fatalf("global Acquire lease=%v reason=%q, want same bucket rejection", gotLease, gotReason)
+	}
+}

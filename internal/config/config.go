@@ -117,6 +117,7 @@ type RouterConfig struct {
 
 type LimitConfig struct {
 	Enabled          bool   `yaml:"enabled"`
+	Scope            string `yaml:"scope"`
 	MaxConcurrent    int    `yaml:"max_concurrent"`
 	MaxQueued        int    `yaml:"max_queued"`
 	ChannelKeyHeader string `yaml:"channel_key_header"`
@@ -124,6 +125,17 @@ type LimitConfig struct {
 
 func (c LimitConfig) LocalConcurrencyEnabled() bool {
 	return c.Enabled && c.MaxConcurrent > 0
+}
+
+func (c LimitConfig) ScopeOrDefault() string {
+	scope := strings.ToLower(strings.TrimSpace(c.Scope))
+	if scope != "" {
+		return scope
+	}
+	if strings.TrimSpace(c.ChannelKeyHeader) != "" {
+		return "header"
+	}
+	return "global"
 }
 
 type ChaosRule struct {

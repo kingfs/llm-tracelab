@@ -264,6 +264,7 @@ func TestLoadLimitConfigFromYAML(t *testing.T) {
 	path := writeTempConfig(t, `
 limits:
   enabled: true
+  scope: "header"
   max_concurrent: 1
   max_queued: 2
   channel_key_header: "X-TraceLab-Channel"
@@ -276,8 +277,20 @@ limits:
 	if !cfg.Limits.LocalConcurrencyEnabled() {
 		t.Fatalf("LocalConcurrencyEnabled() = false, want true")
 	}
-	if cfg.Limits.MaxConcurrent != 1 || cfg.Limits.MaxQueued != 2 || cfg.Limits.ChannelKeyHeader != "X-TraceLab-Channel" {
+	if cfg.Limits.MaxConcurrent != 1 || cfg.Limits.MaxQueued != 2 || cfg.Limits.ChannelKeyHeader != "X-TraceLab-Channel" || cfg.Limits.ScopeOrDefault() != "header" {
 		t.Fatalf("Limits = %+v", cfg.Limits)
+	}
+}
+
+func TestLimitScopeDefaults(t *testing.T) {
+	if got := (LimitConfig{}).ScopeOrDefault(); got != "global" {
+		t.Fatalf("ScopeOrDefault() = %q, want global", got)
+	}
+	if got := (LimitConfig{ChannelKeyHeader: "X-TraceLab-Channel"}).ScopeOrDefault(); got != "header" {
+		t.Fatalf("ScopeOrDefault() = %q, want header", got)
+	}
+	if got := (LimitConfig{Scope: " Credential ", ChannelKeyHeader: "X-TraceLab-Channel"}).ScopeOrDefault(); got != "credential" {
+		t.Fatalf("ScopeOrDefault() = %q, want credential", got)
 	}
 }
 

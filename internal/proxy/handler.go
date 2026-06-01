@@ -58,6 +58,12 @@ var sleepForRetry retrySleeper = defaultSleepForRetry
 
 var upstreamRetryWaitSlots = make(chan struct{}, upstreamRetryWaitCapacity)
 
+type limitDecision struct {
+	Scope    string
+	Key      string
+	Identity router.CredentialDecisionInfo
+}
+
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
 	_, _ = readAndNormalizeRequestBody(req)
@@ -382,21 +388,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.limiter != nil {
-		limitKey := h.limitKey(r)
-		lease, rejectReason := h.limiter.Acquire(r.Context(), limitKey)
-		if rejectReason != limit.RejectNone {
-			statusCode := http.StatusTooManyRequests
-			eventType := "limit.concurrency_rejected"
-			if rejectReason == limit.RejectQueueSaturated {
-				statusCode = http.StatusServiceUnavailable
-				eventType = "limit.queue_saturated"
+		if decision, ok := h.preSelectionLimitDecision(r); ok {
+			lease, rejectReason := h.limiter.Acquire(r.Context(), decision.Key)
+			if rejectReason != limit.RejectNone {
+				statusCode, eventType := limitRejectionHTTP(rejectReason)
+				h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
+				http.Error(w, http.StatusText(statusCode), statusCode)
+				return
 			}
-			h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, limitKey, bodyBytes)
-			http.Error(w, http.StatusText(statusCode), statusCode)
-			return
-		}
-		if lease != nil {
-			defer lease.Release()
+			if lease != nil {
+				defer lease.Release()
+			}
 		}
 	}
 
@@ -462,6 +464,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			lastErr = selErr
 			break
+		}
+		if h.limiter != nil {
+			if decision, ok := h.postSelectionLimitDecision(selection); ok {
+				lease, rejectReason := h.limiter.Acquire(r.Context(), decision.Key)
+				if rejectReason != limit.RejectNone {
+					h.router.Release(selection)
+					statusCode, eventType := limitRejectionHTTP(rejectReason)
+					h.recordLimitRejectionWithBody(r, start, statusCode, eventType, rejectReason, decision, bodyBytes)
+					http.Error(w, http.StatusText(statusCode), statusCode)
+					return
+				}
+				if lease != nil {
+					defer lease.Release()
+				}
+			}
 		}
 		triedIDs = append(triedIDs, selection.Target.ID)
 
@@ -1231,22 +1248,68 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	}
 }
 
-func (h *Handler) limitKey(r *http.Request) string {
+func (h *Handler) preSelectionLimitDecision(r *http.Request) (limitDecision, bool) {
 	if h == nil || h.cfg == nil {
-		return "global"
+		return limitDecision{Scope: "global", Key: "global"}, true
 	}
-	headerName := strings.TrimSpace(h.cfg.Limits.ChannelKeyHeader)
-	if headerName == "" {
-		return "global"
+	scope := h.cfg.Limits.ScopeOrDefault()
+	switch scope {
+	case "global":
+		return limitDecision{Scope: scope, Key: "global"}, true
+	case "header":
+		headerName := strings.TrimSpace(h.cfg.Limits.ChannelKeyHeader)
+		if headerName == "" {
+			return limitDecision{Scope: "global", Key: "global"}, true
+		}
+		value := strings.TrimSpace(r.Header.Get(headerName))
+		if value == "" {
+			value = "missing"
+		}
+		return limitDecision{Scope: scope, Key: scope + ":" + value}, true
+	default:
+		return limitDecision{}, false
 	}
-	value := strings.TrimSpace(r.Header.Get(headerName))
-	if value == "" {
-		return "global"
-	}
-	return headerName + ":" + value
 }
 
-func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time, statusCode int, eventType string, reason limit.RejectReason, limitKey string, bodyBytes []byte) {
+func (h *Handler) postSelectionLimitDecision(selection *router.Selection) (limitDecision, bool) {
+	if h == nil || h.cfg == nil || selection == nil {
+		return limitDecision{}, false
+	}
+	scope := h.cfg.Limits.ScopeOrDefault()
+	identity := selection.Credential
+	switch scope {
+	case "channel":
+		if identity.ChannelID == "" {
+			return limitDecision{}, false
+		}
+		return limitDecision{Scope: scope, Key: scope + ":" + identity.ChannelID, Identity: identity}, true
+	case "route_target":
+		if identity.RouteTargetID == "" {
+			return limitDecision{}, false
+		}
+		return limitDecision{Scope: scope, Key: scope + ":" + identity.RouteTargetID, Identity: identity}, true
+	case "credential":
+		if identity.CredentialID == "" {
+			return limitDecision{}, false
+		}
+		key := scope + ":" + identity.CredentialID
+		if identity.ChannelID != "" {
+			key = scope + ":" + identity.ChannelID + ":" + identity.CredentialID
+		}
+		return limitDecision{Scope: scope, Key: key, Identity: identity}, true
+	default:
+		return limitDecision{}, false
+	}
+}
+
+func limitRejectionHTTP(reason limit.RejectReason) (int, string) {
+	if reason == limit.RejectQueueSaturated {
+		return http.StatusServiceUnavailable, "limit.queue_saturated"
+	}
+	return http.StatusTooManyRequests, "limit.concurrency_rejected"
+}
+
+func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time, statusCode int, eventType string, reason limit.RejectReason, decision limitDecision, bodyBytes []byte) {
 	if h == nil || h.recorder == nil || r == nil {
 		return
 	}
@@ -1290,18 +1353,25 @@ func (h *Handler) recordLimitRejectionWithBody(r *http.Request, start time.Time,
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
-		Type:    eventType,
-		Time:    time.Now().UTC(),
-		Message: string(reason),
-		Attributes: map[string]interface{}{
-			"http_status":           statusCode,
-			"limit_key_fingerprint": stickyKeyFingerprint(limitKey),
-			"max_concurrent":        h.cfg.Limits.MaxConcurrent,
-			"max_queued":            h.cfg.Limits.MaxQueued,
-		},
+		Type:       eventType,
+		Time:       time.Now().UTC(),
+		Message:    string(reason),
+		Attributes: limitEventAttributes(h.cfg.Limits, statusCode, decision),
 	})
 
 	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
 		slog.Error("Failed to update limit-rejection log file", "path", logInfo.Path, "err", err)
 	}
+}
+
+func limitEventAttributes(cfg config.LimitConfig, statusCode int, decision limitDecision) map[string]interface{} {
+	attrs := map[string]interface{}{
+		"http_status":           statusCode,
+		"scope":                 decision.Scope,
+		"limit_key_fingerprint": stickyKeyFingerprint(decision.Key),
+		"max_concurrent":        cfg.MaxConcurrent,
+		"max_queued":            cfg.MaxQueued,
+	}
+	addCredentialAttrs(attrs, decision.Identity)
+	return attrs
 }

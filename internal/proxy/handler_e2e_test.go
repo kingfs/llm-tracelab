@@ -1774,6 +1774,209 @@ func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 	t.Fatalf("limit.concurrency_rejected event not found in entries: %+v", entries)
 }
 
+func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	releaseUpstream := make(chan struct{})
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-releaseUpstream
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+	cfg.Limits.Enabled = true
+	cfg.Limits.Scope = "header"
+	cfg.Limits.ChannelKeyHeader = "X-Limit-Bucket"
+	cfg.Limits.MaxConcurrent = 1
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	firstDone := make(chan error, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hold"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Limit-Bucket", "raw-secret-header-value")
+		resp, err := proxyServer.Client().Do(req)
+		if err != nil {
+			firstDone <- err
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		firstDone <- nil
+	}()
+
+	for i := 0; i < 100; i++ {
+		inflight, _ := handler.limiter.Counts("header:raw-secret-header-value")
+		if inflight > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"reject"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Limit-Bucket", "raw-secret-header-value")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("resp.StatusCode = %d, want 429", resp.StatusCode)
+	}
+
+	close(releaseUpstream)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first request error = %v", err)
+	}
+
+	entries, err := waitForRecentEntries(st, 2, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	for _, entry := range entries {
+		parsed, err := waitForRecordedPrelude(entry.LogPath, time.Second)
+		if err != nil {
+			t.Fatalf("waitForRecordedPrelude(%q) error = %v", entry.LogPath, err)
+		}
+		for _, event := range parsed.Events {
+			if event.Type != "limit.concurrency_rejected" {
+				continue
+			}
+			if event.Attributes["scope"] != "header" {
+				t.Fatalf("scope = %v, want header", event.Attributes["scope"])
+			}
+			if strings.Contains(fmt.Sprint(event.Attributes), "raw-secret-header-value") {
+				t.Fatalf("limit event leaked raw header value: %+v", event.Attributes)
+			}
+			return
+		}
+	}
+	t.Fatalf("limit.concurrency_rejected event not found in entries: %+v", entries)
+}
+
+func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	releaseUpstream := make(chan struct{})
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-releaseUpstream
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","object":"response","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+	cfg.Limits.Enabled = true
+	cfg.Limits.Scope = "channel"
+	cfg.Limits.MaxConcurrent = 1
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	firstDone := make(chan error, 1)
+	go func() {
+		req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hold"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := proxyServer.Client().Do(req)
+		if err != nil {
+			firstDone <- err
+			return
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		firstDone <- nil
+	}()
+
+	for i := 0; i < 100; i++ {
+		inflight, _ := handler.limiter.Counts("channel:openai-primary")
+		if inflight > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"reject"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("resp.StatusCode = %d, want 429", resp.StatusCode)
+	}
+
+	close(releaseUpstream)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first request error = %v", err)
+	}
+
+	entries, err := waitForRecentEntries(st, 2, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	for _, entry := range entries {
+		parsed, err := waitForRecordedPrelude(entry.LogPath, time.Second)
+		if err != nil {
+			t.Fatalf("waitForRecordedPrelude(%q) error = %v", entry.LogPath, err)
+		}
+		for _, event := range parsed.Events {
+			if event.Type != "limit.concurrency_rejected" {
+				continue
+			}
+			if event.Attributes["scope"] != "channel" || event.Attributes["channel_id"] != "openai-primary" || event.Attributes["route_target_id"] != "openai-primary:default" || event.Attributes["credential_id"] != "default" {
+				t.Fatalf("limit event attrs = %+v, want scoped identity", event.Attributes)
+			}
+			return
+		}
+	}
+	t.Fatalf("limit.concurrency_rejected event not found in entries: %+v", entries)
+}
+
 func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
