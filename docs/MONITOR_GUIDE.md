@@ -155,8 +155,13 @@ Current routing capabilities include:
 - Observation status filtering for `parsed`, `failed`, `queued`, `running`, and
   `unparsed`
 - routed request, channel, error, token, and missing-usage summaries
+- read-only routing event summary API at `GET /api/routing/summary`
 - selected channel tags in request rows
 - parse-state tags in request rows
+
+`GET /api/routing/summary` accepts the same `window` values as upstream analytics (`1h`, `24h`, `7d`, `all`) and an optional `model` filter. It reads V3 cassette prelude events and returns counts by routing failure reason, selected upstream, sticky status, and sticky break previous/next upstream. Legacy cassettes or V3 cassettes without routing events are counted as missing-event inputs rather than errors.
+
+The next UI step is to place these event-backed aggregates into the existing Routing view or upstream diagnostics without changing the main navigation structure.
 
 The legacy `Upstreams` pages remain available as runtime diagnostics for existing selected-upstream metadata, but the primary v1 workflow is `Channels` for configuration and analytics, `Models` for model-centric usage, and `Routing` for selected-route debugging.
 

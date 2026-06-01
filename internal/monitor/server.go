@@ -136,6 +136,27 @@ type systemEventSummaryResponse struct {
 	Window     string             `json:"window"`
 }
 
+type routingSummaryResponse struct {
+	Window                string                    `json:"window"`
+	Model                 string                    `json:"model,omitempty"`
+	RefreshedAt           time.Time                 `json:"refreshed_at"`
+	TotalTraces           int                       `json:"total_traces"`
+	ScannedTraces         int                       `json:"scanned_traces"`
+	EventfulTraces        int                       `json:"eventful_traces"`
+	LegacyOrMissingEvents int                       `json:"legacy_or_missing_events"`
+	ParseErrors           int                       `json:"parse_errors"`
+	FailureReasons        []sessionCountItem        `json:"failure_reasons"`
+	SelectedUpstreams     []sessionCountItem        `json:"selected_upstreams"`
+	StickyStatuses        []sessionCountItem        `json:"sticky_statuses"`
+	StickyBreaks          routingStickyBreakSummary `json:"sticky_breaks"`
+}
+
+type routingStickyBreakSummary struct {
+	Total             int                `json:"total"`
+	PreviousUpstreams []sessionCountItem `json:"previous_upstreams"`
+	NextUpstreams     []sessionCountItem `json:"next_upstreams"`
+}
+
 type systemEventStreamMessage struct {
 	Type       string                     `json:"type"`
 	EventID    string                     `json:"event_id,omitempty"`
@@ -943,6 +964,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
@@ -1162,6 +1184,31 @@ func systemEventDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, systemEventViewFromStore(event))
+	}
+}
+
+func routingSummaryAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+
+		windowLabel, since := parseUpstreamWindow(r.URL.Query().Get("window"))
+		modelFilter := strings.TrimSpace(r.URL.Query().Get("model"))
+		summary, err := buildRoutingSummary(st, since, modelFilter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "routing summary error: " + err.Error()})
+			return
+		}
+		summary.Window = windowLabel
+		summary.Model = modelFilter
+		summary.RefreshedAt = time.Now().UTC()
+		writeJSON(w, http.StatusOK, summary)
 	}
 }
 
@@ -3313,6 +3360,148 @@ func toEventViewsFromRecord(events []recordfile.RecordEvent) []recordEventView {
 		payload = append(payload, row)
 	}
 	return payload
+}
+
+func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (routingSummaryResponse, error) {
+	filter := store.ListFilter{Model: modelFilter}
+	pageSize := 200
+	summary := routingSummaryResponse{}
+	failureReasons := map[string]int{}
+	selectedUpstreams := map[string]int{}
+	stickyStatuses := map[string]int{}
+	stickyPrevious := map[string]int{}
+	stickyNext := map[string]int{}
+
+	// ListPage does not expose a recorded_at filter, so stop once the descending
+	// index reaches traces older than the requested monitor window.
+	for page := 1; ; page++ {
+		result, err := st.ListPage(page, pageSize, filter)
+		if err != nil {
+			return routingSummaryResponse{}, err
+		}
+		if page == 1 {
+			summary.TotalTraces = result.Total
+		}
+		stop := false
+		for _, entry := range result.Items {
+			if !since.IsZero() && entry.Header.Meta.Time.Before(since) {
+				stop = true
+				continue
+			}
+			summary.ScannedTraces++
+			routingEvents, parseErr := readRoutingPreludeEvents(entry.LogPath)
+			if parseErr != nil {
+				summary.ParseErrors++
+				continue
+			}
+			if len(routingEvents) == 0 {
+				summary.LegacyOrMissingEvents++
+				continue
+			}
+			summary.EventfulTraces++
+			aggregateRoutingEvents(routingEvents, failureReasons, selectedUpstreams, stickyStatuses, stickyPrevious, stickyNext, &summary)
+		}
+		if stop || len(result.Items) == 0 || result.TotalPages == 0 || page >= result.TotalPages {
+			break
+		}
+	}
+
+	summary.FailureReasons = countMapToItems(failureReasons)
+	summary.SelectedUpstreams = countMapToItems(selectedUpstreams)
+	summary.StickyStatuses = countMapToItems(stickyStatuses)
+	summary.StickyBreaks.PreviousUpstreams = countMapToItems(stickyPrevious)
+	summary.StickyBreaks.NextUpstreams = countMapToItems(stickyNext)
+	return summary, nil
+}
+
+func readRoutingPreludeEvents(path string) ([]recordfile.RecordEvent, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	parsed, err := recordfile.ParsePrelude(content)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]recordfile.RecordEvent, 0)
+	for _, event := range parsed.Events {
+		if strings.HasPrefix(event.Type, "routing.") {
+			events = append(events, event)
+		}
+	}
+	return events, nil
+}
+
+func aggregateRoutingEvents(events []recordfile.RecordEvent, failureReasons map[string]int, selectedUpstreams map[string]int, stickyStatuses map[string]int, stickyPrevious map[string]int, stickyNext map[string]int, summary *routingSummaryResponse) {
+	for _, event := range events {
+		switch event.Type {
+		case "routing.filtered":
+			if reason := stringAttr(event.Attributes, "routing_failure_reason"); reason != "" {
+				failureReasons[reason]++
+			}
+		case "routing.retry_queue_saturated":
+			failureReasons["retry_queue_saturated"]++
+		case "routing.selected":
+			if upstreamID := stringAttr(event.Attributes, "upstream_id"); upstreamID != "" {
+				selectedUpstreams[upstreamID]++
+			}
+		case "routing.selection":
+			if upstreamID := stringAttr(event.Attributes, "upstream_id"); upstreamID != "" {
+				selectedUpstreams[upstreamID]++
+			}
+		}
+		if strings.HasPrefix(event.Type, "routing.sticky.") {
+			status := strings.TrimPrefix(event.Type, "routing.sticky.")
+			if attrStatus := stringAttr(event.Attributes, "sticky_status"); attrStatus != "" {
+				status = attrStatus
+			}
+			if status != "" {
+				stickyStatuses[status]++
+			}
+			if status == "break" {
+				summary.StickyBreaks.Total++
+				if previousID := stringAttr(event.Attributes, "previous_upstream_id"); previousID != "" {
+					stickyPrevious[previousID]++
+				}
+				if upstreamID := stringAttr(event.Attributes, "upstream_id"); upstreamID != "" {
+					stickyNext[upstreamID]++
+				}
+			}
+		}
+	}
+}
+
+func stringAttr(attrs map[string]interface{}, key string) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	value, ok := attrs[key]
+	if !ok {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+}
+
+func countMapToItems(counts map[string]int) []sessionCountItem {
+	items := make([]sessionCountItem, 0, len(counts))
+	for label, count := range counts {
+		if strings.TrimSpace(label) == "" || count == 0 {
+			continue
+		}
+		items = append(items, sessionCountItem{Label: label, Count: count})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Count != items[j].Count {
+			return items[i].Count > items[j].Count
+		}
+		return items[i].Label < items[j].Label
+	})
+	return items
 }
 
 func observationSummaryFromStore(summary store.ObservationSummary) observationSummaryView {

@@ -2060,6 +2060,77 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 	}
 }
 
+func TestRoutingSummaryAPIHandlerAggregatesPreludeEvents(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	reqBody := `{"input":"hello"}`
+	resBody := `{"output_text":"done"}`
+	writeRoutingSummaryTrace(t, outputDir, "selected.http", reqBody, resBody, []recordfile.RecordEvent{
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openai-primary"}},
+		{Type: "routing.sticky.miss", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "miss", "sticky_key_fingerprint": "sha256:aaa"}},
+		{Type: "routing.sticky.bind", Time: time.Date(2026, 4, 18, 8, 0, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "bind", "upstream_id": "openai-primary"}},
+	})
+	writeRoutingSummaryTrace(t, outputDir, "filtered.http", reqBody, resBody, []recordfile.RecordEvent{
+		{Type: "routing.filtered", Time: time.Date(2026, 4, 18, 8, 1, 0, 0, time.UTC), Attributes: map[string]interface{}{"routing_failure_reason": "all_excluded"}},
+		{Type: "routing.retry_queue_saturated", Time: time.Date(2026, 4, 18, 8, 1, 0, 0, time.UTC)},
+	})
+	writeRoutingSummaryTrace(t, outputDir, "sticky-break.http", reqBody, resBody, []recordfile.RecordEvent{
+		{Type: "routing.selected", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"upstream_id": "openrouter-fallback"}},
+		{Type: "routing.filtered", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"routing_failure_reason": "no_support"}},
+		{Type: "routing.sticky.hit", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "hit", "upstream_id": "openai-primary"}},
+		{Type: "routing.sticky.break", Time: time.Date(2026, 4, 18, 8, 2, 0, 0, time.UTC), Attributes: map[string]interface{}{"sticky_status": "break", "previous_upstream_id": "openai-primary", "upstream_id": "openrouter-fallback"}},
+	})
+	writeLegacyRoutingSummaryTrace(t, outputDir, "legacy.http", reqBody, resBody)
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/routing/summary?window=all", nil)
+	rr := httptest.NewRecorder()
+	routingSummaryAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload routingSummaryResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.TotalTraces != 4 || payload.ScannedTraces != 4 || payload.EventfulTraces != 3 || payload.LegacyOrMissingEvents != 1 || payload.ParseErrors != 0 {
+		t.Fatalf("summary counters = %+v", payload)
+	}
+	assertCountItem(t, payload.FailureReasons, "all_excluded", 1)
+	assertCountItem(t, payload.FailureReasons, "no_support", 1)
+	assertCountItem(t, payload.FailureReasons, "retry_queue_saturated", 1)
+	assertCountItem(t, payload.SelectedUpstreams, "openai-primary", 1)
+	assertCountItem(t, payload.SelectedUpstreams, "openrouter-fallback", 1)
+	assertCountItem(t, payload.StickyStatuses, "miss", 1)
+	assertCountItem(t, payload.StickyStatuses, "bind", 1)
+	assertCountItem(t, payload.StickyStatuses, "hit", 1)
+	assertCountItem(t, payload.StickyStatuses, "break", 1)
+	if payload.StickyBreaks.Total != 1 {
+		t.Fatalf("sticky break total = %d, want 1", payload.StickyBreaks.Total)
+	}
+	assertCountItem(t, payload.StickyBreaks.PreviousUpstreams, "openai-primary", 1)
+	assertCountItem(t, payload.StickyBreaks.NextUpstreams, "openrouter-fallback", 1)
+}
+
+func TestRoutingSummaryAPIHandlerRejectsWriteMethods(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/routing/summary", nil)
+	rr := httptest.NewRecorder()
+	routingSummaryAPIHandler(nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
 func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	t.Parallel()
 
@@ -3485,6 +3556,64 @@ func buildRecordFixtureWithStatusHeadersAndMutator(t *testing.T, url string, isS
 	}
 	payload := request + "\n" + responseHeader + resBody
 	return append(prelude, []byte(payload)...)
+}
+
+func writeRoutingSummaryTrace(t *testing.T, outputDir string, name string, reqBody string, resBody string, routingEvents []recordfile.RecordEvent) {
+	t.Helper()
+
+	header := buildRecordHeader("/v1/responses", false, reqBody, resBody)
+	header.Meta.RequestID = name
+	header.Meta.Model = "gpt-5"
+	events := append(recordfile.BuildEvents(header), routingEvents...)
+	prelude, err := recordfile.MarshalPrelude(header, events)
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	payload := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" +
+		reqBody + "\n" +
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" +
+		resBody
+	if err := os.WriteFile(filepath.Join(outputDir, name), append(prelude, []byte(payload)...), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", name, err)
+	}
+}
+
+func writeLegacyRoutingSummaryTrace(t *testing.T, outputDir string, name string, reqBody string, resBody string) {
+	t.Helper()
+
+	header := buildRecordHeader("/v1/responses", false, reqBody, resBody)
+	header.Version = "LLM_PROXY_V2"
+	header.Meta.RequestID = name
+	header.Meta.Model = "gpt-5"
+	headerJSON, err := json.Marshal(header)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	legacyHeader := make([]byte, recordfile.LegacyHeaderLen)
+	for i := range legacyHeader {
+		legacyHeader[i] = ' '
+	}
+	copy(legacyHeader, headerJSON)
+	legacyHeader[len(headerJSON)] = '\n'
+	request := "POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n" + reqBody
+	response := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + resBody
+	content := append(legacyHeader, []byte(request+"\n"+response)...)
+	if err := os.WriteFile(filepath.Join(outputDir, name), content, 0o644); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", name, err)
+	}
+}
+
+func assertCountItem(t *testing.T, items []sessionCountItem, label string, count int) {
+	t.Helper()
+	for _, item := range items {
+		if item.Label == label {
+			if item.Count != count {
+				t.Fatalf("count for %q = %d, want %d in %#v", label, item.Count, count, items)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing count item %q in %#v", label, items)
 }
 
 func parseStatusCode(status string) int {
