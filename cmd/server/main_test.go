@@ -1156,8 +1156,8 @@ func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 18 {
-		t.Fatalf("len(tools.Tools) = %d, want 18", len(tools.Tools))
+	if len(tools.Tools) != 19 {
+		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
 	}
 }
 
@@ -1231,8 +1231,8 @@ func TestNewManagementMuxServesAuthorizedStreamableMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session.ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 18 {
-		t.Fatalf("len(tools.Tools) = %d, want 18", len(tools.Tools))
+	if len(tools.Tools) != 19 {
+		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
 	}
 }
 
