@@ -211,6 +211,12 @@ feature/gateway-next-parallel
 /data/src/github.com/kingfs/llm-tracelab-gateway-next-parallel
 ```
 
+Mainline status:
+
+- Batch 1 was fast-forward merged into `main` at `6df900e`.
+- `task check:quick` passes on `main` after merge.
+- Batch 2 worker branches were created from coordinator commit `4f0e941`; coordinator assignment commit is `007ef86`.
+
 Batch 2 integration order:
 
 1. MCP sticky/failure drilldown, because it only reads existing cassette events.
