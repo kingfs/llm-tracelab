@@ -201,11 +201,13 @@ type Selection struct {
 	CandidateCount int
 	Candidates     []string
 	Request        RequestFeatures
+	Decision       *DecisionTrace
 }
 
 type SelectionError struct {
-	Reason  string
-	Message string
+	Reason   string
+	Message  string
+	Decision *DecisionTrace
 }
 
 func (e *SelectionError) Error() string {
@@ -234,6 +236,14 @@ func SelectionFailureReason(err error) string {
 	return SelectionFailureUnknown
 }
 
+func SelectionDecision(err error) *DecisionTrace {
+	var selectionErr *SelectionError
+	if errors.As(err, &selectionErr) {
+		return selectionErr.Decision
+	}
+	return nil
+}
+
 type RequestFeatures struct {
 	ModelName           string
 	RequestBytes        int64
@@ -242,6 +252,33 @@ type RequestFeatures struct {
 	Stream              bool
 	HasTools            bool
 	HasStructuredOutput bool
+}
+
+type DecisionTrace struct {
+	ModelName      string              `json:"model_name,omitempty"`
+	Endpoint       string              `json:"endpoint,omitempty"`
+	Policy         string              `json:"policy,omitempty"`
+	FallbackPolicy string              `json:"fallback_policy,omitempty"`
+	ExcludedIDs    []string            `json:"excluded_ids,omitempty"`
+	Candidates     []CandidateDecision `json:"candidates,omitempty"`
+	AvailableCount int                 `json:"available_count"`
+	SelectedID     string              `json:"selected_id,omitempty"`
+	SelectedScore  float64             `json:"selected_score,omitempty"`
+	FailureReason  string              `json:"failure_reason,omitempty"`
+}
+
+type CandidateDecision struct {
+	ID             string  `json:"id"`
+	ProviderPreset string  `json:"provider_preset,omitempty"`
+	BaseURL        string  `json:"base_url,omitempty"`
+	Priority       int     `json:"priority"`
+	Weight         float64 `json:"weight"`
+	HealthState    string  `json:"health_state,omitempty"`
+	SupportsPath   bool    `json:"supports_path"`
+	SupportsModel  bool    `json:"supports_model"`
+	Excluded       bool    `json:"excluded,omitempty"`
+	Selectable     bool    `json:"selectable"`
+	FilterReason   string  `json:"filter_reason,omitempty"`
 }
 
 type Outcome struct {
@@ -576,11 +613,13 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
+	decision := r.buildDecisionTrace(rawPath, model, excludeIDs)
 	candidates := r.candidatesForRequest(rawPath, model)
 	if len(candidates) == 0 {
 		return nil, &SelectionError{
-			Reason:  SelectionFailureNoSupportingTarget,
-			Message: fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(rawPath)),
+			Reason:   SelectionFailureNoSupportingTarget,
+			Message:  fmt.Sprintf("no upstream target supports model %q for endpoint %q", model, llm.NormalizeEndpoint(rawPath)),
+			Decision: decision.withFailure(SelectionFailureNoSupportingTarget),
 		}
 	}
 
@@ -599,6 +638,7 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 		}
 		available = append(available, candidate)
 	}
+	decision.markAvailable(available)
 	if len(available) == 0 {
 		reason := SelectionFailureAllTargetsOpen
 		msg := fmt.Sprintf("all upstream targets are temporarily unavailable for model %q", model)
@@ -607,8 +647,9 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 			msg = fmt.Sprintf("all upstream targets for model %q have been exhausted", model)
 		}
 		return nil, &SelectionError{
-			Reason:  reason,
-			Message: msg,
+			Reason:   reason,
+			Message:  msg,
+			Decision: decision.withFailure(reason),
 		}
 	}
 
@@ -625,7 +666,70 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 		CandidateCount: len(available),
 		Candidates:     candidateIDs,
 		Request:        features,
+		Decision:       decision.withSelection(selected.ID, score),
 	}, nil
+}
+
+func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string) *DecisionTrace {
+	decision := &DecisionTrace{
+		ModelName:      model,
+		Endpoint:       llm.NormalizeEndpoint(rawPath),
+		Policy:         r.policy,
+		FallbackPolicy: r.fallbackPolicy,
+		ExcludedIDs:    append([]string(nil), excludeIDs...),
+		Candidates:     make([]CandidateDecision, 0, len(r.targets)),
+	}
+	excludeSet := make(map[string]struct{}, len(excludeIDs))
+	for _, id := range excludeIDs {
+		excludeSet[id] = struct{}{}
+	}
+	now := time.Now()
+	for _, target := range r.targets {
+		candidate := target.candidateDecision(rawPath, model, now)
+		if _, excluded := excludeSet[target.ID]; excluded {
+			candidate.Excluded = true
+			candidate.Selectable = false
+			candidate.FilterReason = "excluded"
+		}
+		decision.Candidates = append(decision.Candidates, candidate)
+	}
+	return decision
+}
+
+func (d *DecisionTrace) markAvailable(available []*Target) {
+	if d == nil {
+		return
+	}
+	availableSet := make(map[string]struct{}, len(available))
+	for _, target := range available {
+		if target != nil {
+			availableSet[target.ID] = struct{}{}
+		}
+	}
+	d.AvailableCount = len(availableSet)
+	for i := range d.Candidates {
+		if _, ok := availableSet[d.Candidates[i].ID]; ok {
+			d.Candidates[i].Selectable = true
+			d.Candidates[i].FilterReason = ""
+		}
+	}
+}
+
+func (d *DecisionTrace) withSelection(selectedID string, score float64) *DecisionTrace {
+	if d == nil {
+		return nil
+	}
+	d.SelectedID = selectedID
+	d.SelectedScore = score
+	return d
+}
+
+func (d *DecisionTrace) withFailure(reason string) *DecisionTrace {
+	if d == nil {
+		return nil
+	}
+	d.FailureReason = reason
+	return d
 }
 
 func (r *Router) Complete(selection *Selection, outcome Outcome) {
@@ -973,6 +1077,70 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 		}
 	}
 	return true
+}
+
+func (t *Target) candidateDecision(rawPath string, model string, now time.Time) CandidateDecision {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	decision := CandidateDecision{
+		ID:             t.ID,
+		ProviderPreset: t.Upstream.ProviderPreset,
+		BaseURL:        t.Upstream.BaseURL,
+		Priority:       t.Priority,
+		Weight:         t.Weight,
+		HealthState:    t.healthState,
+		SupportsPath:   supportsPath(t, rawPath),
+		SupportsModel:  t.supportsModelLocked(model),
+		Selectable:     true,
+	}
+	if !decision.SupportsPath {
+		decision.Selectable = false
+		decision.FilterReason = "unsupported_path"
+		return decision
+	}
+	if !decision.SupportsModel {
+		decision.Selectable = false
+		decision.FilterReason = "unsupported_model"
+		return decision
+	}
+	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil) {
+		decision.Selectable = false
+		decision.FilterReason = "target_open"
+		return decision
+	}
+	if t.healthState == HealthProbation && t.inflight >= probationInflightLimit {
+		decision.Selectable = false
+		decision.FilterReason = "target_probation_full"
+		return decision
+	}
+	modelKey := strings.ToLower(strings.TrimSpace(model))
+	if modelKey != "" {
+		if state := t.modelHealth[modelKey]; state != nil {
+			if state.healthState == HealthOpen && !state.openUntil.IsZero() && now.Before(state.openUntil) {
+				decision.Selectable = false
+				decision.FilterReason = "model_open"
+				return decision
+			}
+			if state.healthState == HealthProbation && t.inflight >= probationInflightLimit {
+				decision.Selectable = false
+				decision.FilterReason = "model_probation_full"
+				return decision
+			}
+		}
+	}
+	return decision
+}
+
+func (t *Target) supportsModelLocked(model string) bool {
+	modelKey := strings.ToLower(strings.TrimSpace(model))
+	if modelKey == "" || modelKey == ModelDiscoveryListModels {
+		return true
+	}
+	if _, ok := t.models[modelKey]; ok {
+		return true
+	}
+	return t.allowUnknownModels
 }
 
 func (t *Target) onStart(req RequestFeatures) {

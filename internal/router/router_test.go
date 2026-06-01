@@ -234,6 +234,88 @@ func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 	if SelectionFailureReason(err) != SelectionFailureNoSupportingTarget {
 		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureNoSupportingTarget)
 	}
+	decision := SelectionDecision(err)
+	if decision == nil {
+		t.Fatalf("SelectionDecision() = nil, want decision trace")
+	}
+	if decision.ModelName != "claude-3-7-sonnet" {
+		t.Fatalf("decision.ModelName = %q, want claude-3-7-sonnet", decision.ModelName)
+	}
+	if decision.FailureReason != SelectionFailureNoSupportingTarget {
+		t.Fatalf("decision.FailureReason = %q, want %q", decision.FailureReason, SelectionFailureNoSupportingTarget)
+	}
+	if len(decision.Candidates) != 2 {
+		t.Fatalf("len(decision.Candidates) = %d, want 2", len(decision.Candidates))
+	}
+	for _, candidate := range decision.Candidates {
+		if candidate.Selectable {
+			t.Fatalf("candidate %q selectable = true, want false", candidate.ID)
+		}
+		if candidate.FilterReason != "unsupported_model" {
+			t.Fatalf("candidate %q FilterReason = %q, want unsupported_model", candidate.ID, candidate.FilterReason)
+		}
+	}
+}
+
+func TestRouterSelectionCarriesDecisionTrace(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Decision == nil {
+		t.Fatalf("selection.Decision = nil, want decision trace")
+	}
+	if selection.Decision.SelectedID != "primary" {
+		t.Fatalf("decision.SelectedID = %q, want primary", selection.Decision.SelectedID)
+	}
+	if selection.Decision.AvailableCount != 2 {
+		t.Fatalf("decision.AvailableCount = %d, want 2", selection.Decision.AvailableCount)
+	}
+	if len(selection.Decision.Candidates) != 2 {
+		t.Fatalf("len(decision.Candidates) = %d, want 2", len(selection.Decision.Candidates))
+	}
 }
 
 func TestRouterSelectAllowsModelListRequestsWithoutCatalogMatch(t *testing.T) {

@@ -379,6 +379,18 @@ guardrails 不能只做在线拦截。每个规则应满足：
 
 - 任意一次 502/429/模型缺失都能解释为什么没有其他渠道可用。
 
+阶段进度：
+
+- 已实现 router 侧 `DecisionTrace`，包含模型、endpoint、策略、排除列表、候选渠道、过滤原因、可用数量、选中渠道和失败原因。
+- 已在 proxy 录制 `routing.classified`、`routing.candidates`、`routing.selected`、`routing.filtered`、`routing.outcome` 事件，并保留旧的 `routing.selection`、`routing.retry_*`、`routing.failure` 事件兼容面。
+- 已覆盖 router 决策 trace 单测和 proxy e2e cassette 事件断言。
+- 当前阶段只把决策写入 cassette；Monitor/MCP 专用展示和聚合仍是后续工作，避免在事件词汇稳定前过早扩大前端改动。
+
+阶段复盘：
+
+- 这一步强化的是 TraceLab 的 replay/debug/audit 核心，不改变请求转发选择算法，不改变 raw payload，不影响 `pkg/replay`。
+- 下一步应优先在事件词汇稳定后做 sticky session / credential 决策链，或者把现有 routing events 暴露到 Monitor/MCP；不应跳到支付、充值或公网分发能力。
+
 ### Phase C：Credential 和 Sticky Session
 
 目标：补齐 coding agent 场景下的账号级调度能力。

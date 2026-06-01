@@ -466,6 +466,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"candidate_targets": selection.Candidates,
 			},
 		})
+		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
 
 		// Chaos
 		chaosRes := h.chaosManager.Evaluate(logInfo.Header.Meta.Model)
@@ -675,6 +676,120 @@ func retryEvent(eventType string, attempt int, delay time.Duration, upstreamID s
 	}
 }
 
+func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) []recorder.RecordEvent {
+	if decision == nil {
+		return nil
+	}
+	events := []recorder.RecordEvent{
+		{
+			Type: "routing.classified",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"model":           decision.ModelName,
+				"endpoint":        decision.Endpoint,
+				"routing_policy":  decision.Policy,
+				"fallback_policy": decision.FallbackPolicy,
+				"excluded_ids":    decision.ExcludedIDs,
+			},
+		},
+		{
+			Type: "routing.candidates",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"available_count": len(selectableCandidateIDs(decision.Candidates)),
+				"candidates":      candidateEventAttributes(decision.Candidates),
+			},
+		},
+	}
+	if decision.SelectedID != "" {
+		events = append(events, recorder.RecordEvent{
+			Type: "routing.selected",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"upstream_id":   decision.SelectedID,
+				"routing_score": decision.SelectedScore,
+			},
+		})
+	}
+	if decision.FailureReason != "" {
+		events = append(events, recorder.RecordEvent{
+			Type: "routing.filtered",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"routing_failure_reason": decision.FailureReason,
+				"filtered_count":         filteredCandidateCount(decision.Candidates),
+			},
+		})
+	}
+	return events
+}
+
+func routingOutcomeEvent(selection *router.Selection, statusCode int, duration time.Duration, errText string) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"status_code": statusCode,
+		"duration_ms": duration.Milliseconds(),
+	}
+	if selection != nil && selection.Target != nil {
+		attrs["upstream_id"] = selection.Target.ID
+		attrs["model"] = selection.Request.ModelName
+	}
+	if errText != "" {
+		attrs["error"] = errText
+	}
+	return recorder.RecordEvent{
+		Type:       "routing.outcome",
+		Time:       time.Now().UTC(),
+		Attributes: attrs,
+	}
+}
+
+func candidateEventAttributes(candidates []router.CandidateDecision) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(candidates))
+	for _, candidate := range candidates {
+		attrs := map[string]interface{}{
+			"id":              candidate.ID,
+			"provider_preset": candidate.ProviderPreset,
+			"priority":        candidate.Priority,
+			"weight":          candidate.Weight,
+			"health_state":    candidate.HealthState,
+			"supports_path":   candidate.SupportsPath,
+			"supports_model":  candidate.SupportsModel,
+			"selectable":      candidate.Selectable,
+		}
+		if candidate.BaseURL != "" {
+			attrs["base_url"] = candidate.BaseURL
+		}
+		if candidate.Excluded {
+			attrs["excluded"] = true
+		}
+		if candidate.FilterReason != "" {
+			attrs["filter_reason"] = candidate.FilterReason
+		}
+		out = append(out, attrs)
+	}
+	return out
+}
+
+func selectableCandidateIDs(candidates []router.CandidateDecision) []string {
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Selectable {
+			out = append(out, candidate.ID)
+		}
+	}
+	return out
+}
+
+func filteredCandidateCount(candidates []router.CandidateDecision) int {
+	count := 0
+	for _, candidate := range candidates {
+		if !candidate.Selectable {
+			count++
+		}
+	}
+	return count
+}
+
 func tryAcquireRetryWaitSlot() bool {
 	select {
 	case upstreamRetryWaitSlots <- struct{}{}:
@@ -785,6 +900,7 @@ func (h *Handler) writeUpstreamResponse(
 	// Finalize metrics and log (equivalent to old defer block).
 	duration := time.Since(start)
 	code, written, ttft := irw.GetMetrics()
+	logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, code, duration, logInfo.Header.Meta.Error))
 
 	logInfo.Header.Meta.DurationMs = duration.Milliseconds()
 	logInfo.Header.Meta.StatusCode = code
@@ -988,6 +1104,9 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Events = append(logInfo.Events, retryEvents...)
+	if decision := router.SelectionDecision(selectErr); decision != nil {
+		logInfo.Events = append(logInfo.Events, routingDecisionEvents(decision, start)...)
+	}
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
 		Type:    "routing.failure",
 		Time:    time.Now().UTC(),

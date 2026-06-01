@@ -409,6 +409,15 @@ func TestHandlerAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 	if parsed.Header.Meta.RoutingFailureReason != "" {
 		t.Fatalf("RoutingFailureReason = %q, want empty", parsed.Header.Meta.RoutingFailureReason)
 	}
+	seenEvents := map[string]bool{}
+	for _, event := range parsed.Events {
+		seenEvents[event.Type] = true
+	}
+	for _, eventType := range []string{"routing.classified", "routing.candidates", "routing.selected", "routing.outcome"} {
+		if !seenEvents[eventType] {
+			t.Fatalf("recorded events missing %s: %+v", eventType, parsed.Events)
+		}
+	}
 }
 
 func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
