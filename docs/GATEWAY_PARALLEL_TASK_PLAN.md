@@ -464,3 +464,123 @@ Acceptance:
 - MCP and Monitor outputs expose credential grouping without breaking existing fields.
 - Old cassette fixtures still pass.
 - `go test ./internal/mcpserver ./internal/monitor` passes.
+
+## Parallel Batch 4 Plan
+
+Baseline:
+
+```text
+9584bc7 fix: remove merged credential helper dead code
+```
+
+Coordinator branch:
+
+```text
+feature/gateway-credential-followups
+/data/src/github.com/kingfs/llm-tracelab-gateway-credential-followups
+```
+
+Batch 4 objective:
+
+Turn the credential routing MVP into a usable workflow while keeping persistence and UI changes additive.
+
+Integration order:
+
+1. Credential storage/migration design, because later persistent implementation depends on it.
+2. Limit scope extension, because it can use existing credential/channel identities without storage.
+3. Monitor/UI credential display, because it consumes already emitted/read-side fields.
+4. Documentation/examples, because it should reflect the final integrated behavior.
+
+### L. Credential Storage Migration Design
+
+Branch: `feature/gateway-credential-storage-design`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-storage-design`
+Status: planned
+
+Owner scope:
+
+- Produce an implementation-ready storage migration plan for explicit credential records.
+- Map current channel inline secrets to implicit default credentials.
+- Define ent schema/table fields, bootstrap behavior, rollback safety, and migration tests needed later.
+- Documentation only unless tiny compile-time constants/helpers clarify naming.
+
+Constraints:
+
+- No actual DB migration in this branch.
+- No router/proxy behavior changes.
+- Keep payment/recharge/public relay out of scope.
+
+Acceptance:
+
+- Later storage implementation can be split into migration, service, monitor, and MCP tasks.
+- Plan clearly preserves existing SQLite startup and local cassette replay.
+
+### M. Scoped Limit Keys For Channel/Credential
+
+Branch: `feature/gateway-scoped-limit-keys`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-scoped-limit-keys`
+Status: planned
+
+Owner scope:
+
+- Extend disabled-by-default local limit config with a scope selector: global, header, channel, route_target, credential.
+- Reuse current in-memory limiter and route selection identity where possible.
+- Emit `limit.*` events with safe scope fields and fingerprints.
+- Add proxy tests proving legacy disabled behavior and scoped rejection events.
+
+Constraints:
+
+- No persistent quota, billing, or token accounting.
+- Do not change routing selection when limits are disabled.
+- Do not leak raw header values or secrets.
+
+Acceptance:
+
+- `go test ./internal/proxy ./internal/config ./internal/limit` passes.
+- `task check:quick` passes on the branch.
+
+### N. Monitor Credential Routing Display
+
+Branch: `feature/gateway-monitor-credential-display`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-monitor-credential-display`
+Status: planned
+
+Owner scope:
+
+- Surface credential routing fields in the existing Routing/Trace Detail experience.
+- Prefer small UI additions using existing `/api/routing/summary` and trace detail event data.
+- Show route target/channel/credential counts without navigation redesign.
+- Add/update frontend tests only if a relevant test harness exists; otherwise run existing build/check command and document it.
+
+Constraints:
+
+- No backend hot-path changes.
+- No DB schema changes.
+- Keep dense operational UI; no landing-page style redesign.
+
+Acceptance:
+
+- A user can inspect selected route target/channel/credential and sticky credential break context from monitor UI.
+- Existing Trace Detail behavior remains intact.
+
+### O. Credential Routing Examples And Operator Guide
+
+Branch: `feature/gateway-credential-docs`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-docs`
+Status: planned
+
+Owner scope:
+
+- Add user-facing YAML examples for explicit credentials.
+- Document implicit default credential behavior, sticky route target binding, safe metadata fields, and limit scope semantics.
+- Update README/MONITOR guide links as needed.
+
+Constraints:
+
+- Documentation only.
+- Do not describe payment/recharge/public relay as supported.
+- Avoid real-looking secrets; use env references and placeholders.
+
+Acceptance:
+
+- Users can configure two credentials under one upstream and understand how it affects routing events and replay.
