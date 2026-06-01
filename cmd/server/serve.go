@@ -244,6 +244,9 @@ func validateServeConfig(cfg *config.Config) error {
 }
 
 func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {
+	if configHasExplicitCredentials(cfg) {
+		return cfg, "yaml", nil
+	}
 	targets, err := channelService.RuntimeTargets()
 	if err != nil {
 		return nil, "", err
@@ -255,4 +258,16 @@ func routerConfigFromChannels(cfg *config.Config, channelService *channel.Servic
 	routerCfg.Upstream = config.UpstreamConfig{}
 	routerCfg.Upstreams = targets
 	return &routerCfg, "database", nil
+}
+
+func configHasExplicitCredentials(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	for _, target := range cfg.EffectiveUpstreams() {
+		if target.HasExplicitCredentials() {
+			return true
+		}
+	}
+	return false
 }

@@ -103,7 +103,7 @@ func TestTraceOutputDirEnvOverridesLegacyOutputDirEnv(t *testing.T) {
 
 func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 	t.Setenv("LLM_TRACELAB_UPSTREAM_BASE_URL", "https://proxy.example.com/v1")
-	t.Setenv("LLM_TRACELAB_UPSTREAM_API_KEY", "sk-env")
+	t.Setenv("LLM_TRACELAB_UPSTREAM_API_KEY", "env-placeholder-key")
 	t.Setenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET", "openrouter")
 
 	cfg := Config{
@@ -112,7 +112,7 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 				ID: "primary",
 				Upstream: UpstreamConfig{
 					BaseURL:        "https://api.openai.com/v1",
-					ApiKey:         "sk-config",
+					ApiKey:         "config-placeholder-key",
 					ProviderPreset: "openai",
 				},
 			},
@@ -120,7 +120,7 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 				ID: "secondary",
 				Upstream: UpstreamConfig{
 					BaseURL:        "https://secondary.example.com/v1",
-					ApiKey:         "sk-secondary",
+					ApiKey:         "secondary-placeholder-key",
 					ProviderPreset: "openai",
 				},
 			},
@@ -131,19 +131,19 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 	if cfg.Upstreams[0].Upstream.BaseURL != "https://proxy.example.com/v1" {
 		t.Fatalf("first upstream base_url = %q", cfg.Upstreams[0].Upstream.BaseURL)
 	}
-	if cfg.Upstreams[0].Upstream.ApiKey != "sk-env" {
+	if cfg.Upstreams[0].Upstream.ApiKey != "env-placeholder-key" {
 		t.Fatalf("first upstream api_key = %q", cfg.Upstreams[0].Upstream.ApiKey)
 	}
 	if cfg.Upstreams[0].Upstream.ProviderPreset != "openrouter" {
 		t.Fatalf("first upstream provider_preset = %q", cfg.Upstreams[0].Upstream.ProviderPreset)
 	}
-	if cfg.Upstreams[1].Upstream.ApiKey != "sk-secondary" {
+	if cfg.Upstreams[1].Upstream.ApiKey != "secondary-placeholder-key" {
 		t.Fatalf("second upstream api_key = %q", cfg.Upstreams[1].Upstream.ApiKey)
 	}
 }
 
 func TestLoadExpandsEnvReferences(t *testing.T) {
-	t.Setenv("OPENAI_TEST_KEY", "sk-test")
+	t.Setenv("OPENAI_TEST_KEY", "test-placeholder-key")
 	path := writeTempConfig(t, `
 server:
   port: "8080"
@@ -159,8 +159,94 @@ upstreams:
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if cfg.Upstreams[0].Upstream.ApiKey != "sk-test" {
-		t.Fatalf("api_key = %q, want sk-test", cfg.Upstreams[0].Upstream.ApiKey)
+	if cfg.Upstreams[0].Upstream.ApiKey != "test-placeholder-key" {
+		t.Fatalf("api_key = %q, want test-placeholder-key", cfg.Upstreams[0].Upstream.ApiKey)
+	}
+}
+
+func TestLoadParsesExplicitCredentials(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "test-key-from-env")
+	t.Setenv("OPENAI_BACKUP_KEY", "backup-key-from-env")
+	path := writeTempConfig(t, `
+upstreams:
+  - id: "primary"
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: "$env:OPENAI_TEST_KEY"
+      provider_preset: "openai"
+    credentials:
+      - id: "primary"
+        name: "Primary account"
+        api_key: "$env:OPENAI_TEST_KEY"
+        concurrency_limit: 2
+        headers:
+          X-Test-Credential: "primary"
+      - id: "backup"
+        name: "Backup account"
+        api_key: "$env:OPENAI_BACKUP_KEY"
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	target := cfg.Upstreams[0]
+	if !target.HasExplicitCredentials() {
+		t.Fatalf("HasExplicitCredentials() = false, want true")
+	}
+	credentials := target.EffectiveCredentials()
+	if len(credentials) != 2 {
+		t.Fatalf("len(EffectiveCredentials()) = %d, want 2", len(credentials))
+	}
+	if credentials[0].ID != "primary" || credentials[0].ApiKey != "test-key-from-env" || credentials[0].ConcurrencyLimit != 2 {
+		t.Fatalf("primary credential = %+v", credentials[0])
+	}
+	if credentials[0].Headers["X-Test-Credential"] != "primary" {
+		t.Fatalf("primary credential headers = %+v", credentials[0].Headers)
+	}
+	if credentials[1].ID != "backup" || credentials[1].ApiKey != "backup-key-from-env" {
+		t.Fatalf("backup credential = %+v", credentials[1])
+	}
+}
+
+func TestEffectiveCredentialsUsesExplicitCredentialsBeforeInlineKey(t *testing.T) {
+	target := UpstreamTargetConfig{
+		Upstream: UpstreamConfig{
+			ApiKey: "inline-placeholder",
+		},
+		Credentials: []CredentialConfig{
+			{
+				ID:     "explicit",
+				ApiKey: "explicit-placeholder",
+			},
+		},
+	}
+
+	credentials := target.EffectiveCredentials()
+	if len(credentials) != 1 {
+		t.Fatalf("len(EffectiveCredentials()) = %d, want 1", len(credentials))
+	}
+	if credentials[0].ID != "explicit" || credentials[0].ApiKey != "explicit-placeholder" {
+		t.Fatalf("EffectiveCredentials()[0] = %+v, want explicit credential", credentials[0])
+	}
+}
+
+func TestEffectiveCredentialsCompilesImplicitDefaultFromInlineKey(t *testing.T) {
+	target := UpstreamTargetConfig{
+		Upstream: UpstreamConfig{
+			ApiKey: "inline-placeholder",
+		},
+	}
+
+	credentials := target.EffectiveCredentials()
+	if len(credentials) != 1 {
+		t.Fatalf("len(EffectiveCredentials()) = %d, want 1", len(credentials))
+	}
+	if credentials[0].ID != "default" || credentials[0].ApiKey != "inline-placeholder" {
+		t.Fatalf("EffectiveCredentials()[0] = %+v, want implicit default credential", credentials[0])
+	}
+	if credentials[0].Enabled == nil || !*credentials[0].Enabled {
+		t.Fatalf("implicit default Enabled = %v, want true", credentials[0].Enabled)
 	}
 }
 

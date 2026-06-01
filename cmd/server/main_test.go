@@ -160,6 +160,57 @@ func TestRouterConfigFromChannelsFallsBackToYAML(t *testing.T) {
 	}
 }
 
+func TestRouterConfigFromChannelsKeepsYAMLWhenExplicitCredentialsExist(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "db-channel",
+		Name:           "DB Channel",
+		BaseURL:        "https://db.example.com/v1",
+		ProviderPreset: "openai",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Upstreams = []config.UpstreamTargetConfig{
+		{
+			ID: "yaml-channel",
+			Upstream: config.UpstreamConfig{
+				BaseURL:        "https://yaml.example.com/v1",
+				ApiKey:         "$env:OPENAI_TEST_KEY",
+				ProviderPreset: "openai",
+			},
+			Credentials: []config.CredentialConfig{
+				{
+					ID:     "primary",
+					ApiKey: "$env:OPENAI_TEST_KEY",
+				},
+			},
+		},
+	}
+
+	routerCfg, source, err := routerConfigFromChannels(cfg, channel.NewService(st))
+	if err != nil {
+		t.Fatalf("routerConfigFromChannels() error = %v", err)
+	}
+	if source != "yaml" {
+		t.Fatalf("source = %q, want yaml", source)
+	}
+	if routerCfg != cfg {
+		t.Fatalf("routerConfigFromChannels should return original cfg when YAML credentials are explicit")
+	}
+	if got := routerCfg.Upstreams[0].EffectiveCredentials()[0].ID; got != "primary" {
+		t.Fatalf("credential id = %q, want primary", got)
+	}
+}
+
 func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 

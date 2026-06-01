@@ -77,15 +77,25 @@ type UpstreamConfig struct {
 }
 
 type UpstreamTargetConfig struct {
-	ID                 string         `yaml:"id"`
-	Enabled            *bool          `yaml:"enabled"`
-	Priority           int            `yaml:"priority"`
-	Weight             float64        `yaml:"weight"`
-	CapacityHint       float64        `yaml:"capacity_hint"`
-	ModelDiscovery     string         `yaml:"model_discovery"`
-	StaticModels       []string       `yaml:"static_models"`
-	AllowUnknownModels *bool          `yaml:"allow_unknown_models"`
-	Upstream           UpstreamConfig `yaml:"upstream"`
+	ID                 string             `yaml:"id"`
+	Enabled            *bool              `yaml:"enabled"`
+	Priority           int                `yaml:"priority"`
+	Weight             float64            `yaml:"weight"`
+	CapacityHint       float64            `yaml:"capacity_hint"`
+	ModelDiscovery     string             `yaml:"model_discovery"`
+	StaticModels       []string           `yaml:"static_models"`
+	AllowUnknownModels *bool              `yaml:"allow_unknown_models"`
+	Upstream           UpstreamConfig     `yaml:"upstream"`
+	Credentials        []CredentialConfig `yaml:"credentials"`
+}
+
+type CredentialConfig struct {
+	ID               string            `yaml:"id"`
+	Name             string            `yaml:"name"`
+	Enabled          *bool             `yaml:"enabled"`
+	ApiKey           string            `yaml:"api_key"`
+	Headers          map[string]string `yaml:"headers"`
+	ConcurrencyLimit int               `yaml:"concurrency_limit"`
 }
 
 type RouterConfig struct {
@@ -364,6 +374,42 @@ func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {
 			Upstream: c.Upstream,
 		},
 	}
+}
+
+func (t UpstreamTargetConfig) HasExplicitCredentials() bool {
+	return len(t.Credentials) > 0
+}
+
+func (t UpstreamTargetConfig) EffectiveCredentials() []CredentialConfig {
+	if len(t.Credentials) > 0 {
+		return cloneCredentialConfigs(t.Credentials)
+	}
+	if strings.TrimSpace(t.Upstream.ApiKey) == "" {
+		return nil
+	}
+	enabled := true
+	return []CredentialConfig{
+		{
+			ID:      "default",
+			Name:    "default",
+			Enabled: &enabled,
+			ApiKey:  t.Upstream.ApiKey,
+		},
+	}
+}
+
+func cloneCredentialConfigs(in []CredentialConfig) []CredentialConfig {
+	out := make([]CredentialConfig, len(in))
+	for i, credential := range in {
+		out[i] = credential
+		if credential.Headers != nil {
+			out[i].Headers = make(map[string]string, len(credential.Headers))
+			for key, value := range credential.Headers {
+				out[i].Headers[key] = value
+			}
+		}
+	}
+	return out
 }
 
 func (c Config) AuthDatabasePath() string {

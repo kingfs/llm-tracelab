@@ -76,6 +76,9 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 	}
 
 	targets := configuredUpstreams(cfg)
+	if hasExplicitCredentials(targets) {
+		return 0, nil
+	}
 	imported := 0
 	seenIDs := map[string]struct{}{}
 	for idx, target := range targets {
@@ -153,6 +156,15 @@ func configuredUpstreams(cfg *config.Config) []config.UpstreamTargetConfig {
 		return nil
 	}
 	return cfg.EffectiveUpstreams()
+}
+
+func hasExplicitCredentials(targets []config.UpstreamTargetConfig) bool {
+	for _, target := range targets {
+		if target.HasExplicitCredentials() {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {

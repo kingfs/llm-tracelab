@@ -30,7 +30,7 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 				StaticModels:   []string{"gpt-5", "GPT-5", "gpt-4.1"},
 				Upstream: config.UpstreamConfig{
 					BaseURL:        "https://api.openai.com/v1",
-					ApiKey:         "sk-test-secret",
+					ApiKey:         "test-inline-key",
 					ProviderPreset: "openai",
 					Headers: map[string]string{
 						"X-Test": "true",
@@ -74,7 +74,7 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	if target.ID != "openai-primary" {
 		t.Fatalf("target.ID = %q", target.ID)
 	}
-	if target.Upstream.ApiKey != "sk-test-secret" {
+	if target.Upstream.ApiKey != "test-inline-key" {
 		t.Fatalf("target.Upstream.ApiKey = %q", target.Upstream.ApiKey)
 	}
 	if got := target.Upstream.Headers["X-Test"]; got != "true" {
@@ -82,6 +82,48 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	}
 	if len(target.StaticModels) != 2 || target.StaticModels[0] != "gpt-4.1" || target.StaticModels[1] != "gpt-5" {
 		t.Fatalf("target.StaticModels = %#v", target.StaticModels)
+	}
+}
+
+func TestBootstrapFromConfigSkipsExplicitCredentialsWithoutStorageProjection(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID: "openai-primary",
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ApiKey:         "test-inline-key",
+					ProviderPreset: "openai",
+				},
+				Credentials: []config.CredentialConfig{
+					{
+						ID:     "primary",
+						ApiKey: "test-explicit-key",
+					},
+				},
+			},
+		},
+	}
+
+	imported, err := NewService(st).BootstrapFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("BootstrapFromConfig() error = %v", err)
+	}
+	if imported != 0 {
+		t.Fatalf("imported = %d, want 0", imported)
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		t.Fatalf("ListChannelConfigs() error = %v", err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("len(channels) = %d, want 0", len(channels))
 	}
 }
 
