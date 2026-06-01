@@ -34,6 +34,8 @@ This means the monitor is optimized for fast browsing without losing access to t
 
 Channels and model enablement are also stored in SQLite. YAML is only the service startup configuration surface and a first-run bootstrap compatibility input for legacy `upstream` / `upstreams` blocks. After bootstrap, manage channels, API keys, provider presets, probing, and model enablement from Monitor Web.
 
+Credential-aware routing examples and operator guidance live in [Credential Routing Operator Guide](./CREDENTIAL_ROUTING_OPERATOR_GUIDE.md). It explains explicit credentials, implicit default credentials, sticky route target binding, safe metadata fields, and limit scopes.
+
 System events are stored in SQLite as operational metadata. They describe TraceLab's own runtime or derived-pipeline health, not ordinary user traffic health.
 
 ## Events View
@@ -103,6 +105,8 @@ This view is the best fit for:
 - comparing channel request and token trends
 - reviewing recent probe results and failed traces for one channel
 
+When credential-aware routing is enabled, one channel may expand into multiple route targets, one per credential. Existing single-key channels behave like they have an implicit `default` credential, so older bootstrap configs and cassettes remain understandable.
+
 Configuration source is visible in the UI:
 
 - `web-managed`: created or edited through Monitor Web
@@ -159,7 +163,7 @@ Current routing capabilities include:
 - selected channel tags in request rows
 - parse-state tags in request rows
 
-`GET /api/routing/summary` accepts the same `window` values as upstream analytics (`1h`, `24h`, `7d`, `all`) and an optional `model` filter. It reads V3 cassette prelude events and returns counts by routing failure reason, selected upstream, sticky status, and sticky break previous/next upstream. Legacy cassettes or V3 cassettes without routing events are counted as missing-event inputs rather than errors.
+`GET /api/routing/summary` accepts the same `window` values as upstream analytics (`1h`, `24h`, `7d`, `all`) and an optional `model` filter. It reads V3 cassette prelude events and returns counts by routing failure reason, selected upstream, sticky status, and sticky break previous/next upstream. When credential fields are present, it can also expose route target, channel, and credential groupings. Legacy cassettes or V3 cassettes without routing events are counted as missing-event inputs rather than errors.
 
 The next UI step is to place these event-backed aggregates into the existing Routing view or upstream diagnostics without changing the main navigation structure.
 
@@ -235,6 +239,7 @@ When a trace was recorded through the multi-upstream router, the trace detail su
 Current routing context includes:
 
 - selected upstream id
+- selected route target, channel, and credential ids when cassette events include credential-aware fields
 - selected upstream provider preset
 - selected upstream base URL
 - routing policy

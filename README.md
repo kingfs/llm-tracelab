@@ -53,7 +53,7 @@ pkg/replay            单元测试回放 Transport
 pkg/llm               多厂商请求/响应归一化
 ```
 
-更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，v1 产品与架构设计入口见 [docs/v1/README.md](./docs/v1/README.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，系统事件中心设计见 [docs/SYSTEM_EVENTS_DESIGN.md](./docs/SYSTEM_EVENTS_DESIGN.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，多 upstream 路由设计说明见 [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，v1 产品与架构设计入口见 [docs/v1/README.md](./docs/v1/README.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，系统事件中心设计见 [docs/SYSTEM_EVENTS_DESIGN.md](./docs/SYSTEM_EVENTS_DESIGN.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，多 upstream 路由设计说明见 [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md)，Credential 路由操作指南见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
 
 面向 Sub2API、LiteLLM、Portkey、Helicone 等 LLM 网关/观测生态的方向校准和能力吸收设计见 [docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md)。该文档明确 TraceLab 不转向公网中转、支付或 SaaS 分发平台，而是吸收渠道管理、调度、限流、健康、成本和治理能力来强化本地优先的 record/replay、调试、审计和评估闭环。
 
@@ -139,6 +139,8 @@ upstream:
   api_key: "$env:LLM_API_KEY"
   provider_preset: "openai"
 ```
+
+同一个 upstream 下配置多个 explicit credentials 的示例和 sticky route target、credential-safe metadata、limit scope 说明见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)。文档示例只使用 `$env:...` 占位符，不应在 YAML 中提交真实 provider secret。
 
 如果你不想从零开始写 bootstrap 配置，可参考这些现成样例；长期配置仍建议在 Monitor Web 中完成：
 

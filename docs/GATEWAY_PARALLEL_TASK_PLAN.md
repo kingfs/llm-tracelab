@@ -573,7 +573,7 @@ Acceptance:
 Branch: `feature/gateway-credential-docs`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-docs`
 Agent: Parfit (`019e824b-227c-73c3-b412-62b324e27785`)
-Status: assigned
+Status: completed in branch as `docs: add credential routing operator guide`
 
 Owner scope:
 
@@ -590,3 +590,7 @@ Constraints:
 Acceptance:
 
 - Users can configure two credentials under one upstream and understand how it affects routing events and replay.
+
+Guide:
+
+- [Credential Routing Operator Guide](./CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)

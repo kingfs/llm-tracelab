@@ -52,7 +52,7 @@ pkg/replay            replay transport for tests
 pkg/llm               cross-provider normalization helpers
 ```
 
-AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), and authenticated proxy examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the multi-upstream routing design note is in [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), the gateway ecosystem direction review is in [docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md), and the Vertex family design note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
+AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), and authenticated proxy examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the multi-upstream routing design note is in [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md), the credential routing operator guide is in [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), the gateway ecosystem direction review is in [docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md), and the Vertex family design note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
 
 The gateway ecosystem review compares Sub2API, LiteLLM, Portkey, and Helicone. It clarifies that TraceLab should not become a public relay, payment, or SaaS quota-distribution platform; it should absorb channel management, routing, rate limiting, health, cost, and governance ideas only where they strengthen local-first record/replay, debugging, audit, and evaluation workflows.
 
@@ -135,6 +135,8 @@ upstream:
   api_key: "$env:LLM_API_KEY"
   provider_preset: "openai"
 ```
+
+For an example with two explicit credentials under one upstream, plus sticky route target, credential-safe metadata, and limit scope guidance, see [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md). The examples use `$env:...` placeholders only; do not commit real provider secrets in YAML.
 
 If you prefer starting from a ready-made bootstrap config, use one of these examples; long-lived channel configuration should still be managed in Monitor Web:
 
