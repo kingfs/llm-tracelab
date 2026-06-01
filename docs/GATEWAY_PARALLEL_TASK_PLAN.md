@@ -195,3 +195,125 @@ The next parallel batch should stay orthogonal:
 - Limit events: add global/token/channel concurrency and queue rejection events without changing sticky routing.
 - Monitor routing aggregation: aggregate existing routing and sticky events into UI views, with no hot-path router changes.
 - MCP sticky/failure drilldown: query sticky break/rebind traces from cassette events, with no storage schema change.
+
+## Parallel Batch 2 Plan
+
+Baseline:
+
+```text
+6df900e docs: record gateway parallel integration review
+```
+
+Coordinator branch:
+
+```text
+feature/gateway-next-parallel
+/data/src/github.com/kingfs/llm-tracelab-gateway-next-parallel
+```
+
+Batch 2 integration order:
+
+1. MCP sticky/failure drilldown, because it only reads existing cassette events.
+2. Monitor routing aggregation, because it should consume existing monitor data and cassette events.
+3. Limit event primitives, because it introduces new hot-path rejection events but should not change routing selection.
+4. Credential decision-chain design/spec, because it defines the next router/storage boundary and should be reviewed after seeing the read-side needs.
+
+### D. MCP Sticky Drilldown
+
+Branch: `feature/gateway-mcp-sticky-drilldown`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-mcp-sticky-drilldown`
+
+Owner scope:
+
+- Add an MCP tool that finds traces with `routing.sticky.*` events.
+- Support optional filters for sticky status, upstream id, previous upstream id, and sticky fingerprint.
+- Return compact rows with trace id, created time if available, status, upstream ids, fingerprint, and cassette path.
+- Add deterministic tests using local cassette fixtures or temp V3 record files.
+
+Constraints:
+
+- Read-only over existing store/cassette files.
+- No DB schema changes.
+- No router/proxy behavior changes.
+- Do not expose raw sticky keys; only use `sticky_key_fingerprint`.
+
+Acceptance:
+
+- `routing.sticky.break` traces can be queried without opening raw trace details.
+- Missing or malformed cassette files are skipped or reported consistently with existing MCP query behavior.
+- `go test ./internal/mcpserver` passes.
+
+### E. Monitor Routing Aggregation
+
+Branch: `feature/gateway-monitor-routing-aggregation`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-monitor-routing-aggregation`
+
+Owner scope:
+
+- Add monitor-facing aggregation for routing/sticky event summaries.
+- Prefer an existing monitor API pattern; if adding an endpoint, keep it read-only and cassette-event backed.
+- Surface counts by routing failure reason, selected upstream, sticky status, and sticky breaks.
+- Add focused backend tests and minimal UI wiring only if the existing Trace/Monitor UI has a natural location.
+
+Constraints:
+
+- No router/proxy hot-path changes.
+- No DB schema changes in this batch.
+- No broad navigation redesign.
+- Preserve existing trace detail behavior.
+
+Acceptance:
+
+- A developer can see whether recent failures are mostly no-support, all-open, all-excluded, retry saturation, or sticky break related.
+- Aggregation is derived from V3 prelude events and degrades gracefully for legacy cassettes.
+- Relevant Go tests pass; if UI is touched, run the existing frontend check available in this repo.
+
+### F. Limit Event Primitives
+
+Branch: `feature/gateway-limit-events`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-limit-events`
+
+Owner scope:
+
+- Introduce small reusable in-memory concurrency limiter primitives for global/channel-like keys.
+- Emit structured rejection events such as `limit.concurrency_rejected` and `limit.queue_saturated` when a configured local limit is exceeded.
+- Add conservative disabled-by-default config fields if needed.
+- Add unit tests for limiter behavior and proxy event recording.
+
+Constraints:
+
+- Disabled by default; existing behavior must not change without config.
+- No persistent quota/billing/payment model.
+- No token spend accounting.
+- Do not alter sticky routing selection semantics.
+
+Acceptance:
+
+- With limits disabled, current tests and behavior remain unchanged.
+- With a tiny configured limit, concurrent requests receive the intended HTTP status and cassette event.
+- `task check:quick` passes on the branch.
+
+### G. Credential Decision Chain Spec
+
+Branch: `feature/gateway-credential-decision-spec`
+Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-credential-decision-spec`
+
+Owner scope:
+
+- Produce a concrete implementation spec for credential-aware routing.
+- Define Channel, Credential, RouteTarget, and event vocabulary boundaries.
+- Identify the minimal additive storage/config changes for a later implementation batch.
+- Include migration safety and replay compatibility analysis.
+
+Constraints:
+
+- Documentation/spec only unless a tiny type-level sketch is necessary.
+- No DB migrations in this branch.
+- No router behavior changes.
+- Keep payment/recharge/public relay explicitly out of scope.
+
+Acceptance:
+
+- The next implementation batch can split storage, router snapshot, monitor, and MCP work without ambiguity.
+- Spec explains how credentials interact with sticky bindings, health, limit events, and route decision traces.
+- Documentation is linked from the gateway plan or design entry.
