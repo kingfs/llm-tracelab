@@ -33,6 +33,7 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		SelectedUpstreamID:             "openai-primary",
 		SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
 		SelectedUpstreamProviderPreset: "openai",
+		RoutingEvents:                  true,
 	}), 0o644); err != nil {
 		t.Fatalf("WriteFile(success) error = %v", err)
 	}
@@ -162,8 +163,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 17 {
-		t.Fatalf("len(tools.Tools) = %d, want 17", len(tools.Tools))
+	if len(tools.Tools) != 18 {
+		t.Fatalf("len(tools.Tools) = %d, want 18", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -221,6 +222,27 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if _, ok := traceDetailPayload["raw"].(map[string]any); !ok {
 		t.Fatalf("get_trace.raw missing")
+	}
+
+	routingDecisions, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_routing_decisions",
+		Arguments: map[string]any{"trace_id": successEntry.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(query_routing_decisions) error = %v", err)
+	}
+	routingPayload := routingDecisions.StructuredContent.(map[string]any)
+	if got := routingPayload["selected_upstream_id"].(string); got != "openai-primary" {
+		t.Fatalf("query_routing_decisions selected_upstream_id = %q, want openai-primary", got)
+	}
+	if got := int(routingPayload["candidate_count"].(float64)); got != 1 {
+		t.Fatalf("query_routing_decisions candidate_count = %d, want 1", got)
+	}
+	if got := int(routingPayload["available_count"].(float64)); got != 1 {
+		t.Fatalf("query_routing_decisions available_count = %d, want 1", got)
+	}
+	if len(routingPayload["events"].([]any)) == 0 {
+		t.Fatalf("query_routing_decisions events empty")
 	}
 
 	traceFindings, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -440,6 +462,7 @@ type fixtureSpec struct {
 	SelectedUpstreamID             string
 	SelectedUpstreamBaseURL        string
 	SelectedUpstreamProviderPreset string
+	RoutingEvents                  bool
 }
 
 func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
@@ -492,11 +515,69 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 		},
 	}
 
-	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	events := recordfile.BuildEvents(header)
+	if spec.RoutingEvents {
+		events = append(events, routingFixtureEvents(header)...)
+	}
+	prelude, err := recordfile.MarshalPrelude(header, events)
 	if err != nil {
 		t.Fatalf("MarshalPrelude() error = %v", err)
 	}
 	return append(prelude, []byte(request+"\n"+responseHeader+spec.ResponseBody)...)
+}
+
+func routingFixtureEvents(header recordfile.RecordHeader) []recordfile.RecordEvent {
+	eventTime := header.Meta.Time
+	return []recordfile.RecordEvent{
+		{
+			Type: "routing.classified",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"model":           header.Meta.Model,
+				"endpoint":        header.Meta.Endpoint,
+				"routing_policy":  header.Meta.RoutingPolicy,
+				"fallback_policy": "reject",
+			},
+		},
+		{
+			Type: "routing.candidates",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"available_count": 1,
+				"candidates": []any{
+					map[string]any{
+						"id":              header.Meta.SelectedUpstreamID,
+						"provider_preset": header.Meta.SelectedUpstreamProviderPreset,
+						"base_url":        header.Meta.SelectedUpstreamBaseURL,
+						"priority":        100,
+						"weight":          1,
+						"health_state":    "healthy",
+						"supports_path":   true,
+						"supports_model":  true,
+						"selectable":      true,
+					},
+				},
+			},
+		},
+		{
+			Type: "routing.selected",
+			Time: eventTime,
+			Attributes: map[string]interface{}{
+				"upstream_id":   header.Meta.SelectedUpstreamID,
+				"routing_score": header.Meta.RoutingScore,
+			},
+		},
+		{
+			Type: "routing.outcome",
+			Time: eventTime.Add(time.Duration(header.Meta.DurationMs) * time.Millisecond),
+			Attributes: map[string]interface{}{
+				"upstream_id": header.Meta.SelectedUpstreamID,
+				"model":       header.Meta.Model,
+				"status_code": header.Meta.StatusCode,
+				"duration_ms": header.Meta.DurationMs,
+			},
+		},
+	}
 }
 
 func operationForURL(path string) string {

@@ -383,8 +383,9 @@ guardrails 不能只做在线拦截。每个规则应满足：
 
 - 已实现 router 侧 `DecisionTrace`，包含模型、endpoint、策略、排除列表、候选渠道、过滤原因、可用数量、选中渠道和失败原因。
 - 已在 proxy 录制 `routing.classified`、`routing.candidates`、`routing.selected`、`routing.filtered`、`routing.outcome` 事件，并保留旧的 `routing.selection`、`routing.retry_*`、`routing.failure` 事件兼容面。
+- 已新增 MCP `query_routing_decisions` 工具，直接从 trace cassette 的 V3 prelude events 提取路由分类、候选、选中、结果和失败原因，方便 AI agent 不读取 raw HTML 或完整 trace 也能解释路由。
 - 已覆盖 router 决策 trace 单测和 proxy e2e cassette 事件断言。
-- 当前阶段只把决策写入 cassette；Monitor/MCP 专用展示和聚合仍是后续工作，避免在事件词汇稳定前过早扩大前端改动。
+- 当前阶段只把决策写入 cassette 并开放 MCP 查询；Monitor 专用展示和聚合仍是后续工作，避免在事件词汇稳定前过早扩大前端改动。
 
 阶段复盘：
 

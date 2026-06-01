@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -41,6 +43,10 @@ type listTracesInput struct {
 type getTraceInput struct {
 	TraceID    string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
 	IncludeRaw bool   `json:"include_raw,omitempty" jsonschema:"include raw HTTP request and response bytes"`
+}
+
+type queryRoutingDecisionsInput struct {
+	TraceID string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
 }
 
 type listTraceFindingsInput struct {
@@ -166,6 +172,22 @@ type upstreamListOutput struct {
 	Model           string           `json:"model"`
 }
 
+type routingDecisionOutput struct {
+	TraceID            string           `json:"trace_id"`
+	Model              string           `json:"model,omitempty"`
+	Endpoint           string           `json:"endpoint,omitempty"`
+	RoutingPolicy      string           `json:"routing_policy,omitempty"`
+	FallbackPolicy     string           `json:"fallback_policy,omitempty"`
+	SelectedUpstreamID string           `json:"selected_upstream_id,omitempty"`
+	FailureReason      string           `json:"failure_reason,omitempty"`
+	StatusCode         int              `json:"status_code,omitempty"`
+	CandidateCount     int              `json:"candidate_count"`
+	AvailableCount     int              `json:"available_count"`
+	Events             []map[string]any `json:"events"`
+	Candidates         []map[string]any `json:"candidates,omitempty"`
+	Outcome            map[string]any   `json:"outcome,omitempty"`
+}
+
 type queryFailuresOutput struct {
 	Items       []map[string]any `json:"items"`
 	Page        int              `json:"page"`
@@ -260,6 +282,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "get_trace",
 		Description: "Get one trace detail by trace_id, optionally including raw HTTP request and response bytes.",
 	}, api.getTrace)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "query_routing_decisions",
+		Description: "Return routing decision events for one trace, including candidates, selected upstream, outcome, and failure reason.",
+	}, api.queryRoutingDecisions)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_trace_findings",
 		Description: "List deterministic audit findings for one trace, with optional severity and category filters.",
@@ -358,6 +384,73 @@ func (a *serverAPI) getTrace(ctx context.Context, req *mcp.CallToolRequest, in *
 		out["raw"] = raw
 	}
 	return nil, out, nil
+}
+
+func (a *serverAPI) queryRoutingDecisions(ctx context.Context, req *mcp.CallToolRequest, in *queryRoutingDecisionsInput) (*mcp.CallToolResult, *routingDecisionOutput, error) {
+	traceID := strings.TrimSpace(in.TraceID)
+	if traceID == "" {
+		return nil, nil, fmt.Errorf("trace_id is required")
+	}
+	entry, err := a.lookupTrace(traceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	content, err := os.ReadFile(entry.LogPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read trace cassette: %w", err)
+	}
+	parsed, err := recordfile.ParsePrelude(content)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse trace prelude: %w", err)
+	}
+	out := routingDecisionOutput{
+		TraceID:            entry.ID,
+		Model:              parsed.Header.Meta.Model,
+		Endpoint:           firstNonEmpty(parsed.Header.Meta.Endpoint, parsed.Header.Meta.URL),
+		RoutingPolicy:      parsed.Header.Meta.RoutingPolicy,
+		SelectedUpstreamID: parsed.Header.Meta.SelectedUpstreamID,
+		FailureReason:      parsed.Header.Meta.RoutingFailureReason,
+		StatusCode:         parsed.Header.Meta.StatusCode,
+		CandidateCount:     parsed.Header.Meta.RoutingCandidateCount,
+		Events:             []map[string]any{},
+	}
+	for _, event := range parsed.Events {
+		if !strings.HasPrefix(event.Type, "routing.") {
+			continue
+		}
+		eventMap := routingEventMap(event)
+		out.Events = append(out.Events, eventMap)
+		switch event.Type {
+		case "routing.classified":
+			if out.Model == "" {
+				out.Model, _ = event.Attributes["model"].(string)
+			}
+			if out.Endpoint == "" {
+				out.Endpoint, _ = event.Attributes["endpoint"].(string)
+			}
+			if out.RoutingPolicy == "" {
+				out.RoutingPolicy, _ = event.Attributes["routing_policy"].(string)
+			}
+			out.FallbackPolicy, _ = event.Attributes["fallback_policy"].(string)
+		case "routing.candidates":
+			out.AvailableCount = intFromAny(event.Attributes["available_count"])
+			out.Candidates = mapsFromAny(event.Attributes["candidates"])
+			if out.CandidateCount == 0 {
+				out.CandidateCount = len(out.Candidates)
+			}
+		case "routing.selected":
+			if out.SelectedUpstreamID == "" {
+				out.SelectedUpstreamID, _ = event.Attributes["upstream_id"].(string)
+			}
+		case "routing.filtered":
+			if out.FailureReason == "" {
+				out.FailureReason, _ = event.Attributes["routing_failure_reason"].(string)
+			}
+		case "routing.outcome":
+			out.Outcome = eventMap
+		}
+	}
+	return nil, &out, nil
 }
 
 func (a *serverAPI) listTraceFindings(ctx context.Context, req *mcp.CallToolRequest, in *listTraceFindingsInput) (*mcp.CallToolResult, map[string]any, error) {
@@ -800,6 +893,56 @@ func (a *serverAPI) requireStoreSync() error {
 		return fmt.Errorf("store not configured")
 	}
 	return nil
+}
+
+func routingEventMap(event recordfile.RecordEvent) map[string]any {
+	out := map[string]any{
+		"type":       event.Type,
+		"time":       event.Time,
+		"attributes": event.Attributes,
+	}
+	if event.Message != "" {
+		out["message"] = event.Message
+	}
+	if event.StatusCode > 0 {
+		out["status_code"] = event.StatusCode
+	}
+	return out
+}
+
+func intFromAny(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		i, _ := v.Int64()
+		return int(i)
+	default:
+		return 0
+	}
+}
+
+func mapsFromAny(value any) []map[string]any {
+	items, ok := value.([]any)
+	if !ok {
+		if typed, ok := value.([]map[string]interface{}); ok {
+			out := make([]map[string]any, 0, len(typed))
+			out = append(out, typed...)
+			return out
+		}
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if mapped, ok := item.(map[string]any); ok {
+			out = append(out, mapped)
+		}
+	}
+	return out
 }
 
 func normalizePage(page int) int {
