@@ -211,6 +211,7 @@ type Selection struct {
 	Candidates     []string
 	Request        RequestFeatures
 	Decision       *DecisionTrace
+	Credential     CredentialDecisionInfo
 }
 
 type SelectionError struct {
@@ -286,32 +287,42 @@ type DecisionTrace struct {
 }
 
 type CandidateDecision struct {
-	ID             string  `json:"id"`
-	RouteTargetID  string  `json:"route_target_id,omitempty"`
-	ChannelID      string  `json:"channel_id,omitempty"`
-	CredentialID   string  `json:"credential_id,omitempty"`
-	CredentialHint string  `json:"credential_hint,omitempty"`
-	ProviderPreset string  `json:"provider_preset,omitempty"`
-	BaseURL        string  `json:"base_url,omitempty"`
-	Priority       int     `json:"priority"`
-	Weight         float64 `json:"weight"`
-	HealthState    string  `json:"health_state,omitempty"`
-	SupportsPath   bool    `json:"supports_path"`
-	SupportsModel  bool    `json:"supports_model"`
-	Excluded       bool    `json:"excluded,omitempty"`
-	Selectable     bool    `json:"selectable"`
-	FilterReason   string  `json:"filter_reason,omitempty"`
+	ID                     string  `json:"id"`
+	RouteTargetID          string  `json:"route_target_id,omitempty"`
+	ChannelID              string  `json:"channel_id,omitempty"`
+	CredentialID           string  `json:"credential_id,omitempty"`
+	CredentialHint         string  `json:"credential_hint,omitempty"`
+	CredentialHealthState  string  `json:"credential_health_state,omitempty"`
+	CredentialSelectable   *bool   `json:"credential_selectable,omitempty"`
+	CredentialFilterReason string  `json:"credential_filter_reason,omitempty"`
+	ProviderPreset         string  `json:"provider_preset,omitempty"`
+	BaseURL                string  `json:"base_url,omitempty"`
+	Priority               int     `json:"priority"`
+	Weight                 float64 `json:"weight"`
+	HealthState            string  `json:"health_state,omitempty"`
+	SupportsPath           bool    `json:"supports_path"`
+	SupportsModel          bool    `json:"supports_model"`
+	Excluded               bool    `json:"excluded,omitempty"`
+	Selectable             bool    `json:"selectable"`
+	FilterReason           string  `json:"filter_reason,omitempty"`
 }
 
 type StickyDecision struct {
 	Status         string `json:"status,omitempty"`
 	Key            string `json:"key,omitempty"`
 	TargetID       string `json:"target_id,omitempty"`
+	BreakID        string `json:"break_id,omitempty"`
 	RouteTargetID  string `json:"route_target_id,omitempty"`
 	ChannelID      string `json:"channel_id,omitempty"`
 	CredentialID   string `json:"credential_id,omitempty"`
 	CredentialHint string `json:"credential_hint,omitempty"`
-	BreakID        string `json:"break_id,omitempty"`
+}
+
+type CredentialDecisionInfo struct {
+	RouteTargetID  string
+	ChannelID      string
+	CredentialID   string
+	CredentialHint string
 }
 
 type Outcome struct {
@@ -764,6 +775,7 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 		Candidates:     candidateIDs,
 		Request:        features,
 		Decision:       decision.withSelectedTarget(selected, score),
+		Credential:     credentialDecisionFromTarget(selected),
 	}, nil
 }
 
@@ -1308,6 +1320,32 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 		}
 	}
 	return decision
+}
+
+func credentialDecisionFromCandidates(candidates []CandidateDecision, id string) CredentialDecisionInfo {
+	for _, candidate := range candidates {
+		if candidate.ID == id {
+			return CredentialDecisionInfo{
+				RouteTargetID:  candidate.RouteTargetID,
+				ChannelID:      candidate.ChannelID,
+				CredentialID:   candidate.CredentialID,
+				CredentialHint: candidate.CredentialHint,
+			}
+		}
+	}
+	return CredentialDecisionInfo{}
+}
+
+func credentialDecisionFromTarget(target *Target) CredentialDecisionInfo {
+	if target == nil {
+		return CredentialDecisionInfo{}
+	}
+	return CredentialDecisionInfo{
+		RouteTargetID:  target.RouteTargetID,
+		ChannelID:      target.ChannelID,
+		CredentialID:   target.CredentialID,
+		CredentialHint: target.CredentialHint,
+	}
 }
 
 func (t *Target) supportsModelLocked(model string) bool {

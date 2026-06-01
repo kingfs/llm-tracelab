@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/redaction"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -171,11 +172,11 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 			Provider:                       semantics.Provider,
 			Operation:                      semantics.Operation,
 			Endpoint:                       semantics.Endpoint,
-			URL:                            req.URL.String(),
+			URL:                            redaction.DisplayURL(req.URL.String()),
 			Method:                         req.Method,
 			ClientIP:                       req.RemoteAddr,
 			SelectedUpstreamID:             opts.SelectedUpstreamID,
-			SelectedUpstreamBaseURL:        opts.SiteURL,
+			SelectedUpstreamBaseURL:        redaction.DisplayURL(opts.SiteURL),
 			SelectedUpstreamProviderPreset: opts.SelectedUpstreamProviderPreset,
 			RoutingPolicy:                  opts.RoutingPolicy,
 			RoutingScore:                   opts.RoutingScore,

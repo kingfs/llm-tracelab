@@ -527,6 +527,100 @@ func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 	}
 }
 
+func TestHandlerCassetteMetadataDoesNotLeakCredentialMaterial(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer upstream-secret-token" {
+			t.Fatalf("upstream Authorization = %q", got)
+		}
+		if got := r.Header.Get("X-Api-Key"); got != "upstream-api-key" {
+			t.Fatalf("upstream X-Api-Key = %q", got)
+		}
+		if got := r.Header.Get("X-Custom-Auth"); got != "custom-auth-secret" {
+			t.Fatalf("upstream X-Custom-Auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp","usage":{"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1?api_key=query-secret"
+	cfg.Upstream.ApiKey = "upstream-secret-token"
+	cfg.Upstream.Headers = map[string]string{
+		"X-Api-Key":     "upstream-api-key",
+		"X-Custom-Auth": "custom-auth-secret",
+		"X-OAuth-Token": "oauth-token-secret",
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = false
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses?access_token=client-query-token", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer client-token-raw")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	content, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", recordPath, err)
+	}
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	payload := content[parsed.PayloadOffset:]
+	requestHeaderEnd := bytes.Index(payload, []byte("\r\n\r\n"))
+	if requestHeaderEnd < 0 {
+		t.Fatalf("record payload missing request header/body separator")
+	}
+	requestHeaders := string(payload[:requestHeaderEnd])
+	prelude := string(content[:parsed.PayloadOffset])
+	for _, leaked := range []string{
+		"upstream-secret-token",
+		"upstream-api-key",
+		"custom-auth-secret",
+		"oauth-token-secret",
+		"query-secret",
+	} {
+		if strings.Contains(prelude, leaked) {
+			t.Fatalf("cassette metadata leaked %q in prelude:\n%s", leaked, prelude)
+		}
+	}
+	if !strings.Contains(requestHeaders, "Authorization: Bearer client-token-raw") {
+		t.Fatalf("raw request headers did not preserve client Authorization:\n%s", requestHeaders)
+	}
+	if strings.Contains(requestHeaders, "upstream-secret-token") || strings.Contains(requestHeaders, "upstream-api-key") || strings.Contains(requestHeaders, "custom-auth-secret") {
+		t.Fatalf("raw client request unexpectedly contains upstream credential material:\n%s", requestHeaders)
+	}
+}
+
 func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

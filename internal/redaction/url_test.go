@@ -69,6 +69,16 @@ func TestDisplayURLPreservesNonURL(t *testing.T) {
 	}
 }
 
+func TestDisplayURLRedactsRelativeQuery(t *testing.T) {
+	got := DisplayURL("/v1/responses?access_token=abc&model=gpt-5")
+	if strings.Contains(got, "abc") {
+		t.Fatalf("DisplayURL() leaked relative query token: %q", got)
+	}
+	if !strings.Contains(got, "access_token=REDACTED") || !strings.Contains(got, "model=gpt-5") {
+		t.Fatalf("DisplayURL() = %q, want redacted access_token and preserved model", got)
+	}
+}
+
 func TestDisplayURLPreservesNonSensitiveQuery(t *testing.T) {
 	raw := "https://example.com/v1?model=gpt-5&region=us"
 	got := DisplayURL(raw)
@@ -76,5 +86,27 @@ func TestDisplayURLPreservesNonSensitiveQuery(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("DisplayURL() = %q, missing %q", got, want)
 		}
+	}
+}
+
+func TestMetadataTextRedactsCredentialMaterial(t *testing.T) {
+	raw := `Authorization: Bearer sk-live-token api_key=abc123 refresh_token:"oauth-refresh" x-api-key: custom-secret {"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\nabc"}`
+	got := MetadataText(raw)
+	for _, leaked := range []string{"sk-live-token", "abc123", "oauth-refresh", "custom-secret", "PRIVATE KEY"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("MetadataText() leaked %q in %q", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "REDACTED") {
+		t.Fatalf("MetadataText() = %q, want redacted markers", got)
+	}
+}
+
+func TestSafeCredentialHintRedactsSecretLikeHints(t *testing.T) {
+	if got := SafeCredentialHint("Bearer sk-live-token"); got != "Bearer REDACTED" {
+		t.Fatalf("SafeCredentialHint() = %q, want redacted bearer hint", got)
+	}
+	if got := SafeCredentialHint("acct-prod-east-1234567890"); got != "acct-prod-east-1234567890" {
+		t.Fatalf("SafeCredentialHint() = %q, want safe hint unchanged", got)
 	}
 }

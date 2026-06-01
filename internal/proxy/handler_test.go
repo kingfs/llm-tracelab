@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -110,6 +111,137 @@ func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	if !strings.Contains(baseURL, "api_key=REDACTED") || !strings.Contains(baseURL, "region=us") {
 		t.Fatalf("candidateEventAttributes base_url = %q, want redacted api_key and preserved region", baseURL)
 	}
+}
+
+func TestCredentialRoutingEventFieldsAreAdditiveAndSafe(t *testing.T) {
+	credentialSelectable := false
+	attrs := candidateEventAttributes([]router.CandidateDecision{{
+		ID:                     "route-channel-a-cred-1",
+		RouteTargetID:          "channel-a:cred-1",
+		ChannelID:              "channel-a",
+		CredentialID:           "cred-1",
+		CredentialHint:         "Bearer sk-leaky-token",
+		CredentialHealthState:  "open",
+		CredentialSelectable:   &credentialSelectable,
+		CredentialFilterReason: "credential_health_open",
+		ProviderPreset:         "openai",
+		SupportsPath:           true,
+		SupportsModel:          true,
+		Selectable:             false,
+		FilterReason:           "credential_health_open",
+	}})
+	if len(attrs) != 1 {
+		t.Fatalf("len(attrs) = %d, want 1", len(attrs))
+	}
+	got := attrs[0]
+	for key, want := range map[string]interface{}{
+		"route_target_id":          "channel-a:cred-1",
+		"channel_id":               "channel-a",
+		"credential_id":            "cred-1",
+		"credential_hint":          "Bearer REDACTED",
+		"credential_health_state":  "open",
+		"credential_selectable":    false,
+		"credential_filter_reason": "credential_health_open",
+	} {
+		if got[key] != want {
+			t.Fatalf("attrs[%q] = %#v, want %#v; attrs=%+v", key, got[key], want, got)
+		}
+	}
+	if strings.Contains(fmt.Sprint(got), "sk-leaky-token") {
+		t.Fatalf("credential event attrs leaked secret: %+v", got)
+	}
+
+	legacyAttrs := candidateEventAttributes([]router.CandidateDecision{{
+		ID:            "primary",
+		SupportsPath:  true,
+		SupportsModel: true,
+		Selectable:    true,
+	}})
+	for _, key := range []string{"route_target_id", "channel_id", "credential_id", "credential_hint"} {
+		if _, ok := legacyAttrs[0][key]; ok {
+			t.Fatalf("legacy attrs unexpectedly included %s: %+v", key, legacyAttrs[0])
+		}
+	}
+}
+
+func TestRoutingDecisionEventsIncludeCredentialFields(t *testing.T) {
+	selectable := true
+	decision := &router.DecisionTrace{
+		ModelName:              "gpt-5",
+		Endpoint:               "/v1/responses",
+		Policy:                 router.PolicyFirstAvailable,
+		SelectedID:             "route-channel-a-cred-1",
+		SelectedRouteTargetID:  "channel-a:cred-1",
+		SelectedChannelID:      "channel-a",
+		SelectedCredentialID:   "cred-1",
+		SelectedCredentialHint: "acct-1234",
+		Candidates: []router.CandidateDecision{{
+			ID:                   "route-channel-a-cred-1",
+			RouteTargetID:        "channel-a:cred-1",
+			ChannelID:            "channel-a",
+			CredentialID:         "cred-1",
+			CredentialHint:       "acct-1234",
+			CredentialSelectable: &selectable,
+			SupportsPath:         true,
+			SupportsModel:        true,
+			Selectable:           true,
+		}},
+		StickyEvents: []router.StickyDecision{{
+			Status:         "hit",
+			Key:            "sticky-secret",
+			TargetID:       "route-channel-a-cred-1",
+			RouteTargetID:  "channel-a:cred-1",
+			ChannelID:      "channel-a",
+			CredentialID:   "cred-1",
+			CredentialHint: "acct-1234",
+		}},
+	}
+
+	events := routingDecisionEvents(decision, time.Now())
+	selected := eventAttrsByType(t, events, "routing.selected")
+	if selected["route_target_id"] != "channel-a:cred-1" || selected["channel_id"] != "channel-a" || selected["credential_id"] != "cred-1" || selected["credential_hint"] != "acct-1234" {
+		t.Fatalf("selected attrs missing credential fields: %+v", selected)
+	}
+	sticky := eventAttrsByType(t, events, "routing.sticky.hit")
+	if sticky["route_target_id"] != "channel-a:cred-1" || sticky["channel_id"] != "channel-a" || sticky["credential_id"] != "cred-1" {
+		t.Fatalf("sticky attrs missing credential fields: %+v", sticky)
+	}
+	if _, ok := sticky["sticky_key"]; ok {
+		t.Fatalf("sticky attrs leaked raw sticky key: %+v", sticky)
+	}
+}
+
+func TestRoutingOutcomeEventRedactsCredentialError(t *testing.T) {
+	selection := &router.Selection{
+		Target: &router.Target{ID: "route-channel-a-cred-1"},
+		Request: router.RequestFeatures{
+			ModelName: "gpt-5",
+		},
+		Credential: router.CredentialDecisionInfo{
+			RouteTargetID:  "channel-a:cred-1",
+			ChannelID:      "channel-a",
+			CredentialID:   "cred-1",
+			CredentialHint: "acct-1234",
+		},
+	}
+	event := routingOutcomeEvent(selection, http.StatusUnauthorized, time.Millisecond, "provider returned Authorization: Bearer sk-live-token")
+	if event.Attributes["route_target_id"] != "channel-a:cred-1" || event.Attributes["channel_id"] != "channel-a" || event.Attributes["credential_id"] != "cred-1" {
+		t.Fatalf("outcome attrs missing credential fields: %+v", event.Attributes)
+	}
+	if got := fmt.Sprint(event.Attributes["error"]); strings.Contains(got, "sk-live-token") || !strings.Contains(got, "REDACTED") {
+		t.Fatalf("outcome error not safely redacted: %q", got)
+	}
+}
+
+func eventAttrsByType(t *testing.T, events []recorder.RecordEvent, eventType string) map[string]interface{} {
+	t.Helper()
+	for _, event := range events {
+		if event.Type == eventType {
+			return event.Attributes
+		}
+	}
+	t.Fatalf("event %s not found: %+v", eventType, events)
+	return nil
 }
 
 func TestHandlerRejectsMissingProxyTokenBeforeRouting(t *testing.T) {

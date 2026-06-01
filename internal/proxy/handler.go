@@ -732,13 +732,20 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 		},
 	}
 	if decision.SelectedID != "" {
+		attrs := map[string]interface{}{
+			"upstream_id":   decision.SelectedID,
+			"routing_score": decision.SelectedScore,
+		}
+		addCredentialAttrs(attrs, router.CredentialDecisionInfo{
+			RouteTargetID:  decision.SelectedRouteTargetID,
+			ChannelID:      decision.SelectedChannelID,
+			CredentialID:   decision.SelectedCredentialID,
+			CredentialHint: decision.SelectedCredentialHint,
+		})
 		events = append(events, recorder.RecordEvent{
-			Type: "routing.selected",
-			Time: eventTime,
-			Attributes: map[string]interface{}{
-				"upstream_id":   decision.SelectedID,
-				"routing_score": decision.SelectedScore,
-			},
+			Type:       "routing.selected",
+			Time:       eventTime,
+			Attributes: attrs,
 		})
 	}
 	for _, sticky := range decision.StickyEvents {
@@ -757,6 +764,12 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 		if sticky.BreakID != "" {
 			attrs["previous_upstream_id"] = sticky.BreakID
 		}
+		addCredentialAttrs(attrs, router.CredentialDecisionInfo{
+			RouteTargetID:  sticky.RouteTargetID,
+			ChannelID:      sticky.ChannelID,
+			CredentialID:   sticky.CredentialID,
+			CredentialHint: sticky.CredentialHint,
+		})
 		events = append(events, recorder.RecordEvent{
 			Type:       "routing.sticky." + sticky.Status,
 			Time:       eventTime,
@@ -793,9 +806,10 @@ func routingOutcomeEvent(selection *router.Selection, statusCode int, duration t
 	if selection != nil && selection.Target != nil {
 		attrs["upstream_id"] = selection.Target.ID
 		attrs["model"] = selection.Request.ModelName
+		addCredentialAttrs(attrs, selection.Credential)
 	}
 	if errText != "" {
-		attrs["error"] = errText
+		attrs["error"] = redaction.MetadataText(errText)
 	}
 	return recorder.RecordEvent{
 		Type:       "routing.outcome",
@@ -820,6 +834,21 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 		if candidate.BaseURL != "" {
 			attrs["base_url"] = redaction.DisplayURL(candidate.BaseURL)
 		}
+		addCredentialAttrs(attrs, router.CredentialDecisionInfo{
+			RouteTargetID:  candidate.RouteTargetID,
+			ChannelID:      candidate.ChannelID,
+			CredentialID:   candidate.CredentialID,
+			CredentialHint: candidate.CredentialHint,
+		})
+		if candidate.CredentialHealthState != "" {
+			attrs["credential_health_state"] = candidate.CredentialHealthState
+		}
+		if candidate.CredentialSelectable != nil {
+			attrs["credential_selectable"] = *candidate.CredentialSelectable
+		}
+		if candidate.CredentialFilterReason != "" {
+			attrs["credential_filter_reason"] = candidate.CredentialFilterReason
+		}
 		if candidate.Excluded {
 			attrs["excluded"] = true
 		}
@@ -829,6 +858,24 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 		out = append(out, attrs)
 	}
 	return out
+}
+
+func addCredentialAttrs(attrs map[string]interface{}, info router.CredentialDecisionInfo) {
+	if attrs == nil {
+		return
+	}
+	if info.RouteTargetID != "" {
+		attrs["route_target_id"] = info.RouteTargetID
+	}
+	if info.ChannelID != "" {
+		attrs["channel_id"] = info.ChannelID
+	}
+	if info.CredentialID != "" {
+		attrs["credential_id"] = info.CredentialID
+	}
+	if hint := redaction.SafeCredentialHint(info.CredentialHint); hint != "" {
+		attrs["credential_hint"] = hint
+	}
 }
 
 func selectableCandidateIDs(candidates []router.CandidateDecision) []string {
@@ -1158,7 +1205,7 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 		return
 	}
 
-	logInfo.Header.Meta.Error = selectErr.Error()
+	logInfo.Header.Meta.Error = redaction.MetadataText(selectErr.Error())
 	logInfo.Header.Meta.StatusCode = statusCode
 	logInfo.Header.Meta.DurationMs = time.Since(start).Milliseconds()
 	logInfo.Header.Meta.ContentLength = int64(len(body))
@@ -1171,7 +1218,7 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
 		Type:    "routing.failure",
 		Time:    time.Now().UTC(),
-		Message: selectErr.Error(),
+		Message: redaction.MetadataText(selectErr.Error()),
 		Attributes: map[string]interface{}{
 			"routing_policy":         h.routerPolicy(),
 			"routing_failure_reason": reason,
