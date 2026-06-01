@@ -256,7 +256,7 @@ Acceptance:
 Branch: `feature/gateway-monitor-routing-aggregation`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-monitor-routing-aggregation`
 Agent: Heisenberg (`019e8261-703a-7f52-bfeb-caaa11123b4d`)
-Status: assigned
+Status: integrated as `b5d0068 feat: add monitor routing aggregation`
 
 Owner scope:
 
@@ -283,7 +283,7 @@ Acceptance:
 Branch: `feature/gateway-limit-events`
 Worktree: `/data/src/github.com/kingfs/llm-tracelab-gateway-limit-events`
 Agent: Curie (`019e8261-8e98-7c90-b044-5706e34238d8`)
-Status: completed on worker branch as `214c7e7 feat: add local limit rejection events`; pending integration after Monitor aggregation review.
+Status: integrated as `b441250 feat: add local limit rejection events`
 
 Owner scope:
 
