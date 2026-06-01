@@ -14,6 +14,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/redaction"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -79,13 +80,13 @@ func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 
 func TestRedactRoutingBaseURLRemovesCredentialsAndSensitiveQuery(t *testing.T) {
 	raw := "https://user:secret@example.com/v1?api_key=abc&token=def&model=gpt-5&signature=sig"
-	got := redactRoutingBaseURL(raw)
+	got := redaction.DisplayURL(raw)
 	if strings.Contains(got, "secret") || strings.Contains(got, "api_key=abc") || strings.Contains(got, "token=def") || strings.Contains(got, "signature=sig") {
-		t.Fatalf("redactRoutingBaseURL leaked sensitive value: %q", got)
+		t.Fatalf("DisplayURL leaked sensitive value: %q", got)
 	}
 	for _, want := range []string{"user:REDACTED@", "api_key=REDACTED", "token=REDACTED", "signature=REDACTED", "model=gpt-5"} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("redactRoutingBaseURL() = %q, missing %q", got, want)
+			t.Fatalf("DisplayURL() = %q, missing %q", got, want)
 		}
 	}
 }

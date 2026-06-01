@@ -21,6 +21,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/chaos"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	"github.com/kingfs/llm-tracelab/internal/redaction"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -757,7 +758,7 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 			"selectable":      candidate.Selectable,
 		}
 		if candidate.BaseURL != "" {
-			attrs["base_url"] = redactRoutingBaseURL(candidate.BaseURL)
+			attrs["base_url"] = redaction.DisplayURL(candidate.BaseURL)
 		}
 		if candidate.Excluded {
 			attrs["excluded"] = true
@@ -788,47 +789,6 @@ func filteredCandidateCount(candidates []router.CandidateDecision) int {
 		}
 	}
 	return count
-}
-
-func redactRoutingBaseURL(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return trimmed
-	}
-	if parsed.User != nil {
-		if username := parsed.User.Username(); username != "" {
-			parsed.User = url.UserPassword(username, "REDACTED")
-		} else {
-			parsed.User = url.UserPassword("REDACTED", "REDACTED")
-		}
-	}
-	if parsed.RawQuery != "" {
-		query := parsed.Query()
-		for key := range query {
-			if isSensitiveURLParam(key) {
-				query.Set(key, "REDACTED")
-			}
-		}
-		parsed.RawQuery = query.Encode()
-	}
-	return parsed.String()
-}
-
-func isSensitiveURLParam(key string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(key))
-	if normalized == "" {
-		return false
-	}
-	for _, marker := range []string{"key", "token", "secret", "password", "passwd", "credential", "signature", "sig", "access_token", "api_key"} {
-		if strings.Contains(normalized, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func tryAcquireRetryWaitSlot() bool {
