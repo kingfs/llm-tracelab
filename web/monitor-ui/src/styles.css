@@ -2323,6 +2323,50 @@ a:focus-visible {
   gap: 8px;
 }
 
+.routing-decision-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.routing-decision-head,
+.routing-candidate-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.routing-decision-head strong,
+.routing-candidate-head strong {
+  display: block;
+  line-height: 1.2;
+}
+
+.routing-candidate-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.routing-candidate-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.routing-candidate-card-active {
+  border-color: rgba(52, 211, 153, 0.38);
+  background: rgba(52, 211, 153, 0.1);
+}
+
 .breakdown-card {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -3360,6 +3404,7 @@ a:focus-visible {
   .detail-grid,
   .session-breakdown-grid,
   .routing-summary-grid,
+  .routing-candidate-list,
   .tool-layout,
   .tool-summary-grid,
   .failure-context-strip,

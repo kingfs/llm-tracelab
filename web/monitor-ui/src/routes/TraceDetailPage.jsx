@@ -73,6 +73,7 @@ export function TraceDetailPage() {
   const timelineCount = detail.data?.events?.length || 0;
   const messageCount = detail.data?.messages?.length || 0;
   const toolCount = declaredTools.length;
+  const routingDecision = buildRoutingDecision(detail.data?.events || []);
 
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
@@ -246,9 +247,9 @@ export function TraceDetailPage() {
           </div>
           <div className="trace-reading-grid">
             <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("conversation")}>
-              <strong>Conversation</strong>
+              <strong>Routing & Conversation</strong>
               <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : `${timelineCount} event record${timelineCount > 1 ? "s" : ""}`}</span>
-              <p>Use this for routing context, conversation payloads, final output, and captured timeline events.</p>
+              <p>Use this for route candidates, selected upstream, conversation payloads, final output, and captured timeline events.</p>
             </button>
             <button className={tab === "protocol" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("protocol")}>
               <strong>Protocol</strong>
@@ -359,6 +360,7 @@ export function TraceDetailPage() {
                   </section>
                 ) : null}
               </div>
+              <RoutingDecisionPanel decision={routingDecision} InlineTag={InlineTag} CodeBlock={CodeBlock} />
             </section>
           ) : null}
           <section className="panel">
@@ -855,6 +857,60 @@ function TimelinePanel({ events, focusTarget = "", CodeBlock, InlineTag }) {
   );
 }
 
+function RoutingDecisionPanel({ decision, InlineTag, CodeBlock }) {
+  if (!decision || (!decision.candidates.length && !decision.events.length)) {
+    return null;
+  }
+  const selectedID = decision.selectedID || "";
+  return (
+    <section className="routing-decision-panel">
+      <div className="routing-decision-head">
+        <div>
+          <div className="breakdown-title">Decision trace</div>
+          <strong>{selectedID ? `Selected ${selectedID}` : decision.failureReason ? formatFailureReason(decision.failureReason) : "Routing events"}</strong>
+        </div>
+        <div className="trace-tag-group">
+          {decision.policy ? <InlineTag>{decision.policy}</InlineTag> : null}
+          {decision.fallbackPolicy ? <InlineTag>{decision.fallbackPolicy}</InlineTag> : null}
+          {decision.outcome?.attributes?.status_code ? <InlineTag tone={Number(decision.outcome.attributes.status_code) >= 400 ? "danger" : "green"}>{decision.outcome.attributes.status_code}</InlineTag> : null}
+        </div>
+      </div>
+      {decision.candidates.length ? (
+        <div className="routing-candidate-list">
+          {decision.candidates.map((candidate, index) => (
+            <article key={`${candidate.id || "candidate"}-${index}`} className={candidate.selectable ? "routing-candidate-card routing-candidate-card-active" : "routing-candidate-card"}>
+              <div className="routing-candidate-head">
+                <div>
+                  <strong>{candidate.id || "unknown target"}</strong>
+                  <span className="trace-subline mono">{candidate.base_url || "-"}</span>
+                </div>
+                <div className="trace-tag-group">
+                  {candidate.provider_preset ? <InlineTag tone="accent">{candidate.provider_preset}</InlineTag> : null}
+                  <InlineTag tone={candidate.selectable ? "green" : "gold"}>{candidate.selectable ? "selectable" : candidate.filter_reason || "filtered"}</InlineTag>
+                  {candidate.health_state ? <InlineTag tone={healthTone(candidate.health_state)}>{formatHealthLabel(candidate.health_state)}</InlineTag> : null}
+                </div>
+              </div>
+              <div className="detail-meta-strip">
+                <DetailMetaPill label="priority" value={candidate.priority ?? "-"} />
+                <DetailMetaPill label="weight" value={candidate.weight ?? "-"} />
+                <DetailMetaPill label="path" value={candidate.supports_path ? "yes" : "no"} />
+                <DetailMetaPill label="model" value={candidate.supports_model ? "yes" : "no"} />
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No candidate detail" detail="This trace has routing events but no candidate list." compact />
+      )}
+      {decision.events.length ? (
+        <CollapsibleCard title="Routing event payloads" subtitle={`${decision.events.length} event(s)`} defaultOpen={false}>
+          <CodeBlock value={JSON.stringify(decision.events, null, 2)} />
+        </CollapsibleCard>
+      ) : null}
+    </section>
+  );
+}
+
 function TimelineTree({ items, focusPath = [], InlineTag }) {
   return (
     <div className="timeline-tree">
@@ -921,6 +977,30 @@ function TimelineNodeHeading({ item }) {
       <strong className="timeline-node-title">{formatTimelineTitle(item)}</strong>
     </div>
   );
+}
+
+function buildRoutingDecision(events = []) {
+  const routingEvents = events.filter((event) => event.type?.startsWith("routing."));
+  if (!routingEvents.length) {
+    return { events: [], candidates: [] };
+  }
+  const classified = routingEvents.find((event) => event.type === "routing.classified")?.attributes || {};
+  const candidatesEvent = routingEvents.find((event) => event.type === "routing.candidates")?.attributes || {};
+  const selected = routingEvents.find((event) => event.type === "routing.selected")?.attributes || {};
+  const filtered = routingEvents.find((event) => event.type === "routing.filtered")?.attributes || {};
+  const outcome = [...routingEvents].reverse().find((event) => event.type === "routing.outcome") || null;
+  return {
+    events: routingEvents,
+    model: classified.model || outcome?.attributes?.model || "",
+    endpoint: classified.endpoint || "",
+    policy: classified.routing_policy || "",
+    fallbackPolicy: classified.fallback_policy || "",
+    selectedID: selected.upstream_id || outcome?.attributes?.upstream_id || "",
+    failureReason: filtered.routing_failure_reason || "",
+    availableCount: Number(candidatesEvent.available_count || 0),
+    candidates: Array.isArray(candidatesEvent.candidates) ? candidatesEvent.candidates : [],
+    outcome,
+  };
 }
 
 function PayloadSummary({ raw, CodeBlock }) {
