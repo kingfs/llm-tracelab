@@ -216,6 +216,7 @@ type failureTraceItem struct {
 	Reason             string    `json:"reason"`
 	Error              string    `json:"error,omitempty"`
 	SelectedUpstreamID string    `json:"selected_upstream_id,omitempty"`
+	RoutingEventReason string    `json:"routing_event_reason,omitempty"`
 }
 
 type summarizeFailureClustersOutput struct {
@@ -529,6 +530,21 @@ func (a *serverAPI) queryFailures(ctx context.Context, req *mcp.CallToolRequest,
 		statusCode, _ := item["status_code"].(float64)
 		errText, _ := item["error"].(string)
 		if statusCode < 200 || statusCode >= 300 || strings.TrimSpace(errText) != "" {
+			traceID, _ := item["id"].(string)
+			entry, err := a.lookupTrace(traceID)
+			if err != nil {
+				return nil, nil, err
+			}
+			reason, routingEventReason, err := a.traceFailureReason(entry, int(statusCode), errText)
+			if err != nil {
+				return nil, nil, err
+			}
+			if reason != "" {
+				item["failure_reason"] = reason
+			}
+			if routingEventReason != "" {
+				item["routing_event_reason"] = routingEventReason
+			}
 			out.Items = append(out.Items, item)
 		}
 	}
@@ -580,7 +596,10 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 		if err != nil {
 			return nil, nil, err
 		}
-		reason := classifyFailureReason(int(statusCode), errorText)
+		reason, routingEventReason, err := a.traceFailureReason(entry, int(statusCode), errorText)
+		if err != nil {
+			return nil, nil, err
+		}
 		incrementCount(byReason, reason)
 		incrementCount(byStatus, fmt.Sprintf("%d", int(statusCode)))
 		incrementCount(byModel, entry.Header.Meta.Model)
@@ -598,6 +617,7 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 			Reason:             reason,
 			Error:              entry.Header.Meta.Error,
 			SelectedUpstreamID: entry.Header.Meta.SelectedUpstreamID,
+			RoutingEventReason: routingEventReason,
 		})
 	}
 	out.Returned = len(out.TopFailures)
@@ -620,6 +640,45 @@ func (a *serverAPI) summarizeFailureClusters(ctx context.Context, req *mcp.CallT
 		out.TopFailures = out.TopFailures[:limit]
 	}
 	return nil, out, nil
+}
+
+func (a *serverAPI) traceFailureReason(entry store.LogEntry, statusCode int, errorText string) (reason string, routingEventReason string, err error) {
+	routingEventReason, err = a.traceRoutingEventFailureReason(entry)
+	if err != nil {
+		return "", "", err
+	}
+	if routingEventReason != "" {
+		return routingEventReason, routingEventReason, nil
+	}
+	if reason := strings.TrimSpace(entry.Header.Meta.RoutingFailureReason); reason != "" {
+		return reason, "", nil
+	}
+	return classifyFailureReason(statusCode, errorText), "", nil
+}
+
+func (a *serverAPI) traceRoutingEventFailureReason(entry store.LogEntry) (string, error) {
+	content, err := os.ReadFile(entry.LogPath)
+	if err != nil {
+		return "", fmt.Errorf("read trace cassette %q: %w", entry.ID, err)
+	}
+	parsed, err := recordfile.ParsePrelude(content)
+	if err != nil {
+		return "", fmt.Errorf("parse trace prelude %q: %w", entry.ID, err)
+	}
+	for _, event := range parsed.Events {
+		if event.Type != "routing.filtered" {
+			continue
+		}
+		if reason, _ := event.Attributes["routing_failure_reason"].(string); strings.TrimSpace(reason) != "" {
+			return strings.TrimSpace(reason), nil
+		}
+	}
+	for _, event := range parsed.Events {
+		if event.Type == "routing.retry_queue_saturated" {
+			return "retry_queue_saturated", nil
+		}
+	}
+	return "", nil
 }
 
 func (a *serverAPI) listSystemEvents(ctx context.Context, req *mcp.CallToolRequest, in *listSystemEventsInput) (*mcp.CallToolResult, *systemEventListOutput, error) {

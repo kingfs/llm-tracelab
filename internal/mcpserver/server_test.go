@@ -48,6 +48,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 		SelectedUpstreamID:             "openai-primary",
 		SelectedUpstreamBaseURL:        "https://api.openai.com/v1",
 		SelectedUpstreamProviderPreset: "openai",
+		HeaderRoutingFailureReason:     "header_route_failure",
+		RoutingFailureEventReason:      "all_targets_filtered",
 	}), 0o644); err != nil {
 		t.Fatalf("WriteFile(failure) error = %v", err)
 	}
@@ -314,6 +316,13 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if got := int(failurePayload["returned"].(float64)); got != 1 {
 		t.Fatalf("query_failures.returned = %d, want 1", got)
 	}
+	failureItems := failurePayload["items"].([]any)
+	if got := failureItems[0].(map[string]any)["failure_reason"].(string); got != "all_targets_filtered" {
+		t.Fatalf("query_failures failure_reason = %q, want all_targets_filtered", got)
+	}
+	if got := failureItems[0].(map[string]any)["routing_event_reason"].(string); got != "all_targets_filtered" {
+		t.Fatalf("query_failures routing_event_reason = %q, want all_targets_filtered", got)
+	}
 
 	failureClusters, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "summarize_failure_clusters",
@@ -326,8 +335,16 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if got := len(failureClustersPayload["by_reason"].([]any)); got != 1 {
 		t.Fatalf("len(summarize_failure_clusters.by_reason) = %d, want 1", got)
 	}
+	reasonItem := failureClustersPayload["by_reason"].([]any)[0].(map[string]any)
+	if got := reasonItem["label"].(string); got != "all_targets_filtered" {
+		t.Fatalf("summarize_failure_clusters.by_reason[0].label = %q, want all_targets_filtered", got)
+	}
 	if got := len(failureClustersPayload["top_failures"].([]any)); got != 1 {
 		t.Fatalf("len(summarize_failure_clusters.top_failures) = %d, want 1", got)
+	}
+	topFailure := failureClustersPayload["top_failures"].([]any)[0].(map[string]any)
+	if got := topFailure["routing_event_reason"].(string); got != "all_targets_filtered" {
+		t.Fatalf("summarize_failure_clusters.top_failures[0].routing_event_reason = %q, want all_targets_filtered", got)
 	}
 
 	systemEvents, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -463,6 +480,9 @@ type fixtureSpec struct {
 	SelectedUpstreamBaseURL        string
 	SelectedUpstreamProviderPreset string
 	RoutingEvents                  bool
+	HeaderRoutingFailureReason     string
+	RoutingFailureEventReason      string
+	RetryQueueSaturatedEvent       bool
 }
 
 func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
@@ -501,6 +521,7 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 			SelectedUpstreamProviderPreset: spec.SelectedUpstreamProviderPreset,
 			RoutingPolicy:                  "p2c",
 			RoutingCandidateCount:          1,
+			RoutingFailureReason:           spec.HeaderRoutingFailureReason,
 		},
 		Layout: recordfile.LayoutInfo{
 			ReqHeaderLen: int64(len(strings.Join(requestHeaderLines, "\r\n") + "\r\n\r\n")),
@@ -518,6 +539,21 @@ func buildRecordFixture(t *testing.T, spec fixtureSpec) []byte {
 	events := recordfile.BuildEvents(header)
 	if spec.RoutingEvents {
 		events = append(events, routingFixtureEvents(header)...)
+	}
+	if spec.RoutingFailureEventReason != "" {
+		events = append(events, recordfile.RecordEvent{
+			Type: "routing.filtered",
+			Time: header.Meta.Time,
+			Attributes: map[string]interface{}{
+				"routing_failure_reason": spec.RoutingFailureEventReason,
+			},
+		})
+	}
+	if spec.RetryQueueSaturatedEvent {
+		events = append(events, recordfile.RecordEvent{
+			Type: "routing.retry_queue_saturated",
+			Time: header.Meta.Time,
+		})
 	}
 	prelude, err := recordfile.MarshalPrelude(header, events)
 	if err != nil {
