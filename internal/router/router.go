@@ -102,6 +102,7 @@ type Router struct {
 	costs            costConfig
 	store            *store.Store
 	random           *rand.Rand
+	sticky           *StickyBindingStore
 	stopCh           chan struct{}
 	stopOnce         sync.Once
 	refreshMu        sync.Mutex
@@ -265,6 +266,11 @@ type DecisionTrace struct {
 	SelectedID     string              `json:"selected_id,omitempty"`
 	SelectedScore  float64             `json:"selected_score,omitempty"`
 	FailureReason  string              `json:"failure_reason,omitempty"`
+	StickyKey      string              `json:"sticky_key,omitempty"`
+	StickyStatus   string              `json:"sticky_status,omitempty"`
+	StickyTargetID string              `json:"sticky_target_id,omitempty"`
+	StickyBreakID  string              `json:"sticky_break_id,omitempty"`
+	StickyEvents   []StickyDecision    `json:"sticky_events,omitempty"`
 }
 
 type CandidateDecision struct {
@@ -279,6 +285,13 @@ type CandidateDecision struct {
 	Excluded       bool    `json:"excluded,omitempty"`
 	Selectable     bool    `json:"selectable"`
 	FilterReason   string  `json:"filter_reason,omitempty"`
+}
+
+type StickyDecision struct {
+	Status   string `json:"status,omitempty"`
+	Key      string `json:"key,omitempty"`
+	TargetID string `json:"target_id,omitempty"`
+	BreakID  string `json:"break_id,omitempty"`
 }
 
 type Outcome struct {
@@ -310,6 +323,7 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 		costs:            defaultCostConfig(),
 		store:            st,
 		random:           rand.New(rand.NewSource(time.Now().UnixNano())),
+		sticky:           NewStickyBindingStore(defaultStickyBindingTTL),
 		stopCh:           make(chan struct{}),
 	}
 	r.refreshCond = sync.NewCond(&r.refreshMu)
@@ -592,7 +606,7 @@ func (r *Router) SelectWithExclusion(req *http.Request, body []byte, excludeIDs 
 	if len(excludeIDs) == 0 {
 		return r.SelectWithBody(req, body)
 	}
-	return r.selectTargets(req.URL.Path, body, excludeIDs)
+	return r.selectTargets(req, body, excludeIDs)
 }
 
 func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, error) {
@@ -602,13 +616,16 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 			Message: "nil request",
 		}
 	}
-	return r.selectTargets(req.URL.Path, body, nil)
+	return r.selectTargets(req, body, nil)
 }
 
 // selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
-func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string) (*Selection, error) {
+func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
+	rawPath := req.URL.Path
 	features := extractRequestFeatures(rawPath, body)
 	model := features.ModelName
+	stickyKey := extractStickyKey(req, body)
+	stickyTargetID, hasStickyBinding := r.sticky.Lookup(stickyKey)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -653,7 +670,30 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 		}
 	}
 
-	selected, score := r.pick(available, features)
+	var selected *Target
+	var score float64
+	if hasStickyBinding {
+		if stickyTarget := findTargetByID(available, stickyTargetID); stickyTarget != nil {
+			selected = stickyTarget
+			score = r.expectedCost(selected, features)
+			decision.withSticky("hit", stickyKey, stickyTargetID, "")
+		} else {
+			decision.withSticky("break", stickyKey, stickyTargetID, stickyTargetID)
+		}
+	} else if stickyKey != "" {
+		decision.withSticky("miss", stickyKey, "", "")
+	}
+	if selected == nil {
+		selected, score = r.pick(available, features)
+		if stickyKey != "" {
+			r.sticky.Bind(stickyKey, selected.ID)
+			if hasStickyBinding {
+				decision.withSticky("bind", stickyKey, selected.ID, stickyTargetID)
+			} else {
+				decision.withSticky("bind", stickyKey, selected.ID, "")
+			}
+		}
+	}
 	selected.onStart(features)
 
 	candidateIDs := make([]string, 0, len(available))
@@ -668,6 +708,15 @@ func (r *Router) selectTargets(rawPath string, body []byte, excludeIDs []string)
 		Request:        features,
 		Decision:       decision.withSelection(selected.ID, score),
 	}, nil
+}
+
+func findTargetByID(targets []*Target, id string) *Target {
+	for _, target := range targets {
+		if target != nil && target.ID == id {
+			return target
+		}
+	}
+	return nil
 }
 
 func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string) *DecisionTrace {
@@ -729,6 +778,23 @@ func (d *DecisionTrace) withFailure(reason string) *DecisionTrace {
 		return nil
 	}
 	d.FailureReason = reason
+	return d
+}
+
+func (d *DecisionTrace) withSticky(status string, key string, targetID string, breakID string) *DecisionTrace {
+	if d == nil {
+		return nil
+	}
+	d.StickyStatus = status
+	d.StickyKey = key
+	d.StickyTargetID = targetID
+	d.StickyBreakID = breakID
+	d.StickyEvents = append(d.StickyEvents, StickyDecision{
+		Status:   status,
+		Key:      key,
+		TargetID: targetID,
+		BreakID:  breakID,
+	})
 	return d
 }
 

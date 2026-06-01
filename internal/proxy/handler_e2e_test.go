@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -417,6 +418,111 @@ func TestHandlerAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 		if !seenEvents[eventType] {
 			t.Fatalf("recorded events missing %s: %+v", eventType, parsed.Events)
 		}
+	}
+}
+
+func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamPrimary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_primary","usage":{"total_tokens":2}}`)
+	}))
+	defer upstreamPrimary.Close()
+
+	upstreamSecondary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_secondary","usage":{"total_tokens":2}}`)
+	}))
+	defer upstreamSecondary.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai"},
+			},
+			{
+				ID:             "secondary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai"},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = router.PolicyFirstAvailable
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Session_id", "session-e2e")
+		resp, err := proxyServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("client.Do() error = %v", err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+		}
+	}
+
+	entries, err := waitForRecentEntries(st, 2, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	var seenMiss, seenBind, seenHit bool
+	for _, entry := range entries {
+		parsed, err := waitForRecordedPrelude(entry.LogPath, time.Second)
+		if err != nil {
+			t.Fatalf("waitForRecordedPrelude(%q) error = %v", entry.LogPath, err)
+		}
+		for _, event := range parsed.Events {
+			if event.Type == "routing.sticky.miss" {
+				seenMiss = true
+			}
+			if event.Type == "routing.sticky.bind" {
+				seenBind = true
+			}
+			if event.Type == "routing.sticky.hit" {
+				seenHit = true
+			}
+			if strings.HasPrefix(event.Type, "routing.sticky.") {
+				if _, ok := event.Attributes["sticky_key"]; ok {
+					t.Fatalf("sticky event leaked raw sticky_key: %+v", event.Attributes)
+				}
+				if _, ok := event.Attributes["sticky_key_fingerprint"]; !ok {
+					t.Fatalf("sticky event missing sticky_key_fingerprint: %+v", event.Attributes)
+				}
+			}
+		}
+	}
+	if !seenMiss || !seenBind || !seenHit {
+		t.Fatalf("sticky events seen miss=%v bind=%v hit=%v; entries=%+v", seenMiss, seenBind, seenHit, entries)
 	}
 }
 

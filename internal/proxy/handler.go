@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -712,6 +713,28 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 			},
 		})
 	}
+	for _, sticky := range decision.StickyEvents {
+		if sticky.Status == "" {
+			continue
+		}
+		attrs := map[string]interface{}{
+			"sticky_status": sticky.Status,
+		}
+		if sticky.Key != "" {
+			attrs["sticky_key_fingerprint"] = stickyKeyFingerprint(sticky.Key)
+		}
+		if sticky.TargetID != "" {
+			attrs["upstream_id"] = sticky.TargetID
+		}
+		if sticky.BreakID != "" {
+			attrs["previous_upstream_id"] = sticky.BreakID
+		}
+		events = append(events, recorder.RecordEvent{
+			Type:       "routing.sticky." + sticky.Status,
+			Time:       eventTime,
+			Attributes: attrs,
+		})
+	}
 	if decision.FailureReason != "" {
 		events = append(events, recorder.RecordEvent{
 			Type: "routing.filtered",
@@ -723,6 +746,15 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 		})
 	}
 	return events
+}
+
+func stickyKeyFingerprint(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("sha256:%x", sum[:8])
 }
 
 func routingOutcomeEvent(selection *router.Selection, statusCode int, duration time.Duration, errText string) recorder.RecordEvent {

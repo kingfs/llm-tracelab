@@ -389,11 +389,13 @@ guardrails 不能只做在线拦截。每个规则应满足：
 - 已在 Monitor Trace Detail 的 `Routing & Conversation` 视角展示候选渠道、过滤原因、健康状态、选中结果和原始 routing event payload，复用 cassette events，不新增存储依赖。
 - 已覆盖 router 决策 trace 单测和 proxy e2e cassette 事件断言。
 - 当前阶段把决策写入 cassette，并在 MCP 查询和 failure clustering 中复用这些事件；Monitor 专用聚合仍是后续工作，避免在事件词汇稳定前过早扩大前端改动。
+- 已完成 sticky session in-memory MVP：进程内 `sticky key -> targetID` 绑定，默认 TTL 1 小时；支持 `Session_id`、`X-Codex-Window-Id` 前缀、`X-Codex-Turn-Metadata.session_id` 和 OpenAI Responses `previous_response_id`；路由选择记录 `routing.sticky.miss`、`routing.sticky.bind`、`routing.sticky.hit`、`routing.sticky.break` 事件。
+- 当前阶段把决策写入 cassette，并在 MCP 查询和 failure clustering 中复用这些事件；sticky session 暂不上 DB、不引入 credential model，Monitor 专用聚合仍是后续工作，避免在事件词汇稳定前过早扩大前端改动。
 
 阶段复盘：
 
 - 这一步强化的是 TraceLab 的 replay/debug/audit 核心，不改变请求转发选择算法，不改变 raw payload，不影响 `pkg/replay`。
-- 下一步应优先在事件词汇稳定后做 sticky session / credential 决策链，或者把现有 routing events 暴露到 Monitor/MCP；不应跳到支付、充值或公网分发能力。
+- 下一步应优先评估 credential 决策链、sticky session Monitor 展示，或者把现有 routing events 继续扩展到 MCP 查询；不应跳到支付、充值或公网分发能力。
 
 ### Phase C：Credential 和 Sticky Session
 

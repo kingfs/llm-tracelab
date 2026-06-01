@@ -318,6 +318,215 @@ func TestRouterSelectionCarriesDecisionTrace(t *testing.T) {
 	}
 }
 
+func TestRouterStickySessionReusesBoundTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req1 := stickyRequest(t, "same-session")
+	selection, err := rtr.Select(req1)
+	if err != nil {
+		t.Fatalf("Select(first) error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("first target = %q, want primary", selection.Target.ID)
+	}
+	if selection.Decision.StickyStatus != "bind" {
+		t.Fatalf("first sticky status = %q, want bind", selection.Decision.StickyStatus)
+	}
+
+	targets := rtr.Targets()
+	targets[0].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 5000, TTFTMs: 1800}, rtr.costs, 3, time.Minute)
+	targets[1].onFinish(RequestFeatures{ModelName: "gpt-5"}, Outcome{Success: true, StatusCode: 200, DurationMs: 400, TTFTMs: 80}, rtr.costs, 3, time.Minute)
+	req2 := stickyRequest(t, "same-session")
+	selection, err = rtr.Select(req2)
+	if err != nil {
+		t.Fatalf("Select(second) error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("second target = %q, want sticky primary", selection.Target.ID)
+	}
+	if selection.Decision.StickyStatus != "hit" {
+		t.Fatalf("second sticky status = %q, want hit", selection.Decision.StickyStatus)
+	}
+}
+
+func TestRouterStickySessionBreaksWhenTargetExcluded(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://openrouter.ai/api/v1",
+					ProviderPreset: "openrouter",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	body := []byte(`{"model":"gpt-5","input":"hello"}`)
+	req := stickyRequest(t, "session-break")
+	selection, err := rtr.SelectWithBody(req, body)
+	if err != nil {
+		t.Fatalf("Select(first) error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("first target = %q, want primary", selection.Target.ID)
+	}
+
+	selection, err = rtr.SelectWithExclusion(stickyRequest(t, "session-break"), body, []string{"primary"})
+	if err != nil {
+		t.Fatalf("SelectWithExclusion() error = %v", err)
+	}
+	if selection.Target.ID != "fallback" {
+		t.Fatalf("excluded sticky target selection = %q, want fallback", selection.Target.ID)
+	}
+	if !hasStickyDecision(selection.Decision, "break", "primary") {
+		t.Fatalf("sticky events = %+v, want break for primary", selection.Decision.StickyEvents)
+	}
+	if selection.Decision.StickyBreakID != "primary" {
+		t.Fatalf("sticky break id = %q, want primary", selection.Decision.StickyBreakID)
+	}
+
+	selection, err = rtr.Select(stickyRequest(t, "session-break"))
+	if err != nil {
+		t.Fatalf("Select(after rebind) error = %v", err)
+	}
+	if selection.Target.ID != "fallback" {
+		t.Fatalf("after rebind target = %q, want fallback", selection.Target.ID)
+	}
+	if selection.Decision.StickyStatus != "hit" {
+		t.Fatalf("after rebind sticky status = %q, want hit", selection.Decision.StickyStatus)
+	}
+}
+
+func TestRouterSelectWithoutStickyKeyUnchanged(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream:       config.UpstreamConfig{BaseURL: "https://api.openai.com/v1"},
+			},
+			{
+				ID:             "fallback",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream:       config.UpstreamConfig{BaseURL: "https://openrouter.ai/api/v1"},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "primary" {
+		t.Fatalf("selected target = %q, want primary", selection.Target.ID)
+	}
+	if selection.Decision.StickyStatus != "" {
+		t.Fatalf("StickyStatus = %q, want empty", selection.Decision.StickyStatus)
+	}
+}
+
+func stickyRequest(t *testing.T, sessionID string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Session_id", sessionID)
+	return req
+}
+
+func hasStickyDecision(decision *DecisionTrace, status string, breakID string) bool {
+	if decision == nil {
+		return false
+	}
+	for _, event := range decision.StickyEvents {
+		if event.Status == status && event.BreakID == breakID {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRouterSelectAllowsModelListRequestsWithoutCatalogMatch(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
