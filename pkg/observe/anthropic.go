@@ -26,7 +26,7 @@ func (p anthropicParser) Version() string {
 }
 
 func (p anthropicParser) CanParse(input ParseInput) bool {
-	return input.Header.Meta.Provider == llm.ProviderAnthropic || input.Header.Meta.Operation == llm.OperationMessages || input.Header.Meta.Endpoint == "/v1/messages"
+	return input.Header.Meta.Provider == llm.ProviderAnthropic || input.Header.Meta.Operation == llm.OperationMessages || input.Header.Meta.Endpoint == "/v1/messages" || input.Header.Meta.Endpoint == "/v1/messages/count_tokens"
 }
 
 func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObservation, error) {
@@ -88,6 +88,27 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 		})
 	}
 	appendAnthropicToolObservations(obs.Request.Messages, &obs)
+
+	if input.Header.Meta.Endpoint == "/v1/messages/count_tokens" {
+		resp, err := decodeJSONObject(input.ResponseBody)
+		if err != nil {
+			return obs, fmt.Errorf("parse anthropic count_tokens response: %w", err)
+		}
+		inputTokens := intField(resp, "input_tokens")
+		if inputTokens > 0 {
+			obs.Usage.InputTokens = inputTokens
+			obs.Usage.TotalTokens = inputTokens
+		}
+		obs.Response.Nodes = append(obs.Response.Nodes, SemanticNode{
+			ID:             StableNodeID("response", "$.input_tokens", "usage", 0),
+			ProviderType:   "usage",
+			NormalizedType: NodeUsage,
+			Path:           "$.input_tokens",
+			Text:           fmt.Sprintf("%d", inputTokens),
+			Raw:            cloneRaw(input.ResponseBody),
+		})
+		return obs, nil
+	}
 
 	if input.IsStream {
 		parseAnthropicStream(input.ResponseBody, &obs)

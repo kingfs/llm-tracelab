@@ -458,6 +458,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Error("Failed to select upstream target", "error", selErr)
 			// 如果是第一次就失败，保持原有的 selection-failure 记录行为。
 			if len(triedIDs) == 0 {
+				if h.shouldSynthesizeAnthropicCountTokens(r, selErr, 0) {
+					h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, nil, selErr, retryEvents)
+					return
+				}
 				h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selErr, bodyBytes, retryEvents)
 				http.Error(w, selErr.Error(), http.StatusBadGateway)
 				return
@@ -560,6 +564,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if isRetryableStatus(resp.StatusCode) {
 			resp.Body.Close()
+			if h.shouldSynthesizeAnthropicCountTokens(r, nil, resp.StatusCode) {
+				logInfo.Header.Meta.Error = fmt.Sprintf("upstream returned status %d; synthetic count_tokens fallback", resp.StatusCode)
+				h.router.Complete(selection, router.Outcome{
+					Success:    false,
+					StatusCode: resp.StatusCode,
+					DurationMs: float64(time.Since(start).Milliseconds()),
+					Stream:     selection.Request.Stream,
+				})
+				retryEvents = append(retryEvents, retryEvent("routing.retry_candidate", retryAttempt, 0, selection.Target.ID, resp.StatusCode, "upstream returned status 404", false))
+				h.closeLogFile(logInfo)
+				h.writeSyntheticAnthropicCountTokens(irw, r, start, bodyBytes, selection, nil, retryEvents)
+				return
+			}
 			logInfo.Header.Meta.Error = fmt.Sprintf("upstream returned status %d", resp.StatusCode)
 			slog.Warn("Upstream returned retryable status, will retry with next candidate",
 				"upstream_id", selection.Target.ID,
@@ -1050,6 +1067,180 @@ func (h *Handler) writeUpstreamResponse(
 		"status", code,
 		"tokens_total", logInfo.Header.Usage.TotalTokens,
 	)
+}
+
+func (h *Handler) shouldSynthesizeAnthropicCountTokens(r *http.Request, selectErr error, upstreamStatus int) bool {
+	if r == nil || r.Method != http.MethodPost || llm.NormalizeEndpoint(r.URL.Path) != "/v1/messages/count_tokens" {
+		return false
+	}
+	if selectErr != nil {
+		return router.SelectionFailureReason(selectErr) == router.SelectionFailureNoSupportingTarget
+	}
+	return upstreamStatus == http.StatusNotFound
+}
+
+func (h *Handler) writeSyntheticAnthropicCountTokens(
+	irw *InstrumentedResponseWriter,
+	r *http.Request,
+	start time.Time,
+	bodyBytes []byte,
+	selection *router.Selection,
+	selectErr error,
+	retryEvents []recorder.RecordEvent,
+) {
+	if h == nil || h.recorder == nil {
+		http.Error(irw, "count_tokens recording unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	inputTokens := estimateAnthropicCountTokensInput(bodyBytes)
+	responseBody, err := json.Marshal(map[string]int{"input_tokens": inputTokens})
+	if err != nil {
+		http.Error(irw, "failed to build count_tokens response", http.StatusInternalServerError)
+		return
+	}
+	responseBody = append(responseBody, '\n')
+
+	opts := recorder.PrepareOptions{
+		RoutingPolicy: h.routerPolicy(),
+	}
+	if selection != nil && selection.Target != nil {
+		opts.SiteURL = selection.Target.Upstream.BaseURL
+		opts.SelectedUpstreamID = selection.Target.ID
+		opts.SelectedUpstreamProviderPreset = selection.Target.Upstream.ProviderPreset
+		opts.RoutingScore = selection.Score
+		opts.RoutingCandidateCount = selection.CandidateCount
+	}
+	if selectErr != nil {
+		opts.RoutingFailureReason = router.SelectionFailureReason(selectErr)
+	}
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, opts, bodyBytes)
+	if err != nil {
+		slog.Error("Failed to prepare synthetic count_tokens log file", "err", err)
+		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		return
+	}
+
+	headerBuf := bytes.NewBufferString("HTTP/1.1 200 OK\r\n")
+	headerBuf.WriteString("Content-Type: application/json\r\n")
+	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(responseBody))
+	headerBuf.WriteString("\r\n")
+
+	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
+		slog.Error("Failed to write synthetic count_tokens separator", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		return
+	}
+	nHead, err := logInfo.File.Write(headerBuf.Bytes())
+	if err != nil {
+		slog.Error("Failed to write synthetic count_tokens response header", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		return
+	}
+	nBody, err := logInfo.File.Write(responseBody)
+	if err != nil {
+		slog.Error("Failed to write synthetic count_tokens response body", "path", logInfo.Path, "err", err)
+		_ = logInfo.File.Close()
+		http.Error(irw, "failed to record count_tokens response", http.StatusInternalServerError)
+		return
+	}
+
+	irw.Header().Set("Content-Type", "application/json")
+	irw.Header().Set("Content-Length", strconv.Itoa(len(responseBody)))
+	irw.WriteHeader(http.StatusOK)
+	_, _ = irw.Write(responseBody)
+
+	duration := time.Since(start)
+	code, written, ttft := irw.GetMetrics()
+	logInfo.Header.Meta.StatusCode = code
+	logInfo.Header.Meta.DurationMs = duration.Milliseconds()
+	logInfo.Header.Meta.ContentLength = written
+	logInfo.Header.Meta.TTFTMs = ttft
+	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
+	logInfo.Header.Layout.ResBodyLen = int64(nBody)
+	logInfo.Header.Usage.PromptTokens = inputTokens
+	logInfo.Header.Usage.TotalTokens = inputTokens
+	logInfo.Events = append(logInfo.Events, retryEvents...)
+	if selection != nil && selection.Decision != nil {
+		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
+	}
+	if selectErr != nil {
+		if decision := router.SelectionDecision(selectErr); decision != nil {
+			logInfo.Events = append(logInfo.Events, routingDecisionEvents(decision, start)...)
+		}
+	}
+	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+		Type:    "count_tokens.synthetic",
+		Time:    time.Now().UTC(),
+		Message: "synthetic Anthropic count_tokens response",
+		Attributes: map[string]interface{}{
+			"input_tokens": inputTokens,
+			"reason":       syntheticCountTokensReason(selectErr, retryEvents),
+		},
+	})
+	if selection != nil {
+		logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, code, duration, ""))
+	}
+
+	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
+		slog.Error("Failed to update synthetic count_tokens log file", "path", logInfo.Path, "err", err)
+	}
+
+	slog.Info("Synthetic count_tokens response completed",
+		"model", logInfo.Header.Meta.Model,
+		"tokens_input", inputTokens,
+	)
+}
+
+func syntheticCountTokensReason(selectErr error, retryEvents []recorder.RecordEvent) string {
+	if selectErr != nil {
+		return router.SelectionFailureReason(selectErr)
+	}
+	if len(retryEvents) > 0 {
+		return "upstream_404"
+	}
+	return "fallback"
+}
+
+func estimateAnthropicCountTokensInput(body []byte) int {
+	if len(body) == 0 {
+		return 1
+	}
+	canonical := body
+	var payload any
+	if err := json.Unmarshal(body, &payload); err == nil {
+		if encoded, marshalErr := json.Marshal(payload); marshalErr == nil && len(encoded) > 0 {
+			canonical = encoded
+		}
+	}
+	estimated := (len(canonical) + 3) / 4
+	if estimated < 1 {
+		return 1
+	}
+	return estimated + anthropicCountTokensStructuralOverhead(body)
+}
+
+func anthropicCountTokensStructuralOverhead(body []byte) int {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return 8
+	}
+	overhead := 8
+	if raw := payload["system"]; len(raw) > 0 {
+		overhead += 4
+	}
+	if raw := payload["tools"]; len(raw) > 0 {
+		overhead += 8
+	}
+	if raw := payload["messages"]; len(raw) > 0 {
+		var messages []json.RawMessage
+		if err := json.Unmarshal(raw, &messages); err == nil {
+			overhead += len(messages) * 4
+		}
+	}
+	return overhead
 }
 
 // closeLogFile closes and removes the log file for a failed attempt so stale

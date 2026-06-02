@@ -253,6 +253,163 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	}
 }
 
+func TestHandlerSynthesizesAnthropicCountTokensWhenNoSupportingTarget(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	body := `{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hello count tokens"}]}]}`
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/messages/count_tokens?beta=true", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(respBody))
+	}
+	var payload struct {
+		InputTokens int `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(respBody, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, string(respBody))
+	}
+	if payload.InputTokens <= 0 {
+		t.Fatalf("input_tokens = %d, want positive", payload.InputTokens)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/messages/count_tokens" {
+		t.Fatalf("Endpoint = %q, want /v1/messages/count_tokens", parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Meta.StatusCode != http.StatusOK {
+		t.Fatalf("StatusCode = %d, want 200", parsed.Header.Meta.StatusCode)
+	}
+	if parsed.Header.Meta.RoutingFailureReason != router.SelectionFailureNoSupportingTarget {
+		t.Fatalf("RoutingFailureReason = %q, want %q", parsed.Header.Meta.RoutingFailureReason, router.SelectionFailureNoSupportingTarget)
+	}
+	if parsed.Header.Usage.PromptTokens != payload.InputTokens || parsed.Header.Usage.TotalTokens != payload.InputTokens {
+		t.Fatalf("usage = %+v, want input/total %d", parsed.Header.Usage, payload.InputTokens)
+	}
+	if !hasRecordEvent(parsed.Events, "count_tokens.synthetic") {
+		t.Fatalf("synthetic event missing: %+v", parsed.Events)
+	}
+}
+
+func TestHandlerSynthesizesAnthropicCountTokensOnUpstream404(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:                 "anthropic-primary",
+				Enabled:            boolPtr(true),
+				Priority:           100,
+				ModelDiscovery:     router.ModelDiscoveryStaticOnly,
+				StaticModels:       []string{"glm-5.1"},
+				AllowUnknownModels: boolPtr(true),
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL,
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	body := `{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hello count tokens"}]}]}`
+	resp, err := proxyServer.Client().Post(proxyServer.URL+"/v1/messages/count_tokens", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("client.Post() error = %v", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(respBody))
+	}
+	var payload struct {
+		InputTokens int `json:"input_tokens"`
+	}
+	if err := json.Unmarshal(respBody, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, string(respBody))
+	}
+	if payload.InputTokens <= 0 {
+		t.Fatalf("input_tokens = %d, want positive", payload.InputTokens)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "anthropic-primary" {
+		t.Fatalf("SelectedUpstreamID = %q, want anthropic-primary", parsed.Header.Meta.SelectedUpstreamID)
+	}
+	if parsed.Header.Meta.StatusCode != http.StatusOK {
+		t.Fatalf("StatusCode = %d, want 200", parsed.Header.Meta.StatusCode)
+	}
+	if parsed.Header.Usage.TotalTokens != payload.InputTokens {
+		t.Fatalf("TotalTokens = %d, want %d", parsed.Header.Usage.TotalTokens, payload.InputTokens)
+	}
+	if !hasRecordEvent(parsed.Events, "count_tokens.synthetic") {
+		t.Fatalf("synthetic event missing: %+v", parsed.Events)
+	}
+}
+
 func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
@@ -2248,4 +2405,13 @@ func findRecordedHTTP(t *testing.T, root string) string {
 		t.Fatalf("no recorded .http file found under %q", root)
 	}
 	return found
+}
+
+func hasRecordEvent(events []recordfile.RecordEvent, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }

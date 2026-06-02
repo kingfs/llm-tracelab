@@ -75,6 +75,35 @@ func TestAnthropicParserParsesMessagesAndTools(t *testing.T) {
 	}
 }
 
+func TestAnthropicParserParsesCountTokens(t *testing.T) {
+	parser := NewAnthropicParser()
+	header := anthropicTestHeader(false)
+	header.Meta.Endpoint = "/v1/messages/count_tokens"
+	header.Usage.PromptTokens = 31
+	header.Usage.TotalTokens = 31
+	obs, err := parser.Parse(t.Context(), ParseInput{
+		TraceID: "trace-count",
+		Header:  header,
+		RequestBody: []byte(`{
+			"model":"glm-5.1",
+			"messages":[{"role":"user","content":[{"type":"text","text":"count me"}]}]
+		}`),
+		ResponseBody: []byte(`{"input_tokens":31}`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Model != "glm-5.1" {
+		t.Fatalf("model = %q, want glm-5.1", obs.Model)
+	}
+	if obs.Usage.InputTokens != 31 || obs.Usage.TotalTokens != 31 {
+		t.Fatalf("usage = %+v, want input/total 31", obs.Usage)
+	}
+	if len(obs.Response.Nodes) != 1 || obs.Response.Nodes[0].NormalizedType != NodeUsage {
+		t.Fatalf("response nodes = %+v, want usage node", obs.Response.Nodes)
+	}
+}
+
 func anthropicTestHeader(isStream bool) recordfile.RecordHeader {
 	return recordfile.RecordHeader{
 		Meta: recordfile.MetaData{
