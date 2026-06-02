@@ -93,6 +93,7 @@ func NormalizeEndpoint(rawPath string) string {
 	}{
 		{canonical: "/v1/chat/completions", suffixes: []string{"/v1/chat/completions", "/chat/completions"}},
 		{canonical: "/v1/responses", suffixes: []string{"/v1/responses", "/responses"}},
+		{canonical: "/v1/messages/count_tokens", suffixes: []string{"/v1/messages/count_tokens", "/messages/count_tokens"}},
 		{canonical: "/v1/messages", suffixes: []string{"/v1/messages", "/messages"}},
 		{canonical: "/v1/embeddings", suffixes: []string{"/v1/embeddings", "/embeddings"}},
 		{canonical: "/v1/models", suffixes: []string{"/v1/models", "/models"}},
@@ -118,6 +119,7 @@ func detectProvider(endpoint string, upstreamBaseURL string) string {
 	basePath := strings.ToLower(parsed.Path)
 	switch {
 	case endpoint == "/v1/messages",
+		endpoint == "/v1/messages/count_tokens",
 		strings.Contains(host, "anthropic.com"),
 		strings.Contains(host, "claude"):
 		return ProviderAnthropic
@@ -157,6 +159,8 @@ func detectOperation(endpoint string, provider string) string {
 	case "/v1/responses":
 		return OperationResponses
 	case "/v1/messages":
+		return OperationMessages
+	case "/v1/messages/count_tokens":
 		return OperationMessages
 	case "/v1/embeddings":
 		return OperationEmbeddings

@@ -1591,8 +1591,30 @@ func compareScore(a *Target, scoreA float64, b *Target, scoreB float64) int {
 }
 
 func supportsPath(target *Target, rawPath string) bool {
-	_, err := llm.AdapterForPath(rawPath, target.Upstream.BaseURL)
+	if target == nil {
+		return false
+	}
+	semantics := llm.ClassifyPath(rawPath, "")
+	if !supportsProtocolFamily(target.Upstream.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
+		return false
+	}
+	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
 	return err == nil
+}
+
+func supportsProtocolFamily(protocolFamily string, provider string, endpoint string) bool {
+	switch protocolFamily {
+	case upstream.ProtocolFamilyAnthropicMessages:
+		return provider == llm.ProviderAnthropic || endpoint == "/v1/models"
+	case upstream.ProtocolFamilyGoogleGenAI:
+		return provider == llm.ProviderGoogleGenAI
+	case upstream.ProtocolFamilyVertexNative:
+		return provider == llm.ProviderVertexNative
+	case upstream.ProtocolFamilyOpenAICompatible, "":
+		return llm.IsOpenAICompatibleProvider(provider)
+	default:
+		return false
+	}
 }
 
 func requestModel(rawPath string, body []byte) string {

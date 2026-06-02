@@ -21,6 +21,12 @@ func TestAdapterForPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, ProviderAnthropic, adapter.Semantics().Provider)
 
+	adapter, err = AdapterForPath("/v1/messages/count_tokens?beta=true", "https://api.anthropic.com")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderAnthropic, adapter.Semantics().Provider)
+	assert.Equal(t, OperationMessages, adapter.Semantics().Operation)
+	assert.Equal(t, "/v1/messages/count_tokens", adapter.Semantics().Endpoint)
+
 	adapter, err = AdapterForPath("/openai/v1/responses?api-version=preview", "https://example-resource.openai.azure.com/openai/v1")
 	require.NoError(t, err)
 	assert.Equal(t, ProviderAzureOpenAI, adapter.Semantics().Provider)
@@ -43,6 +49,14 @@ func TestAdapterForPath(t *testing.T) {
 	assert.Equal(t, ProviderVertexNative, adapter.Semantics().Provider)
 	assert.Equal(t, OperationGenerateContent, adapter.Semantics().Operation)
 	assert.Equal(t, "/v1/publishers/models:generateContent", adapter.Semantics().Endpoint)
+}
+
+func TestParseAnthropicCountTokensRequestForPath(t *testing.T) {
+	req, err := ParseRequestForPath("/v1/messages/count_tokens?beta=true", "", []byte(`{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	require.NoError(t, err)
+	assert.Equal(t, "glm-5.1", req.Model)
+	require.Len(t, req.Messages, 1)
+	assert.Equal(t, "hello", req.Messages[0].Content[0].Text)
 }
 
 func TestParseOpenAIResponsesRequest(t *testing.T) {

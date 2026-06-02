@@ -40,7 +40,7 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 		return openAIResponsesAdapter{semantics: semantics}, nil
 	case "/v1/models", "/v1beta/models", "/v1/publishers/models":
 		return modelListAdapter{semantics: semantics}, nil
-	case "/v1/messages":
+	case "/v1/messages", "/v1/messages/count_tokens":
 		return anthropicMessagesAdapter{semantics: semantics}, nil
 	case "/v1beta/models:generateContent", "/v1beta/models:streamGenerateContent":
 		return googleGenerateContentAdapter{semantics: semantics}, nil

@@ -828,6 +828,111 @@ func TestRouterSelectAllowsAnthropicModelListEndpoint(t *testing.T) {
 	}
 }
 
+func TestRouterDoesNotRouteAnthropicMessagesToOpenAICompatibleTarget(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1", "deepseek-chat"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "anthropic-primary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages?beta=true", strings.NewReader(`{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "anthropic-primary" {
+		t.Fatalf("selected target = %q, want anthropic-primary", selection.Target.ID)
+	}
+}
+
+func TestRouterExtractsModelAndRoutesAnthropicCountTokens(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "anthropic-primary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"glm-5.1"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/messages/count_tokens?beta=true", strings.NewReader(`{"model":"glm-5.1","messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "anthropic-primary" {
+		t.Fatalf("selected target = %q, want anthropic-primary", selection.Target.ID)
+	}
+	if selection.Decision == nil || selection.Decision.ModelName != "glm-5.1" {
+		t.Fatalf("decision model = %#v, want glm-5.1", selection.Decision)
+	}
+}
+
 func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
