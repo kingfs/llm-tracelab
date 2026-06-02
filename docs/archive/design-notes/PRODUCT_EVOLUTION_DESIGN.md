@@ -1,6 +1,6 @@
 # 产品演进设计
 
-本文档是早期产品演进设计入口。v1 版本的完整中文设计文档已经拆分到 [`v1/README.md`](./v1/README.md) 及其子文档中。
+本文档是早期产品演进设计入口。v1 版本的完整中文设计文档已经拆分到 [`v1/README.md`](../../v1/README.md) 及其子文档中。
 
 ## v1 设计定位
 
@@ -25,14 +25,14 @@ v1 设计保留当前项目最有价值的基础能力：
 
 建议按以下顺序阅读和开发：
 
-1. [`v1/product-vision.md`](./v1/product-vision.md)：产品定位、命名方向、用户场景与非目标。
-2. [`v1/architecture.md`](./v1/architecture.md)：总体架构、五层平面、异步管道与关键边界。
-3. [`v1/observation-ir.md`](./v1/observation-ir.md)：深度协议解析输出的内部中间表示。
-4. [`v1/protocol-parsers.md`](./v1/protocol-parsers.md)：四类主流 LLM API 协议的解析策略。
-5. [`v1/audit-analysis.md`](./v1/audit-analysis.md)：危险操作、敏感内容和行为风险分析。
-6. [`v1/monitor-experience.md`](./v1/monitor-experience.md)：面向调试和审计的前端展示体验。
-7. [`v1/storage-pipeline.md`](./v1/storage-pipeline.md)：raw cassette、SQLite 派生表、异步队列与重算机制。
-8. [`v1/implementation-roadmap.md`](./v1/implementation-roadmap.md)：从 `v0.10.0` 到 v1 的分阶段实现路线。
+1. [`v1/product-vision.md`](../../v1/product-vision.md)：产品定位、命名方向、用户场景与非目标。
+2. [`v1/architecture.md`](../../v1/architecture.md)：总体架构、五层平面、异步管道与关键边界。
+3. [`v1/observation-ir.md`](../../v1/observation-ir.md)：深度协议解析输出的内部中间表示。
+4. [`v1/protocol-parsers.md`](../../v1/protocol-parsers.md)：四类主流 LLM API 协议的解析策略。
+5. [`v1/audit-analysis.md`](../../v1/audit-analysis.md)：危险操作、敏感内容和行为风险分析。
+6. [`v1/monitor-experience.md`](../../v1/monitor-experience.md)：面向调试和审计的前端展示体验。
+7. [`v1/storage-pipeline.md`](../../v1/storage-pipeline.md)：raw cassette、SQLite 派生表、异步队列与重算机制。
+8. [`v1/implementation-roadmap.md`](../../v1/implementation-roadmap.md)：从 `v0.10.0` 到 v1 的分阶段实现路线。
 
 ## 关键原则
 

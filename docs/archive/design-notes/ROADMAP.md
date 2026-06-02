@@ -337,7 +337,7 @@ These should be revisited before the next protocol-family expansion:
 
 Current planning note:
 
-- `vertex_native` has been completed as a separate family; see [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md)
+- `vertex_native` has been completed as a separate family; see [VERTEX_NATIVE_PLAN.md](../completed-plans/VERTEX_NATIVE_PLAN.md)
 
 ## Decision Rule For Future Contributions
 

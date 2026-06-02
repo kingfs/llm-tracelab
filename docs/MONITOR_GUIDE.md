@@ -1,327 +1,195 @@
-# Monitor Guide
+# Monitor 使用指南
 
-## Purpose
+Monitor 是 TraceLab 的本地 Web 工作台。
 
-This document explains what users can do with the current monitor and how to move between the two supported observation perspectives:
+它面向三个主要场景：
 
-- `Requests`: one row per recorded HTTP exchange
-- `Sessions`: one row per grouped session of related requests
-- `Models`: traffic-oriented model marketplace and model detail
-- `Channels`: Web-managed upstream channel configuration, probing, model enablement, and channel analytics
-- `Routing`: selected route decisions for debugging which channel handled each request
-- `Events`: TraceLab runtime and derived-pipeline exceptions
+- 查看真实 LLM HTTP 请求。
+- 分析 session、模型、渠道、路由和失败。
+- 管理 token、渠道、模型启停和重分析任务。
 
-It reflects the current implemented behavior.
+## 登录与 Token
 
-## Access Control
-
-The monitor requires username/password login. Initialize the first user before starting a fresh deployment:
+首次部署需要创建用户：
 
 ```bash
 go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
-After login, use the `Tokens` page to generate personal API tokens. The same token is used by the LLM proxy API and MCP with `Authorization: Bearer <token>`.
+登录后在 `Tokens` 页面创建个人 token。
 
-## What The Monitor Shows
+同一个 token 用于：
 
-The monitor is backed by two data sources:
+- 代理 API：`Authorization: Bearer <token>`。
+- MCP：`Authorization: Bearer <token>`。
 
-- SQLite for list pages, filters, pagination, and aggregate stats
-- raw `.http` cassettes for detail reconstruction and replay-safe inspection
+## 数据来源
 
-This means the monitor is optimized for fast browsing without losing access to the original HTTP payload.
+Monitor 使用两类数据：
 
-Channels and model enablement are also stored in SQLite. YAML is only the service startup configuration surface and a first-run bootstrap compatibility input for legacy `upstream` / `upstreams` blocks. After bootstrap, manage channels, API keys, provider presets, probing, and model enablement from Monitor Web.
+- SQLite：列表、过滤、分页、聚合、渠道/模型配置、事件和派生分析。
+- raw `.http` cassette：trace 详情、raw protocol、replay-safe 检查。
 
-Credential-aware routing examples and operator guidance live in [Credential Routing Operator Guide](./CREDENTIAL_ROUTING_OPERATOR_GUIDE.md). It explains explicit credentials, implicit default credentials, sticky route target binding, safe metadata fields, and limit scopes.
+因此列表页快速，详情页仍能回到原始 HTTP 证据。
 
-System events are stored in SQLite as operational metadata. They describe TraceLab's own runtime or derived-pipeline health, not ordinary user traffic health.
+## 页面
 
-## Events View
+### Overview
 
-Use `Events` when you need to review TraceLab internal exceptions without mixing them into request failure analytics.
+用于查看系统健康概览：
 
-This view is the best fit for:
+- 请求量。
+- 失败量。
+- token 和 latency 汇总。
+- Observation 状态。
+- system event 摘要。
 
-- parser failures
-- analysis failures
-- routing selection failures
-- upstream transport errors
-- future monitor/store/MCP handler failures
+### Requests
 
-The Events navigation item shows an unread badge. The badge is updated from `/api/events/stream` when SSE is available and falls back to periodic summary polling.
+逐请求 trace 列表。
 
-Event statuses are:
+适合：
 
-- `unread`: not yet reviewed
-- `read`: reviewed but not resolved
-- `resolved`: considered handled
-- `ignored`: intentionally not actionable
+- 查单次 HTTP 交换。
+- 看 endpoint、model、状态码、duration、TTFT、token。
+- 进入 trace detail。
+- 跳转到模型、渠道或路由上下文。
 
-Repeated events are grouped by fingerprint. If a read or resolved event happens again, it becomes unread again. Ignored events stay ignored.
+### Sessions
 
-Overview shows only a compact system event summary and a link to Events. It should not be used as the durable exception inbox.
+按 session 聚合请求。
 
-## Requests View
-
-Use `Requests` when you need to inspect traffic one HTTP exchange at a time.
-
-This view is the best fit for:
-
-- checking a single request/response pair
-- inspecting endpoint, model, duration, and token usage per call
-- jumping directly into raw protocol details
-- validating whether a request failed, streamed, or used tools
-
-Each row corresponds to one recorded trace.
-
-The request list can link into channel, model, and routing views when recorded traces include route metadata.
-
-## Models View
-
-Use `Models` when you want to start from a model name and understand where its traffic is going.
-
-This view is the best fit for:
-
-- seeing models that had traffic in the selected time window
-- checking enabled channel coverage for one model
-- comparing request, error, token, and today-token totals
-- opening model detail to inspect channel coverage and request/token trends
-
-Token totals only sum known usage values. When successful traces have no usage payload, the UI shows `missing usage` next to token totals so that missing provider data is not mistaken for a true zero-token request.
-
-## Channels View
-
-Use `Channels` when you need to manage upstream providers or inspect channel-level health and usage.
-
-This view is the best fit for:
-
-- creating a channel without editing YAML
-- setting provider preset, base URL, API key, custom headers, and advanced routing fields
-- probing `/models` or provider-specific model discovery
-- enabling or disabling a channel with a switch
-- enabling or disabling individual models with switches
-- comparing channel request and token trends
-- reviewing recent probe results and failed traces for one channel
-
-When credential-aware routing is enabled, one channel may expand into multiple route targets, one per credential. Existing single-key channels behave like they have an implicit `default` credential, so older bootstrap configs and cassettes remain understandable.
-
-Configuration source is visible in the UI:
-
-- `web-managed`: created or edited through Monitor Web
-- `bootstrap`: imported once from legacy YAML when the database had no channel configuration
-
-Model source is also visible:
-
-- `manual`: added from Monitor Web
-- `bootstrap static`: imported from legacy YAML `static_models`
-- `probe discovered`: discovered by a channel probe
-- `seen in trace`: inferred from recorded traffic
-
-## Sessions View
-
-Use `Sessions` when one user workflow produces many related requests and the request list becomes too fragmented.
-
-This view is the best fit for:
-
-- understanding multi-turn coding or agent loops
-- reviewing aggregate latency and token patterns for one session
-- locating failure clusters inside a larger workflow
-- moving from a grouped overview into the specific failed trace
-
-The current session grouping order is:
+当前 session 提取顺序：
 
 1. `Session_id`
 2. `X-Codex-Turn-Metadata.session_id`
-3. `X-Codex-Window-Id` prefix before `:`
-4. no session grouping when none of the above exist
+3. `X-Codex-Window-Id` 中 `:` 前缀
+4. 空 session
 
-The implementation is intentionally provider-extensible. OpenAI-compatible traffic is the first strong use case, but the monitor model is not limited to OpenAI.
+适合分析 Codex/agent 一轮任务中多次模型调用的整体行为。
 
-## Routing View
+### Models
 
-Use `Routing` when you need to inspect selected route decisions across recent traces.
+按模型查看流量。
 
-This view is the best fit for:
+适合：
 
-- confirming which channel handled a model request
-- filtering route records by model, channel, status, duration, TTFT, or token range
-- seeing status code, token usage, duration, and TTFT without opening backend logs
-- jumping from a route record into trace detail
+- 查看时间窗口内有流量的模型。
+- 查看模型覆盖哪些渠道。
+- 比较请求数、错误数、token、趋势。
+- 定位模型相关失败。
 
-Current routing capabilities include:
+### Channels
 
-- time-window filtering
-- model and channel substring filtering
-- success/error filtering
-- duration, TTFT, and token range filtering
-- Observation status filtering for `parsed`, `failed`, `queued`, `running`, and
-  `unparsed`
-- routed request, channel, error, token, and missing-usage summaries
-- read-only routing event summary API at `GET /api/routing/summary`
-- selected channel tags in request rows
-- parse-state tags in request rows
+管理上游渠道。
 
-`GET /api/routing/summary` accepts the same `window` values as upstream analytics (`1h`, `24h`, `7d`, `all`) and an optional `model` filter. It reads V3 cassette prelude events and returns counts by routing failure reason, selected upstream, sticky status, and sticky break previous/next upstream. When credential fields are present, it can also expose route target, channel, and credential groupings. Legacy cassettes or V3 cassettes without routing events are counted as missing-event inputs rather than errors.
+支持：
 
-The next UI step is to place these event-backed aggregates into the existing Routing view or upstream diagnostics without changing the main navigation structure.
+- 创建渠道。
+- 设置 provider preset、base URL、API key、headers、routing 字段。
+- 探测模型。
+- 启停渠道。
+- 启停单个模型。
+- 查看渠道用量、token、失败和 probe 结果。
 
-The legacy `Upstreams` pages remain available as runtime diagnostics for existing selected-upstream metadata, but the primary v1 workflow is `Channels` for configuration and analytics, `Models` for model-centric usage, and `Routing` for selected-route debugging.
+长期渠道配置保存在 SQLite。YAML 只作为启动和首次 bootstrap 输入。
 
-## Session Detail
+### Routing
 
-Session detail is a grouped inspection page for one session.
+查看 selected route 和路由事件。
 
-Current capabilities include:
+适合：
 
-- summary cards for request count, status split, duration, and tokens
-- provider/model/endpoint breakdowns
-- ordered session timeline
-- grouped request list
-- failed-only filtering
-- failure context windows around failed requests
-- async session reanalysis, which can rebuild trace observations/findings and
-  persist a fresh session analysis run
+- 确认某个模型请求由哪个渠道处理。
+- 排查为什么请求失败或被重试。
+- 查看 sticky routing、candidate、failure reason。
+- 从路由记录跳到 trace detail。
 
-This page is meant to answer two questions quickly:
+`GET /api/routing/summary` 会读取 V3 cassette prelude 中的路由事件，并按 failure reason、selected route、sticky 状态等聚合。
 
-1. what happened across the full session
-2. which individual request should I open next
+### Events
 
-## Trace Detail Tabs
+TraceLab 自身事件收件箱。
 
-Each trace detail page currently supports these tabs:
+事件类型包括：
 
-- `Timeline`
-- `Summary`
-- `Raw Protocol`
-- `Declared Tools` when the request declares tools
+- parser failure。
+- analysis failure。
+- routing selection failure。
+- upstream transport error。
 
-These tabs are stable navigation targets and are used by session-to-trace deep links.
+状态：
 
-Trace detail also exposes controlled reanalysis actions:
+- `unread`
+- `read`
+- `resolved`
+- `ignored`
 
-- `Repair usage`: re-extract usage from the recorded response and repair SQLite
-  token metrics
-- `Reparse`: rebuild Observation IR from the raw cassette
-- `Rescan`: rerun deterministic audit detectors against existing Observation IR
-- `Reanalyze`: rebuild Observation IR and rerun deterministic scan
+重复事件按 fingerprint 合并。
 
-These actions do not call the upstream provider. They read local cassettes and
-write auditable rows in `analysis_jobs`.
+### Analysis
 
-When the `Protocol` tab has no persisted Observation IR, the page shows the
-trace as unavailable for protocol inspection and keeps `Reparse` available in
-that tab. A successful reparse refreshes the derived protocol/audit data for the
-current detail page.
+查看分析和重分析任务。
 
-## Analysis View
+支持：
 
-Use `Analysis` to inspect persisted session analysis runs and reanalysis jobs.
+- trace/session analysis runs。
+- analysis jobs。
+- batch reanalysis。
+- usage repair。
+- reparse Observation IR。
+- rescan findings。
 
-Current capabilities include:
+这些操作不调用上游模型。
 
-- recent `analysis_runs`
-- recent `analysis_jobs`
-- job status, target, steps, request, result, and last error
-- a batch action for repairing successful traces with missing usage
-- a batch action for reparsing traces currently marked `unparsed`
+### Tokens
 
-Batch reanalysis expands a stable filter selection into per-trace child jobs.
-The child jobs perform the actual trace work so failures remain attributable to
-specific trace IDs.
+管理当前用户 API token。
 
-## Trace Routing Context
+token 创建后只显示一次，请妥善保存。
 
-When a trace was recorded through the multi-upstream router, the trace detail summary also shows routing context for that individual request.
+## Trace Detail
 
-Current routing context includes:
+trace detail 用于查看单条请求的完整上下文。
 
-- selected upstream id
-- selected route target, channel, and credential ids when cassette events include credential-aware fields
-- selected upstream provider preset
-- selected upstream base URL
-- routing policy
-- routing score
-- routing candidate count
-- selected upstream health state when the router is attached
-- current health-threshold interpretation for error/timeout/TTFT signals
+常用视图：
 
-This lets you answer a practical debugging question directly from one trace:
+- Timeline。
+- Summary。
+- Raw Protocol。
+- Declared Tools。
+- Observation。
+- Findings。
 
-1. which upstream handled this request
-2. why the router considered it the chosen target
-3. whether that upstream is currently healthy, degraded, or open from the router's point of view
+可执行动作：
 
-## Deep Links And Focus
+- `Repair usage`：从本地响应重新抽取 usage。
+- `Reparse`：从 cassette 重建 Observation IR。
+- `Rescan`：对已有 Observation IR 重跑 deterministic detectors。
+- `Reanalyze`：重建 Observation IR 并重扫 findings。
 
-The monitor currently supports query-driven navigation so that session pages can open the most relevant part of a trace detail page.
+## Deep Link
 
-Supported query parameters:
+Trace detail 支持 query 参数定位：
 
 - `tab`
 - `from_session`
 - `view`
 - `focus`
 
-Current focus targets:
+常见 focus：
 
-- `failure`: highlight the failure summary card
-- `response`: jump to and highlight the raw response area
-- `timeline`: jump to and highlight the timeline panel
-- `timeline_error`: expand the timeline tree and focus the first error node
+- `failure`
+- `response`
+- `timeline`
+- `timeline_error`
 
-These links are useful when the session page already knows the user likely wants the failed trace, the raw response body, or the timeline error.
+## 排障建议
 
-## Typical Workflows
+请求失败时建议按顺序查看：
 
-### Investigate a single failed request
-
-1. Start in `Requests`
-2. filter or scan for the failed row
-3. open the trace detail page
-4. use the routing context in `Summary` to confirm which upstream handled it
-5. use `Timeline` or `Raw Protocol` depending on whether you need event flow or raw bytes
-
-### Investigate a multi-request coding session
-
-1. Start in `Sessions`
-2. open the relevant session
-3. review counts, timing, and failed-only requests
-4. jump into the most relevant trace from the grouped request list
-5. use deep links and focus targets to land at the likely failure area
-
-### Add or change a channel
-
-1. Start in `Channels`
-2. create or edit a channel from the modal form
-3. choose the provider preset and base URL, then enter API key or headers
-4. use advanced options only when protocol family, routing profile, deployment, project, location, or model resource needs to be explicit
-5. probe the channel to discover models
-6. enable the models you want routed
-7. send traffic through the proxy and inspect the channel/model statistics
-
-### Investigate one unstable channel
-
-1. Start in `Channels`
-2. choose a time window such as `24h`, `7d`, or `30d`
-3. open the channel detail page
-4. review request/token trends, model usage, recent probes, and recent failed traces
-5. use `Routing` if you need to filter selected-route records by status, latency, TTFT, or token range
-6. jump from a failed request into trace detail if you need raw protocol or timeline context
-
-### Compare request-level and grouped perspectives
-
-1. use `Requests` for exact HTTP-level inspection
-2. use `Sessions` for workflow-level inspection
-3. switch between them depending on whether the problem is isolated or distributed across many turns
-
-## Operational Notes
-
-- The monitor reads aggregate data from SQLite, so large trace directories remain usable without rescanning every cassette on each page load.
-- The raw `.http` cassette remains the source of truth for replay and detail views.
-- Missing session metadata does not break trace visibility. Those traces remain available in `Requests` even when they cannot be grouped into `Sessions`.
-- Session grouping is additive metadata, not a replacement for the original request view.
-- Channel/model/routing analytics are additive. They depend on recorded routing metadata and SQLite indexes, but replay still depends on the raw cassette bytes rather than live provider state.
-- YAML `upstream` / `upstreams` blocks are compatibility bootstrap input. Long-lived channel and model state should be edited in Monitor Web.
+1. trace detail 的 Summary 和 Raw Protocol。
+2. Routing 页面或 trace 中的 routing context。
+3. Events 页面是否有 parser/router/upstream 事件。
+4. Models/Channels 页面确认模型启用和渠道健康。
+5. 必要时运行 Reparse/Reanalyze。

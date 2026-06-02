@@ -1,10 +1,8 @@
-# Development Commands
+# 开发命令
 
-This project keeps stable `task` entry points so humans and AI agents can run the same checks without guessing the right Go or UI commands.
+本项目使用稳定的 `task` 入口，让人类和 AI agent 不需要猜测 Go、前端或测试命令。
 
-## Daily Commands
-
-Use these for normal local development:
+## 日常命令
 
 ```bash
 task fmt
@@ -13,13 +11,14 @@ task build:go
 task run
 ```
 
-`task fmt` rewrites Go files. `task check:quick` does not rewrite files; it checks formatting, runs `golangci-lint`, and runs short tests.
+- `task fmt`：格式化 Go 代码。
+- `task check:quick`：格式检查、lint、短测试，不改写文件。
+- `task build:go`：只构建后端。
+- `task run`：用 `config/config.yaml` 启动本地服务。可用 `CONFIG=path/to/config.yaml task run` 指定配置。
 
-`task run` uses the tracked `config/config.yaml` by default. Override explicitly with `CONFIG=path/to/config.yaml task run`.
+## 验证等级
 
-## Validation Levels
-
-Use the smallest validation level that matches the change:
+按变更风险选择最小足够验证：
 
 ```bash
 task fmt:check
@@ -34,45 +33,64 @@ task check:quick
 task check:full
 ```
 
-- `task check:quick` is the default pre-commit gate for focused changes.
-- `task test:e2e` runs local end-to-end coverage for proxy recording/replay, CLI/management wiring, and cassette fixture workflows. It must not depend on real provider network access or API keys.
-- `task test:race` should be run after changes to proxying, routing, recorder concurrency, SQLite access, or streaming behavior.
-- `task lint` runs the tracked `golangci-lint` configuration.
-- `task lint:vet` runs `go vet ./...` directly for troubleshooting.
-- `task check:full` is the release-style gate: formatting check, lint, tests, explicit end-to-end tests, race tests, UI build, and Go build.
+- 小范围代码改动：`task check:quick`。
+- 代理、路由、录制、SQLite 或 streaming 改动：补跑 `task test:race`。
+- 端到端行为改动：跑 `task test:e2e`。
+- 发布前或大范围改动：`task check:full`。
 
-## Build Commands
+所有测试都不应依赖真实 provider 网络或 API key。
+
+## 前端命令
 
 ```bash
-task build:go
 task ui:build
 task ui:test
 task ui:test:real
-task build:all
-task build
 ```
 
-`task build:go` is useful when changing backend code only. `task build` and `task build:all` rebuild the embedded monitor UI before compiling the server.
+- `task ui:build`：构建 Monitor UI 并生成 Go embed 产物。
+- `task ui:test`：用 mock Monitor API 运行 Playwright 冒烟测试。
+- `task ui:test:real`：启动本地 Go Monitor fixture 和本地 fake upstream，验证真实嵌入路由。
 
-For monitor UI changes, run:
+前端或 embed 产物改动建议执行：
 
 ```bash
 task ui:build
 task ui:test
+task ui:test:real
 go test ./internal/monitor
 task build:go
 ```
 
-`task ui:test` runs Playwright browser smoke tests with mocked Monitor APIs for the model/channel pages and trace routing links. `task ui:test:real` starts a local Go Monitor server fixture with temporary SQLite data and a local fake upstream, then runs browser checks against the real embedded Monitor routes without external network access. `go test ./internal/monitor` includes an embedded UI smoke test that verifies the SPA entry routes and built JS/CSS assets are served from Go `embed.FS`.
+## 构建命令
 
-## Benchmarks
+```bash
+task build:go
+task build:all
+task build
+```
+
+- `task build:go`：适合后端-only 改动。
+- `task build` / `task build:all`：会先重建嵌入式 Monitor UI，再编译服务端。
+
+## 依赖命令
+
+```bash
+task deps:verify
+task deps:tidy
+```
+
+- `task deps:verify`：检查依赖，不改文件。
+- `task deps:tidy`：依赖确实变更时使用，会改 `go.mod` / `go.sum`。
+
+## Benchmark
 
 ```bash
 task bench
 task bench:core
 ```
 
-Run `task bench:core` after changes to these hot paths:
+以下热路径改动后建议跑 `task bench:core`：
 
 - `internal/proxy`
 - `internal/router`
@@ -81,18 +99,7 @@ Run `task bench:core` after changes to these hot paths:
 - `pkg/recordfile`
 - `pkg/replay`
 
-Benchmarks must not depend on network access or real provider API keys.
-
-## Dependency Commands
-
-```bash
-task deps:verify
-task deps:tidy
-```
-
-Use `task deps:verify` in checks because it does not edit module files. Use `task deps:tidy` intentionally when dependencies changed.
-
-## Local Secret Key Commands
+## 本地密钥命令
 
 ```bash
 llm-tracelab -c config/config.yaml db secret status
@@ -101,16 +108,15 @@ llm-tracelab -c config/config.yaml db secret rotate --yes
 llm-tracelab -c config/config.yaml --format json db secret status
 ```
 
-`db secret status` reports the local channel secret key path, readability, and fingerprint without printing the key. `db secret export --out` writes the backup with `0600` permissions. Without `--out`, export writes the base64 key to stdout; reserve that for explicit backup automation. `db secret rotate --yes` backs up the old key, writes a new key, and re-encrypts channel API keys and sensitive headers.
+- `status` 只输出路径、可读性和 fingerprint，不打印密钥。
+- `export --out` 以 `0600` 权限写备份文件。
+- `rotate --yes` 会备份旧 key、写入新 key，并重加密渠道 API key 和敏感 header。
 
-## Agent Guidance
+## AI Agent 默认选择
 
-For AI agents, prefer these defaults:
-
-- Small code change: `task check:quick`
-- End-to-end behavior change: `task test:e2e`
-- Record format, replay, or monitor parsing change: `go test ./pkg/recordfile ./pkg/replay ./internal/monitor ./unittest`
-- Monitor UI source or embedded asset change: `task ui:build`, `task ui:test`, `task ui:test:real`, `go test ./internal/monitor`, and `task build:go`
-- Proxy, router, recorder, or store change: `go test ./internal/proxy ./internal/router ./internal/recorder ./internal/store` and `task test:race`
-- Performance-sensitive change: `task bench:core`
-- Before handing off a broad change: `task check:full`
+- 文档改动：`git diff --check`，必要时补链接检查。
+- 小代码改动：`task check:quick`。
+- record/replay/协议解析改动：`go test ./pkg/recordfile ./pkg/replay ./pkg/llm ./pkg/observe ./internal/monitor`。
+- Monitor UI 改动：`task ui:build && task ui:test && go test ./internal/monitor`。
+- proxy/router/store 改动：`go test ./internal/proxy ./internal/router ./internal/store`，必要时 `task test:race`。
+- 大范围交付前：`task check:full`。

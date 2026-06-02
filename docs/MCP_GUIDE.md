@@ -1,45 +1,36 @@
-# MCP Guide
+# MCP 使用指南
 
-## Purpose
+本文档描述当前 `llm-tracelab` MCP server 的实现范围。
 
-This document describes the current `llm-tracelab` MCP server surface.
+## 定位
 
-The current goal is narrow and deliberate:
+MCP 当前用于让 AI agent 查询本地 TraceLab 数据，辅助排障和分析。
 
-- expose local trace/session/upstream inspection to AI agents
-- reuse existing monitor/store behavior
+当前支持：
 
-This is the `M1` slice from [Agent Evolution Roadmap](./AGENT_EVOLUTION_ROADMAP.md).
+- streamable HTTP transport。
+- 复用 Monitor/store 查询逻辑。
+- trace、session、upstream 查询。
+- 失败聚类。
+- TraceLab 系统事件查询。
+- 受控 reanalysis job。
 
-## Current Status
+当前不支持：
 
-Current MCP support is:
+- 托管控制平面。
+- 替代 Monitor 或 replay 存储。
+- 广泛写入型运维操作。
+- 调用上游 provider。
 
-- transport: streamable HTTP
-- implementation library: official `github.com/modelcontextprotocol/go-sdk`
-- scope: local inspection, failure-oriented triage, TraceLab system-event
-  diagnostics, and controlled reanalysis jobs
+## 启动
 
-Current MCP support is not:
-
-- a hosted control plane
-- a replacement for replay or monitor storage
-
-## Run
-
-Start the main server with the same config file used by the proxy and monitor:
+使用与代理和 Monitor 相同的配置启动服务：
 
 ```bash
 go run ./cmd/server serve -c config/config.yaml
 ```
 
-When `mcp.enabled: true`, the server exposes MCP over streamable HTTP on `monitor.port`.
-
-Default endpoint:
-
-- `http://localhost:<monitor.port>/mcp`
-
-Recommended config:
+推荐配置：
 
 ```yaml
 monitor:
@@ -50,216 +41,86 @@ mcp:
   path: "/mcp"
 ```
 
-Authentication:
+默认 endpoint：
 
-- MCP reuses the same user-backed personal token as the proxy API
-- create the first user with `llm-tracelab auth init-user`
-- log in to Monitor and create a token from the `Tokens` page, or use `llm-tracelab auth create-token`
-- clients must send `Authorization: Bearer <token>`
+```text
+http://localhost:<monitor.port>/mcp
+```
 
-## Tool Surface
+## 认证
 
-### `list_traces`
+MCP 使用和代理 API 相同的个人 token。
 
-List recorded traces with pagination and optional filters:
+流程：
 
-- `page`
-- `page_size`
-- `provider`
-- `model`
-- `q`
-- `observation`: `parsed`, `failed`, `queued`, `running`, or `unparsed`
+1. 用 `llm-tracelab auth init-user` 初始化首个用户。
+2. 登录 Monitor，在 `Tokens` 页面创建 token；或用 `llm-tracelab auth create-token` 创建。
+3. MCP client 发送 `Authorization: Bearer <token>`。
 
-Trace list items include Observation metadata under `observation`, including
-the current status and parser metadata when an Observation row exists.
+## 工具概览
 
-### `get_trace`
+### Trace 与 Session
 
-Get one trace detail by `trace_id`.
+- `list_traces`：分页列出 trace，支持 provider、model、全文查询和 Observation 状态过滤。
+- `get_trace`：获取单条 trace 详情，可选择包含 raw HTTP request/response。
+- `list_sessions`：分页列出 session，支持 provider、model、全文查询。
+- `list_trace_findings`：列出单条 trace 的审计 findings。
 
-Optional input:
+### Upstream 与路由
 
-- `include_raw`: when true, also return raw HTTP request/response bytes
+- `list_upstreams`：查看 upstream 分析，支持时间窗口和模型过滤。
+- `query_routing_decisions`：查看单条 trace 的路由决策事件。
+- `query_sticky_routing`：查询 sticky routing 事件。
+- `query_failures`：从分页 trace 扫描中返回失败请求。
+- `summarize_failure_clusters`：按 reason、status、model、provider、endpoint、upstream、route target 聚类失败。
 
-### `list_sessions`
+### 系统事件
 
-List grouped sessions with pagination and optional filters:
+- `list_system_events`：列出 TraceLab 运行时和派生管道事件。
+- `get_system_event`：查看单个事件，可选择包含 details。
+- `summarize_system_events`：返回事件计数和最新事件。
+- `query_unread_system_events`：按严重程度和时间返回未读事件。
 
-- `page`
-- `page_size`
-- `provider`
-- `model`
-- `q`
+系统事件用于 TraceLab 自身异常：
 
-### `list_upstreams`
+- parser failure。
+- analyzer failure。
+- router selection failure。
+- upstream transport error。
 
-List upstream analytics.
+它们不是普通请求失败列表。
 
-Optional filters:
+### 重分析
 
-- `window`: `1h`, `24h`, `7d`, `all`
-- `model`
+- `reanalyze_trace`：对单条 trace 修复 usage、重建 Observation IR、重扫 findings。
+- `reanalyze_session`：对 session 内 traces 执行重分析。
+- `list_analysis_jobs`：列出分析任务。
+- `get_analysis_job`：查看任务详情。
 
-### `query_failures`
+这些操作只读取本地 cassette 并写入 SQLite 派生状态，不会访问上游模型。
 
-Return failed traces from a paginated trace scan.
+### 安全相关查询
 
-Inputs match `list_traces`, but the result is filtered to requests with:
+- `query_dangerous_tool_calls`：查询危险工具调用 findings。
+- `query_sensitive_data_findings`：查询凭据或敏感数据 findings。
 
-- non-2xx `status_code`, or
-- non-empty `error`
+## Evaluator
 
-Important limitation:
+当前内置 deterministic evaluator profile：
 
-- this tool currently filters one paginated `list_traces` result
-- it is not yet a dedicated failure index
-- use `list_traces` with `observation=unparsed` when the goal is to locate
-  traces that need protocol reparse rather than transport failures
+- `baseline_v1`：HTTP 状态、记录错误、响应 body。
+- `baseline_v2`：在 v1 基础上加入 TTFT 和 token 预算。
+- `baseline_v3`：在 v2 基础上加入 tool call 声明一致性。
+- `baseline_v4`：在 v3 基础上加入 tool call arguments JSON 校验。
 
-### `summarize_failure_clusters`
+默认 baseline 是 `baseline_v4`。
 
-Summarize failed traces from a paginated scan by:
+这些 evaluator 是客观、低成本、可复现的信号，不替代人工质量判断或模型评分。
 
-- reason
-- status
-- model
-- provider
-- endpoint
-- upstream
+## 设计约束
 
-It also returns bounded top failed traces.
-
-### `list_system_events`
-
-List TraceLab runtime and derived-pipeline events.
-
-Optional filters:
-
-- `page`
-- `page_size`
-- `status`: `unread`, `read`, `resolved`, `ignored`, `all`
-- `severity`: `info`, `warning`, `error`, `critical`
-- `source`
-- `category`
-- `q`
-- `window`: `1h`, `24h`, `7d`, `all`
-
-### `get_system_event`
-
-Get one system event by `event_id`.
-
-Optional input:
-
-- `include_details`: when true, include `details_json`
-
-### `summarize_system_events`
-
-Return compact system event counts and newest events for agent triage.
-
-Optional inputs:
-
-- `window`: `1h`, `24h`, `7d`, `all`
-- `status`: default `unread` for newest events
-
-### `query_unread_system_events`
-
-Return unread system events ordered by severity and recency.
-
-Optional inputs:
-
-- `limit`
-- `min_severity`: default `warning`
-
-### `reanalyze_trace`
-
-Run or enqueue controlled reanalysis for one trace.
-
-Inputs:
-
-- `trace_id`
-- `repair_usage`: optional usage repair before other selected work
-- `reparse`: rebuild Observation IR, default true when no step is selected
-- `scan`: rerun deterministic audit scan, default true when no step is selected
-- `async`: enqueue and return the job without executing immediately
-
-### `reanalyze_session`
-
-Run or enqueue controlled reanalysis for one session.
-
-Inputs:
-
-- `session_id`
-- `reparse`: rebuild Observation IR for session traces
-- `scan`: rerun deterministic audit scan for session traces
-- `async`: enqueue and return the job without executing immediately
-
-### `list_analysis_jobs`
-
-List reanalysis jobs.
-
-Optional filters:
-
-- `status`
-- `target_type`: `trace`, `session`, or `batch`
-- `target_id`
-- `limit`
-
-### `get_analysis_job`
-
-Get one reanalysis job by `job_id`.
-
-## Design Notes
-
-The MCP server intentionally reuses existing monitor/store behavior in-process
-rather than adding a parallel query stack.
-
-This keeps the first MCP slice:
-
-- thin
-- replay-safe
-- low-risk
-- focused on inspection and triage rather than local workflow orchestration
-- aligned with current monitor semantics
-
-System event MCP tools are read-only. Reanalysis MCP tools are write-capable but
-narrow: they only create or execute auditable `analysis_jobs` against local raw
-cassettes and derived SQLite state. They do not call upstream providers.
-
-## Next Likely Step
-
-The next MCP-focused step should be:
-
-1. keep comparison local and deterministic
-2. keep experiment persistence lightweight and additive
-3. add richer evaluators only after current score signals prove actionable
-
-## Current Evaluator Set
-
-Current deterministic evaluator set:
-
-- `http_status_2xx`
-- `no_recorded_error`
-- `response_has_body`
-- `ttft_le_2000ms`
-- `total_tokens_le_32000`
-- `tool_calls_declared`
-- `tool_call_arguments_json`
-
-This set is intentionally objective and cheap.
-
-Default baseline evaluator version is `baseline_v4`.
-
-Current built-in profiles:
-
-- `baseline_v1`: status/error/body checks only
-- `baseline_v2`: `baseline_v1` plus TTFT and total-token budgets
-- `baseline_v3`: `baseline_v2` plus declared tool-call conformance
-- `baseline_v4`: `baseline_v3` plus tool-call argument JSON validation
-
-The latency and token thresholds are currently hard-coded so results stay deterministic and easy to compare across runs.
-
-`tool_calls_declared` checks that every recorded response tool call matches a tool name declared in the request. If no tool call occurred, the check passes.
-
-`tool_call_arguments_json` checks that each recorded response tool call argument payload is valid JSON. Empty argument strings are treated as acceptable.
-
-It is not intended to replace human judgment or model-graded quality review.
+- MCP handler 复用 Monitor/store 行为，不建立第二套查询语义。
+- 只读工具不改变 replay 或 raw cassette。
+- 重分析工具必须生成可审计 `analysis_jobs`。
+- 不通过 MCP 暴露 raw secret。
+- 不把 MCP 当成 TraceLab 的存储事实源。

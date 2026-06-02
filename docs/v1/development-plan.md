@@ -7,7 +7,7 @@
 v1 总目标保持不变：在现有 raw cassette、replay、多 upstream、Monitor 基础上，新增可重算的 Observation IR、协议级展示、审计 findings、性能分析和长期 session 分析。
 
 重解析、重审计、usage repair、session/batch reanalysis 的完整执行设计见
-[`../REANALYSIS_PIPELINE_DESIGN.md`](../REANALYSIS_PIPELINE_DESIGN.md)。
+[`../archive/design-notes/REANALYSIS_PIPELINE_DESIGN.md`](../archive/design-notes/REANALYSIS_PIPELINE_DESIGN.md)。
 
 ## 执行原则
 

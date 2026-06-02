@@ -189,7 +189,7 @@ analysis job
 - 按 detector version 批量 reanalyze。
 - 对历史 cassette 进行 usage repair，回填 SQLite token 指标，并在显式请求时重写 V3 prelude。
 
-完整设计以 [`../REANALYSIS_PIPELINE_DESIGN.md`](../REANALYSIS_PIPELINE_DESIGN.md) 为准。
+历史完整设计归档在 [`../archive/design-notes/REANALYSIS_PIPELINE_DESIGN.md`](../archive/design-notes/REANALYSIS_PIPELINE_DESIGN.md)。当前实现事实以 [`../CURRENT_IMPLEMENTATION.md`](../CURRENT_IMPLEMENTATION.md) 和 [`status.md`](./status.md) 为准。
 
 CLI 示例：
 

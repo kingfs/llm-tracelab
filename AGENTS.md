@@ -78,15 +78,16 @@ Compatibility note:
 
 - `README.md` and `README_EN.md`: human-facing overview and quick start
 - `AGENTS.md`: AI-oriented project map and invariants
+- `docs/README.md`: 中文文档总入口，说明当前事实文档、用户指南、开发指南、v1 设计和归档文档的阅读顺序
+- `docs/CURRENT_IMPLEMENTATION.md`: 当前最新代码事实的中文概览
 - `docs/PROJECT_BASELINE.md`: current implemented capability baseline for both humans and AI agents
 - `docs/protocol-reference/README.md`: current protocol reference entry, implemented protocol matrix, protocol differences, and dated upstream schema snapshots
-- `docs/v1/README.md`: v1 中文设计文档入口，覆盖产品定位、总体架构、Observation IR、协议解析、审计分析、展示体验、存储管道和实施路线图
+- `docs/v1/README.md`: v1 中文设计文档入口，区分当前事实、设计背景和历史计划
+- `docs/v1/status.md`: v1 能力当前落地状态
 - `docs/v1/reference-materials/README.md`: historical v1 protocol parsing reference snapshots; prefer `docs/protocol-reference/README.md` for current implementation work
-- `docs/v1/development-plan.md`: v1 开发执行计划，明确阶段任务、验收、自动提交和阶段复盘规则
-- `docs/PRODUCT_EVOLUTION_DESIGN.md`: v1 设计兼容入口，正文以 `docs/v1/README.md` 及其子文档为准
-- `docs/AI_BRANCH_BASELINE.md`: branch-specific summary of the current AI-agent evolution work and implemented closed loop
 - `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
-- `docs/SYSTEM_EVENTS_DESIGN.md`: proposed event center for TraceLab runtime/analysis exceptions, unread status, server push, and MCP event tools
+- `docs/MCP_GUIDE.md`: current MCP tool surface and usage
 - `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants
 - `docs/DEVELOPMENT_COMMANDS.md`: stable test, lint, build, benchmark, and dependency command entry points
+- `docs/archive/README.md`: historical plans, completed phase designs, branch notes, and older roadmap material; not a current implementation fact source
 - add focused docs under `docs/` only when they clarify architecture or storage decisions

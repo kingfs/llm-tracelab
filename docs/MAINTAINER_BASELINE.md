@@ -1,267 +1,176 @@
-# Maintainer Baseline
+# 维护基线
 
-## Purpose
+本文档记录维护者修改核心模块时必须遵守的当前约束。
 
-This document records the current implementation baseline and the main maintenance constraints for storage, monitor behavior, and session aggregation.
-
-Use it when changing:
+适用范围：
 
 - `internal/store`
 - `internal/monitor`
 - `internal/recorder`
+- `internal/proxy`
+- `internal/router`
 - `pkg/recordfile`
 - `pkg/replay`
 - `pkg/llm`
+- `pkg/observe`
 
-## Baseline Architecture
+## 事实源边界
 
-Current responsibility split:
+raw `.http` cassette 是：
 
-- raw `.http` cassettes are the source of truth for replay and detail reconstruction
-- the configured structured database is the source of truth for list pages, aggregate statistics, filtering, pagination, auth users/tokens, datasets, evals, experiments, channel/model configuration, upstream catalog state, and session grouping
-- monitor detail pages may read raw cassettes on demand
-- monitor list pages should not depend on rescanning raw files
+- replay 事实源。
+- raw protocol 详情源。
+- Observation IR / findings / usage repair 的重建来源。
 
-This split is deliberate and should remain stable unless there is a strong reason to redesign replay and monitor storage together.
+SQLite 是：
 
-## Structured Store Boundary
+- 列表、聚合、过滤、分页的查询源。
+- auth、channel/model 配置、system events、analysis jobs、Observation IR、findings、eval 的结构化源。
 
-The current implementation uses ent as the ORM for ordinary structured CRUD and index-maintenance paths.
+不要让列表页依赖扫描 raw 文件。
 
-Keep these paths ent-first:
+不要让 replay 依赖 SQLite 或网络。
 
-- auth users and API tokens
-- trace list/detail lookup by indexed identity
-- dataset, eval, score, experiment, and upstream catalog records
-- channel configuration, channel model enablement, probe runs, and model catalog records
-- simple aggregate reads that map cleanly to ent queries
+## Record Format
 
-Raw SQL is still acceptable for compatibility upgrades, backfills, and monitor read models where the query is primarily analytical:
-
-- session grouping pages
-- upstream analytics and drilldowns
-- channel/model/routing analytics and drilldowns
-- routing failure analytics
-- complex joins that would require artificial ent edges without improving the domain model
-
-Do not mechanically convert every SQL statement to ent. Convert paths when it improves the storage contract or removes unsafe ad hoc writes without weakening replay compatibility or query semantics.
-
-## Record Format Invariants
-
-Active write format:
+当前写入格式：
 
 - `LLM_PROXY_V3`
 
-Read compatibility requirement:
+读取兼容：
 
-- continue to support legacy `LLM_PROXY_V2`
+- `LLM_PROXY_V2`
+- `LLM_PROXY_V3`
 
-When changing storage or recorder behavior:
+改 record format 时：
 
-1. update `pkg/recordfile` first
-2. then adapt recorder, monitor, and replay together
-3. preserve human-inspectable `.http` payloads
-4. do not make replay depend on network access
+1. 先改 `pkg/recordfile`。
+2. 同步 recorder、monitor、replay。
+3. 保持 `.http` 人类可读。
+4. 保持旧 cassette 可读，除非明确做 breaking migration。
 
-## Session Aggregation Baseline
+## SQLite 升级
 
-Session aggregation is already implemented and is not experimental.
+schema 演进必须 additive。
 
-Current extraction order:
+规则：
 
-1. `Session_id`
-2. `X-Codex-Turn-Metadata.session_id`
-3. `X-Codex-Window-Id` prefix before `:`
-4. empty string
+- 新列必须通过启动时 `ensureColumn` 或等价迁移兼容旧 DB。
+- 查询或索引依赖新列前，必须保证列已存在。
+- 旧本地 `trace_index.sqlite3` / 当前 SQLite 文件必须可原地升级。
 
-Current indexed grouping fields in `logs`:
+## Channel 与模型配置
 
-- `session_id`
-- `session_source`
-- `window_id`
-- `client_request_id`
+长期配置源是 SQLite：
 
-The first strong use case is OpenAI-compatible and Codex-like traffic, but the storage model is intentionally additive so other providers can attach grouping metadata later without rewriting the monitor around an OpenAI-only concept.
+- `channel_configs`
+- `channel_models`
+- `model_catalog`
+- `channel_probe_runs`
 
-## Monitor Baseline
+YAML `upstream` / `upstreams` 是兼容 bootstrap 输入。
 
-Stable API surface:
+修改渠道管理时必须保持：
 
-- `GET /api/traces`
-- `GET /api/traces/:traceID`
-- `GET /api/sessions`
-- `GET /api/sessions/:sessionID`
-- MCP `list_traces`
-- MCP `get_trace`
-- MCP `list_sessions`
-- MCP `list_upstreams`
-- MCP `query_failures`
-- MCP `summarize_failure_clusters`
+- DB 优先。
+- legacy YAML 可首次导入。
+- API key 和敏感 header 本地加密。
+- channel/model 启停能 reload router。
 
-Stable UI perspectives:
+## 协议边界
 
-- `Requests`
-- `Sessions`
+当前代理不做跨协议转换。
 
-Stable trace detail tabs:
+修改 `pkg/llm` 或 `pkg/observe` 时要区分：
 
-- `Timeline`
-- `Summary`
-- `Raw Protocol`
-- `Declared Tools` when applicable
+- 协议识别。
+- usage/timeline 抽取。
+- Observation IR 解析。
+- 请求转发。
 
-Stable deep-link parameters:
+前三者可以跨 provider 归一化；请求转发必须保持 raw/replay 安全，不能隐式改变协议语义。
 
-- `tab`
-- `from_session`
-- `view`
-- `focus`
+## Monitor API
 
-Stable focus targets:
+当前稳定 API 族：
 
-- `failure`
-- `response`
-- `timeline`
-- `timeline_error`
+- `/api/overview`
+- `/api/traces`
+- `/api/sessions`
+- `/api/models`
+- `/api/channels`
+- `/api/routing/summary`
+- `/api/events`
+- `/api/findings`
+- `/api/analysis`
+- `/api/upstreams`
+- `/api/auth/*`
 
-Changes to these surfaces should be treated as product-facing changes and should be documented explicitly.
+修改这些接口要视为产品行为变化，并同步更新文档和测试。
 
-## MCP Baseline
+## MCP
 
-Current MCP baseline is intentionally narrow:
+MCP 当前是受限工具面：
 
-- transport is streamable HTTP on the management server
-- implementation uses the official Go MCP SDK
-- tool surface is intentionally read-only for trace/session/upstream inspection, failure triage, and system-event diagnostics
-- MCP handlers reuse current monitor/store behavior rather than introducing a second query stack
-- baseline evaluator keys and built-in threshold semantics should be treated as versioned contract surface once recorded scores depend on them
-- evaluator profile selection should stay explicit and additive; do not silently change the meaning of an existing profile name
+- read-only 查询为主。
+- reanalysis 工具只创建/执行本地 `analysis_jobs`。
+- 不调用上游 provider。
+- 不暴露 raw secret。
+- 复用 Monitor/store 查询语义。
 
-Do not:
+不要为 MCP 建立另一套不一致的事实模型。
 
-- make MCP the source of truth for replay or storage
-- add broad write-capable mutation tools without an explicit milestone and configuration gate
-- fork monitor semantics into a divergent MCP-only query model unless there is a strong reason
+## System Events
 
-## System Events Baseline
+system events 是 TraceLab 自身运行和派生管道异常，不是普通用户请求失败列表。
 
-System events are TraceLab operational metadata, not request replay data.
+事件来源包括：
 
-Current event sources include:
+- parser failure。
+- analyzer failure。
+- router selection failure。
+- upstream transport error。
 
-- parse job failures
-- failed analysis runs
-- routing selection failures
-- upstream transport errors
+维护要求：
 
-Maintenance constraints:
+- 事件 details 不保存 raw request/response body。
+- fingerprint 要能合并重复事件。
+- ignored 事件保持 ignored。
+- read/resolved 事件复发时重新 unread。
 
-- keep system event schema additive
-- keep event details bounded and free of raw request/response bodies
-- preserve fingerprint grouping so repeated failures do not create unbounded rows
-- keep Overview as a compact health summary; Events is the durable exception inbox
-- keep `/api/events/stream` one-way and optional, with polling fallback
-- defer retention/compaction policy until deployed event volume justifies it
+## Reanalysis
 
-## SQLite Upgrade Constraints
+reanalysis 只基于本地 cassette 和 SQLite 派生状态工作。
 
-Additive schema evolution on existing local databases is a hard requirement.
+任务必须写入 `analysis_jobs`，便于审计：
 
-Important rule:
+- trace reparse。
+- trace rescan。
+- trace repair usage。
+- trace reanalyze。
+- session reanalyze。
+- batch reanalyze。
 
-- all newly required columns must exist before any index or query depends on them
+## 测试基线
 
-This matters because users may upgrade with an older `trace_index.sqlite3` already present.
+常用验证：
 
-Recent regression that is now fixed:
+```bash
+task check:quick
+go test ./pkg/recordfile ./pkg/replay ./pkg/llm ./pkg/observe
+go test ./internal/proxy ./internal/router ./internal/store ./internal/monitor
+```
 
-- startup and `migrate` could fail with `no such column: session_id` when indexes referring to session columns were created before `ensureColumn(...)` finished
+改 streaming、router、store 并发时补：
 
-The expected behavior now is:
+```bash
+task test:race
+```
 
-1. open existing DB
-2. ensure missing columns exist
-3. backfill additive metadata if needed
-4. create indexes that depend on those columns
-5. continue startup successfully without requiring a manual DB reset
+前端改动补：
 
-Any future schema change must preserve this property.
-
-## Startup And Rebuild Expectations
-
-Current supported flows:
-
-- clean startup on a fresh output directory
-- clean startup on an old output directory with an existing SQLite DB
-- rebuild from raw cassettes
-- explicit migration from V2 to V3 when requested
-
-When modifying store initialization, verify at least:
-
-- fresh DB creation
-- startup against an older schema
-- backfill paths for newly added metadata
-- `migrate` behavior against an older schema
-
-## Replay Compatibility Constraints
-
-`pkg/replay` is a hard requirement and should constrain monitor/storage changes.
-
-Do not:
-
-- make SQLite the replay source of truth
-- require normalized metadata that cannot be reconstructed from the raw cassette
-- rewrite old cassettes implicitly during normal startup
-
-Prefer:
-
-- additive metadata indexing in SQLite
-- explicit migration tooling when file rewrites are needed
-- keeping the raw request/response readable for manual debugging
-
-## Testing Expectations
-
-When changing storage or monitor behavior, the baseline expectation is:
-
-- Go tests pass
-- monitor frontend builds successfully when frontend assets change
-- embedded assets remain in sync with the built frontend
-
-When changing schema upgrade logic, include regression coverage for older DB states where feasible.
-
-## Current Done State
-
-This is considered implemented at the current baseline:
-
-- session metadata extraction and persistence
-- dual-view monitor home page
-- session list and session detail APIs
-- grouped session inspection with failure context
-- trace/session deep links and tab selection
-- trace focus targets including `timeline_error`
-- legacy SQLite schema upgrade fix for session columns
-- multi-upstream runtime routing with persisted model catalog state
-- per-trace routing metadata and selected-upstream health context
-- upstream analytics, drilldown, routing failure analytics, and health-threshold exposure
-
-For maintainers, this implies an important convergence rule:
-
-- do not continue expanding monitor surfaces as a substitute for unfinished routing/runtime work
-- once the multi-upstream routing loop is closed, further monitor changes should be justified as focused follow-up work rather than part of the core delivery
-
-The current core delivery is already closed around:
-
-1. multi-upstream config compatibility
-2. runtime target selection
-3. local model coverage persistence
-4. replay-safe routing metadata
-5. operator-visible routing diagnostics
-
-## Reasonable Next Refinements
-
-The following work is still reasonable, but is not required to understand the current baseline:
-
-- more stable node-level timeline anchors
-- direct linking to tool call or tool response nodes
-- richer focus/highlight lifecycle behavior
-- more operator-facing troubleshooting documentation
+```bash
+task ui:build
+task ui:test
+go test ./internal/monitor
+```

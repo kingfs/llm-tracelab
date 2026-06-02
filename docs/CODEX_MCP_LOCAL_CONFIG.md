@@ -1,16 +1,16 @@
-# Codex MCP Local Config
+# Codex MCP 本地配置
 
-This repository keeps Codex MCP client configuration local to the workspace.
+本仓库把 Codex MCP client 配置保存在工作区本地。
 
-The local config file is:
+本地配置文件：
 
 ```text
 .codex/config.toml
 ```
 
-`.codex` is ignored by git, so endpoint overrides and local client settings are not committed.
+`.codex` 已被 git 忽略，因此本地 endpoint、token 环境变量名和调试配置不会提交到仓库。
 
-Current local example:
+## 示例
 
 ```toml
 [mcp_servers.tracelab-remote]
@@ -18,22 +18,26 @@ url = "http://ip:port/mcp"
 bearer_token_env_var = "LLM_TRACELAB_MCP_TOKEN"
 ```
 
-Do not store tokens in this file. If the remote deployment requires auth, export the token in the shell before starting Codex:
+不要把 token 直接写入该文件。
+
+如果远端部署需要认证，启动 Codex 前导出 token：
 
 ```bash
 export LLM_TRACELAB_MCP_TOKEN='...'
 ```
 
-If the deployment does not require auth, leave `LLM_TRACELAB_MCP_TOKEN` unset.
+如果远端部署不需要认证，保持 `LLM_TRACELAB_MCP_TOKEN` 未设置即可。
 
-To inspect the repository-local MCP config without touching global Codex config:
+## 查看本地配置
+
+只检查仓库本地 MCP 配置，不修改全局 Codex 配置：
 
 ```bash
 CODEX_HOME="$PWD/.codex" codex mcp list
 CODEX_HOME="$PWD/.codex" codex mcp get tracelab-remote
 ```
 
-To update the remote endpoint locally:
+## 更新远端 endpoint
 
 ```bash
 CODEX_HOME="$PWD/.codex" codex mcp remove tracelab-remote
@@ -41,3 +45,8 @@ CODEX_HOME="$PWD/.codex" codex mcp add tracelab-remote \
   --url http://HOST:PORT/mcp \
   --bearer-token-env-var LLM_TRACELAB_MCP_TOKEN
 ```
+
+## 相关文档
+
+- [MCP 使用指南](./MCP_GUIDE.md)
+- [当前实现概览](./CURRENT_IMPLEMENTATION.md)

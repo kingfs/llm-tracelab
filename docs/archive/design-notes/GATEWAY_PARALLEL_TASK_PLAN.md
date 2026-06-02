@@ -593,4 +593,4 @@ Acceptance:
 
 Guide:
 
-- [Credential Routing Operator Guide](./CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)
+- [Credential Routing Operator Guide](../../CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)

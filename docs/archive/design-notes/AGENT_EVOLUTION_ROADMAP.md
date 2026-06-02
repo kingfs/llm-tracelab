@@ -18,9 +18,9 @@ Every milestone below is constrained by the current architecture, current test g
 
 Related documents:
 
-- [Project Baseline](./PROJECT_BASELINE.md)
-- [Maintainer Baseline](./MAINTAINER_BASELINE.md)
-- [Monitor Guide](./MONITOR_GUIDE.md)
+- [Project Baseline](../../PROJECT_BASELINE.md)
+- [Maintainer Baseline](../../MAINTAINER_BASELINE.md)
+- [Monitor Guide](../../MONITOR_GUIDE.md)
 - [Roadmap](./ROADMAP.md)
 
 ## Strategic Position

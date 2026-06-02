@@ -14,10 +14,10 @@ Use it when you need a fast answer to these questions:
 This document is branch-specific.
 It complements, but does not replace:
 
-- [Project Baseline](./PROJECT_BASELINE.md)
-- [MCP Guide](./MCP_GUIDE.md)
-- [Maintainer Baseline](./MAINTAINER_BASELINE.md)
-- [Agent Evolution Roadmap](./AGENT_EVOLUTION_ROADMAP.md)
+- [Project Baseline](../../PROJECT_BASELINE.md)
+- [MCP Guide](../../MCP_GUIDE.md)
+- [Maintainer Baseline](../../MAINTAINER_BASELINE.md)
+- [Agent Evolution Roadmap](../design-notes/AGENT_EVOLUTION_ROADMAP.md)
 
 ## Branch Goal
 

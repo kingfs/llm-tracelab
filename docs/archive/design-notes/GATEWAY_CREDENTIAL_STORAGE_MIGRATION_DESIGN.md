@@ -1,6 +1,6 @@
 # Gateway Credential Storage Migration Design
 
-This document is the implementation-ready storage plan for explicit gateway credential records. It extends the credential routing contract in [GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md](./GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md) and the Batch 4 task plan in [GATEWAY_PARALLEL_TASK_PLAN.md](./GATEWAY_PARALLEL_TASK_PLAN.md#l-credential-storage-migration-design).
+This document is the implementation-ready storage plan for explicit gateway credential records. It extends the credential routing contract in [GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md](./GATEWAY_CREDENTIAL_DECISION_CHAIN_SPEC.md) and the Batch 4 task plan in [GATEWAY_PARALLEL_TASK_PLAN.md](./GATEWAY_PARALLEL_TASK_PLAN.md).
 
 This branch is documentation only. It does not introduce a database migration, does not change router or proxy behavior, and does not change cassette recording or replay.
 

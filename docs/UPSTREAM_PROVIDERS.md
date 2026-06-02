@@ -1,64 +1,67 @@
-# Upstream Providers
+# 上游 Provider 与协议族
 
-## Goal
+TraceLab 不为每个 provider 写一套独立集成，而是把上游解析成：
 
-`llm-tracelab` does not try to model every upstream as a unique integration.
-Instead, it resolves each upstream into:
+- `protocol_family`
+- `routing_profile`
+- 鉴权、版本、header 和 URL 构造规则
 
-- a `protocol_family`
-- a `routing_profile`
-- a small set of auth/version/header rules
+协议 schema 和差异见 [协议参考](./protocol-reference/README.md)。
 
-This keeps provider growth additive instead of turning the proxy into a large tree of special cases.
-
-For protocol schema snapshots and detailed API-shape differences, see [Protocol Reference](./protocol-reference/README.md).
-
-## Current Families
+## 协议族
 
 ### `openai_compatible`
 
-Used for providers whose request and response semantics follow the OpenAI-style API surface.
+适用于 OpenAI 风格 API。
 
-Supported routing profiles:
+支持 routing profile：
 
 - `openai_default`
 - `azure_openai_v1`
 - `azure_openai_deployment`
 - `vllm_openai`
 
-Typical endpoints:
+典型 endpoint：
 
 - `/v1/chat/completions`
 - `/v1/responses`
 - `/v1/embeddings`
 - `/v1/models`
 
-Configuration note:
+配置注意：
 
-- `upstream.base_url` must already include the upstream API path prefix for OpenAI-compatible providers, such as `/v1`, `/api/v1`, `/openai`, or `/openai/v1`
-- the proxy still accepts client requests under `/v1/...`, but forwards them upstream as `base_url + /...`
+- `upstream.base_url` 应包含上游 API prefix，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`。
+- client 仍请求 TraceLab 的 `/v1/...`。
+- TraceLab 转发时按 routing profile 构造上游 URL。
 
 ### `anthropic_messages`
 
-Used for Anthropic Claude Messages-style APIs.
+适用于 Anthropic Claude Messages API。
 
-Supported routing profiles:
+支持 routing profile：
 
 - `anthropic_default`
 
-Typical endpoint:
+典型 endpoint：
 
 - `/v1/messages`
+- `/v1/models` 用于 connectivity/model discovery
+
+注意：
+
+- 鉴权使用 `x-api-key`。
+- 可自动补 `anthropic-version`。
+- 不会自动转为 OpenAI-compatible 请求。
 
 ### `google_genai`
 
-Used for Google Gemini / Google GenAI-native content-generation APIs.
+适用于 Google AI Studio / Gemini API。
 
-Supported routing profiles:
+支持 routing profile：
 
 - `google_ai_studio`
 
-Typical endpoints:
+典型 endpoint：
 
 - `/v1beta/models/{model}:generateContent`
 - `/v1beta/models/{model}:streamGenerateContent`
@@ -66,133 +69,71 @@ Typical endpoints:
 
 ### `vertex_native`
 
-Used for Vertex AI native content-generation APIs with project/location-aware routing and Google Cloud Bearer auth.
+适用于 Vertex AI native Gemini API。
 
-Supported routing profiles:
+支持 routing profile：
 
 - `vertex_express`
 - `vertex_project_location`
 
-Currently verified endpoints:
+当前验证 endpoint：
 
 - `/v1/publishers/{publisher}/models/{model}:generateContent`
 - `/v1/publishers/{publisher}/models/{model}:streamGenerateContent`
 - `/v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}:generateContent`
 - `/v1/projects/{project}/locations/{location}/publishers/{publisher}/models/{model}:streamGenerateContent`
 
-## Support Levels
+## Provider Preset
 
-Presets are classified as:
+当前可用 preset：
 
-- `verified`: explicitly covered by behavior tests or cassette-level regression tests
-- `compatible`: expected to work because they map cleanly to an existing family, but have lighter direct verification
-- `planned`: not yet a preset or not yet implemented
+| preset | 协议族 | routing profile | 说明 |
+| --- | --- | --- | --- |
+| `openai` | `openai_compatible` | `openai_default` | OpenAI 风格默认 |
+| `openrouter` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `fireworks` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `together` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `deepseek` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `groq` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `xai` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `moonshot` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `cerebras` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `baseten` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `perplexity` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `alibaba` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `hugging_face` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `nvidia_nim` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
+| `github_models` | `openai_compatible` | `openai_default` | GitHub Models |
+| `azure` | `openai_compatible` | 自动推断 | Azure OpenAI |
+| `azure_openai` | `openai_compatible` | 自动推断 | `azure` 别名 |
+| `vllm` | `openai_compatible` | `vllm_openai` | 自托管 vLLM |
+| `anthropic` | `anthropic_messages` | `anthropic_default` | Claude Messages |
+| `google_genai` | `google_genai` | `google_ai_studio` | Gemini API |
+| `google` | `google_genai` | `google_ai_studio` | `google_genai` 别名 |
+| `gemini` | `google_genai` | `google_ai_studio` | `google_genai` 别名 |
+| `vertex` | `vertex_native` | 自动推断 | Vertex Gemini |
 
-## Current Preset Matrix
+非法组合会在启动或配置解析时失败。例如：
 
-These presets currently resolve without requiring extra code changes:
+- `provider_preset: anthropic` 搭配 `protocol_family: google_genai`。
+- `provider_preset: openrouter` 搭配 `routing_profile: azure_openai_v1`。
+- 未知 `provider_preset`。
 
-| Provider preset | Support | Protocol family | Routing profile | Notes |
-| --- | --- | --- | --- | --- |
-| `openai` | `verified` | `openai_compatible` | `openai_default` | default OpenAI-style routing |
-| `openrouter` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `fireworks` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `together` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `deepseek` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `groq` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `xai` | `verified` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `moonshot` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `cerebras` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `baseten` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `perplexity` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `alibaba` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `hugging_face` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `nvidia_nim` | `compatible` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
-| `github_models` | `verified` | `openai_compatible` | `openai_default` | GitHub Models OpenAI-compatible surface |
-| `azure` | `verified` | `openai_compatible` | inferred | chooses `azure_openai_v1` or `azure_openai_deployment` |
-| `azure_openai` | `verified` | `openai_compatible` | inferred | alias of `azure` |
-| `vllm` | `verified` | `openai_compatible` | `vllm_openai` | self-hosted OpenAI-compatible server |
-| `anthropic` | `verified` | `anthropic_messages` | `anthropic_default` | Claude Messages API |
-| `google_genai` | `verified` | `google_genai` | `google_ai_studio` | Google Gemini API |
-| `google` | `verified` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
-| `gemini` | `verified` | `google_genai` | `google_ai_studio` | alias of `google_genai` |
-| `vertex` | `verified` | `vertex_native` | inferred | chooses `vertex_express` or `vertex_project_location` from `base_url` |
+## 配置来源
 
-Invalid combinations now fail fast at startup. For example:
+当前支持两类输入：
 
-- `provider_preset: anthropic` with `protocol_family: google_genai`
-- `provider_preset: openrouter` with `routing_profile: azure_openai_v1`
-- unknown `provider_preset` values
+- YAML `upstream` / `upstreams`：兼容启动和首次 bootstrap。
+- SQLite `channel_configs` / `channel_models`：长期配置事实源。
 
-## Explicit Family Config
+当数据库已有 channel 配置时，router 优先使用数据库配置。
 
-Not every supported family needs many presets.
+## 新增 preset 的原则
 
-`vertex_native` now has a single controlled preset: `vertex`.
+可以新增 preset 的条件：
 
-It remains intentionally narrow:
+- 上游在生态中常见。
+- 能清晰映射到已有协议族。
+- 不需要新的请求/响应语义。
 
-- only `vertex_express`
-- only `vertex_project_location`
-- no extra aliases yet
-
-Recommended config patterns:
-
-- `provider_preset: vertex`
-- `protocol_family: vertex_native`
-- `routing_profile: vertex_express | vertex_project_location`
-- `model_resource: publishers/google/models/<model>`
-- `api_key: <google-cloud-bearer-token>`
-
-Additional fields for `vertex_project_location`:
-
-- `project`
-- `location`
-
-Explicit `protocol_family` / `routing_profile` config still works when you want to avoid presets entirely.
-
-## Selection Rules
-
-Resolution order is:
-
-1. explicit config fields such as `protocol_family` and `routing_profile`
-2. `provider_preset`
-3. inference from `base_url`
-
-This means presets are convenience defaults, not hard locks.
-
-## When To Add A New Preset
-
-Add a new preset when:
-
-- the upstream is already well-known in the ecosystem
-- it cleanly maps to an existing protocol family
-- it does not require new request/response semantics
-
-Do not add a new protocol family unless the payload semantics or stream/event model are genuinely different.
-
-## When To Add A New Protocol Family
-
-Add one only when the upstream differs materially in:
-
-- request schema
-- response schema
-- streaming event structure
-- usage extraction rules
-- replay-critical behavior
-
-Examples that may justify future families:
-
-- Bedrock or Vertex APIs that are not used through an OpenAI-compatible surface
-- realtime or session-based APIs
-
-## Planning Note
-
-`vertex_native` is now the fourth implemented protocol family.
-
-Its broader scope is still intentionally limited in v1:
-
-- `generateContent`
-- `streamGenerateContent`
-
-Planning and non-goals remain documented in [VERTEX_NATIVE_PLAN.md](./VERTEX_NATIVE_PLAN.md).
+只有当请求 schema、响应 schema、stream 事件、usage 或 replay 行为明显不同，才应新增协议族。

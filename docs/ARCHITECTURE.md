@@ -1,144 +1,144 @@
-# Architecture
+# 架构说明
 
-## Goal
+## 目标
 
-`llm-tracelab` records LLM HTTP traffic once and reuses it many times.
+`llm-tracelab` 的目标是把真实 LLM HTTP 调用录制成可检查、可回放、可重算的本地事实。
 
-## Data Flow
+架构原则：
 
-1. Client SDK sends an LLM API request to the local proxy.
-2. Proxy classifies the request by endpoint/upstream protocol family and may apply narrow pass-through adjustments such as injecting `stream_options.include_usage=true` for OpenAI-compatible chat completions.
-3. Recorder writes the raw request and response into a `.http` cassette.
-4. `pkg/llm` classifies provider-specific request/response semantics, stream transcripts, token usage, and event timelines.
-5. `internal/upstream` resolves config into protocol family, routing profile, auth headers, and upstream URL behavior.
-6. Recorder writes compact metadata plus `# event:` timeline lines into the cassette prelude and indexes summary fields into SQLite.
-7. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
-8. Session-oriented monitor views are aggregated from SQLite using group metadata extracted from raw request headers such as `Session_id`.
-8. Unit tests use `pkg/replay.Transport` to replay the recorded response from the cassette.
+- 转发路径保持简单可靠。
+- raw cassette 是 replay 和详情页的事实源。
+- SQLite 保存列表、统计、配置和派生分析。
+- 协议解析和审计结果可以从 raw cassette 重建。
+- 测试 replay 不依赖上游网络。
 
-## Storage Model
+## 数据流
 
-- Raw cassette: `<output_dir>/<host>/<model>/<yyyy>/<mm>/<dd>/*.http`
-- Metadata database: `<output_dir>/llm_tracelab.sqlite3`
-- Container convention: `/app/config/config.yaml` + `/app/data/traces`
+1. SDK、CLI 或应用把 LLM API 请求发到本地代理。
+2. 代理根据请求路径和上游配置识别协议族。
+3. router 选择一个支持该协议和模型的 route target。
+4. proxy 对请求做少量透传型调整，例如为 OpenAI-compatible chat stream 补 `stream_options.include_usage=true`。
+5. 请求转发到上游。
+6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette。
+7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 和 `llm.*` timeline 事件。
+8. SQLite 写入 trace、路由、usage、session、upstream 等索引字段。
+9. observe/reanalysis 管道从 raw cassette 解析 Observation IR、findings 和分析任务结果。
+10. Monitor 和 MCP 从 SQLite 查询列表/聚合，从 cassette 读取详情。
+11. 单元测试通过 `pkg/replay.Transport` 从 cassette 回放响应。
 
-The cassette remains the canonical replay artifact.
-SQLite exists to avoid expensive aggregate rescans and to support fast monitor queries.
-It also stores additive grouping metadata such as `session_id` so the monitor can switch between request and session perspectives without rescanning raw files.
+## 协议边界
 
-## V3 Prelude And Timeline
+当前 TraceLab 是协议族感知的透传代理，不是跨协议转换网关。
 
-`LLM_PROXY_V3` now has three logical layers before the raw payload:
+已实现协议族和 endpoint 见 [协议参考](./protocol-reference/README.md)。
 
-1. `# meta:` compact request summary and normalized usage
-2. `# event:` timeline rows
-3. blank line + raw HTTP request/response bytes
+重要边界：
 
-The base recorder still emits request/response lifecycle events, but the proxy pipeline also appends provider-normalized `llm.*` events, for example:
+- OpenAI-compatible、Anthropic Messages、Google Gemini、Vertex native 请求不会在转发热路径中互转。
+- `pkg/llm` 可以把不同协议解析到统一摘要/IR，但这不等于可以无损转发到另一个协议。
+- 上游必须支持 client 实际请求的 endpoint。例如 Claude Code 的 `/v1/messages` 需要 Anthropic Messages 兼容上游。
+
+## 录制格式
+
+当前写入格式是 `LLM_PROXY_V3`。
+
+V3 prelude：
+
+1. `# llm-tracelab/v3`
+2. `# meta: {...}`
+3. 多行 `# event: {...}`
+4. 空行
+5. 原始 HTTP 请求字节
+6. 分隔换行
+7. 原始 HTTP 响应字节
+
+V2 固定 2KB header block 仍保持读取兼容。
+
+## Timeline 事件
+
+基础 recorder 记录请求/响应生命周期事件。
+
+proxy pipeline 会追加 provider 归一化事件，例如：
 
 - `llm.output_text.delta`
 - `llm.reasoning.delta`
 - `llm.tool_call`
 - `llm.tool_call.delta`
 - `llm.usage`
+- `routing.selection`
+- `routing.filtered`
+- `routing.retry_candidate`
+- `routing.failure`
 
-These events are generated in `pkg/llm.ResponsePipeline`, recorded into the cassette, and surfaced by the monitor detail API.
+这些事件写入 cassette prelude，并被 Monitor/MCP 用于 trace 详情、路由排障和失败聚类。
 
-## Token Usage Normalization
+## Token Usage 归一化
 
-The monitor, cassette prelude, and SQLite database all use a shared usage shape:
+统一 usage 结构：
 
 - `prompt_tokens`
 - `completion_tokens`
 - `total_tokens`
 - `prompt_tokens_details.cached_tokens`
 
-This shape is normalized from provider-specific response payloads inside `pkg/llm`.
-
-### OpenAI-compatible chat completions
-
-OpenAI-style usage is recorded directly:
+OpenAI-compatible：
 
 - `prompt_tokens = usage.prompt_tokens`
 - `completion_tokens = usage.completion_tokens`
 - `total_tokens = usage.total_tokens`
-- `prompt_tokens_details.cached_tokens = usage.prompt_tokens_details.cached_tokens`
+- `cached_tokens = usage.prompt_tokens_details.cached_tokens`
 
-Example:
-
-```json
-{
-  "usage": {
-    "prompt_tokens": 14851,
-    "completion_tokens": 67,
-    "total_tokens": 14918,
-    "prompt_tokens_details": {
-      "cached_tokens": 14656
-    }
-  }
-}
-```
-
-### Anthropic / Claude messages
-
-Claude reports prompt cache usage separately from `input_tokens`, so the proxy folds cache-related fields back into the shared prompt view:
+Anthropic Messages：
 
 - `prompt_tokens = input_tokens + cache_creation_input_tokens + cache_read_input_tokens`
 - `completion_tokens = output_tokens`
-- `total_tokens = prompt_tokens + completion_tokens` when Anthropic does not provide `total_tokens`
-- `prompt_tokens_details.cached_tokens = cache_read_input_tokens`
+- `total_tokens = prompt_tokens + completion_tokens`
+- `cached_tokens = cache_read_input_tokens`
 
-Notes:
+Gemini / Vertex：
 
-- `cache_read_input_tokens` means prompt tokens served from cache, which is the closest equivalent to OpenAI's `cached_tokens`
-- `cache_creation_input_tokens` is included in `prompt_tokens` so the recorded prompt total reflects the full prompt-side token cost/volume for that request
-- SQLite currently indexes only one cache field: `cached_tokens`, which stores cache hits (`cache_read_input_tokens`) for Claude and `prompt_tokens_details.cached_tokens` for OpenAI-style payloads
+- 从 `usageMetadata` 映射到统一输入/输出/总 token 视图。
 
-Example:
+## 存储边界
 
-```json
-{
-  "usage": {
-    "input_tokens": 17430,
-    "output_tokens": 194,
-    "cache_read_input_tokens": 18560
-  }
-}
-```
+raw cassette：
 
-This is recorded as:
+- replay 事实源。
+- raw protocol 详情源。
+- 派生数据重建源。
 
-```json
-{
-  "prompt_tokens": 35990,
-  "completion_tokens": 194,
-  "total_tokens": 36184,
-  "prompt_tokens_details": {
-    "cached_tokens": 18560
-  }
-}
-```
+SQLite：
 
-## Key Packages
+- trace/session/upstream/model/channel 列表和聚合。
+- auth user/token。
+- channel/model 配置。
+- system events。
+- Observation IR 和 findings。
+- analysis jobs。
+- eval/dataset/score/experiment。
 
-- `internal/proxy`: reverse proxy, response interception, and cassette byte capture
-- `internal/upstream`: upstream config resolution, auth/header application, and path/query rewriting
-- `internal/recorder`: file writer and metadata finalization
-- `internal/store`: SQLite schema, sync, and query layer
-- `internal/monitor`: embedded React monitor and cassette detail projection
-- `pkg/recordfile`: shared V2/V3 parsing and V3 prelude writer
-- `pkg/llm`: provider adapters, stream transcript normalization, usage pipeline, and event timeline generation
-- `pkg/replay`: HTTP response replay transport for tests
+Monitor 列表页不应依赖扫描文件系统。
 
-## Protocol Boundary
+## 关键包
 
-TraceLab is protocol-family aware, but it is not currently a cross-protocol gateway.
+- `cmd/server`：CLI 和服务启动。
+- `internal/proxy`：反向代理、鉴权、转发、响应截获。
+- `internal/router`：多上游选择、健康、重试、sticky、决策记录。
+- `internal/upstream`：上游配置解析、协议族、路由 profile、鉴权 header、URL 构造。
+- `internal/recorder`：cassette 写入和 metadata finalization。
+- `internal/store`：SQLite schema、升级、索引、查询和派生状态。
+- `internal/monitor`：Monitor API 与嵌入式 React UI。
+- `internal/mcpserver`：MCP 工具层。
+- `internal/reanalysis`：trace/session/batch 重分析任务。
+- `pkg/recordfile`：V2/V3 cassette 解析与写入。
+- `pkg/llm`：协议识别、adapter、usage、stream pipeline。
+- `pkg/observe`：Observation IR parser。
+- `pkg/replay`：测试 replay transport。
 
-Implemented protocol families and current endpoint coverage are documented in [Protocol Reference](./protocol-reference/README.md).
-The proxy forwarding path preserves raw request/response bytes for replay and forwards requests to an upstream that supports the same protocol family. Parsers can recognize OpenAI-compatible, Anthropic Messages, Google Gemini, and Vertex native payloads, but recognition is not request conversion.
+## 兼容性要求
 
-## Compatibility
-
-- V3 is the active write format.
-- V2 is still a supported read format for monitor and replay.
-- `migrate` can explicitly rewrite V2 cassettes to V3 and rebuild SQLite from raw files.
+- 新录制只写 V3。
+- 读取端继续支持 V2。
+- 存储 schema 只能 additive 演进。
+- 修改 record format 时必须同步 recorder、monitor、replay。
+- replay 不能访问网络。
