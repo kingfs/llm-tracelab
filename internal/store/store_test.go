@@ -669,6 +669,20 @@ func TestExtractGroupingInfoFallsBackToCodexMetadata(t *testing.T) {
 	}
 }
 
+func TestExtractGroupingInfoRecognizesClaudeCodeSessionHeader(t *testing.T) {
+	req := []byte("POST /v1/messages HTTP/1.1\r\nHost: example.com\r\nX-Claude-Code-Session-Id: sess-claude-code\r\nX-Codex-Turn-Metadata: {\"session_id\":\"sess-meta\"}\r\n\r\n{}")
+	info, err := extractGroupingInfoFromRequest(req)
+	if err != nil {
+		t.Fatalf("extractGroupingInfoFromRequest() error = %v", err)
+	}
+	if info.SessionID != "sess-claude-code" {
+		t.Fatalf("SessionID = %q, want sess-claude-code", info.SessionID)
+	}
+	if info.SessionSource != "header.x_claude_code_session_id" {
+		t.Fatalf("SessionSource = %q, want header.x_claude_code_session_id", info.SessionSource)
+	}
+}
+
 func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "codex.http")

@@ -13,6 +13,7 @@ func TestExtractStickyKeyPrecedence(t *testing.T) {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Session_id", "session_header")
+	req.Header.Set("X-Claude-Code-Session-Id", "claude_session")
 	req.Header.Set("X-Codex-Window-Id", "window:turn")
 	req.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"metadata_session"}`)
 
@@ -26,6 +27,12 @@ func TestExtractStickyKeyFallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
+	req.Header.Set("X-Claude-Code-Session-Id", "claude-session")
+	if got := extractStickyKey(req, nil); got != "claude-session" {
+		t.Fatalf("extractStickyKey(claude) = %q, want claude-session", got)
+	}
+
+	req.Header.Del("X-Claude-Code-Session-Id")
 	req.Header.Set("X-Codex-Window-Id", "window-123:turn-456")
 	if got := extractStickyKey(req, nil); got != "window-123" {
 		t.Fatalf("extractStickyKey(window) = %q, want window-123", got)

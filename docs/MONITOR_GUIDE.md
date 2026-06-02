@@ -62,11 +62,12 @@ Monitor 使用两类数据：
 当前 session 提取顺序：
 
 1. `Session_id`
-2. `X-Codex-Turn-Metadata.session_id`
-3. `X-Codex-Window-Id` 中 `:` 前缀
-4. 空 session
+2. `X-Claude-Code-Session-Id`
+3. `X-Codex-Turn-Metadata.session_id`
+4. `X-Codex-Window-Id` 中 `:` 前缀
+5. 空 session
 
-适合分析 Codex/agent 一轮任务中多次模型调用的整体行为。
+适合分析 Codex、Claude Code 和其他 agent 一轮任务中多次模型调用的整体行为。
 
 ### Models
 

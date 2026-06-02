@@ -65,9 +65,10 @@ session 聚合已实现。
 提取顺序：
 
 1. `Session_id`
-2. `X-Codex-Turn-Metadata.session_id`
-3. `X-Codex-Window-Id` 中 `:` 前缀
-4. 空 session
+2. `X-Claude-Code-Session-Id`
+3. `X-Codex-Turn-Metadata.session_id`
+4. `X-Codex-Window-Id` 中 `:` 前缀
+5. 空 session
 
 Monitor 和 MCP 都可查询 session 列表和详情。
 

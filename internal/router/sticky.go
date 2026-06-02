@@ -74,6 +74,9 @@ func extractStickyKey(req *http.Request, body []byte) string {
 	if key := strings.TrimSpace(req.Header.Get("Session_id")); key != "" {
 		return key
 	}
+	if key := strings.TrimSpace(req.Header.Get("X-Claude-Code-Session-Id")); key != "" {
+		return key
+	}
 	if key := stickyWindowPrefix(req.Header.Get("X-Codex-Window-Id")); key != "" {
 		return key
 	}

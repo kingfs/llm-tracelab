@@ -6354,6 +6354,12 @@ func extractGroupingInfoFromRequest(reqFull []byte) (GroupingInfo, error) {
 		return info, nil
 	}
 
+	if sessionID := strings.TrimSpace(headers.Get("X-Claude-Code-Session-Id")); sessionID != "" {
+		info.SessionID = sessionID
+		info.SessionSource = "header.x_claude_code_session_id"
+		return info, nil
+	}
+
 	if rawMetadata := strings.TrimSpace(headers.Get("X-Codex-Turn-Metadata")); rawMetadata != "" {
 		var metadata struct {
 			SessionID string `json:"session_id"`
