@@ -1,5 +1,8 @@
 # v1 协议参考材料
 
+> Current protocol reference moved to [`../../protocol-reference/README.md`](../../protocol-reference/README.md).
+> This directory remains a historical v1 design-era snapshot archive.
+
 本目录保存 v1 协议深度解析设计所依赖的上游原始材料和抽取 schema，避免后续开发时重复调研。
 
 ## 来源时间

@@ -11,6 +11,8 @@ Instead, it resolves each upstream into:
 
 This keeps provider growth additive instead of turning the proxy into a large tree of special cases.
 
+For protocol schema snapshots and detailed API-shape differences, see [Protocol Reference](./protocol-reference/README.md).
+
 ## Current Families
 
 ### `openai_compatible`
@@ -181,7 +183,6 @@ Add one only when the upstream differs materially in:
 
 Examples that may justify future families:
 
-- Google GenAI-native APIs
 - Bedrock or Vertex APIs that are not used through an OpenAI-compatible surface
 - realtime or session-based APIs
 

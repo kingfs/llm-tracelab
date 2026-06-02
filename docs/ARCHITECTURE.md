@@ -6,10 +6,10 @@
 
 ## Data Flow
 
-1. Client SDK sends an OpenAI-compatible request to the local proxy.
-2. Proxy may normalize the request, for example injecting `stream_options.include_usage=true`.
+1. Client SDK sends an LLM API request to the local proxy.
+2. Proxy classifies the request by endpoint/upstream protocol family and may apply narrow pass-through adjustments such as injecting `stream_options.include_usage=true` for OpenAI-compatible chat completions.
 3. Recorder writes the raw request and response into a `.http` cassette.
-4. `pkg/llm` normalizes provider-specific request/response semantics, stream transcripts, token usage, and event timelines.
+4. `pkg/llm` classifies provider-specific request/response semantics, stream transcripts, token usage, and event timelines.
 5. `internal/upstream` resolves config into protocol family, routing profile, auth headers, and upstream URL behavior.
 6. Recorder writes compact metadata plus `# event:` timeline lines into the cassette prelude and indexes summary fields into SQLite.
 7. Monitor reads list/statistics from SQLite and reads the raw cassette only for detail pages.
@@ -129,6 +129,13 @@ This is recorded as:
 - `pkg/recordfile`: shared V2/V3 parsing and V3 prelude writer
 - `pkg/llm`: provider adapters, stream transcript normalization, usage pipeline, and event timeline generation
 - `pkg/replay`: HTTP response replay transport for tests
+
+## Protocol Boundary
+
+TraceLab is protocol-family aware, but it is not currently a cross-protocol gateway.
+
+Implemented protocol families and current endpoint coverage are documented in [Protocol Reference](./protocol-reference/README.md).
+The proxy forwarding path preserves raw request/response bytes for replay and forwards requests to an upstream that supports the same protocol family. Parsers can recognize OpenAI-compatible, Anthropic Messages, Google Gemini, and Vertex native payloads, but recognition is not request conversion.
 
 ## Compatibility
 

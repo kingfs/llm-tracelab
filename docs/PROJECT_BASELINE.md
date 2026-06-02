@@ -17,6 +17,7 @@ Related documents:
 - [MCP Guide](./MCP_GUIDE.md) for agent-facing MCP workflows
 - [Maintainer Baseline](./MAINTAINER_BASELINE.md) for implementation constraints and upgrade expectations
 - [Reanalysis Pipeline Design](./REANALYSIS_PIPELINE_DESIGN.md) for rebuilding derived observations, findings, usage, and session analysis from raw cassettes
+- [Protocol Reference](./protocol-reference/README.md) for current protocol-family support and upstream schema snapshots
 
 ## Product Scope
 
@@ -40,7 +41,13 @@ The codebase currently supports these protocol families at the baseline level:
 - Google GenAI
 - Vertex native
 
-Provider normalization, usage extraction, stream transcript handling, and monitor parsing are centered in `pkg/llm`.
+Provider classification, usage extraction, stream transcript handling, and monitor parsing are centered in `pkg/llm`.
+
+Important boundary:
+
+- TraceLab forwards requests within the selected protocol family.
+- TraceLab parses multiple protocol families into common inspection surfaces.
+- TraceLab does not currently translate Anthropic Messages, OpenAI Chat Completions, OpenAI Responses, Gemini GenerateContent, or Vertex native requests into each other in the proxy hot path.
 
 ## Storage Baseline
 

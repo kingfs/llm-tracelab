@@ -1,0 +1,35 @@
+{
+  "get": {
+    "operationId": "listModels",
+    "tags": [
+      "Models"
+    ],
+    "summary": "Lists the currently available models, and provides basic information about each one such as the owner and availability.",
+    "responses": {
+      "200": {
+        "description": "OK",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ListModelsResponse"
+            }
+          }
+        }
+      }
+    },
+    "x-oaiMeta": {
+      "name": "List models",
+      "group": "models",
+      "returns": "A list of [model](/docs/api-reference/models/object) objects.",
+      "examples": {
+        "request": {
+          "curl": "curl https://api.openai.com/v1/models \\\n  -H \"Authorization: Bearer $OPENAI_API_KEY\"\n",
+          "python": "from openai import OpenAI\nclient = OpenAI()\n\nclient.models.list()\n",
+          "node.js": "import OpenAI from \"openai\";\n\nconst openai = new OpenAI();\n\nasync function main() {\n  const list = await openai.models.list();\n\n  for await (const model of list) {\n    console.log(model);\n  }\n}\nmain();",
+          "csharp": "using System;\n\nusing OpenAI.Models;\n\nOpenAIModelClient client = new(\n    apiKey: Environment.GetEnvironmentVariable(\"OPENAI_API_KEY\")\n);\n\nforeach (var model in client.GetModels().Value)\n{\n    Console.WriteLine(model.Id);\n}\n"
+        },
+        "response": "{\n  \"object\": \"list\",\n  \"data\": [\n    {\n      \"id\": \"model-id-0\",\n      \"object\": \"model\",\n      \"created\": 1686935002,\n      \"owned_by\": \"organization-owner\"\n    },\n    {\n      \"id\": \"model-id-1\",\n      \"object\": \"model\",\n      \"created\": 1686935002,\n      \"owned_by\": \"organization-owner\",\n    },\n    {\n      \"id\": \"model-id-2\",\n      \"object\": \"model\",\n      \"created\": 1686935002,\n      \"owned_by\": \"openai\"\n    },\n  ],\n  \"object\": \"list\"\n}\n"
+      }
+    }
+  }
+}

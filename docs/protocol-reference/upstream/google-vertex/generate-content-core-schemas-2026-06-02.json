@@ -1,0 +1,962 @@
+{
+  "schemas": {
+    "GenerateContentRequest": {
+      "type": "object",
+      "description": "Request message for [PredictionService.GenerateContent].",
+      "id": "GoogleCloudAiplatformV1GenerateContentRequest",
+      "properties": {
+        "cachedContent": {
+          "description": "Optional. The name of the cached content used as context to serve the prediction. Note: only used in explicit caching, where users can have control over caching (e.g. what content to cache) and enjoy guaranteed cost savings. Format: `projects/{project}/locations/{location}/cachedContents/{cachedContent}`",
+          "type": "string"
+        },
+        "modelArmorConfig": {
+          "description": "Optional. Settings for prompt and response sanitization using the Model Armor service. If supplied, safety_settings must not be supplied.",
+          "$ref": "GoogleCloudAiplatformV1ModelArmorConfig"
+        },
+        "toolConfig": {
+          "description": "Optional. Tool config. This config is shared for all tools provided in the request.",
+          "$ref": "GoogleCloudAiplatformV1ToolConfig"
+        },
+        "contents": {
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1Content"
+          },
+          "description": "Required. The content of the current conversation with the model. For single-turn queries, this is a single instance. For multi-turn queries, this is a repeated field that contains conversation history + latest request."
+        },
+        "safetySettings": {
+          "description": "Optional. Per request settings for blocking unsafe content. Enforced on GenerateContentResponse.candidates.",
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1SafetySetting"
+          }
+        },
+        "generationConfig": {
+          "description": "Optional. Generation config.",
+          "$ref": "GoogleCloudAiplatformV1GenerationConfig"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Optional. The labels with user-defined metadata for the request. It is used for billing and reporting only. Label keys and values can be no longer than 63 characters (Unicode codepoints) and can only contain lowercase letters, numeric characters, underscores, and dashes. International characters are allowed. Label values are optional. Label keys must start with a letter.",
+          "type": "object"
+        },
+        "tools": {
+          "description": "Optional. A list of `Tools` the model may use to generate the next response. A `Tool` is a piece of code that enables the system to interact with external systems to perform an action, or set of actions, outside of knowledge and scope of the model.",
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1Tool"
+          }
+        },
+        "systemInstruction": {
+          "description": "Optional. The user provided system instructions for the model. Note: only text should be used in parts and content in each part will be in a separate paragraph.",
+          "$ref": "GoogleCloudAiplatformV1Content"
+        }
+      }
+    },
+    "Content": {
+      "description": "The structured data content of a message. A Content message contains a `role` field, which indicates the producer of the content, and a `parts` field, which contains the multi-part data of the message.",
+      "type": "object",
+      "id": "GoogleCloudAiplatformV1Content",
+      "properties": {
+        "role": {
+          "description": "Optional. The producer of the content. Must be either 'user' or 'model'. If not set, the service will default to 'user'.",
+          "type": "string"
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1Part"
+          },
+          "description": "Required. A list of Part objects that make up a single message. Parts of a message can have different MIME types. A Content message must have at least one Part."
+        }
+      }
+    },
+    "Part": {
+      "description": "A datatype containing media that is part of a multi-part Content message. A `Part` consists of data which has an associated datatype. A `Part` can only contain one of the accepted types in `Part.data`. For media types that are not text, `Part` must have a fixed IANA MIME type identifying the type and subtype of the media if `inline_data` or `file_data` field is filled with raw bytes.",
+      "type": "object",
+      "id": "GoogleCloudAiplatformV1Part",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Optional. The text content of the part. When sent from the VSCode Gemini Code Assist extension, references to @mentioned items will be converted to markdown boldface text. For example `@my-repo` will be converted to and sent as `**my-repo**` by the IDE agent."
+        },
+        "fileData": {
+          "description": "Optional. The URI-based data of the part. This can be used to include files from Google Cloud Storage.",
+          "$ref": "GoogleCloudAiplatformV1FileData"
+        },
+        "functionCall": {
+          "description": "Optional. A predicted function call returned from the model. This contains the name of the function to call and the arguments to pass to the function.",
+          "$ref": "GoogleCloudAiplatformV1FunctionCall"
+        },
+        "thought": {
+          "description": "Optional. Indicates whether the `part` represents the model's thought process or reasoning.",
+          "type": "boolean"
+        },
+        "thoughtSignature": {
+          "type": "string",
+          "description": "Optional. An opaque signature for the thought so it can be reused in subsequent requests.",
+          "format": "byte"
+        },
+        "codeExecutionResult": {
+          "description": "Optional. The result of executing the ExecutableCode.",
+          "$ref": "GoogleCloudAiplatformV1CodeExecutionResult"
+        },
+        "videoMetadata": {
+          "description": "Optional. Video metadata. The metadata should only be specified while the video data is presented in inline_data or file_data.",
+          "$ref": "GoogleCloudAiplatformV1VideoMetadata"
+        },
+        "executableCode": {
+          "description": "Optional. Code generated by the model that is intended to be executed.",
+          "$ref": "GoogleCloudAiplatformV1ExecutableCode"
+        },
+        "functionResponse": {
+          "description": "Optional. The result of a function call. This is used to provide the model with the result of a function call that it predicted.",
+          "$ref": "GoogleCloudAiplatformV1FunctionResponse"
+        },
+        "inlineData": {
+          "description": "Optional. The inline data content of the part. This can be used to include images, audio, or video in a request.",
+          "$ref": "GoogleCloudAiplatformV1Blob"
+        },
+        "mediaResolution": {
+          "description": "per part media resolution. Media resolution for the input media.",
+          "$ref": "GoogleCloudAiplatformV1PartMediaResolution"
+        }
+      }
+    },
+    "Tool": {
+      "type": "object",
+      "description": "Tool details that the model may use to generate response. A `Tool` is a piece of code that enables the system to interact with external systems to perform an action, or set of actions, outside of knowledge and scope of the model. A Tool object should contain exactly one type of Tool (e.g FunctionDeclaration, Retrieval or GoogleSearchRetrieval).",
+      "id": "GoogleCloudAiplatformV1Tool",
+      "properties": {
+        "functionDeclarations": {
+          "description": "Optional. Function tool type. One or more function declarations to be passed to the model along with the current user query. Model may decide to call a subset of these functions by populating FunctionCall in the response. User should provide a FunctionResponse for each function call in the next turn. Based on the function responses, Model will generate the final response back to the user. Maximum 512 function declarations can be provided.",
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1FunctionDeclaration"
+          }
+        },
+        "googleSearch": {
+          "description": "Optional. GoogleSearch tool type. Tool to support Google Search in Model. Powered by Google.",
+          "$ref": "GoogleCloudAiplatformV1ToolGoogleSearch"
+        },
+        "googleSearchRetrieval": {
+          "deprecated": true,
+          "$ref": "GoogleCloudAiplatformV1GoogleSearchRetrieval",
+          "description": "Optional. Specialized retrieval tool that is powered by Google Search."
+        },
+        "parallelAiSearch": {
+          "description": "Optional. If specified, Vertex AI will use Parallel.ai to search for information to answer user queries. The search results will be grounded on Parallel.ai and presented to the model for response generation",
+          "$ref": "GoogleCloudAiplatformV1ToolParallelAiSearch"
+        },
+        "retrieval": {
+          "description": "Optional. Retrieval tool type. System will always execute the provided retrieval tool(s) to get external knowledge to answer the prompt. Retrieval results are presented to the model for generation.",
+          "$ref": "GoogleCloudAiplatformV1Retrieval"
+        },
+        "computerUse": {
+          "description": "Optional. Tool to support the model interacting directly with the computer. If enabled, it automatically populates computer-use specific Function Declarations.",
+          "$ref": "GoogleCloudAiplatformV1ToolComputerUse"
+        },
+        "googleMaps": {
+          "description": "Optional. GoogleMaps tool type. Tool to support Google Maps in Model.",
+          "$ref": "GoogleCloudAiplatformV1GoogleMaps"
+        },
+        "enterpriseWebSearch": {
+          "description": "Optional. Tool to support searching public web data, powered by Vertex AI Search and Sec4 compliance.",
+          "$ref": "GoogleCloudAiplatformV1EnterpriseWebSearch"
+        },
+        "exaAiSearch": {
+          "description": "Optional. Uses Exa.ai to search for information to answer user queries. The search results will be grounded on Exa.ai and presented to the model for response generation",
+          "$ref": "GoogleCloudAiplatformV1ToolExaAiSearch"
+        },
+        "codeExecution": {
+          "description": "Optional. CodeExecution tool type. Enables the model to execute code as part of generation.",
+          "$ref": "GoogleCloudAiplatformV1ToolCodeExecution"
+        },
+        "urlContext": {
+          "description": "Optional. Tool to support URL context retrieval.",
+          "$ref": "GoogleCloudAiplatformV1UrlContext"
+        }
+      }
+    },
+    "ToolConfig": {
+      "description": "Tool config. This config is shared for all tools provided in the request.",
+      "type": "object",
+      "id": "GoogleCloudAiplatformV1ToolConfig",
+      "properties": {
+        "functionCallingConfig": {
+          "description": "Optional. Function calling config.",
+          "$ref": "GoogleCloudAiplatformV1FunctionCallingConfig"
+        },
+        "retrievalConfig": {
+          "description": "Optional. Retrieval config.",
+          "$ref": "GoogleCloudAiplatformV1RetrievalConfig"
+        }
+      }
+    },
+    "SafetySetting": {
+      "description": "A safety setting that affects the safety-blocking behavior. A SafetySetting consists of a harm category and a threshold for that category.",
+      "type": "object",
+      "id": "GoogleCloudAiplatformV1SafetySetting",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "HARM_BLOCK_METHOD_UNSPECIFIED",
+            "SEVERITY",
+            "PROBABILITY"
+          ],
+          "description": "Optional. The method for blocking content. If not specified, the default behavior is to use the probability score.",
+          "enumDescriptions": [
+            "The harm block method is unspecified.",
+            "The harm block method uses both probability and severity scores.",
+            "The harm block method uses the probability score."
+          ]
+        },
+        "category": {
+          "enumDeprecated": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false
+          ],
+          "enum": [
+            "HARM_CATEGORY_UNSPECIFIED",
+            "HARM_CATEGORY_HATE_SPEECH",
+            "HARM_CATEGORY_DANGEROUS_CONTENT",
+            "HARM_CATEGORY_HARASSMENT",
+            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            "HARM_CATEGORY_CIVIC_INTEGRITY",
+            "HARM_CATEGORY_IMAGE_HATE",
+            "HARM_CATEGORY_IMAGE_DANGEROUS_CONTENT",
+            "HARM_CATEGORY_IMAGE_HARASSMENT",
+            "HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT",
+            "HARM_CATEGORY_JAILBREAK"
+          ],
+          "enumDescriptions": [
+            "Default value. This value is unused.",
+            "Content that promotes violence or incites hatred against individuals or groups based on certain attributes.",
+            "Content that promotes, facilitates, or enables dangerous activities.",
+            "Abusive, threatening, or content intended to bully, torment, or ridicule.",
+            "Content that contains sexually explicit material.",
+            "Deprecated: Election filter is not longer supported. The harm category is civic integrity.",
+            "Images that contain hate speech.",
+            "Images that contain dangerous content.",
+            "Images that contain harassment.",
+            "Images that contain sexually explicit content.",
+            "Prompts designed to bypass safety filters."
+          ],
+          "type": "string",
+          "description": "Required. The harm category to be blocked."
+        },
+        "threshold": {
+          "enumDescriptions": [
+            "The harm block threshold is unspecified.",
+            "Block content with a low harm probability or higher.",
+            "Block content with a medium harm probability or higher.",
+            "Block content with a high harm probability.",
+            "Do not block any content, regardless of its harm probability.",
+            "Turn off the safety filter entirely."
+          ],
+          "description": "Required. The threshold for blocking content. If the harm probability exceeds this threshold, the content will be blocked.",
+          "type": "string",
+          "enum": [
+            "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
+            "BLOCK_LOW_AND_ABOVE",
+            "BLOCK_MEDIUM_AND_ABOVE",
+            "BLOCK_ONLY_HIGH",
+            "BLOCK_NONE",
+            "OFF"
+          ]
+        }
+      }
+    },
+    "GenerateContentResponse": {
+      "id": "GoogleCloudAiplatformV1GenerateContentResponse",
+      "properties": {
+        "modelVersion": {
+          "description": "Output only. The model version used to generate the response.",
+          "type": "string",
+          "readOnly": true
+        },
+        "usageMetadata": {
+          "description": "Usage metadata about the response(s).",
+          "$ref": "GoogleCloudAiplatformV1GenerateContentResponseUsageMetadata"
+        },
+        "responseId": {
+          "readOnly": true,
+          "type": "string",
+          "description": "Output only. response_id is used to identify each response. It is the encoding of the event_id."
+        },
+        "candidates": {
+          "readOnly": true,
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1Candidate"
+          },
+          "description": "Output only. Generated candidates."
+        },
+        "promptFeedback": {
+          "$ref": "GoogleCloudAiplatformV1GenerateContentResponsePromptFeedback",
+          "readOnly": true,
+          "description": "Output only. Content filter results for a prompt sent in the request. Note: Sent only in the first stream chunk. Only happens when no candidates were generated due to content violations."
+        },
+        "createTime": {
+          "readOnly": true,
+          "description": "Output only. Timestamp when the request is made to the server.",
+          "format": "google-datetime",
+          "type": "string"
+        }
+      },
+      "description": "Response message for [PredictionService.GenerateContent].",
+      "type": "object"
+    },
+    "Candidate": {
+      "description": "A response candidate generated from the model.",
+      "type": "object",
+      "id": "GoogleCloudAiplatformV1Candidate",
+      "properties": {
+        "logprobsResult": {
+          "readOnly": true,
+          "$ref": "GoogleCloudAiplatformV1LogprobsResult",
+          "description": "Output only. The detailed log probability information for the tokens in this candidate. This is useful for debugging, understanding model uncertainty, and identifying potential \"hallucinations\"."
+        },
+        "safetyRatings": {
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1SafetyRating"
+          },
+          "description": "Output only. A list of ratings for the safety of a response candidate. There is at most one rating per category.",
+          "readOnly": true
+        },
+        "finishMessage": {
+          "readOnly": true,
+          "type": "string",
+          "description": "Output only. Describes the reason the model stopped generating tokens in more detail. This field is returned only when `finish_reason` is set."
+        },
+        "content": {
+          "description": "Output only. The content of the candidate.",
+          "readOnly": true,
+          "$ref": "GoogleCloudAiplatformV1Content"
+        },
+        "avgLogprobs": {
+          "description": "Output only. The average log probability of the tokens in this candidate. This is a length-normalized score that can be used to compare the quality of candidates of different lengths. A higher average log probability suggests a more confident and coherent response.",
+          "format": "double",
+          "type": "number",
+          "readOnly": true
+        },
+        "groundingMetadata": {
+          "readOnly": true,
+          "$ref": "GoogleCloudAiplatformV1GroundingMetadata",
+          "description": "Output only. Metadata returned when grounding is enabled. It contains the sources used to ground the generated content."
+        },
+        "index": {
+          "readOnly": true,
+          "type": "integer",
+          "description": "Output only. The 0-based index of this candidate in the list of generated responses. This is useful for distinguishing between multiple candidates when `candidate_count` > 1.",
+          "format": "int32"
+        },
+        "finishReason": {
+          "enum": [
+            "FINISH_REASON_UNSPECIFIED",
+            "STOP",
+            "MAX_TOKENS",
+            "SAFETY",
+            "RECITATION",
+            "OTHER",
+            "BLOCKLIST",
+            "PROHIBITED_CONTENT",
+            "SPII",
+            "MALFORMED_FUNCTION_CALL",
+            "MODEL_ARMOR",
+            "IMAGE_SAFETY",
+            "IMAGE_PROHIBITED_CONTENT",
+            "IMAGE_RECITATION",
+            "IMAGE_OTHER",
+            "UNEXPECTED_TOOL_CALL",
+            "NO_IMAGE"
+          ],
+          "type": "string",
+          "description": "Output only. The reason why the model stopped generating tokens. If empty, the model has not stopped generating.",
+          "readOnly": true,
+          "enumDescriptions": [
+            "The finish reason is unspecified.",
+            "The model reached a natural stopping point or a configured stop sequence.",
+            "The model generated the maximum number of tokens allowed by the `max_output_tokens` parameter.",
+            "The model stopped generating because the content potentially violates safety policies. NOTE: When streaming, the `content` field is empty if content filters block the output.",
+            "The model stopped generating because the content may be a recitation from a source.",
+            "The model stopped generating for a reason not otherwise specified.",
+            "The model stopped generating because the content contains a term from a configured blocklist.",
+            "The model stopped generating because the content may be prohibited.",
+            "The model stopped generating because the content may contain sensitive personally identifiable information (SPII).",
+            "The model generated a function call that is syntactically invalid and can't be parsed.",
+            "The model response was blocked by Model Armor.",
+            "The generated image potentially violates safety policies.",
+            "The generated image may contain prohibited content.",
+            "The generated image may be a recitation from a source.",
+            "The image generation stopped for a reason not otherwise specified.",
+            "The model generated a function call that is semantically invalid. This can happen, for example, if function calling is not enabled or the generated function is not in the function declaration.",
+            "The model was expected to generate an image, but didn't."
+          ]
+        },
+        "urlContextMetadata": {
+          "readOnly": true,
+          "$ref": "GoogleCloudAiplatformV1UrlContextMetadata",
+          "description": "Output only. Metadata returned when the model uses the `url_context` tool to get information from a user-provided URL."
+        },
+        "citationMetadata": {
+          "description": "Output only. A collection of citations that apply to the generated content.",
+          "$ref": "GoogleCloudAiplatformV1CitationMetadata",
+          "readOnly": true
+        }
+      }
+    },
+    "SafetyRating": {
+      "id": "GoogleCloudAiplatformV1SafetyRating",
+      "properties": {
+        "probability": {
+          "enum": [
+            "HARM_PROBABILITY_UNSPECIFIED",
+            "NEGLIGIBLE",
+            "LOW",
+            "MEDIUM",
+            "HIGH"
+          ],
+          "readOnly": true,
+          "enumDescriptions": [
+            "The harm probability is unspecified.",
+            "The harm probability is negligible.",
+            "The harm probability is low.",
+            "The harm probability is medium.",
+            "The harm probability is high."
+          ],
+          "type": "string",
+          "description": "Output only. The probability of harm for this category."
+        },
+        "blocked": {
+          "type": "boolean",
+          "description": "Output only. Indicates whether the content was blocked because of this rating.",
+          "readOnly": true
+        },
+        "severity": {
+          "description": "Output only. The severity of harm for this category.",
+          "type": "string",
+          "enumDescriptions": [
+            "The harm severity is unspecified.",
+            "The harm severity is negligible.",
+            "The harm severity is low.",
+            "The harm severity is medium.",
+            "The harm severity is high."
+          ],
+          "readOnly": true,
+          "enum": [
+            "HARM_SEVERITY_UNSPECIFIED",
+            "HARM_SEVERITY_NEGLIGIBLE",
+            "HARM_SEVERITY_LOW",
+            "HARM_SEVERITY_MEDIUM",
+            "HARM_SEVERITY_HIGH"
+          ]
+        },
+        "severityScore": {
+          "readOnly": true,
+          "type": "number",
+          "description": "Output only. The severity score of harm for this category.",
+          "format": "float"
+        },
+        "category": {
+          "enum": [
+            "HARM_CATEGORY_UNSPECIFIED",
+            "HARM_CATEGORY_HATE_SPEECH",
+            "HARM_CATEGORY_DANGEROUS_CONTENT",
+            "HARM_CATEGORY_HARASSMENT",
+            "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+            "HARM_CATEGORY_CIVIC_INTEGRITY",
+            "HARM_CATEGORY_IMAGE_HATE",
+            "HARM_CATEGORY_IMAGE_DANGEROUS_CONTENT",
+            "HARM_CATEGORY_IMAGE_HARASSMENT",
+            "HARM_CATEGORY_IMAGE_SEXUALLY_EXPLICIT",
+            "HARM_CATEGORY_JAILBREAK"
+          ],
+          "enumDeprecated": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false
+          ],
+          "type": "string",
+          "description": "Output only. The harm category of this rating.",
+          "readOnly": true,
+          "enumDescriptions": [
+            "Default value. This value is unused.",
+            "Content that promotes violence or incites hatred against individuals or groups based on certain attributes.",
+            "Content that promotes, facilitates, or enables dangerous activities.",
+            "Abusive, threatening, or content intended to bully, torment, or ridicule.",
+            "Content that contains sexually explicit material.",
+            "Deprecated: Election filter is not longer supported. The harm category is civic integrity.",
+            "Images that contain hate speech.",
+            "Images that contain dangerous content.",
+            "Images that contain harassment.",
+            "Images that contain sexually explicit content.",
+            "Prompts designed to bypass safety filters."
+          ]
+        },
+        "overwrittenThreshold": {
+          "enum": [
+            "HARM_BLOCK_THRESHOLD_UNSPECIFIED",
+            "BLOCK_LOW_AND_ABOVE",
+            "BLOCK_MEDIUM_AND_ABOVE",
+            "BLOCK_ONLY_HIGH",
+            "BLOCK_NONE",
+            "OFF"
+          ],
+          "readOnly": true,
+          "enumDescriptions": [
+            "The harm block threshold is unspecified.",
+            "Block content with a low harm probability or higher.",
+            "Block content with a medium harm probability or higher.",
+            "Block content with a high harm probability.",
+            "Do not block any content, regardless of its harm probability.",
+            "Turn off the safety filter entirely."
+          ],
+          "type": "string",
+          "description": "Output only. The overwritten threshold for the safety category of Gemini 2.0 image out. If minors are detected in the output image, the threshold of each safety category will be overwritten if user sets a lower threshold."
+        },
+        "probabilityScore": {
+          "description": "Output only. The probability score of harm for this category.",
+          "format": "float",
+          "type": "number",
+          "readOnly": true
+        }
+      },
+      "type": "object",
+      "description": "A safety rating for a piece of content. The safety rating contains the harm category and the harm probability level."
+    },
+    "UsageMetadata": {
+      "description": "Usage metadata about the content generation request and response. This message provides a detailed breakdown of token usage and other relevant metrics.",
+      "type": "object",
+      "id": "GoogleCloudAiplatformV1GenerateContentResponseUsageMetadata",
+      "properties": {
+        "toolUsePromptTokenCount": {
+          "type": "integer",
+          "description": "Output only. The number of tokens in the results from tool executions, which are provided back to the model as input, if applicable.",
+          "format": "int32",
+          "readOnly": true
+        },
+        "candidatesTokensDetails": {
+          "readOnly": true,
+          "description": "Output only. A detailed breakdown of the token count for each modality in the generated candidates.",
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1ModalityTokenCount"
+          }
+        },
+        "totalTokenCount": {
+          "type": "integer",
+          "description": "The total number of tokens for the entire request. This is the sum of `prompt_token_count`, `candidates_token_count`, `tool_use_prompt_token_count`, and `thoughts_token_count`.",
+          "format": "int32"
+        },
+        "thoughtsTokenCount": {
+          "readOnly": true,
+          "description": "Output only. The number of tokens that were part of the model's generated \"thoughts\" output, if applicable.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "cachedContentTokenCount": {
+          "readOnly": true,
+          "description": "Output only. The number of tokens in the cached content that was used for this request.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "candidatesTokenCount": {
+          "description": "The total number of tokens in the generated candidates.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "promptTokensDetails": {
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1ModalityTokenCount"
+          },
+          "description": "Output only. A detailed breakdown of the token count for each modality in the prompt.",
+          "readOnly": true
+        },
+        "cacheTokensDetails": {
+          "readOnly": true,
+          "description": "Output only. A detailed breakdown of the token count for each modality in the cached content.",
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1ModalityTokenCount"
+          }
+        },
+        "promptTokenCount": {
+          "description": "The total number of tokens in the prompt. This includes any text, images, or other media provided in the request. When `cached_content` is set, this also includes the number of tokens in the cached content.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "toolUsePromptTokensDetails": {
+          "description": "Output only. A detailed breakdown by modality of the token counts from the results of tool executions, which are provided back to the model as input.",
+          "type": "array",
+          "items": {
+            "$ref": "GoogleCloudAiplatformV1ModalityTokenCount"
+          },
+          "readOnly": true
+        },
+        "trafficType": {
+          "type": "string",
+          "description": "Output only. The traffic type for this request.",
+          "readOnly": true,
+          "enumDescriptions": [
+            "Unspecified request traffic type.",
+            "The request was processed using Pay-As-You-Go quota.",
+            "Type for Priority Pay-As-You-Go traffic.",
+            "Type for Flex traffic.",
+            "Type for Provisioned Throughput traffic."
+          ],
+          "enum": [
+            "TRAFFIC_TYPE_UNSPECIFIED",
+            "ON_DEMAND",
+            "ON_DEMAND_PRIORITY",
+            "ON_DEMAND_FLEX",
+            "PROVISIONED_THROUGHPUT"
+          ]
+        }
+      }
+    }
+  },
+  "resources": {
+    "publishers": {
+      "computeTokens": {
+        "path": "v1/{+endpoint}:computeTokens",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:computeTokens",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1ComputeTokensResponse"
+        },
+        "description": "Return a list of tokens based on the input text.",
+        "id": "aiplatform.projects.locations.publishers.models.computeTokens",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1ComputeTokensRequest"
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "parameters": {
+          "endpoint": {
+            "description": "Required. The name of the Endpoint requested to get lists of tokens and token ids.",
+            "type": "string",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform"
+        ]
+      },
+      "predictLongRunning": {
+        "id": "aiplatform.projects.locations.publishers.models.predictLongRunning",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1PredictLongRunningRequest"
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "parameters": {
+          "endpoint": {
+            "type": "string",
+            "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}` or `projects/{project}/locations/{location}/publishers/{publisher}/models/{model}`",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "path": "v1/{+endpoint}:predictLongRunning",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:predictLongRunning",
+        "response": {
+          "$ref": "GoogleLongrunningOperation"
+        },
+        "description": ""
+      },
+      "embedContent": {
+        "path": "v1/{+model}:embedContent",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:embedContent",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1EmbedContentResponse"
+        },
+        "description": "Embed content with multimodal inputs.",
+        "parameterOrder": [
+          "model"
+        ],
+        "parameters": {
+          "model": {
+            "type": "string",
+            "description": "Required. The name of the publisher model requested to serve the prediction. Format: `projects/{project}/locations/{location}/publishers/*/models/*`",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "id": "aiplatform.projects.locations.publishers.models.embedContent",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1EmbedContentRequest"
+        },
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ]
+      },
+      "fetchPredictOperation": {
+        "description": "Fetch an asynchronous online prediction operation.",
+        "path": "v1/{+endpoint}:fetchPredictOperation",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:fetchPredictOperation",
+        "response": {
+          "$ref": "GoogleLongrunningOperation"
+        },
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "id": "aiplatform.projects.locations.publishers.models.fetchPredictOperation",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1FetchPredictOperationRequest"
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "parameters": {
+          "endpoint": {
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path",
+            "required": true,
+            "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}` or `projects/{project}/locations/{location}/publishers/{publisher}/models/{model}`",
+            "type": "string"
+          }
+        }
+      },
+      "serverStreamingPredict": {
+        "id": "aiplatform.projects.locations.publishers.models.serverStreamingPredict",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1StreamingPredictRequest"
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "parameters": {
+          "endpoint": {
+            "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}`",
+            "type": "string",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "path": "v1/{+endpoint}:serverStreamingPredict",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:serverStreamingPredict",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1StreamingPredictResponse"
+        },
+        "description": "Perform a server-side streaming online prediction request for Vertex LLM streaming."
+      },
+      "streamGenerateContent": {
+        "description": "Generate content with multimodal inputs with streaming support.",
+        "path": "v1/{+model}:streamGenerateContent",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:streamGenerateContent",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1GenerateContentResponse"
+        },
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "id": "aiplatform.projects.locations.publishers.models.streamGenerateContent",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1GenerateContentRequest"
+        },
+        "parameterOrder": [
+          "model"
+        ],
+        "parameters": {
+          "model": {
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path",
+            "description": "Required. The fully qualified name of the publisher model or tuned model endpoint to use. Publisher model format: `projects/{project}/locations/{location}/publishers/*/models/*` Tuned model endpoint format: `projects/{project}/locations/{location}/endpoints/{endpoint}`",
+            "type": "string",
+            "required": true
+          }
+        }
+      },
+      "predict": {
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "id": "aiplatform.projects.locations.publishers.models.predict",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1PredictRequest"
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "parameters": {
+          "endpoint": {
+            "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}`",
+            "type": "string",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "description": "",
+        "path": "v1/{+endpoint}:predict",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:predict",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1PredictResponse"
+        }
+      },
+      "generateContent": {
+        "path": "v1/{+model}:generateContent",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:generateContent",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1GenerateContentResponse"
+        },
+        "description": "Generate content with multimodal inputs.",
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1GenerateContentRequest"
+        },
+        "id": "aiplatform.projects.locations.publishers.models.generateContent",
+        "parameters": {
+          "model": {
+            "description": "Required. The fully qualified name of the publisher model or tuned model endpoint to use. Publisher model format: `projects/{project}/locations/{location}/publishers/*/models/*` Tuned model endpoint format: `projects/{project}/locations/{location}/endpoints/{endpoint}`",
+            "type": "string",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "parameterOrder": [
+          "model"
+        ],
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ]
+      },
+      "rawPredict": {
+        "parameters": {
+          "endpoint": {
+            "type": "string",
+            "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}`",
+            "required": true,
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1RawPredictRequest"
+        },
+        "id": "aiplatform.projects.locations.publishers.models.rawPredict",
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "path": "v1/{+endpoint}:rawPredict",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:rawPredict",
+        "response": {
+          "$ref": "GoogleApiHttpBody"
+        },
+        "description": "Perform an online prediction with an arbitrary HTTP payload. The response includes the following HTTP headers: * `X-Vertex-AI-Endpoint-Id`: ID of the Endpoint that served this prediction. * `X-Vertex-AI-Deployed-Model-Id`: ID of the Endpoint's DeployedModel that served this prediction."
+      },
+      "streamRawPredict": {
+        "parameters": {
+          "endpoint": {
+            "required": true,
+            "description": "Required. The name of the Endpoint requested to serve the prediction. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}` or `projects/{project}/locations/{location}/publishers/{publisher}/models/{model}`",
+            "type": "string",
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1StreamRawPredictRequest"
+        },
+        "id": "aiplatform.projects.locations.publishers.models.streamRawPredict",
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform",
+          "https://www.googleapis.com/auth/cloud-platform.read-only"
+        ],
+        "path": "v1/{+endpoint}:streamRawPredict",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:streamRawPredict",
+        "response": {
+          "$ref": "GoogleApiHttpBody"
+        },
+        "description": "Perform a streaming online prediction with an arbitrary HTTP payload."
+      },
+      "countTokens": {
+        "parameters": {
+          "endpoint": {
+            "required": true,
+            "type": "string",
+            "description": "Required. The name of the Endpoint requested to perform token counting. Format: `projects/{project}/locations/{location}/endpoints/{endpoint}`",
+            "pattern": "^projects/[^/]+/locations/[^/]+/publishers/[^/]+/models/[^/]+$",
+            "location": "path"
+          }
+        },
+        "parameterOrder": [
+          "endpoint"
+        ],
+        "request": {
+          "$ref": "GoogleCloudAiplatformV1CountTokensRequest"
+        },
+        "id": "aiplatform.projects.locations.publishers.models.countTokens",
+        "httpMethod": "POST",
+        "scopes": [
+          "https://www.googleapis.com/auth/cloud-platform"
+        ],
+        "path": "v1/{+endpoint}:countTokens",
+        "flatPath": "v1/projects/{projectsId}/locations/{locationsId}/publishers/{publishersId}/models/{modelsId}:countTokens",
+        "response": {
+          "$ref": "GoogleCloudAiplatformV1CountTokensResponse"
+        },
+        "description": "Perform a token counting."
+      }
+    }
+  }
+}
