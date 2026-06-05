@@ -19,6 +19,7 @@
 - [项目基线](./PROJECT_BASELINE.md)
 - [维护基线](./MAINTAINER_BASELINE.md)
 - [上游 Provider 与协议族](./UPSTREAM_PROVIDERS.md)
+- [Provider 协议入口](./PROVIDER_PROTOCOL_ENTRYPOINTS.md)
 - [协议参考](./protocol-reference/README.md)
 
 ## 用户与运维指南

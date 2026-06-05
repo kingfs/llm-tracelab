@@ -194,6 +194,15 @@ export function buildChannelLink(channelID, windowValue = "24h") {
   return query ? `/channels/${encodeURIComponent(channelID)}?${query}` : `/channels/${encodeURIComponent(channelID)}`;
 }
 
+export function buildProviderLink(providerID, windowValue = "24h") {
+  const params = new URLSearchParams();
+  if (windowValue && windowValue !== "24h") {
+    params.set("window", windowValue);
+  }
+  const query = params.toString();
+  return query ? `/providers/${encodeURIComponent(providerID)}?${query}` : `/providers/${encodeURIComponent(providerID)}`;
+}
+
 export function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
   const params = new URLSearchParams();
   if (upstreamWindow && upstreamWindow !== "24h") {

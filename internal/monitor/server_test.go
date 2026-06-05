@@ -3,7 +3,9 @@ package monitor
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1347,6 +1349,50 @@ func TestChannelManagementAPI(t *testing.T) {
 		t.Fatalf("enabledModels = %#v", enabledModels)
 	}
 
+	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/models", strings.NewReader(`{"model":"vip/deepseek-v4-pro","display_name":"DeepSeek Pro","enabled":false}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("create slash model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/vip%2Fdeepseek-v4-pro", strings.NewReader(`{"enabled":true}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("enable slash model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	enabledModels, err = st.ListChannelModels("openai-primary", true)
+	if err != nil {
+		t.Fatalf("ListChannelModels(after slash enable) error = %v", err)
+	}
+	foundSlashModel := false
+	for _, model := range enabledModels {
+		if model.Model == "vip/deepseek-v4-pro" {
+			foundSlashModel = true
+			break
+		}
+	}
+	if !foundSlashModel {
+		t.Fatalf("enabledModels missing slash model: %#v", enabledModels)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/channels/openai-primary/models/vip%2Fdeepseek-v4-pro", nil)
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete slash model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	allModels, err := st.ListChannelModels("openai-primary", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels(after slash delete) error = %v", err)
+	}
+	for _, model := range allModels {
+		if model.Model == "vip/deepseek-v4-pro" {
+			t.Fatalf("slash model still present after delete: %#v", allModels)
+		}
+	}
+
 	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/batch", strings.NewReader(`{"models":["gpt-5","gpt-5"],"enabled":true}`))
 	rr = httptest.NewRecorder()
 	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
@@ -1483,6 +1529,23 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if len(detail.RecentProbeRuns) != 2 || detail.RecentProbeRuns[0].Status != "success" || detail.RecentProbeRuns[0].DiscoveredCount != 2 {
 		t.Fatalf("recent probe runs = %+v", detail.RecentProbeRuns)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/channels/openai-primary", nil)
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("delete channel status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if _, err := st.GetChannelConfig("openai-primary"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetChannelConfig(after delete) error = %v, want sql.ErrNoRows", err)
+	}
+	allModels, err = st.ListChannelModels("openai-primary", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels(after channel delete) error = %v", err)
+	}
+	if len(allModels) != 0 {
+		t.Fatalf("channel models after channel delete = %#v, want none", allModels)
 	}
 }
 

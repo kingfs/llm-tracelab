@@ -1,18 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
-import { DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
+import { DeleteIcon, DetailMetaPill, EditIcon, HomeIcon, InlineTag, ProbeIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { SingleUsageCharts } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, patchJSON, postJSON } from "../lib/api";
+import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { buildTraceLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
-export function ChannelDetailPage() {
-  const { channelID = "" } = useParams();
+export function ProviderDetailPage() {
+  const { providerID = "", channelID = "" } = useParams();
+  const effectiveProviderID = providerID || channelID;
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [refreshTick, setRefreshTick] = useState(0);
@@ -23,21 +25,21 @@ export function ChannelDetailPage() {
   const [editForm, setEditForm] = useState(() => emptyEditForm());
   const params = new URLSearchParams();
   params.set("window", windowValue);
-  const detail = useJSON(apiURL(apiPaths.channel(channelID), params), [channelID, windowValue, refreshTick]);
+  const detail = useJSON(apiURL(apiPaths.provider(effectiveProviderID), params), [effectiveProviderID, windowValue, refreshTick]);
   const presets = useJSON(apiPaths.providerPresets, []);
-  const channel = detail.data || {};
-  const summary = channel.summary || {};
-  const modelsUsage = channel.models_usage || [];
+  const provider = detail.data || {};
+  const summary = provider.summary || {};
+  const modelsUsage = sortProviderModels(provider.models_usage || []);
   const discoveredDisabledModels = modelsUsage.filter((model) => model.source === "discovered" && !model.enabled).map((model) => model.model);
-  const failures = channel.recent_failures || [];
-  const probeRuns = channel.recent_probe_runs || [];
-  const trends = channel.trends || [];
+  const failures = provider.recent_failures || [];
+  const probeRuns = provider.recent_probe_runs || [];
+  const trends = provider.trends || [];
 
   useEffect(() => {
     if (!detail.data) {
       return;
     }
-    setEditForm(editFormFromChannel(detail.data));
+    setEditForm(editFormFromProvider(detail.data));
   }, [detail.data]);
 
   const setWindow = (nextWindow) => {
@@ -50,7 +52,7 @@ export function ChannelDetailPage() {
     setBusy("probe");
     setActionError("");
     try {
-      await postJSON(apiPaths.channelProbe(channelID), { enable_discovered: false });
+      await postJSON(apiPaths.providerProbe(effectiveProviderID), { enable_discovered: false });
       reload();
     } catch (err) {
       setActionError(formatProbeActionError(err));
@@ -59,27 +61,27 @@ export function ChannelDetailPage() {
       setBusy("");
     }
   };
-  const setChannelEnabled = async (enabled) => {
-    setBusy("channel");
+  const setProviderEnabled = async (enabled) => {
+    setBusy("provider");
     setActionError("");
     try {
-      await patchJSON(apiPaths.channel(channelID), { enabled });
+      await patchJSON(apiPaths.provider(effectiveProviderID), { enabled });
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to update channel.");
+      setActionError(err.message || "Unable to update provider.");
     } finally {
       setBusy("");
     }
   };
-  const saveChannel = async () => {
-    setBusy("save-channel");
+  const saveProvider = async () => {
+    setBusy("save-provider");
     setActionError("");
     try {
-      await patchJSON(apiPaths.channel(channelID), channelPayloadFromForm(editForm));
+      await patchJSON(apiPaths.provider(effectiveProviderID), providerPayloadFromForm(editForm));
       setEditOpen(false);
       reload();
     } catch (err) {
-      setActionError(err.message || "Unable to save channel.");
+      setActionError(err.message || "Unable to save provider.");
     } finally {
       setBusy("");
     }
@@ -88,10 +90,40 @@ export function ChannelDetailPage() {
     setBusy(model);
     setActionError("");
     try {
-      await patchJSON(apiPaths.channelModel(channelID, model), { enabled });
+      await patchJSON(apiPaths.providerModel(effectiveProviderID, model), { enabled });
       reload();
     } catch (err) {
       setActionError(err.message || "Unable to update model.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const deleteProvider = async () => {
+    if (!window.confirm(`Delete provider ${provider.name || effectiveProviderID}? Configured models for this provider will also be removed.`)) {
+      return;
+    }
+    setBusy("delete-provider");
+    setActionError("");
+    try {
+      await deleteJSON(apiPaths.provider(effectiveProviderID));
+      navigate("/providers");
+    } catch (err) {
+      setActionError(err.message || "Unable to delete provider.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const deleteModel = async (model) => {
+    if (!window.confirm(`Delete model ${model} from this provider?`)) {
+      return;
+    }
+    setBusy(`delete:${model}`);
+    setActionError("");
+    try {
+      await deleteJSON(apiPaths.providerModel(effectiveProviderID, model));
+      reload();
+    } catch (err) {
+      setActionError(err.message || "Unable to delete model.");
     } finally {
       setBusy("");
     }
@@ -105,7 +137,7 @@ export function ChannelDetailPage() {
     setBusy("add-model");
     setActionError("");
     try {
-      await postJSON(apiPaths.channelModels(channelID), { model, display_name: model, enabled: true });
+      await postJSON(apiPaths.providerModels(effectiveProviderID), { model, display_name: model, enabled: true });
       setModelDraft("");
       reload();
     } catch (err) {
@@ -121,7 +153,7 @@ export function ChannelDetailPage() {
     setBusy(enabled ? "models-enable" : "models-disable");
     setActionError("");
     try {
-      await patchJSON(apiPaths.channelModelsBatch(channelID), { models, enabled });
+      await patchJSON(apiPaths.providerModelsBatch(effectiveProviderID), { models, enabled });
       reload();
     } catch (err) {
       setActionError(err.message || "Unable to update models.");
@@ -135,19 +167,19 @@ export function ChannelDetailPage() {
       <header className="topbar detail-topbar">
         <div className="detail-title-block">
           <div className="detail-heading-row">
-            <h1>{channel.name || channelID}</h1>
+            <h1>{provider.name || effectiveProviderID}</h1>
             <div className="trace-tag-group detail-tag-group">
-              <InlineTag tone={channel.enabled ? "green" : "default"}>{channel.enabled ? "enabled" : "disabled"}</InlineTag>
-              <InlineTag tone={channel.source === "bootstrap" ? "gold" : "green"}>{channelSourceLabel(channel.source)}</InlineTag>
-              <InlineTag tone="accent">{channel.provider_preset || "custom"}</InlineTag>
-              {channel.secret_storage_mode ? <InlineTag tone={channel.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{channel.secret_storage_mode}</InlineTag> : null}
-              {channel.last_probe_status ? <InlineTag tone={channel.last_probe_status === "success" ? "green" : "danger"}>{channel.last_probe_status}</InlineTag> : null}
+              <InlineTag tone={provider.enabled ? "green" : "default"}>{provider.enabled ? "enabled" : "disabled"}</InlineTag>
+              <InlineTag tone={provider.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(provider.source)}</InlineTag>
+              <InlineTag tone="accent">{provider.provider_preset || "custom"}</InlineTag>
+              {provider.secret_storage_mode ? <InlineTag tone={provider.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{provider.secret_storage_mode}</InlineTag> : null}
+              {provider.last_probe_status ? <InlineTag tone={provider.last_probe_status === "success" ? "green" : "danger"}>{provider.last_probe_status}</InlineTag> : null}
             </div>
           </div>
           <div className="detail-meta-strip">
-            <DetailMetaPill label="config source" value={channelSourceLabel(channel.source)} />
-            <DetailMetaPill label="base url" value={channel.base_url || "-"} mono />
-            <DetailMetaPill label="models" value={`${formatCount(channel.enabled_model_count)} / ${formatCount(channel.model_count)}`} />
+            <DetailMetaPill label="config source" value={providerSourceLabel(provider.source)} />
+            <DetailMetaPill label="base url" value={provider.base_url || "-"} mono />
+            <DetailMetaPill label="models" value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
             <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
             <DetailMetaPill label="tokens" value={formatCount(summary.total_tokens)} />
             {summary.missing_usage_request ? <DetailMetaPill label="missing usage" value={formatCount(summary.missing_usage_request)} /> : null}
@@ -155,12 +187,13 @@ export function ChannelDetailPage() {
         </div>
         <div className="topbar-meta detail-toolbar">
           <div className="detail-toolbar-actions">
-            <Link className="icon-button" to="/channels" title="Back to channels" aria-label="Back to channels">
+            <Link className="icon-button" to="/providers" title="Back to providers" aria-label="Back to providers">
               <HomeIcon />
             </Link>
-            <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title="Probe channel" aria-label="Probe channel"><ProbeIcon /></button>
-            <button className="icon-button" type="button" onClick={() => setEditOpen(true)} title="Edit channel" aria-label="Edit channel"><EditIcon /></button>
-            <Switch checked={Boolean(channel.enabled)} onChange={setChannelEnabled} disabled={busy === "channel"} label="Channel enabled" />
+            <button className="icon-button" type="button" onClick={probe} disabled={busy === "probe"} title="Probe provider" aria-label="Probe provider"><ProbeIcon /></button>
+            <button className="icon-button" type="button" onClick={() => setEditOpen(true)} title="Edit provider" aria-label="Edit provider"><EditIcon /></button>
+            <button className="icon-button" type="button" onClick={deleteProvider} disabled={busy === "delete-provider"} title="Delete provider" aria-label="Delete provider"><DeleteIcon /></button>
+            <Switch checked={Boolean(provider.enabled)} onChange={setProviderEnabled} disabled={busy === "provider"} label="Provider enabled" />
           </div>
           <span className="badge">{detail.data ? formatTime(detail.data.updated_at) : "..."}</span>
         </div>
@@ -170,10 +203,10 @@ export function ChannelDetailPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Analytics</p>
-            <h2>Channel usage</h2>
+            <h2>Provider usage</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Channel detail window">
+            <div className="view-toggle" role="tablist" aria-label="Provider detail window">
               {["24h", "7d", "30d", "all"].map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
@@ -190,23 +223,23 @@ export function ChannelDetailPage() {
         </div>
       </section>
 
-      {actionError ? <EmptyState title="Channel action failed" detail={actionError} tone="danger" /> : null}
-      {detail.error ? <EmptyState title="Unable to load channel" detail={detail.error} tone="danger" /> : null}
-      {detail.loading && !detail.data ? <EmptyState title="Loading channel" detail="Collecting channel configuration, models, and usage." /> : null}
+      {actionError ? <EmptyState title="Provider action failed" detail={actionError} tone="danger" /> : null}
+      {detail.error ? <EmptyState title="Unable to load provider" detail={detail.error} tone="danger" /> : null}
+      {detail.loading && !detail.data ? <EmptyState title="Loading provider" detail="Collecting provider configuration, models, and usage." /> : null}
       {detail.data?.secret_storage_mode === "plaintext-local" ? (
         <EmptyState title="Local plaintext secret storage" detail="API keys and secret headers are redacted in Monitor responses, but currently stored in the local SQLite database without encryption." tone="danger" />
       ) : null}
 
       {detail.data && editOpen ? (
-        <EditChannelDialog
-          channel={channel}
+        <EditProviderDialog
+          provider={provider}
           form={editForm}
           presetData={presets.data}
-          saving={busy === "save-channel"}
+          saving={busy === "save-provider"}
           onChange={setEditForm}
-          onReset={() => setEditForm(editFormFromChannel(channel))}
+          onReset={() => setEditForm(editFormFromProvider(provider))}
           onClose={() => setEditOpen(false)}
-          onSave={saveChannel}
+          onSave={saveProvider}
         />
       ) : null}
 
@@ -234,8 +267,17 @@ export function ChannelDetailPage() {
               <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? "Adding" : "Add model"}</button>
               <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? "Enabling" : `Enable new (${formatCount(discoveredDisabledModels.length)})`}</button>
             </form>
-            <div className="channel-model-card-grid">
-              {modelsUsage.length ? modelsUsage.map((model) => <ChannelModelRow key={model.model} item={model} busy={busy === model.model} onToggle={() => setModelEnabled(model.model, !model.enabled)} />) : <EmptyState title="No models" detail="Probe or manually configure models for this channel." compact />}
+            <div className="provider-model-card-grid">
+              {modelsUsage.length ? modelsUsage.map((model) => (
+                <ProviderModelRow
+                  key={model.model}
+                  item={model}
+                  busy={busy === model.model}
+                  deleting={busy === `delete:${model.model}`}
+                  onToggle={() => setModelEnabled(model.model, !model.enabled)}
+                  onDelete={() => deleteModel(model.model)}
+                />
+              )) : <EmptyState title="No models" detail="Probe or manually configure models for this provider." compact />}
             </div>
           </section>
 
@@ -247,11 +289,11 @@ export function ChannelDetailPage() {
               </div>
             </div>
             {probeRuns.length ? (
-              <div className="channel-probe-list">
+              <div className="provider-probe-list">
                 {probeRuns.map((run) => <ProbeRunCard key={run.id} item={run} />)}
               </div>
             ) : (
-              <EmptyState title="No probe runs" detail="Run a channel probe to record discovery status and troubleshooting context." />
+              <EmptyState title="No probe runs" detail="Run a provider probe to record discovery status and troubleshooting context." />
             )}
           </section>
 
@@ -265,7 +307,7 @@ export function ChannelDetailPage() {
             {failures.length ? (
               <div className="upstream-failure-list upstream-failure-list-detail">
                 {failures.map((failure) => (
-                  <Link key={failure.trace_id} className="upstream-failure-card" to={buildTraceLink(failure.trace_id, "channels", "", "", "failure")}>
+                  <Link key={failure.trace_id} className="upstream-failure-card" to={buildTraceLink(failure.trace_id, "providers", "", "", "failure")}>
                     <div className="trace-tag-group">
                       <InlineTag tone="danger">{failure.status_code}</InlineTag>
                       {failure.reason ? <InlineTag>{failure.reason}</InlineTag> : null}
@@ -277,7 +319,7 @@ export function ChannelDetailPage() {
                 ))}
               </div>
             ) : (
-              <EmptyState title="No recent failures" detail="This channel has no failed trace in the selected window." />
+              <EmptyState title="No recent failures" detail="This provider has no failed trace in the selected window." />
             )}
           </section>
         </>
@@ -286,7 +328,9 @@ export function ChannelDetailPage() {
   );
 }
 
-function EditChannelDialog({ channel, form, presetData, saving, onChange, onReset, onClose, onSave }) {
+export const ChannelDetailPage = ProviderDetailPage;
+
+function EditProviderDialog({ provider, form, presetData, saving, onChange, onReset, onClose, onSave }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
   const updateForm = (key, value) => {
@@ -299,24 +343,24 @@ function EditChannelDialog({ channel, form, presetData, saving, onChange, onRese
 
   return createPortal(
     <div className="nav-modal-backdrop" role="presentation">
-      <form className="nav-modal channel-edit-modal" onSubmit={submit}>
+      <form className="nav-modal provider-edit-modal" onSubmit={submit}>
         <div className="nav-modal-head">
           <div>
             <p className="eyebrow">Configuration</p>
-            <h2>Edit channel</h2>
+            <h2>Edit provider</h2>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
-        <div className="channel-form channel-form-modal">
+        <div className="provider-form provider-form-modal">
           <label>Name<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} /></label>
           <label>Provider preset<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
-          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
-          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={channel.api_key_hint ? `keep ${channel.api_key_hint}` : "unchanged"} /></label>
-          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+          <label className="provider-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} /></label>
+          <label className="provider-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder={provider.api_key_hint ? `keep ${provider.api_key_hint}` : "unchanged"} /></label>
+          <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
         </div>
         <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
         {advancedOpen ? (
-          <div className="channel-form channel-form-modal">
+          <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders />
           </div>
         ) : null}
@@ -334,8 +378,8 @@ function EditChannelDialog({ channel, form, presetData, saving, onChange, onRese
 function ProbeRunCard({ item }) {
   const failed = item.status !== "success";
   return (
-    <div className={failed ? "channel-probe-card channel-probe-card-failed" : "channel-probe-card"}>
-      <div className="channel-probe-card-head">
+    <div className={failed ? "provider-probe-card provider-probe-card-failed" : "provider-probe-card"}>
+      <div className="provider-probe-card-head">
         <div className="trace-tag-group">
           <InlineTag tone={failed ? "danger" : "green"}>{item.status || "unknown"}</InlineTag>
           {item.failure_reason ? <InlineTag tone="accent">{item.failure_reason}</InlineTag> : null}
@@ -343,29 +387,37 @@ function ProbeRunCard({ item }) {
         </div>
         <span>{formatDateTime(item.completed_at || item.started_at)}</span>
       </div>
-      <div className="channel-probe-meta">
+      <div className="provider-probe-meta">
         <span>{formatCount(item.discovered_count)} discovered</span>
         <span>{formatCount(item.enabled_count)} enabled</span>
         <span>{formatCount(item.duration_ms)} ms</span>
       </div>
-      {item.endpoint ? <div className="channel-probe-endpoint">{item.endpoint}</div> : null}
+      {item.endpoint ? <div className="provider-probe-endpoint">{item.endpoint}</div> : null}
       {item.error_text ? <div className="upstream-failure-detail">{item.error_text}</div> : null}
-      {item.retry_hint ? <div className="channel-probe-hint">{item.retry_hint}</div> : null}
+      {item.retry_hint ? <div className="provider-probe-hint">{item.retry_hint}</div> : null}
     </div>
   );
 }
 
-function ChannelModelRow({ item, busy, onToggle }) {
+function ProviderModelRow({ item, busy, deleting, onToggle, onDelete }) {
   const summary = item.summary || {};
   const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
+  const canDelete = item.source !== "trace";
   return (
-    <div className="channel-model-card">
-      <div className="channel-model-card-head">
+    <div className="provider-model-card">
+      <div className="provider-model-card-head">
         <div>
           <strong>{item.model}</strong>
           <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : modelSourceLabel(item.source)}</span>
         </div>
-        <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} />
+        <div className="action-group">
+          <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} />
+          {canDelete ? (
+            <button className="icon-button" type="button" onClick={onDelete} disabled={deleting} title="Delete model" aria-label={`Delete ${item.model}`}>
+              <DeleteIcon />
+            </button>
+          ) : null}
+        </div>
       </div>
       <div className="trace-tag-group">
         <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? "enabled" : "disabled"}</InlineTag>
@@ -380,7 +432,21 @@ function ChannelModelRow({ item, busy, onToggle }) {
   );
 }
 
-function channelSourceLabel(source) {
+function sortProviderModels(items) {
+  return items.slice().sort((left, right) => {
+    if (Boolean(left.enabled) !== Boolean(right.enabled)) {
+      return left.enabled ? -1 : 1;
+    }
+    const leftRequests = Number(left.summary?.request_count || 0);
+    const rightRequests = Number(right.summary?.request_count || 0);
+    if (leftRequests !== rightRequests) {
+      return rightRequests - leftRequests;
+    }
+    return String(left.model || "").localeCompare(String(right.model || ""));
+  });
+}
+
+function providerSourceLabel(source) {
   switch (source) {
     case "bootstrap":
       return "bootstrap";
@@ -460,25 +526,25 @@ function emptyEditForm() {
   };
 }
 
-function editFormFromChannel(channel = {}) {
-  const headers = channel.headers || {};
+function editFormFromProvider(provider = {}) {
+  const headers = provider.headers || {};
   return {
-    name: channel.name || "",
-    base_url: channel.base_url || "",
-    provider_preset: channel.provider_preset || "",
-    protocol_family: channel.protocol_family || "",
-    routing_profile: channel.routing_profile || "",
-    api_version: channel.api_version || "",
-    deployment: channel.deployment || "",
-    project: channel.project || "",
-    location: channel.location || "",
-    model_resource: channel.model_resource || "",
+    name: provider.name || "",
+    base_url: provider.base_url || "",
+    provider_preset: provider.provider_preset || "",
+    protocol_family: provider.protocol_family || "",
+    routing_profile: provider.routing_profile || "",
+    api_version: provider.api_version || "",
+    deployment: provider.deployment || "",
+    project: provider.project || "",
+    location: provider.location || "",
+    model_resource: provider.model_resource || "",
     api_key: "",
-    priority: channel.priority ?? 0,
-    weight: channel.weight ?? 1,
-    capacity_hint: channel.capacity_hint ?? 1,
-    model_discovery: channel.model_discovery || "list_models",
-    allow_unknown_models: Boolean(channel.allow_unknown_models),
+    priority: provider.priority ?? 0,
+    weight: provider.weight ?? 1,
+    capacity_hint: provider.capacity_hint ?? 1,
+    model_discovery: provider.model_discovery || "list_models",
+    allow_unknown_models: Boolean(provider.allow_unknown_models),
     headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
   };
 }
@@ -487,7 +553,7 @@ function setEditValue(setEditForm, key, value) {
   setEditForm((current) => ({ ...current, [key]: value }));
 }
 
-function channelPayloadFromForm(form) {
+function providerPayloadFromForm(form) {
   const payload = {
     name: form.name,
     base_url: form.base_url,

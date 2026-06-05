@@ -44,6 +44,12 @@ export const apiPaths = {
   channelModels: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models`,
   channelModelsBatch: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models/batch`,
   channelModel: (channelID, model) => `/api/channels/${encodeURIComponent(channelID)}/models/${encodeURIComponent(model)}`,
+  providers: "/api/channels",
+  provider: (providerID) => `/api/channels/${encodeURIComponent(providerID)}`,
+  providerProbe: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/probe`,
+  providerModels: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/models`,
+  providerModelsBatch: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/models/batch`,
+  providerModel: (providerID, model) => `/api/channels/${encodeURIComponent(providerID)}/models/${encodeURIComponent(model)}`,
   providerPresets: "/api/provider-presets",
   localSecretKey: "/api/secrets/local-key",
   localSecretKeyExport: "/api/secrets/local-key?export=1",
@@ -105,6 +111,13 @@ export function patchJSON(path, payload, options = {}) {
       ...(options.headers || {}),
     },
     body: JSON.stringify(payload),
+  });
+}
+
+export function deleteJSON(path, options = {}) {
+  return requestJSON(path, {
+    ...options,
+    method: "DELETE",
   });
 }
 

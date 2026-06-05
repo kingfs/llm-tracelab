@@ -101,16 +101,16 @@ test("models marketplace and detail render", async ({ page }) => {
   await expect(page.getByText("openai-primary")).toBeVisible();
 });
 
-test("channel management renders and supports core actions", async ({ page }) => {
-  await page.goto("/channels");
-  await expect(page.getByRole("heading", { name: "Channels", exact: true })).toBeVisible();
+test("provider management renders and supports core actions", async ({ page }) => {
+  await page.goto("/providers");
+  await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Channel secret storage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Provider secret storage" })).toBeVisible();
   await expect(page.getByText("abc123")).toBeVisible();
   await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
-  await page.getByRole("button", { name: "New channel" }).click();
-  await expect(page.getByRole("heading", { name: "Create channel" })).toBeVisible();
+  await page.getByRole("button", { name: "New provider" }).click();
+  await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
   await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
@@ -125,11 +125,11 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
 
-  await page.getByRole("button", { name: "Edit channel" }).click();
-  await expect(page.getByRole("heading", { name: "Edit channel" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit provider" }).click();
+  await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
-  await expect(page.getByLabel("Channel enabled")).toBeVisible();
-  await expect(page.locator(".channel-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
+  await expect(page.getByLabel("Provider enabled")).toBeVisible();
+  await expect(page.locator(".provider-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
   await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
@@ -140,7 +140,7 @@ test("channel management renders and supports core actions", async ({ page }) =>
   await page.getByRole("button", { name: "Add model" }).click();
   await expect(page.getByRole("button", { name: "Adding" })).toBeHidden();
 
-  await page.getByRole("button", { name: "Probe channel" }).click();
+  await page.getByRole("button", { name: "Probe provider" }).click();
   await expect(page.getByText("auth_error").first()).toBeVisible();
   await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
 
@@ -174,6 +174,15 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
   await page.getByRole("button", { name: "Reanalyze" }).click();
   await expect(page.getByText(/Reanalysis job #301 completed/)).toBeVisible();
+});
+
+test("connect page renders protocol entrypoint examples", async ({ page }) => {
+  await page.goto("/connect");
+  await expect(page.getByRole("heading", { name: "Connect" })).toBeVisible();
+  await expect(page.getByText("OpenAI-compatible Chat Completions")).toBeVisible();
+  await expect(page.getByText("OpenAI Responses / Codex")).toBeVisible();
+  await expect(page.getByText("Anthropic Messages / Claude Code")).toBeVisible();
+  await expect(page.getByText("/anthropic/messages").first()).toBeVisible();
 });
 
 test("analysis page renders runs and reanalysis jobs", async ({ page }) => {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1674,19 +1675,40 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService
 				handleChannelModels(w, r, st, rtr, channelService, channelID)
 				return
 			}
-			if len(parts) == 3 {
-				if parts[2] == "batch" {
-					handleChannelModelsBatch(w, r, st, rtr, channelService, channelID)
-					return
-				}
-				handleChannelModel(w, r, st, rtr, channelService, channelID, parts[2])
+			modelPath, ok := channelModelPathSegment(r, channelID)
+			if !ok {
+				http.NotFound(w, r)
 				return
 			}
-			http.NotFound(w, r)
+			if modelPath == "batch" {
+				handleChannelModelsBatch(w, r, st, rtr, channelService, channelID)
+				return
+			}
+			handleChannelModel(w, r, st, rtr, channelService, channelID, modelPath)
 		default:
 			http.NotFound(w, r)
 		}
 	}
+}
+
+func channelModelPathSegment(r *http.Request, channelID string) (string, bool) {
+	if r == nil || r.URL == nil {
+		return "", false
+	}
+	prefix := "/api/channels/" + url.PathEscape(channelID) + "/models/"
+	escapedPath := r.URL.EscapedPath()
+	if !strings.HasPrefix(escapedPath, prefix) {
+		return "", false
+	}
+	escapedModel := strings.Trim(escapedPath[len(prefix):], "/")
+	if escapedModel == "" || strings.Contains(escapedModel, "/") {
+		return "", false
+	}
+	model, err := url.PathUnescape(escapedModel)
+	if err != nil || strings.TrimSpace(model) == "" {
+		return "", false
+	}
+	return model, true
 }
 
 func decodeChannelProbeRequest(r *http.Request) (channelProbeRequest, error) {
@@ -1749,6 +1771,20 @@ func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store
 		}
 		models, _ := st.ListChannelModels(channelID, false)
 		writeJSON(w, http.StatusOK, channelItemFromRecord(st, record, len(models), enabledChannelModelCount(models, channelID)))
+	case http.MethodDelete:
+		if err := st.DeleteChannelConfig(channelID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "channel not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 	default:
 		http.NotFound(w, r)
 	}
@@ -1826,8 +1862,24 @@ func handleChannelModelsBatch(w http.ResponseWriter, r *http.Request, st *store.
 }
 
 func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string, model string) {
-	if r.Method != http.MethodPatch {
+	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
 		http.NotFound(w, r)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if err := st.DeleteChannelModel(channelID, model); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "model not found"})
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
 	var req channelModelPatchRequest

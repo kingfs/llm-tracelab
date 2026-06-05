@@ -1173,6 +1173,7 @@ a:focus-visible {
 }
 
 .channel-grid,
+.provider-grid,
 .model-market-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1574,8 +1575,10 @@ a:focus-visible {
 :root[data-theme="light"] .failure-context-card,
 :root[data-theme="light"] .failure-node,
 :root[data-theme="light"] .channel-form-check,
+:root[data-theme="light"] .provider-form-check,
 :root[data-theme="light"] .channel-model-row,
 :root[data-theme="light"] .channel-model-card,
+:root[data-theme="light"] .provider-model-card,
 :root[data-theme="light"] .model-market-card,
 :root[data-theme="light"] .model-market-metric,
 :root[data-theme="light"] .model-catalog-row,
@@ -1588,6 +1591,9 @@ a:focus-visible {
 :root[data-theme="light"] .channel-form input,
 :root[data-theme="light"] .channel-form select,
 :root[data-theme="light"] .channel-form textarea,
+:root[data-theme="light"] .provider-form input,
+:root[data-theme="light"] .provider-form select,
+:root[data-theme="light"] .provider-form textarea,
 :root[data-theme="light"] .token-form input,
 :root[data-theme="light"] .auth-panel input {
   border-color: rgba(0, 0, 0, 0.12);
@@ -1615,6 +1621,7 @@ a:focus-visible {
 
 :root[data-theme="light"] .upstream-card,
 :root[data-theme="light"] .channel-probe-card,
+:root[data-theme="light"] .provider-probe-card,
 :root[data-theme="light"] .usage-chart-panel,
 :root[data-theme="light"] .line-chart-card,
 :root[data-theme="light"] .empty-state {
@@ -1639,8 +1646,10 @@ a:focus-visible {
   :root[data-theme="system"] .failure-context-card,
   :root[data-theme="system"] .failure-node,
   :root[data-theme="system"] .channel-form-check,
+  :root[data-theme="system"] .provider-form-check,
   :root[data-theme="system"] .channel-model-row,
   :root[data-theme="system"] .channel-model-card,
+  :root[data-theme="system"] .provider-model-card,
   :root[data-theme="system"] .model-market-card,
   :root[data-theme="system"] .model-market-metric,
   :root[data-theme="system"] .model-catalog-row,
@@ -1653,6 +1662,9 @@ a:focus-visible {
   :root[data-theme="system"] .channel-form input,
   :root[data-theme="system"] .channel-form select,
   :root[data-theme="system"] .channel-form textarea,
+  :root[data-theme="system"] .provider-form input,
+  :root[data-theme="system"] .provider-form select,
+  :root[data-theme="system"] .provider-form textarea,
   :root[data-theme="system"] .token-form input,
   :root[data-theme="system"] .auth-panel input {
     border-color: rgba(0, 0, 0, 0.12);
@@ -1676,6 +1688,7 @@ a:focus-visible {
   :root[data-theme="system"] .tool-list-item:hover,
   :root[data-theme="system"] .channel-model-row:hover,
   :root[data-theme="system"] .channel-model-card:hover,
+  :root[data-theme="system"] .provider-model-card:hover,
   :root[data-theme="system"] .model-market-card:hover,
   :root[data-theme="system"] .model-catalog-row:hover {
     background: #ffffff;
@@ -1683,6 +1696,7 @@ a:focus-visible {
 
   :root[data-theme="system"] .upstream-card,
   :root[data-theme="system"] .channel-probe-card,
+  :root[data-theme="system"] .provider-probe-card,
   :root[data-theme="system"] .usage-chart-panel,
   :root[data-theme="system"] .line-chart-card,
   :root[data-theme="system"] .empty-state {
@@ -3206,10 +3220,15 @@ a:focus-visible {
   min-width: 0;
 }
 
-.channel-model-card-head > div {
+.channel-model-card-head > div:first-child {
   display: grid;
   gap: 4px;
   min-width: 0;
+}
+
+.channel-model-card-head .action-group {
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 .channel-model-card strong {
@@ -3301,6 +3320,197 @@ a:focus-visible {
 
 .channel-probe-hint {
   color: var(--text);
+}
+
+.provider-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.provider-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.provider-form input,
+.provider-form select,
+.provider-form textarea {
+  min-height: 42px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: 0 12px;
+  background: rgba(2, 8, 23, 0.42);
+  color: var(--text);
+}
+
+.provider-form select {
+  appearance: auto;
+}
+
+.provider-form-modal {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.provider-create-modal {
+  width: min(620px, 100%);
+}
+
+.provider-edit-modal {
+  width: min(720px, 100%);
+}
+
+.provider-form textarea {
+  min-height: 112px;
+  padding: 10px 12px;
+  resize: vertical;
+  font-family: SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.provider-form-wide {
+  grid-column: 1 / -1;
+}
+
+.provider-form-check {
+  display: flex !important;
+  align-items: center;
+  grid-template-columns: none !important;
+  min-height: 42px;
+}
+
+.provider-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.provider-model-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.provider-model-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.provider-model-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.provider-model-card-head > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.provider-model-card-head .action-group {
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.provider-model-card strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-probe-list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-probe-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.provider-probe-card-failed {
+  border-color: rgba(248, 113, 113, 0.46);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.provider-probe-card-head,
+.provider-probe-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.provider-probe-card-head > span,
+.provider-probe-meta span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.provider-probe-meta {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.provider-probe-endpoint,
+.provider-probe-hint {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.provider-probe-hint {
+  color: var(--text);
+}
+
+.provider-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.provider-entry-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.provider-entry-card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.connect-code {
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre;
 }
 
 .usage-chart-grid {

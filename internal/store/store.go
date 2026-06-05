@@ -730,6 +730,31 @@ func (s *Store) GetChannelConfig(channelID string) (ChannelConfigRecord, error) 
 	return s.channelConfigRecordFromEnt(row)
 }
 
+func (s *Store) DeleteChannelConfig(channelID string) error {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return fmt.Errorf("channel id is required")
+	}
+
+	ctx := context.Background()
+	tx, err := s.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ChannelModel.Delete().Where(channelmodel.ChannelIDEQ(channelID)).Exec(ctx); err != nil {
+		return err
+	}
+	if err := tx.ChannelConfig.DeleteOneID(channelID).Exec(ctx); err != nil {
+		if dao.IsNotFound(err) {
+			return sql.ErrNoRows
+		}
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRecord, error) {
 	record.ID = strings.TrimSpace(record.ID)
 	record.Name = strings.TrimSpace(record.Name)
@@ -1001,6 +1026,27 @@ func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled b
 		SetLastSeenAt(time.Now().UTC()).
 		Save(context.Background())
 	return err
+}
+
+func (s *Store) DeleteChannelModel(channelID string, model string) error {
+	channelID = strings.TrimSpace(channelID)
+	model = strings.ToLower(strings.TrimSpace(model))
+	if channelID == "" {
+		return fmt.Errorf("channel id is required")
+	}
+	if model == "" {
+		return fmt.Errorf("model is required")
+	}
+	affected, err := s.client.ChannelModel.Delete().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		Exec(context.Background())
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) UpsertModelCatalog(record ModelCatalogRecord) error {
@@ -1304,6 +1350,9 @@ func (s *Store) GetChannelModelUsage(channelID string, since time.Time) ([]Chann
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Enabled != out[j].Enabled {
+			return out[i].Enabled
+		}
 		if out[i].Summary.TotalTokens != out[j].Summary.TotalTokens {
 			return out[i].Summary.TotalTokens > out[j].Summary.TotalTokens
 		}

@@ -6,6 +6,7 @@ import { AnalysisPage } from "./routes/AnalysisPage";
 import { AuditPage } from "./routes/AuditPage";
 import { ChannelDetailPage } from "./routes/ChannelDetailPage";
 import { ChannelsPage } from "./routes/ChannelsPage";
+import { ConnectPage } from "./routes/ConnectPage";
 import { EventsPage } from "./routes/EventsPage";
 import { ModelDetailPage } from "./routes/ModelDetailPage";
 import { ModelsPage } from "./routes/ModelsPage";
@@ -114,8 +115,11 @@ function App() {
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/models/:model" element={<ModelDetailPage />} />
-        <Route path="/channels" element={<ChannelsPage />} />
+        <Route path="/providers" element={<ChannelsPage />} />
+        <Route path="/providers/:providerID" element={<ChannelDetailPage />} />
+        <Route path="/channels" element={<Navigate to="/providers" replace />} />
         <Route path="/channels/:channelID" element={<ChannelDetailPage />} />
+        <Route path="/connect" element={<ConnectPage />} />
         <Route path="/routing" element={<RoutingPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/tokens" element={<TokensPage />} />

@@ -11,7 +11,8 @@ const navItems = [
   { to: "/traces", label: "Traces", icon: "activity" },
   { to: "/audit", label: "Audit", icon: "shield" },
   { to: "/models", label: "Models", icon: "box" },
-  { to: "/channels", label: "Channels", icon: "plug" },
+  { to: "/providers", label: "Providers", icon: "plug" },
+  { to: "/connect", label: "Connect", icon: "terminal" },
   { to: "/routing", label: "Routing", icon: "route" },
   { to: "/analysis", label: "Analysis", icon: "spark" },
   { to: "/tokens", label: "Tokens", icon: "key" },
@@ -170,6 +171,8 @@ function NavIcon({ name }) {
       return <svg {...common}><path d="m12 3 8 4.4v9.2L12 21l-8-4.4V7.4L12 3Z" /><path d="M4.5 7.7 12 12l7.5-4.3" /><path d="M12 12v8.5" /></svg>;
     case "plug":
       return <svg {...common}><path d="M9 7V3" /><path d="M15 7V3" /><path d="M7 7h10v4a5 5 0 0 1-10 0V7Z" /><path d="M12 16v5" /><path d="M8 21h8" /></svg>;
+    case "terminal":
+      return <svg {...common}><path d="m5 7 5 5-5 5" /><path d="M12 17h7" /></svg>;
     case "spark":
       return <svg {...common}><path d="m12 3 1.7 5.2L19 10l-5.3 1.8L12 17l-1.7-5.2L5 10l5.3-1.8L12 3Z" /><path d="M19 15v4" /><path d="M21 17h-4" /></svg>;
     case "key":

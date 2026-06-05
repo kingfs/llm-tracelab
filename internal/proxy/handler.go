@@ -368,6 +368,7 @@ func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router,
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	normalizeClientEntrypoint(r)
 
 	if !auth.RequestAuthorized(r, h.authVerifier) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-proxy"`)

@@ -11,6 +11,7 @@ var (
 	Version = "dev"
 	Commit  = "none"
 	Date    = "unknown"
+	Branch  = "unknown"
 )
 
 type versionInfo struct {
@@ -18,6 +19,7 @@ type versionInfo struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
 	Date    string `json:"date"`
+	Branch  string `json:"branch"`
 }
 
 func newVersionCommand(runtime *cliRuntime) *cobra.Command {
@@ -31,9 +33,10 @@ func newVersionCommand(runtime *cliRuntime) *cobra.Command {
 				Version: Version,
 				Commit:  Commit,
 				Date:    Date,
+				Branch:  Branch,
 			}
 			return writeCLIResult(cmd.OutOrStdout(), runtime.outputFormat(), "version", info, func(w io.Writer) error {
-				_, err := fmt.Fprintf(w, "%s version=%s commit=%s date=%s\n", cliName, Version, Commit, Date)
+				_, err := fmt.Fprintf(w, "%s version=%s commit=%s date=%s branch=%s\n", cliName, Version, Commit, Date, Branch)
 				return err
 			})
 		},

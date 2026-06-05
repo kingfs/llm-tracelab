@@ -151,6 +151,19 @@ export function EditIcon() {
   );
 }
 
+export function DeleteIcon() {
+  return (
+    <IconFrame>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 7h14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M10 11v6M14 11v6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M8 7l1-3h6l1 3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M7 7l1 14h8l1-14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    </IconFrame>
+  );
+}
+
 export function ProbeIcon() {
   return (
     <IconFrame>

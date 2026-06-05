@@ -34,6 +34,7 @@ Current normalized endpoints:
 
 Important details:
 
+- client `/responses` is accepted as a TraceLab entrypoint alias and is normalized to `/v1/responses`
 - `upstream.base_url` should include the provider's API prefix such as `/v1`, `/api/v1`, `/openai`, or `/openai/v1`.
 - The proxy records and parses Chat Completions and Responses. Embeddings are routed/recorded but are not a deep Observation IR parser target today.
 - Responses and Chat Completions are different OpenAI surfaces. Codex traffic commonly uses `/v1/responses`.
@@ -44,6 +45,7 @@ Anthropic Messages routing is used for Claude-style `/v1/messages` traffic.
 
 Current behavior:
 
+- client `/anthropic/messages` and `/anthropic/v1/messages` are accepted as TraceLab entrypoint aliases and normalized to `/v1/messages`
 - request and response bodies are passed through unchanged
 - auth headers are rewritten to Anthropic-style `x-api-key`
 - `anthropic-version` is injected from upstream config when missing

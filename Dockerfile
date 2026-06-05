@@ -12,6 +12,10 @@ ARG NO_PROXY
 ARG http_proxy
 ARG https_proxy
 ARG no_proxy
+ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_DATE=unknown
+ARG BRANCH=unknown
 
 RUN apk add --no-cache ca-certificates tzdata
 
@@ -21,7 +25,9 @@ RUN go env -w GOPROXY="${GOPROXY}" GOSUMDB="${GOSUMDB}" && \
 
 COPY . .
 
-RUN go build -trimpath -ldflags="-s -w" -o /out/llm-tracelab ./cmd/server
+RUN go build -trimpath \
+	-ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.Date=${BUILD_DATE} -X main.Branch=${BRANCH}" \
+	-o /out/llm-tracelab ./cmd/server
 
 FROM alpine:3.22 AS runtime
 

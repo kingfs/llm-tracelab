@@ -2,13 +2,13 @@ import React, { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
-import { InlineTag, PlusIcon } from "../components/common/Badges";
+import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, downloadBlob, patchJSON, postJSON } from "../lib/api";
-import { buildChannelLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { apiPaths, apiURL, deleteJSON, downloadBlob, patchJSON, postJSON } from "../lib/api";
+import { buildProviderLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_FORM = {
   name: "",
@@ -30,7 +30,7 @@ const DEFAULT_FORM = {
   allow_unknown_models: false,
 };
 
-export function ChannelsPage() {
+export function ProvidersPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [refreshTick, setRefreshTick] = useState(0);
@@ -38,12 +38,12 @@ export function ChannelsPage() {
   const [secretTick, setSecretTick] = useState(0);
   const params = new URLSearchParams();
   params.set("window", windowValue);
-  const channels = useJSON(apiURL(apiPaths.channels, params), [windowValue, refreshTick]);
+  const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue, refreshTick]);
   const secret = useJSON(apiPaths.localSecretKey, [secretTick]);
   const presets = useJSON(apiPaths.providerPresets, []);
-  const items = channels.data?.items || [];
-  const totals = useMemo(() => summarizeChannels(items), [items]);
-  const chartItems = useMemo(() => buildChannelTrendItems(items), [items]);
+  const items = providers.data?.items || [];
+  const totals = useMemo(() => summarizeProviders(items), [items]);
+  const chartItems = useMemo(() => buildProviderTrendItems(items), [items]);
   const chartSeries = useMemo(() => items.map((item) => ({ key: item.id, name: item.name || item.id })), [items]);
 
   const setWindow = (nextWindow) => {
@@ -56,15 +56,15 @@ export function ChannelsPage() {
     <div className="shell shell-list">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Channel management</p>
-          <h1>Channels</h1>
+          <p className="eyebrow">Provider management</p>
+          <h1>Providers</h1>
         </div>
         <div className="topbar-meta">
           <button className="ghost-button active icon-text-button" type="button" onClick={() => setFormOpen(true)}>
             <PlusIcon />
-            <span>New channel</span>
+            <span>New provider</span>
           </button>
-          <span className="badge">{channels.data?.refreshed_at ? formatTime(channels.data.refreshed_at) : "..."}</span>
+          <span className="badge">{providers.data?.refreshed_at ? formatTime(providers.data.refreshed_at) : "..."}</span>
         </div>
       </header>
 
@@ -72,10 +72,10 @@ export function ChannelsPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Overview</p>
-            <h2>Managed upstream channels</h2>
+            <h2>Managed upstream providers</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Channel analytics window">
+            <div className="view-toggle" role="tablist" aria-label="Provider analytics window">
               {["24h", "7d", "30d", "all"].map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
@@ -85,18 +85,18 @@ export function ChannelsPage() {
           </div>
         </div>
         <div className="hero-grid hero-grid-compact">
-          <StatCard label="Channels" value={formatCount(items.length)} />
+          <StatCard label="Providers" value={formatCount(items.length)} />
           <StatCard label="Enabled" value={formatCount(totals.enabled)} />
           <StatCard label="Requests" value={formatCount(totals.requests)} />
           <StatCard label="Tokens" value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing)} />
         </div>
         <div className="usage-chart-grid chart-grid-two">
           <section className="usage-chart-panel">
-            <div className="breakdown-title">Requests by channel</div>
+            <div className="breakdown-title">Requests by provider</div>
             <MultiLineChart items={chartItems} series={chartSeries} metric="request_count" />
           </section>
           <section className="usage-chart-panel">
-            <div className="breakdown-title">Tokens by channel</div>
+            <div className="breakdown-title">Tokens by provider</div>
             <MultiLineChart items={chartItems} series={chartSeries} metric="total_tokens" />
           </section>
         </div>
@@ -104,15 +104,15 @@ export function ChannelsPage() {
 
       <LocalSecretPanel data={secret.data} loading={secret.loading} error={secret.error} onRefresh={() => setSecretTick((tick) => tick + 1)} />
 
-      {channels.error ? <EmptyState title="Unable to load channels" detail={channels.error} tone="danger" /> : null}
-      {channels.loading && !channels.data ? <EmptyState title="Loading channels" detail="Collecting channel configuration and usage summary." /> : null}
-      {channels.data ? (
-        <section className="channel-grid">
-          {items.length ? items.map((item) => <ChannelCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title="No channels" detail="Create a channel from Monitor. YAML upstreams are only used as first-run bootstrap input." />}
+      {providers.error ? <EmptyState title="Unable to load providers" detail={providers.error} tone="danger" /> : null}
+      {providers.loading && !providers.data ? <EmptyState title="Loading providers" detail="Collecting provider configuration and usage summary." /> : null}
+      {providers.data ? (
+        <section className="provider-grid">
+          {items.length ? items.map((item) => <ProviderCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title="No providers" detail="Create a provider from Monitor. YAML upstreams are only used as first-run bootstrap input." />}
         </section>
       ) : null}
       {formOpen ? (
-        <CreateChannelDialog
+        <CreateProviderDialog
           presetData={presets.data}
           onClose={() => setFormOpen(false)}
           onCreated={() => {
@@ -125,7 +125,9 @@ export function ChannelsPage() {
   );
 }
 
-function CreateChannelDialog({ presetData, onClose, onCreated }) {
+export const ChannelsPage = ProvidersPage;
+
+function CreateProviderDialog({ presetData, onClose, onCreated }) {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -140,10 +142,10 @@ function CreateChannelDialog({ presetData, onClose, onCreated }) {
     setSaving(true);
     setError("");
     try {
-      await postJSON(apiPaths.channels, normalizeChannelPayload(form));
+      await postJSON(apiPaths.providers, normalizeProviderPayload(form));
       onCreated();
     } catch (err) {
-      setError(err.message || "Unable to save channel.");
+      setError(err.message || "Unable to save provider.");
     } finally {
       setSaving(false);
     }
@@ -151,31 +153,31 @@ function CreateChannelDialog({ presetData, onClose, onCreated }) {
 
   return createPortal(
     <div className="nav-modal-backdrop" role="presentation">
-      <form className="nav-modal channel-create-modal" onSubmit={submit}>
+      <form className="nav-modal provider-create-modal" onSubmit={submit}>
         <div className="nav-modal-head">
           <div>
             <p className="eyebrow">Configuration</p>
-            <h2>Create channel</h2>
+            <h2>Create provider</h2>
           </div>
           <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
         </div>
-        <div className="channel-form channel-form-modal">
+        <div className="provider-form provider-form-modal">
           <label>Name<input required value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="OpenAI Primary" /></label>
           <label>Provider preset<select value={form.provider_preset} onChange={(event) => updateForm("provider_preset", event.target.value)}>{presetState.options.map((preset) => <option key={preset} value={preset}>{preset}</option>)}</select></label>
-          <label className="channel-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
-          <label className="channel-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
-          <label className="channel-form-check channel-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
+          <label className="provider-form-wide">Base URL<input required value={form.base_url} onChange={(event) => updateForm("base_url", event.target.value)} placeholder="https://api.openai.com/v1" /></label>
+          <label className="provider-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
+          <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
         </div>
         <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
         {advancedOpen ? (
-          <div className="channel-form channel-form-modal">
+          <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
           </div>
         ) : null}
         {error ? <p className="auth-error">{error}</p> : null}
         <div className="nav-modal-actions">
           <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
-          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Create channel"}</button>
+          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Create provider"}</button>
         </div>
       </form>
     </div>,
@@ -231,7 +233,7 @@ function LocalSecretPanel({ data, loading, error, onRefresh }) {
       <div className="panel-head">
         <div>
           <p className="eyebrow">Local secret key</p>
-          <h2>Channel secret storage</h2>
+          <h2>Provider secret storage</h2>
         </div>
         <div className="trace-tag-group">
           <InlineTag tone={readable ? "green" : "danger"}>{loading && !data ? "loading" : readable ? "readable" : "attention"}</InlineTag>
@@ -245,29 +247,45 @@ function LocalSecretPanel({ data, loading, error, onRefresh }) {
       </div>
       {data?.key_path ? <p className="trace-subline mono">{data.key_path}</p> : null}
       {error || data?.error || actionError ? <EmptyState title="Secret key action failed" detail={actionError || data?.error || error} tone="danger" compact /> : null}
-      <div className="channel-form-actions">
+      <div className="provider-form-actions">
         <button className="ghost-button" type="button" onClick={downloadKey} disabled={!readable || busy === "download"}>{busy === "download" ? "Downloading" : "Download backup"}</button>
-        <label className="channel-form-check"><input type="checkbox" checked={confirmRotate} onChange={(event) => setConfirmRotate(event.target.checked)} /> Confirm rotate</label>
+        <label className="provider-form-check"><input type="checkbox" checked={confirmRotate} onChange={(event) => setConfirmRotate(event.target.checked)} /> Confirm rotate</label>
         <button className="ghost-button" type="button" onClick={rotateKey} disabled={!readable || !confirmRotate || busy === "rotate"}>{busy === "rotate" ? "Rotating" : "Rotate key"}</button>
       </div>
     </section>
   );
 }
 
-function ChannelCard({ item, windowValue, onRefresh }) {
+function ProviderCard({ item, windowValue, onRefresh }) {
   const summary = item.summary || {};
   const [saving, setSaving] = useState(false);
-  const setEnabled = async (enabled) => {
+  const setEnabled = async (enabled, event) => {
+    event?.preventDefault();
+    event?.stopPropagation();
     setSaving(true);
     try {
-      await patchJSON(apiPaths.channel(item.id), { enabled });
+      await patchJSON(apiPaths.provider(item.id), { enabled });
+      onRefresh?.();
+    } finally {
+      setSaving(false);
+    }
+  };
+  const deleteProvider = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!window.confirm(`Delete provider ${item.name || item.id}? Configured models for this provider will also be removed.`)) {
+      return;
+    }
+    setSaving(true);
+    try {
+      await deleteJSON(apiPaths.provider(item.id));
       onRefresh?.();
     } finally {
       setSaving(false);
     }
   };
   return (
-    <Link className="upstream-card" to={buildChannelLink(item.id, windowValue)}>
+    <Link className="upstream-card" to={buildProviderLink(item.id, windowValue)}>
       <div className="upstream-card-head">
         <div>
           <p className="eyebrow">{item.provider_preset || "custom"}</p>
@@ -275,7 +293,10 @@ function ChannelCard({ item, windowValue, onRefresh }) {
         </div>
         <div className="trace-tag-group">
           <Switch checked={Boolean(item.enabled)} onChange={setEnabled} disabled={saving} label={`${item.name || item.id} enabled`} />
-          <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{channelSourceLabel(item.source)}</InlineTag>
+          <button className="icon-button" type="button" onClick={deleteProvider} disabled={saving} title="Delete provider" aria-label={`Delete ${item.name || item.id}`}>
+            <DeleteIcon />
+          </button>
+          <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(item.source)}</InlineTag>
           {item.secret_storage_mode ? <InlineTag tone={item.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{item.secret_storage_mode}</InlineTag> : null}
           {item.last_probe_status ? <InlineTag tone={item.last_probe_status === "success" ? "green" : "danger"}>{item.last_probe_status}</InlineTag> : null}
         </div>
@@ -293,7 +314,7 @@ function ChannelCard({ item, windowValue, onRefresh }) {
   );
 }
 
-function channelSourceLabel(source) {
+function providerSourceLabel(source) {
   switch (source) {
     case "bootstrap":
       return "bootstrap";
@@ -306,17 +327,17 @@ function channelSourceLabel(source) {
   }
 }
 
-function buildChannelTrendItems(items) {
+function buildProviderTrendItems(items) {
   const times = [];
   const byTime = new Map();
-  for (const channel of items) {
-    for (const trend of channel.trends || []) {
+  for (const provider of items) {
+    for (const trend of provider.trends || []) {
       const key = trend.time;
       if (!byTime.has(key)) {
         times.push(key);
         byTime.set(key, { time: key, series: {} });
       }
-      byTime.get(key).series[channel.id] = trend;
+      byTime.get(key).series[provider.id] = trend;
     }
   }
   times.sort();
@@ -343,12 +364,12 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
       {presetState.needsDeployment ? <label>Deployment<input value={form.deployment || ""} onChange={(event) => onChange("deployment", event.target.value)} placeholder="gpt-4o-mini" /></label> : null}
       {presetState.needsProject ? <label>Project<input value={form.project || ""} onChange={(event) => onChange("project", event.target.value)} placeholder="my-gcp-project" /></label> : null}
       {presetState.needsLocation ? <label>Location<input value={form.location || ""} onChange={(event) => onChange("location", event.target.value)} placeholder="us-central1" /></label> : null}
-      {presetState.needsModelResource ? <label className="channel-form-wide">Model resource<input value={form.model_resource || ""} onChange={(event) => onChange("model_resource", event.target.value)} placeholder="publishers/google/models/gemini-2.5-flash" /></label> : null}
+      {presetState.needsModelResource ? <label className="provider-form-wide">Model resource<input value={form.model_resource || ""} onChange={(event) => onChange("model_resource", event.target.value)} placeholder="publishers/google/models/gemini-2.5-flash" /></label> : null}
       <label>Model discovery<select value={form.model_discovery || "list_models"} onChange={(event) => onChange("model_discovery", event.target.value)}>{discoveryOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       <label>Priority<input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
       <label>Weight<input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
       <label>Capacity<input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
-      {includeHeaders ? <label className="channel-form-wide">Headers<textarea value={form.headers_text} onChange={(event) => onChange("headers_text", event.target.value)} spellCheck={false} /></label> : null}
+      {includeHeaders ? <label className="provider-form-wide">Headers<textarea value={form.headers_text} onChange={(event) => onChange("headers_text", event.target.value)} spellCheck={false} /></label> : null}
     </>
   );
 }
@@ -397,7 +418,7 @@ function uniqueSorted(values) {
   return Array.from(new Set(values.filter(Boolean))).sort();
 }
 
-function normalizeChannelPayload(form) {
+function normalizeProviderPayload(form) {
   return {
     ...form,
     priority: Number(form.priority || 0),
@@ -406,7 +427,7 @@ function normalizeChannelPayload(form) {
   };
 }
 
-function summarizeChannels(items) {
+function summarizeProviders(items) {
   return items.reduce(
     (state, item) => {
       const summary = item.summary || {};
