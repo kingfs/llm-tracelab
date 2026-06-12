@@ -2015,7 +2015,7 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 	writeLog("old-match.http", now.Add(-48*time.Hour), "gpt-5", 200)
 	writeLog("recent-other.http", now.Add(-20*time.Minute), "gemini-2.5-flash", 200)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=1h&model=gpt-5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=today&model=gpt-5", nil)
 	rr := httptest.NewRecorder()
 	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -2026,7 +2026,7 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if payload.Window != "1h" || payload.Model != "gpt-5" {
+	if payload.Window != "today" || payload.Model != "gpt-5" {
 		t.Fatalf("payload filters = window:%q model:%q", payload.Window, payload.Model)
 	}
 	if len(payload.Items) != 1 {
@@ -2088,7 +2088,7 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 	writeLog("match-b.http", now.Add(-10*time.Minute), "gpt-5", "all_targets_open")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "gemini-2.5-flash", "no_supporting_target")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=1h&model=gpt-5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams?window=today&model=gpt-5", nil)
 	rr := httptest.NewRecorder()
 	upstreamListAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -2111,8 +2111,8 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 	if payload.RoutingFailures.Recent[0].Reason != "all_targets_open" {
 		t.Fatalf("most recent reason = %q, want all_targets_open", payload.RoutingFailures.Recent[0].Reason)
 	}
-	if len(payload.RoutingFailures.Timeline) != 12 {
-		t.Fatalf("RoutingFailures.Timeline = %#v, want 12 buckets", payload.RoutingFailures.Timeline)
+	if len(payload.RoutingFailures.Timeline) != 24 {
+		t.Fatalf("RoutingFailures.Timeline = %#v, want 24 buckets", payload.RoutingFailures.Timeline)
 	}
 	totalTimeline := 0
 	for _, item := range payload.RoutingFailures.Timeline {
@@ -2283,7 +2283,7 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	writeLog("match-b.http", now.Add(-10*time.Minute), "/v1/chat/completions", "gpt-5", 503, "upstream overloaded")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, "")
 
-	req := httptest.NewRequest(http.MethodGet, "/api/upstreams/openai-primary?window=1h&model=gpt-5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/upstreams/openai-primary?window=today&model=gpt-5", nil)
 	rr := httptest.NewRecorder()
 	upstreamDetailAPIHandler(st, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -2297,7 +2297,7 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	if payload.Target.ID != "openai-primary" {
 		t.Fatalf("Target.ID = %q, want openai-primary", payload.Target.ID)
 	}
-	if payload.Window != "1h" || payload.Model != "gpt-5" {
+	if payload.Window != "today" || payload.Model != "gpt-5" {
 		t.Fatalf("filters = window:%q model:%q", payload.Window, payload.Model)
 	}
 	if len(payload.Traces) != 2 {
@@ -2321,8 +2321,8 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 	if payload.Timeline[0].Reason != "upstream_overloaded" {
 		t.Fatalf("Timeline reason = %q, want upstream_overloaded", payload.Timeline[0].Reason)
 	}
-	if len(payload.FailureTimeline) != 12 {
-		t.Fatalf("len(FailureTimeline) = %d, want 12", len(payload.FailureTimeline))
+	if len(payload.FailureTimeline) != 24 {
+		t.Fatalf("len(FailureTimeline) = %d, want 24", len(payload.FailureTimeline))
 	}
 	totalTimeline := 0
 	for _, item := range payload.FailureTimeline {

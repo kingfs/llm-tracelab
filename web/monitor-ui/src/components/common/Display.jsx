@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { formatRawNumber } from "../../lib/monitor";
 
 export function CollapsibleCard({ title, subtitle, defaultOpen = false, children, bodyClassName = "" }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -17,14 +18,21 @@ export function CollapsibleCard({ title, subtitle, defaultOpen = false, children
   );
 }
 
-export function StatCard({ label, value, accent = "", detail = "", mono = false }) {
+export function StatCard({ label, value, accent = "", detail = "", mono = false, title = "" }) {
   return (
-    <article className={`stat-card ${accent}`.trim()}>
+    <article className={`stat-card ${accent}`.trim()} title={title || rawValueTitle(value)}>
       <span>{label}</span>
       <strong className={mono ? "mono" : ""}>{value}</strong>
       {detail ? <small className={mono ? "mono stat-detail" : "stat-detail"}>{detail}</small> : null}
     </article>
   );
+}
+
+function rawValueTitle(value) {
+  if (typeof value === "number") {
+    return formatRawNumber(value);
+  }
+  return "";
 }
 
 export function CodeBlock({ value }) {

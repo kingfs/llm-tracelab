@@ -220,6 +220,19 @@ func TestStoreListsAndRevokesUserTokens(t *testing.T) {
 	if len(tokens) != 1 || tokens[0].Enabled {
 		t.Fatalf("tokens after revoke = %+v, want disabled token", tokens)
 	}
+	if err := st.DeleteToken(ctx, "other", tokens[0].ID); err == nil {
+		t.Fatalf("DeleteToken(other owned token) error = nil, want error")
+	}
+	if err := st.DeleteToken(ctx, "admin", tokens[0].ID); err != nil {
+		t.Fatalf("DeleteToken(admin) error = %v", err)
+	}
+	tokens, err = st.ListTokens(ctx, "admin")
+	if err != nil {
+		t.Fatalf("ListTokens(after delete) error = %v", err)
+	}
+	if len(tokens) != 0 {
+		t.Fatalf("tokens after delete = %+v, want empty", tokens)
+	}
 }
 
 func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {

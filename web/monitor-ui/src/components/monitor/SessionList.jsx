@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { InlineTag, StackIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
-import { formatDateTime, formatProviderTag } from "../../lib/monitor";
+import { formatDateTime, formatDuration, formatProviderTag, formatTokenCount } from "../../lib/monitor";
 
 export function SessionList({ items }) {
   if (!items.length) {
@@ -41,11 +41,11 @@ export function SessionList({ items }) {
           </div>
           <div className="trace-metric-stack">
             <strong className={item.failed_request > 0 ? "status-err" : "status-ok"}>{Number(item.success_rate ?? 0).toFixed(1)}%</strong>
-            <span>ttft {item.avg_ttft ?? 0} ms</span>
+            <span>ttft {formatDuration(item.avg_ttft ?? 0)}</span>
           </div>
           <div className="trace-metric-stack">
-            <strong>{item.total_tokens ?? 0}</strong>
-            <span>duration {item.total_duration_ms ?? 0} ms</span>
+            <strong title={String(item.total_tokens ?? 0)}>{formatTokenCount(item.total_tokens ?? 0)}</strong>
+            <span>duration {formatDuration(item.total_duration_ms ?? 0)}</span>
           </div>
           <div className="action-group">
             <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title="View session" aria-label="View session">

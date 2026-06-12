@@ -164,9 +164,11 @@ export function buildTraceLink(traceID, fromView = "", fromSessionID = "", tab =
   return query ? `/traces/${traceID}?${query}` : `/traces/${traceID}`;
 }
 
-export function buildUpstreamLink(upstreamID, windowValue = "24h", modelValue = "") {
+export const MONITOR_WINDOW_OPTIONS = ["today", "7d", "30d", "all"];
+
+export function buildUpstreamLink(upstreamID, windowValue = "today", modelValue = "") {
   const params = new URLSearchParams();
-  if (windowValue && windowValue !== "24h") {
+  if (windowValue && windowValue !== "today") {
     params.set("window", windowValue);
   }
   if (modelValue) {
@@ -176,36 +178,36 @@ export function buildUpstreamLink(upstreamID, windowValue = "24h", modelValue = 
   return query ? `/upstreams/${encodeURIComponent(upstreamID)}?${query}` : `/upstreams/${encodeURIComponent(upstreamID)}`;
 }
 
-export function buildModelLink(model, windowValue = "24h") {
+export function buildModelLink(model, windowValue = "today") {
   const params = new URLSearchParams();
-  if (windowValue && windowValue !== "24h") {
+  if (windowValue && windowValue !== "today") {
     params.set("window", windowValue);
   }
   const query = params.toString();
   return query ? `/models/${encodeURIComponent(model)}?${query}` : `/models/${encodeURIComponent(model)}`;
 }
 
-export function buildChannelLink(channelID, windowValue = "24h") {
+export function buildChannelLink(channelID, windowValue = "today") {
   const params = new URLSearchParams();
-  if (windowValue && windowValue !== "24h") {
+  if (windowValue && windowValue !== "today") {
     params.set("window", windowValue);
   }
   const query = params.toString();
   return query ? `/channels/${encodeURIComponent(channelID)}?${query}` : `/channels/${encodeURIComponent(channelID)}`;
 }
 
-export function buildProviderLink(providerID, windowValue = "24h") {
+export function buildProviderLink(providerID, windowValue = "today") {
   const params = new URLSearchParams();
-  if (windowValue && windowValue !== "24h") {
+  if (windowValue && windowValue !== "today") {
     params.set("window", windowValue);
   }
   const query = params.toString();
   return query ? `/providers/${encodeURIComponent(providerID)}?${query}` : `/providers/${encodeURIComponent(providerID)}`;
 }
 
-export function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
+export function buildRoutingLink(upstreamWindow = "today", upstreamModel = "") {
   const params = new URLSearchParams();
-  if (upstreamWindow && upstreamWindow !== "24h") {
+  if (upstreamWindow && upstreamWindow !== "today") {
     params.set("window", upstreamWindow);
   }
   if (upstreamModel) {
@@ -217,13 +219,13 @@ export function buildRoutingLink(upstreamWindow = "24h", upstreamModel = "") {
 
 export function normalizeAnalyticsWindow(value = "") {
   switch (value) {
-    case "1h":
+    case "today":
     case "7d":
     case "30d":
     case "all":
       return value;
     default:
-      return "24h";
+      return "today";
   }
 }
 
@@ -254,12 +256,13 @@ export function setOrDeleteParam(params, key, value) {
 
 export function normalizeUpstreamWindow(value = "") {
   switch (value) {
-    case "1h":
+    case "today":
     case "7d":
+    case "30d":
     case "all":
       return value;
     default:
-      return "24h";
+      return "today";
   }
 }
 
@@ -282,15 +285,19 @@ export function buildFailureContexts(timeline = []) {
 export function formatDuration(value, { precise = false } = {}) {
   const ms = Number(value || 0);
   const safeMs = Number.isFinite(ms) ? Math.max(0, Math.round(ms)) : 0;
-  let label = `${safeMs} ms`;
-  if (safeMs >= 1000) {
-    const seconds = safeMs / 1000;
-    label = `${formatCompactNumber(seconds)}s`;
-  }
-  if (precise && label !== `${safeMs} ms`) {
+  let label = `${formatSeconds(safeMs / 1000)}s`;
+  if (precise && safeMs > 0) {
     return `${label} (${safeMs} ms)`;
   }
   return label;
+}
+
+export function formatRawNumber(value = 0) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  return Math.round(number).toLocaleString();
 }
 
 export function formatTokenRate(tokens = 0, durationMs = 0) {
@@ -366,6 +373,24 @@ export function formatCount(value = 0) {
     return `${(number / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
   }
   return String(Math.round(number));
+}
+
+export function formatTokenCount(value = 0) {
+  return formatCount(value);
+}
+
+function formatSeconds(value = 0) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
+  if (number >= 100 || Number.isInteger(number)) {
+    return String(Math.round(number));
+  }
+  if (number >= 10) {
+    return number.toFixed(1).replace(/\.0$/, "");
+  }
+  return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 export function buildFailureSummary(context) {

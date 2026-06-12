@@ -5,9 +5,9 @@ import { EmptyState } from "../components/common/EmptyState";
 import { StatCard } from "../components/common/Display";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
-import { buildTraceLink, formatDateTime, formatFailureReason, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatDateTime, formatFailureReason, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
-const WINDOW_OPTIONS = ["1h", "24h", "7d", "all"];
+const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const STATUS_OPTIONS = ["unread", "read", "resolved", "ignored", "all"];
 const SEVERITY_OPTIONS = ["all", "critical", "error", "warning", "info"];
 const SOURCE_OPTIONS = ["all", "parser", "analyzer", "router", "upstream", "proxy", "recorder", "monitor", "store", "auth", "mcp"];
@@ -19,13 +19,13 @@ export function EventsPage() {
   const [busyID, setBusyID] = useState("");
   const params = useMemo(() => eventQueryParams(searchParams), [searchParams]);
   const { loading, data, error } = useJSON(apiURL(apiPaths.events, params), [params.toString(), refreshTick]);
-  const { data: summary } = useJSON(apiURL(apiPaths.eventsSummary, { window: params.get("window") || "24h" }), [params.get("window") || "24h", refreshTick]);
+  const { data: summary } = useJSON(apiURL(apiPaths.eventsSummary, { window: params.get("window") || "today" }), [params.get("window") || "today", refreshTick]);
   const items = data?.items || [];
   const selected = items.find((item) => item.id === selectedID) || items[0] || null;
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, key, value === "all" || (key === "window" && value === "24h") ? "" : value);
+    setOrDeleteParam(next, key, value === "all" || (key === "window" && value === "today") ? "" : value);
     if (key !== "page") {
       next.delete("page");
     }
@@ -70,7 +70,7 @@ export function EventsPage() {
         <div className="topbar-meta">
           <div className="view-toggle" aria-label="Events window">
             {WINDOW_OPTIONS.map((option) => (
-              <button key={option} className={`ghost-button ${currentFilter(searchParams, "window", "24h") === option ? "active" : ""}`.trim()} type="button" onClick={() => setFilter("window", option)}>
+              <button key={option} className={`ghost-button ${currentFilter(searchParams, "window", "today") === option ? "active" : ""}`.trim()} type="button" onClick={() => setFilter("window", option)}>
                 {option}
               </button>
             ))}
@@ -187,7 +187,7 @@ function Meta({ label, value, mono = false }) {
 
 function eventQueryParams(searchParams) {
   const params = new URLSearchParams();
-  params.set("window", currentFilter(searchParams, "window", "24h"));
+  params.set("window", currentFilter(searchParams, "window", "today"));
   params.set("status", currentFilter(searchParams, "status", "unread"));
   for (const key of ["severity", "source", "category", "q", "page"]) {
     const value = searchParams.get(key);

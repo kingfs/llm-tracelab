@@ -81,7 +81,7 @@ type listSessionsInput struct {
 }
 
 type listUpstreamsInput struct {
-	Window string `json:"window,omitempty" jsonschema:"time window: 1h, 24h, 7d, or all"`
+	Window string `json:"window,omitempty" jsonschema:"time window: today, 7d, 30d, or all"`
 	Model  string `json:"model,omitempty" jsonschema:"optional model substring filter"`
 }
 
@@ -110,7 +110,7 @@ type listSystemEventsInput struct {
 	Source   string `json:"source,omitempty" jsonschema:"optional source filter such as parser, analyzer, router, upstream, monitor, store, or mcp"`
 	Category string `json:"category,omitempty" jsonschema:"optional category filter"`
 	Query    string `json:"q,omitempty" jsonschema:"optional free-text query filter"`
-	Window   string `json:"window,omitempty" jsonschema:"time window: 1h, 24h, 7d, or all"`
+	Window   string `json:"window,omitempty" jsonschema:"time window: today, 7d, 30d, or all"`
 }
 
 type getSystemEventInput struct {
@@ -119,7 +119,7 @@ type getSystemEventInput struct {
 }
 
 type summarizeSystemEventsInput struct {
-	Window string `json:"window,omitempty" jsonschema:"time window: 1h, 24h, 7d, or all"`
+	Window string `json:"window,omitempty" jsonschema:"time window: today, 7d, 30d, or all"`
 	Status string `json:"status,omitempty" jsonschema:"optional status filter for newest events, default unread"`
 }
 

@@ -19,6 +19,7 @@ import {
   formatFailureReason,
   formatProviderTag,
   formatSignedMetric,
+  formatTokenCount,
   formatTokenRate,
 } from "../lib/monitor";
 
@@ -110,7 +111,7 @@ export function SessionDetailPage() {
                 <StatCard label="Failed" value={breakdown?.failed_traces ?? 0} accent={(breakdown?.failed_traces ?? 0) > 0 ? "accent-red" : ""} />
                 <StatCard label="Success" value={summary?.success_request ?? 0} />
                 <StatCard label="Streams" value={summary?.stream_count ?? 0} />
-                <StatCard label="Duration" value={formatDuration(summary?.total_duration_ms ?? 0)} detail={`${summary?.total_duration_ms ?? 0} ms total`} />
+                <StatCard label="Duration" value={formatDuration(summary?.total_duration_ms ?? 0)} detail={`${formatDuration(summary?.total_duration_ms ?? 0)} total`} title={`${summary?.total_duration_ms ?? 0} ms`} />
               </div>
             </section>
             <section className="panel">
@@ -160,7 +161,7 @@ export function SessionDetailPage() {
                   <div className="session-timeline-meta">
                     <span>duration {formatDuration(item.duration_ms)}</span>
                     <span>ttft {formatDuration(item.ttft_ms)}</span>
-                    <span>tokens {item.total_tokens}</span>
+                    <span>tokens {formatTokenCount(item.total_tokens)}</span>
                     <span>rate {formatTokenRate(item.total_tokens, item.duration_ms)}</span>
                   </div>
                   {item.error ? <div className="timeline-message">{item.error}</div> : null}
@@ -339,10 +340,10 @@ function SessionPerformancePanel({ performance }) {
         <StatCard label="Cache" value={`${Number(performance.cache_ratio || 0).toFixed(1)}%`} />
       </section>
       <div className="detail-meta-strip">
-        <DetailMetaPill label="total tokens" value={performance.total_tokens || 0} />
-        <DetailMetaPill label="input" value={performance.prompt_tokens || 0} />
-        <DetailMetaPill label="output" value={performance.completion_tokens || 0} />
-        <DetailMetaPill label="cached" value={performance.cached_tokens || 0} />
+        <DetailMetaPill label="total tokens" value={formatTokenCount(performance.total_tokens || 0)} />
+        <DetailMetaPill label="input" value={formatTokenCount(performance.prompt_tokens || 0)} />
+        <DetailMetaPill label="output" value={formatTokenCount(performance.completion_tokens || 0)} />
+        <DetailMetaPill label="cached" value={formatTokenCount(performance.cached_tokens || 0)} />
       </div>
     </section>
   );
@@ -401,11 +402,11 @@ function FailureContextNode({ label, item, tone = "default", sessionID = "", del
       <strong>{item.model || "unknown-model"}</strong>
       <span>{formatDateTime(item.time)}</span>
       <span>duration {formatDuration(item.duration_ms)}</span>
-      <span>tokens {item.total_tokens}</span>
+      <span>tokens {formatTokenCount(item.total_tokens)}</span>
       <span>rate {formatTokenRate(item.total_tokens, item.duration_ms)}</span>
       {delta ? (
         <div className="failure-delta-row">
-          <span>vs prev duration {formatSignedMetric(delta.duration_ms)} ms</span>
+          <span>vs prev duration {formatSignedMetric(delta.duration_ms / 1000)}s</span>
           <span>tokens {formatSignedMetric(delta.total_tokens)}</span>
         </div>
       ) : null}

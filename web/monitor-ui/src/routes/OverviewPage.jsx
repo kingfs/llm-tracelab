@@ -16,16 +16,18 @@ import {
   formatEndpointTag,
   formatFailureReason,
   formatProviderTag,
+  formatTokenCount,
+  MONITOR_WINDOW_OPTIONS,
+  normalizeAnalyticsWindow,
   normalizeUpstreamWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
-const WINDOW_OPTIONS = ["1h", "24h", "7d", "all"];
 
 export function OverviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const windowValue = normalizeOverviewWindow(searchParams.get("window") || "24h");
+  const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [refreshTick, setRefreshTick] = useState(0);
   const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue, refreshTick]);
   const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue, refreshTick]);
@@ -45,7 +47,7 @@ export function OverviewPage() {
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
 
@@ -58,7 +60,7 @@ export function OverviewPage() {
         </div>
         <div className="topbar-meta">
           <div className="view-toggle" aria-label="Overview window">
-            {WINDOW_OPTIONS.map((option) => (
+            {MONITOR_WINDOW_OPTIONS.map((option) => (
               <button key={option} className={`ghost-button ${windowValue === option ? "active" : ""}`.trim()} type="button" onClick={() => setWindow(option)}>
                 {option}
               </button>
@@ -76,7 +78,7 @@ export function OverviewPage() {
         <StatCard label="Requests" value={summary.request_count ?? 0} detail={`${summary.session_count ?? 0} active sessions`} />
         <StatCard label="Success" value={`${Number(summary.success_rate ?? 0).toFixed(1)}%`} detail={`${summary.success_request ?? 0} successful`} accent="accent-green" />
         <StatCard label="Failed" value={summary.failed_request ?? 0} detail={`${attention.recent_failures?.length ?? 0} recent failures`} accent={(summary.failed_request ?? 0) > 0 ? "accent-red" : ""} />
-        <StatCard label="Tokens" value={formatOverviewCount(summary.total_tokens ?? 0)} detail={`${summary.stream_count ?? 0} streaming traces`} accent="accent-gold" />
+        <StatCard label="Tokens" value={formatTokenCount(summary.total_tokens ?? 0)} detail={`${summary.stream_count ?? 0} streaming traces`} accent="accent-gold" title={String(summary.total_tokens ?? 0)} />
         <StatCard label="TTFT" value={formatDuration(summary.avg_ttft_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_ttft_ms ?? 0)}`} />
         <StatCard label="Latency" value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
         <StatCard label="Findings" value={breakdown.finding_categories?.reduce((sum, item) => sum + Number(item.count || 0), 0) ?? 0} detail={`${attention.high_risk_findings?.length ?? 0} high risk`} accent={(attention.high_risk_findings?.length ?? 0) ? "accent-red" : ""} />
@@ -147,13 +149,13 @@ export function OverviewPage() {
               items={(data?.timeline || []).map((item) => ({
                 time: item.time,
                 series: {
-                  ttft: { value: item.avg_ttft_ms },
-                  latency: { value: item.avg_duration_ms },
+                  ttft: { value: Number(item.avg_ttft_ms || 0) / 1000 },
+                  latency: { value: Number(item.avg_duration_ms || 0) / 1000 },
                 },
               }))}
               series={[
-                { key: "ttft", name: "ttft ms" },
-                { key: "latency", name: "latency ms" },
+                { key: "ttft", name: "ttft s" },
+                { key: "latency", name: "latency s" },
               ]}
               metric="value"
               height={220}
@@ -257,31 +259,6 @@ function RoutingFailureQueue({ items }) {
   );
 }
 
-function normalizeOverviewWindow(value = "") {
-  switch (value) {
-    case "1h":
-    case "7d":
-    case "all":
-      return value;
-    default:
-      return "24h";
-  }
-}
-
-function formatOverviewCount(value = 0) {
-  const number = Number(value || 0);
-  if (!Number.isFinite(number)) {
-    return "0";
-  }
-  if (Math.abs(number) >= 1_000_000) {
-    return `${(number / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  }
-  if (Math.abs(number) >= 1_000) {
-    return `${(number / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  }
-  return String(Math.round(number));
-}
-
 function buildOverviewBreakdownLink(kind, value, windowValue) {
   const label = String(value || "").trim();
   if (!label) {
@@ -289,7 +266,7 @@ function buildOverviewBreakdownLink(kind, value, windowValue) {
   }
   switch (kind) {
     case "model":
-      return `/models/${encodeURIComponent(label)}${windowValue && windowValue !== "24h" ? `?window=${encodeURIComponent(windowValue)}` : ""}`;
+      return `/models/${encodeURIComponent(label)}${windowValue && windowValue !== "today" ? `?window=${encodeURIComponent(windowValue)}` : ""}`;
     case "provider":
       return `/traces?provider=${encodeURIComponent(label)}`;
     case "endpoint":
@@ -297,7 +274,7 @@ function buildOverviewBreakdownLink(kind, value, windowValue) {
     case "upstream":
       return buildRoutingLink(normalizeUpstreamWindow(windowValue), label);
     case "routing_failure":
-      return `/routing?status=error${windowValue && windowValue !== "24h" ? `&window=${encodeURIComponent(windowValue)}` : ""}`;
+      return `/routing?status=error${windowValue && windowValue !== "today" ? `&window=${encodeURIComponent(windowValue)}` : ""}`;
     case "finding_category":
       return `/audit?category=${encodeURIComponent(label)}`;
     default:

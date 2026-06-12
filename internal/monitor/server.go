@@ -1360,7 +1360,13 @@ func authTokenDetailAPIHandler(authStore *auth.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "token not found"})
 			return
 		}
-		if err := authStore.RevokeToken(r.Context(), principal.Username, tokenID); err != nil {
+		deleteToken := parseBool(r.URL.Query().Get("delete"))
+		if deleteToken {
+			err = authStore.DeleteToken(r.Context(), principal.Username, tokenID)
+		} else {
+			err = authStore.RevokeToken(r.Context(), principal.Username, tokenID)
+		}
+		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "token not found"})
 				return
@@ -2594,19 +2600,23 @@ func toRoutingFailureBucketItems(records []store.TimeCountItem) []routingFailure
 
 func routingFailureBucketSpec(window string) (time.Duration, int) {
 	switch window {
-	case "1h":
-		return 5 * time.Minute, 12
+	case "today":
+		return time.Hour, 24
 	case "7d":
 		return 12 * time.Hour, 14
+	case "30d":
+		return 24 * time.Hour, 30
 	case "all":
 		return 24 * time.Hour, 14
 	default:
-		return 2 * time.Hour, 12
+		return time.Hour, 24
 	}
 }
 
 func analyticsBucketSpec(window string) (time.Duration, int) {
 	switch window {
+	case "today":
+		return time.Hour, 24
 	case "30d":
 		return 24 * time.Hour, 30
 	case "7d":
@@ -2621,64 +2631,64 @@ func analyticsBucketSpec(window string) (time.Duration, int) {
 func parseUpstreamWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1h":
-		return "1h", now.Add(-1 * time.Hour)
-	case "7d":
-		return "7d", now.Add(-7 * 24 * time.Hour)
-	case "all":
-		return "all", time.Time{}
-	case "", "24h":
-		return "24h", now.Add(-24 * time.Hour)
-	default:
-		return "24h", now.Add(-24 * time.Hour)
-	}
-}
-
-func parseOverviewWindow(value string) (string, time.Time, time.Duration, int) {
-	now := time.Now().UTC()
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1h":
-		return "1h", now.Add(-time.Hour), 5 * time.Minute, 12
-	case "7d":
-		return "7d", now.Add(-7 * 24 * time.Hour), 12 * time.Hour, 14
-	case "all":
-		return "all", time.Time{}, 24 * time.Hour, 14
-	case "", "24h":
-		return "24h", now.Add(-24 * time.Hour), 2 * time.Hour, 12
-	default:
-		return "24h", now.Add(-24 * time.Hour), 2 * time.Hour, 12
-	}
-}
-
-func parseAnalyticsWindow(value string) (string, time.Time) {
-	now := time.Now().UTC()
-	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "today", "", "24h":
+		return "today", startOfUTCDay(now)
 	case "7d":
 		return "7d", now.Add(-7 * 24 * time.Hour)
 	case "30d":
 		return "30d", now.Add(-30 * 24 * time.Hour)
 	case "all":
 		return "all", time.Time{}
-	case "", "24h":
-		return "24h", now.Add(-24 * time.Hour)
 	default:
-		return "24h", now.Add(-24 * time.Hour)
+		return "today", startOfUTCDay(now)
+	}
+}
+
+func parseOverviewWindow(value string) (string, time.Time, time.Duration, int) {
+	now := time.Now().UTC()
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "today", "", "24h":
+		return "today", startOfUTCDay(now), time.Hour, 24
+	case "7d":
+		return "7d", now.Add(-7 * 24 * time.Hour), 12 * time.Hour, 14
+	case "30d":
+		return "30d", now.Add(-30 * 24 * time.Hour), 24 * time.Hour, 30
+	case "all":
+		return "all", time.Time{}, 24 * time.Hour, 14
+	default:
+		return "today", startOfUTCDay(now), time.Hour, 24
+	}
+}
+
+func parseAnalyticsWindow(value string) (string, time.Time) {
+	now := time.Now().UTC()
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "today", "", "24h":
+		return "today", startOfUTCDay(now)
+	case "7d":
+		return "7d", now.Add(-7 * 24 * time.Hour)
+	case "30d":
+		return "30d", now.Add(-30 * 24 * time.Hour)
+	case "all":
+		return "all", time.Time{}
+	default:
+		return "today", startOfUTCDay(now)
 	}
 }
 
 func parseSystemEventWindow(value string) (string, time.Time) {
 	now := time.Now().UTC()
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1h":
-		return "1h", now.Add(-time.Hour)
+	case "today", "", "24h":
+		return "today", startOfUTCDay(now)
 	case "7d":
 		return "7d", now.Add(-7 * 24 * time.Hour)
+	case "30d":
+		return "30d", now.Add(-30 * 24 * time.Hour)
 	case "all":
 		return "all", time.Time{}
-	case "", "24h":
-		return "24h", now.Add(-24 * time.Hour)
 	default:
-		return "24h", now.Add(-24 * time.Hour)
+		return "today", startOfUTCDay(now)
 	}
 }
 

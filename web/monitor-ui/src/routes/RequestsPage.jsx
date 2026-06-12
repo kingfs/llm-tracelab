@@ -5,7 +5,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
-import { formatTime, setOrDeleteParam } from "../lib/monitor";
+import { formatDuration, formatTime, formatTokenCount, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
@@ -90,8 +90,8 @@ export function RequestsPage() {
       </header>
       <section className="hero-grid">
         <StatCard label="Total" value={stats.total_request ?? 0} />
-        <StatCard label="Avg TTFT" value={`${stats.avg_ttft ?? 0} ms`} />
-        <StatCard label="Tokens" value={stats.total_tokens ?? 0} accent="accent-gold" />
+        <StatCard label="Avg TTFT" value={formatDuration(stats.avg_ttft ?? 0)} title={`${stats.avg_ttft ?? 0} ms`} />
+        <StatCard label="Tokens" value={formatTokenCount(stats.total_tokens ?? 0)} accent="accent-gold" title={String(stats.total_tokens ?? 0)} />
         <StatCard label="Success" value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
       </section>
 

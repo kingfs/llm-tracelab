@@ -17,6 +17,7 @@ import {
   formatHealthLabel,
   formatProviderTag,
   formatRatio,
+  formatTokenCount,
   formatRoutingScore,
   formatTokenRate,
   healthTone,
@@ -219,7 +220,7 @@ export function TraceDetailPage() {
             <span>{header?.endpoint || header?.url || "-"}</span>
             <span>duration {formatDuration(header?.duration_ms || 0, { precise: true })}</span>
             <span>ttft {formatDuration(header?.ttft_ms || 0, { precise: true })}</span>
-            <span>tokens {usage?.total_tokens || 0}</span>
+            <span>tokens {formatTokenCount(usage?.total_tokens || 0)}</span>
             <span>rate {formatTokenRate(usage?.total_tokens || 0, header?.duration_ms || 0)}</span>
           </div>
           <div className="trace-failure-actions">
@@ -379,8 +380,8 @@ export function TraceDetailPage() {
                       <div className="detail-meta-strip">
                         <DetailMetaPill label="error" value={formatRatio(selectedUpstreamHealth.error_rate)} />
                         <DetailMetaPill label="timeout" value={formatRatio(selectedUpstreamHealth.timeout_rate)} />
-                        <DetailMetaPill label="ttft" value={`${Math.round(selectedUpstreamHealth.ttft_fast_ms || 0)} ms`} />
-                        <DetailMetaPill label="latency" value={`${Math.round(selectedUpstreamHealth.latency_fast_ms || 0)} ms`} />
+                        <DetailMetaPill label="ttft" value={formatDuration(selectedUpstreamHealth.ttft_fast_ms || 0)} />
+                        <DetailMetaPill label="latency" value={formatDuration(selectedUpstreamHealth.latency_fast_ms || 0)} />
                       </div>
                     </div>
                   </section>
@@ -780,10 +781,10 @@ function PerformancePanel({ performance }) {
       </section>
       <div className="detail-meta-strip">
         <DetailMetaPill label="status" value={perf.status_code || 0} />
-        <DetailMetaPill label="total tokens" value={perf.total_tokens || 0} />
-        <DetailMetaPill label="input" value={perf.prompt_tokens || 0} />
-        <DetailMetaPill label="output" value={perf.completion_tokens || 0} />
-        <DetailMetaPill label="cached" value={perf.cached_tokens || 0} />
+        <DetailMetaPill label="total tokens" value={formatTokenCount(perf.total_tokens || 0)} />
+        <DetailMetaPill label="input" value={formatTokenCount(perf.prompt_tokens || 0)} />
+        <DetailMetaPill label="output" value={formatTokenCount(perf.completion_tokens || 0)} />
+        <DetailMetaPill label="cached" value={formatTokenCount(perf.cached_tokens || 0)} />
         <DetailMetaPill label="stream" value={perf.is_stream ? "yes" : "no"} />
         <DetailMetaPill label="upstream" value={perf.selected_upstream_id || "-"} mono />
         <DetailMetaPill label="policy" value={perf.routing_policy || "-"} />
@@ -1090,12 +1091,21 @@ function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleC
   const alignClass = message.role === "assistant" ? "message-assistant" : message.role === "tool" ? "message-tool" : "message-user";
   const isCollapsible = message.message_type === "tool_use" || message.message_type === "tool_result";
   const toolSummary = buildToolMessageSummary(message, declaredTools);
+  const callID = message.tool_call_id || "";
+  const outputAnchor = callID ? toolOutputAnchor(callID) : "";
+  const cardID = outputAnchor || undefined;
 
   const body = (
-    <article className={`message-card ${alignClass}`}>
+    <article id={cardID} className={`message-card ${alignClass}`}>
       <div className="message-meta">
         <span className="role-pill">{message.role}</span>
         <span className="message-kind">{message.message_type || "message"}</span>
+        {callID ? (
+          <>
+            <span className="message-call-id">call id {callID}</span>
+            <a className="message-jump-link" href={`#${toolCallAnchor(callID)}`}>call</a>
+          </>
+        ) : null}
       </div>
       {toolSummary ? <div className="tool-message-summary">{toolSummary}</div> : null}
       {message.content ? (
@@ -1123,16 +1133,34 @@ function MessageCard({ message, renderMarkdown, declaredTools = [], CollapsibleC
 }
 
 function ToolCallView({ call, match = null, CodeBlock, InlineTag }) {
+  const callID = call.id || "";
   return (
-    <div className="tool-call-box">
+    <div id={callID ? toolCallAnchor(callID) : undefined} className="tool-call-box">
       <div className="tool-call-head">
         <div className="tool-call-title">{call.function?.name || "tool"}</div>
         {match?.name ? <InlineTag tone="accent">declared</InlineTag> : null}
       </div>
-      {call.id ? <div className="tool-call-meta">call id {call.id}</div> : null}
+      {callID ? (
+        <div className="tool-call-meta">
+          call id {callID}
+          <a className="message-jump-link" href={`#${toolOutputAnchor(callID)}`}>output</a>
+        </div>
+      ) : null}
       <CodeBlock value={call.function?.arguments || "{}"} />
     </div>
   );
+}
+
+function toolCallAnchor(callID = "") {
+  return `call-${anchorToken(callID)}`;
+}
+
+function toolOutputAnchor(callID = "") {
+  return `output-${anchorToken(callID)}`;
+}
+
+function anchorToken(value = "") {
+  return encodeURIComponent(String(value || "").trim()).replaceAll("%", "_");
 }
 
 function BlockView({ block, CodeBlock }) {

@@ -3,7 +3,7 @@ import { InlineTag, PlusIcon } from "../components/common/Badges";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, postJSON, requestJSON } from "../lib/api";
+import { apiPaths, apiURL, deleteJSON, postJSON, requestJSON } from "../lib/api";
 import { formatDateTime } from "../lib/monitor";
 
 export function TokensPage() {
@@ -15,8 +15,10 @@ export function TokensPage() {
   const [loading, setLoading] = useState(false);
   const [busyToken, setBusyToken] = useState(0);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [showAll, setShowAll] = useState(false);
   const tokens = useJSON(apiPaths.authTokens, [refreshTick]);
   const items = tokens.data?.items || [];
+  const visibleItems = showAll ? items : items.filter((item) => item.status === "active");
   const summary = useMemo(() => summarizeTokens(items), [items]);
 
   const createToken = async (event) => {
@@ -43,6 +45,19 @@ export function TokensPage() {
       setRefreshTick((tick) => tick + 1);
     } catch (err) {
       setError(err.message || "Unable to revoke token.");
+    } finally {
+      setBusyToken(0);
+    }
+  };
+
+  const deleteToken = async (tokenID) => {
+    setBusyToken(tokenID);
+    setError("");
+    try {
+      await deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { delete: "1" }));
+      setRefreshTick((tick) => tick + 1);
+    } catch (err) {
+      setError(err.message || "Unable to delete token.");
     } finally {
       setBusyToken(0);
     }
@@ -106,18 +121,21 @@ export function TokensPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Token inventory</p>
-            <h2>Your tokens</h2>
+            <h2>{showAll ? "All tokens" : "Active tokens"}</h2>
           </div>
+          <button className={showAll ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setShowAll((value) => !value)}>
+            {showAll ? "Show active" : "Show all"}
+          </button>
         </div>
         {tokens.error ? <EmptyState title="Unable to load tokens" detail={tokens.error} tone="danger" /> : null}
         {tokens.loading && !tokens.data ? <EmptyState title="Loading tokens" detail="Reading token metadata for the current user." /> : null}
-        {tokens.data ? <TokenTable items={items} busyToken={busyToken} onRevoke={revokeToken} /> : null}
+        {tokens.data ? <TokenTable items={visibleItems} busyToken={busyToken} onRevoke={revokeToken} onDelete={deleteToken} /> : null}
       </section>
     </main>
   );
 }
 
-function TokenTable({ items, busyToken, onRevoke }) {
+function TokenTable({ items, busyToken, onRevoke, onDelete }) {
   if (!items.length) {
     return <EmptyState title="No tokens" detail="No API tokens have been created for the current user." />;
   }
@@ -145,6 +163,9 @@ function TokenTable({ items, busyToken, onRevoke }) {
           <div className="action-group">
             <button className="ghost-button" type="button" disabled={item.status !== "active" || busyToken === item.id} onClick={() => onRevoke(item.id)}>
               {busyToken === item.id ? "Revoking" : "Revoke"}
+            </button>
+            <button className="ghost-button" type="button" disabled={busyToken === item.id} onClick={() => onDelete(item.id)}>
+              {busyToken === item.id ? "Deleting" : "Delete"}
             </button>
           </div>
         </article>

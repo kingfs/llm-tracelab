@@ -304,7 +304,7 @@ a {
 .token-table-head,
 .token-row {
   display: grid;
-  grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.9fr) minmax(80px, 0.6fr) minmax(92px, 0.65fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(110px, 0.7fr);
+  grid-template-columns: minmax(130px, 1fr) minmax(120px, 0.9fr) minmax(80px, 0.6fr) minmax(92px, 0.65fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(150px, 1fr) minmax(180px, 0.9fr);
   gap: 12px;
   align-items: center;
 }
@@ -2480,6 +2480,7 @@ a:focus-visible {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 10px;
 }
 
@@ -2626,6 +2627,22 @@ a:focus-visible {
 .tool-message-summary,
 .tool-message-placeholder {
   margin-top: 10px;
+}
+
+.message-call-id,
+.message-jump-link {
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.message-jump-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.message-jump-link:hover {
+  text-decoration: underline;
 }
 
 .tool-modal-backdrop {

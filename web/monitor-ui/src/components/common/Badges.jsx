@@ -1,29 +1,34 @@
 import React from "react";
+import { formatDuration, formatRawNumber, formatTokenCount } from "../../lib/monitor";
 
 export function InlineTag({ children, tone = "default" }) {
   return <span className={`inline-tag inline-tag-${tone}`}>{children}</span>;
 }
 
 export function MiniToken({ metric, value, tone = "default", icon = "total" }) {
+  const displayValue = typeof value === "number" ? formatTokenCount(value) : value || 0;
+  const rawTitle = typeof value === "number" ? formatRawNumber(value) : "";
   return (
-    <span className={`mini-token mini-token-${tone}`}>
+    <span className={`mini-token mini-token-${tone}`} title={rawTitle}>
       <span className="metric-icon-wrap">
         <MetricIcon type={icon} />
       </span>
       <span className="mini-token-label">{metric}</span>
-      <strong>{value || 0}</strong>
+      <strong>{displayValue}</strong>
     </span>
   );
 }
 
 export function TokenBadge({ label, value, accent = "", icon = "total" }) {
+  const displayValue = label === "ttft" ? formatDuration(value) : formatTokenCount(value);
+  const rawTitle = label === "ttft" ? `${Math.round(Number(value || 0))} ms` : formatRawNumber(value);
   return (
-    <span className={`badge token-badge ${accent}`.trim()}>
+    <span className={`badge token-badge ${accent}`.trim()} title={rawTitle}>
       <span className="metric-icon-wrap token-badge-icon">
         <MetricIcon type={icon} />
       </span>
       <span className="token-badge-label">{label}</span>
-      <strong>{value}</strong>
+      <strong>{displayValue}</strong>
     </span>
   );
 }

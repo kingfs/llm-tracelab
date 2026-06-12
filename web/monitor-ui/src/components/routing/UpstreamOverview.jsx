@@ -10,14 +10,16 @@ import {
   buildUpstreamLink,
   formatCapacity,
   formatDateTime,
+  formatDuration,
   formatEndpointTag,
   formatFailureReason,
   formatHealthLabel,
   formatRatio,
+  formatTokenCount,
   healthTone,
 } from "../../lib/monitor";
 
-export function UpstreamOverview({ items, analyticsWindow = "24h", analyticsModel = "", routingFailures = {} }) {
+export function UpstreamOverview({ items, analyticsWindow = "today", analyticsModel = "", routingFailures = {} }) {
   const healthyCount = items.filter((item) => item.health_state === "healthy").length;
   const attentionCount = items.filter((item) => item.health_state !== "healthy").length;
   const modelCount = new Set(items.flatMap((item) => item.models || [])).size;
@@ -109,11 +111,11 @@ export function UpstreamOverview({ items, analyticsWindow = "24h", analyticsMode
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">ttft</span>
-                <strong>{Math.round(item.ttft_fast_ms || item.avg_ttft || 0)} ms</strong>
+                <strong>{formatDuration(item.ttft_fast_ms || item.avg_ttft || 0)}</strong>
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">latency</span>
-                <strong>{Math.round(item.latency_fast_ms || 0)} ms</strong>
+                <strong>{formatDuration(item.latency_fast_ms || 0)}</strong>
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">error</span>
@@ -125,7 +127,7 @@ export function UpstreamOverview({ items, analyticsWindow = "24h", analyticsMode
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">tokens</span>
-                <strong>{item.total_tokens ?? 0}</strong>
+                <strong title={String(item.total_tokens ?? 0)}>{formatTokenCount(item.total_tokens ?? 0)}</strong>
               </div>
               <div className="detail-meta-pill">
                 <span className="detail-meta-label">capacity</span>

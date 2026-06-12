@@ -304,6 +304,26 @@ func (s *Store) RevokeToken(ctx context.Context, username string, tokenID int) e
 	return nil
 }
 
+func (s *Store) DeleteToken(ctx context.Context, username string, tokenID int) error {
+	username = normalizeUsername(username)
+	if username == "" {
+		return errors.New("username is required")
+	}
+	if tokenID <= 0 {
+		return errors.New("token id is required")
+	}
+	n, err := s.client.APIToken.Delete().
+		Where(apitoken.IDEQ(tokenID), apitoken.HasUserWith(user.UsernameEQ(username))).
+		Exec(ctx)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {

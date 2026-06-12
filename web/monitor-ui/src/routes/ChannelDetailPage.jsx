@@ -8,7 +8,7 @@ import { SingleUsageCharts } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
-import { buildTraceLink, formatCount, formatDateTime, formatTime, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
+import { buildTraceLink, formatCount, formatDateTime, formatDuration, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 import { buildPresetState, normalizePresetSelection, ProviderAdvancedFields } from "./ChannelsPage";
 
 export function ProviderDetailPage() {
@@ -44,7 +44,7 @@ export function ProviderDetailPage() {
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
   const reload = () => setRefreshTick((tick) => tick + 1);
@@ -207,7 +207,7 @@ export function ProviderDetailPage() {
           </div>
           <div className="panel-head-actions">
             <div className="view-toggle" role="tablist" aria-label="Provider detail window">
-              {["24h", "7d", "30d", "all"].map((window) => (
+              {MONITOR_WINDOW_OPTIONS.map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
                 </button>
@@ -390,7 +390,7 @@ function ProbeRunCard({ item }) {
       <div className="provider-probe-meta">
         <span>{formatCount(item.discovered_count)} discovered</span>
         <span>{formatCount(item.enabled_count)} enabled</span>
-        <span>{formatCount(item.duration_ms)} ms</span>
+        <span>{formatDuration(item.duration_ms)}</span>
       </div>
       {item.endpoint ? <div className="provider-probe-endpoint">{item.endpoint}</div> : null}
       {item.error_text ? <div className="upstream-failure-detail">{item.error_text}</div> : null}

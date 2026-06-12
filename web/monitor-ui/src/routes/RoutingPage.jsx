@@ -7,10 +7,10 @@ import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
-import { formatCount, formatTime, setOrDeleteParam } from "../lib/monitor";
+import { formatCount, formatTime, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
-const WINDOW_OPTIONS = ["24h", "7d", "30d", "all"];
+const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
 
 export function RoutingPage() {
@@ -49,7 +49,7 @@ export function RoutingPage() {
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
   const applyFilters = (event) => {
@@ -130,7 +130,7 @@ export function RoutingPage() {
 }
 
 function normalizeRoutingWindow(value) {
-  return WINDOW_OPTIONS.includes(value) ? value : "24h";
+  return WINDOW_OPTIONS.includes(value) ? value : "today";
 }
 
 function emptyRoutingFilters() {
@@ -149,8 +149,10 @@ function filterByWindow(items, windowValue) {
   if (windowValue === "all") {
     return items.filter((item) => item.selected_upstream_id);
   }
-  const durationMs = windowValue === "7d" ? 7 * 24 * 60 * 60 * 1000 : windowValue === "30d" ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-  const since = Date.now() - durationMs;
+  const now = new Date();
+  const since = windowValue === "today"
+    ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    : Date.now() - (windowValue === "7d" ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000);
   return items.filter((item) => item.selected_upstream_id && new Date(item.recorded_at).getTime() >= since);
 }
 

@@ -10,6 +10,7 @@ import {
   formatCount,
   formatDateTime,
   formatTime,
+  MONITOR_WINDOW_OPTIONS,
   normalizeAnalyticsWindow,
   setOrDeleteParam,
 } from "../lib/monitor";
@@ -34,7 +35,7 @@ export function ModelsPage() {
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
   const applySearch = (event) => {
@@ -64,7 +65,7 @@ export function ModelsPage() {
           </div>
           <div className="panel-head-actions">
             <div className="view-toggle" role="tablist" aria-label="Model analytics window">
-              {["24h", "7d", "30d", "all"].map((window) => (
+              {MONITOR_WINDOW_OPTIONS.map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
                 </button>

@@ -14,6 +14,7 @@ import {
   computeTTFTRatio,
   formatCapacity,
   formatDateTime,
+  formatDuration,
   formatEndpointTag,
   formatFailureReason,
   formatHealthLabel,
@@ -22,6 +23,7 @@ import {
   formatTime,
   healthTone,
   metricThresholdTone,
+  MONITOR_WINDOW_OPTIONS,
   normalizeUpstreamWindow,
   resolveThresholdState,
   setOrDeleteParam,
@@ -59,7 +61,7 @@ export function UpstreamDetailPage() {
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "window", nextWindow === "24h" ? "" : nextWindow);
+    setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
   const applyModel = (event) => {
@@ -114,7 +116,7 @@ export function UpstreamDetailPage() {
           </div>
           <div className="panel-head-actions">
             <div className="view-toggle" role="tablist" aria-label="Upstream detail window">
-              {["1h", "24h", "7d", "all"].map((window) => (
+              {MONITOR_WINDOW_OPTIONS.map((window) => (
                 <button
                   key={window}
                   className={windowValue === window ? "ghost-button active" : "ghost-button"}
@@ -195,8 +197,8 @@ export function UpstreamDetailPage() {
                 <div className="detail-meta-strip">
                   <DetailMetaPill label="error" value={formatRatio(target?.error_rate)} />
                   <DetailMetaPill label="timeout" value={formatRatio(target?.timeout_rate)} />
-                  <DetailMetaPill label="ttft" value={`${Math.round(target?.ttft_fast_ms || target?.avg_ttft || 0)} ms`} />
-                  <DetailMetaPill label="latency" value={`${Math.round(target?.latency_fast_ms || 0)} ms`} />
+                  <DetailMetaPill label="ttft" value={formatDuration(target?.ttft_fast_ms || target?.avg_ttft || 0)} />
+                  <DetailMetaPill label="latency" value={formatDuration(target?.latency_fast_ms || 0)} />
                   <DetailMetaPill label="refresh" value={target?.last_refresh_status || "unknown"} />
                 </div>
               </section>
