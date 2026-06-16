@@ -6,6 +6,7 @@ require (
 	entgo.io/ent v0.14.6
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
+	github.com/kingfs/go-llm-specs v0.5.28
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/spf13/cobra v1.10.2

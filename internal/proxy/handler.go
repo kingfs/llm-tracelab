@@ -35,9 +35,36 @@ type aggregatedModelListResponse struct {
 }
 
 type aggregatedModelListEntry struct {
-	ID      string `json:"id"`
-	Object  string `json:"object,omitempty"`
-	OwnedBy string `json:"owned_by,omitempty"`
+	ID            string                       `json:"id"`
+	CanonicalSlug string                       `json:"canonical_slug,omitempty"`
+	Name          string                       `json:"name,omitempty"`
+	Object        string                       `json:"object,omitempty"`
+	OwnedBy       string                       `json:"owned_by,omitempty"`
+	Provider      string                       `json:"provider,omitempty"`
+	Description   string                       `json:"description,omitempty"`
+	Summary       string                       `json:"summary,omitempty"`
+	Family        string                       `json:"family,omitempty"`
+	Series        string                       `json:"series,omitempty"`
+	Tags          []string                     `json:"tags,omitempty"`
+	ContextLength int                          `json:"context_length,omitempty"`
+	MaxModelLen   int                          `json:"max_model_len,omitempty"`
+	MaxOutput     int                          `json:"max_output,omitempty"`
+	Architecture  *aggregatedModelArchitecture `json:"architecture,omitempty"`
+	TopProvider   *aggregatedModelTopProvider  `json:"top_provider,omitempty"`
+}
+
+type aggregatedModelArchitecture struct {
+	Modality         string   `json:"modality,omitempty"`
+	InputModalities  []string `json:"input_modalities,omitempty"`
+	OutputModalities []string `json:"output_modalities,omitempty"`
+	Tokenizer        string   `json:"tokenizer,omitempty"`
+	InstructType     *string  `json:"instruct_type,omitempty"`
+}
+
+type aggregatedModelTopProvider struct {
+	ContextLength       *int  `json:"context_length,omitempty"`
+	MaxCompletionTokens *int  `json:"max_completion_tokens,omitempty"`
+	IsModerated         *bool `json:"is_moderated,omitempty"`
 }
 
 type contextKey string
@@ -1300,11 +1327,7 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 		Data:   make([]aggregatedModelListEntry, 0, len(models)),
 	}
 	for _, model := range models {
-		payload.Data = append(payload.Data, aggregatedModelListEntry{
-			ID:      model,
-			Object:  "model",
-			OwnedBy: "llm-tracelab",
-		})
+		payload.Data = append(payload.Data, newAggregatedModelListEntry(model))
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
