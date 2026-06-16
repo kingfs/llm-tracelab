@@ -314,6 +314,14 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			wantURL: "https://openrouter.example.com/v1/chat/completions",
 		},
 		{
+			name: "openai_compatible_tokenize_uses_top_level_route",
+			cfg: config.UpstreamConfig{
+				BaseURL: "http://10.2.69.245:38080/v1",
+			},
+			path:    "/v1/tokenize",
+			wantURL: "http://10.2.69.245:38080/tokenize",
+		},
+		{
 			name: "vllm_tokenize_uses_top_level_route",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "http://vllm.local:8000/v1",

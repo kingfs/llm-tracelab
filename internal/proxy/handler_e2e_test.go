@@ -226,11 +226,20 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 		name             string
 		proxyPath        string
 		wantUpstreamPath string
+		providerPreset   string
 		requestBody      string
 		responseBody     string
 	}{
 		{
 			name:             "tokenize",
+			proxyPath:        "/v1/tokenize",
+			wantUpstreamPath: "/tokenize",
+			providerPreset:   "vllm",
+			requestBody:      `{"model":"Qwen/Qwen3-0.6B","prompt":"hello","return_token_strs":true}`,
+			responseBody:     `{"tokens":[14990],"token_strs":["hello"],"count":1,"max_model_len":32768}`,
+		},
+		{
+			name:             "tokenize default openai compatible",
 			proxyPath:        "/v1/tokenize",
 			wantUpstreamPath: "/tokenize",
 			requestBody:      `{"model":"Qwen/Qwen3-0.6B","prompt":"hello","return_token_strs":true}`,
@@ -240,6 +249,7 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 			name:             "detokenize",
 			proxyPath:        "/detokenize",
 			wantUpstreamPath: "/detokenize",
+			providerPreset:   "vllm",
 			requestBody:      `{"model":"Qwen/Qwen3-0.6B","tokens":[14990]}`,
 			responseBody:     `{"prompt":"hello"}`,
 		},
@@ -267,7 +277,7 @@ func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
 
 			cfg := &config.Config{}
 			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
-			cfg.Upstream.ProviderPreset = "vllm"
+			cfg.Upstream.ProviderPreset = tt.providerPreset
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 

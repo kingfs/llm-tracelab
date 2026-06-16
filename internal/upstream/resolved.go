@@ -534,18 +534,18 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 	if resolved.RoutingProfile == RoutingProfileVertexExpress || resolved.RoutingProfile == RoutingProfileVertexProject {
 		return joinVertexRequestPath(reqPath, resolved)
 	}
+	if resolved.ProtocolFamily == ProtocolFamilyOpenAICompatible {
+		switch llm.NormalizeEndpoint(reqPath) {
+		case "/tokenize", "/detokenize":
+			return llm.NormalizeEndpoint(reqPath)
+		}
+	}
 	if resolved.RoutingProfile == RoutingProfileAzureOpenAIDeploy {
 		if resolved.Deployment != "" {
 			return "/openai/deployments/" + resolved.Deployment + stripOpenAIVersionPrefix(reqPath)
 		}
 		if strings.Contains(basePath, "/deployments/") {
 			return basePath + stripOpenAIVersionPrefix(reqPath)
-		}
-	}
-	if resolved.RoutingProfile == RoutingProfileVLLMOpenAI {
-		switch llm.NormalizeEndpoint(reqPath) {
-		case "/tokenize", "/detokenize":
-			return llm.NormalizeEndpoint(reqPath)
 		}
 	}
 	if resolved.ProtocolFamily == ProtocolFamilyOpenAICompatible {
