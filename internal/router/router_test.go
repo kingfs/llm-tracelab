@@ -933,6 +933,60 @@ func TestRouterExtractsModelAndRoutesAnthropicCountTokens(t *testing.T) {
 	}
 }
 
+func TestRouterExtractsModelAndRoutesOpenAITokenize(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "vllm-primary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"qwen3.6-35b-a3b"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "http://vllm.local:8000/v1",
+					ProviderPreset: "vllm",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/tokenize", strings.NewReader(`{"model":"qwen3.6-35b-a3b","prompt":"hello","add_special_tokens":false}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "vllm-primary" {
+		t.Fatalf("selected target = %q, want vllm-primary", selection.Target.ID)
+	}
+	if selection.Decision == nil || selection.Decision.ModelName != "qwen3.6-35b-a3b" {
+		t.Fatalf("decision model = %#v, want qwen3.6-35b-a3b", selection.Decision)
+	}
+}
+
 func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

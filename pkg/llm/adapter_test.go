@@ -70,6 +70,7 @@ func TestParseTokenizerPassthroughRequestForPath(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Qwen/Qwen3-0.6B", req.Model)
 	assert.Equal(t, "/tokenize", req.Extensions["passthrough_endpoint"])
+	require.Contains(t, req.Extensions, "tokenization")
 }
 
 func TestParseOpenAIResponsesRequest(t *testing.T) {
