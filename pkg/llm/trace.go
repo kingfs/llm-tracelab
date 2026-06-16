@@ -22,6 +22,8 @@ const (
 	OperationMessages        = "messages"
 	OperationEmbeddings      = "embeddings"
 	OperationModels          = "models"
+	OperationTokenize        = "tokenize"
+	OperationDetokenize      = "detokenize"
 	OperationGenerateContent = "generate_content"
 )
 
@@ -93,6 +95,8 @@ func NormalizeEndpoint(rawPath string) string {
 	}{
 		{canonical: "/v1/chat/completions", suffixes: []string{"/v1/chat/completions", "/chat/completions"}},
 		{canonical: "/v1/responses", suffixes: []string{"/v1/responses", "/responses"}},
+		{canonical: "/tokenize", suffixes: []string{"/v1/tokenize", "/tokenize"}},
+		{canonical: "/detokenize", suffixes: []string{"/v1/detokenize", "/detokenize"}},
 		{canonical: "/v1/messages/count_tokens", suffixes: []string{"/v1/messages/count_tokens", "/messages/count_tokens"}},
 		{canonical: "/v1/messages", suffixes: []string{"/v1/messages", "/messages"}},
 		{canonical: "/v1/embeddings", suffixes: []string{"/v1/embeddings", "/embeddings"}},
@@ -144,6 +148,8 @@ func detectProvider(endpoint string, upstreamBaseURL string) string {
 		return ProviderVLLM
 	case endpoint == "/v1/chat/completions",
 		endpoint == "/v1/responses",
+		endpoint == "/tokenize",
+		endpoint == "/detokenize",
 		endpoint == "/v1/embeddings",
 		endpoint == "/v1/models":
 		return ProviderOpenAICompatible
@@ -166,6 +172,10 @@ func detectOperation(endpoint string, provider string) string {
 		return OperationEmbeddings
 	case "/v1/models":
 		return OperationModels
+	case "/tokenize":
+		return OperationTokenize
+	case "/detokenize":
+		return OperationDetokenize
 	case "/v1/publishers/models:generateContent", "/v1/publishers/models:streamGenerateContent":
 		return OperationGenerateContent
 	case "/v1/publishers/models":
@@ -194,7 +204,7 @@ func detectOperation(endpoint string, provider string) string {
 
 func isOpenAICompatibleEndpoint(endpoint string) bool {
 	switch endpoint {
-	case "/v1/chat/completions", "/v1/responses", "/v1/embeddings", "/v1/models":
+	case "/v1/chat/completions", "/v1/responses", "/tokenize", "/detokenize", "/v1/embeddings", "/v1/models":
 		return true
 	default:
 		return false

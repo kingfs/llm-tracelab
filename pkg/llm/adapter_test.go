@@ -44,6 +44,12 @@ func TestAdapterForPath(t *testing.T) {
 	assert.Equal(t, OperationModels, adapter.Semantics().Operation)
 	assert.Equal(t, "/v1/models", adapter.Semantics().Endpoint)
 
+	adapter, err = AdapterForPath("/v1/tokenize", "http://vllm.local:8000")
+	require.NoError(t, err)
+	assert.Equal(t, ProviderVLLM, adapter.Semantics().Provider)
+	assert.Equal(t, OperationTokenize, adapter.Semantics().Operation)
+	assert.Equal(t, "/tokenize", adapter.Semantics().Endpoint)
+
 	adapter, err = AdapterForPath("/v1/projects/demo/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent", "https://us-central1-aiplatform.googleapis.com")
 	require.NoError(t, err)
 	assert.Equal(t, ProviderVertexNative, adapter.Semantics().Provider)
@@ -57,6 +63,13 @@ func TestParseAnthropicCountTokensRequestForPath(t *testing.T) {
 	assert.Equal(t, "glm-5.1", req.Model)
 	require.Len(t, req.Messages, 1)
 	assert.Equal(t, "hello", req.Messages[0].Content[0].Text)
+}
+
+func TestParseTokenizerPassthroughRequestForPath(t *testing.T) {
+	req, err := ParseRequestForPath("/tokenize", "http://vllm.local:8000", []byte(`{"model":"Qwen/Qwen3-0.6B","prompt":"hello"}`))
+	require.NoError(t, err)
+	assert.Equal(t, "Qwen/Qwen3-0.6B", req.Model)
+	assert.Equal(t, "/tokenize", req.Extensions["passthrough_endpoint"])
 }
 
 func TestParseOpenAIResponsesRequest(t *testing.T) {

@@ -221,6 +221,103 @@ func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	}
 }
 
+func TestHandlerVLLMTokenizerEndpointsRouteToTopLevelPaths(t *testing.T) {
+	tests := []struct {
+		name             string
+		proxyPath        string
+		wantUpstreamPath string
+		requestBody      string
+		responseBody     string
+	}{
+		{
+			name:             "tokenize",
+			proxyPath:        "/v1/tokenize",
+			wantUpstreamPath: "/tokenize",
+			requestBody:      `{"model":"Qwen/Qwen3-0.6B","prompt":"hello","return_token_strs":true}`,
+			responseBody:     `{"tokens":[14990],"token_strs":["hello"],"count":1,"max_model_len":32768}`,
+		},
+		{
+			name:             "detokenize",
+			proxyPath:        "/detokenize",
+			wantUpstreamPath: "/detokenize",
+			requestBody:      `{"model":"Qwen/Qwen3-0.6B","tokens":[14990]}`,
+			responseBody:     `{"prompt":"hello"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
+			var gotPath string
+			var gotBody string
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				body, _ := io.ReadAll(r.Body)
+				gotBody = string(body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tt.responseBody)
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{}
+			cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+			cfg.Upstream.ProviderPreset = "vllm"
+			cfg.Debug.OutputDir = outputDir
+			cfg.Debug.MaskKey = true
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			req, err := http.NewRequest(http.MethodPost, proxyServer.URL+tt.proxyPath, bytes.NewBufferString(tt.requestBody))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, err := proxyServer.Client().Do(req)
+			if err != nil {
+				t.Fatalf("client.Do() error = %v", err)
+			}
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(respBody))
+			}
+			if gotPath != tt.wantUpstreamPath {
+				t.Fatalf("upstream path = %q, want %q", gotPath, tt.wantUpstreamPath)
+			}
+			if gotBody != tt.requestBody {
+				t.Fatalf("upstream body = %q, want %q", gotBody, tt.requestBody)
+			}
+			if string(respBody) != tt.responseBody {
+				t.Fatalf("response body = %q, want %q", string(respBody), tt.responseBody)
+			}
+
+			parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecordedPrelude() error = %v", err)
+			}
+			if parsed.Header.Meta.Endpoint != tt.wantUpstreamPath {
+				t.Fatalf("recorded endpoint = %q, want %q", parsed.Header.Meta.Endpoint, tt.wantUpstreamPath)
+			}
+			if parsed.Header.Meta.Model != "Qwen/Qwen3-0.6B" {
+				t.Fatalf("recorded model = %q, want Qwen/Qwen3-0.6B", parsed.Header.Meta.Model)
+			}
+		})
+	}
+}
+
 func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

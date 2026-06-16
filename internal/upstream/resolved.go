@@ -542,6 +542,12 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 			return basePath + stripOpenAIVersionPrefix(reqPath)
 		}
 	}
+	if resolved.RoutingProfile == RoutingProfileVLLMOpenAI {
+		switch llm.NormalizeEndpoint(reqPath) {
+		case "/tokenize", "/detokenize":
+			return llm.NormalizeEndpoint(reqPath)
+		}
+	}
 	if resolved.ProtocolFamily == ProtocolFamilyOpenAICompatible {
 		trimmedReqPath := stripOpenAIVersionPrefix(reqPath)
 		if llm.NormalizeEndpoint(basePath) == llm.NormalizeEndpoint(reqPath) {

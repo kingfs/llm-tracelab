@@ -38,6 +38,8 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 		return openAIChatAdapter{semantics: semantics}, nil
 	case "/v1/responses":
 		return openAIResponsesAdapter{semantics: semantics}, nil
+	case "/tokenize", "/detokenize":
+		return openAITokenizerPassthroughAdapter{semantics: semantics}, nil
 	case "/v1/models", "/v1beta/models", "/v1/publishers/models":
 		return modelListAdapter{semantics: semantics}, nil
 	case "/v1/messages", "/v1/messages/count_tokens":
@@ -195,6 +197,57 @@ func (a modelListAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
 }
 func (a modelListAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
 	return json.Marshal(resp.Extensions["model_list"])
+}
+
+type openAITokenizerPassthroughAdapter struct {
+	semantics TraceSemantics
+}
+
+func (a openAITokenizerPassthroughAdapter) Semantics() TraceSemantics { return a.semantics }
+func (a openAITokenizerPassthroughAdapter) ParseRequest(body []byte) (LLMRequest, error) {
+	var payload struct {
+		Model string `json:"model"`
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return LLMRequest{}, err
+		}
+	}
+	return LLMRequest{
+		Model: payload.Model,
+		Extensions: map[string]any{
+			"passthrough_endpoint": a.semantics.Endpoint,
+		},
+	}, nil
+}
+func (a openAITokenizerPassthroughAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+	if resp, ok := parseProviderErrorResponse(body); ok {
+		return resp, nil
+	}
+	var raw any
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return LLMResponse{}, err
+		}
+	}
+	return LLMResponse{
+		Extensions: map[string]any{
+			"passthrough_endpoint": a.semantics.Endpoint,
+			"raw":                  raw,
+		},
+	}, nil
+}
+func (a openAITokenizerPassthroughAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
+	if raw, ok := req.Extensions["raw"]; ok {
+		return json.Marshal(raw)
+	}
+	return json.Marshal(req)
+}
+func (a openAITokenizerPassthroughAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
+	if raw, ok := resp.Extensions["raw"]; ok {
+		return json.Marshal(raw)
+	}
+	return json.Marshal(resp)
 }
 
 type googleGenerateContentAdapter struct {

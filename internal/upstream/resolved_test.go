@@ -314,6 +314,24 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			wantURL: "https://openrouter.example.com/v1/chat/completions",
 		},
 		{
+			name: "vllm_tokenize_uses_top_level_route",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "http://vllm.local:8000/v1",
+				ProviderPreset: "vllm",
+			},
+			path:    "/v1/tokenize",
+			wantURL: "http://vllm.local:8000/tokenize",
+		},
+		{
+			name: "vllm_detokenize_uses_top_level_route",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "http://vllm.local:8000/v1",
+				ProviderPreset: "vllm",
+			},
+			path:    "/detokenize",
+			wantURL: "http://vllm.local:8000/detokenize",
+		},
+		{
 			name: "azure_v1_adds_api_version",
 			cfg: config.UpstreamConfig{
 				BaseURL:        "https://demo-resource.openai.azure.com/openai/v1",

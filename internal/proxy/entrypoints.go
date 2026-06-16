@@ -35,6 +35,10 @@ func canonicalClientPath(rawPath string) string {
 	switch clean {
 	case "/responses":
 		return "/v1/responses"
+	case "/v1/tokenize":
+		return "/tokenize"
+	case "/v1/detokenize":
+		return "/detokenize"
 	case "/anthropic/messages":
 		return "/v1/messages"
 	case "/anthropic/v1/messages":
