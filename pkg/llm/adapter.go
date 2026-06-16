@@ -225,17 +225,20 @@ func (a tokenizationAdapter) ParseResponse(body []byte) (LLMResponse, error) {
 	if resp, ok := parseProviderErrorResponse(body); ok {
 		return resp, nil
 	}
-	var payload map[string]any
+	var raw any
 	if len(body) > 0 {
-		if err := json.Unmarshal(body, &payload); err != nil {
+		if err := json.Unmarshal(body, &raw); err != nil {
 			return LLMResponse{}, err
 		}
 	}
-	return LLMResponse{Extensions: map[string]any{
+	extensions := map[string]any{
 		"passthrough_endpoint": a.semantics.Endpoint,
-		"tokenization":         payload,
-		"raw":                  payload,
-	}}, nil
+		"raw":                  raw,
+	}
+	if payload, ok := raw.(map[string]any); ok {
+		extensions["tokenization"] = payload
+	}
+	return LLMResponse{Extensions: extensions}, nil
 }
 func (a tokenizationAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
 	if req.Extensions != nil {

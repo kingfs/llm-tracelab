@@ -1178,6 +1178,33 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 			wantAuthHeader:   "Bearer github-secret",
 			wantNoAPIKey:     true,
 		},
+		{
+			name:             "vllm_tokenize_uses_root_endpoint",
+			baseURLPath:      "/v1",
+			providerPreset:   "vllm",
+			requestPath:      "/tokenize",
+			requestBody:      `{"model":"local-model","prompt":"hello","add_special_tokens":false}`,
+			wantUpstreamPath: "/tokenize",
+			wantNoAPIKey:     true,
+		},
+		{
+			name:             "vllm_tokenize_accepts_v1_prefixed_entrypoint",
+			baseURLPath:      "/v1",
+			providerPreset:   "vllm",
+			requestPath:      "/v1/tokenize",
+			requestBody:      `{"model":"local-model","prompt":"hello","add_special_tokens":false}`,
+			wantUpstreamPath: "/tokenize",
+			wantNoAPIKey:     true,
+		},
+		{
+			name:             "vllm_detokenize_accepts_v1_prefixed_entrypoint",
+			baseURLPath:      "/v1",
+			providerPreset:   "vllm",
+			requestPath:      "/v1/detokenize",
+			requestBody:      `{"model":"local-model","tokens":[14556]}`,
+			wantUpstreamPath: "/detokenize",
+			wantNoAPIKey:     true,
+		},
 	}
 
 	for _, tt := range tests {

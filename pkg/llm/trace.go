@@ -101,8 +101,6 @@ func NormalizeEndpoint(rawPath string) string {
 		{canonical: "/v1/messages", suffixes: []string{"/v1/messages", "/messages"}},
 		{canonical: "/v1/embeddings", suffixes: []string{"/v1/embeddings", "/embeddings"}},
 		{canonical: "/v1/models", suffixes: []string{"/v1/models", "/models"}},
-		{canonical: "/tokenize", suffixes: []string{"/tokenize"}},
-		{canonical: "/detokenize", suffixes: []string{"/detokenize"}},
 		{canonical: "/v1beta/models:generateContent", suffixes: []string{"/v1beta/models:generateContent"}},
 		{canonical: "/v1beta/models:streamGenerateContent", suffixes: []string{"/v1beta/models:streamGenerateContent"}},
 		{canonical: "/v1beta/models", suffixes: []string{"/v1beta/models"}},
