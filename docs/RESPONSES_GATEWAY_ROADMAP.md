@@ -47,7 +47,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 完成后 `responses` / `response_items` 可查到完整结果。
 - 非流式路径、record/replay cassette 和现有 deferred stream 行为不回退。
 
-当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。已注册 server-side function executor 的 stream 首切会输出 arguments delta/done、执行 executor、把 tool output 注入下一轮模型上下文并继续流式输出最终文本，executor tool_call started/completed/failed events 会带 `stream=true`。provider 就绪的 hosted `web_search` 也已接入 stream tool loop，会输出 arguments delta/done、执行 server-side search、注入结果并继续最终文本 delta，tool_call started/completed/failed events 会带 `stream=true`。需要 auto compact 等复杂路径仍会 fallback 到 deferred SSE；更细粒度 tool lifecycle streaming events 仍未完成。后续工作是 hosted/server-side tool SSE 事件细化和已写出 SSE 后的失败事件细化。
+当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。已注册 server-side function executor 的 stream 首切会输出 arguments delta/done、执行 executor、输出完成态 `response.output_item.done` tool item、把 tool output 注入下一轮模型上下文并继续流式输出最终文本，executor tool_call started/completed/failed events 会带 `stream=true`。provider 就绪的 hosted `web_search` 也已接入 stream tool loop，会输出 arguments delta/done、执行 server-side search、输出完成态 `response.output_item.done` `web_search_call` item、注入结果并继续最终文本 delta，tool_call started/completed/failed events 会带 `stream=true`。需要 auto compact 等复杂路径仍会 fallback 到 deferred SSE；更完整的 tool started/failed SSE 和已写出 SSE 后失败事件仍未完成。
 
 ### Stage 21：Model Profile 与 Context Budget（保守估算首切已落地）
 
@@ -103,11 +103,11 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 开启 executor 后写 tool_call started/completed/failed events。
 - 明确超时、错误、结果大小和敏感信息处理边界。
 
-当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。已注册 server-side function executor 在 `stream:true` 下已有首切 tool loop：参数分片继续 streaming，executor 执行后进入下一轮内部 Chat Completions，并继续输出最终文本 delta；对应 tool_call started/completed/failed events 会标记 `stream=true`。Monitor 已有只读 API 和 Audit 页面状态面板；Monitor 写配置、外部 executor 隔离策略和更细粒度 server-side tool streaming lifecycle events 仍未完成。
+当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。已注册 server-side function executor 在 `stream:true` 下已有首切 tool loop：参数分片继续 streaming，executor 执行后输出完成态 `response.output_item.done` tool item，进入下一轮内部 Chat Completions，并继续输出最终文本 delta；对应 tool_call started/completed/failed events 会标记 `stream=true`。Monitor 已有只读 API 和 Audit 页面状态面板；Monitor 写配置、外部 executor 隔离策略和更完整的 server-side tool started/failed SSE lifecycle events 仍未完成。
 
 ## 并行开发规则
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切顺序合入。后续优先补 hosted/server-side tool streaming lifecycle 细化，再做外部 executor/Monitor 配置和更完整的 provider setup wizard。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入。后续优先补 hosted/server-side tool started/failed SSE lifecycle 细化，再做外部 executor/Monitor 配置和更完整的 provider setup wizard。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
