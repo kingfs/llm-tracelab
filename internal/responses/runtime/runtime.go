@@ -1835,10 +1835,6 @@ func normalizeChatMessages(messages []ChatMessage) []ChatMessage {
 	return out
 }
 
-func responseFromOutput(req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage) protocol.Response {
-	return responseFromOutputWithID(newResponseID(), req, model, output, usage)
-}
-
 func responseFromOutputWithID(id string, req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage) protocol.Response {
 	return protocol.Response{
 		ID:                 id,
