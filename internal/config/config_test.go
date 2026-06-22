@@ -423,6 +423,10 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 
 func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
 	workingDir := t.TempDir()
+	commandPath := filepath.Join(workingDir, "lookup")
+	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write command fixture: %v", err)
+	}
 	path := writeTempConfig(t, fmt.Sprintf(`
 responses_server:
   enabled: true
@@ -450,7 +454,7 @@ responses_server:
         output: "off"
       - name: "run_lookup"
         type: "external_command"
-        command: " /bin/echo "
+        command: " %s "
         args: ["ok"]
         timeout: 1s
         env:
@@ -459,6 +463,8 @@ responses_server:
         process:
           working_dir: %q
           require_absolute_command: true
+          allowed_command_dirs: [" %s "]
+          reject_root: true
   model_profiles:
     - name: "qwen3"
       context_window_tokens: 32768
@@ -471,7 +477,7 @@ responses_server:
         timeout: 750ms
     - pattern: "gpt-4o*"
       compact_history_item_threshold: 6
-`, workingDir))
+`, commandPath, workingDir, workingDir))
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -524,7 +530,7 @@ responses_server:
 	if got := executors.Executors[1]; got.Name != "disabled_lookup" || got.Enabled == nil || *got.Enabled {
 		t.Fatalf("second function executor = %+v", got)
 	}
-	if got := executors.Executors[2]; got.Name != "run_lookup" || got.Type != "external_command" || got.Command != "/bin/echo" || got.Timeout != time.Second || len(got.Args) != 1 || got.Args[0] != "ok" || got.Env["STATIC_VALUE"] != "static" || len(got.EnvAllowlist) != 1 || got.EnvAllowlist[0] != "PATH" || got.Process.WorkingDir != workingDir || !got.Process.RequireAbsoluteCommand {
+	if got := executors.Executors[2]; got.Name != "run_lookup" || got.Type != "external_command" || got.Command != commandPath || got.Timeout != time.Second || len(got.Args) != 1 || got.Args[0] != "ok" || got.Env["STATIC_VALUE"] != "static" || len(got.EnvAllowlist) != 1 || got.EnvAllowlist[0] != "PATH" || got.Process.WorkingDir != workingDir || !got.Process.RequireAbsoluteCommand || len(got.Process.AllowedCommandDirs) != 1 || got.Process.AllowedCommandDirs[0] != workingDir || !got.Process.RejectRoot {
 		t.Fatalf("third function executor = %+v", got)
 	}
 }
@@ -618,6 +624,100 @@ func TestResponsesFunctionExecutorsConfigValidatesExternalCommandProcessIsolatio
 	}
 	if got := strings.Join(executors.Warnings, " "); !strings.Contains(got, "no available executors") {
 		t.Fatalf("warnings = %q, want no available executors warning", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsConfigValidatesAllowedCommandDirs(t *testing.T) {
+	allowedDir := t.TempDir()
+	commandPath := filepath.Join(allowedDir, "lookup")
+	if err := os.WriteFile(commandPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write command fixture: %v", err)
+	}
+	filePath := filepath.Join(t.TempDir(), "not-dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file fixture: %v", err)
+	}
+	outsideCommand := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outsideCommand, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write outside command fixture: %v", err)
+	}
+
+	cfg := Config{}
+	cfg.ResponsesServer.FunctionExecutors.Enabled = true
+	cfg.ResponsesServer.FunctionExecutors.Executors = []ResponsesFunctionExecutorBinding{
+		{
+			Name:    "allowed",
+			Type:    "external_command",
+			Command: commandPath,
+			Process: ResponsesFunctionExecutorProcessConfig{
+				AllowedCommandDirs: []string{" " + allowedDir + " ", ""},
+				RejectRoot:         true,
+			},
+		},
+		{
+			Name:    "relative_allowed_dir",
+			Type:    "external_command",
+			Command: commandPath,
+			Process: ResponsesFunctionExecutorProcessConfig{
+				AllowedCommandDirs: []string{"relative-dir"},
+			},
+		},
+		{
+			Name:    "missing_allowed_dir",
+			Type:    "external_command",
+			Command: commandPath,
+			Process: ResponsesFunctionExecutorProcessConfig{
+				AllowedCommandDirs: []string{filepath.Join(t.TempDir(), "missing")},
+			},
+		},
+		{
+			Name:    "file_allowed_dir",
+			Type:    "external_command",
+			Command: commandPath,
+			Process: ResponsesFunctionExecutorProcessConfig{
+				AllowedCommandDirs: []string{filePath},
+			},
+		},
+		{
+			Name:    "outside_allowed_dir",
+			Type:    "external_command",
+			Command: outsideCommand,
+			Process: ResponsesFunctionExecutorProcessConfig{
+				AllowedCommandDirs: []string{allowedDir},
+			},
+		},
+		{
+			Name:    "root_rejected",
+			Type:    "external_command",
+			Command: commandPath,
+			Process: ResponsesFunctionExecutorProcessConfig{
+				AllowedCommandDirs: []string{string(filepath.Separator)},
+				RejectRoot:         true,
+			},
+		},
+	}
+
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if len(executors.Executors) != 6 {
+		t.Fatalf("len(executors) = %d, want 6", len(executors.Executors))
+	}
+	if got := executors.Executors[0]; !got.Available || len(got.Warnings) != 0 || len(got.Process.AllowedCommandDirs) != 2 || got.Process.AllowedCommandDirs[0] != allowedDir || got.Process.AllowedCommandDirs[1] != "" || !got.Process.RejectRoot {
+		t.Fatalf("allowed executor = %+v, want available with trimmed allowed dirs", got)
+	}
+	if got := executors.Executors[1]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "allowed_command_dirs entries must be absolute") {
+		t.Fatalf("relative allowed dir executor = %+v, want absolute warning", got)
+	}
+	if got := executors.Executors[2]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "allowed_command_dirs entry is not accessible") {
+		t.Fatalf("missing allowed dir executor = %+v, want accessible warning", got)
+	}
+	if got := executors.Executors[3]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "allowed_command_dirs entries must be directories") {
+		t.Fatalf("file allowed dir executor = %+v, want directory warning", got)
+	}
+	if got := executors.Executors[4]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "command must resolve inside process.allowed_command_dirs") {
+		t.Fatalf("outside command executor = %+v, want allowed dir warning", got)
+	}
+	if got := executors.Executors[5]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "must not include filesystem root") {
+		t.Fatalf("root rejected executor = %+v, want reject_root warning", got)
 	}
 }
 

@@ -34,8 +34,10 @@ type responsesFunctionExecutorBindingSnapshot struct {
 }
 
 type responsesFunctionExecutorProcessSnapshot struct {
-	WorkingDir             string `json:"working_dir,omitempty"`
-	RequireAbsoluteCommand bool   `json:"require_absolute_command,omitempty"`
+	WorkingDir             string   `json:"working_dir,omitempty"`
+	RequireAbsoluteCommand bool     `json:"require_absolute_command,omitempty"`
+	AllowedCommandDirs     []string `json:"allowed_command_dirs,omitempty"`
+	RejectRoot             bool     `json:"reject_root,omitempty"`
 }
 
 // SaveResponsesFunctionExecutorConfigSnapshot stores only the non-sensitive
@@ -101,6 +103,8 @@ func newResponsesFunctionExecutorConfigSnapshot(cfg config.ResponsesFunctionExec
 			Process: responsesFunctionExecutorProcessSnapshot{
 				WorkingDir:             strings.TrimSpace(binding.Process.WorkingDir),
 				RequireAbsoluteCommand: binding.Process.RequireAbsoluteCommand,
+				AllowedCommandDirs:     trimStringSlice(binding.Process.AllowedCommandDirs),
+				RejectRoot:             binding.Process.RejectRoot,
 			},
 		})
 	}
@@ -134,10 +138,23 @@ func (snapshot responsesFunctionExecutorConfigSnapshot) toConfig() (config.Respo
 			Process: config.ResponsesFunctionExecutorProcessConfig{
 				WorkingDir:             strings.TrimSpace(binding.Process.WorkingDir),
 				RequireAbsoluteCommand: binding.Process.RequireAbsoluteCommand,
+				AllowedCommandDirs:     trimStringSlice(binding.Process.AllowedCommandDirs),
+				RejectRoot:             binding.Process.RejectRoot,
 			},
 		})
 	}
 	return cfg, nil
+}
+
+func trimStringSlice(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, strings.TrimSpace(value))
+	}
+	return out
 }
 
 func cloneBoolPtr(value *bool) *bool {

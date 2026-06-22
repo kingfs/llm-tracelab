@@ -204,8 +204,10 @@ type ResponsesFunctionExecutorBinding struct {
 }
 
 type ResponsesFunctionExecutorProcessConfig struct {
-	WorkingDir             string `yaml:"working_dir"`
-	RequireAbsoluteCommand bool   `yaml:"require_absolute_command"`
+	WorkingDir             string   `yaml:"working_dir"`
+	RequireAbsoluteCommand bool     `yaml:"require_absolute_command"`
+	AllowedCommandDirs     []string `yaml:"allowed_command_dirs"`
+	RejectRoot             bool     `yaml:"reject_root"`
 }
 
 const (
@@ -840,6 +842,7 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 		binding.Type = strings.ToLower(strings.TrimSpace(binding.Type))
 		binding.Command = strings.TrimSpace(binding.Command)
 		binding.Process.WorkingDir = strings.TrimSpace(binding.Process.WorkingDir)
+		binding.Process.AllowedCommandDirs = trimStringSlice(binding.Process.AllowedCommandDirs)
 		binding.Available = false
 		binding.Warnings = nil
 		for i := range binding.EnvAllowlist {
@@ -878,6 +881,44 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 			if binding.Process.RequireAbsoluteCommand && binding.Command != "" && !filepath.IsAbs(binding.Command) {
 				binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command must be absolute when process.require_absolute_command is true", binding.Name))
 			}
+			allowedCommandDirs := make([]string, 0, len(binding.Process.AllowedCommandDirs))
+			for _, dir := range binding.Process.AllowedCommandDirs {
+				if dir == "" {
+					continue
+				}
+				if !filepath.IsAbs(dir) {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.allowed_command_dirs entries must be absolute", binding.Name))
+					continue
+				}
+				info, err := os.Stat(dir)
+				if err != nil {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.allowed_command_dirs entry is not accessible: %v", binding.Name, err))
+					continue
+				}
+				if !info.IsDir() {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.allowed_command_dirs entries must be directories", binding.Name))
+					continue
+				}
+				resolved, err := filepath.EvalSymlinks(dir)
+				if err != nil {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.allowed_command_dirs entry cannot resolve symlinks: %v", binding.Name, err))
+					continue
+				}
+				if binding.Process.RejectRoot && filepath.Clean(resolved) == string(filepath.Separator) {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.allowed_command_dirs must not include filesystem root when process.reject_root is true", binding.Name))
+					continue
+				}
+				allowedCommandDirs = append(allowedCommandDirs, resolved)
+			}
+			if binding.Command != "" && len(allowedCommandDirs) > 0 {
+				if !filepath.IsAbs(binding.Command) {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command must be absolute when process.allowed_command_dirs is configured", binding.Name))
+				} else if resolvedCommand, err := filepath.EvalSymlinks(binding.Command); err != nil {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command cannot resolve symlinks: %v", binding.Name, err))
+				} else if !pathWithinAnyDir(resolvedCommand, allowedCommandDirs) {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command must resolve inside process.allowed_command_dirs", binding.Name))
+				}
+			}
 			if len(binding.Warnings) == 0 && enabled {
 				binding.Available = true
 				enabledAvailable++
@@ -902,6 +943,34 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 	}
 	cfg.Executors = bindings
 	return cfg
+}
+
+func trimStringSlice(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, strings.TrimSpace(value))
+	}
+	return out
+}
+
+func pathWithinAnyDir(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		if pathWithinDir(path, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathWithinDir(path string, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func (c Config) WebSearchEnabled() bool {
