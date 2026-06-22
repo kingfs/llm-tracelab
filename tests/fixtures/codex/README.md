@@ -3,9 +3,10 @@
 These fixtures document the first offline Codex/OpenAI SDK compatibility
 profile for llm-tracelab Responses server-mode.
 
-They are not wired into Go tests yet. They are intended as stable examples for
-future focused tests or an offline fixture runner. Do not make these fixtures
-depend on real Codex, real model providers, wall clock time, or network access.
+They are wired into focused offline Go tests under `internal/responses/httpapi`
+and `internal/responses/runtime`. The tests validate fixture schema/contract
+shape and a small runtime/parser alignment surface without depending on real
+Codex, real model providers, wall clock time, or network access.
 
 Coverage:
 
@@ -21,4 +22,6 @@ Coverage:
   descriptor accepted as compatibility input.
 - `unsupported_hosted_tool_expected_error.json`: expected stable error shape for
   unsupported hosted tools such as `mcp`, `file_search`, and
-  `code_interpreter` once runtime gating is added.
+  `code_interpreter` once runtime gating is added. The current fixture tests
+  treat this as a pending compatibility contract and do not assert that runtime
+  gating for those hosted tools is already implemented.

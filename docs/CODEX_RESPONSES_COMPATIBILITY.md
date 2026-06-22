@@ -129,7 +129,7 @@ Fixture:
 | file search hosted runtime | 不支持 | 无 vector store/retrieval/citation runtime。 |
 | code interpreter hosted runtime | 不支持 | 无 sandboxed code runtime。 |
 | Codex TOML profile generation | 不支持 | 尚无 `models codex-config` 等生成命令。 |
-| Codex fixture runner | 不支持 | 当前只有离线 fixture 资产，未接 Go/e2e runner。 |
+| Codex fixture runner | 部分支持 | `internal/responses/httpapi` 与 `internal/responses/runtime` 有 focused 离线 Go tests，覆盖 fixture schema/contract 和最小 runtime/parser 对齐；不是完整 Codex/e2e runner。 |
 
 ## 配置建议
 
@@ -191,8 +191,8 @@ tools:
 
 ## Fixture 使用约定
 
-`tests/fixtures/codex/` 当前只是离线资产，目标是给后续自动 runner 或 focused Go
-测试提供稳定输入。新增 fixture 时遵守：
+`tests/fixtures/codex/` 是 focused 离线 Go tests 的稳定输入，也可给后续更完整的
+自动 runner 复用。新增 fixture 时遵守：
 
 - 不依赖真实 Codex、真实模型、真实网络或当前日期。
 - 使用占位模型 `local-test-model` 和稳定 id。
