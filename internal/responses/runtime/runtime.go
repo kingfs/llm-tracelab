@@ -382,6 +382,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 			}
 			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{Stream: true})
 			if err != nil {
+				_ = streamOutputItemDone(sink, outputIndex, failedToolOutputItem(call))
 				return protocol.Response{}, err
 			}
 			if err := streamOutputItemDone(sink, outputIndex, outputItem); err != nil {
@@ -441,6 +442,13 @@ func startedToolOutputItem(call executableToolCall) protocol.OutputItem {
 			Name:   call.call.Function.Name,
 		}
 	}
+}
+
+func failedToolOutputItem(call executableToolCall) protocol.OutputItem {
+	item := startedToolOutputItem(call)
+	item.Status = "failed"
+	item.Output = nil
+	return item
 }
 
 func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error) {

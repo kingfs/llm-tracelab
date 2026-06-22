@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -150,6 +151,15 @@ type fakeExecutionEventRecorder struct {
 func (f *fakeExecutionEventRecorder) RecordExecutionEvent(ctx context.Context, event audit.ExecutionEvent) error {
 	f.events = append(f.events, event)
 	return nil
+}
+
+func toJSONForTest(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal test value: %v", err)
+	}
+	return string(data)
 }
 
 func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) {
@@ -700,6 +710,86 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	}
 }
 
+func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForFunctionToolExecutorFailure(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ID:             "call_lookup",
+				FunctionName:   "lookup",
+				ArgumentsDelta: `{"secret"`,
+			}}},
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ArgumentsDelta: `:"do-not-leak"}`,
+			}}},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{
+					ToolCalls: []ChatToolCall{{
+						ID:   "call_lookup",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "lookup",
+							Arguments: `{"secret":"do-not-leak"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+			Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+		},
+	}
+	executorErr := errors.New("lookup backend failed")
+	sink := &fakeResponseStreamSink{}
+	rt := New(
+		Config{DefaultModel: "fallback-model"},
+		client,
+		NewMemoryStore(),
+		WithFunctionToolExecutor("lookup", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+			return FunctionToolResult{Output: "sensitive-output"}, executorErr
+		})),
+	)
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "lookup codex",
+		Stream: true,
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}, sink)
+	if !errors.Is(err, executorErr) {
+		t.Fatalf("CreateStream() error = %v, want executor error", err)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(sink.outputAdded) != 1 || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_lookup" {
+		t.Fatalf("output item added = %#v, want started call_lookup", sink.outputAdded)
+	}
+	if len(sink.outputDone) != 1 {
+		t.Fatalf("output item done = %#v, want one failed item", sink.outputDone)
+	}
+	done := sink.outputDone[0].Item
+	if done.Type != "function_call_output" || done.Status != "failed" || done.CallID != "call_lookup" || done.Name != "lookup" {
+		t.Fatalf("failed output item = %#v, want failed lookup call output", done)
+	}
+	if done.Output != nil || strings.Contains(toJSONForTest(t, done), "sensitive-output") {
+		t.Fatalf("failed output item leaked output: %#v", done)
+	}
+}
+
 func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	client := &fakeChatClient{
 		streamEventBatches: [][]ChatStreamEvent{
@@ -860,6 +950,83 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	}
 	if !reflect.DeepEqual(stored.Output, resp.Output) {
 		t.Fatalf("stored output mismatch\nwant: %#v\n got: %#v", resp.Output, stored.Output)
+	}
+}
+
+func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForHostedWebSearchProviderFailure(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ID:             "call_search",
+				FunctionName:   "web_search",
+				ArgumentsDelta: `{"query"`,
+			}}},
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ArgumentsDelta: `:"llm trace replay"}`,
+			}}},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{
+					ToolCalls: []ChatToolCall{{
+						ID:   "call_search",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "web_search",
+							Arguments: `{"query":"llm trace replay"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+			Usage: ChatUsage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
+		},
+	}
+	providerErr := errors.New("search backend failed")
+	provider := &fakeWebSearchProvider{err: providerErr}
+	sink := &fakeResponseStreamSink{}
+	rt := New(Config{
+		DefaultModel:     "fallback-model",
+		WebSearchEnabled: true,
+	}, client, NewMemoryStore(), WithWebSearchProvider(provider))
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:      "search docs",
+		Stream:     true,
+		ToolChoice: "web_search",
+		Tools:      []protocol.Tool{{Type: "web_search_preview"}},
+	}, sink)
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("CreateStream() error = %v, want provider error", err)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(provider.queries) != 1 || provider.queries[0].Text != "llm trace replay" {
+		t.Fatalf("provider queries = %#v, want llm trace replay", provider.queries)
+	}
+	if len(sink.outputDone) != 1 {
+		t.Fatalf("output item done = %#v, want one failed item", sink.outputDone)
+	}
+	done := sink.outputDone[0].Item
+	if done.Type != "web_search_call" || done.Status != "failed" || done.CallID != "call_search" {
+		t.Fatalf("failed output item = %#v, want failed web_search_call call_search", done)
+	}
+	if got := done.Action["query"]; got != "llm trace replay" {
+		t.Fatalf("failed output item query = %#v", got)
+	}
+	if _, ok := done.Action["sources"]; ok {
+		t.Fatalf("failed output item leaked sources: %#v", done)
 	}
 }
 
