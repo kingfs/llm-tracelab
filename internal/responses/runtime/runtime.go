@@ -74,6 +74,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		return protocol.Response{}, fmt.Errorf("model is required")
 	}
 	inputItems := requestInputItems(req)
+	r.recordSubmittedFunctionOutputs(ctx, inputItems)
 	history, err := r.loadContinuationHistory(ctx, req.PreviousResponseID)
 	if err != nil {
 		return protocol.Response{}, err
@@ -180,7 +181,9 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		calls := executableWebSearchCalls(chatResp)
 		if len(calls) == 0 {
 			chatResp.Usage = usage
-			output = append(output, chatToOutputItems(chatResp)...)
+			outputItems := chatToOutputItems(chatResp)
+			r.recordRequestedFunctionCalls(ctx, outputItems)
+			output = append(output, outputItems...)
 			return responseFromOutput(req, model, output, usage), nil
 		}
 		if !r.webSearchReady() {
@@ -265,6 +268,41 @@ func (r *Runtime) recordExecutionEvent(ctx context.Context, event audit.Executio
 	}
 	if err := r.events.RecordExecutionEvent(ctx, event); err != nil {
 		slog.Error("Failed to record responses runtime execution event", "event_type", event.EventType, "status", event.Status, "err", err)
+	}
+}
+
+func (r *Runtime) recordRequestedFunctionCalls(ctx context.Context, outputItems []protocol.OutputItem) {
+	for _, item := range outputItems {
+		if item.Type != "function_call" {
+			continue
+		}
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "requested",
+			DetailsJSON: map[string]any{
+				"tool_name": item.Name,
+				"call_id":   item.CallID,
+				"arguments": item.Arguments,
+			},
+		})
+	}
+}
+
+func (r *Runtime) recordSubmittedFunctionOutputs(ctx context.Context, inputItems []protocol.InputItem) {
+	for _, item := range inputItems {
+		if item.Type != "function_call_output" {
+			continue
+		}
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "submitted",
+			DetailsJSON: map[string]any{
+				"tool_name": item.Name,
+				"call_id":   item.CallID,
+			},
+		})
 	}
 }
 
@@ -514,8 +552,9 @@ func mapToInputItem(item map[string]any) protocol.InputItem {
 	}
 	input.Name, _ = item["name"].(string)
 	input.Arguments, _ = item["arguments"].(string)
-	input.Output, _ = item["output"].(string)
+	input.Output = item["output"]
 	input.Content = inputContentParts(item["content"])
+	input.Extra = inputItemExtra(item)
 	if input.ID == "" {
 		input.ID = newInputID()
 	}
@@ -523,6 +562,22 @@ func mapToInputItem(item map[string]any) protocol.InputItem {
 		input.Type = "message"
 	}
 	return input
+}
+
+func inputItemExtra(item map[string]any) map[string]any {
+	extra := make(map[string]any, len(item))
+	for key, value := range item {
+		switch key {
+		case "id", "type", "role", "content", "call_id", "tool_call_id", "name", "arguments", "output":
+			continue
+		default:
+			extra[key] = value
+		}
+	}
+	if len(extra) == 0 {
+		return nil
+	}
+	return extra
 }
 
 func inputContentParts(content any) []protocol.ContentPart {
@@ -580,7 +635,7 @@ func inputItemToChatMessage(item protocol.InputItem) ChatMessage {
 		role = "user"
 	}
 	if item.Type == "function_call_output" {
-		return ChatMessage{Role: "tool", ToolCallID: item.CallID, Content: item.Output}
+		return ChatMessage{Role: "tool", ToolCallID: item.CallID, Content: toolOutputContent(item.Output)}
 	}
 	if item.Type == "function_call" {
 		return ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{inputFunctionCallToChatToolCall(item, 0)}}
@@ -644,7 +699,7 @@ func ledgerToChatMessages(items []LedgerItem) []ChatMessage {
 			messages = append(messages, ChatMessage{Role: "assistant", Content: contentPartsText(item.Output.Content)})
 		case "function_call_output":
 			flushToolCalls()
-			messages = append(messages, ChatMessage{Role: "tool", ToolCallID: item.Output.CallID, Content: item.Output.Output})
+			messages = append(messages, ChatMessage{Role: "tool", ToolCallID: item.Output.CallID, Content: toolOutputContent(item.Output.Output)})
 		case "summary":
 			flushToolCalls()
 			messages = append(messages, ChatMessage{Role: "system", Content: "Previous conversation summary:\n" + contentPartsText(item.Output.Content)})
@@ -733,6 +788,21 @@ func chatMessageContentText(content any) string {
 		return text
 	}
 	return fmt.Sprint(content)
+}
+
+func toolOutputContent(output any) string {
+	switch value := output.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	default:
+		data, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Sprint(value)
+		}
+		return string(data)
+	}
 }
 
 func contentPartsText(parts []protocol.ContentPart) string {

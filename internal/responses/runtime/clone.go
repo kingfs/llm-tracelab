@@ -21,6 +21,7 @@ func cloneInputItems(items []protocol.InputItem) []protocol.InputItem {
 
 func cloneInputItem(item protocol.InputItem) protocol.InputItem {
 	item.Content = append([]protocol.ContentPart(nil), item.Content...)
+	item.Extra = cloneMap(item.Extra)
 	return item
 }
 
@@ -38,6 +39,7 @@ func cloneOutputItems(items []protocol.OutputItem) []protocol.OutputItem {
 func cloneOutputItem(item protocol.OutputItem) protocol.OutputItem {
 	item.Content = append([]protocol.ContentPart(nil), item.Content...)
 	item.Action = cloneMap(item.Action)
+	item.Extra = cloneMap(item.Extra)
 	return item
 }
 

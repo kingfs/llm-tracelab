@@ -147,6 +147,61 @@ func TestEntStorePutGetInputItemsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEntStoreFunctionToolItemsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	store := newEntStoreForTest(t)
+	resp := protocol.Response{
+		ID:        "resp_ent_tool_1",
+		Object:    "response",
+		CreatedAt: 12,
+		Status:    "completed",
+		Model:     "model",
+		Output: []protocol.OutputItem{{
+			ID:        "fc_call_lookup",
+			Type:      "function_call",
+			Status:    "completed",
+			CallID:    "call_lookup",
+			Name:      "lookup",
+			Arguments: `{"q":"codex"}`,
+			Extra:     map[string]any{"provider_item_id": "item_1"},
+		}},
+	}
+	inputs := []protocol.InputItem{{
+		ID:     "in_tool_result_1",
+		Type:   "function_call_output",
+		CallID: "call_lookup",
+		Name:   "lookup",
+		Output: map[string]any{"ok": true, "value": "42"},
+		Extra:  map[string]any{"status": "completed"},
+	}}
+
+	if err := store.Put(ctx, resp, protocol.CreateResponseRequest{Input: "tool"}, inputs, resp.Output); err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+	got, ok, err := store.Get(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("Get() ok=%v err=%v", ok, err)
+	}
+	if len(got.Output) != 1 || got.Output[0].Extra["provider_item_id"] != "item_1" {
+		t.Fatalf("output item extra round-trip mismatch: %#v", got.Output)
+	}
+	items, ok, err := store.ContinuationItems(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("ContinuationItems() ok=%v err=%v", ok, err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want input and output: %#v", len(items), items)
+	}
+	input := items[0].Input
+	if input == nil || input.Type != "function_call_output" || input.Extra["status"] != "completed" {
+		t.Fatalf("function output input round-trip mismatch: %#v", items[0])
+	}
+	outputMap, ok := input.Output.(map[string]any)
+	if !ok || outputMap["ok"] != true || outputMap["value"] != "42" {
+		t.Fatalf("function output payload = %#v, want object payload", input.Output)
+	}
+}
+
 func TestEntStoreContinuationItemsWalksPreviousResponses(t *testing.T) {
 	ctx := context.Background()
 	store := newEntStoreForTest(t)

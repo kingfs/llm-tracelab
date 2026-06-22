@@ -167,6 +167,105 @@ func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) 
 	}
 }
 
+func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_lookup",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "lookup",
+								Arguments: `{"q":"codex"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "The lookup result is ready."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 15, CompletionTokens: 6, TotalTokens: 21},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	store := NewMemoryStore()
+	rt := New(Config{DefaultModel: "gpt-test"}, client, store, WithExecutionEventRecorder(events))
+
+	first, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("first Create returned error: %v", err)
+	}
+	if len(first.Output) != 1 || first.Output[0].Type != "function_call" || first.Output[0].CallID != "call_lookup" {
+		t.Fatalf("first output = %#v, want function_call call_lookup", first.Output)
+	}
+
+	second, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		PreviousResponseID: first.ID,
+		Input: []any{map[string]any{
+			"type":    "function_call_output",
+			"call_id": "call_lookup",
+			"name":    "lookup",
+			"output":  map[string]any{"ok": true, "value": "42"},
+			"status":  "completed",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("second Create returned error: %v", err)
+	}
+	if len(second.Output) != 1 || second.Output[0].Content[0].Text != "The lookup result is ready." {
+		t.Fatalf("second output = %#v, want final message", second.Output)
+	}
+
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat calls = %d, want 2", len(client.reqs))
+	}
+	secondMessages := client.reqs[1].Messages
+	if len(secondMessages) != 3 {
+		t.Fatalf("second messages len = %d, want 3: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[0].Role != "user" || secondMessages[0].Content != "lookup codex" {
+		t.Fatalf("history user message mismatch: %#v", secondMessages[0])
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 1 || secondMessages[1].ToolCalls[0].ID != "call_lookup" {
+		t.Fatalf("history assistant function call mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_lookup" || secondMessages[2].Content != `{"ok":true,"value":"42"}` {
+		t.Fatalf("submitted tool output message mismatch: %#v", secondMessages[2])
+	}
+
+	inputs, ok, err := store.InputItems(context.Background(), second.ID)
+	if err != nil || !ok {
+		t.Fatalf("InputItems(second) ok=%v err=%v", ok, err)
+	}
+	if len(inputs) != 1 || inputs[0].Extra["status"] != "completed" {
+		t.Fatalf("stored function output input lost extra fields: %#v", inputs)
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want requested and submitted: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "lookup" || events.events[0].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("requested event mismatch: %#v", events.events[0])
+	}
+	if events.events[1].Status != "submitted" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("submitted event mismatch: %#v", events.events[1])
+	}
+}
+
 func TestResponseToolsToChatToolsMapsHostedWebSearchWhenReady(t *testing.T) {
 	tools := responseToolsToChatTools([]protocol.Tool{
 		{Type: "web_search_preview"},

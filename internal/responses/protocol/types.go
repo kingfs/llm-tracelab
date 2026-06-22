@@ -219,19 +219,155 @@ type OutputItem struct {
 	CallID    string         `json:"call_id,omitempty"`
 	Name      string         `json:"name,omitempty"`
 	Arguments string         `json:"arguments,omitempty"`
-	Output    string         `json:"output,omitempty"`
+	Output    any            `json:"output,omitempty"`
 	Action    map[string]any `json:"action,omitempty"`
+	Extra     map[string]any `json:"-"`
+}
+
+func (o *OutputItem) UnmarshalJSON(data []byte) error {
+	type outputItemAlias OutputItem
+	var alias outputItemAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, key := range []string{
+		"id",
+		"type",
+		"status",
+		"role",
+		"content",
+		"call_id",
+		"name",
+		"arguments",
+		"output",
+		"action",
+	} {
+		delete(raw, key)
+	}
+	*o = OutputItem(alias)
+	o.Extra = decodeExtra(raw)
+	return nil
+}
+
+func (o OutputItem) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(o.Extra)+10)
+	for key, value := range o.Extra {
+		out[key] = value
+	}
+	if o.ID != "" {
+		out["id"] = o.ID
+	}
+	if o.Type != "" {
+		out["type"] = o.Type
+	}
+	if o.Status != "" {
+		out["status"] = o.Status
+	}
+	if o.Role != "" {
+		out["role"] = o.Role
+	}
+	if len(o.Content) > 0 {
+		out["content"] = o.Content
+	}
+	if o.CallID != "" {
+		out["call_id"] = o.CallID
+	}
+	if o.Name != "" {
+		out["name"] = o.Name
+	}
+	if o.Arguments != "" {
+		out["arguments"] = o.Arguments
+	}
+	if o.Output != nil {
+		out["output"] = o.Output
+	}
+	if o.Action != nil {
+		out["action"] = o.Action
+	}
+	return json.Marshal(out)
 }
 
 type InputItem struct {
-	ID        string        `json:"id,omitempty"`
-	Type      string        `json:"type"`
-	Role      string        `json:"role,omitempty"`
-	Content   []ContentPart `json:"content,omitempty"`
-	CallID    string        `json:"call_id,omitempty"`
-	Name      string        `json:"name,omitempty"`
-	Arguments string        `json:"arguments,omitempty"`
-	Output    string        `json:"output,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Type      string         `json:"type"`
+	Role      string         `json:"role,omitempty"`
+	Content   []ContentPart  `json:"content,omitempty"`
+	CallID    string         `json:"call_id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Arguments string         `json:"arguments,omitempty"`
+	Output    any            `json:"output,omitempty"`
+	Extra     map[string]any `json:"-"`
+}
+
+func (i *InputItem) UnmarshalJSON(data []byte) error {
+	type inputItemAlias InputItem
+	var alias inputItemAlias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, key := range []string{
+		"id",
+		"type",
+		"role",
+		"content",
+		"call_id",
+		"tool_call_id",
+		"name",
+		"arguments",
+		"output",
+	} {
+		delete(raw, key)
+	}
+	*i = InputItem(alias)
+	if i.CallID == "" {
+		var toolCallID string
+		if rawToolCallID, ok := raw["tool_call_id"]; ok {
+			_ = json.Unmarshal(rawToolCallID, &toolCallID)
+		}
+		i.CallID = toolCallID
+	}
+	i.Extra = decodeExtra(raw)
+	return nil
+}
+
+func (i InputItem) MarshalJSON() ([]byte, error) {
+	out := make(map[string]any, len(i.Extra)+8)
+	for key, value := range i.Extra {
+		out[key] = value
+	}
+	if i.ID != "" {
+		out["id"] = i.ID
+	}
+	if i.Type != "" {
+		out["type"] = i.Type
+	}
+	if i.Role != "" {
+		out["role"] = i.Role
+	}
+	if len(i.Content) > 0 {
+		out["content"] = i.Content
+	}
+	if i.CallID != "" {
+		out["call_id"] = i.CallID
+	}
+	if i.Name != "" {
+		out["name"] = i.Name
+	}
+	if i.Arguments != "" {
+		out["arguments"] = i.Arguments
+	}
+	if i.Output != nil {
+		out["output"] = i.Output
+	}
+	return json.Marshal(out)
 }
 
 type InputItemList struct {
@@ -276,4 +412,19 @@ type StreamEvent struct {
 	Text         string       `json:"text,omitempty"`
 	Arguments    string       `json:"arguments,omitempty"`
 	Error        *ErrorBody   `json:"error,omitempty"`
+}
+
+func decodeExtra(raw map[string]json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	extra := make(map[string]any, len(raw))
+	for key, value := range raw {
+		var decoded any
+		if err := json.Unmarshal(value, &decoded); err != nil {
+			continue
+		}
+		extra[key] = decoded
+	}
+	return extra
 }

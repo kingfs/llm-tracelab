@@ -65,7 +65,7 @@ SQLite 当前负责：
 
 启动时 schema 升级必须兼容已有本地 DB。
 
-Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client。`ent/postgres-migrations` 已包含 Postgres application schema SQL，并已验证 up/down 可执行；Postgres `db migrate up` 已切到 checked-in SQL migrator，通过 `golang-migrate` 应用嵌入的 `ent/postgres-migrations`。命令/server 打开 application store 时已拆分 migrate 与 open：`database.auto_migrate=true` 先执行应用迁移，再以 no-auto-migrate 模式打开 store；`false` 则只打开已存在 schema。Postgres migration 现在覆盖 `internal/store` SQLite application raw DDL 表集。Postgres `auth migrate up` 和 auth startup auto-migrate 也复用这套 checked-in Postgres SQL；`auth migrate down` 和独立 auth migration namespace 仍未完成。完整 Postgres 运维生产化仍不是当前基线能力，因为 SQLite 应用迁移仍未版本化，Postgres auth rollback/namespace 未完成，analytics/eval 等 raw SQL 兼容性仍需持续审计。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束，Stage 16A/16B/16C/16D/16E/16F 已接入 Postgres ent migration SQL 生成链路、checked-in migrations、CLI versioned SQL migrator、open-vs-migrate 分离、首轮 store raw SQL 兼容审计、application raw DDL 表覆盖补齐和 Postgres auth `up` 版本化迁移。完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client。`ent/postgres-migrations` 已包含 Postgres application schema SQL，并已验证 up/down 可执行；Postgres `db migrate up` 已切到 checked-in SQL migrator，通过 `golang-migrate` 应用嵌入的 `ent/postgres-migrations`。命令/server 打开 application store 时已拆分 migrate 与 open：`database.auto_migrate=true` 先执行应用迁移，再以 no-auto-migrate 模式打开 store；`false` 则只打开已存在 schema。Postgres migration 现在覆盖 `internal/store` SQLite application raw DDL 表集。Postgres `auth migrate up` 和 auth startup auto-migrate 也复用这套 checked-in Postgres SQL；`auth migrate down` 和独立 auth migration namespace 仍未完成。完整 Postgres 运维生产化仍不是当前基线能力，因为 SQLite 应用迁移仍未版本化，Postgres auth rollback/namespace 未完成，analytics/eval 等 raw SQL 兼容性仍需持续审计。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束，Stage 16A/16B/16C/16D/16E/16F 已接入 Postgres ent migration SQL 生成链路、checked-in migrations、CLI versioned SQL migrator、open-vs-migrate 分离、首轮 store raw SQL 兼容审计、application raw DDL 表覆盖补齐和 Postgres auth `up` 版本化迁移。完整 stream/cancel/compact events 仍不是当前基线能力。
 
 Stage 9 audit 表职责边界：
 
@@ -73,7 +73,7 @@ Stage 9 audit 表职责边界：
 - `execution_events`：runtime plan、model/tool/compact/stream/error 生命周期。当前只写入 request 与内部 model_call 的最小生命周期。
 - `upstream_exchanges`：semantic response/request 与 `.http` cassette、trace id、route target 的关联。
 
-后续接入顺序建议先补 Responses audit Monitor UI，再补通用 function tool events，最后补 streaming/cancel/compact events。
+后续接入顺序建议先补 Responses audit Monitor UI，再补 function tool provider capability 错误处理，最后补 streaming/cancel/compact events。
 
 ## Session 基线
 
@@ -169,8 +169,8 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 用派生数据替代 raw cassette。
 - 让测试依赖真实 provider。
 - Responses server-mode streaming。
-- 完整 Responses function tool lifecycle、streaming tool events 和 compact workflow。
-- 完整 function-tool/stream/cancel/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
+- 服务端任意 function tool 执行器、streaming tool events 和 compact workflow。
+- 完整 stream/cancel/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed、普通 function tool requested/submitted 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
 - provider auto-detect。
 
 ## 推荐验证
