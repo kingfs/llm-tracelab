@@ -70,7 +70,7 @@ type Stats struct {
 }
 
 type Store struct {
-	db        *sql.DB
+	db        *rebindingDB
 	client    *dao.Client
 	outputDir string
 	dbPath    string
@@ -84,6 +84,58 @@ type Store struct {
 
 type DatabaseOptions struct {
 	AutoMigrate bool
+}
+
+type rebindingDB struct {
+	*sql.DB
+	driver string
+}
+
+func (db *rebindingDB) Exec(query string, args ...any) (sql.Result, error) {
+	return db.DB.Exec(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) Query(query string, args ...any) (*sql.Rows, error) {
+	return db.DB.Query(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) QueryRow(query string, args ...any) *sql.Row {
+	return db.DB.QueryRow(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) rebind(query string) string {
+	if db == nil || db.driver != "postgres" {
+		return query
+	}
+	return rebindPostgresPlaceholders(query)
+}
+
+func rebindPostgresPlaceholders(query string) string {
+	var b strings.Builder
+	b.Grow(len(query) + 8)
+	arg := 1
+	inSingleQuote := false
+	for i := 0; i < len(query); i++ {
+		ch := query[i]
+		if ch == '\'' {
+			b.WriteByte(ch)
+			if inSingleQuote && i+1 < len(query) && query[i+1] == '\'' {
+				i++
+				b.WriteByte(query[i])
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if ch == '?' && !inSingleQuote {
+			b.WriteByte('$')
+			b.WriteString(fmt.Sprint(arg))
+			arg++
+			continue
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
 }
 
 const (
@@ -2216,7 +2268,7 @@ func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpen
 	}
 
 	st := &Store{
-		db:        db,
+		db:        &rebindingDB{DB: db, driver: driver},
 		client:    dao.NewClient(dao.Driver(entsql.OpenDB(entDialect, db))),
 		outputDir: outputDir,
 		dbPath:    dbPath,
@@ -2536,12 +2588,12 @@ func (s *Store) applyRotatedChannelSecrets(items []rotatedChannelSecret) error {
 	defer tx.Rollback()
 	for _, item := range items {
 		if item.hasAPIKey {
-			if _, err := tx.Exec(`UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+			if _, err := s.execTx(tx, `UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := tx.Exec(`UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+		if _, err := s.execTx(tx, `UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
 			return err
 		}
 	}
@@ -2712,6 +2764,13 @@ func (s *Store) Close() error {
 // EntClient returns the generated ent client backing this store.
 func (s *Store) EntClient() *dao.Client {
 	return s.client
+}
+
+func (s *Store) execTx(tx *sql.Tx, query string, args ...any) (sql.Result, error) {
+	if s == nil || s.db == nil {
+		return tx.Exec(query, args...)
+	}
+	return tx.Exec(s.db.rebind(query), args...)
 }
 
 func (s *Store) initSchema() error {
@@ -4159,7 +4218,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Layout.ReqBodyLen,
 		header.Layout.ResHeaderLen,
 		header.Layout.ResBodyLen,
-		boolToInt(header.Layout.IsStream),
+		header.Layout.IsStream,
 		grouping.SessionID,
 		grouping.SessionSource,
 		grouping.WindowID,
@@ -4600,14 +4659,14 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
+	if _, err := s.execTx(tx, `
 		INSERT INTO parser_versions (parser, version, created_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(parser, version) DO NOTHING
 	`, obs.Parser, obs.ParserVersion, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`
+	if _, err := s.execTx(tx, `
 		INSERT INTO trace_observations (
 			trace_id, parser, parser_version, status, provider, operation, model,
 			summary_json, warnings_json, created_at, updated_at
@@ -4626,7 +4685,7 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	`, obs.TraceID, obs.Parser, obs.ParserVersion, string(obs.Status), obs.Provider, obs.Operation, obs.Model, string(summaryJSON), string(warningsJSON), now, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
+	if _, err := s.execTx(tx, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
 		return err
 	}
 	for _, row := range nodes {
@@ -4638,7 +4697,7 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`
+		if _, err := s.execTx(tx, `
 			INSERT INTO semantic_nodes (
 				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
 				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
@@ -4649,7 +4708,7 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`
+	if _, err := s.execTx(tx, `
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
 		VALUES (?, ?, 1, ?, ?)
 	`, obs.TraceID, string(obs.Status), now, now); err != nil {
@@ -5111,7 +5170,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
+	if _, err := s.execTx(tx, `DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
 		return err
 	}
 	for _, finding := range findings {
@@ -5124,7 +5183,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 		if finding.TraceID == "" {
 			finding.TraceID = traceID
 		}
-		if _, err := tx.Exec(`
+		if _, err := s.execTx(tx, `
 			INSERT INTO trace_findings (
 				trace_id, finding_id, category, severity, confidence, title, description,
 				evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
@@ -5228,6 +5287,26 @@ func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = time.Now().UTC()
 	}
+	if s.driver == "postgres" {
+		var id int64
+		err := s.db.QueryRow(`
+			INSERT INTO analysis_runs (
+				trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id
+		`, run.TraceID, run.SessionID, run.Kind, run.Analyzer, run.AnalyzerVersion, run.Model, run.InputRef, run.OutputJSON, run.Status, run.CreatedAt).Scan(&id)
+		if err != nil {
+			return 0, err
+		}
+		run.ID = id
+		if isAnalysisRunFailure(run.Status) {
+			if _, err := s.UpsertSystemEvent(systemEventForAnalysisFailure(run)); err != nil {
+				return 0, err
+			}
+		}
+		return id, nil
+	}
 	result, err := s.db.Exec(`
 		INSERT INTO analysis_runs (
 			trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
@@ -5325,6 +5404,21 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 	}
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
+	}
+	if s.driver == "postgres" {
+		err := s.db.QueryRow(`
+			INSERT INTO analysis_jobs (
+				job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
+				attempts, created_at, updated_at, started_at, finished_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id
+		`, job.JobType, job.TargetType, job.TargetID, job.Status, job.StepsJSON, job.RequestJSON, job.ResultJSON, job.LastError,
+			job.Attempts, job.CreatedAt, job.UpdatedAt, nullableTime(job.StartedAt), nullableTime(job.FinishedAt)).Scan(&job.ID)
+		if err != nil {
+			return AnalysisJobRecord{}, err
+		}
+		return job, nil
 	}
 	result, err := s.db.Exec(`
 		INSERT INTO analysis_jobs (
@@ -6358,7 +6452,7 @@ func scanEntry(scanner interface {
 		recordedAt   any
 		errorText    string
 		cached       int
-		isStream     int
+		isStream     any
 		routingScore float64
 	)
 
@@ -6411,7 +6505,7 @@ func scanEntry(scanner interface {
 	}
 	entry.Header.Meta.Error = errorText
 	entry.Header.Meta.RoutingScore = routingScore
-	entry.Header.Layout.IsStream = isStream == 1
+	entry.Header.Layout.IsStream = boolValue(isStream)
 	if cached > 0 {
 		entry.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
 	}
@@ -6541,6 +6635,30 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func boolValue(v any) bool {
+	switch value := v.(type) {
+	case bool:
+		return value
+	case int:
+		return value != 0
+	case int64:
+		return value != 0
+	case int32:
+		return value != 0
+	case []byte:
+		return boolValue(string(value))
+	case string:
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "1", "t", "true", "yes":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
 }
 
 func ExtractGroupingInfo(content []byte, parsed *recordfile.ParsedPrelude) (GroupingInfo, error) {
