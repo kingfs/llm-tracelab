@@ -182,13 +182,17 @@ type ResponsesFunctionRedactionConfig struct {
 }
 
 type ResponsesFunctionExecutorBinding struct {
-	Name      string   `yaml:"name"`
-	Type      string   `yaml:"type"`
-	Enabled   *bool    `yaml:"enabled"`
-	Output    any      `yaml:"output"`
-	Command   string   `yaml:"command"`
-	Available bool     `yaml:"-" json:"-"`
-	Warnings  []string `yaml:"-" json:"-"`
+	Name         string            `yaml:"name"`
+	Type         string            `yaml:"type"`
+	Enabled      *bool             `yaml:"enabled"`
+	Output       any               `yaml:"output"`
+	Command      string            `yaml:"command"`
+	Args         []string          `yaml:"args"`
+	Timeout      time.Duration     `yaml:"timeout"`
+	Env          map[string]string `yaml:"env"`
+	EnvAllowlist []string          `yaml:"env_allowlist"`
+	Available    bool              `yaml:"-" json:"-"`
+	Warnings     []string          `yaml:"-" json:"-"`
 }
 
 const (
@@ -823,6 +827,9 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 		binding.Command = strings.TrimSpace(binding.Command)
 		binding.Available = false
 		binding.Warnings = nil
+		for i := range binding.EnvAllowlist {
+			binding.EnvAllowlist[i] = strings.TrimSpace(binding.EnvAllowlist[i])
+		}
 		enabled := true
 		if binding.Enabled != nil {
 			enabled = *binding.Enabled
@@ -841,7 +848,13 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 				enabledAvailable++
 			}
 		case ResponsesFunctionExecutorTypeExternalCommand:
-			binding.Warnings = append(binding.Warnings, "external_command executors are recognized but not implemented")
+			if binding.Command == "" {
+				binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command is required", binding.Name))
+			}
+			if len(binding.Warnings) == 0 && enabled {
+				binding.Available = true
+				enabledAvailable++
+			}
 		default:
 			if binding.Type == "" {
 				binding.Warnings = append(binding.Warnings, fmt.Sprintf("executor %q type is required", binding.Name))

@@ -290,14 +290,14 @@ func TestResponsesFunctionExecutorsAPIHandlerValidationWarnings(t *testing.T) {
 	if payload.Executors[0].Available || !strings.Contains(strings.Join(payload.Executors[0].Warnings, " "), "name is required") {
 		t.Fatalf("empty-name executor = %+v, want unavailable name warning", payload.Executors[0])
 	}
-	if payload.Executors[1].Available || !payload.Executors[1].CommandConfigured || !strings.Contains(strings.Join(payload.Executors[1].Warnings, " "), "not implemented") {
-		t.Fatalf("external executor = %+v, want unavailable command-configured warning", payload.Executors[1])
+	if !payload.Executors[1].Available || !payload.Executors[1].CommandConfigured || len(payload.Executors[1].Warnings) != 0 {
+		t.Fatalf("external executor = %+v, want available command-configured executor", payload.Executors[1])
 	}
 	if payload.Executors[2].Available || !strings.Contains(strings.Join(payload.Executors[2].Warnings, " "), "unsupported executor type") {
 		t.Fatalf("unknown executor = %+v, want unavailable unsupported warning", payload.Executors[2])
 	}
-	if got := strings.Join(payload.Warnings, " "); !strings.Contains(got, "no available executors") || !strings.Contains(got, "unsupported executor type") {
-		t.Fatalf("warnings = %q, want validation and no-available warnings", got)
+	if got := strings.Join(payload.Warnings, " "); strings.Contains(got, "no available executors") || !strings.Contains(got, "unsupported executor type") {
+		t.Fatalf("warnings = %q, want validation warning without no-available warning", got)
 	}
 }
 

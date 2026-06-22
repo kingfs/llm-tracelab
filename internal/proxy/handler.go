@@ -509,6 +509,23 @@ func responsesFunctionExecutorOptions(cfg *config.Config) ([]responsesruntime.Op
 				responsesruntime.StaticFunctionToolExecutor{Output: binding.Output},
 				policy,
 			))
+		case config.ResponsesFunctionExecutorTypeExternalCommand:
+			if binding.Command == "" {
+				return nil, fmt.Errorf("responses external_command executor command is required for %q", binding.Name)
+			}
+			options = append(options, responsesruntime.WithFunctionToolExecutorPolicy(
+				binding.Name,
+				responsesruntime.ExternalCommandFunctionToolExecutor{
+					Command:        binding.Command,
+					Args:           binding.Args,
+					Env:            binding.Env,
+					EnvAllowlist:   binding.EnvAllowlist,
+					Timeout:        binding.Timeout,
+					MaxStdoutBytes: executorConfig.MaxResultBytes + 1,
+					MaxStderrBytes: executorConfig.MaxResultBytes + 1,
+				},
+				policy,
+			))
 		default:
 			return nil, fmt.Errorf("unsupported responses function executor type %q for %q", binding.Type, binding.Name)
 		}

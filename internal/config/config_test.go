@@ -446,6 +446,14 @@ responses_server:
         type: "static_response"
         enabled: false
         output: "off"
+      - name: "run_lookup"
+        type: "external_command"
+        command: " /bin/echo "
+        args: ["ok"]
+        timeout: 1s
+        env:
+          STATIC_VALUE: "static"
+        env_allowlist: [" PATH "]
   model_profiles:
     - name: "qwen3"
       context_window_tokens: 32768
@@ -495,14 +503,17 @@ responses_server:
 	if !executors.Enabled || executors.Timeout != 2*time.Second || executors.MaxResultBytes != 128 || !executors.Redaction.Arguments || !executors.Redaction.Output {
 		t.Fatalf("function executors policy = %+v, want enabled 2s 128 redacted", executors)
 	}
-	if len(executors.Executors) != 2 {
-		t.Fatalf("function executors len = %d, want 2", len(executors.Executors))
+	if len(executors.Executors) != 3 {
+		t.Fatalf("function executors len = %d, want 3", len(executors.Executors))
 	}
 	if got := executors.Executors[0]; got.Name != "lookup" || got.Type != "static_response" {
 		t.Fatalf("first function executor = %+v", got)
 	}
 	if got := executors.Executors[1]; got.Name != "disabled_lookup" || got.Enabled == nil || *got.Enabled {
 		t.Fatalf("second function executor = %+v", got)
+	}
+	if got := executors.Executors[2]; got.Name != "run_lookup" || got.Type != "external_command" || got.Command != "/bin/echo" || got.Timeout != time.Second || len(got.Args) != 1 || got.Args[0] != "ok" || got.Env["STATIC_VALUE"] != "static" || len(got.EnvAllowlist) != 1 || got.EnvAllowlist[0] != "PATH" {
+		t.Fatalf("third function executor = %+v", got)
 	}
 }
 
@@ -532,8 +543,8 @@ func TestResponsesFunctionExecutorsConfigValidation(t *testing.T) {
 	if got := executors.Executors[2]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "name is required") {
 		t.Fatalf("empty-name executor = %+v, want unavailable name warning", got)
 	}
-	if got := executors.Executors[3]; got.Available || got.Command != "echo ok" || !strings.Contains(strings.Join(got.Warnings, " "), "not implemented") {
-		t.Fatalf("external command executor = %+v, want recognized unavailable warning", got)
+	if got := executors.Executors[3]; !got.Available || got.Command != "echo ok" || len(got.Warnings) != 0 {
+		t.Fatalf("external command executor = %+v, want available external command", got)
 	}
 	if got := executors.Executors[4]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "unsupported executor type") {
 		t.Fatalf("unknown executor = %+v, want unavailable unsupported warning", got)
@@ -551,7 +562,7 @@ func TestResponsesFunctionExecutorsConfigWarnsWhenEnabledWithoutAvailableExecuto
 	cfg := Config{}
 	cfg.ResponsesServer.FunctionExecutors.Enabled = true
 	cfg.ResponsesServer.FunctionExecutors.Executors = []ResponsesFunctionExecutorBinding{
-		{Name: "future", Type: "external_command", Command: "echo ok"},
+		{Name: "future", Type: "external_command"},
 		{Name: "off", Type: "static_response", Enabled: &disabled},
 	}
 
