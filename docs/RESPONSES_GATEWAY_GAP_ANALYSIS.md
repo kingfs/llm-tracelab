@@ -92,10 +92,10 @@
 ### Doctor 启动前诊断首切
 
 - 已吸收首切：`llm-tracelab doctor` 读取同一套配置，输出稳定 JSON envelope，`result` 包含 overall status、summary counts、redacted config summary 和 checks 列表。
-- 当前覆盖：`config.load`、`server.port`、monitor/MCP consistency、application database migration mode/report、Responses server backend validation、web_search provider config validation、provider config basic count、auth migration scope note。
+- 当前覆盖：`config.load`、`server.port`、monitor/MCP consistency、application database migration mode/report、Responses server backend validation、`responses_server.default_model`、Responses store driver/auto-migrate readiness、model profile context-window/compact threshold numeric relationships、web_search provider config validation、provider config basic count、auth migration scope note。
 - 安全边界：默认离线，不做真实模型推理或 provider 网络请求；`--check-db` 才读取数据库 migration status；输出复用 DSN/URL 脱敏摘要，不输出 API key/header secret。
 - llm-tracelab 落点：`cmd/server/doctor.go`，复用 `appDBMigrationReport`、`router.ValidateLocalResponsesServerBackendConfig`、`websearch.NewProvider` 和 `config inspect` 的脱敏摘要。
-- 剩余缺口：`--probe-providers` 仍是首切占位提示，尚未接入受控的 provider probe；model profile context window drift、store backend 深度健康检查、HTTP guard/default model 诊断仍待补齐。
+- 剩余缺口：`--probe-providers` 仍是离线占位提示，尚未接入受控的 provider probe；store backend 深度健康检查仍需 `--check-db` 或后续更细检查；Codex profile 建议、HTTP guard 深度诊断和 model profile drift 与 catalog/channel 的交叉校验仍待补齐。
 ### Codex compatibility profile
 
 - 已吸收首切：新增独立 [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)，固化 text create、stream text、function call、`function_call_output` continuation、ordinary `web_search` descriptor、unsupported hosted tool 的最小兼容合约。
@@ -143,8 +143,8 @@
 
 ### `doctor` 深度诊断
 
-- 已吸收首切：`llm-tracelab doctor` 覆盖离线启动前诊断、稳定 JSON envelope、`--check-db`、`--fail-on-warn`、`--fail-on-fail`。
-- 剩余缺口：provider 网络 probe 尚未真正执行；尚未检查 HTTP guard、默认模型可用性、model profile context window drift、store backend 深度健康、Codex profile 建议与 compact threshold drift。
+- 已吸收首切：`llm-tracelab doctor` 覆盖离线启动前诊断、稳定 JSON envelope、`--check-db`、`--fail-on-warn`、`--fail-on-fail`、Responses default model、store driver/auto-migrate readiness、model profile context-window/compact threshold numeric relationships。
+- 剩余缺口：provider 网络 probe 尚未真正执行；尚未检查 HTTP guard、默认模型是否存在于 catalog/channel、store backend 深度健康、Codex profile 建议与 compact threshold drift。
 - responses-gateway 能力：读取同一套配置，输出稳定 JSON，检查 config、HTTP guard、默认模型、vLLM `/models`、model profile context window drift、store backend、web_search 配置。
 - llm-tracelab 后续落点：继续扩展 `cmd/server/doctor.go`，受控复用 `internal/providerprobe` 和更细的 responses/profile/store 诊断，但保持默认离线。
 
