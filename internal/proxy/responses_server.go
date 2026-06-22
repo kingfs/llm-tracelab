@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -122,13 +123,14 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		logInfo.Header.Meta.Error = "send chat completion request: " + err.Error()
+		modelCallStatus := responsesModelCallFailureStatus(err)
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
 		a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
 			EventType: "response.model_call",
 			Phase:     "model_call",
-			Status:    "failed",
+			Status:    modelCallStatus,
 			Message:   "send chat completion request: " + err.Error(),
 		})
 		a.recordUpstreamExchange(ctx, logInfo, start, time.Now(), 0)
@@ -146,13 +148,14 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	respBody, isStream, err := recordResponsesServerChatResponse(logInfo, httpResp)
 	if err != nil {
 		logInfo.Header.Meta.Error = err.Error()
+		modelCallStatus := responsesModelCallFailureStatus(err)
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
 		a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
 			EventType: "response.model_call",
 			Phase:     "model_call",
-			Status:    "failed",
+			Status:    modelCallStatus,
 			Message:   err.Error(),
 		})
 		a.recordUpstreamExchange(ctx, logInfo, start, time.Now(), httpResp.StatusCode)
@@ -377,6 +380,13 @@ func chatCompletionResponseError(statusCode int, status string, body []byte) err
 		Body:          string(errorBody),
 		BodyTruncated: truncated,
 	}
+}
+
+func responsesModelCallFailureStatus(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	return "failed"
 }
 
 func cloneURL(in *url.URL) *url.URL {

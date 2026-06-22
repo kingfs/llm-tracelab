@@ -17,6 +17,7 @@ import (
 )
 
 const defaultMaxBodyBytes int64 = 16 << 20
+const statusClientClosedRequest = 499
 
 type Runtime interface {
 	Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error)
@@ -124,11 +125,12 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
 	resp, err := h.runtime.Create(ctx, req)
 	if err != nil {
-		h.auditRejected(r, auditID, "failed", err.Error())
+		failureStatus := runtimeFailureStatus(err)
+		h.auditRejected(r, auditID, failureStatus, err.Error())
 		h.recordExecutionEvent(r, audit.ExecutionEvent{
 			EventType: "response.request",
 			Phase:     "request",
-			Status:    "failed",
+			Status:    failureStatus,
 			Message:   err.Error(),
 			DetailsJSON: map[string]any{
 				"request_audit_id": auditID,
@@ -156,11 +158,12 @@ func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, au
 	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
 	resp, err := h.runtime.Create(ctx, req)
 	if err != nil {
-		h.auditRejected(r, auditID, "failed", err.Error())
+		failureStatus := runtimeFailureStatus(err)
+		h.auditRejected(r, auditID, failureStatus, err.Error())
 		h.recordExecutionEvent(r, audit.ExecutionEvent{
 			EventType: "response.request",
 			Phase:     "request",
-			Status:    "failed",
+			Status:    failureStatus,
 			Message:   err.Error(),
 			DetailsJSON: map[string]any{
 				"request_audit_id": auditID,
@@ -343,7 +346,7 @@ func (h *Handler) auditAccepted(r *http.Request, body []byte) string {
 	if h.auditor == nil {
 		return ""
 	}
-	id, err := h.auditor.Accepted(r.Context(), audit.NewRequestEntry(r, body))
+	id, err := h.auditor.Accepted(auditWriteContext(r), audit.NewRequestEntry(r, body))
 	if err != nil {
 		slog.Error("Failed to write responses request audit", "err", err)
 		return ""
@@ -355,7 +358,7 @@ func (h *Handler) auditCompleted(r *http.Request, id string, resp protocol.Respo
 	if h.auditor == nil || id == "" {
 		return
 	}
-	if err := h.auditor.Completed(r.Context(), id, audit.CompletionFromResponse(resp)); err != nil {
+	if err := h.auditor.Completed(auditWriteContext(r), id, audit.CompletionFromResponse(resp)); err != nil {
 		slog.Error("Failed to complete responses request audit", "audit_id", id, "err", err)
 	}
 }
@@ -364,7 +367,7 @@ func (h *Handler) auditRejected(r *http.Request, id string, status string, error
 	if h.auditor == nil || id == "" {
 		return
 	}
-	if err := h.auditor.Rejected(r.Context(), id, audit.Failure{Status: status, ErrorText: errorText}); err != nil {
+	if err := h.auditor.Rejected(auditWriteContext(r), id, audit.Failure{Status: status, ErrorText: errorText}); err != nil {
 		slog.Error("Failed to reject responses request audit", "audit_id", id, "err", err)
 	}
 }
@@ -373,7 +376,7 @@ func (h *Handler) recordExecutionEvent(r *http.Request, event audit.ExecutionEve
 	if h.events == nil {
 		return
 	}
-	if err := h.events.RecordExecutionEvent(r.Context(), event); err != nil {
+	if err := h.events.RecordExecutionEvent(auditWriteContext(r), event); err != nil {
 		slog.Error("Failed to write responses execution event", "event_type", event.EventType, "status", event.Status, "err", err)
 	}
 }
@@ -415,7 +418,25 @@ func writeRuntimeError(w http.ResponseWriter, err error) {
 		writeNotFound(w, notFound.ID)
 		return
 	}
+	if errors.Is(err, context.Canceled) {
+		writeError(w, statusClientClosedRequest, "request cancelled", "server_error", "cancelled")
+		return
+	}
 	writeError(w, http.StatusInternalServerError, err.Error(), "server_error", "server_error")
+}
+
+func runtimeFailureStatus(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "cancelled"
+	}
+	return "failed"
+}
+
+func auditWriteContext(r *http.Request) context.Context {
+	if r == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(r.Context())
 }
 
 func writeNotFound(w http.ResponseWriter, id string) {

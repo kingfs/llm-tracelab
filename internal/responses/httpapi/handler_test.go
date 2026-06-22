@@ -285,6 +285,42 @@ func TestCreateResponseRuntimeError(t *testing.T) {
 	assertError(t, rec, "server_error", "server_error")
 }
 
+func TestCreateResponseRuntimeContextCanceledAuditsCancelled(t *testing.T) {
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(&fakeRuntime{createErr: context.Canceled}, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`)))
+
+	if rec.Code != statusClientClosedRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, statusClientClosedRequest, rec.Body.String())
+	}
+	if auditor.acceptedCalls != 1 || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "cancelled" {
+		t.Fatalf("cancelled audit mismatch: calls=%d id=%q failure=%#v", auditor.acceptedCalls, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 2 || auditor.events[1].Status != "cancelled" || auditor.events[1].Message != context.Canceled.Error() {
+		t.Fatalf("cancelled events mismatch: %#v", auditor.events)
+	}
+	assertError(t, rec, "server_error", "cancelled")
+}
+
+func TestCreateResponseStreamRuntimeContextCanceledAuditsCancelled(t *testing.T) {
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(&fakeRuntime{createErr: context.Canceled}, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+
+	if rec.Code != statusClientClosedRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, statusClientClosedRequest, rec.Body.String())
+	}
+	if auditor.acceptedCalls != 1 || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "cancelled" {
+		t.Fatalf("stream cancelled audit mismatch: calls=%d id=%q failure=%#v", auditor.acceptedCalls, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 2 || auditor.events[1].Status != "cancelled" || auditor.events[1].DetailsJSON["stream"] != true {
+		t.Fatalf("stream cancelled events mismatch: %#v", auditor.events)
+	}
+	assertError(t, rec, "server_error", "cancelled")
+}
+
 func TestInputItemsSuccess(t *testing.T) {
 	rt := &fakeRuntime{
 		inputItemsFound: true,
