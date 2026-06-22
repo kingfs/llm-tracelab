@@ -96,7 +96,7 @@ func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) 
 		cfg:            cfg,
 		client:         client,
 		store:          store,
-		tokenEstimator: conservativeTokenEstimator{},
+		tokenEstimator: NewAdapterBackedTokenEstimator(ChatTokenCounter{}),
 	}
 	for _, opt := range opts {
 		opt(rt)
@@ -1045,65 +1045,6 @@ func chatCompletionRequest(req protocol.CreateResponseRequest, model string, his
 		TopP:        req.TopP,
 		Stream:      req.Stream,
 	}
-}
-
-type conservativeTokenEstimator struct{}
-
-func (conservativeTokenEstimator) EstimateResponsePromptTokens(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) int {
-	tools := responseToolsToChatTools(req.Tools, webSearchReady)
-	messages := responseInputToMessages(req, history, inputItems)
-	return estimateChatMessagesTokens(messages) + estimateChatToolsTokens(tools) + estimateJSONishTokens(req.ToolChoice) + 8
-}
-
-func estimateChatMessagesTokens(messages []ChatMessage) int {
-	total := 0
-	for _, message := range messages {
-		total += 4
-		total += estimateTextTokens(message.Role)
-		total += estimateTextTokens(chatMessageContentText(message.Content))
-		for _, call := range message.ToolCalls {
-			total += 4
-			total += estimateTextTokens(call.ID)
-			total += estimateTextTokens(call.Type)
-			total += estimateTextTokens(call.Function.Name)
-			total += estimateTextTokens(call.Function.Arguments)
-		}
-		if message.ToolCallID != "" {
-			total += estimateTextTokens(message.ToolCallID)
-		}
-	}
-	return total
-}
-
-func estimateChatToolsTokens(tools []ChatTool) int {
-	total := 0
-	for _, tool := range tools {
-		total += 4
-		total += estimateTextTokens(tool.Type)
-		total += estimateTextTokens(tool.Function.Name)
-		total += estimateTextTokens(tool.Function.Description)
-		total += estimateJSONishTokens(tool.Function.Parameters)
-	}
-	return total
-}
-
-func estimateJSONishTokens(value any) int {
-	if value == nil {
-		return 0
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return estimateTextTokens(fmt.Sprint(value))
-	}
-	return estimateTextTokens(string(data))
-}
-
-func estimateTextTokens(text string) int {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return 0
-	}
-	return (len([]byte(text)) + 3) / 4
 }
 
 func compactChatRequest(model string, history []LedgerItem) ChatCompletionRequest {
