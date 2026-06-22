@@ -527,6 +527,8 @@ func responsesFunctionExecutorOptions(cfg *config.Config) ([]responsesruntime.Op
 					Args:           binding.Args,
 					Env:            binding.Env,
 					EnvAllowlist:   binding.EnvAllowlist,
+					WorkingDir:     binding.Process.WorkingDir,
+					RequireAbsPath: binding.Process.RequireAbsoluteCommand,
 					Timeout:        binding.Timeout,
 					MaxStdoutBytes: executorConfig.MaxResultBytes + 1,
 					MaxStderrBytes: executorConfig.MaxResultBytes + 1,

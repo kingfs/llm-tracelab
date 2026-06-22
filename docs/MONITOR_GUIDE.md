@@ -122,7 +122,7 @@ Monitor 使用两类数据：
 - `executors[]` 中的 `name`、`type`、`enabled`、`available`、`output_configured`、`command_configured` 和 `warnings`。
 - `warnings`，例如开启 executor 但未配置任何 binding、没有可用 executor、重复 name、空 name、未知 type 或 `external_command` 缺少 command。
 
-该 API 不返回 `static_response` 的 output 内容，也不返回 `external_command` 的 command 内容；当前 UI 只展示只读状态，不提供写配置能力。`external_command` 必须通过 YAML 显式配置，运行时不使用 shell，默认不继承环境变量，tool call 输入通过 stdin JSON 传入命令。
+该 API 不返回 `static_response` 的 output 内容，也不返回 `external_command` 的 command 内容；当前 UI 只展示只读状态，不提供写配置能力。`external_command` 必须通过 YAML 显式配置，运行时不使用 shell，默认不继承环境变量，tool call 输入通过 stdin JSON 传入命令。可选 `process.working_dir` 会要求绝对且已存在的执行目录；可选 `process.require_absolute_command=true` 会拒绝相对 command/PATH 查找，相关危险配置会以 validation warning 形式出现在摘要中。
 
 ### Events
 

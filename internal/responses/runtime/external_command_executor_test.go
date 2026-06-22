@@ -130,6 +130,49 @@ func TestExternalCommandFunctionToolExecutorDoesNotUseShellForArgs(t *testing.T)
 	}
 }
 
+func TestExternalCommandFunctionToolExecutorUsesConfiguredWorkingDir(t *testing.T) {
+	workingDir := t.TempDir()
+	executor := externalCommandTestExecutor("cwd")
+	executor.WorkingDir = workingDir
+
+	result, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if err != nil {
+		t.Fatalf("ExecuteFunctionTool() error = %v", err)
+	}
+	gotDir, err := filepath.EvalSymlinks(strings.TrimSpace(result.Output.(string)))
+	if err != nil {
+		t.Fatalf("EvalSymlinks(output) error = %v", err)
+	}
+	wantDir, err := filepath.EvalSymlinks(workingDir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(workingDir) error = %v", err)
+	}
+	if gotDir != wantDir {
+		t.Fatalf("working directory = %q, want %q", gotDir, wantDir)
+	}
+}
+
+func TestExternalCommandFunctionToolExecutorRejectsRelativeWorkingDir(t *testing.T) {
+	executor := externalCommandTestExecutor("cwd")
+	executor.WorkingDir = "relative-dir"
+
+	_, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if err == nil || !strings.Contains(err.Error(), "working_dir must be absolute") {
+		t.Fatalf("ExecuteFunctionTool() error = %v, want absolute working_dir error", err)
+	}
+}
+
+func TestExternalCommandFunctionToolExecutorCanRequireAbsoluteCommand(t *testing.T) {
+	executor := externalCommandTestExecutor("echo-input")
+	executor.Command = filepath.Base(executor.Command)
+	executor.RequireAbsPath = true
+
+	_, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if err == nil || !strings.Contains(err.Error(), "command must be absolute") {
+		t.Fatalf("ExecuteFunctionTool() error = %v, want absolute command error", err)
+	}
+}
+
 func externalCommandTestExecutor(mode string, extraArgs ...string) ExternalCommandFunctionToolExecutor {
 	args := append([]string{"-test.run=TestExternalCommandExecutorHelper", "--", mode}, extraArgs...)
 	return ExternalCommandFunctionToolExecutor{
@@ -172,6 +215,13 @@ func TestExternalCommandExecutorHelper(t *testing.T) {
 		fmt.Print("abcdefghijklmnopqrstuvwxyz")
 	case "args":
 		fmt.Println(strings.Join(args[modeIndex+1:], "|"))
+	case "cwd":
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "getwd: %v", err)
+			os.Exit(3)
+		}
+		fmt.Println(wd)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown mode %q", args[modeIndex])
 		os.Exit(2)

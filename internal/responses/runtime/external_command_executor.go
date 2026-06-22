@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -18,6 +19,8 @@ type ExternalCommandFunctionToolExecutor struct {
 	Args           []string
 	Env            map[string]string
 	EnvAllowlist   []string
+	WorkingDir     string
+	RequireAbsPath bool
 	Timeout        time.Duration
 	MaxStdoutBytes int
 	MaxStderrBytes int
@@ -32,6 +35,13 @@ type externalCommandFunctionToolInput struct {
 func (e ExternalCommandFunctionToolExecutor) ExecuteFunctionTool(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
 	if strings.TrimSpace(e.Command) == "" {
 		return FunctionToolResult{}, fmt.Errorf("external command function executor command is required")
+	}
+	workingDir, err := e.validatedWorkingDir()
+	if err != nil {
+		return FunctionToolResult{}, err
+	}
+	if e.RequireAbsPath && !filepath.IsAbs(e.Command) {
+		return FunctionToolResult{}, fmt.Errorf("external command function executor command must be absolute")
 	}
 	if err := ctx.Err(); err != nil {
 		return FunctionToolResult{}, err
@@ -51,6 +61,7 @@ func (e ExternalCommandFunctionToolExecutor) ExecuteFunctionTool(ctx context.Con
 
 	cmd := exec.CommandContext(execCtx, e.Command, e.Args...)
 	cmd.Env = e.commandEnv()
+	cmd.Dir = workingDir
 	cmd.Stdin = bytes.NewReader(input)
 
 	stdout := newLimitedCapture(e.stdoutLimit())
@@ -66,6 +77,24 @@ func (e ExternalCommandFunctionToolExecutor) ExecuteFunctionTool(ctx context.Con
 		return FunctionToolResult{}, externalCommandError(err, stderr.String())
 	}
 	return FunctionToolResult{Output: stdout.String()}, nil
+}
+
+func (e ExternalCommandFunctionToolExecutor) validatedWorkingDir() (string, error) {
+	workingDir := strings.TrimSpace(e.WorkingDir)
+	if workingDir == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(workingDir) {
+		return "", fmt.Errorf("external command function executor working_dir must be absolute")
+	}
+	info, err := os.Stat(workingDir)
+	if err != nil {
+		return "", fmt.Errorf("external command function executor working_dir is not accessible: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("external command function executor working_dir must be a directory")
+	}
+	return workingDir, nil
 }
 
 func (e ExternalCommandFunctionToolExecutor) stdoutLimit() int {
