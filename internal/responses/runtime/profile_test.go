@@ -48,3 +48,30 @@ func TestConfigContextBudgetForModelResolvesProfileAndFallback(t *testing.T) {
 		t.Fatalf("fallback threshold = %d, want 20", fallback.Budget.CompactHistoryItemThreshold)
 	}
 }
+
+func TestConfigContextBudgetForModelPrefersExactBeforePattern(t *testing.T) {
+	cfg := Config{
+		ModelProfiles: []ModelProfile{
+			{
+				Pattern: "gpt-*",
+				Budget: ContextBudget{
+					ContextWindowTokens: 100,
+				},
+			},
+			{
+				Name: "gpt-5",
+				Budget: ContextBudget{
+					ContextWindowTokens: 200,
+				},
+			},
+		},
+	}
+
+	resolved := cfg.ContextBudgetForModel("gpt-5")
+	if resolved.Profile == nil || resolved.Profile.Name != "gpt-5" {
+		t.Fatalf("resolved profile = %#v, want exact gpt-5", resolved.Profile)
+	}
+	if resolved.Budget.ContextWindowTokens != 200 {
+		t.Fatalf("context window = %d, want exact profile value 200", resolved.Budget.ContextWindowTokens)
+	}
+}

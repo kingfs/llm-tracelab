@@ -38,24 +38,39 @@ func (c Config) ContextBudgetForModel(model string) ResolvedModelProfile {
 			CompactHistoryItemThreshold: c.CompactHistoryItemThreshold,
 		},
 	}
-	for i := range c.ModelProfiles {
-		profile := c.ModelProfiles[i].normalized()
-		if !profile.matches(model) {
-			continue
-		}
-		resolved.Profile = &profile
-		if profile.Budget.ContextWindowTokens > 0 {
-			resolved.Budget.ContextWindowTokens = profile.Budget.ContextWindowTokens
-		}
-		if profile.Budget.MaxOutputTokens > 0 {
-			resolved.Budget.MaxOutputTokens = profile.Budget.MaxOutputTokens
-		}
-		if profile.Budget.CompactHistoryItemThreshold > 0 {
-			resolved.Budget.CompactHistoryItemThreshold = profile.Budget.CompactHistoryItemThreshold
-		}
+	model = strings.TrimSpace(model)
+	if model == "" {
 		return resolved
 	}
+	for i := range c.ModelProfiles {
+		profile := c.ModelProfiles[i].normalized()
+		if profile.Name == "" || profile.Name != model {
+			continue
+		}
+		return resolved.withProfile(profile)
+	}
+	for i := range c.ModelProfiles {
+		profile := c.ModelProfiles[i].normalized()
+		if profile.Pattern == "" || !wildcardMatch(profile.Pattern, model) {
+			continue
+		}
+		return resolved.withProfile(profile)
+	}
 	return resolved
+}
+
+func (r ResolvedModelProfile) withProfile(profile ModelProfile) ResolvedModelProfile {
+	r.Profile = &profile
+	if profile.Budget.ContextWindowTokens > 0 {
+		r.Budget.ContextWindowTokens = profile.Budget.ContextWindowTokens
+	}
+	if profile.Budget.MaxOutputTokens > 0 {
+		r.Budget.MaxOutputTokens = profile.Budget.MaxOutputTokens
+	}
+	if profile.Budget.CompactHistoryItemThreshold > 0 {
+		r.Budget.CompactHistoryItemThreshold = profile.Budget.CompactHistoryItemThreshold
+	}
+	return r
 }
 
 func (p ModelProfile) normalized() ModelProfile {

@@ -101,7 +101,7 @@
 - 已吸收首切：新增独立 [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)，固化 text create、stream text、function call、`function_call_output` continuation、ordinary `web_search` descriptor、unsupported hosted tool 的最小兼容合约。
 - fixture 资产：新增 `tests/fixtures/codex/` 离线 examples，覆盖请求、期望 response/event/error 形状；不依赖真实 Codex、真实模型或网络。
 - llm-tracelab 落点：`docs/CODEX_RESPONSES_COMPATIBILITY.md`、`tests/fixtures/codex/*`，运行时事实仍以 `internal/responses/httpapi`、`internal/responses/runtime`、`internal/proxy/responses_server.go` 为准。
-- 剩余缺口：fixture 尚未接自动 Go/e2e runner；尚未生成 Codex TOML/profile；unsupported hosted tools 还没有 runtime-level stable `unsupported_tool` gate；Codex-specific audit diagnostics 仍只覆盖 response/request 查询首切。
+- 剩余缺口：fixture 尚未接自动 Go/e2e runner；Codex TOML/profile 生成已接首切但尚未联动 catalog/channel drift；unsupported hosted tools 还没有 runtime-level stable `unsupported_tool` gate；Codex-specific audit diagnostics 仍只覆盖 response/request 查询首切。
 
 ## 部分吸收能力
 
@@ -166,14 +166,16 @@
 
 ### Codex profile 生成命令
 
-- 缺口：没有等价 `models codex-config`，无法从本地 model profile 生成 Codex provider TOML 建议。
+- 已吸收首切：`llm-tracelab models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 `models.codex_config` JSON envelope、Codex TOML 建议、provider `base_url` 推导、`wire_api=responses`、profile match/compact threshold diagnostics 和 warnings。
+- 安全边界：不连 DB、不探上游网络、不运行真实 Codex、不输出真实 API key/header secret/DSN；无 profile 时不失败，输出 0 值并 warning。
+- 剩余缺口：尚未从数据库 catalog/channel model profile 合并能力，也未检查 Codex 本地配置 drift。
 - responses-gateway 能力：输出 `model_context_window`、`model_auto_compact_token_limit`、provider `base_url`、`wire_api=responses` 等稳定 JSON/TOML。
 - llm-tracelab 建议落点：`cmd/server/models.go` 或 `cmd/server/provider.go` 子命令；数据来源应优先是 `responses_server.model_profiles` 和 channel/model catalog。
 
 ### Codex fixture/runbook 资产
 
 - 已吸收首切：已有集中 `tests/fixtures/codex` 离线 fixture、`docs/CODEX_RESPONSES_COMPATIBILITY.md` profile 文档，以及 `internal/responses/httpapi` / `internal/responses/runtime` focused offline Go tests。
-- 剩余缺口：当前只是 focused fixture/contract tests，不是完整 Codex/e2e runner；没有长任务 compact/cancel/run-report 脚本资产；没有 Codex TOML/profile 生成命令。
+- 剩余缺口：当前只是 focused fixture/contract tests，不是完整 Codex/e2e runner；没有长任务 compact/cancel/run-report 脚本资产；Codex TOML/profile 生成只有离线首切。
 - responses-gateway 能力：`docs/codex-longrun-compact-runbook.md`、`scripts/codex-longrun-*.sh`、Codex fixture profile。
 - llm-tracelab 建议落点：在现有离线 fixtures 基础上决定是否引入脚本；不要让测试依赖真实 Codex 或网络。
 

@@ -575,6 +575,62 @@ func TestResponsesFunctionExecutorsConfigValidation(t *testing.T) {
 	}
 }
 
+func TestMatchResponsesModelProfilePrefersExactBeforePattern(t *testing.T) {
+	cfg := Config{}
+	cfg.ResponsesServer.ModelProfiles = []ResponsesModelProfileConfig{
+		{
+			Pattern:             "gpt-*",
+			ContextWindowTokens: 100,
+		},
+		{
+			Name:                "gpt-5",
+			ContextWindowTokens: 200,
+		},
+	}
+
+	match := cfg.MatchResponsesModelProfile("gpt-5")
+	if !match.Matched || match.Kind != "exact" || match.Index != 1 || match.Source != "responses_server.model_profiles[1].name" {
+		t.Fatalf("exact match = %+v", match)
+	}
+	if match.Profile.ContextWindowTokens != 200 {
+		t.Fatalf("exact profile context window = %d, want 200", match.Profile.ContextWindowTokens)
+	}
+}
+
+func TestMatchResponsesModelProfileFallsBackToPattern(t *testing.T) {
+	cfg := Config{}
+	cfg.ResponsesServer.ModelProfiles = []ResponsesModelProfileConfig{
+		{
+			Name: "qwen3",
+		},
+		{
+			Pattern:                     "gpt-4o*",
+			CompactHistoryItemThreshold: 8,
+		},
+	}
+
+	match := cfg.MatchResponsesModelProfile("gpt-4o-mini")
+	if !match.Matched || match.Kind != "pattern" || match.Index != 1 || match.Source != "responses_server.model_profiles[1].pattern" {
+		t.Fatalf("pattern match = %+v", match)
+	}
+	if match.Profile.CompactHistoryItemThreshold != 8 {
+		t.Fatalf("pattern profile threshold = %d, want 8", match.Profile.CompactHistoryItemThreshold)
+	}
+}
+
+func TestMatchResponsesModelProfileNoProfile(t *testing.T) {
+	cfg := Config{}
+	cfg.ResponsesServer.ModelProfiles = []ResponsesModelProfileConfig{
+		{Name: "qwen3"},
+		{Pattern: "gpt-4o*"},
+	}
+
+	match := cfg.MatchResponsesModelProfile("claude")
+	if match.Matched || match.Index != -1 || match.Source != "none" {
+		t.Fatalf("no match = %+v", match)
+	}
+}
+
 func TestResponsesFunctionExecutorsConfigWarnsWhenEnabledWithoutAvailableExecutor(t *testing.T) {
 	disabled := false
 	cfg := Config{}
