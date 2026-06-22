@@ -80,20 +80,6 @@ func (p ModelProfile) normalized() ModelProfile {
 	return p
 }
 
-func (p ModelProfile) matches(model string) bool {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return false
-	}
-	if p.Name != "" && p.Name == model {
-		return true
-	}
-	if p.Pattern != "" && wildcardMatch(p.Pattern, model) {
-		return true
-	}
-	return false
-}
-
 func wildcardMatch(pattern, value string) bool {
 	pattern = strings.TrimSpace(pattern)
 	value = strings.TrimSpace(value)
