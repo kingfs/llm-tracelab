@@ -889,6 +889,160 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 }
 
+func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCompletions(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamCalls := 0
+	var firstChatBody map[string]any
+	var secondChatBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var chatBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		switch upstreamCalls {
+		case 1:
+			firstChatBody = chatBody
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_search","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_search","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"llm-tracelab replay\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`)
+		case 2:
+			secondChatBody = chatBody
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_final","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Mock search says replay cassettes keep tests deterministic."},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`)
+		default:
+			http.Error(w, "unexpected extra call", http.StatusInternalServerError)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Tools: config.ToolsConfig{
+			WebSearch: config.WebSearchToolConfig{
+				Enabled:    true,
+				Provider:   "mock",
+				MaxResults: 2,
+			},
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"find docs","tools":[{"type":"web_search"}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(body))
+	}
+	var responsePayload protocol.Response
+	if err := json.NewDecoder(resp.Body).Decode(&responsePayload); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+
+	if upstreamCalls != 2 {
+		t.Fatalf("upstreamCalls = %d, want 2", upstreamCalls)
+	}
+	if firstChatBody == nil || secondChatBody == nil {
+		t.Fatalf("missing captured chat bodies first=%v second=%v", firstChatBody != nil, secondChatBody != nil)
+	}
+	tools, ok := firstChatBody["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("first chat tools = %#v, want one web_search function", firstChatBody["tools"])
+	}
+	firstTool, ok := tools[0].(map[string]any)
+	if !ok {
+		t.Fatalf("first chat tool = %#v, want object", tools[0])
+	}
+	firstFunction, ok := firstTool["function"].(map[string]any)
+	if !ok || firstFunction["name"] != "web_search" {
+		t.Fatalf("first chat function tool = %#v, want web_search", firstTool["function"])
+	}
+
+	messages, ok := secondChatBody["messages"].([]any)
+	if !ok || len(messages) != 3 {
+		t.Fatalf("second chat messages = %#v, want user + assistant tool_call + tool result", secondChatBody["messages"])
+	}
+	toolMessage, ok := messages[2].(map[string]any)
+	if !ok || toolMessage["role"] != "tool" || toolMessage["tool_call_id"] != "call_search" {
+		t.Fatalf("second chat tool message = %#v", messages[2])
+	}
+	toolContent, _ := toolMessage["content"].(string)
+	if !strings.Contains(toolContent, "Mock search result 1") || !strings.Contains(toolContent, "llm-tracelab replay") {
+		t.Fatalf("second chat tool content missing mock result: %q", toolContent)
+	}
+
+	if responsePayload.Usage != (protocol.Usage{InputTokens: 13, OutputTokens: 6, TotalTokens: 19}) {
+		t.Fatalf("response usage = %#v, want accumulated 13/6/19", responsePayload.Usage)
+	}
+	if len(responsePayload.Output) != 2 {
+		t.Fatalf("response output len = %d, want 2: %#v", len(responsePayload.Output), responsePayload.Output)
+	}
+	if got := responsePayload.Output[0]; got.Type != "web_search_call" || got.Status != "completed" {
+		t.Fatalf("first response output = %#v, want completed web_search_call", got)
+	}
+	if got := responsePayload.Output[1]; got.Type != "message" || got.Content[0].Text != "Mock search says replay cassettes keep tests deterministic." {
+		t.Fatalf("second response output = %#v, want final assistant message", got)
+	}
+
+	entries, err := waitForRecentEntries(st, 2, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("indexed entries = %d, want at least 2", len(entries))
+	}
+	for _, entry := range entries[:2] {
+		if entry.Header.Meta.Endpoint != "/v1/chat/completions" {
+			t.Fatalf("recorded endpoint = %q, want /v1/chat/completions", entry.Header.Meta.Endpoint)
+		}
+	}
+}
+
 func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerRestart(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
