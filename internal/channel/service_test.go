@@ -18,6 +18,9 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	defer st.Close()
 
 	enabled := true
+	responsesEnabled := false
+	chatCompletionsEnabled := true
+	toolCallingEnabled := true
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
@@ -32,6 +35,13 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 					BaseURL:        "https://api.openai.com/v1",
 					ApiKey:         "test-inline-key",
 					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "responses_server",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       &responsesEnabled,
+						ChatCompletions: &chatCompletionsEnabled,
+						ToolCalling:     &toolCallingEnabled,
+					},
 					Headers: map[string]string{
 						"X-Test": "true",
 					},
@@ -62,6 +72,12 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	if record.Source != "bootstrap" {
 		t.Fatalf("record.Source = %q, want bootstrap", record.Source)
 	}
+	if record.APIType != "chat_completions" || record.Mode != "responses_server" {
+		t.Fatalf("record api surface = %q/%q", record.APIType, record.Mode)
+	}
+	if !strings.Contains(record.CapabilitiesJSON, `"chat_completions":true`) || !strings.Contains(record.CapabilitiesJSON, `"responses":false`) {
+		t.Fatalf("record.CapabilitiesJSON = %s", record.CapabilitiesJSON)
+	}
 
 	targets, err := svc.RuntimeTargets()
 	if err != nil {
@@ -79,6 +95,15 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	}
 	if got := target.Upstream.Headers["X-Test"]; got != "true" {
 		t.Fatalf("target header X-Test = %q", got)
+	}
+	if target.Upstream.APIType != "chat_completions" || target.Upstream.Mode != "responses_server" {
+		t.Fatalf("target api surface = %q/%q", target.Upstream.APIType, target.Upstream.Mode)
+	}
+	if target.Upstream.Capabilities.ChatCompletions == nil || !*target.Upstream.Capabilities.ChatCompletions {
+		t.Fatalf("target.Upstream.Capabilities.ChatCompletions = %#v", target.Upstream.Capabilities.ChatCompletions)
+	}
+	if target.Upstream.Capabilities.Responses == nil || *target.Upstream.Capabilities.Responses {
+		t.Fatalf("target.Upstream.Capabilities.Responses = %#v", target.Upstream.Capabilities.Responses)
 	}
 	if len(target.StaticModels) != 2 || target.StaticModels[0] != "gpt-4.1" || target.StaticModels[1] != "gpt-5" {
 		t.Fatalf("target.StaticModels = %#v", target.StaticModels)

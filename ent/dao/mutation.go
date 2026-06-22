@@ -2765,6 +2765,9 @@ type ChannelConfigMutation struct {
 	source               *string
 	base_url             *string
 	provider_preset      *string
+	api_type             *string
+	mode                 *string
+	capabilities_json    *string
 	protocol_family      *string
 	routing_profile      *string
 	api_version          *string
@@ -3077,6 +3080,114 @@ func (m *ChannelConfigMutation) OldProviderPreset(ctx context.Context) (v string
 // ResetProviderPreset resets all changes to the "provider_preset" field.
 func (m *ChannelConfigMutation) ResetProviderPreset() {
 	m.provider_preset = nil
+}
+
+// SetAPIType sets the "api_type" field.
+func (m *ChannelConfigMutation) SetAPIType(s string) {
+	m.api_type = &s
+}
+
+// APIType returns the value of the "api_type" field in the mutation.
+func (m *ChannelConfigMutation) APIType() (r string, exists bool) {
+	v := m.api_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAPIType returns the old "api_type" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldAPIType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAPIType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAPIType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAPIType: %w", err)
+	}
+	return oldValue.APIType, nil
+}
+
+// ResetAPIType resets all changes to the "api_type" field.
+func (m *ChannelConfigMutation) ResetAPIType() {
+	m.api_type = nil
+}
+
+// SetMode sets the "mode" field.
+func (m *ChannelConfigMutation) SetMode(s string) {
+	m.mode = &s
+}
+
+// Mode returns the value of the "mode" field in the mutation.
+func (m *ChannelConfigMutation) Mode() (r string, exists bool) {
+	v := m.mode
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMode returns the old "mode" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldMode(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMode: %w", err)
+	}
+	return oldValue.Mode, nil
+}
+
+// ResetMode resets all changes to the "mode" field.
+func (m *ChannelConfigMutation) ResetMode() {
+	m.mode = nil
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (m *ChannelConfigMutation) SetCapabilitiesJSON(s string) {
+	m.capabilities_json = &s
+}
+
+// CapabilitiesJSON returns the value of the "capabilities_json" field in the mutation.
+func (m *ChannelConfigMutation) CapabilitiesJSON() (r string, exists bool) {
+	v := m.capabilities_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCapabilitiesJSON returns the old "capabilities_json" field's value of the ChannelConfig entity.
+// If the ChannelConfig object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelConfigMutation) OldCapabilitiesJSON(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCapabilitiesJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCapabilitiesJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCapabilitiesJSON: %w", err)
+	}
+	return oldValue.CapabilitiesJSON, nil
+}
+
+// ResetCapabilitiesJSON resets all changes to the "capabilities_json" field.
+func (m *ChannelConfigMutation) ResetCapabilitiesJSON() {
+	m.capabilities_json = nil
 }
 
 // SetProtocolFamily sets the "protocol_family" field.
@@ -3955,7 +4066,7 @@ func (m *ChannelConfigMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelConfigMutation) Fields() []string {
-	fields := make([]string, 0, 26)
+	fields := make([]string, 0, 29)
 	if m.name != nil {
 		fields = append(fields, channelconfig.FieldName)
 	}
@@ -3970,6 +4081,15 @@ func (m *ChannelConfigMutation) Fields() []string {
 	}
 	if m.provider_preset != nil {
 		fields = append(fields, channelconfig.FieldProviderPreset)
+	}
+	if m.api_type != nil {
+		fields = append(fields, channelconfig.FieldAPIType)
+	}
+	if m.mode != nil {
+		fields = append(fields, channelconfig.FieldMode)
+	}
+	if m.capabilities_json != nil {
+		fields = append(fields, channelconfig.FieldCapabilitiesJSON)
 	}
 	if m.protocol_family != nil {
 		fields = append(fields, channelconfig.FieldProtocolFamily)
@@ -4052,6 +4172,12 @@ func (m *ChannelConfigMutation) Field(name string) (ent.Value, bool) {
 		return m.BaseURL()
 	case channelconfig.FieldProviderPreset:
 		return m.ProviderPreset()
+	case channelconfig.FieldAPIType:
+		return m.APIType()
+	case channelconfig.FieldMode:
+		return m.Mode()
+	case channelconfig.FieldCapabilitiesJSON:
+		return m.CapabilitiesJSON()
 	case channelconfig.FieldProtocolFamily:
 		return m.ProtocolFamily()
 	case channelconfig.FieldRoutingProfile:
@@ -4113,6 +4239,12 @@ func (m *ChannelConfigMutation) OldField(ctx context.Context, name string) (ent.
 		return m.OldBaseURL(ctx)
 	case channelconfig.FieldProviderPreset:
 		return m.OldProviderPreset(ctx)
+	case channelconfig.FieldAPIType:
+		return m.OldAPIType(ctx)
+	case channelconfig.FieldMode:
+		return m.OldMode(ctx)
+	case channelconfig.FieldCapabilitiesJSON:
+		return m.OldCapabilitiesJSON(ctx)
 	case channelconfig.FieldProtocolFamily:
 		return m.OldProtocolFamily(ctx)
 	case channelconfig.FieldRoutingProfile:
@@ -4198,6 +4330,27 @@ func (m *ChannelConfigMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetProviderPreset(v)
+		return nil
+	case channelconfig.FieldAPIType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAPIType(v)
+		return nil
+	case channelconfig.FieldMode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMode(v)
+		return nil
+	case channelconfig.FieldCapabilitiesJSON:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCapabilitiesJSON(v)
 		return nil
 	case channelconfig.FieldProtocolFamily:
 		v, ok := value.(string)
@@ -4463,6 +4616,15 @@ func (m *ChannelConfigMutation) ResetField(name string) error {
 		return nil
 	case channelconfig.FieldProviderPreset:
 		m.ResetProviderPreset()
+		return nil
+	case channelconfig.FieldAPIType:
+		m.ResetAPIType()
+		return nil
+	case channelconfig.FieldMode:
+		m.ResetMode()
+		return nil
+	case channelconfig.FieldCapabilitiesJSON:
+		m.ResetCapabilitiesJSON()
 		return nil
 	case channelconfig.FieldProtocolFamily:
 		m.ResetProtocolFamily()

@@ -77,6 +77,48 @@ func (_c *ChannelConfigCreate) SetNillableProviderPreset(v *string) *ChannelConf
 	return _c
 }
 
+// SetAPIType sets the "api_type" field.
+func (_c *ChannelConfigCreate) SetAPIType(v string) *ChannelConfigCreate {
+	_c.mutation.SetAPIType(v)
+	return _c
+}
+
+// SetNillableAPIType sets the "api_type" field if the given value is not nil.
+func (_c *ChannelConfigCreate) SetNillableAPIType(v *string) *ChannelConfigCreate {
+	if v != nil {
+		_c.SetAPIType(*v)
+	}
+	return _c
+}
+
+// SetMode sets the "mode" field.
+func (_c *ChannelConfigCreate) SetMode(v string) *ChannelConfigCreate {
+	_c.mutation.SetMode(v)
+	return _c
+}
+
+// SetNillableMode sets the "mode" field if the given value is not nil.
+func (_c *ChannelConfigCreate) SetNillableMode(v *string) *ChannelConfigCreate {
+	if v != nil {
+		_c.SetMode(*v)
+	}
+	return _c
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (_c *ChannelConfigCreate) SetCapabilitiesJSON(v string) *ChannelConfigCreate {
+	_c.mutation.SetCapabilitiesJSON(v)
+	return _c
+}
+
+// SetNillableCapabilitiesJSON sets the "capabilities_json" field if the given value is not nil.
+func (_c *ChannelConfigCreate) SetNillableCapabilitiesJSON(v *string) *ChannelConfigCreate {
+	if v != nil {
+		_c.SetCapabilitiesJSON(*v)
+	}
+	return _c
+}
+
 // SetProtocolFamily sets the "protocol_family" field.
 func (_c *ChannelConfigCreate) SetProtocolFamily(v string) *ChannelConfigCreate {
 	_c.mutation.SetProtocolFamily(v)
@@ -416,6 +458,18 @@ func (_c *ChannelConfigCreate) defaults() {
 		v := channelconfig.DefaultProviderPreset
 		_c.mutation.SetProviderPreset(v)
 	}
+	if _, ok := _c.mutation.APIType(); !ok {
+		v := channelconfig.DefaultAPIType
+		_c.mutation.SetAPIType(v)
+	}
+	if _, ok := _c.mutation.Mode(); !ok {
+		v := channelconfig.DefaultMode
+		_c.mutation.SetMode(v)
+	}
+	if _, ok := _c.mutation.CapabilitiesJSON(); !ok {
+		v := channelconfig.DefaultCapabilitiesJSON
+		_c.mutation.SetCapabilitiesJSON(v)
+	}
 	if _, ok := _c.mutation.ProtocolFamily(); !ok {
 		v := channelconfig.DefaultProtocolFamily
 		_c.mutation.SetProtocolFamily(v)
@@ -520,6 +574,15 @@ func (_c *ChannelConfigCreate) check() error {
 	}
 	if _, ok := _c.mutation.ProviderPreset(); !ok {
 		return &ValidationError{Name: "provider_preset", err: errors.New(`dao: missing required field "ChannelConfig.provider_preset"`)}
+	}
+	if _, ok := _c.mutation.APIType(); !ok {
+		return &ValidationError{Name: "api_type", err: errors.New(`dao: missing required field "ChannelConfig.api_type"`)}
+	}
+	if _, ok := _c.mutation.Mode(); !ok {
+		return &ValidationError{Name: "mode", err: errors.New(`dao: missing required field "ChannelConfig.mode"`)}
+	}
+	if _, ok := _c.mutation.CapabilitiesJSON(); !ok {
+		return &ValidationError{Name: "capabilities_json", err: errors.New(`dao: missing required field "ChannelConfig.capabilities_json"`)}
 	}
 	if _, ok := _c.mutation.ProtocolFamily(); !ok {
 		return &ValidationError{Name: "protocol_family", err: errors.New(`dao: missing required field "ChannelConfig.protocol_family"`)}
@@ -639,6 +702,18 @@ func (_c *ChannelConfigCreate) createSpec() (*ChannelConfig, *sqlgraph.CreateSpe
 	if value, ok := _c.mutation.ProviderPreset(); ok {
 		_spec.SetField(channelconfig.FieldProviderPreset, field.TypeString, value)
 		_node.ProviderPreset = value
+	}
+	if value, ok := _c.mutation.APIType(); ok {
+		_spec.SetField(channelconfig.FieldAPIType, field.TypeString, value)
+		_node.APIType = value
+	}
+	if value, ok := _c.mutation.Mode(); ok {
+		_spec.SetField(channelconfig.FieldMode, field.TypeString, value)
+		_node.Mode = value
+	}
+	if value, ok := _c.mutation.CapabilitiesJSON(); ok {
+		_spec.SetField(channelconfig.FieldCapabilitiesJSON, field.TypeString, value)
+		_node.CapabilitiesJSON = value
 	}
 	if value, ok := _c.mutation.ProtocolFamily(); ok {
 		_spec.SetField(channelconfig.FieldProtocolFamily, field.TypeString, value)
@@ -833,6 +908,42 @@ func (u *ChannelConfigUpsert) SetProviderPreset(v string) *ChannelConfigUpsert {
 // UpdateProviderPreset sets the "provider_preset" field to the value that was provided on create.
 func (u *ChannelConfigUpsert) UpdateProviderPreset() *ChannelConfigUpsert {
 	u.SetExcluded(channelconfig.FieldProviderPreset)
+	return u
+}
+
+// SetAPIType sets the "api_type" field.
+func (u *ChannelConfigUpsert) SetAPIType(v string) *ChannelConfigUpsert {
+	u.Set(channelconfig.FieldAPIType, v)
+	return u
+}
+
+// UpdateAPIType sets the "api_type" field to the value that was provided on create.
+func (u *ChannelConfigUpsert) UpdateAPIType() *ChannelConfigUpsert {
+	u.SetExcluded(channelconfig.FieldAPIType)
+	return u
+}
+
+// SetMode sets the "mode" field.
+func (u *ChannelConfigUpsert) SetMode(v string) *ChannelConfigUpsert {
+	u.Set(channelconfig.FieldMode, v)
+	return u
+}
+
+// UpdateMode sets the "mode" field to the value that was provided on create.
+func (u *ChannelConfigUpsert) UpdateMode() *ChannelConfigUpsert {
+	u.SetExcluded(channelconfig.FieldMode)
+	return u
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (u *ChannelConfigUpsert) SetCapabilitiesJSON(v string) *ChannelConfigUpsert {
+	u.Set(channelconfig.FieldCapabilitiesJSON, v)
+	return u
+}
+
+// UpdateCapabilitiesJSON sets the "capabilities_json" field to the value that was provided on create.
+func (u *ChannelConfigUpsert) UpdateCapabilitiesJSON() *ChannelConfigUpsert {
+	u.SetExcluded(channelconfig.FieldCapabilitiesJSON)
 	return u
 }
 
@@ -1233,6 +1344,48 @@ func (u *ChannelConfigUpsertOne) SetProviderPreset(v string) *ChannelConfigUpser
 func (u *ChannelConfigUpsertOne) UpdateProviderPreset() *ChannelConfigUpsertOne {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateProviderPreset()
+	})
+}
+
+// SetAPIType sets the "api_type" field.
+func (u *ChannelConfigUpsertOne) SetAPIType(v string) *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetAPIType(v)
+	})
+}
+
+// UpdateAPIType sets the "api_type" field to the value that was provided on create.
+func (u *ChannelConfigUpsertOne) UpdateAPIType() *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateAPIType()
+	})
+}
+
+// SetMode sets the "mode" field.
+func (u *ChannelConfigUpsertOne) SetMode(v string) *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetMode(v)
+	})
+}
+
+// UpdateMode sets the "mode" field to the value that was provided on create.
+func (u *ChannelConfigUpsertOne) UpdateMode() *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateMode()
+	})
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (u *ChannelConfigUpsertOne) SetCapabilitiesJSON(v string) *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetCapabilitiesJSON(v)
+	})
+}
+
+// UpdateCapabilitiesJSON sets the "capabilities_json" field to the value that was provided on create.
+func (u *ChannelConfigUpsertOne) UpdateCapabilitiesJSON() *ChannelConfigUpsertOne {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateCapabilitiesJSON()
 	})
 }
 
@@ -1847,6 +2000,48 @@ func (u *ChannelConfigUpsertBulk) SetProviderPreset(v string) *ChannelConfigUpse
 func (u *ChannelConfigUpsertBulk) UpdateProviderPreset() *ChannelConfigUpsertBulk {
 	return u.Update(func(s *ChannelConfigUpsert) {
 		s.UpdateProviderPreset()
+	})
+}
+
+// SetAPIType sets the "api_type" field.
+func (u *ChannelConfigUpsertBulk) SetAPIType(v string) *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetAPIType(v)
+	})
+}
+
+// UpdateAPIType sets the "api_type" field to the value that was provided on create.
+func (u *ChannelConfigUpsertBulk) UpdateAPIType() *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateAPIType()
+	})
+}
+
+// SetMode sets the "mode" field.
+func (u *ChannelConfigUpsertBulk) SetMode(v string) *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetMode(v)
+	})
+}
+
+// UpdateMode sets the "mode" field to the value that was provided on create.
+func (u *ChannelConfigUpsertBulk) UpdateMode() *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateMode()
+	})
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (u *ChannelConfigUpsertBulk) SetCapabilitiesJSON(v string) *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.SetCapabilitiesJSON(v)
+	})
+}
+
+// UpdateCapabilitiesJSON sets the "capabilities_json" field to the value that was provided on create.
+func (u *ChannelConfigUpsertBulk) UpdateCapabilitiesJSON() *ChannelConfigUpsertBulk {
+	return u.Update(func(s *ChannelConfigUpsert) {
+		s.UpdateCapabilitiesJSON()
 	})
 }
 

@@ -100,12 +100,19 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 			}
 			headersJSON = string(data)
 		}
-		_, err := s.store.UpsertChannelConfig(store.ChannelConfigRecord{
+		capabilitiesJSON, err := marshalCapabilities(target.Upstream.Capabilities)
+		if err != nil {
+			return imported, err
+		}
+		_, err = s.store.UpsertChannelConfig(store.ChannelConfigRecord{
 			ID:               channelID,
 			Name:             defaultChannelName(channelID, target.Upstream.ProviderPreset),
 			Source:           "bootstrap",
 			BaseURL:          target.Upstream.BaseURL,
 			ProviderPreset:   target.Upstream.ProviderPreset,
+			APIType:          target.Upstream.APIType,
+			Mode:             target.Upstream.Mode,
+			CapabilitiesJSON: capabilitiesJSON,
 			ProtocolFamily:   target.Upstream.ProtocolFamily,
 			RoutingProfile:   target.Upstream.RoutingProfile,
 			APIVersion:       target.Upstream.APIVersion,
@@ -190,6 +197,10 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 				return nil, fmt.Errorf("decode headers for channel %q: %w", channel.ID, err)
 			}
 		}
+		capabilities, err := unmarshalCapabilities(channel.CapabilitiesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
+		}
 		enabled := true
 		target := config.UpstreamTargetConfig{
 			ID:                 channel.ID,
@@ -204,6 +215,9 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 				BaseURL:        channel.BaseURL,
 				ApiKey:         string(channel.APIKeyCiphertext),
 				ProviderPreset: channel.ProviderPreset,
+				APIType:        channel.APIType,
+				Mode:           channel.Mode,
+				Capabilities:   capabilities,
 				ProtocolFamily: channel.ProtocolFamily,
 				RoutingProfile: channel.RoutingProfile,
 				APIVersion:     channel.APIVersion,
@@ -217,6 +231,28 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		targets = append(targets, target)
 	}
 	return targets, nil
+}
+
+func marshalCapabilities(capabilities config.UpstreamCapabilitiesConfig) (string, error) {
+	data, err := json.Marshal(capabilities)
+	if err != nil {
+		return "", err
+	}
+	if string(data) == "null" || string(data) == "" {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func unmarshalCapabilities(raw string) (config.UpstreamCapabilitiesConfig, error) {
+	var capabilities config.UpstreamCapabilitiesConfig
+	if strings.TrimSpace(raw) == "" {
+		return capabilities, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &capabilities); err != nil {
+		return config.UpstreamCapabilitiesConfig{}, err
+	}
+	return capabilities, nil
 }
 
 func (s *Service) Probe(channelID string) (ProbeResult, error) {

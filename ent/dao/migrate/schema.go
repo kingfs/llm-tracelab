@@ -123,6 +123,9 @@ var (
 		{Name: "source", Type: field.TypeString, Default: "manual"},
 		{Name: "base_url", Type: field.TypeString},
 		{Name: "provider_preset", Type: field.TypeString, Default: ""},
+		{Name: "api_type", Type: field.TypeString, Default: ""},
+		{Name: "mode", Type: field.TypeString, Default: ""},
+		{Name: "capabilities_json", Type: field.TypeString, Default: "{}"},
 		{Name: "protocol_family", Type: field.TypeString, Default: ""},
 		{Name: "routing_profile", Type: field.TypeString, Default: ""},
 		{Name: "api_version", Type: field.TypeString, Default: ""},
@@ -154,7 +157,7 @@ var (
 			{
 				Name:    "channelconfig_enabled_priority",
 				Unique:  false,
-				Columns: []*schema.Column{ChannelConfigsColumns[16], ChannelConfigsColumns[17]},
+				Columns: []*schema.Column{ChannelConfigsColumns[19], ChannelConfigsColumns[20]},
 			},
 			{
 				Name:    "channelconfig_provider_preset",

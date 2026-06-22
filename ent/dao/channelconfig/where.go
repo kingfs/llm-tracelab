@@ -89,6 +89,21 @@ func ProviderPreset(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldProviderPreset, v))
 }
 
+// APIType applies equality check predicate on the "api_type" field. It's identical to APITypeEQ.
+func APIType(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldAPIType, v))
+}
+
+// Mode applies equality check predicate on the "mode" field. It's identical to ModeEQ.
+func Mode(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldMode, v))
+}
+
+// CapabilitiesJSON applies equality check predicate on the "capabilities_json" field. It's identical to CapabilitiesJSONEQ.
+func CapabilitiesJSON(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldCapabilitiesJSON, v))
+}
+
 // ProtocolFamily applies equality check predicate on the "protocol_family" field. It's identical to ProtocolFamilyEQ.
 func ProtocolFamily(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldEQ(FieldProtocolFamily, v))
@@ -517,6 +532,201 @@ func ProviderPresetEqualFold(v string) predicate.ChannelConfig {
 // ProviderPresetContainsFold applies the ContainsFold predicate on the "provider_preset" field.
 func ProviderPresetContainsFold(v string) predicate.ChannelConfig {
 	return predicate.ChannelConfig(sql.FieldContainsFold(FieldProviderPreset, v))
+}
+
+// APITypeEQ applies the EQ predicate on the "api_type" field.
+func APITypeEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldAPIType, v))
+}
+
+// APITypeNEQ applies the NEQ predicate on the "api_type" field.
+func APITypeNEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNEQ(FieldAPIType, v))
+}
+
+// APITypeIn applies the In predicate on the "api_type" field.
+func APITypeIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldIn(FieldAPIType, vs...))
+}
+
+// APITypeNotIn applies the NotIn predicate on the "api_type" field.
+func APITypeNotIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNotIn(FieldAPIType, vs...))
+}
+
+// APITypeGT applies the GT predicate on the "api_type" field.
+func APITypeGT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGT(FieldAPIType, v))
+}
+
+// APITypeGTE applies the GTE predicate on the "api_type" field.
+func APITypeGTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGTE(FieldAPIType, v))
+}
+
+// APITypeLT applies the LT predicate on the "api_type" field.
+func APITypeLT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLT(FieldAPIType, v))
+}
+
+// APITypeLTE applies the LTE predicate on the "api_type" field.
+func APITypeLTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLTE(FieldAPIType, v))
+}
+
+// APITypeContains applies the Contains predicate on the "api_type" field.
+func APITypeContains(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContains(FieldAPIType, v))
+}
+
+// APITypeHasPrefix applies the HasPrefix predicate on the "api_type" field.
+func APITypeHasPrefix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasPrefix(FieldAPIType, v))
+}
+
+// APITypeHasSuffix applies the HasSuffix predicate on the "api_type" field.
+func APITypeHasSuffix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasSuffix(FieldAPIType, v))
+}
+
+// APITypeEqualFold applies the EqualFold predicate on the "api_type" field.
+func APITypeEqualFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEqualFold(FieldAPIType, v))
+}
+
+// APITypeContainsFold applies the ContainsFold predicate on the "api_type" field.
+func APITypeContainsFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContainsFold(FieldAPIType, v))
+}
+
+// ModeEQ applies the EQ predicate on the "mode" field.
+func ModeEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldMode, v))
+}
+
+// ModeNEQ applies the NEQ predicate on the "mode" field.
+func ModeNEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNEQ(FieldMode, v))
+}
+
+// ModeIn applies the In predicate on the "mode" field.
+func ModeIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldIn(FieldMode, vs...))
+}
+
+// ModeNotIn applies the NotIn predicate on the "mode" field.
+func ModeNotIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNotIn(FieldMode, vs...))
+}
+
+// ModeGT applies the GT predicate on the "mode" field.
+func ModeGT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGT(FieldMode, v))
+}
+
+// ModeGTE applies the GTE predicate on the "mode" field.
+func ModeGTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGTE(FieldMode, v))
+}
+
+// ModeLT applies the LT predicate on the "mode" field.
+func ModeLT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLT(FieldMode, v))
+}
+
+// ModeLTE applies the LTE predicate on the "mode" field.
+func ModeLTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLTE(FieldMode, v))
+}
+
+// ModeContains applies the Contains predicate on the "mode" field.
+func ModeContains(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContains(FieldMode, v))
+}
+
+// ModeHasPrefix applies the HasPrefix predicate on the "mode" field.
+func ModeHasPrefix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasPrefix(FieldMode, v))
+}
+
+// ModeHasSuffix applies the HasSuffix predicate on the "mode" field.
+func ModeHasSuffix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasSuffix(FieldMode, v))
+}
+
+// ModeEqualFold applies the EqualFold predicate on the "mode" field.
+func ModeEqualFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEqualFold(FieldMode, v))
+}
+
+// ModeContainsFold applies the ContainsFold predicate on the "mode" field.
+func ModeContainsFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContainsFold(FieldMode, v))
+}
+
+// CapabilitiesJSONEQ applies the EQ predicate on the "capabilities_json" field.
+func CapabilitiesJSONEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEQ(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONNEQ applies the NEQ predicate on the "capabilities_json" field.
+func CapabilitiesJSONNEQ(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNEQ(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONIn applies the In predicate on the "capabilities_json" field.
+func CapabilitiesJSONIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldIn(FieldCapabilitiesJSON, vs...))
+}
+
+// CapabilitiesJSONNotIn applies the NotIn predicate on the "capabilities_json" field.
+func CapabilitiesJSONNotIn(vs ...string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldNotIn(FieldCapabilitiesJSON, vs...))
+}
+
+// CapabilitiesJSONGT applies the GT predicate on the "capabilities_json" field.
+func CapabilitiesJSONGT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGT(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONGTE applies the GTE predicate on the "capabilities_json" field.
+func CapabilitiesJSONGTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldGTE(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONLT applies the LT predicate on the "capabilities_json" field.
+func CapabilitiesJSONLT(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLT(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONLTE applies the LTE predicate on the "capabilities_json" field.
+func CapabilitiesJSONLTE(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldLTE(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONContains applies the Contains predicate on the "capabilities_json" field.
+func CapabilitiesJSONContains(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContains(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONHasPrefix applies the HasPrefix predicate on the "capabilities_json" field.
+func CapabilitiesJSONHasPrefix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasPrefix(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONHasSuffix applies the HasSuffix predicate on the "capabilities_json" field.
+func CapabilitiesJSONHasSuffix(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldHasSuffix(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONEqualFold applies the EqualFold predicate on the "capabilities_json" field.
+func CapabilitiesJSONEqualFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldEqualFold(FieldCapabilitiesJSON, v))
+}
+
+// CapabilitiesJSONContainsFold applies the ContainsFold predicate on the "capabilities_json" field.
+func CapabilitiesJSONContainsFold(v string) predicate.ChannelConfig {
+	return predicate.ChannelConfig(sql.FieldContainsFold(FieldCapabilitiesJSON, v))
 }
 
 // ProtocolFamilyEQ applies the EQ predicate on the "protocol_family" field.

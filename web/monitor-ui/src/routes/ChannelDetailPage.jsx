@@ -178,6 +178,8 @@ export function ProviderDetailPage() {
           </div>
           <div className="detail-meta-strip">
             <DetailMetaPill label="config source" value={providerSourceLabel(provider.source)} />
+            <DetailMetaPill label="api type" value={provider.api_type || "-"} />
+            <DetailMetaPill label="mode" value={provider.mode || "-"} />
             <DetailMetaPill label="base url" value={provider.base_url || "-"} mono />
             <DetailMetaPill label="models" value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
             <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
@@ -509,6 +511,9 @@ function emptyEditForm() {
     name: "",
     base_url: "",
     provider_preset: "",
+    api_type: "chat_completions",
+    mode: "proxy",
+    capabilities: {},
     protocol_family: "",
     routing_profile: "",
     api_version: "",
@@ -532,6 +537,9 @@ function editFormFromProvider(provider = {}) {
     name: provider.name || "",
     base_url: provider.base_url || "",
     provider_preset: provider.provider_preset || "",
+    api_type: provider.api_type || "chat_completions",
+    mode: provider.mode || "proxy",
+    capabilities: provider.capabilities || {},
     protocol_family: provider.protocol_family || "",
     routing_profile: provider.routing_profile || "",
     api_version: provider.api_version || "",
@@ -558,6 +566,9 @@ function providerPayloadFromForm(form) {
     name: form.name,
     base_url: form.base_url,
     provider_preset: form.provider_preset,
+    api_type: form.api_type,
+    mode: form.mode,
+    capabilities: normalizeCapabilities(form.capabilities),
     protocol_family: form.protocol_family,
     routing_profile: form.routing_profile,
     api_version: form.api_version,
@@ -576,6 +587,16 @@ function providerPayloadFromForm(form) {
     payload.api_key = form.api_key.trim();
   }
   return payload;
+}
+
+function normalizeCapabilities(value) {
+  const capabilities = {};
+  for (const key of ["responses", "chat_completions", "tool_calling", "models", "embeddings", "tokenize"]) {
+    if (typeof value?.[key] === "boolean") {
+      capabilities[key] = value[key];
+    }
+  }
+  return capabilities;
 }
 
 function parseHeadersText(value) {

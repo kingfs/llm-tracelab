@@ -100,6 +100,48 @@ func (_u *ChannelConfigUpdate) SetNillableProviderPreset(v *string) *ChannelConf
 	return _u
 }
 
+// SetAPIType sets the "api_type" field.
+func (_u *ChannelConfigUpdate) SetAPIType(v string) *ChannelConfigUpdate {
+	_u.mutation.SetAPIType(v)
+	return _u
+}
+
+// SetNillableAPIType sets the "api_type" field if the given value is not nil.
+func (_u *ChannelConfigUpdate) SetNillableAPIType(v *string) *ChannelConfigUpdate {
+	if v != nil {
+		_u.SetAPIType(*v)
+	}
+	return _u
+}
+
+// SetMode sets the "mode" field.
+func (_u *ChannelConfigUpdate) SetMode(v string) *ChannelConfigUpdate {
+	_u.mutation.SetMode(v)
+	return _u
+}
+
+// SetNillableMode sets the "mode" field if the given value is not nil.
+func (_u *ChannelConfigUpdate) SetNillableMode(v *string) *ChannelConfigUpdate {
+	if v != nil {
+		_u.SetMode(*v)
+	}
+	return _u
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (_u *ChannelConfigUpdate) SetCapabilitiesJSON(v string) *ChannelConfigUpdate {
+	_u.mutation.SetCapabilitiesJSON(v)
+	return _u
+}
+
+// SetNillableCapabilitiesJSON sets the "capabilities_json" field if the given value is not nil.
+func (_u *ChannelConfigUpdate) SetNillableCapabilitiesJSON(v *string) *ChannelConfigUpdate {
+	if v != nil {
+		_u.SetCapabilitiesJSON(*v)
+	}
+	return _u
+}
+
 // SetProtocolFamily sets the "protocol_family" field.
 func (_u *ChannelConfigUpdate) SetProtocolFamily(v string) *ChannelConfigUpdate {
 	_u.mutation.SetProtocolFamily(v)
@@ -499,6 +541,15 @@ func (_u *ChannelConfigUpdate) sqlSave(ctx context.Context) (_node int, err erro
 	if value, ok := _u.mutation.ProviderPreset(); ok {
 		_spec.SetField(channelconfig.FieldProviderPreset, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.APIType(); ok {
+		_spec.SetField(channelconfig.FieldAPIType, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Mode(); ok {
+		_spec.SetField(channelconfig.FieldMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CapabilitiesJSON(); ok {
+		_spec.SetField(channelconfig.FieldCapabilitiesJSON, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.ProtocolFamily(); ok {
 		_spec.SetField(channelconfig.FieldProtocolFamily, field.TypeString, value)
 	}
@@ -667,6 +718,48 @@ func (_u *ChannelConfigUpdateOne) SetProviderPreset(v string) *ChannelConfigUpda
 func (_u *ChannelConfigUpdateOne) SetNillableProviderPreset(v *string) *ChannelConfigUpdateOne {
 	if v != nil {
 		_u.SetProviderPreset(*v)
+	}
+	return _u
+}
+
+// SetAPIType sets the "api_type" field.
+func (_u *ChannelConfigUpdateOne) SetAPIType(v string) *ChannelConfigUpdateOne {
+	_u.mutation.SetAPIType(v)
+	return _u
+}
+
+// SetNillableAPIType sets the "api_type" field if the given value is not nil.
+func (_u *ChannelConfigUpdateOne) SetNillableAPIType(v *string) *ChannelConfigUpdateOne {
+	if v != nil {
+		_u.SetAPIType(*v)
+	}
+	return _u
+}
+
+// SetMode sets the "mode" field.
+func (_u *ChannelConfigUpdateOne) SetMode(v string) *ChannelConfigUpdateOne {
+	_u.mutation.SetMode(v)
+	return _u
+}
+
+// SetNillableMode sets the "mode" field if the given value is not nil.
+func (_u *ChannelConfigUpdateOne) SetNillableMode(v *string) *ChannelConfigUpdateOne {
+	if v != nil {
+		_u.SetMode(*v)
+	}
+	return _u
+}
+
+// SetCapabilitiesJSON sets the "capabilities_json" field.
+func (_u *ChannelConfigUpdateOne) SetCapabilitiesJSON(v string) *ChannelConfigUpdateOne {
+	_u.mutation.SetCapabilitiesJSON(v)
+	return _u
+}
+
+// SetNillableCapabilitiesJSON sets the "capabilities_json" field if the given value is not nil.
+func (_u *ChannelConfigUpdateOne) SetNillableCapabilitiesJSON(v *string) *ChannelConfigUpdateOne {
+	if v != nil {
+		_u.SetCapabilitiesJSON(*v)
 	}
 	return _u
 }
@@ -1099,6 +1192,15 @@ func (_u *ChannelConfigUpdateOne) sqlSave(ctx context.Context) (_node *ChannelCo
 	}
 	if value, ok := _u.mutation.ProviderPreset(); ok {
 		_spec.SetField(channelconfig.FieldProviderPreset, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.APIType(); ok {
+		_spec.SetField(channelconfig.FieldAPIType, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.Mode(); ok {
+		_spec.SetField(channelconfig.FieldMode, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.CapabilitiesJSON(); ok {
+		_spec.SetField(channelconfig.FieldCapabilitiesJSON, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.ProtocolFamily(); ok {
 		_spec.SetField(channelconfig.FieldProtocolFamily, field.TypeString, value)

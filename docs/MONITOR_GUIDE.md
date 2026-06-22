@@ -88,12 +88,13 @@ Monitor 使用两类数据：
 
 - 创建渠道。
 - 设置 provider preset、base URL、API key、headers、routing 字段。
+- 设置 provider API surface：`api_type`、`mode`，以及 Responses、Chat Completions、tool calling、models 等 capability 开关；这些字段会写入 channel store，并在运行时还原为 upstream routing target。
 - 探测模型。
 - 启停渠道。
 - 启停单个模型。
 - 查看渠道用量、token、失败和 probe 结果。
 
-长期渠道配置保存在 SQLite。YAML 只作为启动和首次 bootstrap 输入。
+长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。YAML 只作为启动和首次 bootstrap 输入。
 
 ### Routing
 

@@ -1463,6 +1463,9 @@ func TestChannelManagementAPI(t *testing.T) {
 		"name":"OpenAI Primary",
 		"base_url":"` + upstreamServer.URL + `/v1",
 		"provider_preset":"openai",
+		"api_type":"chat_completions",
+		"mode":"responses_server",
+		"capabilities":{"responses":false,"chat_completions":true,"tool_calling":true},
 		"api_key":"sk-secret-value",
 		"headers":{"Authorization":"Bearer hidden","X-Test":"visible"},
 		"enabled":true,
@@ -1493,6 +1496,15 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if !created.AllowUnknownModels {
 		t.Fatalf("created.AllowUnknownModels = false, want true")
+	}
+	if created.APIType != "chat_completions" || created.Mode != "responses_server" {
+		t.Fatalf("created api surface = %q/%q", created.APIType, created.Mode)
+	}
+	if created.Capabilities.ChatCompletions == nil || !*created.Capabilities.ChatCompletions {
+		t.Fatalf("created.Capabilities.ChatCompletions = %#v", created.Capabilities.ChatCompletions)
+	}
+	if created.Capabilities.Responses == nil || *created.Capabilities.Responses {
+		t.Fatalf("created.Capabilities.Responses = %#v", created.Capabilities.Responses)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
@@ -1722,6 +1734,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if detail.Summary.RequestCount != 2 || detail.Summary.FailedRequest != 1 || detail.Summary.TotalTokens != 150 {
 		t.Fatalf("detail summary = %+v", detail.Summary)
+	}
+	if detail.APIType != "chat_completions" || detail.Mode != "responses_server" {
+		t.Fatalf("detail api surface = %q/%q", detail.APIType, detail.Mode)
 	}
 	if len(detail.ModelsUsage) != 3 || detail.ModelsUsage[0].Model != "gpt-4.1" || detail.ModelsUsage[0].Summary.TotalTokens != 120 {
 		t.Fatalf("models usage = %+v", detail.ModelsUsage)

@@ -127,6 +127,9 @@ var schemaGraph = func() *sqlgraph.Schema {
 			channelconfig.FieldSource:             {Type: field.TypeString, Column: channelconfig.FieldSource},
 			channelconfig.FieldBaseURL:            {Type: field.TypeString, Column: channelconfig.FieldBaseURL},
 			channelconfig.FieldProviderPreset:     {Type: field.TypeString, Column: channelconfig.FieldProviderPreset},
+			channelconfig.FieldAPIType:            {Type: field.TypeString, Column: channelconfig.FieldAPIType},
+			channelconfig.FieldMode:               {Type: field.TypeString, Column: channelconfig.FieldMode},
+			channelconfig.FieldCapabilitiesJSON:   {Type: field.TypeString, Column: channelconfig.FieldCapabilitiesJSON},
 			channelconfig.FieldProtocolFamily:     {Type: field.TypeString, Column: channelconfig.FieldProtocolFamily},
 			channelconfig.FieldRoutingProfile:     {Type: field.TypeString, Column: channelconfig.FieldRoutingProfile},
 			channelconfig.FieldAPIVersion:         {Type: field.TypeString, Column: channelconfig.FieldAPIVersion},
@@ -1091,6 +1094,21 @@ func (f *ChannelConfigFilter) WhereBaseURL(p entql.StringP) {
 // WhereProviderPreset applies the entql string predicate on the provider_preset field.
 func (f *ChannelConfigFilter) WhereProviderPreset(p entql.StringP) {
 	f.Where(p.Field(channelconfig.FieldProviderPreset))
+}
+
+// WhereAPIType applies the entql string predicate on the api_type field.
+func (f *ChannelConfigFilter) WhereAPIType(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldAPIType))
+}
+
+// WhereMode applies the entql string predicate on the mode field.
+func (f *ChannelConfigFilter) WhereMode(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldMode))
+}
+
+// WhereCapabilitiesJSON applies the entql string predicate on the capabilities_json field.
+func (f *ChannelConfigFilter) WhereCapabilitiesJSON(p entql.StringP) {
+	f.Where(p.Field(channelconfig.FieldCapabilitiesJSON))
 }
 
 // WhereProtocolFamily applies the entql string predicate on the protocol_family field.

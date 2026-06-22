@@ -14,6 +14,9 @@ const DEFAULT_FORM = {
   name: "",
   base_url: "",
   provider_preset: "openai",
+  api_type: "chat_completions",
+  mode: "proxy",
+  capabilities: {},
   protocol_family: "openai_compatible",
   routing_profile: "openai_default",
   api_version: "",
@@ -358,6 +361,8 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
   const discoveryOptions = presetState.modelDiscoveryOptions.length ? presetState.modelDiscoveryOptions : ["list_models", "disabled"];
   return (
     <>
+      <label>API type<select value={form.api_type || "chat_completions"} onChange={(event) => onChange("api_type", event.target.value)}>{API_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+      <label>API mode<select value={form.mode || "proxy"} onChange={(event) => onChange("mode", event.target.value)}>{API_MODE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label>Protocol family<select value={form.protocol_family || ""} onChange={(event) => onChange("protocol_family", event.target.value)}>{presetState.protocolOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       <label>Routing profile<select value={form.routing_profile || ""} onChange={(event) => onChange("routing_profile", event.target.value)}>{presetState.routingOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       {presetState.needsAPIVersion ? <label>API version<input value={form.api_version || ""} onChange={(event) => onChange("api_version", event.target.value)} placeholder={presetState.apiVersionPlaceholder} /></label> : null}
@@ -369,10 +374,53 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
       <label>Priority<input type="number" value={form.priority} onChange={(event) => onChange("priority", event.target.value)} /></label>
       <label>Weight<input type="number" step="0.1" value={form.weight} onChange={(event) => onChange("weight", event.target.value)} /></label>
       <label>Capacity<input type="number" step="0.1" value={form.capacity_hint} onChange={(event) => onChange("capacity_hint", event.target.value)} /></label>
+      <CapabilitySelect form={form} name="responses" label="Responses API" onChange={onChange} />
+      <CapabilitySelect form={form} name="chat_completions" label="Chat Completions" onChange={onChange} />
+      <CapabilitySelect form={form} name="tool_calling" label="Tool calling" onChange={onChange} />
+      <CapabilitySelect form={form} name="models" label="Models API" onChange={onChange} />
       {includeHeaders ? <label className="provider-form-wide">Headers<textarea value={form.headers_text} onChange={(event) => onChange("headers_text", event.target.value)} spellCheck={false} /></label> : null}
     </>
   );
 }
+
+const API_TYPE_OPTIONS = [
+  { value: "chat_completions", label: "Chat Completions" },
+  { value: "responses", label: "Responses" },
+  { value: "responses_native", label: "Responses native" },
+  { value: "messages", label: "Anthropic messages" },
+  { value: "gemini_generate_content", label: "Gemini generateContent" },
+];
+
+const API_MODE_OPTIONS = [
+  { value: "proxy", label: "Proxy" },
+  { value: "record_only", label: "Record only" },
+  { value: "server", label: "Server" },
+  { value: "responses_server", label: "Responses server" },
+];
+
+function CapabilitySelect({ form, name, label, onChange }) {
+  const capabilities = form.capabilities || {};
+  const current = capabilities[name];
+  const value = current === true ? "true" : current === false ? "false" : "";
+  const setValue = (nextValue) => {
+    const next = { ...capabilities };
+    if (nextValue === "") {
+      delete next[name];
+    } else {
+      next[name] = nextValue === "true";
+    }
+    onChange("capabilities", next);
+  };
+  return (
+    <label>{label}<select value={value} onChange={(event) => setValue(event.target.value)}>{CAPABILITY_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+  );
+}
+
+const CAPABILITY_OPTIONS = [
+  { value: "", label: "Auto / inherit" },
+  { value: "true", label: "Supported" },
+  { value: "false", label: "Unsupported" },
+];
 
 export function buildPresetState(presetData, providerPreset, routingProfile) {
   const presets = Array.isArray(presetData?.presets) ? presetData.presets : [];
@@ -407,11 +455,26 @@ export function normalizePresetSelection(form, presetData, changedKey) {
   }
   const spec = (presetData?.presets || []).find((item) => item.id === form.provider_preset) || {};
   const allowedProfiles = Array.isArray(spec.allowed_profiles) ? spec.allowed_profiles : [];
+  const protocolFamily = spec.protocol_family || form.protocol_family || "";
   return {
     ...form,
-    protocol_family: spec.protocol_family || form.protocol_family || "",
+    api_type: defaultAPITypeForProtocolFamily(protocolFamily),
+    protocol_family: protocolFamily,
     routing_profile: spec.routing_profile || allowedProfiles[0] || form.routing_profile || "",
   };
+}
+
+function defaultAPITypeForProtocolFamily(protocolFamily) {
+  switch (protocolFamily) {
+    case "anthropic_messages":
+      return "messages";
+    case "google_genai":
+    case "vertex_native":
+      return "gemini_generate_content";
+    case "openai_compatible":
+    default:
+      return "chat_completions";
+  }
 }
 
 function uniqueSorted(values) {
@@ -424,7 +487,18 @@ function normalizeProviderPayload(form) {
     priority: Number(form.priority || 0),
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
+    capabilities: normalizeCapabilities(form.capabilities),
   };
+}
+
+function normalizeCapabilities(value) {
+  const capabilities = {};
+  for (const key of ["responses", "chat_completions", "tool_calling", "models", "embeddings", "tokenize"]) {
+    if (typeof value?.[key] === "boolean") {
+      capabilities[key] = value[key];
+    }
+  }
+  return capabilities;
 }
 
 function summarizeProviders(items) {

@@ -374,6 +374,9 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 		Name:             "OpenAI Primary",
 		BaseURL:          "https://api.openai.com/v1",
 		ProviderPreset:   "openai",
+		APIType:          "chat_completions",
+		Mode:             "responses_server",
+		CapabilitiesJSON: `{"responses":false,"chat_completions":true,"tool_calling":true}`,
 		APIKeyCiphertext: []byte("sk-secret"),
 		APIKeyHint:       "sk-...cret",
 		HeadersJSON:      `{"Authorization":"Bearer hidden","X-Test":"true"}`,
@@ -395,10 +398,14 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	if record.HeadersJSON != `{"Authorization":"Bearer hidden","X-Test":"true"}` {
 		t.Fatalf("HeadersJSON = %q", record.HeadersJSON)
 	}
+	if record.APIType != "chat_completions" || record.Mode != "responses_server" || record.CapabilitiesJSON != `{"responses":false,"chat_completions":true,"tool_calling":true}` {
+		t.Fatalf("api surface = %q/%q/%s", record.APIType, record.Mode, record.CapabilitiesJSON)
+	}
 
 	var rawAPIKey []byte
 	var rawHeaders string
-	if err := st.db.QueryRow(`SELECT api_key_ciphertext, headers_json FROM channel_configs WHERE id = ?`, "openai-primary").Scan(&rawAPIKey, &rawHeaders); err != nil {
+	var rawAPIType, rawMode, rawCapabilities string
+	if err := st.db.QueryRow(`SELECT api_key_ciphertext, headers_json, api_type, mode, capabilities_json FROM channel_configs WHERE id = ?`, "openai-primary").Scan(&rawAPIKey, &rawHeaders, &rawAPIType, &rawMode, &rawCapabilities); err != nil {
 		t.Fatalf("query raw channel config error = %v", err)
 	}
 	if string(rawAPIKey) == "sk-secret" || !strings.HasPrefix(string(rawAPIKey), secretEnvelopeV1) {
@@ -406,6 +413,9 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	}
 	if strings.Contains(rawHeaders, "Bearer hidden") || !strings.Contains(rawHeaders, secretEnvelopeV1) || !strings.Contains(rawHeaders, `"X-Test":"true"`) {
 		t.Fatalf("raw headers_json = %q, want encrypted secret header and plaintext non-secret header", rawHeaders)
+	}
+	if rawAPIType != "chat_completions" || rawMode != "responses_server" || rawCapabilities != `{"responses":false,"chat_completions":true,"tool_calling":true}` {
+		t.Fatalf("raw api surface = %q/%q/%s", rawAPIType, rawMode, rawCapabilities)
 	}
 
 	reopened, err := New(dir)

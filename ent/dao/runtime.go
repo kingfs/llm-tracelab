@@ -175,80 +175,92 @@ func init() {
 	channelconfigDescProviderPreset := channelconfigFields[5].Descriptor()
 	// channelconfig.DefaultProviderPreset holds the default value on creation for the provider_preset field.
 	channelconfig.DefaultProviderPreset = channelconfigDescProviderPreset.Default.(string)
+	// channelconfigDescAPIType is the schema descriptor for api_type field.
+	channelconfigDescAPIType := channelconfigFields[6].Descriptor()
+	// channelconfig.DefaultAPIType holds the default value on creation for the api_type field.
+	channelconfig.DefaultAPIType = channelconfigDescAPIType.Default.(string)
+	// channelconfigDescMode is the schema descriptor for mode field.
+	channelconfigDescMode := channelconfigFields[7].Descriptor()
+	// channelconfig.DefaultMode holds the default value on creation for the mode field.
+	channelconfig.DefaultMode = channelconfigDescMode.Default.(string)
+	// channelconfigDescCapabilitiesJSON is the schema descriptor for capabilities_json field.
+	channelconfigDescCapabilitiesJSON := channelconfigFields[8].Descriptor()
+	// channelconfig.DefaultCapabilitiesJSON holds the default value on creation for the capabilities_json field.
+	channelconfig.DefaultCapabilitiesJSON = channelconfigDescCapabilitiesJSON.Default.(string)
 	// channelconfigDescProtocolFamily is the schema descriptor for protocol_family field.
-	channelconfigDescProtocolFamily := channelconfigFields[6].Descriptor()
+	channelconfigDescProtocolFamily := channelconfigFields[9].Descriptor()
 	// channelconfig.DefaultProtocolFamily holds the default value on creation for the protocol_family field.
 	channelconfig.DefaultProtocolFamily = channelconfigDescProtocolFamily.Default.(string)
 	// channelconfigDescRoutingProfile is the schema descriptor for routing_profile field.
-	channelconfigDescRoutingProfile := channelconfigFields[7].Descriptor()
+	channelconfigDescRoutingProfile := channelconfigFields[10].Descriptor()
 	// channelconfig.DefaultRoutingProfile holds the default value on creation for the routing_profile field.
 	channelconfig.DefaultRoutingProfile = channelconfigDescRoutingProfile.Default.(string)
 	// channelconfigDescAPIVersion is the schema descriptor for api_version field.
-	channelconfigDescAPIVersion := channelconfigFields[8].Descriptor()
+	channelconfigDescAPIVersion := channelconfigFields[11].Descriptor()
 	// channelconfig.DefaultAPIVersion holds the default value on creation for the api_version field.
 	channelconfig.DefaultAPIVersion = channelconfigDescAPIVersion.Default.(string)
 	// channelconfigDescDeployment is the schema descriptor for deployment field.
-	channelconfigDescDeployment := channelconfigFields[9].Descriptor()
+	channelconfigDescDeployment := channelconfigFields[12].Descriptor()
 	// channelconfig.DefaultDeployment holds the default value on creation for the deployment field.
 	channelconfig.DefaultDeployment = channelconfigDescDeployment.Default.(string)
 	// channelconfigDescProject is the schema descriptor for project field.
-	channelconfigDescProject := channelconfigFields[10].Descriptor()
+	channelconfigDescProject := channelconfigFields[13].Descriptor()
 	// channelconfig.DefaultProject holds the default value on creation for the project field.
 	channelconfig.DefaultProject = channelconfigDescProject.Default.(string)
 	// channelconfigDescLocation is the schema descriptor for location field.
-	channelconfigDescLocation := channelconfigFields[11].Descriptor()
+	channelconfigDescLocation := channelconfigFields[14].Descriptor()
 	// channelconfig.DefaultLocation holds the default value on creation for the location field.
 	channelconfig.DefaultLocation = channelconfigDescLocation.Default.(string)
 	// channelconfigDescModelResource is the schema descriptor for model_resource field.
-	channelconfigDescModelResource := channelconfigFields[12].Descriptor()
+	channelconfigDescModelResource := channelconfigFields[15].Descriptor()
 	// channelconfig.DefaultModelResource holds the default value on creation for the model_resource field.
 	channelconfig.DefaultModelResource = channelconfigDescModelResource.Default.(string)
 	// channelconfigDescAPIKeyHint is the schema descriptor for api_key_hint field.
-	channelconfigDescAPIKeyHint := channelconfigFields[14].Descriptor()
+	channelconfigDescAPIKeyHint := channelconfigFields[17].Descriptor()
 	// channelconfig.DefaultAPIKeyHint holds the default value on creation for the api_key_hint field.
 	channelconfig.DefaultAPIKeyHint = channelconfigDescAPIKeyHint.Default.(string)
 	// channelconfigDescHeadersJSON is the schema descriptor for headers_json field.
-	channelconfigDescHeadersJSON := channelconfigFields[15].Descriptor()
+	channelconfigDescHeadersJSON := channelconfigFields[18].Descriptor()
 	// channelconfig.DefaultHeadersJSON holds the default value on creation for the headers_json field.
 	channelconfig.DefaultHeadersJSON = channelconfigDescHeadersJSON.Default.(string)
 	// channelconfigDescEnabled is the schema descriptor for enabled field.
-	channelconfigDescEnabled := channelconfigFields[16].Descriptor()
+	channelconfigDescEnabled := channelconfigFields[19].Descriptor()
 	// channelconfig.DefaultEnabled holds the default value on creation for the enabled field.
 	channelconfig.DefaultEnabled = channelconfigDescEnabled.Default.(bool)
 	// channelconfigDescPriority is the schema descriptor for priority field.
-	channelconfigDescPriority := channelconfigFields[17].Descriptor()
+	channelconfigDescPriority := channelconfigFields[20].Descriptor()
 	// channelconfig.DefaultPriority holds the default value on creation for the priority field.
 	channelconfig.DefaultPriority = channelconfigDescPriority.Default.(int)
 	// channelconfigDescWeight is the schema descriptor for weight field.
-	channelconfigDescWeight := channelconfigFields[18].Descriptor()
+	channelconfigDescWeight := channelconfigFields[21].Descriptor()
 	// channelconfig.DefaultWeight holds the default value on creation for the weight field.
 	channelconfig.DefaultWeight = channelconfigDescWeight.Default.(float64)
 	// channelconfigDescCapacityHint is the schema descriptor for capacity_hint field.
-	channelconfigDescCapacityHint := channelconfigFields[19].Descriptor()
+	channelconfigDescCapacityHint := channelconfigFields[22].Descriptor()
 	// channelconfig.DefaultCapacityHint holds the default value on creation for the capacity_hint field.
 	channelconfig.DefaultCapacityHint = channelconfigDescCapacityHint.Default.(float64)
 	// channelconfigDescModelDiscovery is the schema descriptor for model_discovery field.
-	channelconfigDescModelDiscovery := channelconfigFields[20].Descriptor()
+	channelconfigDescModelDiscovery := channelconfigFields[23].Descriptor()
 	// channelconfig.DefaultModelDiscovery holds the default value on creation for the model_discovery field.
 	channelconfig.DefaultModelDiscovery = channelconfigDescModelDiscovery.Default.(string)
 	// channelconfigDescAllowUnknownModels is the schema descriptor for allow_unknown_models field.
-	channelconfigDescAllowUnknownModels := channelconfigFields[21].Descriptor()
+	channelconfigDescAllowUnknownModels := channelconfigFields[24].Descriptor()
 	// channelconfig.DefaultAllowUnknownModels holds the default value on creation for the allow_unknown_models field.
 	channelconfig.DefaultAllowUnknownModels = channelconfigDescAllowUnknownModels.Default.(bool)
 	// channelconfigDescCreatedAt is the schema descriptor for created_at field.
-	channelconfigDescCreatedAt := channelconfigFields[22].Descriptor()
+	channelconfigDescCreatedAt := channelconfigFields[25].Descriptor()
 	// channelconfig.DefaultCreatedAt holds the default value on creation for the created_at field.
 	channelconfig.DefaultCreatedAt = channelconfigDescCreatedAt.Default.(func() time.Time)
 	// channelconfigDescUpdatedAt is the schema descriptor for updated_at field.
-	channelconfigDescUpdatedAt := channelconfigFields[23].Descriptor()
+	channelconfigDescUpdatedAt := channelconfigFields[26].Descriptor()
 	// channelconfig.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	channelconfig.DefaultUpdatedAt = channelconfigDescUpdatedAt.Default.(func() time.Time)
 	// channelconfigDescLastProbeStatus is the schema descriptor for last_probe_status field.
-	channelconfigDescLastProbeStatus := channelconfigFields[25].Descriptor()
+	channelconfigDescLastProbeStatus := channelconfigFields[28].Descriptor()
 	// channelconfig.DefaultLastProbeStatus holds the default value on creation for the last_probe_status field.
 	channelconfig.DefaultLastProbeStatus = channelconfigDescLastProbeStatus.Default.(string)
 	// channelconfigDescLastProbeError is the schema descriptor for last_probe_error field.
-	channelconfigDescLastProbeError := channelconfigFields[26].Descriptor()
+	channelconfigDescLastProbeError := channelconfigFields[29].Descriptor()
 	// channelconfig.DefaultLastProbeError holds the default value on creation for the last_probe_error field.
 	channelconfig.DefaultLastProbeError = channelconfigDescLastProbeError.Default.(string)
 	// channelconfigDescID is the schema descriptor for id field.

@@ -264,6 +264,9 @@ type ChannelConfigRecord struct {
 	Source             string
 	BaseURL            string
 	ProviderPreset     string
+	APIType            string
+	Mode               string
+	CapabilitiesJSON   string
 	ProtocolFamily     string
 	RoutingProfile     string
 	APIVersion         string
@@ -829,6 +832,9 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 	if strings.TrimSpace(record.HeadersJSON) == "" {
 		record.HeadersJSON = "{}"
 	}
+	if strings.TrimSpace(record.CapabilitiesJSON) == "" {
+		record.CapabilitiesJSON = "{}"
+	}
 	if strings.TrimSpace(record.ModelDiscovery) == "" {
 		record.ModelDiscovery = "list_models"
 	}
@@ -862,6 +868,9 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetSource(strings.TrimSpace(record.Source)).
 		SetBaseURL(record.BaseURL).
 		SetProviderPreset(strings.TrimSpace(record.ProviderPreset)).
+		SetAPIType(strings.TrimSpace(record.APIType)).
+		SetMode(strings.TrimSpace(record.Mode)).
+		SetCapabilitiesJSON(strings.TrimSpace(record.CapabilitiesJSON)).
 		SetProtocolFamily(strings.TrimSpace(record.ProtocolFamily)).
 		SetRoutingProfile(strings.TrimSpace(record.RoutingProfile)).
 		SetAPIVersion(strings.TrimSpace(record.APIVersion)).
@@ -2850,6 +2859,9 @@ func (s *Store) initSchema() error {
 			source TEXT NOT NULL DEFAULT 'manual',
 			base_url TEXT NOT NULL,
 			provider_preset TEXT NOT NULL DEFAULT '',
+			api_type TEXT NOT NULL DEFAULT '',
+			mode TEXT NOT NULL DEFAULT '',
+			capabilities_json TEXT NOT NULL DEFAULT '{}',
 			protocol_family TEXT NOT NULL DEFAULT '',
 			routing_profile TEXT NOT NULL DEFAULT '',
 			api_version TEXT NOT NULL DEFAULT '',
@@ -3263,6 +3275,15 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("channel_configs", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "api_type", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "capabilities_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	if err := s.backfillTraceIDs(); err != nil {
@@ -6270,6 +6291,9 @@ func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 		Source:             row.Source,
 		BaseURL:            row.BaseURL,
 		ProviderPreset:     row.ProviderPreset,
+		APIType:            row.APIType,
+		Mode:               row.Mode,
+		CapabilitiesJSON:   row.CapabilitiesJSON,
 		ProtocolFamily:     row.ProtocolFamily,
 		RoutingProfile:     row.RoutingProfile,
 		APIVersion:         row.APIVersion,

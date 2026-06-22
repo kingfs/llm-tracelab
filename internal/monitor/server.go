@@ -833,6 +833,9 @@ type channelItem struct {
 	Source             string                `json:"source"`
 	BaseURL            string                `json:"base_url"`
 	ProviderPreset     string                `json:"provider_preset"`
+	APIType            string                `json:"api_type"`
+	Mode               string                `json:"mode"`
+	Capabilities       upstreamCapabilities  `json:"capabilities,omitempty"`
 	ProtocolFamily     string                `json:"protocol_family"`
 	RoutingProfile     string                `json:"routing_profile"`
 	APIVersion         string                `json:"api_version,omitempty"`
@@ -913,26 +916,29 @@ type channelProbeRequest struct {
 }
 
 type channelUpsertRequest struct {
-	ID                 string                         `json:"id"`
-	Name               string                         `json:"name"`
-	Description        string                         `json:"description"`
-	BaseURL            string                         `json:"base_url"`
-	ProviderPreset     string                         `json:"provider_preset"`
-	ProtocolFamily     string                         `json:"protocol_family"`
-	RoutingProfile     string                         `json:"routing_profile"`
-	APIVersion         string                         `json:"api_version"`
-	Deployment         string                         `json:"deployment"`
-	Project            string                         `json:"project"`
-	Location           string                         `json:"location"`
-	ModelResource      string                         `json:"model_resource"`
-	APIKey             string                         `json:"api_key"`
-	Headers            map[string]channelHeaderUpdate `json:"headers"`
-	Enabled            *bool                          `json:"enabled"`
-	Priority           *int                           `json:"priority"`
-	Weight             *float64                       `json:"weight"`
-	CapacityHint       *float64                       `json:"capacity_hint"`
-	ModelDiscovery     string                         `json:"model_discovery"`
-	AllowUnknownModels *bool                          `json:"allow_unknown_models"`
+	ID                 string                             `json:"id"`
+	Name               string                             `json:"name"`
+	Description        string                             `json:"description"`
+	BaseURL            string                             `json:"base_url"`
+	ProviderPreset     string                             `json:"provider_preset"`
+	APIType            string                             `json:"api_type"`
+	Mode               string                             `json:"mode"`
+	Capabilities       *config.UpstreamCapabilitiesConfig `json:"capabilities"`
+	ProtocolFamily     string                             `json:"protocol_family"`
+	RoutingProfile     string                             `json:"routing_profile"`
+	APIVersion         string                             `json:"api_version"`
+	Deployment         string                             `json:"deployment"`
+	Project            string                             `json:"project"`
+	Location           string                             `json:"location"`
+	ModelResource      string                             `json:"model_resource"`
+	APIKey             string                             `json:"api_key"`
+	Headers            map[string]channelHeaderUpdate     `json:"headers"`
+	Enabled            *bool                              `json:"enabled"`
+	Priority           *int                               `json:"priority"`
+	Weight             *float64                           `json:"weight"`
+	CapacityHint       *float64                           `json:"capacity_hint"`
+	ModelDiscovery     string                             `json:"model_discovery"`
+	AllowUnknownModels *bool                              `json:"allow_unknown_models"`
 }
 
 type channelHeaderUpdate struct {
@@ -940,6 +946,8 @@ type channelHeaderUpdate struct {
 	Keep   bool
 	Delete bool
 }
+
+type upstreamCapabilities = config.UpstreamCapabilitiesConfig
 
 func (u *channelHeaderUpdate) UnmarshalJSON(data []byte) error {
 	var value string
@@ -2145,6 +2153,13 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.ProviderPreset) != "" {
 		record.ProviderPreset = strings.TrimSpace(req.ProviderPreset)
 	}
+	record.APIType = valueOrExisting(req.APIType, record.APIType)
+	record.Mode = valueOrExisting(req.Mode, record.Mode)
+	if req.Capabilities != nil {
+		if data, err := json.Marshal(req.Capabilities); err == nil {
+			record.CapabilitiesJSON = string(data)
+		}
+	}
 	if strings.TrimSpace(req.ProtocolFamily) != "" {
 		record.ProtocolFamily = strings.TrimSpace(req.ProtocolFamily)
 	}
@@ -2193,6 +2208,10 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 	if strings.TrimSpace(record.HeadersJSON) != "" {
 		_ = json.Unmarshal([]byte(record.HeadersJSON), &headers)
 	}
+	capabilities := upstreamCapabilities{}
+	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
+		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
+	}
 	return channelItem{
 		ID:                 record.ID,
 		Name:               record.Name,
@@ -2200,6 +2219,9 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		Source:             record.Source,
 		BaseURL:            record.BaseURL,
 		ProviderPreset:     record.ProviderPreset,
+		APIType:            record.APIType,
+		Mode:               record.Mode,
+		Capabilities:       capabilities,
 		ProtocolFamily:     record.ProtocolFamily,
 		RoutingProfile:     record.RoutingProfile,
 		APIVersion:         record.APIVersion,

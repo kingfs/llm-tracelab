@@ -123,6 +123,8 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
   await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
+  await expect(page.getByLabel("API mode")).toHaveValue("proxy");
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
   await page.getByRole("button", { name: "Cancel" }).click();
@@ -131,6 +133,8 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("config source").first()).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
+  await expect(page.getByText("chat_completions").first()).toBeVisible();
+  await expect(page.getByText("responses_server").first()).toBeVisible();
   await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
@@ -141,6 +145,8 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByLabel("Provider enabled")).toBeVisible();
   await expect(page.locator(".provider-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
   await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
+  await expect(page.getByLabel("API mode")).toHaveValue("responses_server");
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
@@ -285,6 +291,9 @@ function channelDetailPayload() {
     source: "manual",
     base_url: "https://api.openai.example/v1",
     provider_preset: "openai",
+    api_type: "chat_completions",
+    mode: "responses_server",
+    capabilities: { responses: false, chat_completions: true, tool_calling: true },
     protocol_family: "openai_compatible",
     routing_profile: "openai_default",
     api_version: "",

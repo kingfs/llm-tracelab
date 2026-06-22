@@ -86,12 +86,12 @@ type UpstreamConfig struct {
 }
 
 type UpstreamCapabilitiesConfig struct {
-	Responses       *bool `yaml:"responses"`
-	ChatCompletions *bool `yaml:"chat_completions"`
-	ToolCalling     *bool `yaml:"tool_calling"`
-	Embeddings      *bool `yaml:"embeddings"`
-	Models          *bool `yaml:"models"`
-	Tokenize        *bool `yaml:"tokenize"`
+	Responses       *bool `yaml:"responses" json:"responses,omitempty"`
+	ChatCompletions *bool `yaml:"chat_completions" json:"chat_completions,omitempty"`
+	ToolCalling     *bool `yaml:"tool_calling" json:"tool_calling,omitempty"`
+	Embeddings      *bool `yaml:"embeddings" json:"embeddings,omitempty"`
+	Models          *bool `yaml:"models" json:"models,omitempty"`
+	Tokenize        *bool `yaml:"tokenize" json:"tokenize,omitempty"`
 }
 
 type UpstreamTargetConfig struct {
