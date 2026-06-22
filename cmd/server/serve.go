@@ -73,6 +73,13 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 
+	if cfg.DatabaseAutoMigrate() {
+		if err := migrateApplicationDatabaseUp(cfg, 0); err != nil {
+			slog.Error("Failed to migrate application database", "error", err)
+			return 1
+		}
+	}
+
 	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.25+")
 
 	authStore, err := openAuthStore(cfg)
@@ -82,12 +89,13 @@ func runServeWithConfig(configPath string) int {
 	}
 	defer authStore.Close()
 
-	traceStore, err := store.NewWithDatabase(
+	traceStore, err := store.NewWithDatabaseOptions(
 		cfg.TraceOutputDir(),
 		cfg.DatabaseDriver(),
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
+		store.DatabaseOptions{AutoMigrate: false},
 	)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)

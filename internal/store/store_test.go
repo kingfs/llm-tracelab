@@ -102,6 +102,24 @@ func TestNewWithDatabaseAcceptsRelativeSQLitePath(t *testing.T) {
 	}
 }
 
+func TestNewWithDatabaseOptionsCanOpenWithoutMigratingSQLite(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	st, err := NewWithDatabaseOptions(dir, "sqlite", dbPath, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(AutoMigrate=false) error = %v", err)
+	}
+	defer st.Close()
+
+	var count int
+	if err := st.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'logs'`).Scan(&count); err != nil {
+		t.Fatalf("query sqlite_master error = %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("logs table count = %d, want 0 without auto migrate", count)
+	}
+}
+
 func TestNormalizeDatabaseDriver(t *testing.T) {
 	t.Parallel()
 

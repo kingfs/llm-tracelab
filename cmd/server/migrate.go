@@ -7,7 +7,6 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/migrate"
-	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -83,22 +82,7 @@ func runMigrateWithOptions(opts migrateOptions) int {
 			"database_dsn":    config.RedactDSN(cfg.DatabaseDSN()),
 		})
 	}
-	if cfg.DatabaseAutoMigrate() {
-		appStore, err := initializeApplicationDatabase(cfg)
-		if err != nil {
-			slog.Error("Database migration failed", "error", err)
-			return 1
-		}
-		_ = appStore.Close()
-	}
-
-	traceStore, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	traceStore, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1

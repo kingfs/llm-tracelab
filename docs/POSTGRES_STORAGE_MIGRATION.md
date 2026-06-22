@@ -17,10 +17,11 @@ claim that Postgres persistence is fully production mature today.
 - With `database.auto_migrate: true`, the auth store keeps SQLite on the
   embedded migration path and uses ent `Schema.Create` for Postgres evaluation
   databases.
-- `internal/store.Store.initSchema` still uses `client.Schema.Create` for
-  Postgres during store startup. This can create the current ent schema on an
-  empty database, but it is not a substitute for versioned production
-  migrations.
+- `internal/store.NewWithDatabase` remains the compatibility constructor and
+  still initializes schema by default. Command/server paths use
+  `NewWithDatabaseOptions(..., AutoMigrate:false)` after running the explicit
+  application migrator, so application store startup no longer relies on
+  Postgres `Schema.Create`.
 - SQLite remains the default for empty driver values and keeps the existing
   local path / `file:` DSN behavior.
 - The checked-in `ent/migrations` directory contains SQLite-oriented
@@ -54,9 +55,10 @@ Stage 6 splits migration ownership explicitly:
 | `auth migrate up|down` | Auth database: users, tokens, auth-owned schema | Currently supported through embedded SQLite migrations | Separate future gap; not covered by the Stage 6A application migration slice |
 
 `db migrate` is no longer an alias for the auth migrator. Postgres `db migrate
-up` is now the versioned application migration path, but production operators
-should still account for the remaining startup and auth migration gaps before
-declaring the whole Postgres deployment model mature.
+up` is now the versioned application migration path, and command/server store
+opening has an explicit no-auto-migrate mode. Production operators should still
+account for the remaining auth migration and runtime SQL compatibility gaps
+before declaring the whole Postgres deployment model mature.
 The top-level `migrate` command remains a cassette rewrite/index rebuild
 workflow; when `database.auto_migrate` is enabled, it initializes the
 application database schema and does not run the auth migrator.
@@ -81,9 +83,11 @@ For Postgres evaluation:
   records progress in `schema_migrations`. It has been manually verified
   against a fresh Postgres 17 development database and covered by a
   DSN-gated integration test.
-- `database.auto_migrate: true` can initialize both the application schema and
-  the current auth schema through ent `Schema.Create` when using Postgres. This
-  is an evaluation convenience only.
+- `database.auto_migrate: true` runs the application migrator before opening
+  the trace store. For Postgres this means checked-in SQL; for SQLite this means
+  the existing schema initialization compatibility path.
+- Postgres auth schema handling still uses ent `Schema.Create` when
+  `database.auto_migrate: true`. This is an evaluation convenience only.
 - Do not run `auth migrate` expecting Postgres migrations; it still uses the
   SQLite-only embedded migrator.
 - Do not treat `client.Schema.Create` as a production rollout mechanism. It may
@@ -96,9 +100,10 @@ For Postgres evaluation:
 
 For production-like Postgres trials, run `db migrate up` against a fresh
 database first, capture the exact llm-tracelab build and migration version, and
-disable startup schema creation once the schema exists. Do not point the
-remaining `database.auto_migrate` / auth Postgres paths at a long-lived
-production database that needs fully auditable upgrades and rollbacks.
+then start the service with application store auto schema creation disabled by
+construction. Do not point the remaining auth Postgres auto schema path at a
+long-lived production database that needs fully auditable upgrades and
+rollbacks.
 
 ## Stage 6 Target
 
@@ -155,6 +160,12 @@ Stage 16B wires the checked-in Postgres SQL into runtime CLI migration:
 Postgres and applies embedded `ent/postgres-migrations` through
 `internal/appdbmigrate`.
 
+Stage 16C separates application store opening from schema creation:
+`internal/store.NewWithDatabaseOptions` can open without migration, and
+serve/top-level migrate/analyze/db command paths run the explicit application
+migrator only when `database.auto_migrate` is enabled before reopening the
+store with `AutoMigrate:false`.
+
 SQLite compatibility:
 
 ```bash
@@ -202,12 +213,10 @@ been committed or applied in a shared environment.
 
 ## Remaining Gaps
 
-- Serve/store startup still uses ent auto schema creation when
-  `database.auto_migrate` is enabled for Postgres. It needs stricter
-  open-vs-migrate separation before production rollout.
+- Postgres auth migrations are not versioned; auth startup still uses ent auto
+  schema creation when `database.auto_migrate` is enabled for Postgres.
 - SQLite application migrations still use schema initialization rather than
   explicit versioned files.
-- Postgres auth migrations are not implemented.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.

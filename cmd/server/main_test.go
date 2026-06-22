@@ -631,6 +631,39 @@ database:
 	}
 }
 
+func TestOpenApplicationDatabaseAutoMigrateFalseDoesNotCreateSchema(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	autoMigrate := false
+	cfg := &config.Config{}
+	cfg.Trace.OutputDir = dir
+	cfg.Database.Driver = "sqlite"
+	cfg.Database.DSN = dbPath
+	cfg.Database.AutoMigrate = &autoMigrate
+
+	st, err := openApplicationDatabase(cfg)
+	if err != nil {
+		t.Fatalf("openApplicationDatabase() error = %v", err)
+	}
+	defer st.Close()
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer db.Close()
+
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'logs'`).Scan(&count); err != nil {
+		t.Fatalf("query sqlite_master error = %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("logs table count = %d, want 0 with auto_migrate=false", count)
+	}
+}
+
 func writePostgresDBMigrateConfig(t *testing.T) string {
 	t.Helper()
 

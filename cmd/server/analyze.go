@@ -226,13 +226,7 @@ func runAnalyzeReparse(opts analyzeReparseOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	traceStore, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -271,13 +265,7 @@ func runAnalyzeRepairUsage(opts analyzeRepairUsageOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	traceStore, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -318,13 +306,7 @@ func runAnalyzeReanalyze(opts analyzeReanalyzeOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	traceStore, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -402,13 +384,7 @@ func runAnalyzeSession(opts analyzeSessionOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	traceStore, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1
@@ -478,13 +454,7 @@ func runAnalyzeScan(opts analyzeScanOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	traceStore, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	traceStore, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
 		return 1

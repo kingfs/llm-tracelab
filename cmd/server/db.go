@@ -243,6 +243,22 @@ func appDBMigrationMode(driver string) string {
 	}
 }
 
+func openApplicationDatabase(cfg *config.Config) (*store.Store, error) {
+	if cfg.DatabaseAutoMigrate() {
+		if err := migrateApplicationDatabaseUp(cfg, 0); err != nil {
+			return nil, err
+		}
+	}
+	return store.NewWithDatabaseOptions(
+		cfg.TraceOutputDir(),
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+		store.DatabaseOptions{AutoMigrate: false},
+	)
+}
+
 func initializeApplicationDatabase(cfg *config.Config) (*store.Store, error) {
 	return store.NewWithDatabase(
 		cfg.TraceOutputDir(),
@@ -373,13 +389,7 @@ func openTraceStoreForCommand(configPath string) (*store.Store, func(), int) {
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return nil, func() {}, 1
 	}
-	st, err := store.NewWithDatabase(
-		cfg.TraceOutputDir(),
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	st, err := openApplicationDatabase(cfg)
 	if err != nil {
 		slog.Error("Open trace store failed", "error", err)
 		return nil, func() {}, 1

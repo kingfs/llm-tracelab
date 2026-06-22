@@ -82,6 +82,10 @@ type Store struct {
 	eventSubs map[chan SystemEventNotification]struct{}
 }
 
+type DatabaseOptions struct {
+	AutoMigrate bool
+}
+
 const (
 	localSecretKeyFile = "trace_index.secret"
 	secretEnvelopeV1   = "tlsec:v1:"
@@ -2184,6 +2188,10 @@ func New(outputDir string) (*Store, error) {
 }
 
 func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
+	return NewWithDatabaseOptions(outputDir, driver, dsn, maxOpenConns, maxIdleConns, DatabaseOptions{AutoMigrate: true})
+}
+
+func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpenConns int, maxIdleConns int, opts DatabaseOptions) (*Store, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -2215,12 +2223,28 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 		driver:    driver,
 		secrets:   secrets,
 	}
-	if err := st.initSchema(); err != nil {
-		_ = st.Close()
-		return nil, err
+	if opts.AutoMigrate {
+		if err := st.initSchema(); err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+	}
+
+	if !opts.AutoMigrate {
+		if err := st.ping(); err != nil {
+			_ = st.Close()
+			return nil, err
+		}
 	}
 
 	return st, nil
+}
+
+func (s *Store) ping() error {
+	if s.db == nil {
+		return nil
+	}
+	return s.db.Ping()
 }
 
 func normalizeDatabaseDriver(driver string) string {
