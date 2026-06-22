@@ -24,6 +24,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/providerprobe"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -675,6 +676,82 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("missing audit status = %d, want 404", rr.Code)
+	}
+}
+
+func TestResponsesToolCallAuditsAPIHandler(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	base := time.Date(2026, 6, 23, 10, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-monitor-tool-1").
+		SetResponseID("resp-monitor-tool-1").
+		SetConversationID("thread-monitor-tool-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(ctx); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	if _, err := auditor.RecordToolCallAudit(responsesaudit.ContextWithRequestAuditID(ctx, "reqaudit-monitor-tool-1"), responsesaudit.ToolCallAudit{
+		ResponseID:     "resp-monitor-tool-1",
+		ConversationID: "thread-monitor-tool-1",
+		CallID:         "call_monitor_secret",
+		ToolType:       "function",
+		ToolName:       "lookup",
+		Executor:       "function_executor:lookup",
+		Status:         "completed",
+		InputJSON:      map[string]any{"query": "SECRET_MARKER_MONITOR"},
+		OutputJSON:     map[string]any{"result": "SECRET_MARKER_MONITOR"},
+		MetadataJSON:   map[string]any{"note": "SECRET_MARKER_MONITOR"},
+		StartedAt:      base.Add(time.Second),
+		CompletedAt:    base.Add(2 * time.Second),
+		CreatedAt:      base.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st)
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/tool-calls?request_audit_id=reqaudit-monitor-tool-1&tool_name=lookup&status=completed&limit=10", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "SECRET_MARKER_MONITOR") {
+		t.Fatalf("default response leaked secret marker: %s", rr.Body.String())
+	}
+	var payload responsesToolCallAuditListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total != 1 || len(payload.Items) != 1 {
+		t.Fatalf("tool call audit total/items = %d/%d, want 1/1", payload.Total, len(payload.Items))
+	}
+	item := payload.Items[0]
+	if item.RequestAuditID != "reqaudit-monitor-tool-1" || item.ResponseID != "resp-monitor-tool-1" || item.CallID != "call_monitor_secret" || item.ToolName != "lookup" || item.Status != "completed" {
+		t.Fatalf("tool call audit item = %+v, want seeded lookup audit", item)
+	}
+	if !item.InputSummary.Present || item.InputSummary.SHA256 == "" || len(item.InputJSON) != 0 || len(item.OutputJSON) != 0 || len(item.MetadataJSON) != 0 {
+		t.Fatalf("default payload fields = input summary %+v raw %v/%v/%v, want summary only", item.InputSummary, item.InputJSON, item.OutputJSON, item.MetadataJSON)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/tool-calls?call_id=call_monitor_secret&include_payloads=true", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("include payload status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "SECRET_MARKER_MONITOR") {
+		t.Fatalf("include_payloads response missing secret marker: %s", rr.Body.String())
 	}
 }
 
