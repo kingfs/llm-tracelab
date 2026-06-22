@@ -173,6 +173,62 @@ func TestExternalCommandFunctionToolExecutorCanRequireAbsoluteCommand(t *testing
 	}
 }
 
+func TestExternalCommandFunctionToolExecutorAllowedCommandDirsAllowsCommandInsideDir(t *testing.T) {
+	executor := externalCommandTestExecutor("echo-input")
+	resolvedCommand, err := filepath.EvalSymlinks(executor.Command)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(command) error = %v", err)
+	}
+	executor.AllowedCommandDirs = []string{filepath.Dir(resolvedCommand)}
+
+	result, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if err != nil {
+		t.Fatalf("ExecuteFunctionTool() error = %v", err)
+	}
+	if got := result.Output.(string); !strings.Contains(got, `"name":"lookup"`) {
+		t.Fatalf("output = %q, want helper output", got)
+	}
+}
+
+func TestExternalCommandFunctionToolExecutorAllowedCommandDirsRejectsCommandOutsideDir(t *testing.T) {
+	executor := externalCommandTestExecutor("echo-input")
+	executor.AllowedCommandDirs = []string{t.TempDir()}
+
+	_, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if err == nil || !strings.Contains(err.Error(), "command is outside allowed_command_dirs") {
+		t.Fatalf("ExecuteFunctionTool() error = %v, want outside allowed dirs error", err)
+	}
+}
+
+func TestExternalCommandFunctionToolExecutorAllowedCommandDirsRejectsRelativeDir(t *testing.T) {
+	executor := externalCommandTestExecutor("echo-input")
+	executor.AllowedCommandDirs = []string{"relative-bin"}
+
+	_, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if err == nil || !strings.Contains(err.Error(), "allowed_command_dirs entries must be absolute") {
+		t.Fatalf("ExecuteFunctionTool() error = %v, want absolute allowed dir error", err)
+	}
+}
+
+func TestExternalCommandFunctionToolExecutorRejectRoot(t *testing.T) {
+	executor := externalCommandTestExecutor("echo-input")
+	executor.RejectRoot = true
+
+	result, err := executor.ExecuteFunctionTool(context.Background(), FunctionToolCall{Name: "lookup"})
+	if os.Geteuid() == 0 {
+		if err == nil || !strings.Contains(err.Error(), "refuses to run as root") {
+			t.Fatalf("ExecuteFunctionTool() error = %v, want root rejection", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("ExecuteFunctionTool() error = %v", err)
+	}
+	if got := result.Output.(string); !strings.Contains(got, `"name":"lookup"`) {
+		t.Fatalf("output = %q, want helper output", got)
+	}
+}
+
 func externalCommandTestExecutor(mode string, extraArgs ...string) ExternalCommandFunctionToolExecutor {
 	args := append([]string{"-test.run=TestExternalCommandExecutorHelper", "--", mode}, extraArgs...)
 	return ExternalCommandFunctionToolExecutor{
