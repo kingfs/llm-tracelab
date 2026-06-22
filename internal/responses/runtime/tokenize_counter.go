@@ -204,11 +204,10 @@ func tokenizeEndpoint(baseURL string) (string, error) {
 		return "", errors.New("tokenize base URL must include scheme and host")
 	}
 	cleanPath := path.Clean(parsed.Path)
-	if cleanPath == "." || cleanPath == "/" {
+	switch cleanPath {
+	case ".", "/", "/v1":
 		parsed.Path = "/tokenize"
-	} else if cleanPath == "/v1" {
-		parsed.Path = "/tokenize"
-	} else {
+	default:
 		parsed.Path = path.Join(cleanPath, "tokenize")
 	}
 	parsed.RawPath = ""

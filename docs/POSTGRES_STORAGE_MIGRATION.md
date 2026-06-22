@@ -1,6 +1,6 @@
 # Postgres Storage Migration
 
-Date: 2026-06-22
+Date: 2026-06-23
 
 This note records the Stage 6A migration strategy for Postgres-first
 persistence. It is a productionization plan and current-state boundary, not a
@@ -38,6 +38,12 @@ claim that Postgres persistence is fully production mature today.
   Postgres `up` and `down` migrations to `internal/appdbmigrate`. The Postgres
   rollback path is operationally constrained by the shared application/auth
   migration namespace.
+- `auth migrate status` and `auth migrate up/down --dry-run` report auth
+  migration source, namespace, scope, and whether Postgres is using the shared
+  application migration namespace. `auth migrate status --check-db` is an
+  explicit opt-in read-only check: Postgres reads the shared
+  `schema_migrations` state, while SQLite reads the configured auth migration
+  table.
 - `cmd/server/db.go` now has an application-owned `db migrate` command.
   Postgres `db migrate up` applies checked-in SQL from
   `ent/postgres-migrations` through `internal/appdbmigrate` and
@@ -74,7 +80,7 @@ Stage 6 splits migration ownership explicitly:
 | Command | Intended owner | SQLite status | Postgres status |
 | --- | --- | --- | --- |
 | `db migrate up|down` | Application database: trace index, routing/channel/model data, Responses state, and future audit tables | `up` uses current application schema initialization; `down` is unsupported except dry-run | `up` applies checked-in SQL from `ent/postgres-migrations` via `golang-migrate`; `down` is unsupported except dry-run |
-| `auth migrate up|down` | Auth database: users, tokens, auth-owned schema | `up` and `down` use embedded SQLite migrations | `up` applies the shared checked-in `ent/postgres-migrations` SQL; `down` rolls back the same shared migration set |
+| `auth migrate up|down|status` | Auth database: users, tokens, auth-owned schema | `up` and `down` use embedded SQLite migrations; `status --check-db` reads the auth migration table | `up` applies the shared checked-in `ent/postgres-migrations` SQL; `down` rolls back the same shared migration set; `status --check-db` reads the shared `schema_migrations` table and reports the shared namespace |
 
 `db migrate` is no longer an alias for the auth migrator. Postgres `db migrate
 up` is now the versioned application migration path, and command/server store
@@ -232,6 +238,14 @@ Stage 16I routes Postgres auth migration `down` through the same shared
 versioned SQL rollback path in `internal/appdbmigrate`. This closes the
 previous Postgres auth rollback command gap, while preserving the explicit
 warning that auth and application schemas still share one migration namespace.
+
+Stage 16J adds auth migration status reporting. `auth migrate status` and
+`auth migrate up/down --dry-run` now include namespace, source, scope, rollback
+support, and shared application namespace fields. `auth migrate status
+--check-db` reads Postgres `schema_migrations` through the shared application
+migration path and reads SQLite auth migration status through the configured
+auth database. This improves operator visibility but deliberately does not
+create an independent Postgres auth migration namespace.
 
 SQLite compatibility:
 

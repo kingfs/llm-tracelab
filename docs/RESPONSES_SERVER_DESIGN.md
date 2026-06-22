@@ -3,9 +3,9 @@
 状态：Responses server 演进设计，Stage 3A/3B、Stage 4A/4B、Stage 5A/5B 与 Stage 10A 已部分落地
 日期：2026-06-22
 
-本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-22 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
+本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-23 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
 
-## 已落地实现截至 2026-06-22
+## 已落地实现截至 2026-06-23
 
 当前已经落地的范围是可选的 `/v1/responses` 本地 server-mode，不改变默认 proxy 行为：
 
@@ -186,9 +186,9 @@ providers:
 
 目标是 Postgres-first，但保留 SQLite fallback 和旧 replay 兼容。
 
-截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client；`ent/postgres-migrations` 已有 versioned schema SQL，Postgres `db migrate up` 已切到版本化 SQL migrator，application store 已拆分 open-vs-migrate，Postgres migration 覆盖 `internal/store` SQLite application raw DDL 表集。Postgres `auth migrate up`、`auth migrate down` 和 auth startup auto-migrate 也复用这套 checked-in Postgres SQL；独立 auth migration namespace 仍未完成。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；Stage 11A 已接入内部 Chat Completions `upstream_exchanges` correlation；Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入；Stage 13A 已接入核心 audit 查询服务、Monitor API 和 MCP 查询工具；Stage 14A 已接入 hosted `web_search` tool_call events；Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束；Stage 16A/16B/16C/16D/16E/16F/16G/16H/16I 已接入 Postgres ent migration SQL 生成链路、checked-in migrations、CLI versioned SQL migrator、open-vs-migrate 分离、首轮 store raw SQL 兼容审计、application raw DDL 表覆盖补齐和 Postgres auth `up`/`down` 版本化迁移。
+截至 2026-06-23，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client；`ent/postgres-migrations` 已有 versioned schema SQL，Postgres `db migrate up` 已切到版本化 SQL migrator，application store 已拆分 open-vs-migrate，Postgres migration 覆盖 `internal/store` SQLite application raw DDL 表集。Postgres `auth migrate up`、`auth migrate down`、`auth migrate status --check-db` 和 auth startup auto-migrate 也复用这套 checked-in Postgres SQL；auth status/dry-run 会显式报告 shared application namespace，独立 auth migration namespace 仍未完成。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；Stage 11A 已接入内部 Chat Completions `upstream_exchanges` correlation；Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入；Stage 13A 已接入核心 audit 查询服务、Monitor API 和 MCP 查询工具；Stage 14A 已接入 hosted `web_search` tool_call events；Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束；Stage 16A/16B/16C/16D/16E/16F/16G/16H/16I 已接入 Postgres ent migration SQL 生成链路、checked-in migrations、CLI versioned SQL migrator、open-vs-migrate 分离、首轮 store raw SQL 兼容审计、application raw DDL 表覆盖补齐和 Postgres auth `up`/`down` 版本化迁移。
 
-Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 Postgres `db migrate up` 已拆出为应用库版本化 SQL 路径，SQLite `db migrate up` 仍使用应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持。Postgres `auth migrate up` 和 `auth migrate down` 现在复用同一套 checked-in ent/Postgres SQL，因为当前 Postgres schema 同时包含 auth 表；独立 auth migration namespace 仍是后续缺口。
+Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 Postgres `db migrate up` 已拆出为应用库版本化 SQL 路径，SQLite `db migrate up` 仍使用应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持。Postgres `auth migrate up`、`auth migrate down` 和 `auth migrate status --check-db` 现在复用同一套 checked-in ent/Postgres SQL，因为当前 Postgres schema 同时包含 auth 表；status/dry-run 输出会标明 shared application namespace，独立 auth migration namespace 仍是后续缺口。
 
 ### Postgres-first semantic store
 
@@ -257,7 +257,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 
 ## 分阶段实施计划与当前状态
 
-下面保留原始演进计划，并补充截至 2026-06-22 的状态。未标注已落地的条目仍是目标，不代表当前支持。
+下面保留原始演进计划，并补充截至 2026-06-23 的状态。未标注已落地的条目仍是目标，不代表当前支持。
 
 ### Stage 1A：设计与边界冻结（已落地）
 
@@ -357,8 +357,8 @@ Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstre
 产物：
 
 - hosted `web_search` runtime。
-- `/v1/responses/compact` 或 compact internal workflow。
-- model profile 驱动的精确 tokenizer/context optimization。
+- 更完整 compact internal workflow。
+- model profile 驱动的精确 tokenizer 默认装配/context optimization；当前已有可注入 provider `/tokenize` counter，但未接入默认 provider/runtime hot path。
 
 验收：
 
@@ -366,7 +366,7 @@ Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstre
 - compact 产出 summary/item，并保留原始 item lineage。
 - Codex 长会话可通过 audit 解释 compact 行为。
 
-当前状态：`tools.web_search` 配置、mock/SearXNG provider、hosted `web_search` tool loop 及其 started/completed/failed execution events 已落地，`stream:true` 路径也能执行 hosted search、输出 started 态 `response.output_item.added` 和完成态 `response.output_item.done` `web_search_call` item、注入工具结果并继续最终文本 delta，tool_call events 会带 `stream=true`。普通 function tool 的客户端执行回路、requested/submitted audit events、argument streaming 首切，以及默认关闭的 YAML `static_response` server-side executor 首切已落地；registered executor stream tool loop 也会输出 started 态 `response.output_item.added` 和完成态 `response.output_item.done` tool item，并写带 `stream=true` 的 started/completed/failed events。Stage 19A 已接入显式 `/v1/responses/compact`：读取目标 response continuation history，调用上游 Chat Completions 生成 `summary` output，把 compact response 存入 runtime store，并写 `response.compact` started/completed/failed events；后续 continuation 会停在 `compact_request` boundary，并把 summary 注入 system message。Stage 19B 已接入 `responses_server.auto_compact` 和 `responses_server.compact_history_item_threshold`，create continuation 在 history item 数超过阈值时会先生成 compact response，并写 `response.compact` `auto_triggered` event。当前 `responses_server.model_profiles` 已支持用匹配 profile 的 `compact_history_item_threshold` 覆盖全局 item-count 阈值，也已支持用 `upstream_model` 改写内部 Chat Completions 请求 model 且不改写外部 Responses model；Stage 21B 已支持 `max_output_tokens` 作为默认输出上限，并用可注入 token estimator 基于 `context_window_tokens` 触发 auto compact，默认 estimator 已通过 adapter-backed chat prompt counter 包装确定性保守计数器。更完整多工具 failed lifecycle、真实 provider `/tokenize` 网络 adapter 和完整 context optimization 仍未完成。
+当前状态：`tools.web_search` 配置、mock/SearXNG provider、hosted `web_search` tool loop 及其 started/completed/failed execution events 已落地，`stream:true` 路径也能执行 hosted search、输出 started 态 `response.output_item.added` 和完成态 `response.output_item.done` `web_search_call` item、注入工具结果并继续最终文本 delta，tool_call events 会带 `stream=true`。普通 function tool 的客户端执行回路、requested/submitted audit events、argument streaming 首切，以及默认关闭的 YAML `static_response` server-side executor 首切已落地；registered executor stream tool loop 也会输出 started 态 `response.output_item.added` 和完成态 `response.output_item.done` tool item，并写带 `stream=true` 的 started/completed/failed events。Stage 19A 已接入显式 `/v1/responses/compact`：读取目标 response continuation history，调用上游 Chat Completions 生成 `summary` output，把 compact response 存入 runtime store，并写 `response.compact` started/completed/failed events；后续 continuation 会停在 `compact_request` boundary，并把 summary 注入 system message。Stage 19B 已接入 `responses_server.auto_compact` 和 `responses_server.compact_history_item_threshold`，create continuation 在 history item 数超过阈值时会先生成 compact response，并写 `response.compact` `auto_triggered` event。当前 `responses_server.model_profiles` 已支持用匹配 profile 的 `compact_history_item_threshold` 覆盖全局 item-count 阈值，也已支持用 `upstream_model` 改写内部 Chat Completions 请求 model 且不改写外部 Responses model；Stage 21B 已支持 `max_output_tokens` 作为默认输出上限，并用可注入 token estimator 基于 `context_window_tokens` 触发 auto compact，默认 estimator 已通过 adapter-backed chat prompt counter 包装确定性保守计数器，代码层另有可注入 HTTP provider `/tokenize` chat prompt counter。更完整多工具 failed lifecycle、provider `/tokenize` 默认装配和完整 context optimization 仍未完成。
 
 ### Stage 4：高级 routing 与多 provider（未完成）
 

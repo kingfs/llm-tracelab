@@ -13,7 +13,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 ## 当前阶段基线
 
-截至 2026-06-22，已落地：
+截至 2026-06-23，已落地：
 
 - Responses server-mode over Chat Completions upstream。
 - ent-backed Responses runtime store，SQLite fallback 和 Postgres checked-in application migrations。
@@ -28,10 +28,10 @@ TraceLab 的新定位是 production-grade LLM gateway：
 尚未作为基线能力：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
-- model profile 驱动的真实模型专用 tokenizer/provider tokenize adapter 与完整 context optimization；当前已有可注入 estimator 边界、adapter-backed estimator 层和默认确定性保守计数器，尚未接真实 provider `/tokenize` 网络适配。
+- model profile 驱动的默认 tokenizer/provider tokenize 装配与完整 context optimization；当前已有可注入 estimator 边界、adapter-backed estimator 层、默认确定性保守计数器，以及可注入 HTTP provider `/tokenize` chat prompt counter，但尚未把 `/tokenize` counter 接入默认 runtime/provider 配置。
 - provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、只读批量 `provider probe-report` / Monitor report API，以及默认关闭的启动时保守补全开关。
 - server-side function executor 的 Monitor 写配置和更强隔离；当前已有默认关闭的 YAML `static_response` 与 `external_command` executor 首切。
-- SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
+- SQLite 版本化迁移、auth 独立 Postgres namespace、剩余 raw SQL 方言审计。
 
 ## 阶段计划
 
@@ -49,9 +49,9 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。已注册 server-side function executor 的 stream 首切会输出 arguments delta/done、执行 executor 前输出 started 态 `response.output_item.added` tool item、成功后输出完成态 `response.output_item.done`、把 tool output 注入下一轮模型上下文并继续流式输出最终文本，executor tool_call started/completed/failed events 会带 `stream=true`。provider 就绪的 hosted `web_search` 也已接入 stream tool loop，会输出 arguments delta/done、执行 server-side search 前输出 started 态 `response.output_item.added` `web_search_call` item、成功后输出完成态 `response.output_item.done`、注入结果并继续最终文本 delta，tool_call started/completed/failed events 会带 `stream=true`。stream tool loop 在已输出 started item 后遇到 executor/provider 错误时，会 best-effort 输出 `status=failed` 的 `response.output_item.done`，再返回原错误；已写出 SSE 后的 runtime 错误会尽量追加最小 `response.failed` SSE，并保留现有 audit failed/cancelled 记录；未写出 SSE 的错误仍走原 HTTP error 或 deferred fallback 行为。需要 auto compact 等复杂路径仍会 fallback 到 deferred SSE；更完整的多 item/复杂路径 failed lifecycle 仍未完成。
 
-### Stage 21：Model Profile 与 Context Budget（estimator adapter 边界与保守计数首切已落地）
+### Stage 21：Model Profile 与 Context Budget（estimator adapter 与可注入 `/tokenize` counter 已落地）
 
-目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的可注入 estimator 触发 auto compact；默认 estimator 现在通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback 到 conservative estimator。后续再接真实模型专用 tokenizer/provider `/tokenize` 网络适配和更完整的上下文优化。
+目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的可注入 estimator 触发 auto compact；默认 estimator 现在通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback 到 conservative estimator。代码层已新增可注入 HTTP provider `/tokenize` chat prompt counter，支持 `/v1` base URL 归一化、API key/header、自定义 header、timeout 和多种 token count 响应形状，但尚未接入默认 runtime/provider hot path。后续再做 profile/provider capability 驱动的 `/tokenize` 装配和更完整的上下文优化。
 
 依赖：Stage 19B 的自动 compact。
 
@@ -61,7 +61,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - model profile 匹配当前 model 时覆盖 compact 阈值。
 - profile `max_output_tokens` 在客户端未显式传值时作为内部 Chat Completions `max_tokens` 默认值。
 - `context_window_tokens` 超预算时写 `response.compact` `auto_triggered` 事件，details 标明 `trigger=context_window_tokens`、估算输入 tokens、窗口和预留输出。
-- 文档明确当前 token budgeting 已有 estimator/adapter 扩展边界，默认仍是确定性保守计数，不是模型专用 tokenizer。
+- 文档明确当前 token budgeting 已有 estimator/adapter 扩展边界和可注入 `/tokenize` counter，默认仍是确定性保守计数，不是自动启用的模型专用 tokenizer。
 
 ### Stage 22：Persistence Operability 收敛
 
@@ -70,6 +70,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 优先切片：
 
 - `db migrate status` / dry-run 明确区分 application DB、auth DB、Postgres checked-in SQL 和 SQLite fallback。
+- `auth migrate status` / dry-run 明确报告 auth migration source、scope、namespace，以及 Postgres 当前复用 application `schema_migrations` / `ent/postgres-migrations` 的 shared namespace 约束。
 - 已为 SQLite fallback 增加非破坏性的 `app_schema_status` application schema marker；`db migrate status --check-db` 会只读报告 marker version 和核心应用表完整性，旧 SQLite DB 无 marker 仍兼容。
 
 验收：
@@ -109,5 +110,5 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算与 estimator 边界 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入 -> 最小 tool output item added started SSE 顺序合入 -> 已写出 SSE 后最小 `response.failed` 顺序合入 -> function executor validation/Monitor 摘要 -> YAML `external_command` executor 首切 -> stream tool failed output item done -> token estimator adapter 层。后续优先接 provider tokenize adapter、Monitor 写配置、进程级强隔离和更完整的 provider setup wizard。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算与 estimator 边界 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入 -> 最小 tool output item added started SSE 顺序合入 -> 已写出 SSE 后最小 `response.failed` 顺序合入 -> function executor validation/Monitor 摘要 -> YAML `external_command` executor 首切 -> stream tool failed output item done -> token estimator adapter 层 -> 可注入 provider `/tokenize` counter -> auth migration status reporting。后续优先接 provider tokenize 默认装配、Monitor 写配置、进程级强隔离和更完整的 provider setup wizard。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
