@@ -1267,6 +1267,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
+	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
@@ -2338,6 +2339,50 @@ func providerProbeReportAPIHandler(st *store.Store, channelService *channel.Serv
 		}
 		writeJSON(w, http.StatusOK, report)
 	}
+}
+
+func providerProbeReportApplyAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		var req providerProbeReportRequest
+		if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe report apply payload"})
+				return
+			}
+		}
+		svc := effectiveChannelService(st, channelService)
+		result, err := svc.ApplyProviderProbeReport(r.Context(), channel.ProviderProbeReportOptions{
+			ChannelID: strings.TrimSpace(req.ChannelID),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if appliedProviderProbeSuggestions(result.Applied) {
+			if err := reloadRouterFromChannels(rtr, svc); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func appliedProviderProbeSuggestions(items []channel.ProviderProbeApplyItem) bool {
+	for _, item := range items {
+		if item.Applied {
+			return true
+		}
+	}
+	return false
 }
 
 func localSecretKeyAPIHandler(st *store.Store) http.HandlerFunc {

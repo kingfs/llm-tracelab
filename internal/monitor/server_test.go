@@ -2447,6 +2447,86 @@ func TestProviderProbeReportAPIUsesChannelsReadOnly(t *testing.T) {
 	}
 }
 
+func TestProviderProbeReportApplyAPIAppliesSafeSuggestions(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	disabled := false
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{ChatCompletions: &disabled})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          upstreamServer.URL + "/v1",
+		APIKeyCiphertext: []byte("sk-apply-secret"),
+		APIKeyHint:       "sk...cret",
+		HeadersJSON:      `{"Authorization":"Bearer header-secret","X-Test":"visible"}`,
+		CapabilitiesJSON: string(capabilitiesJSON),
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe/report/apply", strings.NewReader(`{"channel_id":"openai-primary"}`))
+	rr := httptest.NewRecorder()
+	providerProbeReportApplyAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe report apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-apply-secret") || strings.Contains(rr.Body.String(), "Bearer header-secret") {
+		t.Fatalf("probe report apply leaked secret: %s", rr.Body.String())
+	}
+	var result channel.ProviderProbeApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if len(result.Applied) != 1 || !result.Applied[0].Applied {
+		t.Fatalf("result.Applied = %#v", result.Applied)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record suggestions = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	var capabilities config.UpstreamCapabilitiesConfig
+	if err := json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities); err != nil {
+		t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+	}
+	if capabilities.ChatCompletions == nil || *capabilities.ChatCompletions {
+		t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+	}
+	if capabilities.Models == nil || !*capabilities.Models {
+		t.Fatalf("models capability was not applied: %#v", capabilities.Models)
+	}
+	runs, err := st.ListChannelProbeRuns("openai-primary", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("provider probe report apply wrote probe runs: %#v", runs)
+	}
+}
+
 func TestChannelProbeFailureResponseIncludesClassification(t *testing.T) {
 	t.Parallel()
 
