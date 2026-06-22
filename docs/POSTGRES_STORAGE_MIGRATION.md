@@ -57,7 +57,10 @@ claim that Postgres persistence is fully production mature today.
   store-owned `?` placeholders are rebound to `$n` for Postgres, transaction
   helpers use the same rebind path, `logs.is_stream` can round-trip as a
   Postgres boolean, and migrated logs/observation/finding/analysis/system-event
-  paths are covered by `LLM_TRACELAB_TEST_POSTGRES_DSN` integration tests.
+  paths are covered by `LLM_TRACELAB_TEST_POSTGRES_DSN` integration tests. A
+  representative eval path now also round-trips dataset examples, eval runs,
+  score writes, finalize, and score queries against the checked-in Postgres
+  migration.
 - `db migrate down` is intentionally unsupported outside `--dry-run`; ent auto
   migration does not provide a safe rollback plan.
 - The Responses runtime has ent-backed persistence for `responses` and
@@ -161,13 +164,15 @@ The production route should be additive and reviewable:
    no-change behavior, core store runtime paths, and a small Responses
    persistence round trip. These now exist under
    `LLM_TRACELAB_TEST_POSTGRES_DSN`, including an ent-backed Responses runtime
-   store round trip through checked-in Postgres migrations.
+   store round trip and a representative eval dataset/run/score round trip
+   through checked-in Postgres migrations.
 6. Audit raw SQL in `internal/store` for placeholder syntax, SQLite functions,
    partial index behavior, time encoding, and transaction assumptions before
    declaring Postgres runtime support complete. The first pass covers
    placeholder rebinding and migrated logs/observation/finding/analysis/system
-   event paths; deeper analytics and eval query paths still need real Postgres
-   tests.
+   event paths plus a representative eval dataset/run/score path; deeper
+   analytics queries and broader eval/experiment query coverage still need real
+   Postgres tests.
 7. Define a separate SQLite-to-Postgres data migration/export plan for existing
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
@@ -287,6 +292,6 @@ been committed or applied in a shared environment.
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.
 - Existing raw SQL paths may still contain SQLite-specific assumptions beyond
-  placeholder rebinding, especially analytics and eval query paths not yet
-  exercised by Postgres integration tests.
+  placeholder rebinding, especially deeper analytics queries and broader
+  eval/experiment query paths not yet exercised by Postgres integration tests.
 - There is no automatic SQLite-to-Postgres data migration.

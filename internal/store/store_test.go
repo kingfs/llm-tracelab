@@ -239,7 +239,11 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
 
 	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
 	recordPath := filepath.Join(dir, suffix+".http")
@@ -367,6 +371,165 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	}
 	if events.Total == 0 || len(events.Items) == 0 || events.Items[0].ID != event.ID {
 		t.Fatalf("postgres system events = %+v, want event %q", events, event.ID)
+	}
+}
+
+func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	requestID := "req_eval_" + suffix
+	var traceID, datasetID, evalRunID, scoreID string
+	t.Cleanup(func() {
+		for _, cleanup := range []struct {
+			query string
+			args  []any
+		}{
+			{query: `DELETE FROM scores WHERE id = ? OR eval_run_id = ? OR dataset_id = ? OR trace_id = ?`, args: []any{scoreID, evalRunID, datasetID, traceID}},
+			{query: `DELETE FROM eval_runs WHERE id = ? OR dataset_id = ?`, args: []any{evalRunID, datasetID}},
+			{query: `DELETE FROM dataset_examples WHERE dataset_id = ? OR trace_id = ?`, args: []any{datasetID, traceID}},
+			{query: `DELETE FROM datasets WHERE id = ?`, args: []any{datasetID}},
+			{query: `DELETE FROM logs WHERE id = ? OR request_id = ?`, args: []any{traceID, requestID}},
+		} {
+			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
+				t.Logf("cleanup %q error = %v", cleanup.query, err)
+			}
+		}
+	})
+
+	recordPath := filepath.Join(dir, suffix+".http")
+	if err := os.WriteFile(recordPath, []byte("# eval postgres smoke\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(record) error = %v", err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     requestID,
+			Time:          time.Now().UTC(),
+			Model:         "gpt-postgres-eval",
+			Provider:      "openai_compatible",
+			Operation:     "responses.create",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        http.MethodPost,
+			StatusCode:    http.StatusOK,
+			DurationMs:    120,
+			TTFTMs:        15,
+			ClientIP:      "127.0.0.1",
+			ContentLength: 4,
+		},
+		Usage: recordfile.UsageInfo{
+			TotalTokens: 42,
+		},
+	}
+	if err := st.UpsertLog(recordPath, header); err != nil {
+		t.Fatalf("UpsertLog(postgres) error = %v", err)
+	}
+	entry, err := st.GetByRequestID(requestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID(postgres) error = %v", err)
+	}
+	traceID = entry.ID
+
+	dataset, err := st.CreateDataset("postgres-eval-"+suffix, "postgres eval migration smoke")
+	if err != nil {
+		t.Fatalf("CreateDataset(postgres) error = %v", err)
+	}
+	datasetID = dataset.ID
+	added, skipped, err := st.AppendDatasetExamples(dataset.ID, []string{entry.ID}, "postgres_eval_smoke", requestID, "dsn-gated")
+	if err != nil {
+		t.Fatalf("AppendDatasetExamples(postgres) error = %v", err)
+	}
+	if added != 1 || skipped != 0 {
+		t.Fatalf("AppendDatasetExamples(postgres) added/skipped = %d/%d, want 1/0", added, skipped)
+	}
+
+	examples, err := st.GetDatasetExamples(dataset.ID)
+	if err != nil {
+		t.Fatalf("GetDatasetExamples(postgres) error = %v", err)
+	}
+	if len(examples) != 1 || examples[0].TraceID != entry.ID || examples[0].Trace.Header.Meta.RequestID != requestID {
+		t.Fatalf("GetDatasetExamples(postgres) = %#v, want trace %q request %q", examples, entry.ID, requestID)
+	}
+
+	run, err := st.CreateEvalRun(dataset.ID, "dataset", dataset.ID, "baseline_v4", 1)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(postgres) error = %v", err)
+	}
+	evalRunID = run.ID
+	score, err := st.AddScore(ScoreRecord{
+		TraceID:      entry.ID,
+		SessionID:    entry.SessionID,
+		DatasetID:    dataset.ID,
+		EvalRunID:    run.ID,
+		EvaluatorKey: "postgres_eval_round_trip",
+		Value:        1,
+		Status:       "pass",
+		Label:        "pass",
+		Explanation:  "checked-in postgres migration supports eval score round trip",
+	})
+	if err != nil {
+		t.Fatalf("AddScore(postgres) error = %v", err)
+	}
+	scoreID = score.ID
+	if err := st.FinalizeEvalRun(run.ID, 1, 1, 0); err != nil {
+		t.Fatalf("FinalizeEvalRun(postgres) error = %v", err)
+	}
+
+	gotRun, err := st.GetEvalRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetEvalRun(postgres) error = %v", err)
+	}
+	if gotRun.DatasetID != dataset.ID || gotRun.EvaluatorSet != "baseline_v4" || gotRun.ScoreCount != 1 || gotRun.PassCount != 1 || gotRun.FailCount != 0 {
+		t.Fatalf("GetEvalRun(postgres) = %#v, want finalized run for dataset %q", gotRun, dataset.ID)
+	}
+
+	runs, err := st.ListEvalRuns(25)
+	if err != nil {
+		t.Fatalf("ListEvalRuns(postgres) error = %v", err)
+	}
+	foundRun := false
+	for _, candidate := range runs {
+		if candidate.ID == run.ID {
+			foundRun = true
+			break
+		}
+	}
+	if !foundRun {
+		t.Fatalf("ListEvalRuns(postgres) missing run %q in %#v", run.ID, runs)
+	}
+
+	scores, err := st.ListScores(ScoreFilter{EvalRunID: run.ID}, 10)
+	if err != nil {
+		t.Fatalf("ListScores(eval_run postgres) error = %v", err)
+	}
+	if len(scores) != 1 || scores[0].ID != score.ID || scores[0].Status != "pass" {
+		t.Fatalf("ListScores(eval_run postgres) = %#v, want pass score %q", scores, score.ID)
+	}
+
+	scores, err = st.ListScores(ScoreFilter{DatasetID: dataset.ID, TraceID: entry.ID}, 10)
+	if err != nil {
+		t.Fatalf("ListScores(dataset+trace postgres) error = %v", err)
+	}
+	if len(scores) != 1 || scores[0].EvaluatorKey != "postgres_eval_round_trip" {
+		t.Fatalf("ListScores(dataset+trace postgres) = %#v, want postgres_eval_round_trip", scores)
 	}
 }
 
