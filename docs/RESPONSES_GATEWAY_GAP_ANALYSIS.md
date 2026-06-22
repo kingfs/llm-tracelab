@@ -65,7 +65,7 @@
 ### Request audit 基础链路
 
 - 已吸收：入站 Responses request audit、内部 Chat Completions upstream exchange correlation、execution events、Monitor/MCP 查询入口。
-- llm-tracelab 落点：`internal/responses/audit`、`internal/mcpserver/responses_audit.go`、`internal/monitor` 的 `/api/responses/audit/trace`。`tool_call_audits` 独立表、ent schema、SQLite/Postgres migration 和 QueryService 查询 API 已落地，但 runtime hosted tool lifecycle 尚未双写该表。
+- llm-tracelab 落点：`internal/responses/audit`、`internal/mcpserver/responses_audit.go`、`internal/monitor` 的 `/api/responses/audit/trace`。`tool_call_audits` 独立表、ent schema、SQLite/Postgres migration、QueryService 查询 API、`audit tool-calls` CLI 和 runtime web_search/function executor 双写已落地。
 - responses-gateway 对照：`internal/interfaces/http/request_audit.go`、`docs/request-audit-cli.md`、`cmd/responses-gateway/audit.go`。
 - 差异：llm-tracelab 当前主要按 `response_id` / `request_audit_id` 查询 trace；responses-gateway 的 CLI 已按 thread/session/turn/client request id、compact candidate、status、operation 等维度组织诊断。
 
@@ -108,7 +108,7 @@
 ### Request audit 诊断深度
 
 - 已有：`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切。当前还可通过 `--include-tools` 从既有 `execution_events.event_type == "response.tool_call"` 派生保守的 tool call diagnostics，汇总 call id、工具名、executor、状态序列、latest status、started/completed 时间、error/output/query/arguments 的脱敏摘要和事件计数。
-- 缺口：缺少 thread/session/turn 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/request feature 顶层诊断；`tool_call_audits` 目前已有持久化 schema/recorder/query API，但 hosted web_search、function executor 和未来 MCP/file/code/computer-use runtime 还没有统一写入该 read model，CLI `--include-tools` 仍是 derived 过渡视图。
+- 缺口：缺少 thread/session/turn 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/request feature 顶层诊断；`tool_call_audits` 已承接 hosted web_search 与 configured function executor 的 started/completed/failed read model，但 `audit query --include-tools` 仍是 derived event 视图，未来 MCP/file/code/computer-use runtime 还没有统一写入该 read model。
 - llm-tracelab 下一步落点：扩展 `cmd/server/audit.go`，复用并扩展 `internal/responses/audit.QueryService`。
 
 ### Compact 与 context optimization
@@ -120,9 +120,9 @@
 
 ### Hosted/server-side tool lifecycle
 
-- 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切；`audit query --include-tools` 已基于这些 events 提供 derived tool call summary。独立 `tool_call_audits` 表、recorder 和 query API 已落地，SQLite startup schema、SQLite migration、Postgres migration 与 status 检查也已覆盖。
-- 缺口：runtime 尚未把 hosted `web_search`、configured function executor 和 unsupported hosted tool rejection 统一写入 `tool_call_audits`；CLI 也尚未提供独立 tool-call-audit 查询入口。跨轮/混合工具失败 lifecycle 仍不完整；MCP、file search、code interpreter、computer-use 仍未实现执行器，只有强制执行时的 stable rejection contract。
-- llm-tracelab 下一步落点：`ent/schema`、`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
+- 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切；`audit query --include-tools` 已基于这些 events 提供 derived tool call summary。独立 `tool_call_audits` 表、recorder、query API、runtime web_search/function executor 双写和 `audit tool-calls` CLI 已落地，SQLite startup schema、SQLite migration、Postgres migration 与 status 检查也已覆盖。
+- 缺口：unsupported hosted tool rejection 尚未统一写入 `tool_call_audits`；跨轮/混合工具失败 lifecycle 仍不完整；MCP、file search、code interpreter、computer-use 仍未实现执行器，只有强制执行时的 stable rejection contract。
+- llm-tracelab 下一步落点：`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
 - responses-gateway 对照：`docs/tool-runtime.md` 的 `tool_call_audits` 和 MCP runtime boundary。
 
 ### Migration 运维
@@ -162,7 +162,7 @@
 - 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --include-tools --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时返回最新一条 trace；默认只输出 request audit envelope，events/exchanges/tool calls 需显式打开。
 - 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body；当前 `tool_calls` 仍是 derived conservative view，不输出 raw arguments/query/output/error，只输出 redacted summary 和事件引用。`--include-events` 仍按原行为输出 events 的 `details_json`，需要调用者自行按权限使用。
 - responses-gateway 能力：按 response/request/thread/session/turn/client request id 查询，并输出 diagnostics envelope。
-- 剩余缺口：尚未支持 thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics；独立 `tool_call_audits` 查询 API 已有，但还未接入 CLI 输出和 runtime 写入。
+- 剩余缺口：尚未支持 thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics；`audit tool-calls` 已提供独立 `tool_call_audits` 查询，但 Monitor/MCP 尚未暴露同等 tool-call-audit read model。
 
 ### Codex profile 生成命令
 
@@ -182,9 +182,9 @@
 ### MCP hosted tool runtime
 
 - 已吸收首切：`mcp`、`file_search`、`code_interpreter`、`computer_use_preview` 在强制 `tool_choice` 执行时返回 OpenAI-style `unsupported_tool` error；普通 descriptor 仍按兼容输入保守解析，不伪造执行结果。
-- 缺口：MCP 当前仍是 llm-tracelab 对外排障 server，不是 Responses runtime 内部的 MCP client/tool executor；尚无 file/code/computer-use 执行器；独立 `tool_call_audits` 表已落地但尚未承接 MCP/file/code/computer-use lifecycle。
+- 缺口：MCP 当前仍是 llm-tracelab 对外排障 server，不是 Responses runtime 内部的 MCP client/tool executor；尚无 file/code/computer-use 执行器；独立 `tool_call_audits` 表已落地并承接 web_search/function executor，但尚未承接 MCP/file/code/computer-use lifecycle。
 - responses-gateway 设计：`type:"mcp"` descriptor 作为 gateway-hosted runtime 请求，当前先明确拒绝并审计。
-- llm-tracelab 下一步落点：`internal/responses/audit` 的 `tool_call_audits` runtime 写入与 CLI 查询；执行器本身需单独设计安全边界。
+- llm-tracelab 下一步落点：`internal/responses/audit` 的 `tool_call_audits` 对 unsupported hosted tool 和未来 MCP/file/code/computer-use lifecycle 的扩展；执行器本身需单独设计安全边界。
 
 ## 建议下一阶段优先级
 
@@ -203,10 +203,10 @@
    - 模块：`tests/fixtures/codex`、`internal/responses/httpapi`、`runtime` 测试、`cmd/server/provider.go` 或新增 `cmd/server/models.go`。
    - 验收：在已接 focused offline tests 基础上，补更完整 runner 或 e2e harness；输出 JSON + TOML profile 片段。
 
-4. 接入 hosted tool audit runtime 写入与 CLI 查询。
-   - 价值：让 web_search、external_command、未来 MCP/file/code 工具共享可索引、可长期演进的排障面。
-   - 模块：`internal/responses/runtime`、`internal/responses/functionexec`、`internal/responses/audit`、`cmd/server/audit.go`。
-   - 验收：在已落地的 `tool_call_audits` schema/recorder/query API 基础上，接 web_search/executor started/finished/failed 的独立写入；CLI 提供按 response/request/conversation/call/status/tool_name 的安全查询；继续保留 derived `--include-tools` 作为 event fallback。
+4. 扩展 hosted tool audit 覆盖面。
+   - 价值：让 unsupported hosted tools、未来 MCP/file/code 工具共享可索引、可长期演进的排障面。
+   - 模块：`internal/responses/runtime`、`internal/responses/functionexec`、`internal/responses/audit`、`cmd/server/audit.go`、Monitor/MCP audit surface。
+   - 验收：在已落地的 web_search/executor `tool_call_audits` 写入和 `audit tool-calls` CLI 基础上，补 unsupported hosted tool rejection、Monitor/MCP 查询入口和未来执行器 lifecycle；继续保留 derived `--include-tools` 作为 event fallback。
 
 5. 补 model/Codex profile inspect。
    - 价值：让 Codex 本地配置与 `responses_server.model_profiles`、channel model catalog 保持一致。

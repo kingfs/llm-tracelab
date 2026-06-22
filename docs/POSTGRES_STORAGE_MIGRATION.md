@@ -256,8 +256,11 @@ defined in ent, generated into `ent/dao/**`, included in SQLite startup schema
 fallback, covered by a minimal additive SQLite migration, and checked into
 `ent/postgres-migrations` with a matching additive Postgres migration. The
 table is available through `internal/responses/audit.RecordToolCallAudit` and
-`ListToolCallAudits`; hosted tool runtime write-through and CLI-first query
-ergonomics remain follow-up work.
+`ListToolCallAudits`; runtime now writes hosted `web_search` and configured
+function executor started/completed/failed lifecycle into the table, and
+`audit tool-calls` exposes a CLI-first query path with payload summaries by
+default. Unsupported hosted tool rejection and future MCP/file/code/computer-use
+lifecycle remain follow-up work.
 
 SQLite compatibility:
 
