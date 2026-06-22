@@ -43,9 +43,11 @@ func newResponsesProviderTokenizeCounter(cfg *config.Config, rtr *router.Router,
 		return nil, nil
 	}
 	profiles := cfg.ResponsesModelProfiles()
+	targets := rtr.Targets()
 	counterProfiles := make([]responsesTokenizeCounterProfile, 0, len(profiles))
 	for _, profile := range profiles {
-		if !profile.TokenizeCounter.Enabled {
+		enableMode := responsesTokenizeCounterProfileEnableMode(profile, targets)
+		if enableMode == responsesTokenizeCounterDisabled {
 			continue
 		}
 		if profile.Name == "" && profile.Pattern == "" {
@@ -62,7 +64,6 @@ func newResponsesProviderTokenizeCounter(cfg *config.Config, rtr *router.Router,
 	if len(counterProfiles) == 0 {
 		return nil, nil
 	}
-	targets := rtr.Targets()
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("responses tokenize_counter is enabled but no router targets are available")
 	}
@@ -71,6 +72,49 @@ func newResponsesProviderTokenizeCounter(cfg *config.Config, rtr *router.Router,
 		targets:  targets,
 		client:   client,
 	}, nil
+}
+
+type responsesTokenizeCounterEnableMode int
+
+const (
+	responsesTokenizeCounterDisabled responsesTokenizeCounterEnableMode = iota
+	responsesTokenizeCounterExplicit
+	responsesTokenizeCounterAuto
+)
+
+func responsesTokenizeCounterProfileEnableMode(profile config.ResponsesModelProfileConfig, targets []*router.Target) responsesTokenizeCounterEnableMode {
+	if profile.TokenizeCounter.Enabled != nil {
+		if *profile.TokenizeCounter.Enabled {
+			return responsesTokenizeCounterExplicit
+		}
+		return responsesTokenizeCounterDisabled
+	}
+	if profile.ContextWindowTokens <= 0 {
+		return responsesTokenizeCounterDisabled
+	}
+	if profile.Name == "" && profile.Pattern == "" {
+		return responsesTokenizeCounterDisabled
+	}
+	if !hasEnabledTokenizeCapableTarget(targets, strings.TrimSpace(profile.TokenizeCounter.UpstreamID)) {
+		return responsesTokenizeCounterDisabled
+	}
+	return responsesTokenizeCounterAuto
+}
+
+func hasEnabledTokenizeCapableTarget(targets []*router.Target, upstreamID string) bool {
+	for _, target := range targets {
+		if target == nil || !target.Enabled {
+			continue
+		}
+		if upstreamID != "" && target.ID != upstreamID && target.RouteTargetID != upstreamID && target.ChannelID != upstreamID {
+			continue
+		}
+		if target.Upstream.Capabilities.Tokenize == nil || !*target.Upstream.Capabilities.Tokenize {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (c *responsesProviderTokenizeCounter) CountChatPromptTokens(req responsesruntime.ChatPromptTokenCountRequest) (int, error) {

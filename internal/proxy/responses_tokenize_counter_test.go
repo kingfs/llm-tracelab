@@ -15,13 +15,13 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/router"
 )
 
-func TestResponsesTokenizeEstimatorOptionDisabledByDefault(t *testing.T) {
+func TestResponsesTokenizeEstimatorOptionDisabledWithoutContextWindow(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatalf("unexpected request to %s", r.URL.Path)
 	}))
 	defer upstream.Close()
 
-	cfg := tokenizeCounterTestConfig(upstream.URL, false)
+	cfg := tokenizeCounterTestConfig(upstream.URL, nil)
 	rtr := newTokenizeCounterTestRouter(t, cfg)
 
 	option, err := responsesTokenizeEstimatorOption(cfg, rtr, upstream.Client())
@@ -30,6 +30,121 @@ func TestResponsesTokenizeEstimatorOptionDisabledByDefault(t *testing.T) {
 	}
 	if option != nil {
 		t.Fatalf("responsesTokenizeEstimatorOption() = non-nil, want nil when profile tokenize_counter is disabled")
+	}
+}
+
+func TestResponsesTokenizeEstimatorOptionAutoSelectsTokenizeCapableTarget(t *testing.T) {
+	var gotPath string
+	var gotBody struct {
+		Model  string `json:"model"`
+		Prompt string `json:"prompt"`
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode tokenize request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"count":37}`)
+	}))
+	defer upstream.Close()
+
+	cfg := tokenizeCounterTestConfig(upstream.URL, nil)
+	cfg.ResponsesServer.ModelProfiles[0].ContextWindowTokens = 128000
+	rtr := newTokenizeCounterTestRouter(t, cfg)
+
+	option, err := responsesTokenizeEstimatorOption(cfg, rtr, upstream.Client())
+	if err != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() error = %v", err)
+	}
+	if option == nil {
+		t.Fatal("responsesTokenizeEstimatorOption() = nil, want auto-selected tokenizer option")
+	}
+	counter, err := newResponsesProviderTokenizeCounter(cfg, rtr, upstream.Client())
+	if err != nil {
+		t.Fatalf("newResponsesProviderTokenizeCounter() error = %v", err)
+	}
+	tokens, err := counter.CountChatPromptTokens(responsesruntime.ChatPromptTokenCountRequest{
+		Model: "gpt-4o-mini",
+		Messages: []responsesruntime.ChatMessage{
+			{Role: "user", Content: "hello auto"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CountChatPromptTokens() error = %v", err)
+	}
+	if tokens != 37 {
+		t.Fatalf("CountChatPromptTokens() = %d, want 37", tokens)
+	}
+	if gotPath != "/tokenize" {
+		t.Fatalf("tokenize path = %q, want /tokenize", gotPath)
+	}
+	if gotBody.Model != "upstream-gpt-4o-mini" {
+		t.Fatalf("tokenize model = %q, want upstream-gpt-4o-mini", gotBody.Model)
+	}
+	if !strings.Contains(gotBody.Prompt, "hello auto") {
+		t.Fatalf("tokenize prompt = %q, want serialized chat prompt", gotBody.Prompt)
+	}
+}
+
+func TestResponsesTokenizeEstimatorOptionExplicitFalseDisablesAutoSelect(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request to %s", r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	enabled := false
+	cfg := tokenizeCounterTestConfig(upstream.URL, &enabled)
+	cfg.ResponsesServer.ModelProfiles[0].ContextWindowTokens = 128000
+	rtr := newTokenizeCounterTestRouter(t, cfg)
+
+	option, err := responsesTokenizeEstimatorOption(cfg, rtr, upstream.Client())
+	if err != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() error = %v", err)
+	}
+	if option != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() = non-nil, want nil when tokenize_counter.enabled=false")
+	}
+}
+
+func TestResponsesTokenizeEstimatorOptionAutoSelectWithoutTokenizeTargetIsNoop(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request to %s", r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	cfg := tokenizeCounterTestConfig(upstream.URL, nil)
+	cfg.ResponsesServer.ModelProfiles[0].ContextWindowTokens = 128000
+	disabledTokenize := false
+	cfg.Upstreams[0].Upstream.Capabilities.Tokenize = &disabledTokenize
+	rtr := newTokenizeCounterTestRouter(t, cfg)
+
+	option, err := responsesTokenizeEstimatorOption(cfg, rtr, upstream.Client())
+	if err != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() error = %v", err)
+	}
+	if option != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() = non-nil, want nil when auto mode has no tokenize-capable target")
+	}
+}
+
+func TestResponsesTokenizeEstimatorOptionAutoSelectEmptyProfileIsNoop(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected request to %s", r.URL.Path)
+	}))
+	defer upstream.Close()
+
+	cfg := tokenizeCounterTestConfig(upstream.URL, nil)
+	cfg.ResponsesServer.ModelProfiles[0].Pattern = ""
+	cfg.ResponsesServer.ModelProfiles[0].ContextWindowTokens = 128000
+	rtr := newTokenizeCounterTestRouter(t, cfg)
+
+	option, err := responsesTokenizeEstimatorOption(cfg, rtr, upstream.Client())
+	if err != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() error = %v", err)
+	}
+	if option != nil {
+		t.Fatalf("responsesTokenizeEstimatorOption() = non-nil, want nil for unnamed auto profile")
 	}
 }
 
@@ -54,7 +169,8 @@ func TestResponsesProviderTokenizeCounterCallsConfiguredUpstreamTokenize(t *test
 	}))
 	defer upstream.Close()
 
-	cfg := tokenizeCounterTestConfig(upstream.URL, true)
+	enabled := true
+	cfg := tokenizeCounterTestConfig(upstream.URL, &enabled)
 	cfg.Upstreams[0].Upstream.ApiKey = secret
 	cfg.Upstreams[0].Upstream.Headers = map[string]string{"X-Custom-Provider": "configured"}
 	rtr := newTokenizeCounterTestRouter(t, cfg)
@@ -95,6 +211,33 @@ func TestResponsesProviderTokenizeCounterCallsConfiguredUpstreamTokenize(t *test
 	}
 }
 
+func TestResponsesProviderTokenizeCounterExplicitTrueAllowsZeroContextWindow(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"count":12}`)
+	}))
+	defer upstream.Close()
+
+	enabled := true
+	cfg := tokenizeCounterTestConfig(upstream.URL, &enabled)
+	cfg.ResponsesServer.ModelProfiles[0].ContextWindowTokens = 0
+	rtr := newTokenizeCounterTestRouter(t, cfg)
+	counter, err := newResponsesProviderTokenizeCounter(cfg, rtr, upstream.Client())
+	if err != nil {
+		t.Fatalf("newResponsesProviderTokenizeCounter() error = %v", err)
+	}
+	if counter == nil {
+		t.Fatal("newResponsesProviderTokenizeCounter() = nil, want counter")
+	}
+	tokens, err := counter.CountChatPromptTokens(responsesruntime.ChatPromptTokenCountRequest{Model: "gpt-4o-mini"})
+	if err != nil {
+		t.Fatalf("CountChatPromptTokens() error = %v", err)
+	}
+	if tokens != 12 {
+		t.Fatalf("CountChatPromptTokens() = %d, want 12", tokens)
+	}
+}
+
 func TestResponsesProviderTokenizeCounterFailureFallsBackWithoutLeakingSecret(t *testing.T) {
 	const secret = "sk-test-tokenize"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +245,8 @@ func TestResponsesProviderTokenizeCounterFailureFallsBackWithoutLeakingSecret(t 
 	}))
 	defer upstream.Close()
 
-	cfg := tokenizeCounterTestConfig(upstream.URL, true)
+	enabled := true
+	cfg := tokenizeCounterTestConfig(upstream.URL, &enabled)
 	cfg.Upstreams[0].Upstream.ApiKey = secret
 	rtr := newTokenizeCounterTestRouter(t, cfg)
 	counter, err := newResponsesProviderTokenizeCounter(cfg, rtr, upstream.Client())
@@ -131,7 +275,7 @@ func TestResponsesProviderTokenizeCounterFailureFallsBackWithoutLeakingSecret(t 
 	}
 }
 
-func tokenizeCounterTestConfig(baseURL string, enabled bool) *config.Config {
+func tokenizeCounterTestConfig(baseURL string, enabled *bool) *config.Config {
 	tokenize := true
 	upstreamCfg := config.UpstreamConfig{
 		BaseURL:        baseURL + "/v1",
