@@ -22,7 +22,7 @@
 - streaming Responses server-mode。
 - 服务端任意 function tool 执行器。当前普通 `function` tool 已支持非流式 schema 转发、模型 `function_call` output、客户端 `function_call_output` continuation 和 requested/submitted execution events；hosted `web_search` 仍是唯一 server-side 自动执行 tool。
 - compact workflow。
-- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup，更完整的 stream/cancel/compact events 尚未接入。
+- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 17B 已接入 `capabilities.tool_calling` 路由硬约束。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup，更完整的 stream/cancel/compact events 尚未接入。
 - 完整 Postgres migration 生产化。当前已有 checked-in SQL，Postgres `db migrate up`/`auth migrate up` 会应用版本化 SQL，application store 已拆分 open-vs-migrate，Postgres migration 覆盖 `internal/store` SQLite application raw DDL 表集，并完成 migrated logs/observation/finding/analysis/system-event 路径的首轮 raw SQL 兼容；剩余缺口是 SQLite 应用迁移仍未版本化、Postgres auth rollback/独立 migration namespace 未完成、analytics/eval 等 raw SQL 兼容性仍需持续审计。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
@@ -159,6 +159,7 @@ providers:
     capabilities:
       chat_completions: true
       responses: false
+      tool_calling: true
       models: true
       tokenize: true
 ```
@@ -168,7 +169,7 @@ providers:
 - `protocol_family`：wire protocol family，例如 `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native`。
 - `api_type`：provider 对当前 route 暴露的 API surface。当前接受 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`。默认值按协议族推断：OpenAI-compatible 为 `chat_completions`，Anthropic 为 `messages`，Google GenAI / Vertex 为 `gemini_generate_content`。
 - `mode`：TraceLab 对该 provider 的处理模式。当前接受空值、`proxy`、`record_only`、`server`、`responses_server`；空值保持历史兼容。
-- `capabilities`：当前代码支持 `responses`、`chat_completions`、`embeddings`、`models`、`tokenize` 布尔能力，用于 routing 和 runtime plan，不应从 provider preset 中隐式猜测所有细节。
+- `capabilities`：当前代码支持 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize` 布尔能力，用于 routing 和 runtime plan，不应从 provider preset 中隐式猜测所有细节。
 - `model_profiles`：仍是后续字段，计划用于模型上下文窗口、输出上限、tool 能力、compact 阈值、上游模型名映射和兼容性参数。
 
 配置原则：
@@ -176,6 +177,7 @@ providers:
 - 一个 provider 可以有多个 endpoint profile，但 routing 时必须明确选中与请求路径兼容的 profile。
 - 本地 Responses server-mode 当前会通过内部 `/v1/chat/completions` 调用上游，因此需要至少一个可选择的 target 支持 `api_type: chat_completions`，或者显式 `capabilities.chat_completions: true`。
 - 显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被内部 Chat Completions 选中。
+- 当请求体包含 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，decision trace 的候选项会标记 `unsupported_tools`。
 - `api_type: chat_completions` 不等于 `responses_native`。由 TraceLab server mode 补齐 Responses 语义。
 - 后续 `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源。
 
@@ -201,7 +203,7 @@ Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库�
 Stage 10 后续 audit 接入顺序建议：
 
 1. 补齐 Responses audit Monitor UI。
-2. 再接 function tool provider capability 错误处理、redaction 和更细的 tool result persistence。
+2. 再接 function tool redaction 和更细的 tool result persistence。
 3. 最后补 streaming、cancel、compact 事件，因为这些事件对顺序、幂等和部分失败恢复要求更高。
 
 Postgres-first 的原因：
@@ -312,7 +314,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - tool call 可被审计并和 response item 关联。
 - provider 不支持 tool calling 时返回机器可读错误。
 
-当前状态：`previous_response_id` continuation、`input_items` 查询、普通 `function` tool schema 映射、模型 `function_call` output、客户端 `function_call_output` 回传、object-shaped tool output 保留，以及 requested/submitted tool audit events 已落地。TraceLab 仍不自动执行任意普通 function；provider tool capability 错误处理和更细的 tool item kind 归类仍未完成。
+当前状态：`previous_response_id` continuation、`input_items` 查询、普通 `function` tool schema 映射、模型 `function_call` output、客户端 `function_call_output` 回传、object-shaped tool output 保留、requested/submitted tool audit events，以及 `capabilities.tool_calling` 路由约束已落地。TraceLab 仍不自动执行任意普通 function；更细的 tool item kind 归类仍未完成。
 
 ### Stage 1E：streaming 与 cancel（未完成）
 
@@ -345,7 +347,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 
 当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、Postgres 应用库 `db migrate up` versioned SQL 路径、Postgres auth `migrate up` versioned SQL 路径、application store open-vs-migrate 分离、application raw DDL 表覆盖补齐、migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容、最小 request audit 写入、内部 Chat Completions cassette 的最小 upstream exchange correlation、request/model_call/hosted web_search 最小 execution events，以及核心 audit 查询服务/Monitor API/MCP/UI 查询工具已落地；完整 Postgres migration 生产化仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，Postgres `up` 当前复用 shared ent/Postgres migration set，`down` 和独立 auth migration namespace 另行处理。
 
-Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation 并回填 response id，Stage 12A 接入 request 与内部 model_call 的最小 execution events，Stage 13A 接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 接入 hosted `web_search` tool_call events，Stage 17A 接入普通 function tool 非流式 continuation 和 requested/submitted events，Stage 15A 接入 upstream API surface 校验与 Chat Completions endpoint capability 路由约束，Stage 16A/16B/16C/16D/16E/16F 接入 Postgres migration 生成、CLI versioned SQL 应用路径、application store open-vs-migrate 分离、首轮 raw SQL 兼容、application raw DDL 表覆盖补齐和 Postgres auth `up` 版本化迁移。它不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先补 provider tool capability 错误处理，再处理 streaming/cancel/compact events。
+Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation 并回填 response id，Stage 12A 接入 request 与内部 model_call 的最小 execution events，Stage 13A 接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 接入 hosted `web_search` tool_call events，Stage 17A 接入普通 function tool 非流式 continuation 和 requested/submitted events，Stage 17B 接入 `capabilities.tool_calling` 路由约束，Stage 15A 接入 upstream API surface 校验与 Chat Completions endpoint capability 路由约束，Stage 16A/16B/16C/16D/16E/16F 接入 Postgres migration 生成、CLI versioned SQL 应用路径、application store open-vs-migrate 分离、首轮 raw SQL 兼容、application raw DDL 表覆盖补齐和 Postgres auth `up` 版本化迁移。它不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议处理 streaming/cancel/compact events。
 
 ### Stage 3：Hosted tools 与 compact（部分落地）
 

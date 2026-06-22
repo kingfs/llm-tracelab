@@ -86,6 +86,7 @@ type UpstreamConfig struct {
 type UpstreamCapabilitiesConfig struct {
 	Responses       *bool `yaml:"responses"`
 	ChatCompletions *bool `yaml:"chat_completions"`
+	ToolCalling     *bool `yaml:"tool_calling"`
 	Embeddings      *bool `yaml:"embeddings"`
 	Models          *bool `yaml:"models"`
 	Tokenize        *bool `yaml:"tokenize"`

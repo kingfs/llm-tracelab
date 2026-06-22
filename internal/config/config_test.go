@@ -190,6 +190,7 @@ upstreams:
       capabilities:
         responses: true
         chat_completions: false
+        tool_calling: false
         embeddings: true
         models: true
         tokenize: false
@@ -208,6 +209,9 @@ upstreams:
 	}
 	if upstream.Capabilities.ChatCompletions == nil || *upstream.Capabilities.ChatCompletions {
 		t.Fatalf("capabilities.chat_completions = %v, want false", upstream.Capabilities.ChatCompletions)
+	}
+	if upstream.Capabilities.ToolCalling == nil || *upstream.Capabilities.ToolCalling {
+		t.Fatalf("capabilities.tool_calling = %v, want false", upstream.Capabilities.ToolCalling)
 	}
 	if upstream.Capabilities.Embeddings == nil || !*upstream.Capabilities.Embeddings {
 		t.Fatalf("capabilities.embeddings = %v, want true", upstream.Capabilities.Embeddings)

@@ -29,6 +29,7 @@ const (
 
 	CapabilityResponses       = "responses"
 	CapabilityChatCompletions = "chat_completions"
+	CapabilityToolCalling     = "tool_calling"
 	CapabilityEmbeddings      = "embeddings"
 	CapabilityModels          = "models"
 	CapabilityTokenize        = "tokenize"
@@ -448,6 +449,8 @@ func (u ResolvedUpstream) Capability(name string) (bool, bool) {
 		return capabilityValue(u.Capabilities.Responses)
 	case CapabilityChatCompletions:
 		return capabilityValue(u.Capabilities.ChatCompletions)
+	case CapabilityToolCalling:
+		return capabilityValue(u.Capabilities.ToolCalling)
 	case CapabilityEmbeddings:
 		return capabilityValue(u.Capabilities.Embeddings)
 	case CapabilityModels:
@@ -489,6 +492,14 @@ func (u ResolvedUpstream) SupportsResponsesAPI() bool {
 		return true
 	}
 	return configured && enabled
+}
+
+func (u ResolvedUpstream) SupportsToolCalling() bool {
+	enabled, configured := u.Capability(CapabilityToolCalling)
+	if configured {
+		return enabled
+	}
+	return true
 }
 
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {

@@ -306,6 +306,7 @@ type CandidateDecision struct {
 	HealthState            string  `json:"health_state,omitempty"`
 	SupportsPath           bool    `json:"supports_path"`
 	SupportsModel          bool    `json:"supports_model"`
+	SupportsTools          bool    `json:"supports_tools"`
 	Excluded               bool    `json:"excluded,omitempty"`
 	Selectable             bool    `json:"selectable"`
 	FilterReason           string  `json:"filter_reason,omitempty"`
@@ -700,8 +701,8 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	decision := r.buildDecisionTrace(rawPath, model, excludeIDs)
-	candidates := r.candidatesForRequest(rawPath, model)
+	decision := r.buildDecisionTrace(rawPath, model, excludeIDs, features)
+	candidates := r.candidatesForRequest(rawPath, model, features)
 	if len(candidates) == 0 {
 		return nil, &SelectionError{
 			Reason:   SelectionFailureNoSupportingTarget,
@@ -799,7 +800,7 @@ func targetAlias(target *Target, fallback string) string {
 	return fallback
 }
 
-func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string) *DecisionTrace {
+func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string, features RequestFeatures) *DecisionTrace {
 	decision := &DecisionTrace{
 		ModelName:      model,
 		Endpoint:       llm.NormalizeEndpoint(rawPath),
@@ -814,7 +815,7 @@ func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []s
 	}
 	now := time.Now()
 	for _, target := range r.targets {
-		candidate := target.candidateDecision(rawPath, model, now)
+		candidate := target.candidateDecision(rawPath, model, now, features)
 		if _, excluded := excludeSet[target.ID]; excluded {
 			candidate.Excluded = true
 			candidate.Selectable = false
@@ -964,11 +965,11 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 	return b, scoreB
 }
 
-func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
+func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures) []*Target {
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath) {
+			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -978,7 +979,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
 	var candidates []*Target
 	if model != "" {
 		for _, target := range r.modelToTargets[strings.ToLower(model)] {
-			if supportsPath(target, rawPath) {
+			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -990,6 +991,9 @@ func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
 	var fallback []*Target
 	for _, target := range r.targets {
 		if !supportsPath(target, rawPath) {
+			continue
+		}
+		if !supportsRequestFeatures(target, features) {
 			continue
 		}
 		if target.allowUnknownModels || model == "" || r.fallbackPolicy != FallbackReject {
@@ -1269,7 +1273,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 	return true
 }
 
-func (t *Target) candidateDecision(rawPath string, model string, now time.Time) CandidateDecision {
+func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures) CandidateDecision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1288,6 +1292,7 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 		HealthState:    t.healthState,
 		SupportsPath:   supportsPath(t, rawPath),
 		SupportsModel:  t.supportsModelLocked(model),
+		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
 	}
 	if !decision.SupportsPath {
@@ -1298,6 +1303,11 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 	if !decision.SupportsModel {
 		decision.Selectable = false
 		decision.FilterReason = "unsupported_model"
+		return decision
+	}
+	if !decision.SupportsTools {
+		decision.Selectable = false
+		decision.FilterReason = "unsupported_tools"
 		return decision
 	}
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil) {
@@ -1622,6 +1632,16 @@ func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string) boo
 	default:
 		return true
 	}
+}
+
+func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
+	if target == nil {
+		return false
+	}
+	if features.HasTools && !target.Upstream.SupportsToolCalling() {
+		return false
+	}
+	return true
 }
 
 func supportsProtocolFamily(protocolFamily string, provider string, endpoint string) bool {

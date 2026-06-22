@@ -262,6 +262,76 @@ func TestRouterChatCompletionsRequiresChatCapableAPISurface(t *testing.T) {
 	}
 }
 
+func TestRouterSelectFiltersTargetsWithoutToolCallingCapability(t *testing.T) {
+	toolCallingDisabled := false
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "no-tools",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat-no-tools.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ToolCalling: &toolCallingDisabled,
+					},
+				},
+			},
+			{
+				ID:             "tools",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat-tools.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "tools" {
+		t.Fatalf("selected target = %q, want tools", selection.Target.ID)
+	}
+	var sawNoTools bool
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID != "no-tools" {
+			continue
+		}
+		sawNoTools = true
+		if candidate.SupportsTools || candidate.Selectable || candidate.FilterReason != "unsupported_tools" {
+			t.Fatalf("no-tools candidate = %+v, want unsupported_tools", candidate)
+		}
+	}
+	if !sawNoTools {
+		t.Fatalf("decision did not include no-tools candidate: %+v", selection.Decision)
+	}
+}
+
 func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

@@ -201,6 +201,7 @@ func TestResolveProviderPresets(t *testing.T) {
 func TestResolveKeepsAPISurface(t *testing.T) {
 	responsesEnabled := true
 	chatDisabled := false
+	toolCallingDisabled := false
 
 	resolved, err := Resolve(config.UpstreamConfig{
 		BaseURL: "https://api.openai.com/v1",
@@ -209,6 +210,7 @@ func TestResolveKeepsAPISurface(t *testing.T) {
 		Capabilities: config.UpstreamCapabilitiesConfig{
 			Responses:       &responsesEnabled,
 			ChatCompletions: &chatDisabled,
+			ToolCalling:     &toolCallingDisabled,
 		},
 	})
 	if err != nil {
@@ -225,6 +227,12 @@ func TestResolveKeepsAPISurface(t *testing.T) {
 	}
 	if enabled, configured := resolved.Capability(CapabilityChatCompletions); !configured || enabled {
 		t.Fatalf("Capability(chat_completions) = enabled:%v configured:%v, want false/true", enabled, configured)
+	}
+	if enabled, configured := resolved.Capability(CapabilityToolCalling); !configured || enabled {
+		t.Fatalf("Capability(tool_calling) = enabled:%v configured:%v, want false/true", enabled, configured)
+	}
+	if resolved.SupportsToolCalling() {
+		t.Fatalf("SupportsToolCalling() = true, want false")
 	}
 	if !resolved.NativeResponsesServerMode() {
 		t.Fatalf("NativeResponsesServerMode() = false, want true")
@@ -249,6 +257,9 @@ func TestResolveDefaultsAPISurface(t *testing.T) {
 	}
 	if enabled, configured := resolved.Capability(CapabilityResponses); configured || enabled {
 		t.Fatalf("Capability(responses) = enabled:%v configured:%v, want false/false", enabled, configured)
+	}
+	if !resolved.SupportsToolCalling() {
+		t.Fatalf("SupportsToolCalling() = false, want default true")
 	}
 }
 
