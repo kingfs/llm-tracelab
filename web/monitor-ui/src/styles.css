@@ -597,6 +597,13 @@ a {
   gap: 14px;
 }
 
+.responses-function-executor-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .responses-function-executor-warnings {
   display: grid;
   gap: 8px;
