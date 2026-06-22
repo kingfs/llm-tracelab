@@ -25,6 +25,7 @@
 - [协议参考](./protocol-reference/README.md)
 - [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)
 - [Responses Gateway 重构路线图](./RESPONSES_GATEWAY_ROADMAP.md)
+- [Responses Gateway 差距清单](./RESPONSES_GATEWAY_GAP_ANALYSIS.md)
 
 ## 用户与运维指南
 
