@@ -32,6 +32,10 @@ type Tx struct {
 	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
+	// Response is the client for interacting with the Response builders.
+	Response *ResponseClient
+	// ResponseItem is the client for interacting with the ResponseItem builders.
+	ResponseItem *ResponseItemClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
 	// TraceLog is the client for interacting with the TraceLog builders.
@@ -182,6 +186,8 @@ func (tx *Tx) init() {
 	tx.EvalRun = NewEvalRunClient(tx.config)
 	tx.ExperimentRun = NewExperimentRunClient(tx.config)
 	tx.ModelCatalog = NewModelCatalogClient(tx.config)
+	tx.Response = NewResponseClient(tx.config)
+	tx.ResponseItem = NewResponseItemClient(tx.config)
 	tx.Score = NewScoreClient(tx.config)
 	tx.TraceLog = NewTraceLogClient(tx.config)
 	tx.UpstreamModel = NewUpstreamModelClient(tx.config)

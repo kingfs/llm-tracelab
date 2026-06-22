@@ -2685,6 +2685,11 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// EntClient returns the generated ent client backing this store.
+func (s *Store) EntClient() *dao.Client {
+	return s.client
+}
+
 func (s *Store) initSchema() error {
 	if s.driver == "postgres" {
 		return s.client.Schema.Create(context.Background())
@@ -3029,6 +3034,35 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen ON system_events(status, last_seen_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category ON system_events(source, category, last_seen_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_system_events_trace_id ON system_events(trace_id, last_seen_at DESC) WHERE trace_id <> '';`,
+		`CREATE TABLE IF NOT EXISTS responses (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL DEFAULT '',
+			previous_response_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'queued',
+			model TEXT NOT NULL,
+			history_item_ids json NULL,
+			output_item_ids json NULL,
+			effective_tools json NULL,
+			metadata json NULL,
+			usage json NULL,
+			error json NULL,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS response_conversation_id_created_at ON responses(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS response_previous_response_id ON responses(previous_response_id);`,
+		`CREATE INDEX IF NOT EXISTS response_status_created_at ON responses(status, created_at);`,
+		`CREATE TABLE IF NOT EXISTS response_items (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			response_id TEXT NOT NULL DEFAULT '',
+			conversation_id TEXT NOT NULL DEFAULT '',
+			payload json NOT NULL,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS responseitem_conversation_id_created_at ON response_items(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS responseitem_response_id_kind ON response_items(response_id, kind);`,
 	}
 
 	for _, stmt := range stmts {

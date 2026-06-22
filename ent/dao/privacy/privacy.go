@@ -327,6 +327,54 @@ func (f ModelCatalogMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mu
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ModelCatalogMutation", m)
 }
 
+// The ResponseQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ResponseQueryRuleFunc func(context.Context, *dao.ResponseQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ResponseQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ResponseQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ResponseQuery", q)
+}
+
+// The ResponseMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ResponseMutationRuleFunc func(context.Context, *dao.ResponseMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ResponseMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ResponseMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ResponseMutation", m)
+}
+
+// The ResponseItemQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ResponseItemQueryRuleFunc func(context.Context, *dao.ResponseItemQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ResponseItemQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ResponseItemQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ResponseItemQuery", q)
+}
+
+// The ResponseItemMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ResponseItemMutationRuleFunc func(context.Context, *dao.ResponseItemMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ResponseItemMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ResponseItemMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ResponseItemMutation", m)
+}
+
 // The ScoreQueryRuleFunc type is an adapter to allow the use of ordinary
 // functions as a query rule.
 type ScoreQueryRuleFunc func(context.Context, *dao.ScoreQuery) error
@@ -500,6 +548,10 @@ func queryFilter(q dao.Query) (Filter, error) {
 		return q.Filter(), nil
 	case *dao.ModelCatalogQuery:
 		return q.Filter(), nil
+	case *dao.ResponseQuery:
+		return q.Filter(), nil
+	case *dao.ResponseItemQuery:
+		return q.Filter(), nil
 	case *dao.ScoreQuery:
 		return q.Filter(), nil
 	case *dao.TraceLogQuery:
@@ -534,6 +586,10 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	case *dao.ExperimentRunMutation:
 		return m.Filter(), nil
 	case *dao.ModelCatalogMutation:
+		return m.Filter(), nil
+	case *dao.ResponseMutation:
+		return m.Filter(), nil
+	case *dao.ResponseItemMutation:
 		return m.Filter(), nil
 	case *dao.ScoreMutation:
 		return m.Filter(), nil

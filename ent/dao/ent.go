@@ -21,6 +21,8 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -95,6 +97,8 @@ func checkColumn(t, c string) error {
 			evalrun.Table:         evalrun.ValidColumn,
 			experimentrun.Table:   experimentrun.ValidColumn,
 			modelcatalog.Table:    modelcatalog.ValidColumn,
+			response.Table:        response.ValidColumn,
+			responseitem.Table:    responseitem.ValidColumn,
 			score.Table:           score.ValidColumn,
 			tracelog.Table:        tracelog.ValidColumn,
 			upstreammodel.Table:   upstreammodel.ValidColumn,
