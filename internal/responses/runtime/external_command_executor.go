@@ -43,11 +43,7 @@ func (e ExternalCommandFunctionToolExecutor) ExecuteFunctionTool(ctx context.Con
 	}
 	defer cancel()
 
-	input, err := json.Marshal(externalCommandFunctionToolInput{
-		CallID:    call.CallID,
-		Name:      call.Name,
-		Arguments: call.Arguments,
-	})
+	input, err := json.Marshal(externalCommandFunctionToolInput(call))
 	if err != nil {
 		return FunctionToolResult{}, fmt.Errorf("marshal external command function input: %w", err)
 	}
