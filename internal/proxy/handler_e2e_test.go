@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -885,6 +886,138 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if entries[0].Header.Meta.Endpoint != "/v1/chat/completions" {
 		t.Fatalf("indexed endpoint = %q, want /v1/chat/completions", entries[0].Header.Meta.Endpoint)
+	}
+}
+
+func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerRestart(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamCalls := 0
+	var secondChatBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var chatBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if upstreamCalls == 2 {
+			secondChatBody = chatBody
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_1","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"persist me"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("create StatusCode = %d, want 200; body=%s", resp.StatusCode, string(body))
+	}
+	var created protocol.Response
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode created response: %v", err)
+	}
+	resp.Body.Close()
+	proxyServer.Close()
+
+	restartedHandler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() after restart error = %v", err)
+	}
+	restartedServer := httptest.NewServer(restartedHandler)
+	defer restartedServer.Close()
+
+	secondReq, err := http.NewRequest(http.MethodPost, restartedServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","previous_response_id":"`+created.ID+`","input":"second"}`))
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondResp, err := restartedServer.Client().Do(secondReq)
+	if err != nil {
+		t.Fatalf("second Do() error = %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("second StatusCode = %d, want 200; body=%s", secondResp.StatusCode, string(body))
+	}
+	if secondChatBody == nil {
+		t.Fatalf("second upstream chat body was not captured")
+	}
+	messages, ok := secondChatBody["messages"].([]any)
+	if !ok {
+		t.Fatalf("second chat body messages = %#v, want array", secondChatBody["messages"])
+	}
+	gotRoles := make([]string, 0, len(messages))
+	gotContent := make([]string, 0, len(messages))
+	for _, raw := range messages {
+		message, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("message = %#v, want object", raw)
+		}
+		role, _ := message["role"].(string)
+		content, _ := message["content"].(string)
+		gotRoles = append(gotRoles, role)
+		gotContent = append(gotContent, content)
+	}
+	wantRoles := []string{"user", "assistant", "user"}
+	wantContent := []string{"persist me", "pong", "second"}
+	if fmt.Sprint(gotRoles) != fmt.Sprint(wantRoles) || fmt.Sprint(gotContent) != fmt.Sprint(wantContent) {
+		t.Fatalf("second messages roles=%v content=%v, want roles=%v content=%v", gotRoles, gotContent, wantRoles, wantContent)
+	}
+	if upstreamCalls != 2 {
+		t.Fatalf("upstreamCalls = %d, want create and continuation calls", upstreamCalls)
 	}
 }
 
