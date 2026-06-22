@@ -9,3 +9,4 @@ docker-data/
 config/config.dev.yaml
 web/monitor-ui/test-results/
 web/monitor-ui/playwright-report/
+worktrees/
