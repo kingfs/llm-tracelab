@@ -179,6 +179,41 @@ func TestChatCompletionStreamAggregatesSSEChunks(t *testing.T) {
 	}
 }
 
+func TestChatCompletionStreamCallbackReceivesContentDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"id":"chatcmpl_stream","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello "},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_stream","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":"stop"}]}`,
+			`data: [DONE]`,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	var deltas []string
+	resp, err := client.ChatCompletionStream(context.Background(), runtime.ChatCompletionRequest{Model: "gpt-4o"}, func(event runtime.ChatStreamEvent) error {
+		if event.ContentDelta != "" {
+			deltas = append(deltas, event.ContentDelta)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream() error = %v", err)
+	}
+
+	if strings.Join(deltas, "|") != "Hello |world" {
+		t.Fatalf("deltas = %#v, want separate stream chunks", deltas)
+	}
+	if len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "Hello world" {
+		t.Fatalf("aggregated response = %+v, want full content", resp)
+	}
+}
+
 func TestChatCompletionStreamAggregatesToolCallDeltas(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

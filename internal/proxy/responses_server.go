@@ -37,8 +37,18 @@ type responsesChatCompletionsAdapter struct {
 }
 
 var _ runtime.ChatCompletionsClient = (*responsesChatCompletionsAdapter)(nil)
+var _ runtime.ChatCompletionsStreamer = (*responsesChatCompletionsAdapter)(nil)
 
 func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, chatReq runtime.ChatCompletionRequest) (runtime.ChatCompletionResponse, error) {
+	return a.chatCompletion(ctx, chatReq, nil)
+}
+
+func (a *responsesChatCompletionsAdapter) ChatCompletionStream(ctx context.Context, chatReq runtime.ChatCompletionRequest, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
+	chatReq.Stream = true
+	return a.chatCompletion(ctx, chatReq, handle)
+}
+
+func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, chatReq runtime.ChatCompletionRequest, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
 	if a == nil || a.router == nil {
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("responses chat completions router is required")
 	}
@@ -146,7 +156,15 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	}
 	defer httpResp.Body.Close()
 
-	respBody, isStream, err := recordResponsesServerChatResponse(logInfo, httpResp)
+	statusCode := httpResp.StatusCode
+	var respBody []byte
+	var isStream bool
+	var chatResp runtime.ChatCompletionResponse
+	if handle != nil && statusCode >= 200 && statusCode < 300 && llm.DetectStreamingResponse(httpResp.Header) {
+		chatResp, isStream, err = recordResponsesServerChatStreamResponse(logInfo, httpResp, handle)
+	} else {
+		respBody, isStream, err = recordResponsesServerChatResponse(logInfo, httpResp)
+	}
 	if err != nil {
 		logInfo.Header.Meta.Error = err.Error()
 		modelCallStatus := responsesModelCallFailureStatus(err)
@@ -171,12 +189,10 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	}
 
 	duration := time.Since(start)
-	statusCode := httpResp.StatusCode
-	var chatResp runtime.ChatCompletionResponse
 	responseErr := chatCompletionResponseError(statusCode, httpResp.Status, respBody)
-	if responseErr == nil {
+	if responseErr == nil && len(respBody) > 0 {
 		if isStream {
-			chatResp, responseErr = chatclient.AggregateChatCompletionStream(bytes.NewReader(respBody))
+			chatResp, responseErr = chatclient.AggregateChatCompletionStreamWithCallback(bytes.NewReader(respBody), handle)
 		} else {
 			if err := json.Unmarshal(respBody, &chatResp); err != nil {
 				responseErr = fmt.Errorf("decode chat completion response JSON: %w", err)
@@ -189,7 +205,7 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 
 	logInfo.Header.Meta.DurationMs = duration.Milliseconds()
 	logInfo.Header.Meta.StatusCode = statusCode
-	logInfo.Header.Meta.ContentLength = int64(len(respBody))
+	logInfo.Header.Meta.ContentLength = logInfo.Header.Layout.ResBodyLen
 	logInfo.Header.Layout.IsStream = isStream
 	logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, statusCode, duration, logInfo.Header.Meta.Error))
 	if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
@@ -348,6 +364,41 @@ func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Res
 	if logInfo == nil || logInfo.File == nil {
 		return nil, false, fmt.Errorf("responses chat completions log file is required")
 	}
+	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp)
+	if err != nil {
+		return nil, false, err
+	}
+	respBody, readErr := io.ReadAll(sniffer)
+	closeErr := sniffer.Close()
+	if readErr != nil {
+		return respBody, isStream, fmt.Errorf("read chat completion response body: %w", readErr)
+	}
+	if closeErr != nil {
+		return respBody, isStream, fmt.Errorf("close chat completion response body: %w", closeErr)
+	}
+	return respBody, isStream, nil
+}
+
+func recordResponsesServerChatStreamResponse(logInfo *recorder.LogInfo, resp *http.Response, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, bool, error) {
+	if logInfo == nil || logInfo.File == nil {
+		return runtime.ChatCompletionResponse{}, false, fmt.Errorf("responses chat completions log file is required")
+	}
+	sniffer, isStream, err := responsesServerChatResponseSniffer(logInfo, resp)
+	if err != nil {
+		return runtime.ChatCompletionResponse{}, false, err
+	}
+	chatResp, readErr := chatclient.AggregateChatCompletionStreamWithCallback(sniffer, handle)
+	closeErr := sniffer.Close()
+	if readErr != nil {
+		return runtime.ChatCompletionResponse{}, isStream, readErr
+	}
+	if closeErr != nil {
+		return runtime.ChatCompletionResponse{}, isStream, fmt.Errorf("close chat completion response body: %w", closeErr)
+	}
+	return chatResp, isStream, nil
+}
+
+func responsesServerChatResponseSniffer(logInfo *recorder.LogInfo, resp *http.Response) (*UsageSniffer, bool, error) {
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
 		return nil, false, fmt.Errorf("write chat completion response separator: %w", err)
 	}
@@ -361,23 +412,14 @@ func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Res
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 
 	isStream := llm.DetectStreamingResponse(resp.Header)
-	sniffer := &UsageSniffer{
+	return &UsageSniffer{
 		Source:   resp.Body,
 		File:     logInfo.File,
 		Count:    &logInfo.Header.Layout.ResBodyLen,
 		Usage:    &logInfo.Header.Usage,
 		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
 		Events:   &logInfo.Events,
-	}
-	respBody, readErr := io.ReadAll(sniffer)
-	closeErr := sniffer.Close()
-	if readErr != nil {
-		return respBody, isStream, fmt.Errorf("read chat completion response body: %w", readErr)
-	}
-	if closeErr != nil {
-		return respBody, isStream, fmt.Errorf("close chat completion response body: %w", closeErr)
-	}
-	return respBody, isStream, nil
+	}, isStream, nil
 }
 
 func chatCompletionResponseError(statusCode int, status string, body []byte) error {

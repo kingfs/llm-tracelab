@@ -25,6 +25,10 @@ type Runtime interface {
 	InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error)
 }
 
+type streamingRuntime interface {
+	CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink runtime.ResponseStreamSink) (protocol.Response, error)
+}
+
 type Handler struct {
 	runtime      Runtime
 	maxBodyBytes int64
@@ -231,6 +235,12 @@ func (h *Handler) serveCompact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, auditID string, req protocol.CreateResponseRequest) {
+	if streamer, ok := h.runtime.(streamingRuntime); ok {
+		if fallback := h.serveIncrementalResponseStream(w, r, auditID, req, streamer); !fallback {
+			return
+		}
+	}
+
 	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
 	resp, err := h.runtime.Create(ctx, req)
 	if err != nil {
@@ -267,7 +277,7 @@ func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, au
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	writer := streamWriter{w: w}
+	writer := &streamWriter{w: w}
 	if err := writer.writeResponse(resp); err != nil {
 		h.recordExecutionEvent(r, audit.ExecutionEvent{
 			ResponseID:     completion.ResponseID,
@@ -305,11 +315,115 @@ func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, au
 	})
 }
 
-type streamWriter struct {
-	w http.ResponseWriter
+func (h *Handler) serveIncrementalResponseStream(w http.ResponseWriter, r *http.Request, auditID string, req protocol.CreateResponseRequest, streamer streamingRuntime) bool {
+	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	writer := &streamWriter{w: w}
+	sink := &auditedStreamSink{writer: writer, h: h, r: r, auditID: auditID}
+
+	resp, err := streamer.CreateStream(ctx, req, sink)
+	if err != nil {
+		if errors.Is(err, runtime.ErrIncrementalStreamUnsupported) && !writer.wrote {
+			return true
+		}
+		failureStatus := runtimeFailureStatus(err)
+		h.auditRejected(r, auditID, failureStatus, err.Error())
+		eventType := "response.request"
+		phase := "request"
+		if writer.wrote {
+			eventType = "response.stream"
+			phase = "stream"
+		}
+		h.recordExecutionEvent(r, audit.ExecutionEvent{
+			EventType: eventType,
+			Phase:     phase,
+			Status:    failureStatus,
+			Message:   err.Error(),
+			DetailsJSON: map[string]any{
+				"request_audit_id": auditID,
+				"stream":           true,
+			},
+		})
+		if !writer.wrote {
+			writeRuntimeError(w, err)
+		}
+		return false
+	}
+
+	h.auditCompleted(r, auditID, resp)
+	completion := audit.CompletionFromResponse(resp)
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.stream",
+		Phase:          "stream",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+			"mode":             "incremental",
+		},
+	})
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.request",
+		Phase:          "request",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+			"stream":           true,
+		},
+	})
+	return false
 }
 
-func (s streamWriter) writeResponse(resp protocol.Response) error {
+type auditedStreamSink struct {
+	writer  *streamWriter
+	h       *Handler
+	r       *http.Request
+	auditID string
+	started bool
+}
+
+func (s *auditedStreamSink) ResponseCreated(resp protocol.Response) error {
+	s.start()
+	return s.writer.ResponseCreated(resp)
+}
+
+func (s *auditedStreamSink) OutputTextDelta(delta runtime.ResponseTextDelta) error {
+	s.start()
+	return s.writer.OutputTextDelta(delta)
+}
+
+func (s *auditedStreamSink) ResponseCompleted(resp protocol.Response) error {
+	s.start()
+	return s.writer.ResponseCompleted(resp)
+}
+
+func (s *auditedStreamSink) start() {
+	if s.started {
+		return
+	}
+	s.started = true
+	s.h.recordExecutionEvent(s.r, audit.ExecutionEvent{
+		EventType: "response.stream",
+		Phase:     "stream",
+		Status:    "started",
+		DetailsJSON: map[string]any{
+			"request_audit_id": s.auditID,
+			"mode":             "incremental",
+		},
+	})
+}
+
+type streamWriter struct {
+	w     http.ResponseWriter
+	wrote bool
+}
+
+func (s *streamWriter) writeResponse(resp protocol.Response) error {
 	if err := s.write("response.created", protocol.StreamEvent{Type: "response.created", Response: &resp}); err != nil {
 		return err
 	}
@@ -324,7 +438,27 @@ func (s streamWriter) writeResponse(resp protocol.Response) error {
 	return s.write("response.completed", protocol.StreamEvent{Type: "response.completed", Response: &resp})
 }
 
-func (s streamWriter) writeOutputItem(outputIndex int, item protocol.OutputItem) error {
+func (s *streamWriter) ResponseCreated(resp protocol.Response) error {
+	return s.write("response.created", protocol.StreamEvent{Type: "response.created", Response: &resp})
+}
+
+func (s *streamWriter) OutputTextDelta(delta runtime.ResponseTextDelta) error {
+	outputIndex := delta.OutputIndex
+	contentIndex := delta.ContentIndex
+	return s.write("response.output_text.delta", protocol.StreamEvent{
+		Type:         "response.output_text.delta",
+		OutputIndex:  &outputIndex,
+		ItemID:       delta.ItemID,
+		ContentIndex: &contentIndex,
+		Delta:        delta.Delta,
+	})
+}
+
+func (s *streamWriter) ResponseCompleted(resp protocol.Response) error {
+	return s.write("response.completed", protocol.StreamEvent{Type: "response.completed", Response: &resp})
+}
+
+func (s *streamWriter) writeOutputItem(outputIndex int, item protocol.OutputItem) error {
 	index := outputIndex
 	if err := s.write("response.output_item.added", protocol.StreamEvent{
 		Type:        "response.output_item.added",
@@ -401,7 +535,7 @@ func (s streamWriter) writeOutputItem(outputIndex int, item protocol.OutputItem)
 	})
 }
 
-func (s streamWriter) write(event string, payload protocol.StreamEvent) error {
+func (s *streamWriter) write(event string, payload protocol.StreamEvent) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -415,6 +549,7 @@ func (s streamWriter) write(event string, payload protocol.StreamEvent) error {
 	if flusher, ok := s.w.(http.Flusher); ok {
 		flusher.Flush()
 	}
+	s.wrote = true
 	return nil
 }
 

@@ -29,6 +29,7 @@ type Client struct {
 }
 
 var _ runtime.ChatCompletionsClient = (*Client)(nil)
+var _ runtime.ChatCompletionsStreamer = (*Client)(nil)
 
 func New(opts Options) (*Client, error) {
 	baseURL := strings.TrimRight(opts.BaseURL, "/")
@@ -48,6 +49,15 @@ func New(opts Options) (*Client, error) {
 }
 
 func (c *Client) ChatCompletion(ctx context.Context, chatReq runtime.ChatCompletionRequest) (runtime.ChatCompletionResponse, error) {
+	return c.chatCompletion(ctx, chatReq, nil)
+}
+
+func (c *Client) ChatCompletionStream(ctx context.Context, chatReq runtime.ChatCompletionRequest, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
+	chatReq.Stream = true
+	return c.chatCompletion(ctx, chatReq, handle)
+}
+
+func (c *Client) chatCompletion(ctx context.Context, chatReq runtime.ChatCompletionRequest, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
 	if c == nil {
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("chat completions client is nil")
 	}
@@ -93,7 +103,7 @@ func (c *Client) ChatCompletion(ctx context.Context, chatReq runtime.ChatComplet
 	}
 
 	if chatReq.Stream {
-		chatResp, err := AggregateChatCompletionStream(httpResp.Body)
+		chatResp, err := AggregateChatCompletionStreamWithCallback(httpResp.Body, handle)
 		if err != nil {
 			return runtime.ChatCompletionResponse{}, err
 		}

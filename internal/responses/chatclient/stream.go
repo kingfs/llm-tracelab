@@ -13,6 +13,12 @@ import (
 
 // AggregateChatCompletionStream folds OpenAI-compatible Chat Completions SSE chunks into a final response.
 func AggregateChatCompletionStream(r io.Reader) (runtime.ChatCompletionResponse, error) {
+	return AggregateChatCompletionStreamWithCallback(r, nil)
+}
+
+// AggregateChatCompletionStreamWithCallback folds OpenAI-compatible Chat Completions SSE chunks into a final response,
+// calling handle as content deltas are decoded.
+func AggregateChatCompletionStreamWithCallback(r io.Reader, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -33,11 +39,37 @@ func AggregateChatCompletionStream(r io.Reader) (runtime.ChatCompletionResponse,
 			return runtime.ChatCompletionResponse{}, fmt.Errorf("decode chat completion stream chunk JSON: %w", err)
 		}
 		acc.add(chunk)
+		if err := emitChatStreamEvents(chunk, handle); err != nil {
+			return runtime.ChatCompletionResponse{}, err
+		}
 	}
 	if err := scanner.Err(); err != nil {
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("read chat completion stream: %w", err)
 	}
 	return acc.response(), nil
+}
+
+func emitChatStreamEvents(chunk chatCompletionStreamChunk, handle runtime.ChatStreamCallback) error {
+	if handle == nil {
+		return nil
+	}
+	for _, choice := range chunk.Choices {
+		if choice.Delta.Content == nil && choice.Delta.Role == "" && choice.FinishReason == nil {
+			continue
+		}
+		event := runtime.ChatStreamEvent{
+			ChoiceIndex:  choice.Index,
+			Role:         choice.Delta.Role,
+			FinishReason: choice.FinishReason,
+		}
+		if choice.Delta.Content != nil {
+			event.ContentDelta = *choice.Delta.Content
+		}
+		if err := handle(event); err != nil {
+			return fmt.Errorf("handle chat completion stream event: %w", err)
+		}
+	}
+	return nil
 }
 
 type chatCompletionStreamChunk struct {

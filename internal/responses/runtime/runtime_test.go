@@ -13,12 +13,16 @@ import (
 )
 
 type fakeChatClient struct {
-	reqs  []ChatCompletionRequest
-	req   ChatCompletionRequest
-	resps []ChatCompletionResponse
-	resp  ChatCompletionResponse
-	errs  []error
-	err   error
+	reqs         []ChatCompletionRequest
+	req          ChatCompletionRequest
+	resps        []ChatCompletionResponse
+	resp         ChatCompletionResponse
+	errs         []error
+	err          error
+	streamReqs   []ChatCompletionRequest
+	streamEvents []ChatStreamEvent
+	streamResp   ChatCompletionResponse
+	streamErr    error
 }
 
 func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
@@ -35,6 +39,41 @@ func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionR
 		return f.resps[index], nil
 	}
 	return f.resp, nil
+}
+
+func (f *fakeChatClient) ChatCompletionStream(ctx context.Context, req ChatCompletionRequest, handle ChatStreamCallback) (ChatCompletionResponse, error) {
+	f.streamReqs = append(f.streamReqs, req)
+	if f.streamErr != nil {
+		return ChatCompletionResponse{}, f.streamErr
+	}
+	for _, event := range f.streamEvents {
+		if err := handle(event); err != nil {
+			return ChatCompletionResponse{}, err
+		}
+	}
+	return f.streamResp, nil
+}
+
+type fakeResponseStreamSink struct {
+	created   []protocol.Response
+	deltas    []ResponseTextDelta
+	completed []protocol.Response
+	err       error
+}
+
+func (f *fakeResponseStreamSink) ResponseCreated(resp protocol.Response) error {
+	f.created = append(f.created, resp)
+	return f.err
+}
+
+func (f *fakeResponseStreamSink) OutputTextDelta(delta ResponseTextDelta) error {
+	f.deltas = append(f.deltas, delta)
+	return f.err
+}
+
+func (f *fakeResponseStreamSink) ResponseCompleted(resp protocol.Response) error {
+	f.completed = append(f.completed, resp)
+	return f.err
 }
 
 type fakeWebSearchProvider struct {
@@ -190,6 +229,63 @@ func TestRuntimeCreateStreamRequestsStreamingChatCompletion(t *testing.T) {
 	}
 	if !client.reqs[0].Stream {
 		t.Fatalf("chat request stream = false, want true")
+	}
+}
+
+func TestRuntimeCreateStreamEmitsDeltasAndStoresFinalResponse(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ContentDelta: "Hello "},
+			{ChoiceIndex: 0, ContentDelta: "world"},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "Hello world"},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+		},
+	}
+	store := NewMemoryStore()
+	rt := New(Config{DefaultModel: "fallback-model"}, client, store)
+	sink := &fakeResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "hello",
+		Stream: true,
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+
+	if len(client.streamReqs) != 1 || !client.streamReqs[0].Stream {
+		t.Fatalf("stream chat requests = %#v, want one streaming request", client.streamReqs)
+	}
+	if len(sink.created) != 1 || sink.created[0].ID != resp.ID || sink.created[0].Status != "in_progress" {
+		t.Fatalf("created events = %#v, want in_progress response with final id %q", sink.created, resp.ID)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].Delta != "Hello " || sink.deltas[1].Delta != "world" {
+		t.Fatalf("deltas = %#v, want separate content chunks", sink.deltas)
+	}
+	if len(sink.completed) != 1 || sink.completed[0].ID != resp.ID {
+		t.Fatalf("completed events = %#v, want final response id %q", sink.completed, resp.ID)
+	}
+	if resp.Usage != (protocol.Usage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}) {
+		t.Fatalf("usage = %#v, want chat usage", resp.Usage)
+	}
+	if len(resp.Output) != 1 || resp.Output[0].Content[0].Text != "Hello world" {
+		t.Fatalf("final output = %#v, want aggregated text", resp.Output)
+	}
+	if sink.deltas[0].ItemID != resp.Output[0].ID {
+		t.Fatalf("delta item_id = %q, want final message id %q", sink.deltas[0].ItemID, resp.Output[0].ID)
+	}
+
+	stored, ok, err := store.Get(context.Background(), resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored response lookup ok=%v err=%v", ok, err)
+	}
+	if len(stored.Output) != 1 || stored.Output[0].Content[0].Text != "Hello world" {
+		t.Fatalf("stored output = %#v, want full response text", stored.Output)
 	}
 }
 

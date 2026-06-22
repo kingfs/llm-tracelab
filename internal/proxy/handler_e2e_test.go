@@ -1086,8 +1086,8 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 			t.Fatalf("stream body missing event %q:\n%s", event, body)
 		}
 	}
-	if !strings.Contains(body, `"delta":"stream pong"`) {
-		t.Fatalf("stream body missing output text:\n%s", body)
+	if !strings.Contains(body, `"delta":"stream "`) || !strings.Contains(body, `"delta":"pong"`) {
+		t.Fatalf("stream body missing incremental output text deltas:\n%s", body)
 	}
 	if !gotUpstreamStream {
 		t.Fatal("upstream chat request stream = false, want true")
