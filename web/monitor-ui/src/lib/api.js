@@ -53,6 +53,8 @@ export const apiPaths = {
   providerModelsBatch: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/models/batch`,
   providerModel: (providerID, model) => `/api/channels/${encodeURIComponent(providerID)}/models/${encodeURIComponent(model)}`,
   providerProbePreview: "/api/provider-probe",
+  providerProbeReport: "/api/provider-probe/report",
+  providerProbeApply: "/api/provider-probe/report/apply",
   providerSetupValidate: "/api/provider-setup/validate",
   providerSetupApply: "/api/provider-setup/apply",
   providerPresets: "/api/provider-presets",

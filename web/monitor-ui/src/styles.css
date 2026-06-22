@@ -3651,6 +3651,16 @@ a:focus-visible {
   color: var(--text);
 }
 
+.provider-batch-probe-panel {
+  gap: 14px;
+}
+
+.provider-batch-report-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .provider-entry-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3869,6 +3879,10 @@ a:focus-visible {
 
   .channel-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .provider-batch-report-list {
+    grid-template-columns: 1fr;
   }
 
   .channel-model-row {
