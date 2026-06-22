@@ -1,6 +1,6 @@
 # Responses Server 设计
 
-状态：Responses server 演进设计，Stage 3A/3B 与 Stage 4A/4B 已部分落地
+状态：Responses server 演进设计，Stage 3A/3B、Stage 4A/4B 与 Stage 5A/5B 已部分落地
 日期：2026-06-22
 
 本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-22 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
@@ -14,12 +14,13 @@
 - Chat Completions adapter：本地 Responses runtime 会把非流式 Responses 请求映射为内部上游 `POST /v1/chat/completions` 调用，由现有 router 选择目标 OpenAI-compatible upstream。
 - cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
 - ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
+- hosted web_search 首切：新增 `tools.web_search` 配置和 `internal/responses/tools/websearch` provider，支持 disabled/mock/SearXNG。开启后，非流式 Responses runtime 可把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把 tool result 注入第二轮 Chat Completions。
 - SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client，Postgres 路径已具备打开和 ent schema 基础，但完整生产 migration、运维流程和审计查询仍未完成。
 
 当前明确未完成：
 
 - streaming Responses server-mode。
-- tool loop、hosted `web_search` 和完整 tool call/tool result 生命周期。
+- 完整 tool call/tool result 生命周期和 tool audit。当前只支持非流式 hosted `web_search` 首切。
 - compact workflow。
 - request/tool audit 表，以及完整 execution event / upstream exchange 语义查询。
 - 完整 Postgres migration 生产化。
@@ -345,7 +346,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 
 当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore` 和 Postgres 打开路径已落地；完整 Postgres migration 生产化、request audit、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。
 
-### Stage 3：Hosted tools 与 compact（未完成）
+### Stage 3：Hosted tools 与 compact（部分落地）
 
 产物：
 
@@ -358,6 +359,8 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - hosted tool 可禁用、可审计、错误可读。
 - compact 产出 summary/item，并保留原始 item lineage。
 - Codex 长会话可通过 audit 解释 compact 行为。
+
+当前状态：`tools.web_search` 配置、mock/SearXNG provider、非流式 hosted `web_search` tool loop 已落地。tool audit、streaming tool events、compact workflow 和 model profile 驱动的 context budgeting 仍未完成。
 
 ### Stage 4：高级 routing 与多 provider（未完成）
 

@@ -34,6 +34,7 @@ TraceLab 当前提供：
 - OpenAI-compatible provider 只能声明兼容其实际支持的 endpoint。
 - Responses server-mode 默认关闭；关闭时 `/v1/responses` 仍按普通 OpenAI-compatible endpoint 代理透传。
 - 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现非流式 Responses 响应。
+- 开启 `tools.web_search.enabled=true` 后，非流式 Responses runtime 可执行 hosted `web_search` / `web_search_preview` 首切，provider 支持 `mock` 和 SearXNG。
 - 非 Responses 请求不进入 Responses runtime，继续走现有代理、路由、录制和解析路径。
 
 详细内容见 [协议参考](./protocol-reference/README.md)。
@@ -160,7 +161,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 用派生数据替代 raw cassette。
 - 让测试依赖真实 provider。
 - Responses server-mode streaming。
-- Responses tool loop、hosted web search、compact workflow。
+- 完整 Responses tool lifecycle、tool audit、streaming tool events 和 compact workflow。
 - request/tool audit 表和完整 Postgres migration 生产化。
 - provider auto-detect。
 

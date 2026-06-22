@@ -33,6 +33,8 @@ Responses server-mode 是一个可选功能。默认情况下 `/v1/responses` �
 
 开启 server-mode 后，当前已支持非流式 Responses 请求经本地 runtime 映射为内部上游 `/v1/chat/completions` 调用；该内部上游 HTTP exchange 会按现有 recorder 写入 `.http` cassette。非 Responses 请求仍走现有代理、路由、录制和解析路径。
 
+Hosted `web_search` 已有首切实现。配置 `tools.web_search.enabled=true` 后，可选择 `mock` 或 `searxng` provider；非流式 Responses runtime 会把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把结果注入下一轮 Chat Completions。默认关闭，不影响普通代理路径。
+
 详细协议说明见 [协议参考](./protocol-reference/README.md)。
 
 ## 录制格式
@@ -142,6 +144,6 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 - 让 replay 依赖网络访问。
 - 用 SQLite 替代 raw cassette 作为 replay 事实源。
 - Responses server-mode streaming。
-- Responses tool loop、hosted web search、compact workflow。
+- 完整 Responses tool lifecycle、tool audit、streaming tool events 和 compact workflow。
 - request/tool audit 表和完整 Postgres migration 生产化。
 - provider auto-detect。
