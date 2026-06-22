@@ -196,13 +196,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 	}
 	switch opts.direction {
 	case "up":
-		st, err := store.NewWithDatabase(
-			cfg.TraceOutputDir(),
-			cfg.DatabaseDriver(),
-			cfg.DatabaseDSN(),
-			cfg.DatabaseMaxOpenConns(),
-			cfg.DatabaseMaxIdleConns(),
-		)
+		st, err := initializeApplicationDatabase(cfg)
 		if err != nil {
 			slog.Error("Application database migration failed", "error", err)
 			return 1
@@ -226,6 +220,16 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		fmt.Fprintf(os.Stderr, "unknown db migrate direction %q\n", opts.direction)
 		return 2
 	}
+}
+
+func initializeApplicationDatabase(cfg *config.Config) (*store.Store, error) {
+	return store.NewWithDatabase(
+		cfg.TraceOutputDir(),
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+	)
 }
 
 func runDBSecretStatusWithOptions(opts dbSecretOptions) int {

@@ -504,6 +504,49 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	}
 }
 
+func TestTopLevelMigrateAutoMigrateUsesApplicationDatabase(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+  auto_migrate: true
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	var out bytes.Buffer
+	if code := runMigrateWithOptions(migrateOptions{
+		configPath:   configPath,
+		rewriteV2:    false,
+		rebuildIndex: false,
+		format:       "json",
+		stdout:       &out,
+	}); code != 0 {
+		t.Fatalf("runMigrateWithOptions() = %d, want 0, output=%s", code, out.String())
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	defer db.Close()
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'`).Scan(&count); err != nil {
+		t.Fatalf("query schema_migrations marker error = %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("top-level migrate created auth schema_migrations table; want application database init only")
+	}
+}
+
 func writePostgresDBMigrateConfig(t *testing.T) string {
 	t.Helper()
 

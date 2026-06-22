@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/migrate"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -85,10 +84,12 @@ func runMigrateWithOptions(opts migrateOptions) int {
 		})
 	}
 	if cfg.DatabaseAutoMigrate() {
-		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
+		appStore, err := initializeApplicationDatabase(cfg)
+		if err != nil {
 			slog.Error("Database migration failed", "error", err)
 			return 1
 		}
+		_ = appStore.Close()
 	}
 
 	traceStore, err := store.NewWithDatabase(

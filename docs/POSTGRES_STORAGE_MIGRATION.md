@@ -20,8 +20,10 @@ claim that Postgres persistence is fully production mature today.
 - SQLite remains the default for empty driver values and keeps the existing
   local path / `file:` DSN behavior.
 - The checked-in `ent/migrations` directory contains SQLite-oriented
-  golang-migrate files. `ent/migrate/main.go` generates migration diffs with
-  `schema.WithDialect(dialect.SQLite)`.
+  golang-migrate files. `ent/migrate/main.go` is now a minimal dialect-aware
+  entry point: SQLite remains the default and still writes to `ent/migrations`;
+  Postgres mode requires an explicit Atlas dev URL but intentionally stops
+  before generating SQL in this stage.
 - `internal/auth/migrate.go` embeds `ent/migrations` and wires only the SQLite
   golang-migrate driver. For any non-SQLite driver, it returns a clear
   unsupported-driver error.
@@ -48,6 +50,9 @@ Stage 6 splits migration ownership explicitly:
 `db migrate` is no longer an alias for the auth migrator. Operators should
 still treat it as an initialization command for disposable or controlled
 evaluation databases, not as the final production Postgres migration workflow.
+The top-level `migrate` command remains a cassette rewrite/index rebuild
+workflow; when `database.auto_migrate` is enabled, it initializes the
+application database schema and does not run the auth migrator.
 
 ## Production Deployment Guidance
 
@@ -120,11 +125,59 @@ The production route should be additive and reviewable:
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
 
+## Stage 7B Generation Entry
+
+Stage 7B adds only the minimum CLI surface needed for future checked-in
+Postgres migrations. It does not add Postgres migration SQL and does not change
+`ent/dao/**` or the existing SQLite migration files.
+
+SQLite compatibility:
+
+```bash
+go run -mod=mod ent/migrate/main.go <migration_name>
+```
+
+This remains equivalent to:
+
+```bash
+go run -mod=mod ent/migrate/main.go \
+  --dialect sqlite \
+  --dir ent/migrations \
+  <migration_name>
+```
+
+Future Postgres generation must use a temporary development database, never a
+production DSN:
+
+```bash
+go run -mod=mod ent/migrate/main.go \
+  --dialect postgres \
+  --dir ent/postgres-migrations \
+  --dev-url 'postgres://user:pass@localhost:5432/llm_tracelab_migrate_dev?sslmode=disable' \
+  <migration_name>
+```
+
+`LLM_TRACELAB_ENT_MIGRATE_DEV_URL` can supply the dev URL when `--dev-url` is
+omitted. In the current stage, this command validates the Postgres generation
+configuration and then exits before writing migration files.
+
+When Postgres SQL generation is enabled later, each generated directory must
+have its matching checksum refreshed immediately:
+
+```bash
+go run -mod=mod ent/migrate/update_hash.go <migration_dir>
+```
+
+Review the generated SQL before committing it, commit the migration files and
+`atlas.sum` together, and do not hand-edit migration files that have already
+been committed or applied in a shared environment.
+
 ## Remaining Gaps
 
 - `db migrate up` is application-owned but still uses ent auto schema creation,
   not checked-in versioned migrations.
-- Postgres application migration files are not checked in.
+- Postgres application migration files are not checked in, and the Stage 7B
+  generator entry intentionally does not write them yet.
 - Postgres auth migrations are not implemented.
 - Request audit, execution events, upstream exchange correlation, and Monitor /
   MCP semantic diagnostics are still incomplete.
