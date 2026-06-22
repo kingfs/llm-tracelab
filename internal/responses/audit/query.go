@@ -2,7 +2,11 @@ package audit
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
 	"time"
+	"unicode/utf8"
 
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/kingfs/llm-tracelab/ent/dao"
@@ -91,10 +95,37 @@ type UpstreamExchangeView struct {
 	ErrorText      string
 }
 
+type ToolCallEventReference struct {
+	ID         string
+	Status     string
+	Message    string
+	OccurredAt time.Time
+}
+
+type ToolCallView struct {
+	CallID           string
+	ToolName         string
+	Executor         string
+	StatusesSeen     []string
+	LatestStatus     string
+	StartedAt        time.Time
+	CompletedAt      time.Time
+	ErrorText        string
+	ArgumentsSummary string
+	QuerySummary     string
+	OutputSummary    string
+	EventCount       int
+	Events           []ToolCallEventReference
+	RequestAuditID   string
+	ResponseID       string
+	ConversationID   string
+}
+
 type RequestAuditTrace struct {
 	RequestAudit      RequestAuditView
 	ExecutionEvents   []ExecutionEventView
 	UpstreamExchanges []UpstreamExchangeView
+	ToolCalls         []ToolCallView
 }
 
 func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequestAuditsParams) ([]RequestAuditView, error) {
@@ -156,6 +187,7 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 	}
 	trace.ExecutionEvents = events
 	trace.UpstreamExchanges = exchanges
+	trace.ToolCalls = deriveToolCalls(events)
 	return trace, true, nil
 }
 
@@ -327,6 +359,173 @@ func upstreamExchangeView(record *dao.UpstreamExchange) UpstreamExchangeView {
 		StartedAt:      record.StartedAt,
 		CompletedAt:    record.CompletedAt,
 		ErrorText:      record.ErrorText,
+	}
+}
+
+func deriveToolCalls(events []ExecutionEventView) []ToolCallView {
+	if len(events) == 0 {
+		return nil
+	}
+	indexByKey := make(map[string]int)
+	statusSeen := make([]map[string]struct{}, 0)
+	out := make([]ToolCallView, 0)
+	for _, event := range events {
+		if event.EventType != "response.tool_call" {
+			continue
+		}
+		callID := toolDetailString(event.DetailsJSON, "call_id", "tool_call_id")
+		key := callID
+		if key == "" {
+			key = "event:" + event.ID
+		}
+		idx, ok := indexByKey[key]
+		if !ok {
+			indexByKey[key] = len(out)
+			statusSeen = append(statusSeen, map[string]struct{}{})
+			out = append(out, ToolCallView{
+				CallID:         callID,
+				ToolName:       toolDetailString(event.DetailsJSON, "tool_name", "name"),
+				Executor:       toolDetailString(event.DetailsJSON, "executor"),
+				RequestAuditID: event.RequestAuditID,
+				ResponseID:     event.ResponseID,
+				ConversationID: event.ConversationID,
+			})
+			idx = len(out) - 1
+		}
+		call := &out[idx]
+		if call.ToolName == "" {
+			call.ToolName = toolDetailString(event.DetailsJSON, "tool_name", "name")
+		}
+		if call.Executor == "" {
+			call.Executor = toolDetailString(event.DetailsJSON, "executor")
+		}
+		if call.RequestAuditID == "" {
+			call.RequestAuditID = event.RequestAuditID
+		}
+		if call.ResponseID == "" {
+			call.ResponseID = event.ResponseID
+		}
+		if call.ConversationID == "" {
+			call.ConversationID = event.ConversationID
+		}
+		if event.Status != "" {
+			if _, exists := statusSeen[idx][event.Status]; !exists {
+				statusSeen[idx][event.Status] = struct{}{}
+				call.StatusesSeen = append(call.StatusesSeen, event.Status)
+			}
+			call.LatestStatus = event.Status
+		}
+		if event.Status == "started" && call.StartedAt.IsZero() {
+			call.StartedAt = event.OccurredAt
+		}
+		if event.Status == "completed" || event.Status == "failed" {
+			call.CompletedAt = event.OccurredAt
+		}
+		if summary := summarizeSensitiveToolDetail(event.DetailsJSON["arguments"]); summary != "" {
+			call.ArgumentsSummary = summary
+		}
+		if summary := summarizeSensitiveToolDetail(event.DetailsJSON["query"]); summary != "" {
+			call.QuerySummary = summary
+		}
+		if summary := toolOutputSummary(event.DetailsJSON); summary != "" {
+			call.OutputSummary = summary
+		}
+		if event.Status == "failed" {
+			call.ErrorText = summarizeToolError(event)
+		}
+		call.EventCount++
+		call.Events = append(call.Events, ToolCallEventReference{
+			ID:         event.ID,
+			Status:     event.Status,
+			Message:    summarizeToolEventMessage(event.Message),
+			OccurredAt: event.OccurredAt,
+		})
+	}
+	return out
+}
+
+func toolDetailString(details map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := details[key]
+		if !ok || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			return typed
+		case fmt.Stringer:
+			return typed.String()
+		default:
+			return fmt.Sprint(typed)
+		}
+	}
+	return ""
+}
+
+func summarizeSensitiveToolDetail(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return redactedCharsSummary(typed)
+	case []byte:
+		return fmt.Sprintf("<redacted; bytes=%d>", len(typed))
+	default:
+		return fmt.Sprintf("<redacted; type=%T>", value)
+	}
+}
+
+func summarizeToolError(event ExecutionEventView) string {
+	if summary := summarizeSensitiveToolDetail(event.DetailsJSON["error"]); summary != "" {
+		return summary
+	}
+	return summarizeToolEventMessage(event.Message)
+}
+
+func summarizeToolEventMessage(message string) string {
+	if message == "" {
+		return ""
+	}
+	return redactedCharsSummary(message)
+}
+
+func redactedCharsSummary(value string) string {
+	return fmt.Sprintf("<redacted; chars=%d>", utf8.RuneCountInString(value))
+}
+
+func toolOutputSummary(details map[string]any) string {
+	if value, ok := details["output_chars"]; ok {
+		if n, ok := toolInt(value); ok {
+			return "chars=" + strconv.Itoa(n)
+		}
+	}
+	if value, ok := details["result_bytes"]; ok {
+		if n, ok := toolInt(value); ok {
+			return "bytes=" + strconv.Itoa(n)
+		}
+	}
+	if value, ok := details["result_count"]; ok {
+		if n, ok := toolInt(value); ok {
+			return "results=" + strconv.Itoa(n)
+		}
+	}
+	return ""
+}
+
+func toolInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case json.Number:
+		n, err := strconv.Atoi(string(typed))
+		return n, err == nil
+	default:
+		return 0, false
 	}
 }
 

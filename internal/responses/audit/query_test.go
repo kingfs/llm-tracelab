@@ -3,8 +3,10 @@ package audit
 import (
 	"context"
 	stdsql "database/sql"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,6 +203,120 @@ func TestQueryServiceGetRequestAuditTraceFiltersByClientRequestAndConversation(t
 	}
 }
 
+func TestQueryServiceDerivesToolCallDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 22, 13, 0, 0, 0, time.UTC)
+	const secretMarker = "SECRET_TOOL_MARKER"
+
+	mustCreateRequestAudit(t, client, requestAuditSeed{
+		id:             "audit_tools",
+		responseID:     "resp_tools",
+		conversationID: "conv_tools",
+		method:         "POST",
+		path:           "/v1/responses",
+		status:         "completed",
+		createdAt:      base,
+	})
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "tool_started",
+		requestAuditID: "audit_tools",
+		responseID:     "resp_tools",
+		conversationID: "conv_tools",
+		eventType:      "response.tool_call",
+		phase:          "tool_call",
+		status:         "started",
+		detailsJSON: map[string]any{
+			"call_id":   "call_search",
+			"tool_name": "web_search",
+			"executor":  "hosted:web_search",
+			"query":     "find " + secretMarker,
+		},
+		occurredAt: base.Add(time.Second),
+	})
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "tool_completed",
+		requestAuditID: "audit_tools",
+		responseID:     "resp_tools",
+		conversationID: "conv_tools",
+		eventType:      "response.tool_call",
+		phase:          "tool_call",
+		status:         "completed",
+		detailsJSON: map[string]any{
+			"call_id":      "call_search",
+			"tool_name":    "web_search",
+			"executor":     "hosted:web_search",
+			"query":        "find " + secretMarker,
+			"result_count": 2,
+		},
+		occurredAt: base.Add(2 * time.Second),
+	})
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "tool_failed",
+		requestAuditID: "audit_tools",
+		responseID:     "resp_tools",
+		conversationID: "conv_tools",
+		eventType:      "response.tool_call",
+		phase:          "tool_call",
+		status:         "failed",
+		message:        "failed with " + secretMarker,
+		detailsJSON: map[string]any{
+			"call_id":   "call_func",
+			"tool_name": "lookup_secret",
+			"executor":  "function",
+			"arguments": `{"token":"` + secretMarker + `"}`,
+			"error":     "tool failed: " + secretMarker,
+		},
+		occurredAt: base.Add(3 * time.Second),
+	})
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "model_ignored",
+		requestAuditID: "audit_tools",
+		responseID:     "resp_tools",
+		eventType:      "model_call",
+		status:         "completed",
+		occurredAt:     base.Add(4 * time.Second),
+	})
+
+	trace, found, err := NewQueryService(client).GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		RequestAuditID: "audit_tools",
+		EventLimit:     10,
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace() error = %v", err)
+	}
+	if !found {
+		t.Fatal("GetRequestAuditTrace() found = false, want true")
+	}
+	if len(trace.ToolCalls) != 2 {
+		t.Fatalf("ToolCalls len = %d, want 2: %+v", len(trace.ToolCalls), trace.ToolCalls)
+	}
+	search := trace.ToolCalls[0]
+	if search.CallID != "call_search" || search.ToolName != "web_search" || search.Executor != "hosted:web_search" {
+		t.Fatalf("search tool call = %+v, want call_search/web_search/hosted:web_search", search)
+	}
+	if !reflect.DeepEqual(search.StatusesSeen, []string{"started", "completed"}) || search.LatestStatus != "completed" {
+		t.Fatalf("search statuses = %v latest=%q, want started/completed", search.StatusesSeen, search.LatestStatus)
+	}
+	if !search.StartedAt.Equal(base.Add(time.Second)) || !search.CompletedAt.Equal(base.Add(2*time.Second)) {
+		t.Fatalf("search times = %s/%s, want started/completed times", search.StartedAt, search.CompletedAt)
+	}
+	if search.QuerySummary == "" || search.OutputSummary != "results=2" || search.EventCount != 2 {
+		t.Fatalf("search summaries = query:%q output:%q events:%d", search.QuerySummary, search.OutputSummary, search.EventCount)
+	}
+	failed := trace.ToolCalls[1]
+	if failed.CallID != "call_func" || failed.LatestStatus != "failed" || failed.ErrorText == "" || failed.ArgumentsSummary == "" {
+		t.Fatalf("failed tool call = %+v, want failed redacted summaries", failed)
+	}
+	payload, err := json.Marshal(trace.ToolCalls)
+	if err != nil {
+		t.Fatalf("json.Marshal(ToolCalls) error = %v", err)
+	}
+	if strings.Contains(string(payload), secretMarker) {
+		t.Fatalf("ToolCalls leaked secret marker: %s", payload)
+	}
+}
+
 func TestQueryServiceListRequestAuditsLimitAndEmptyResults(t *testing.T) {
 	ctx := context.Background()
 	client := openAuditTestClient(t)
@@ -302,10 +418,12 @@ type executionEventSeed struct {
 	id             string
 	responseID     string
 	requestAuditID string
+	conversationID string
 	eventType      string
 	phase          string
 	status         string
 	message        string
+	detailsJSON    map[string]any
 	occurredAt     time.Time
 }
 
@@ -314,13 +432,20 @@ func mustCreateExecutionEvent(t *testing.T, client *dao.Client, seed executionEv
 	create := client.ExecutionEvent.Create().
 		SetID(seed.id).
 		SetEventType(seed.eventType).
-		SetDetailsJSON(map[string]any{"seed": seed.id}).
 		SetOccurredAt(seed.occurredAt)
+	if seed.detailsJSON != nil {
+		create.SetDetailsJSON(seed.detailsJSON)
+	} else {
+		create.SetDetailsJSON(map[string]any{"seed": seed.id})
+	}
 	if seed.responseID != "" {
 		create.SetResponseID(seed.responseID)
 	}
 	if seed.requestAuditID != "" {
 		create.SetRequestAuditID(seed.requestAuditID)
+	}
+	if seed.conversationID != "" {
+		create.SetConversationID(seed.conversationID)
 	}
 	if seed.phase != "" {
 		create.SetPhase(seed.phase)
