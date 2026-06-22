@@ -107,8 +107,8 @@
 
 ### Request audit 诊断深度
 
-- 已有：`request_audits`、`execution_events`、`upstream_exchanges`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request 维度只读 trace 查询首切。
-- 缺口：缺少 thread/session/turn/client-request-id 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/tool/request feature 顶层诊断。
+- 已有：`request_audits`、`execution_events`、`upstream_exchanges`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切。
+- 缺口：缺少 thread/session/turn 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/tool/request feature 顶层诊断。
 - llm-tracelab 下一步落点：扩展 `cmd/server/audit.go`，复用并扩展 `internal/responses/audit.QueryService`。
 
 ### Compact 与 context optimization
