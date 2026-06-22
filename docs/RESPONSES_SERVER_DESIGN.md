@@ -1,9 +1,29 @@
 # Responses Server 设计
 
-状态：Stage 1A 设计草案
+状态：Responses server 演进设计，Stage 3A/3B 与 Stage 4A/4B 已部分落地
 日期：2026-06-22
 
-本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构。它不是当前实现事实；当前已经落地的能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
+本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-22 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
+
+## 已落地实现截至 2026-06-22
+
+当前已经落地的范围是可选的 `/v1/responses` 本地 server-mode，不改变默认 proxy 行为：
+
+- 配置：新增 `responses_server` 配置块，字段包括 `enabled`、`default_model`、`force_store`、`max_request_body_bytes` 和 `path`。默认 `enabled: false`，默认 path 为 `/v1/responses`。
+- server-mode path：当 `responses_server.enabled=true` 且请求路径等于配置的 Responses path 时，proxy handler 直接进入本地 Responses HTTP handler；非 Responses 请求仍走现有代理热路径。
+- Chat Completions adapter：本地 Responses runtime 会把非流式 Responses 请求映射为内部上游 `POST /v1/chat/completions` 调用，由现有 router 选择目标 OpenAI-compatible upstream。
+- cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
+- ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
+- SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client，Postgres 路径已具备打开和 ent schema 基础，但完整生产 migration、运维流程和审计查询仍未完成。
+
+当前明确未完成：
+
+- streaming Responses server-mode。
+- tool loop、hosted `web_search` 和完整 tool call/tool result 生命周期。
+- compact workflow。
+- request/tool audit 表，以及完整 execution event / upstream exchange 语义查询。
+- 完整 Postgres migration 生产化。
+- provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
 ## 背景与目标
 
@@ -87,25 +107,24 @@ client
 - `mode: proxy`：按现有代理路径转发 `/v1/responses` 到上游 `/v1/responses`，只做 routing、recording、解析和索引。
 - `mode: responses_server`：由 TraceLab 接管 Responses 语义。即使上游也支持 Responses，也可配置为由本地 runtime 统一处理状态、tools、audit 和 compact。
 
-Stage 1A 后续实现建议先聚焦 `responses_server` + OpenAI-compatible Chat Completions 上游，不急于实现 native Responses pass-through 的全部细节。
+当前已先落地 `responses_server` + OpenAI-compatible Chat Completions 上游的非流式最小链路；native Responses pass-through 仍沿用普通代理路径，尚未实现完整 semantic interposition。
 
 ### 上游只有 Chat Completions
 
 当 client 请求 `/v1/responses`，选中的 provider 是 OpenAI-compatible 且只暴露 `/chat/completions` 时：
 
-1. TraceLab HTTP server 接收 Responses 请求，进行鉴权、body limit 和 request audit。
+1. TraceLab HTTP server 接收 Responses 请求，进行鉴权和 body limit；独立 request audit 表仍未完成。
 2. Gateway Routing 根据 requested model、provider 配置、capabilities、model profile 选择支持 `chat_completions` model client 的 route target。
 3. Responses Runtime 读取 `previous_response_id`、conversation item 和 request input，构造当前 turn 的 model context。
 4. Runtime 将 Responses input、instructions、tools、tool choice、reasoning/metadata 等映射到 OpenAI-compatible Chat Completions 请求。
-5. TraceLab 调用上游 `POST /chat/completions`。这个外部 exchange 进入现有 Proxy Recording 能力，写为 `.http` V3 cassette，并带上 route/request/response 关联 metadata。
-6. 如果模型返回 tool calls，Runtime 执行 server-side hosted tools 或等待/记录 client-side function tool round-trip，再按需要继续调用上游 Chat Completions。
-7. Runtime 输出 OpenAI Responses 兼容 response 或 streaming events。
-8. Persistence/Audit 写入 Response、Conversation、Item、ExecutionEvent、RequestAudit、UpstreamExchange 关联记录。
+5. TraceLab 调用上游 `POST /chat/completions`。这个外部 exchange 进入现有 Proxy Recording 能力，写为 `.http` V3 cassette。
+6. 当前 Runtime 输出非流式 OpenAI Responses 兼容 response；streaming events 尚未支持。
+7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Conversation、ExecutionEvent、RequestAudit、UpstreamExchange 等完整审计表仍是目标设计。
 
 关键边界：
 
 - client 看到的是 `/v1/responses` 语义；上游看到的是 `/chat/completions`。
-- 上游 Chat Completions exchange 是外部 cassette；tool 执行、conversation mutation、compact 决策是内部 execution events。
+- 上游 Chat Completions exchange 是外部 cassette；tool 执行、conversation mutation、compact 决策未来应成为内部 execution events。
 - 非 `/v1/responses` 请求不进入 Responses Runtime。
 
 ### 非 Responses 路径
@@ -172,6 +191,8 @@ providers:
 
 目标是 Postgres-first，但保留 SQLite fallback 和旧 replay 兼容。
 
+截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这两张表。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration、审计表和生产运维流程仍未完成。
+
 ### Postgres-first semantic store
 
 生产和长会话场景建议使用 Postgres 保存 Responses semantic state：
@@ -231,9 +252,11 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - HTTP cassette replay：现有 `pkg/replay.Transport`，用于重放外部 HTTP response。必须保持兼容旧 V2/V3 文件。
 - Semantic execution replay：未来可选能力，用 execution events 和 item store 复现 Responses Runtime 决策。它不能成为旧测试和旧 cassette 的前置条件。
 
-## 分阶段实施计划
+## 分阶段实施计划与当前状态
 
-### Stage 1A：设计与边界冻结
+下面保留原始演进计划，并补充截至 2026-06-22 的状态。未标注已落地的条目仍是目标，不代表当前支持。
+
+### Stage 1A：设计与边界冻结（已落地）
 
 产物：
 
@@ -246,7 +269,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - 文档覆盖现状不变量、目标上下文、responses-gateway 吸收映射、server mode、provider 配置、存储、record/replay 和阶段计划。
 - 文档检查通过 `rtk git diff --check`。
 
-### Stage 1B：协议 DTO 与接口骨架
+### Stage 1B：协议 DTO 与接口骨架（已落地）
 
 产物：
 
@@ -260,7 +283,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - 不修改 `pkg/replay` 行为。
 - 非 `/v1/responses` proxy 测试保持通过。
 
-### Stage 1C：最小 `/v1/responses` 非流式 server
+### Stage 1C：最小 `/v1/responses` 非流式 server（已落地）
 
 产物：
 
@@ -275,7 +298,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - 上游 Chat Completions 调用被录制为 `.http` V3。
 - 旧 replay fixture 仍通过。
 
-### Stage 1D：状态与 function tool round-trip
+### Stage 1D：状态与 function tool round-trip（部分落地）
 
 产物：
 
@@ -289,7 +312,9 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - tool call 可被审计并和 response item 关联。
 - provider 不支持 tool calling 时返回机器可读错误。
 
-### Stage 1E：streaming 与 cancel
+当前状态：`previous_response_id` continuation 和 `input_items` 查询已落地；完整 function tool round-trip、tool audit 和 provider tool capability 错误处理仍未完成。
+
+### Stage 1E：streaming 与 cancel（未完成）
 
 产物：
 
@@ -303,14 +328,14 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - usage、tool call delta、final response event 顺序稳定。
 - cancel 不破坏已写 audit/cassette 关联。
 
-### Stage 2：Postgres-first Persistence/Audit
+### Stage 2：Postgres-first Persistence/Audit（部分落地）
 
 产物：
 
 - Postgres semantic schema 和 migration。
 - request audit / execution events / upstream exchange 查询。
 - Monitor/MCP semantic diagnostics。
-- Stage 2C 先引入 `responses_server` 配置草案和未接线装配判断；默认 `enabled: false`，不改变现有 proxy 热路径。
+- `responses_server` 配置和装配默认 `enabled: false`，不改变现有 proxy 热路径。
 
 验收：
 
@@ -318,7 +343,9 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - SQLite fallback 仍能运行最小 server/test。
 - 旧 `.http` replay 不连接 DB。
 
-### Stage 3：Hosted tools 与 compact
+当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore` 和 Postgres 打开路径已落地；完整 Postgres migration 生产化、request audit、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。
+
+### Stage 3：Hosted tools 与 compact（未完成）
 
 产物：
 
@@ -332,7 +359,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - compact 产出 summary/item，并保留原始 item lineage。
 - Codex 长会话可通过 audit 解释 compact 行为。
 
-### Stage 4：高级 routing 与多 provider
+### Stage 4：高级 routing 与多 provider（未完成）
 
 产物：
 
