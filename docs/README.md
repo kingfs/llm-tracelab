@@ -12,6 +12,8 @@
 4. [开发命令](./DEVELOPMENT_COMMANDS.md)：稳定的构建、测试、格式化、检查入口。
 5. [维护基线](./MAINTAINER_BASELINE.md)：修改存储、录制、Monitor、MCP、重分析时必须遵守的约束。
 
+如果你在参与 Responses server 演进设计，请先读 [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)。该文档是 Stage 1A 设计草案，不替代当前实现事实文档。
+
 ## 当前事实文档
 
 - [当前实现概览](./CURRENT_IMPLEMENTATION.md)
@@ -21,6 +23,7 @@
 - [上游 Provider 与协议族](./UPSTREAM_PROVIDERS.md)
 - [Provider 协议入口](./PROVIDER_PROTOCOL_ENTRYPOINTS.md)
 - [协议参考](./protocol-reference/README.md)
+- [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)
 
 ## 用户与运维指南
 
