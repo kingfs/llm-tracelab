@@ -453,6 +453,9 @@ type sessionTimelineItem struct {
 
 type detailResponse struct {
 	ID                     string                   `json:"id"`
+	ResponseID             string                   `json:"response_id,omitempty"`
+	RequestAuditID         string                   `json:"request_audit_id,omitempty"`
+	ResponsesAudit         *traceResponsesAuditRef  `json:"responses_audit,omitempty"`
 	Session                *traceSessionView        `json:"session,omitempty"`
 	Header                 recordHeaderView         `json:"header"`
 	Events                 []recordEventView        `json:"events"`
@@ -464,6 +467,11 @@ type detailResponse struct {
 	ToolCalls              []ToolCall               `json:"tool_calls"`
 	SelectedUpstreamHealth *traceUpstreamHealthView `json:"selected_upstream_health,omitempty"`
 	Performance            performanceView          `json:"performance"`
+}
+
+type traceResponsesAuditRef struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
 }
 
 type performanceResponse struct {
@@ -4032,7 +4040,7 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 
 		switch {
 		case len(parts) == 1 && r.Method == http.MethodGet:
-			handleTraceDetail(w, absPath, entry, rtr)
+			handleTraceDetail(w, r, st, absPath, entry, rtr)
 		case len(parts) == 2 && parts[1] == "raw" && r.Method == http.MethodGet:
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
@@ -4216,7 +4224,7 @@ func handleTracePerformance(w http.ResponseWriter, entry store.LogEntry) {
 	})
 }
 
-func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry, rtr *router.Router) {
+func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, absPath string, entry store.LogEntry, rtr *router.Router) {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
@@ -4253,8 +4261,42 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 	if health := selectedUpstreamHealthView(rtr, entry.Header.Meta.SelectedUpstreamID); health != nil {
 		resp.SelectedUpstreamHealth = health
 	}
+	if ref, ok, err := traceResponsesAuditReference(r.Context(), st, entry); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query responses audit reference: " + err.Error()})
+		return
+	} else if ok {
+		resp.ResponseID = ref.ResponseID
+		resp.RequestAuditID = ref.RequestAuditID
+		resp.ResponsesAudit = &traceResponsesAuditRef{
+			ResponseID:     ref.ResponseID,
+			RequestAuditID: ref.RequestAuditID,
+		}
+	}
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func traceResponsesAuditReference(ctx context.Context, st *store.Store, entry store.LogEntry) (responsesaudit.RequestAuditReference, bool, error) {
+	if st == nil || st.EntClient() == nil {
+		return responsesaudit.RequestAuditReference{}, false, nil
+	}
+	query := responsesaudit.NewQueryService(st.EntClient())
+	seen := map[string]struct{}{}
+	for _, candidate := range []string{entry.ID, entry.Header.Meta.RequestID} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		ref, ok, err := query.FindRequestAuditReferenceByTraceID(ctx, candidate)
+		if err != nil || ok {
+			return ref, ok, err
+		}
+	}
+	return responsesaudit.RequestAuditReference{}, false, nil
 }
 
 func handleTraceRaw(w http.ResponseWriter, absPath string, entry store.LogEntry) {

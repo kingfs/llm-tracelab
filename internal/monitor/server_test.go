@@ -3441,6 +3441,114 @@ func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 	}
 }
 
+func TestTraceDetailAPIHandlerIncludesResponsesAuditReference(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "responses-audit-link.http")
+	content := buildRecordFixture(t, "/v1/responses", false, `{"input":"hello"}`, `{"output_text":"done"}`)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	traceID := items[0].ID
+	recorderRequestID := items[0].Header.Meta.RequestID
+	if recorderRequestID == "" {
+		t.Fatalf("recorder request id is empty")
+	}
+	base := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-trace-detail-1").
+		SetResponseID("resp-trace-detail-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex-trace-detail-1").
+		SetRequestAuditID("reqaudit-trace-detail-1").
+		SetTraceID(recorderRequestID).
+		SetStartedAt(base.Add(time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ResponseID != "resp-trace-detail-1" {
+		t.Fatalf("ResponseID = %q, want resp-trace-detail-1", payload.ResponseID)
+	}
+	if payload.RequestAuditID != "reqaudit-trace-detail-1" {
+		t.Fatalf("RequestAuditID = %q, want reqaudit-trace-detail-1", payload.RequestAuditID)
+	}
+	if payload.ResponsesAudit == nil || payload.ResponsesAudit.ResponseID != "resp-trace-detail-1" || payload.ResponsesAudit.RequestAuditID != "reqaudit-trace-detail-1" {
+		t.Fatalf("ResponsesAudit = %+v, want linked audit reference", payload.ResponsesAudit)
+	}
+}
+
+func TestTraceDetailAPIHandlerOmitsResponsesAuditReferenceWhenUnlinked(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "unlinked.http")
+	content := buildRecordFixture(t, "/v1/chat/completions", false, `{"messages":[{"role":"user","content":"hello"}]}`, `{"choices":[{"message":{"content":"done"}}]}`)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ResponseID != "" || payload.RequestAuditID != "" || payload.ResponsesAudit != nil {
+		t.Fatalf("unexpected responses audit reference: response=%q request_audit=%q nested=%+v", payload.ResponseID, payload.RequestAuditID, payload.ResponsesAudit)
+	}
+}
+
 func TestTracePerformanceAPIHandlerReturnsMetrics(t *testing.T) {
 	t.Parallel()
 
@@ -4241,7 +4349,8 @@ func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) 
 		LogPath: tracePath,
 	}
 	rr := httptest.NewRecorder()
-	handleTraceDetail(rr, tracePath, entry, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/broken", nil)
+	handleTraceDetail(rr, req, nil, tracePath, entry, nil)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rr.Code)
 	}

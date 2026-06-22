@@ -146,7 +146,7 @@ Monitor 是 Go embed 的 React/Vite 前端。
 - Routing：查看 selected route、sticky、候选和失败聚类。
 - Events：系统事件收件箱。
 - Tokens：管理当前用户 API token。
-- Trace detail：Timeline、Summary、Raw Protocol、Declared Tools、Observation、Findings；如果 trace payload 携带 `response_id` 或 `request_audit_id`，Reading guide 会提供 Responses audit 跳转入口。
+- Trace detail：Timeline、Summary、Raw Protocol、Declared Tools、Observation、Findings；如果 trace payload 或 `upstream_exchanges.trace_id` 能关联到 `response_id` / `request_audit_id`，Reading guide 会提供 Responses audit 跳转入口。
 
 ## MCP 当前能力
 
