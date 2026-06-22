@@ -3,21 +3,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/responses/codexfixtures"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 )
 
-func codexFixturePath(name string) string {
-	return filepath.Join("..", "..", "..", "tests", "fixtures", "codex", name)
-}
-
 func decodeCodexFixture[T any](t *testing.T, name string) T {
 	t.Helper()
-	data, err := os.ReadFile(codexFixturePath(name))
+	data, err := codexfixtures.Load(name)
 	if err != nil {
 		t.Fatalf("read codex fixture %s: %v", name, err)
 	}
@@ -26,6 +21,38 @@ func decodeCodexFixture[T any](t *testing.T, name string) T {
 		t.Fatalf("decode codex fixture %s: %v", name, err)
 	}
 	return out
+}
+
+func TestCodexCreateRequestFixturesReachRuntimeChatRequest(t *testing.T) {
+	names, err := codexfixtures.CreateRequestNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			req := decodeCodexFixture[protocol.CreateResponseRequest](t, name)
+			client := &fakeChatClient{resp: finalChatResponse("offline fixture response")}
+			rt := New(Config{DefaultModel: "fallback-model", WebSearchEnabled: false}, client, NewMemoryStore())
+
+			resp, err := rt.Create(context.Background(), req)
+			if err != nil {
+				t.Fatalf("Create() error = %v", err)
+			}
+
+			if len(client.reqs) != 1 {
+				t.Fatalf("chat requests = %d, want 1", len(client.reqs))
+			}
+			if client.req.Model != "local-test-model" {
+				t.Fatalf("chat model = %q, want local-test-model", client.req.Model)
+			}
+			if client.req.Stream != req.Stream {
+				t.Fatalf("chat stream = %v, want %v", client.req.Stream, req.Stream)
+			}
+			if resp.Model != "local-test-model" || resp.Status != "completed" {
+				t.Fatalf("response mismatch: %#v", resp)
+			}
+		})
+	}
 }
 
 func TestCodexTextCreateFixtureAlignsWithRuntimeChatRequest(t *testing.T) {
