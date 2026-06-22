@@ -1003,6 +1003,107 @@ debug:
 	}
 }
 
+func TestProviderProbeJSONReportsSuggestedAPISurface(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/models":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-test"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/chat/completions":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"model is required"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/responses":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"input is required"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+upstreams:
+  - id: "openai-local"
+    upstream:
+      base_url: "` + upstreamServer.URL + `/api/v1"
+      api_key: "secret-probe-key"
+      api_type: "chat_completions"
+      protocol_family: "openai_compatible"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "provider", "probe", "--id", "openai-local", "--timeout", "2s"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "secret-probe-key") {
+		t.Fatalf("provider probe output leaked api key: %s", out.String())
+	}
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Reports []struct {
+				ProviderID              string   `json:"provider_id"`
+				Status                  string   `json:"status"`
+				SuggestedAPIType        string   `json:"suggested_api_type"`
+				SuggestedProtocolFamily string   `json:"suggested_protocol_family"`
+				Capabilities            []string `json:"capabilities"`
+				Warnings                []string `json:"warnings"`
+			} `json:"reports"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "provider.probe" || len(envelope.Result.Reports) != 1 {
+		t.Fatalf("probe envelope = %+v", envelope)
+	}
+	report := envelope.Result.Reports[0]
+	if report.ProviderID != "openai-local" || report.Status != "detected" {
+		t.Fatalf("probe report identity/status = %+v", report)
+	}
+	if report.SuggestedAPIType != "responses" || report.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("probe suggestion = %+v", report)
+	}
+	if !hasString(report.Capabilities, "responses") || !hasString(report.Capabilities, "chat_completions") || !hasString(report.Capabilities, "models") {
+		t.Fatalf("probe capabilities = %+v", report.Capabilities)
+	}
+	if !containsStringFragment(report.Warnings, "specified api_type") {
+		t.Fatalf("probe warnings = %+v, want api_type mismatch warning", report.Warnings)
+	}
+}
+
+func hasString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsStringFragment(values []string, fragment string) bool {
+	for _, value := range values {
+		if strings.Contains(value, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRunMigrateLogsSummary(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, nil))

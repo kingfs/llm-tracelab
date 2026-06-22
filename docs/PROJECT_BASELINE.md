@@ -34,6 +34,7 @@ TraceLab 当前提供：
 - OpenAI-compatible provider 只能声明兼容其实际支持的 endpoint。
 - Responses server-mode 默认关闭；关闭时 `/v1/responses` 仍按普通 OpenAI-compatible endpoint 代理透传。
 - 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现 Responses 响应；该内部调用会受 upstream `api_type` / capabilities 约束，不会选择显式关闭 Chat Completions 能力的 Responses-native target，也不会在请求带 `tools` 时选择 `capabilities.tool_calling: false` 的 target。下游 `stream:true` 时，简单文本输出路径已能边读取内部 Chat Completions SSE、边输出 Responses `response.output_text.delta`，并仍记录原始 OpenAI-compatible SSE cassette；带 tools、需要 auto compact 等复杂路径仍 fallback 到 deferred envelope。
+- `provider probe` 是当前手动 provider detection 入口，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals。它是诊断工具，不写回配置，不参与启动时路由决策。
 - `responses_server.model_profiles` 已有配置骨架，支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和 `upstream_model`。当前 runtime 只使用匹配 profile 的 `compact_history_item_threshold` 覆盖全局 item-count 自动 compact 阈值；尚未实现 token estimator、context window budgeting 或 upstream model rewrite。
 - 开启 `tools.web_search.enabled=true` 后，非流式 Responses runtime 可执行 hosted `web_search` / `web_search_preview` 首切，provider 支持 `mock` 和 SearXNG；有 ent-backed audit store 时会写 hosted web_search `response.tool_call` started/completed/failed events。
 - 非 Responses 请求不进入 Responses runtime，继续走现有代理、路由、录制和解析路径。
@@ -172,7 +173,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - tool/auto-compact 等复杂场景的真实增量 Responses server-mode streaming 和 cancel 传播。
 - 服务端任意 function tool 执行器、streaming tool events 和完整 model profile/context window/token budgeting；当前仅有 profile 配置骨架和 item-count compact 阈值覆盖。
 - 完整真实 stream/cancel/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed、普通 function tool requested/submitted、deferred/incremental stream started/completed 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
-- provider auto-detect。
+- 启动时自动采用 provider probe 结果；当前只有手动 `provider probe` 诊断建议。
 
 ## 推荐验证
 

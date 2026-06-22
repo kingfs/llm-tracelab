@@ -128,6 +128,18 @@ TraceLab 不为每个 provider 写一套独立集成，而是把上游解析成�
 
 当数据库已有 channel 配置时，router 优先使用数据库配置。
 
+## Provider Probe
+
+`provider probe` 是手动诊断命令，用于检查配置中的 upstream endpoint 是否暴露常见 API surface，并给出保守建议：
+
+```bash
+llm-tracelab --config config.yaml provider probe --id openai-local --format json
+```
+
+当前 probe 会检查 OpenAI-compatible `/v1/models`、`/v1/chat/completions`、`/v1/responses`，Anthropic `/v1/messages` / `/v1/models`，以及 Gemini `/v1beta/models`。输出包含建议的 `api_type`、`protocol_family`、capability signals、confidence 和 warnings。
+
+该命令不会写回配置，也不会在服务启动时覆盖显式 `api_type`、`protocol_family` 或 `capabilities`。如果 probe 建议和显式配置不同，应由操作者审查后手动调整。
+
 ## 新增 preset 的原则
 
 可以新增 preset 的条件：

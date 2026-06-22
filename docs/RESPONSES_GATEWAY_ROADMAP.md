@@ -29,7 +29,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
 - model profile 驱动的 context window/token budgeting。
-- provider auto-detect。
+- 启动时自动采用 provider detection 结果；当前已有手动 `provider probe` 诊断建议。
 - server-side 任意 function executor。
 - SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
 
@@ -76,7 +76,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 不破坏旧 SQLite DB 启动。
 - 文档列清仍未完成的 auth rollback/namespace 与 SQLite versioned migration 缺口。
 
-### Stage 23：Provider Detection 与 Capability Registry
+### Stage 23：Provider Detection 与 Capability Registry（诊断首切已落地）
 
 目标：配置 provider 时，在显式 `api_type` 之外提供保守的探测/建议能力。探测只能辅助，不应覆盖用户显式配置。
 
@@ -86,6 +86,8 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - 支持 OpenAI-compatible Chat Completions、Responses-native、Anthropic Messages、Gemini 的最小 endpoint/capability 探测。
 - 失败时不阻塞启动，可在诊断命令或 probe report 中暴露。
+
+当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议。它不写回配置，也不在启动时覆盖显式 `api_type` / `protocol_family`；后续可把 probe report 接入 Monitor/provider setup flow。
 
 ### Stage 24：Tool Execution 扩展
 
