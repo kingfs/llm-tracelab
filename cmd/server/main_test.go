@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1040,6 +1041,184 @@ func TestOpenApplicationDatabaseAutoMigrateFalseDoesNotCreateSchema(t *testing.T
 	if count != 0 {
 		t.Fatalf("logs table count = %d, want 0 with auto_migrate=false", count)
 	}
+}
+
+func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	base := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit_cli").
+		SetResponseID("resp_cli").
+		SetConversationID("conv_cli").
+		SetMethod("POST").
+		SetPath("/v1/responses").
+		SetClientRequestID("client_cli").
+		SetHeaderJSON(map[string]any{
+			"authorization": "Bearer audit-secret",
+			"cookie":        "session=audit-cookie",
+			"content-type":  "application/json",
+		}).
+		SetBodyPreview(`{"model":"gpt-5"}`).
+		SetBodySha256("sha-cli").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("event_cli_1").
+		SetResponseID("resp_cli").
+		SetRequestAuditID("reqaudit_cli").
+		SetEventType("model_call").
+		SetPhase("upstream").
+		SetStatus("started").
+		SetMessage("calling upstream").
+		SetDetailsJSON(map[string]any{"step": "first"}).
+		SetOccurredAt(base.Add(time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create execution event 1: %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("event_cli_2").
+		SetResponseID("resp_cli").
+		SetRequestAuditID("reqaudit_cli").
+		SetEventType("model_call").
+		SetPhase("upstream").
+		SetStatus("completed").
+		SetDetailsJSON(map[string]any{"step": "second"}).
+		SetOccurredAt(base.Add(2 * time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create execution event 2: %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex_cli").
+		SetResponseID("resp_cli").
+		SetRequestAuditID("reqaudit_cli").
+		SetTraceID("trace_cli").
+		SetCassettePath("responses/trace_cli.http").
+		SetUpstreamID("openai").
+		SetRouteTarget("primary").
+		SetModel("gpt-5").
+		SetEndpoint("/v1/chat/completions").
+		SetStatusCode(200).
+		SetStartedAt(base.Add(time.Second)).
+		SetCompletedAt(base.Add(1500 * time.Millisecond)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "json",
+		"audit", "query",
+		"--response-id", "resp_cli",
+		"--include-events",
+		"--include-exchanges",
+		"--limit", "1",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Found        bool `json:"found"`
+			RequestAudit struct {
+				ID          string `json:"id"`
+				ResponseID  string `json:"response_id"`
+				BodyPreview string `json:"body_preview"`
+				HeaderJSON  struct {
+					Authorization string `json:"authorization"`
+					Cookie        string `json:"cookie"`
+					ContentType   string `json:"content-type"`
+				} `json:"header_json"`
+			} `json:"request_audit"`
+			Events []struct {
+				ID        string `json:"id"`
+				EventType string `json:"event_type"`
+			} `json:"events"`
+			UpstreamExchanges []struct {
+				ID      string `json:"id"`
+				TraceID string `json:"trace_id"`
+			} `json:"upstream_exchanges"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "audit.query" || !envelope.Result.Found {
+		t.Fatalf("envelope = %+v, want ok audit.query found", envelope)
+	}
+	if envelope.Result.RequestAudit.ID != "reqaudit_cli" || envelope.Result.RequestAudit.ResponseID != "resp_cli" {
+		t.Fatalf("request audit = %+v, want reqaudit_cli/resp_cli", envelope.Result.RequestAudit)
+	}
+	if envelope.Result.RequestAudit.BodyPreview != `{"model":"gpt-5"}` {
+		t.Fatalf("body preview = %q, want stored preview", envelope.Result.RequestAudit.BodyPreview)
+	}
+	if envelope.Result.RequestAudit.HeaderJSON.Authorization != "<redacted>" || envelope.Result.RequestAudit.HeaderJSON.Cookie != "<redacted>" || envelope.Result.RequestAudit.HeaderJSON.ContentType != "application/json" {
+		t.Fatalf("header json = %+v, want redacted secrets and preserved content-type", envelope.Result.RequestAudit.HeaderJSON)
+	}
+	if len(envelope.Result.Events) != 1 || envelope.Result.Events[0].ID != "event_cli_1" {
+		t.Fatalf("events = %+v, want first event only", envelope.Result.Events)
+	}
+	if len(envelope.Result.UpstreamExchanges) != 1 || envelope.Result.UpstreamExchanges[0].TraceID != "trace_cli" {
+		t.Fatalf("upstream exchanges = %+v, want trace_cli", envelope.Result.UpstreamExchanges)
+	}
+	if strings.Contains(out.String(), "raw_request_body") {
+		t.Fatalf("audit query output contains raw request body field: %s", out.String())
+	}
+	if strings.Contains(out.String(), "audit-secret") || strings.Contains(out.String(), "audit-cookie") {
+		t.Fatalf("audit query output leaked sensitive header: %s", out.String())
+	}
+}
+
+func TestAuditQueryCommandRequiresSelector(t *testing.T) {
+	t.Parallel()
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--format", "json", "audit", "query"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want selector usage error")
+	}
+	var exit cliExitError
+	if !errors.As(err, &exit) || exit.code != exitCodeUsage {
+		t.Fatalf("Execute() error = %v, want usage cliExitError", err)
+	}
+}
+
+func writeResponsesAuditCLIConfig(t *testing.T, dir string) string {
+	t.Helper()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + filepath.Join(dir, "trace_index.sqlite3") + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return configPath
 }
 
 func writePostgresDBMigrateConfig(t *testing.T) string {

@@ -148,9 +148,11 @@
 
 ### `audit query` CLI
 
-- 缺口：没有面向 agent 的只读 CLI 查询入口；目前主要依赖 Monitor API / MCP。
+- 已吸收首切：`llm-tracelab audit query`（别名 `audit responses`）提供面向 agent 的只读 Responses audit trace 查询入口，复用当前 config 的 application store 和 `internal/responses/audit.QueryService`。
+- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --limit 100`，也支持 `--request-audit-id`；默认只输出 request audit envelope，events/exchanges 需显式打开。
+- 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body。
 - responses-gateway 能力：按 response/request/thread/session/turn/client request id 查询，并输出 diagnostics envelope。
-- llm-tracelab 建议落点：`cmd/server/audit.go`，先支持 `--response-id`、`--request-audit-id`、`--client-request-id`、`--conversation-id`、`--include-events`、`--include-exchanges`，再补 Codex-specific diagnostics。
+- 剩余缺口：尚未支持 `--client-request-id`、`--conversation-id`、thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics。
 
 ### Codex profile 生成命令
 
@@ -177,10 +179,10 @@
    - 模块：`cmd/server/doctor.go`、`cmd/server/config_inspect.go`、`internal/config`、`internal/providerprobe`。
    - 验收：稳定 JSON envelope、默认脱敏、无真实模型推理、可选 `--fail-on-warn/--fail-on-fail`。
 
-2. 补 `audit query` CLI，并复用现有 QueryService。
+2. 扩展 `audit query` CLI，并复用现有 QueryService。
    - 价值：把 Monitor/MCP 才能看的 Responses audit 变成 agent 可脚本化入口。
    - 模块：`cmd/server/audit.go`、`internal/responses/audit/query.go`。
-   - 验收：支持 response/request/client-request/conversation 查询；输出 request audit、events、upstream exchanges；不输出未脱敏 raw body。
+   - 验收：在首切 response/request 查询基础上补 client-request/conversation 查询；输出 request audit、events、upstream exchanges；不输出未脱敏 raw body。
 
 3. 固化 Codex compatibility profile。
    - 价值：把现有分散能力转成可回归的最小兼容合约。
