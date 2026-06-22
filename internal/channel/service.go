@@ -67,6 +67,10 @@ type ProbeOptions struct {
 	DetectProvider   bool
 }
 
+type ProviderProbeReportOptions struct {
+	ChannelID string
+}
+
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 	if s == nil || s.store == nil {
 		return 0, fmt.Errorf("channel service store is required")
@@ -233,6 +237,47 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			},
 		}
 		targets = append(targets, target)
+	}
+	return targets, nil
+}
+
+func (s *Service) ProviderProbeReport(ctx context.Context, options ProviderProbeReportOptions) (providerprobe.BatchReport, error) {
+	targets, err := s.ProviderProbeTargets(options.ChannelID)
+	if err != nil {
+		return providerprobe.BatchReport{}, err
+	}
+	return providerprobe.ProbeBatch(ctx, targets, s.httpClient), nil
+}
+
+func (s *Service) ProviderProbeTargets(channelID string) ([]providerprobe.ProbeTarget, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("channel service store is required")
+	}
+	channelID = strings.TrimSpace(channelID)
+	channels, err := s.store.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]providerprobe.ProbeTarget, 0, len(channels))
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		if channelID != "" && channel.ID != channelID {
+			continue
+		}
+		target := providerProbeTargetFromChannel(channel)
+		target.TargetSource = "channel"
+		if strings.TrimSpace(target.BaseURL) == "" {
+			continue
+		}
+		targets = append(targets, target)
+	}
+	if channelID != "" && len(targets) == 0 {
+		return nil, fmt.Errorf("channel %q was not found, is disabled, or has no base_url", channelID)
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no enabled channel with base_url is configured")
 	}
 	return targets, nil
 }

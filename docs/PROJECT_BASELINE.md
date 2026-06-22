@@ -34,7 +34,7 @@ TraceLab 当前提供：
 - OpenAI-compatible provider 只能声明兼容其实际支持的 endpoint。
 - Responses server-mode 默认关闭；关闭时 `/v1/responses` 仍按普通 OpenAI-compatible endpoint 代理透传。
 - 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现 Responses 响应；该内部调用会受 upstream `api_type` / capabilities 约束，不会选择显式关闭 Chat Completions 能力的 Responses-native target，也不会在请求带 `tools` 时选择 `capabilities.tool_calling: false` 的 target。下游 `stream:true` 时，简单文本输出路径已能边读取内部 Chat Completions SSE、边输出 Responses `response.output_text.delta`；普通 `function` tool 参数分片已能输出 `response.function_call_arguments.delta/done`，并仍记录原始 OpenAI-compatible SSE cassette。已注册 server-side function executor 的 stream 首切会输出 arguments delta/done、执行 executor、再继续流式输出最终文本。hosted tools和 auto compact 等复杂路径仍会 fallback 到 deferred envelope；完整细粒度 streaming lifecycle events 仍未完成。
-- `provider probe` 是当前手动 provider detection 入口，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals。默认启动不执行 probe；显式开启 `provider_probe.startup_fill=true` 后，serve 只在内存中填补 YAML upstream 缺失字段，不写回配置，也不覆盖显式配置。Monitor provider create dialog 提供临时 preview endpoint，provider detail 的 probe 动作也会返回同类 detection report，并支持用户显式 Apply suggestions 写入表单或 channel 配置。
+- `provider probe` 是当前手动 provider detection 入口，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals；`provider probe-report` 是同类只读批量报告入口，面向 YAML upstream 列表输出 report，不写配置。默认启动不执行 probe；显式开启 `provider_probe.startup_fill=true` 后，serve 只在内存中填补 YAML upstream 缺失字段，不写回配置，也不覆盖显式配置。Monitor provider create dialog 提供临时 preview endpoint，`POST /api/provider-probe/report` 会面向 SQLite channel 列表返回只读批量 detection report，不写 probe run、model 或 channel 配置；provider detail 的 probe 动作也会返回同类 detection report，并支持用户显式 Apply suggestions 写入表单或 channel 配置。
 - `responses_server.model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和 `upstream_model`。当前 runtime 会使用匹配 profile 的 `compact_history_item_threshold` 覆盖全局 item-count 自动 compact 阈值；配置 `upstream_model` 时，内部 Chat Completions 请求使用该上游模型名，但外部 Responses `model` 仍保留客户端请求 model 或默认 model；配置 `max_output_tokens` 时，会在客户端未显式传 `max_output_tokens` 时作为内部 Chat Completions `max_tokens` 默认值；配置 `context_window_tokens` 且开启 auto compact 时，会用保守字符数估算 prompt+reserved output，超预算则触发 compact。当前不是模型专用精确 tokenizer 或完整 context optimization。
 - 开启 `tools.web_search.enabled=true` 后，非流式 Responses runtime 可执行 hosted `web_search` / `web_search_preview` 首切，provider 支持 `mock` 和 SearXNG；有 ent-backed audit store 时会写 hosted web_search `response.tool_call` started/completed/failed events。普通 `function` tool 默认仍走客户端回路；runtime 现在提供默认空的 server-side function executor registry。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，runtime 才会自动执行同名 function tool，并按 timeout、max-result-bytes 和 audit redaction policy 写 started/completed/failed events。Monitor 提供只读 `/api/responses/function-executors` 配置摘要和 Audit 页面状态面板，不返回 `static_response` output 内容。
 - 非 Responses 请求不进入 Responses runtime，继续走现有代理、路由、录制和解析路径。
@@ -132,6 +132,7 @@ Monitor 当前包括：
 - `/api/channels`
 - `/api/routing/summary`
 - `/api/responses/function-executors`
+- `/api/provider-probe/report`
 - `/api/events`
 - `/api/findings`
 - `/api/analysis`
@@ -174,7 +175,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - hosted tool/server-side tool execution、auto-compact 等复杂场景的真实增量 Responses server-mode streaming；内部 Chat Completions upstream cancel 传播已落地。
 - function executor 的 Monitor 写配置、外部 executor 隔离、完整 server-side tool streaming lifecycle events 和完整 model profile/context optimization；当前已有默认关闭的 YAML `static_response` executor 首切、只读 Monitor 配置摘要 API 和 Audit 页面状态面板、profile max output/token-budget auto compact 保守估算首切、普通 function call argument streaming 首切，以及已注册 executor 的 stream tool loop 首切。
 - 完整真实 stream/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed/cancelled、普通 function tool requested/submitted、incremental stream fallback、deferred/incremental stream started/completed 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
-- provider probe 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、默认关闭的启动时保守补全首切，以及 Monitor provider create preview/detail report 展示和显式 Apply suggestions 首切。
+- provider probe 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、只读 `provider probe-report` / Monitor `/api/provider-probe/report` 批量报告入口、默认关闭的启动时保守补全首切，以及 Monitor provider create preview/detail report 展示和显式 Apply suggestions 首切。
 
 ## 推荐验证
 

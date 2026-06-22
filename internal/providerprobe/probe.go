@@ -29,6 +29,7 @@ const (
 )
 
 type ProbeTarget struct {
+	TargetSource            string            `json:"target_source,omitempty"`
 	ProviderID              string            `json:"provider_id,omitempty"`
 	BaseURL                 string            `json:"base_url"`
 	APIKey                  string            `json:"-"`
@@ -45,6 +46,7 @@ type CapabilitySuggestion struct {
 }
 
 type Report struct {
+	TargetSource            string          `json:"target_source,omitempty"`
 	ProviderID              string          `json:"provider_id,omitempty"`
 	BaseURL                 string          `json:"base_url"`
 	SpecifiedAPIType        string          `json:"specified_api_type,omitempty"`
@@ -54,6 +56,10 @@ type Report struct {
 	Error                   string          `json:"error,omitempty"`
 	Warnings                []string        `json:"warnings,omitempty"`
 	CapabilitySuggestion
+}
+
+type BatchReport struct {
+	Reports []Report `json:"reports"`
 }
 
 type EndpointProbe struct {
@@ -151,6 +157,7 @@ var defaultProbeSpecs = []probeSpec{
 
 func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report, error) {
 	report := Report{
+		TargetSource:            normalize(target.TargetSource),
 		ProviderID:              strings.TrimSpace(target.ProviderID),
 		BaseURL:                 strings.TrimSpace(target.BaseURL),
 		SpecifiedAPIType:        normalize(target.SpecifiedAPIType),
@@ -200,6 +207,15 @@ func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report
 		report.Warnings = append(report.Warnings, "no known provider endpoint signals were detected")
 	}
 	return report, nil
+}
+
+func ProbeBatch(ctx context.Context, targets []ProbeTarget, client *http.Client) BatchReport {
+	reports := make([]Report, 0, len(targets))
+	for _, target := range targets {
+		report, _ := Probe(ctx, target, client)
+		reports = append(reports, report)
+	}
+	return BatchReport{Reports: reports}
 }
 
 func runEndpointProbe(ctx context.Context, target ProbeTarget, spec probeSpec, client *http.Client) EndpointProbe {

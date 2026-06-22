@@ -29,7 +29,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
 - model profile 驱动的模型专用 tokenizer 与完整 context optimization。
-- provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议，以及默认关闭的启动时保守补全开关。
+- provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、只读批量 `provider probe-report` / Monitor report API，以及默认关闭的启动时保守补全开关。
 - server-side function executor 的 Monitor/外部 executor 配置化；当前已有默认关闭的 YAML `static_response` executor 首切。
 - SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
 
@@ -89,7 +89,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 支持 OpenAI-compatible Chat Completions、Responses-native、Anthropic Messages、Gemini 的最小 endpoint/capability 探测。
 - 失败时不阻塞启动，可在诊断命令或 probe report 中暴露。
 
-当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议。serve 侧已有默认关闭的 `provider_probe.startup_fill` 首切；开启后只填补 YAML upstream 中缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置，也不覆盖显式配置。Monitor provider create dialog 已有临时 preview endpoint，不落库返回同类 report；provider detail 的 probe 动作也已接入 report 展示，用户点击 Apply suggestions 后才会把建议的 `api_type`、`protocol_family` 和 capability bool 写入表单或 channel 配置。后续仍需更完整的 provider setup wizard 和批量 detection flow。
+当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议；`provider probe-report` 是只读批量报告入口，面向 YAML upstream 列表输出 report，不写配置。serve 侧已有默认关闭的 `provider_probe.startup_fill` 首切；开启后只填补 YAML upstream 中缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置，也不覆盖显式配置。Monitor provider create dialog 已有临时 preview endpoint，不落库返回同类 report；`POST /api/provider-probe/report` 会面向 SQLite channel 列表返回批量 detection report，不写 probe run、model 或 channel 配置；provider detail 的 probe 动作也已接入 report 展示，用户点击 Apply suggestions 后才会把建议的 `api_type`、`protocol_family` 和 capability bool 写入表单或 channel 配置。后续仍需更完整的 provider setup wizard。
 
 ### Stage 24：Tool Execution 扩展（registry 与 YAML static_response 首切已落地）
 
