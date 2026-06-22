@@ -237,6 +237,19 @@ func (f *fakeExecutionEventRecorder) RecordExecutionEvent(ctx context.Context, e
 	return nil
 }
 
+type fakeToolCallAuditRecorder struct {
+	entries            []audit.ToolCallAudit
+	requestAuditIDSeen []string
+}
+
+func (f *fakeToolCallAuditRecorder) RecordToolCallAudit(ctx context.Context, entry audit.ToolCallAudit) (string, error) {
+	if requestAuditID, ok := audit.RequestAuditIDFromContext(ctx); ok {
+		f.requestAuditIDSeen = append(f.requestAuditIDSeen, requestAuditID)
+	}
+	f.entries = append(f.entries, entry)
+	return "tcaud_test", nil
+}
+
 func toJSONForTest(t *testing.T, value any) string {
 	t.Helper()
 	data, err := json.Marshal(value)
@@ -1204,11 +1217,12 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	store := NewMemoryStore()
 	sink := &fakeResponseStreamSink{}
 	events := &fakeExecutionEventRecorder{}
+	toolAudits := &fakeToolCallAuditRecorder{}
 	rt := New(Config{
 		DefaultModel:        "fallback-model",
 		WebSearchEnabled:    true,
 		WebSearchMaxResults: 2,
-	}, client, store, WithWebSearchProvider(provider), WithExecutionEventRecorder(events))
+	}, client, store, WithWebSearchProvider(provider), WithExecutionEventRecorder(events), WithToolCallAuditRecorder(toolAudits))
 
 	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
 		Input:      "search docs",
@@ -1301,6 +1315,12 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	}
 	if events.events[2].Status != "completed" || events.events[2].DetailsJSON["tool_name"] != "web_search" || events.events[2].DetailsJSON["call_id"] != "call_search" || events.events[2].DetailsJSON["stream"] != true {
 		t.Fatalf("completed event mismatch: %#v", events.events[2])
+	}
+	if len(toolAudits.entries) != 2 || toolAudits.entries[0].Status != "started" || toolAudits.entries[1].Status != "completed" {
+		t.Fatalf("tool audits = %#v, want started/completed", toolAudits.entries)
+	}
+	if toolAudits.entries[1].ResponseID != resp.ID || toolAudits.entries[1].MetadataJSON["stream"] != true {
+		t.Fatalf("stream tool audit = %#v, want response id and stream metadata", toolAudits.entries[1])
 	}
 	stored, ok, err := store.Get(context.Background(), resp.ID)
 	if err != nil || !ok {
@@ -2019,6 +2039,93 @@ func TestRuntimeCreateExecutesRegisteredFunctionTool(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateRecordsConfiguredFunctionToolCallAudits(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_lookup",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "lookup",
+								Arguments: `{"secret":"argument-token"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "done"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+	}
+	toolAudits := &fakeToolCallAuditRecorder{}
+	rt := New(
+		Config{DefaultModel: "gpt-test"},
+		client,
+		NewMemoryStore(),
+		WithToolCallAuditRecorder(toolAudits),
+		WithFunctionToolExecutorPolicy("lookup", StaticFunctionToolExecutor{Output: "secret output token"}, FunctionToolExecutorPolicy{
+			RedactArguments: true,
+			RedactOutput:    true,
+		}),
+	)
+
+	ctx := audit.ContextWithRequestAuditID(context.Background(), "audit_function")
+	resp, err := rt.Create(ctx, protocol.CreateResponseRequest{
+		Input: "lookup codex",
+		Metadata: map[string]any{
+			"codex": map[string]any{"thread_id": "thread_function"},
+		},
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if len(toolAudits.entries) != 2 {
+		t.Fatalf("tool audits len = %d, want started/completed: %#v", len(toolAudits.entries), toolAudits.entries)
+	}
+	started, completed := toolAudits.entries[0], toolAudits.entries[1]
+	if started.Status != "started" || completed.Status != "completed" {
+		t.Fatalf("audit statuses = %q/%q, want started/completed", started.Status, completed.Status)
+	}
+	if completed.ResponseID != resp.ID || completed.ConversationID != "thread_function" || completed.CallID != "call_lookup" {
+		t.Fatalf("completed audit identity = %#v, want response/thread/call", completed)
+	}
+	if completed.ToolType != "function" || completed.ToolName != "lookup" || completed.Executor != "function_executor:lookup" || completed.Phase != "tool_call" {
+		t.Fatalf("completed audit tool fields = %#v", completed)
+	}
+	if completed.InputJSON["argument_bytes"] != len([]byte(`{"secret":"argument-token"}`)) || completed.InputJSON["arguments_redacted"] != true {
+		t.Fatalf("completed audit input summary = %#v", completed.InputJSON)
+	}
+	if completed.OutputJSON["output_chars"] != 0 || completed.OutputJSON["output_redacted"] != true {
+		t.Fatalf("completed audit output summary = %#v", completed.OutputJSON)
+	}
+	if completed.MetadataJSON["iteration"] != 1 || completed.MetadataJSON["stream"] != false {
+		t.Fatalf("completed audit metadata = %#v", completed.MetadataJSON)
+	}
+	if completed.StartedAt.IsZero() || completed.CompletedAt.IsZero() || completed.CompletedAt.Before(completed.StartedAt) {
+		t.Fatalf("completed audit timestamps = started %v completed %v", completed.StartedAt, completed.CompletedAt)
+	}
+	if len(toolAudits.requestAuditIDSeen) != 2 || toolAudits.requestAuditIDSeen[0] != "audit_function" || toolAudits.requestAuditIDSeen[1] != "audit_function" {
+		t.Fatalf("request audit ids seen = %#v", toolAudits.requestAuditIDSeen)
+	}
+	data := toJSONForTest(t, toolAudits.entries)
+	if strings.Contains(data, "argument-token") || strings.Contains(data, "secret output token") {
+		t.Fatalf("tool call audit leaked raw arguments/output: %s", data)
+	}
+}
+
 func TestRuntimeFunctionToolExecutorPolicyRedactsAndLimitsResult(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{
@@ -2041,11 +2148,13 @@ func TestRuntimeFunctionToolExecutorPolicyRedactsAndLimitsResult(t *testing.T) {
 		},
 	}
 	events := &fakeExecutionEventRecorder{}
+	toolAudits := &fakeToolCallAuditRecorder{}
 	rt := New(
 		Config{DefaultModel: "gpt-test"},
 		client,
 		NewMemoryStore(),
 		WithExecutionEventRecorder(events),
+		WithToolCallAuditRecorder(toolAudits),
 		WithFunctionToolExecutorPolicy("lookup", StaticFunctionToolExecutor{Output: "too long"}, FunctionToolExecutorPolicy{
 			Timeout:         time.Second,
 			MaxResultBytes:  3,
@@ -2075,6 +2184,12 @@ func TestRuntimeFunctionToolExecutorPolicyRedactsAndLimitsResult(t *testing.T) {
 	}
 	if events.events[1].Status != "failed" || events.events[1].DetailsJSON["result_bytes"] != 8 {
 		t.Fatalf("failed event mismatch: %#v", events.events[1])
+	}
+	if len(toolAudits.entries) != 2 || toolAudits.entries[0].Status != "started" || toolAudits.entries[1].Status != "failed" {
+		t.Fatalf("tool audits = %#v, want started/failed", toolAudits.entries)
+	}
+	if toolAudits.entries[1].ErrorText == "" || toolAudits.entries[1].OutputJSON["result_bytes"] != 8 {
+		t.Fatalf("failed tool audit = %#v", toolAudits.entries[1])
 	}
 }
 
@@ -2279,6 +2394,91 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateRecordsHostedWebSearchToolCallAudits(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_search",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "web_search",
+								Arguments: `{"query":"llm trace replay"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "Use cassettes."},
+					FinishReason: "stop",
+				}},
+			},
+		},
+	}
+	provider := &fakeWebSearchProvider{
+		result: websearch.Result{Results: []websearch.SearchResult{{
+			Title:   "TraceLab docs",
+			URL:     "https://example.test/docs",
+			Snippet: "Record and replay LLM API traffic.",
+		}}},
+	}
+	toolAudits := &fakeToolCallAuditRecorder{}
+	rt := New(Config{
+		DefaultModel:        "gpt-test",
+		WebSearchEnabled:    true,
+		WebSearchMaxResults: 2,
+	}, client, NewMemoryStore(), WithWebSearchProvider(provider), WithToolCallAuditRecorder(toolAudits))
+
+	ctx := audit.ContextWithRequestAuditID(context.Background(), "audit_search")
+	resp, err := rt.Create(ctx, protocol.CreateResponseRequest{
+		Input: "search it",
+		Metadata: map[string]any{
+			"codex": map[string]any{"thread_id": "thread_search"},
+		},
+		Tools: []protocol.Tool{{Type: "web_search_preview"}},
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if len(toolAudits.entries) != 2 {
+		t.Fatalf("tool audits len = %d, want started/completed: %#v", len(toolAudits.entries), toolAudits.entries)
+	}
+	started, completed := toolAudits.entries[0], toolAudits.entries[1]
+	if started.Status != "started" || completed.Status != "completed" {
+		t.Fatalf("audit statuses = %q/%q, want started/completed", started.Status, completed.Status)
+	}
+	if completed.ResponseID != resp.ID || completed.ConversationID != "thread_search" || completed.CallID != "call_search" {
+		t.Fatalf("completed audit identity = %#v, want response/thread/call", completed)
+	}
+	if completed.ToolType != "hosted" || completed.ToolName != "web_search" || completed.Executor != "hosted:web_search" || completed.Phase != "tool_call" {
+		t.Fatalf("completed audit tool fields = %#v", completed)
+	}
+	if completed.InputJSON["query_chars"] != len("llm trace replay") || completed.InputJSON["max_results"] != 2 {
+		t.Fatalf("completed audit input summary = %#v", completed.InputJSON)
+	}
+	if completed.OutputJSON["result_count"] != 1 {
+		t.Fatalf("completed audit output summary = %#v", completed.OutputJSON)
+	}
+	if completed.MetadataJSON["iteration"] != 1 || completed.MetadataJSON["stream"] != false {
+		t.Fatalf("completed audit metadata = %#v", completed.MetadataJSON)
+	}
+	if completed.StartedAt.IsZero() || completed.CompletedAt.IsZero() || completed.CompletedAt.Before(completed.StartedAt) {
+		t.Fatalf("completed audit timestamps = started %v completed %v", completed.StartedAt, completed.CompletedAt)
+	}
+	if len(toolAudits.requestAuditIDSeen) != 2 || toolAudits.requestAuditIDSeen[0] != "audit_search" || toolAudits.requestAuditIDSeen[1] != "audit_search" {
+		t.Fatalf("request audit ids seen = %#v", toolAudits.requestAuditIDSeen)
+	}
+	data := toJSONForTest(t, toolAudits.entries)
+	if strings.Contains(data, "llm trace replay") || strings.Contains(data, "TraceLab docs") || strings.Contains(data, "Record and replay") {
+		t.Fatalf("tool call audit leaked raw query/output: %s", data)
+	}
+}
+
 func TestRuntimeCreateWebSearchMaxToolIterationsGuard(t *testing.T) {
 	client := &fakeChatClient{
 		resp: ChatCompletionResponse{
@@ -2344,10 +2544,11 @@ func TestRuntimeCreateRecordsHostedWebSearchToolFailure(t *testing.T) {
 	providerErr := errors.New("search backend failed")
 	provider := &fakeWebSearchProvider{err: providerErr}
 	events := &fakeExecutionEventRecorder{}
+	toolAudits := &fakeToolCallAuditRecorder{}
 	rt := New(Config{
 		DefaultModel:     "gpt-test",
 		WebSearchEnabled: true,
-	}, client, NewMemoryStore(), WithWebSearchProvider(provider), WithExecutionEventRecorder(events))
+	}, client, NewMemoryStore(), WithWebSearchProvider(provider), WithExecutionEventRecorder(events), WithToolCallAuditRecorder(toolAudits))
 
 	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
 		Input: "search it",
@@ -2364,6 +2565,12 @@ func TestRuntimeCreateRecordsHostedWebSearchToolFailure(t *testing.T) {
 	}
 	if events.events[1].DetailsJSON["tool_name"] != "web_search" || events.events[1].DetailsJSON["call_id"] != "call_search" || events.events[1].DetailsJSON["error"] != "search backend failed" {
 		t.Fatalf("failed event details mismatch: %#v", events.events[1].DetailsJSON)
+	}
+	if len(toolAudits.entries) != 2 || toolAudits.entries[0].Status != "started" || toolAudits.entries[1].Status != "failed" {
+		t.Fatalf("tool audits = %#v, want started/failed", toolAudits.entries)
+	}
+	if toolAudits.entries[1].ErrorText != "search backend failed" || toolAudits.entries[1].OutputJSON["result_count"] != nil {
+		t.Fatalf("failed tool audit = %#v", toolAudits.entries[1])
 	}
 }
 

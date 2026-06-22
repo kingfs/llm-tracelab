@@ -396,6 +396,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		var requestAuditor responsesaudit.RequestAuditor
 		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder
 		var executionEventRecorder responsesaudit.ExecutionEventRecorder
+		var toolCallAuditRecorder responsesaudit.ToolCallAuditRecorder
 		if st != nil {
 			if entClient := st.EntClient(); entClient != nil {
 				responseStore = responsesruntime.NewEntStore(entClient)
@@ -403,6 +404,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 				requestAuditor = entAuditor
 				upstreamExchangeRecorder = entAuditor
 				executionEventRecorder = entAuditor
+				toolCallAuditRecorder = entAuditor
 			}
 		}
 		runtimeConfig := responsesruntime.Config{
@@ -417,6 +419,9 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		runtimeOptions := []responsesruntime.Option{}
 		if executionEventRecorder != nil {
 			runtimeOptions = append(runtimeOptions, responsesruntime.WithExecutionEventRecorder(executionEventRecorder))
+		}
+		if toolCallAuditRecorder != nil {
+			runtimeOptions = append(runtimeOptions, responsesruntime.WithToolCallAuditRecorder(toolCallAuditRecorder))
 		}
 		tokenizeEstimatorOption, err := responsesTokenizeEstimatorOption(cfg, rtr, nil)
 		if err != nil {
