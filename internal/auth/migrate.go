@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -209,6 +210,93 @@ func MigrateDatabaseDown(driver string, dsn string, steps int, all bool) error {
 		return nil
 	}
 	return err
+}
+
+type MigrationStatus struct {
+	Driver                     string
+	Versioned                  bool
+	Available                  bool
+	Version                    uint
+	Dirty                      bool
+	DatabasePath               string
+	SharedApplicationNamespace bool
+	Message                    string
+}
+
+func CheckStatus(driver string, dsn string) (MigrationStatus, error) {
+	driver = normalizeDriver(driver)
+	status := MigrationStatus{Driver: driver, Versioned: true}
+	switch driver {
+	case "postgres":
+		appStatus, err := appdbmigrate.CheckStatus(driver, dsn)
+		if err != nil {
+			return status, err
+		}
+		status.Available = appStatus.Available
+		status.Version = appStatus.Version
+		status.Dirty = appStatus.Dirty
+		status.SharedApplicationNamespace = true
+		status.Message = appStatus.Message
+		if status.Message == "" {
+			status.Message = "postgres auth migrations currently share the application schema_migrations namespace"
+		}
+		return status, nil
+	case "sqlite":
+		return checkSQLiteMigrationStatus(dsn, status)
+	default:
+		return status, fmt.Errorf("auth database driver %q is not supported by migrations yet", driver)
+	}
+}
+
+func checkSQLiteMigrationStatus(dsn string, status MigrationStatus) (MigrationStatus, error) {
+	dbPath := config.SQLitePathFromDSN(dsn)
+	status.DatabasePath = dbPath
+	if strings.TrimSpace(dbPath) == "" {
+		status.Message = "sqlite auth database path is empty"
+		return status, nil
+	}
+	if dbPath == ":memory:" {
+		status.Message = "sqlite in-memory auth database status is not inspectable"
+		return status, nil
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			status.Message = "sqlite auth database file does not exist"
+			return status, nil
+		}
+		return status, err
+	}
+
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(dbPath))
+	if err != nil {
+		return status, err
+	}
+	defer db.Close()
+	exists, err := tableExists(db, "schema_migrations")
+	if err != nil {
+		return status, err
+	}
+	if !exists {
+		status.Message = "sqlite auth schema_migrations table does not exist"
+		return status, nil
+	}
+	status.Available = true
+	if err := db.QueryRow(`SELECT version, dirty FROM schema_migrations LIMIT 1`).Scan(&status.Version, &status.Dirty); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			status.Available = false
+			status.Message = "sqlite auth schema_migrations table is empty"
+			return status, nil
+		}
+		return status, err
+	}
+	status.Message = "sqlite auth migration status read from configured auth database path"
+	return status, nil
+}
+
+func sqliteReadOnlyDSN(dbPath string) string {
+	values := url.Values{}
+	values.Set("mode", "ro")
+	return (&url.URL{Scheme: "file", Path: dbPath, RawQuery: values.Encode()}).String()
 }
 
 func newMigrator(driverName string, dsn string) (*gomigrate.Migrate, error) {
