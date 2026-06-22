@@ -147,14 +147,15 @@ type LimitConfig struct {
 }
 
 type ResponsesServerConfig struct {
-	Enabled                     bool                          `yaml:"enabled"`
-	DefaultModel                string                        `yaml:"default_model"`
-	ForceStore                  bool                          `yaml:"force_store"`
-	MaxRequestBodyBytes         int64                         `yaml:"max_request_body_bytes"`
-	Path                        string                        `yaml:"path"`
-	AutoCompact                 bool                          `yaml:"auto_compact"`
-	CompactHistoryItemThreshold int                           `yaml:"compact_history_item_threshold"`
-	ModelProfiles               []ResponsesModelProfileConfig `yaml:"model_profiles"`
+	Enabled                     bool                            `yaml:"enabled"`
+	DefaultModel                string                          `yaml:"default_model"`
+	ForceStore                  bool                            `yaml:"force_store"`
+	MaxRequestBodyBytes         int64                           `yaml:"max_request_body_bytes"`
+	Path                        string                          `yaml:"path"`
+	AutoCompact                 bool                            `yaml:"auto_compact"`
+	CompactHistoryItemThreshold int                             `yaml:"compact_history_item_threshold"`
+	ModelProfiles               []ResponsesModelProfileConfig   `yaml:"model_profiles"`
+	FunctionExecutors           ResponsesFunctionExecutorConfig `yaml:"function_executors"`
 }
 
 type ResponsesModelProfileConfig struct {
@@ -164,6 +165,26 @@ type ResponsesModelProfileConfig struct {
 	MaxOutputTokens             int    `yaml:"max_output_tokens"`
 	CompactHistoryItemThreshold int    `yaml:"compact_history_item_threshold"`
 	UpstreamModel               string `yaml:"upstream_model"`
+}
+
+type ResponsesFunctionExecutorConfig struct {
+	Enabled        bool                               `yaml:"enabled"`
+	Timeout        time.Duration                      `yaml:"timeout"`
+	MaxResultBytes int                                `yaml:"max_result_bytes"`
+	Redaction      ResponsesFunctionRedactionConfig   `yaml:"redaction"`
+	Executors      []ResponsesFunctionExecutorBinding `yaml:"executors"`
+}
+
+type ResponsesFunctionRedactionConfig struct {
+	Arguments bool `yaml:"arguments"`
+	Output    bool `yaml:"output"`
+}
+
+type ResponsesFunctionExecutorBinding struct {
+	Name    string `yaml:"name"`
+	Type    string `yaml:"type"`
+	Enabled *bool  `yaml:"enabled"`
+	Output  any    `yaml:"output"`
 }
 
 type ToolsConfig struct {
@@ -386,6 +407,31 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
 			cfg.ResponsesServer.CompactHistoryItemThreshold = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_ENABLED"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.FunctionExecutors.Enabled = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.ResponsesServer.FunctionExecutors.Timeout = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.ResponsesServer.FunctionExecutors.MaxResultBytes = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.FunctionExecutors.Redaction.Arguments = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.FunctionExecutors.Redaction.Output = parsed
 		}
 	}
 	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
@@ -741,6 +787,24 @@ func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
 		profiles = append(profiles, profile)
 	}
 	return profiles
+}
+
+func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConfig {
+	cfg := c.ResponsesServer.FunctionExecutors
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = 5 * time.Second
+	}
+	if cfg.MaxResultBytes <= 0 {
+		cfg.MaxResultBytes = 64 << 10
+	}
+	bindings := make([]ResponsesFunctionExecutorBinding, 0, len(cfg.Executors))
+	for _, binding := range cfg.Executors {
+		binding.Name = strings.TrimSpace(binding.Name)
+		binding.Type = strings.ToLower(strings.TrimSpace(binding.Type))
+		bindings = append(bindings, binding)
+	}
+	cfg.Executors = bindings
+	return cfg
 }
 
 func (c Config) WebSearchEnabled() bool {

@@ -290,6 +290,7 @@ type responsesServerAssemblyConfig struct {
 	ForceStore          bool
 	MaxRequestBodyBytes int64
 	Path                string
+	FunctionExecutors   config.ResponsesFunctionExecutorConfig
 }
 
 func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAssemblyConfig {
@@ -297,6 +298,7 @@ func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAss
 		return responsesServerAssemblyConfig{
 			MaxRequestBodyBytes: (config.Config{}).ResponsesMaxRequestBodyBytes(),
 			Path:                (config.Config{}).ResponsesServerPath(),
+			FunctionExecutors:   (config.Config{}).ResponsesFunctionExecutorsConfig(),
 		}
 	}
 	return responsesServerAssemblyConfig{
@@ -305,6 +307,7 @@ func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAss
 		ForceStore:          cfg.ResponsesForceStore(),
 		MaxRequestBodyBytes: cfg.ResponsesMaxRequestBodyBytes(),
 		Path:                cfg.ResponsesServerPath(),
+		FunctionExecutors:   cfg.ResponsesFunctionExecutorsConfig(),
 	}
 }
 

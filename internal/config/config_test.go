@@ -407,6 +407,16 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 	if got := cfg.ResponsesModelProfiles(); len(got) != 0 {
 		t.Fatalf("ResponsesModelProfiles() len = %d, want 0", len(got))
 	}
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if executors.Enabled {
+		t.Fatalf("ResponsesFunctionExecutorsConfig().Enabled = true, want false")
+	}
+	if executors.Timeout != 5*time.Second {
+		t.Fatalf("ResponsesFunctionExecutorsConfig().Timeout = %v, want 5s", executors.Timeout)
+	}
+	if executors.MaxResultBytes != 64<<10 {
+		t.Fatalf("ResponsesFunctionExecutorsConfig().MaxResultBytes = %d, want %d", executors.MaxResultBytes, 64<<10)
+	}
 }
 
 func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
@@ -419,6 +429,22 @@ responses_server:
   path: "/v1/responses"
   auto_compact: true
   compact_history_item_threshold: 12
+  function_executors:
+    enabled: true
+    timeout: 2s
+    max_result_bytes: 128
+    redaction:
+      arguments: true
+      output: true
+    executors:
+      - name: "lookup"
+        type: "static_response"
+        output:
+          ok: true
+      - name: "disabled_lookup"
+        type: "static_response"
+        enabled: false
+        output: "off"
   model_profiles:
     - name: "qwen3"
       context_window_tokens: 32768
@@ -464,6 +490,19 @@ responses_server:
 	if got := profiles[1]; got.Pattern != "gpt-4o*" || got.CompactHistoryItemThreshold != 6 {
 		t.Fatalf("second model profile = %+v", got)
 	}
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if !executors.Enabled || executors.Timeout != 2*time.Second || executors.MaxResultBytes != 128 || !executors.Redaction.Arguments || !executors.Redaction.Output {
+		t.Fatalf("function executors policy = %+v, want enabled 2s 128 redacted", executors)
+	}
+	if len(executors.Executors) != 2 {
+		t.Fatalf("function executors len = %d, want 2", len(executors.Executors))
+	}
+	if got := executors.Executors[0]; got.Name != "lookup" || got.Type != "static_response" {
+		t.Fatalf("first function executor = %+v", got)
+	}
+	if got := executors.Executors[1]; got.Name != "disabled_lookup" || got.Enabled == nil || *got.Enabled {
+		t.Fatalf("second function executor = %+v", got)
+	}
 }
 
 func TestResponsesServerEnvOverrides(t *testing.T) {
@@ -474,6 +513,11 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	t.Setenv("LLM_TRACELAB_RESPONSES_PATH", "/custom/responses")
 	t.Setenv("LLM_TRACELAB_RESPONSES_AUTO_COMPACT", "true")
 	t.Setenv("LLM_TRACELAB_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD", "7")
+	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_ENABLED", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_TIMEOUT", "3s")
+	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES", "256")
+	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT", "true")
 
 	cfg := Config{}
 	cfg.ResponsesServer.DefaultModel = "yaml-model"
@@ -500,6 +544,10 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	}
 	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 7 {
 		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 7", got)
+	}
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if !executors.Enabled || executors.Timeout != 3*time.Second || executors.MaxResultBytes != 256 || !executors.Redaction.Arguments || !executors.Redaction.Output {
+		t.Fatalf("ResponsesFunctionExecutorsConfig() = %+v, want env overrides", executors)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
@@ -888,6 +889,65 @@ func TestRuntimeCreateExecutesRegisteredFunctionTool(t *testing.T) {
 	}
 	if events.events[1].Status != "completed" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" {
 		t.Fatalf("completed event mismatch: %#v", events.events[1])
+	}
+}
+
+func TestRuntimeFunctionToolExecutorPolicyRedactsAndLimitsResult(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_lookup",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "lookup",
+								Arguments: `{"secret":"value"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(
+		Config{DefaultModel: "gpt-test"},
+		client,
+		NewMemoryStore(),
+		WithExecutionEventRecorder(events),
+		WithFunctionToolExecutorPolicy("lookup", StaticFunctionToolExecutor{Output: "too long"}, FunctionToolExecutorPolicy{
+			Timeout:         time.Second,
+			MaxResultBytes:  3,
+			RedactArguments: true,
+		}),
+	)
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	})
+	if err == nil {
+		t.Fatalf("Create returned nil error, want result too large")
+	}
+	if _, ok := err.(FunctionToolResultTooLargeError); !ok {
+		t.Fatalf("Create error = %T %v, want FunctionToolResultTooLargeError", err, err)
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want started/failed: %#v", len(events.events), events.events)
+	}
+	if got := events.events[0].DetailsJSON["arguments"]; got != "<redacted>" {
+		t.Fatalf("started event arguments = %q, want redacted", got)
+	}
+	if events.events[1].Status != "failed" || events.events[1].DetailsJSON["result_bytes"] != 8 {
+		t.Fatalf("failed event mismatch: %#v", events.events[1])
 	}
 }
 

@@ -34,7 +34,7 @@ type Runtime struct {
 	client            ChatCompletionsClient
 	store             Store
 	webSearchProvider websearch.Provider
-	functionExecutors map[string]FunctionToolExecutor
+	functionExecutors map[string]configuredFunctionToolExecutor
 	events            audit.ExecutionEventRecorder
 }
 
@@ -53,15 +53,22 @@ func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
 }
 
 func WithFunctionToolExecutor(name string, executor FunctionToolExecutor) Option {
+	return WithFunctionToolExecutorPolicy(name, executor, FunctionToolExecutorPolicy{})
+}
+
+func WithFunctionToolExecutorPolicy(name string, executor FunctionToolExecutor, policy FunctionToolExecutorPolicy) Option {
 	return func(r *Runtime) {
 		name = normalizeFunctionToolName(name)
 		if name == "" || executor == nil {
 			return
 		}
 		if r.functionExecutors == nil {
-			r.functionExecutors = map[string]FunctionToolExecutor{}
+			r.functionExecutors = map[string]configuredFunctionToolExecutor{}
 		}
-		r.functionExecutors[name] = executor
+		r.functionExecutors[name] = configuredFunctionToolExecutor{
+			executor: executor,
+			policy:   policy,
+		}
 	}
 }
 
@@ -718,10 +725,14 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 }
 
 func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+	argumentsForEvent := call.call.Function.Arguments
+	if call.policy.RedactArguments {
+		argumentsForEvent = "<redacted>"
+	}
 	eventDetails := map[string]any{
 		"tool_name": call.call.Function.Name,
 		"call_id":   call.call.ID,
-		"arguments": call.call.Function.Arguments,
+		"arguments": argumentsForEvent,
 		"iteration": iteration,
 		"executor":  "function",
 	}
@@ -731,7 +742,13 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 		Status:      "started",
 		DetailsJSON: eventDetails,
 	})
-	result, err := call.executor.ExecuteFunctionTool(ctx, FunctionToolCall{
+	execCtx := ctx
+	cancel := func() {}
+	if call.policy.Timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, call.policy.Timeout)
+	}
+	defer cancel()
+	result, err := call.executor.ExecuteFunctionTool(execCtx, FunctionToolCall{
 		CallID:    call.call.ID,
 		Name:      call.call.Function.Name,
 		Arguments: call.call.Function.Arguments,
@@ -748,15 +765,38 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 		})
 		return protocol.OutputItem{}, "", err
 	}
+	toolContent := toolOutputContent(result.Output)
+	if call.policy.MaxResultBytes > 0 && len([]byte(toolContent)) > call.policy.MaxResultBytes {
+		err := FunctionToolResultTooLargeError{
+			Name:           call.call.Function.Name,
+			MaxResultBytes: call.policy.MaxResultBytes,
+			ResultBytes:    len([]byte(toolContent)),
+		}
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+				"error":        err.Error(),
+				"result_bytes": err.ResultBytes,
+			}),
+		})
+		return protocol.OutputItem{}, "", err
+	}
+	outputChars := len(toolContent)
+	if call.policy.RedactOutput {
+		outputChars = 0
+	}
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType: "response.tool_call",
 		Phase:     "tool_call",
 		Status:    "completed",
 		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
-			"output_chars": len(toolOutputContent(result.Output)),
+			"output_chars": outputChars,
 		}),
 	})
-	return functionToolCallOutput(call.call, result.Output), toolOutputContent(result.Output), nil
+	return functionToolCallOutput(call.call, result.Output), toolContent, nil
 }
 
 func (r *Runtime) recordExecutionEvent(ctx context.Context, event audit.ExecutionEvent) {
@@ -975,6 +1015,7 @@ type executableToolCall struct {
 	call     ChatToolCall
 	query    string
 	executor FunctionToolExecutor
+	policy   FunctionToolExecutorPolicy
 }
 
 func (r *Runtime) executableToolCalls(chat ChatCompletionResponse) ([]executableToolCall, bool, bool) {
@@ -998,11 +1039,11 @@ func (r *Runtime) executableToolCalls(chat ChatCompletionResponse) ([]executable
 			query := webSearchQueryFromArguments(call.Function.Arguments)
 			out = append(out, executableToolCall{kind: executableToolKindWebSearch, call: call, query: query})
 		default:
-			executor := r.functionExecutors[normalizeFunctionToolName(call.Function.Name)]
-			if executor == nil {
+			configured := r.functionExecutors[normalizeFunctionToolName(call.Function.Name)]
+			if configured.executor == nil {
 				return nil, true, false
 			}
-			out = append(out, executableToolCall{kind: executableToolKindFunction, call: call, executor: executor})
+			out = append(out, executableToolCall{kind: executableToolKindFunction, call: call, executor: configured.executor, policy: configured.policy})
 		}
 	}
 	return out, true, true

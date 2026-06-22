@@ -427,6 +427,11 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			}
 			runtimeOptions = append(runtimeOptions, responsesruntime.WithWebSearchProvider(provider))
 		}
+		functionExecutorOptions, err := responsesFunctionExecutorOptions(cfg)
+		if err != nil {
+			return nil, err
+		}
+		runtimeOptions = append(runtimeOptions, functionExecutorOptions...)
 		rt := responsesruntime.New(runtimeConfig, &responsesChatCompletionsAdapter{
 			router:        rtr,
 			recorder:      rec,
@@ -473,6 +478,42 @@ func responsesRuntimeModelProfiles(cfg *config.Config) []responsesruntime.ModelP
 		})
 	}
 	return out
+}
+
+func responsesFunctionExecutorOptions(cfg *config.Config) ([]responsesruntime.Option, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	executorConfig := cfg.ResponsesFunctionExecutorsConfig()
+	if !executorConfig.Enabled {
+		return nil, nil
+	}
+	options := make([]responsesruntime.Option, 0, len(executorConfig.Executors))
+	policy := responsesruntime.FunctionToolExecutorPolicy{
+		Timeout:         executorConfig.Timeout,
+		MaxResultBytes:  executorConfig.MaxResultBytes,
+		RedactArguments: executorConfig.Redaction.Arguments,
+		RedactOutput:    executorConfig.Redaction.Output,
+	}
+	for _, binding := range executorConfig.Executors {
+		if binding.Enabled != nil && !*binding.Enabled {
+			continue
+		}
+		if binding.Name == "" {
+			return nil, fmt.Errorf("responses function executor name is required")
+		}
+		switch binding.Type {
+		case "static_response":
+			options = append(options, responsesruntime.WithFunctionToolExecutorPolicy(
+				binding.Name,
+				responsesruntime.StaticFunctionToolExecutor{Output: binding.Output},
+				policy,
+			))
+		default:
+			return nil, fmt.Errorf("unsupported responses function executor type %q for %q", binding.Type, binding.Name)
+		}
+	}
+	return options, nil
 }
 
 func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier) (*Handler, error) {

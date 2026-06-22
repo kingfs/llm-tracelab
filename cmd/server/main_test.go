@@ -178,6 +178,12 @@ func TestResponsesServerConfigFromServeConfigDefaultsDisabled(t *testing.T) {
 	if got.Path != "/v1/responses" {
 		t.Fatalf("Path = %q, want /v1/responses", got.Path)
 	}
+	if got.FunctionExecutors.Enabled {
+		t.Fatalf("FunctionExecutors.Enabled = true, want false")
+	}
+	if got.FunctionExecutors.MaxResultBytes != 64<<10 {
+		t.Fatalf("FunctionExecutors.MaxResultBytes = %d, want %d", got.FunctionExecutors.MaxResultBytes, 64<<10)
+	}
 }
 
 func TestResponsesServerConfigFromServeConfigCopiesEnabledValues(t *testing.T) {
@@ -187,6 +193,8 @@ func TestResponsesServerConfigFromServeConfigCopiesEnabledValues(t *testing.T) {
 	cfg.ResponsesServer.ForceStore = true
 	cfg.ResponsesServer.MaxRequestBodyBytes = 1024
 	cfg.ResponsesServer.Path = "/custom/responses"
+	cfg.ResponsesServer.FunctionExecutors.Enabled = true
+	cfg.ResponsesServer.FunctionExecutors.MaxResultBytes = 128
 
 	got := responsesServerConfigFromServeConfig(cfg)
 
@@ -204,6 +212,9 @@ func TestResponsesServerConfigFromServeConfigCopiesEnabledValues(t *testing.T) {
 	}
 	if got.Path != "/custom/responses" {
 		t.Fatalf("Path = %q, want /custom/responses", got.Path)
+	}
+	if !got.FunctionExecutors.Enabled || got.FunctionExecutors.MaxResultBytes != 128 {
+		t.Fatalf("FunctionExecutors = %+v, want enabled max 128", got.FunctionExecutors)
 	}
 }
 
