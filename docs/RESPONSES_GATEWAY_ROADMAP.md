@@ -30,7 +30,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
 - model profile 驱动的 context window/token budgeting。
 - provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议，以及默认关闭的启动时保守补全开关。
-- server-side function executor 配置化；当前已有默认空 registry 代码扩展点。
+- server-side function executor 的 Monitor/外部 executor 配置化；当前已有默认关闭的 YAML `static_response` executor 首切。
 - SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
 
 ## 阶段计划
@@ -89,7 +89,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议。serve 侧已有默认关闭的 `provider_probe.startup_fill` 首切；开启后只填补 YAML upstream 中缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置，也不覆盖显式配置。后续可把 probe report 接入 Monitor/provider setup flow。
 
-### Stage 24：Tool Execution 扩展（registry 首切已落地）
+### Stage 24：Tool Execution 扩展（registry 与 YAML static_response 首切已落地）
 
 目标：在 hosted tools 之外，为 server-side function executor 提供受控扩展点。
 
@@ -101,11 +101,11 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 开启 executor 后写 tool_call started/completed/failed events。
 - 明确超时、错误、结果大小和敏感信息处理边界。
 
-当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。普通 function call argument streaming 已有首切；YAML/Monitor 配置、超时/隔离策略和 server-side tool streaming events 仍未完成。
+当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。普通 function call argument streaming 已有首切；Monitor 配置、外部 executor 隔离策略和 server-side tool streaming events 仍未完成。
 
 ## 并行开发规则
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播顺序合入。后续优先补 hosted/server-side tool streaming，再做 executor 配置化和 provider detection 的 Monitor/setup flow 集成。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置顺序合入。后续优先补 hosted/server-side tool streaming，再做外部 executor/Monitor 配置和 provider detection 的 Monitor/setup flow 集成。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
