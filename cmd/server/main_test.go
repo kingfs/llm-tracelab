@@ -403,6 +403,7 @@ func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 			Direction string `json:"direction"`
 			Steps     int    `json:"steps"`
 			All       bool   `json:"all"`
+			Mode      string `json:"migration_mode"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -413,6 +414,9 @@ func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 	}
 	if !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "up" || envelope.Result.Steps != 2 || envelope.Result.All {
 		t.Fatalf("dry-run result = %+v", envelope.Result)
+	}
+	if envelope.Result.Mode != "versioned-sql" {
+		t.Fatalf("migration_mode = %q, want versioned-sql", envelope.Result.Mode)
 	}
 	if strings.Contains(envelope.Result.DSN, "secret") || strings.Contains(envelope.Command, "auth") {
 		t.Fatalf("db migrate dry-run leaked auth namespace or secret: command=%q dsn=%q", envelope.Command, envelope.Result.DSN)

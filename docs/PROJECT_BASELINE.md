@@ -65,7 +65,7 @@ SQLite 当前负责：
 
 启动时 schema 升级必须兼容已有本地 DB。
 
-Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client。`ent/postgres-migrations` 已包含初始 Postgres application schema SQL，并已验证 up/down 可执行；但 `db migrate up` 仍未切到 checked-in SQL migrator，所以完整 Postgres 运维生产化还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束，Stage 16A 已接入 Postgres ent migration SQL 生成链路和初始 checked-in migration。完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client。`ent/postgres-migrations` 已包含初始 Postgres application schema SQL，并已验证 up/down 可执行；Postgres `db migrate up` 已切到 checked-in SQL migrator，通过 `golang-migrate` 应用嵌入的 `ent/postgres-migrations`。完整 Postgres 运维生产化仍不是当前基线能力，因为 serve/store startup 的 Postgres `auto_migrate` 仍走 ent `Schema.Create` 兼容路径，SQLite 应用迁移仍未版本化，Postgres auth migration 也未完成。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束，Stage 16A/16B 已接入 Postgres ent migration SQL 生成链路、初始 checked-in migration 和 CLI versioned SQL migrator。完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
 
 Stage 9 audit 表职责边界：
 
@@ -170,7 +170,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 让测试依赖真实 provider。
 - Responses server-mode streaming。
 - 完整 Responses function tool lifecycle、streaming tool events 和 compact workflow。
-- Responses audit Monitor UI、完整 function-tool/stream/cancel/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search 最小 `execution_events`，以及核心查询服务/Monitor API/MCP 查询。
+- 完整 function-tool/stream/cancel/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，以及 Postgres `db migrate up` 的 versioned SQL 应用路径。
 - provider auto-detect。
 
 ## 推荐验证

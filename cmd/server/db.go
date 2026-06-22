@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
@@ -183,30 +184,30 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		return 1
 	}
 	result := map[string]any{
-		"dry_run":   opts.dryRun,
-		"mutated":   false,
-		"driver":    cfg.DatabaseDriver(),
-		"dsn":       config.RedactDSN(cfg.DatabaseDSN()),
-		"direction": opts.direction,
-		"steps":     opts.steps,
-		"all":       opts.all,
+		"dry_run":        opts.dryRun,
+		"mutated":        false,
+		"driver":         cfg.DatabaseDriver(),
+		"dsn":            config.RedactDSN(cfg.DatabaseDSN()),
+		"direction":      opts.direction,
+		"steps":          opts.steps,
+		"all":            opts.all,
+		"migration_mode": appDBMigrationMode(cfg.DatabaseDriver()),
 	}
 	if opts.dryRun {
 		return writeDryRunResult(opts.stdout, opts.format, "db.migrate."+opts.direction, result)
 	}
 	switch opts.direction {
 	case "up":
-		st, err := initializeApplicationDatabase(cfg)
-		if err != nil {
+		if err := migrateApplicationDatabaseUp(cfg, opts.steps); err != nil {
 			slog.Error("Application database migration failed", "error", err)
 			return 1
 		}
-		defer st.Close()
 		result["mutated"] = true
 		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.up", result, func(w io.Writer) error {
 			fmt.Fprintf(w, "application database schema migration applied\n")
 			fmt.Fprintf(w, "driver: %s\n", cfg.DatabaseDriver())
 			fmt.Fprintf(w, "dsn: %s\n", config.RedactDSN(cfg.DatabaseDSN()))
+			fmt.Fprintf(w, "migration_mode: %s\n", appDBMigrationMode(cfg.DatabaseDriver()))
 			return nil
 		}); err != nil {
 			slog.Error("Write db migrate result failed", "error", err)
@@ -219,6 +220,26 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown db migrate direction %q\n", opts.direction)
 		return 2
+	}
+}
+
+func migrateApplicationDatabaseUp(cfg *config.Config, steps int) error {
+	if appDBMigrationMode(cfg.DatabaseDriver()) == "versioned-sql" {
+		return appdbmigrate.MigrateUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), steps)
+	}
+	st, err := initializeApplicationDatabase(cfg)
+	if err != nil {
+		return err
+	}
+	return st.Close()
+}
+
+func appDBMigrationMode(driver string) string {
+	switch normalizeAuthStoreDriver(driver) {
+	case "postgres":
+		return "versioned-sql"
+	default:
+		return "schema-init"
 	}
 }
 
