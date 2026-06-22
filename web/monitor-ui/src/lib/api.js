@@ -17,6 +17,7 @@ export const apiPaths = {
   eventIgnore: (eventID) => `/api/events/${encodeURIComponent(eventID)}/ignore`,
   traces: "/api/traces",
   findings: "/api/findings",
+  responsesAuditTrace: "/api/responses/audit/trace",
   analysis: "/api/analysis",
   analysisJobs: "/api/analysis/jobs",
   analysisJob: (jobID) => `/api/analysis/jobs/${encodeURIComponent(jobID)}`,
