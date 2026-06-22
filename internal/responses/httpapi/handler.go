@@ -344,6 +344,9 @@ func (h *Handler) serveIncrementalResponseStream(w http.ResponseWriter, r *http.
 			})
 			return true
 		}
+		if writer.wrote {
+			_ = writer.ResponseFailed(err)
+		}
 		failureStatus := runtimeFailureStatus(err)
 		h.auditRejected(r, auditID, failureStatus, err.Error())
 		eventType := "response.request"
@@ -533,6 +536,11 @@ func (s *streamWriter) ResponseCompleted(resp protocol.Response) error {
 	return s.write("response.completed", protocol.StreamEvent{Type: "response.completed", Response: &resp})
 }
 
+func (s *streamWriter) ResponseFailed(err error) error {
+	body := runtimeErrorBody(err)
+	return s.write("response.failed", protocol.StreamEvent{Type: "response.failed", Error: &body})
+}
+
 func (s *streamWriter) writeOutputItem(outputIndex int, item protocol.OutputItem) error {
 	index := outputIndex
 	if err := s.write("response.output_item.added", protocol.StreamEvent{
@@ -709,6 +717,33 @@ func writeRuntimeError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeError(w, http.StatusInternalServerError, err.Error(), "server_error", "server_error")
+}
+
+func runtimeErrorBody(err error) protocol.ErrorBody {
+	var notFound runtime.ResponseNotFoundError
+	if errors.As(err, &notFound) {
+		message := "response not found"
+		if notFound.ID != "" {
+			message = fmt.Sprintf("response %q not found", notFound.ID)
+		}
+		return protocol.ErrorBody{
+			Message: message,
+			Type:    "invalid_request_error",
+			Code:    "not_found",
+		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return protocol.ErrorBody{
+			Message: "request cancelled",
+			Type:    "server_error",
+			Code:    "cancelled",
+		}
+	}
+	return protocol.ErrorBody{
+		Message: err.Error(),
+		Type:    "server_error",
+		Code:    "server_error",
+	}
 }
 
 func runtimeFailureStatus(err error) string {
