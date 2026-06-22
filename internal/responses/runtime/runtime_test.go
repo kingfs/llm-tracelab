@@ -55,10 +55,12 @@ func (f *fakeChatClient) ChatCompletionStream(ctx context.Context, req ChatCompl
 }
 
 type fakeResponseStreamSink struct {
-	created   []protocol.Response
-	deltas    []ResponseTextDelta
-	completed []protocol.Response
-	err       error
+	created       []protocol.Response
+	deltas        []ResponseTextDelta
+	functionDelta []ResponseFunctionCallArgumentsDelta
+	functionDone  []ResponseFunctionCallArgumentsDone
+	completed     []protocol.Response
+	err           error
 }
 
 func (f *fakeResponseStreamSink) ResponseCreated(resp protocol.Response) error {
@@ -68,6 +70,16 @@ func (f *fakeResponseStreamSink) ResponseCreated(resp protocol.Response) error {
 
 func (f *fakeResponseStreamSink) OutputTextDelta(delta ResponseTextDelta) error {
 	f.deltas = append(f.deltas, delta)
+	return f.err
+}
+
+func (f *fakeResponseStreamSink) FunctionCallArgumentsDelta(delta ResponseFunctionCallArgumentsDelta) error {
+	f.functionDelta = append(f.functionDelta, delta)
+	return f.err
+}
+
+func (f *fakeResponseStreamSink) FunctionCallArgumentsDone(done ResponseFunctionCallArgumentsDone) error {
+	f.functionDone = append(f.functionDone, done)
 	return f.err
 }
 
@@ -354,6 +366,85 @@ func TestRuntimeCreateStreamEmitsDeltasAndStoresFinalResponse(t *testing.T) {
 	}
 	if len(stored.Output) != 1 || stored.Output[0].Content[0].Text != "Hello world" {
 		t.Fatalf("stored output = %#v, want full response text", stored.Output)
+	}
+}
+
+func TestRuntimeCreateStreamEmitsFunctionCallArgumentDeltas(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:        0,
+				ID:           "call_lookup",
+				Type:         "function",
+				FunctionName: "lookup",
+			}}},
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ArgumentsDelta: `{"q"`,
+			}}},
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ArgumentsDelta: `:"codex"}`,
+			}}},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{
+					ID:   "call_lookup",
+					Type: "function",
+					Function: ChatToolCallFunction{
+						Name:      "lookup",
+						Arguments: `{"q":"codex"}`,
+					},
+				}}},
+				FinishReason: "tool_calls",
+			}},
+			Usage: ChatUsage{PromptTokens: 4, CompletionTokens: 3, TotalTokens: 7},
+		},
+	}
+	store := NewMemoryStore()
+	rt := New(Config{DefaultModel: "fallback-model"}, client, store)
+	sink := &fakeResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "lookup codex",
+		Stream: true,
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.streamReqs) != 1 || len(client.streamReqs[0].Tools) != 1 || client.streamReqs[0].Tools[0].Function.Name != "lookup" {
+		t.Fatalf("stream chat tools = %#v, want lookup function tool", client.streamReqs)
+	}
+	if len(sink.created) != 1 || sink.created[0].ID != resp.ID {
+		t.Fatalf("created events = %#v, want one response.created", sink.created)
+	}
+	if len(sink.functionDelta) != 2 {
+		t.Fatalf("function deltas = %#v, want two argument chunks", sink.functionDelta)
+	}
+	if sink.functionDelta[0].ItemID != "fc_call_lookup" || sink.functionDelta[0].Delta != `{"q"` || sink.functionDelta[0].Arguments != `{"q"` {
+		t.Fatalf("first function delta = %#v", sink.functionDelta[0])
+	}
+	if sink.functionDelta[1].ItemID != "fc_call_lookup" || sink.functionDelta[1].Delta != `:"codex"}` || sink.functionDelta[1].Arguments != `{"q":"codex"}` {
+		t.Fatalf("second function delta = %#v", sink.functionDelta[1])
+	}
+	if len(sink.functionDone) != 1 || sink.functionDone[0].ItemID != "fc_call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function done = %#v, want full arguments", sink.functionDone)
+	}
+	if len(resp.Output) != 1 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("final output = %#v, want function_call", resp.Output)
+	}
+	stored, ok, err := store.Get(context.Background(), resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored response lookup ok=%v err=%v", ok, err)
+	}
+	if len(stored.Output) != 1 || stored.Output[0].Type != "function_call" {
+		t.Fatalf("stored output = %#v, want function_call", stored.Output)
 	}
 }
 

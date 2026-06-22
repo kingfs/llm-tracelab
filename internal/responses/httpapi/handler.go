@@ -397,6 +397,16 @@ func (s *auditedStreamSink) OutputTextDelta(delta runtime.ResponseTextDelta) err
 	return s.writer.OutputTextDelta(delta)
 }
 
+func (s *auditedStreamSink) FunctionCallArgumentsDelta(delta runtime.ResponseFunctionCallArgumentsDelta) error {
+	s.start()
+	return s.writer.FunctionCallArgumentsDelta(delta)
+}
+
+func (s *auditedStreamSink) FunctionCallArgumentsDone(done runtime.ResponseFunctionCallArgumentsDone) error {
+	s.start()
+	return s.writer.FunctionCallArgumentsDone(done)
+}
+
 func (s *auditedStreamSink) ResponseCompleted(resp protocol.Response) error {
 	s.start()
 	return s.writer.ResponseCompleted(resp)
@@ -451,6 +461,27 @@ func (s *streamWriter) OutputTextDelta(delta runtime.ResponseTextDelta) error {
 		ItemID:       delta.ItemID,
 		ContentIndex: &contentIndex,
 		Delta:        delta.Delta,
+	})
+}
+
+func (s *streamWriter) FunctionCallArgumentsDelta(delta runtime.ResponseFunctionCallArgumentsDelta) error {
+	outputIndex := delta.OutputIndex
+	return s.write("response.function_call_arguments.delta", protocol.StreamEvent{
+		Type:        "response.function_call_arguments.delta",
+		OutputIndex: &outputIndex,
+		ItemID:      delta.ItemID,
+		Delta:       delta.Delta,
+		Arguments:   delta.Arguments,
+	})
+}
+
+func (s *streamWriter) FunctionCallArgumentsDone(done runtime.ResponseFunctionCallArgumentsDone) error {
+	outputIndex := done.OutputIndex
+	return s.write("response.function_call_arguments.done", protocol.StreamEvent{
+		Type:        "response.function_call_arguments.done",
+		OutputIndex: &outputIndex,
+		ItemID:      done.ItemID,
+		Arguments:   done.Arguments,
 	})
 }
 

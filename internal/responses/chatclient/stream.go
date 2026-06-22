@@ -54,13 +54,14 @@ func emitChatStreamEvents(chunk chatCompletionStreamChunk, handle runtime.ChatSt
 		return nil
 	}
 	for _, choice := range chunk.Choices {
-		if choice.Delta.Content == nil && choice.Delta.Role == "" && choice.FinishReason == nil {
+		if choice.Delta.Content == nil && choice.Delta.Role == "" && len(choice.Delta.ToolCalls) == 0 && choice.FinishReason == nil {
 			continue
 		}
 		event := runtime.ChatStreamEvent{
-			ChoiceIndex:  choice.Index,
-			Role:         choice.Delta.Role,
-			FinishReason: choice.FinishReason,
+			ChoiceIndex:    choice.Index,
+			Role:           choice.Delta.Role,
+			ToolCallDeltas: chatStreamToolCallDeltas(choice.Delta.ToolCalls),
+			FinishReason:   choice.FinishReason,
 		}
 		if choice.Delta.Content != nil {
 			event.ContentDelta = *choice.Delta.Content
@@ -70,6 +71,23 @@ func emitChatStreamEvents(chunk chatCompletionStreamChunk, handle runtime.ChatSt
 		}
 	}
 	return nil
+}
+
+func chatStreamToolCallDeltas(in []chatStreamToolCall) []runtime.ChatStreamToolCallDelta {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]runtime.ChatStreamToolCallDelta, 0, len(in))
+	for _, tool := range in {
+		out = append(out, runtime.ChatStreamToolCallDelta{
+			Index:          tool.Index,
+			ID:             tool.ID,
+			Type:           tool.Type,
+			FunctionName:   tool.Function.Name,
+			ArgumentsDelta: tool.Function.Arguments,
+		})
+	}
+	return out
 }
 
 type chatCompletionStreamChunk struct {

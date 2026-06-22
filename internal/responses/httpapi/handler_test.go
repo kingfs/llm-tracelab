@@ -32,11 +32,13 @@ type fakeRuntime struct {
 
 type fakeIncrementalRuntime struct {
 	fakeRuntime
-	streamCtx    context.Context
-	streamReq    protocol.CreateResponseRequest
-	streamResp   protocol.Response
-	streamDeltas []string
-	streamErr    error
+	streamCtx            context.Context
+	streamReq            protocol.CreateResponseRequest
+	streamResp           protocol.Response
+	streamDeltas         []string
+	streamFunctionDeltas []runtime.ResponseFunctionCallArgumentsDelta
+	streamFunctionDone   []runtime.ResponseFunctionCallArgumentsDone
+	streamErr            error
 }
 
 func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink runtime.ResponseStreamSink) (protocol.Response, error) {
@@ -59,6 +61,18 @@ func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.
 			Delta:        delta,
 		}); err != nil {
 			return protocol.Response{}, err
+		}
+	}
+	if functionSink, ok := sink.(runtime.FunctionCallArgumentStreamSink); ok {
+		for _, delta := range f.streamFunctionDeltas {
+			if err := functionSink.FunctionCallArgumentsDelta(delta); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+		for _, done := range f.streamFunctionDone {
+			if err := functionSink.FunctionCallArgumentsDone(done); err != nil {
+				return protocol.Response{}, err
+			}
 		}
 	}
 	if err := sink.ResponseCompleted(f.streamResp); err != nil {
@@ -369,6 +383,56 @@ func TestCreateResponseStreamUsesIncrementalRuntimeDeltas(t *testing.T) {
 	}
 	if auditor.events[3].EventType != "response.request" || auditor.events[3].Status != "completed" || auditor.events[3].ResponseID != "resp_stream" {
 		t.Fatalf("request completed event mismatch: %#v", auditor.events[3])
+	}
+}
+
+func TestCreateResponseStreamUsesIncrementalFunctionCallArgumentDeltas(t *testing.T) {
+	rt := &fakeIncrementalRuntime{
+		streamResp: protocol.Response{
+			ID:        "resp_stream_tool",
+			Object:    "response",
+			Status:    "completed",
+			Model:     "gpt-test",
+			CreatedAt: 123,
+			Output: []protocol.OutputItem{{
+				ID:        "fc_call_lookup",
+				Type:      "function_call",
+				Status:    "completed",
+				CallID:    "call_lookup",
+				Name:      "lookup",
+				Arguments: `{"q":"codex"}`,
+			}},
+		},
+		streamFunctionDeltas: []runtime.ResponseFunctionCallArgumentsDelta{
+			{OutputIndex: 0, ItemID: "fc_call_lookup", CallID: "call_lookup", Delta: `{"q"`, Arguments: `{"q"`},
+			{OutputIndex: 0, ItemID: "fc_call_lookup", CallID: "call_lookup", Delta: `:"codex"}`, Arguments: `{"q":"codex"}`},
+		},
+		streamFunctionDone: []runtime.ResponseFunctionCallArgumentsDone{
+			{OutputIndex: 0, ItemID: "fc_call_lookup", CallID: "call_lookup", Arguments: `{"q":"codex"}`},
+		},
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, event := range []string{"response.created", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.completed"} {
+		if !strings.Contains(body, "event: "+event+"\n") {
+			t.Fatalf("incremental function stream missing event %q:\n%s", event, body)
+		}
+	}
+	if !strings.Contains(body, `"delta":"{\"q\""`) || !strings.Contains(body, `"delta":":\"codex\"}"`) || !strings.Contains(body, `"arguments":"{\"q\":\"codex\"}"`) {
+		t.Fatalf("incremental function stream missing argument payloads:\n%s", body)
+	}
+	if rt.createReq.Stream {
+		t.Fatalf("fallback Create unexpectedly called: %#v", rt.createReq)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
+		t.Fatalf("stream audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
 	}
 }
 

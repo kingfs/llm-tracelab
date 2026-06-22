@@ -13,10 +13,19 @@ type ChatCompletionsStreamer interface {
 type ChatStreamCallback func(ChatStreamEvent) error
 
 type ChatStreamEvent struct {
-	ChoiceIndex  int
-	Role         string
-	ContentDelta string
-	FinishReason *string
+	ChoiceIndex    int
+	Role           string
+	ContentDelta   string
+	ToolCallDeltas []ChatStreamToolCallDelta
+	FinishReason   *string
+}
+
+type ChatStreamToolCallDelta struct {
+	Index          int
+	ID             string
+	Type           string
+	FunctionName   string
+	ArgumentsDelta string
 }
 
 type ChatCompletionRequest struct {

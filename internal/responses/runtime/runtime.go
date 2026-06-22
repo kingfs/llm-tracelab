@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -161,11 +162,31 @@ type ResponseStreamSink interface {
 	ResponseCompleted(resp protocol.Response) error
 }
 
+type FunctionCallArgumentStreamSink interface {
+	FunctionCallArgumentsDelta(delta ResponseFunctionCallArgumentsDelta) error
+	FunctionCallArgumentsDone(done ResponseFunctionCallArgumentsDone) error
+}
+
 type ResponseTextDelta struct {
 	OutputIndex  int
 	ItemID       string
 	ContentIndex int
 	Delta        string
+}
+
+type ResponseFunctionCallArgumentsDelta struct {
+	OutputIndex int
+	ItemID      string
+	CallID      string
+	Delta       string
+	Arguments   string
+}
+
+type ResponseFunctionCallArgumentsDone struct {
+	OutputIndex int
+	ItemID      string
+	CallID      string
+	Arguments   string
 }
 
 func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink ResponseStreamSink) (protocol.Response, error) {
@@ -176,7 +197,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !ok {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
-	if len(req.Tools) > 0 {
+	if !incrementalStreamSupportsTools(req.Tools) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
 	if sink == nil {
@@ -220,6 +241,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		Metadata:           req.Metadata,
 	}
 	createdSent := false
+	functionStream := newFunctionCallStreamState(sink)
 	sendCreated := func() error {
 		if createdSent {
 			return nil
@@ -229,18 +251,35 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	}
 
 	chatResp, err := streamer.ChatCompletionStream(ctx, chatReq, func(event ChatStreamEvent) error {
-		if event.ChoiceIndex != 0 || event.ContentDelta == "" {
+		if event.ChoiceIndex != 0 {
 			return nil
 		}
-		if err := sendCreated(); err != nil {
-			return err
+		if event.ContentDelta != "" {
+			if err := sendCreated(); err != nil {
+				return err
+			}
+			if err := sink.OutputTextDelta(ResponseTextDelta{
+				OutputIndex:  0,
+				ItemID:       messageID,
+				ContentIndex: 0,
+				Delta:        event.ContentDelta,
+			}); err != nil {
+				return err
+			}
 		}
-		return sink.OutputTextDelta(ResponseTextDelta{
-			OutputIndex:  0,
-			ItemID:       messageID,
-			ContentIndex: 0,
-			Delta:        event.ContentDelta,
-		})
+		for _, toolDelta := range event.ToolCallDeltas {
+			functionStream.observe(toolDelta)
+			if toolDelta.ArgumentsDelta == "" {
+				continue
+			}
+			if err := sendCreated(); err != nil {
+				return err
+			}
+			if err := functionStream.argumentsDelta(toolDelta); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return protocol.Response{}, err
@@ -250,6 +289,9 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	}
 	outputItems := chatToOutputItemsWithMessageID(chatResp, messageID)
 	r.recordRequestedFunctionCalls(ctx, outputItems)
+	if err := functionStream.argumentsDone(outputItems); err != nil {
+		return protocol.Response{}, err
+	}
 	resp := responseFromOutputWithID(responseID, req, model, outputItems, chatResp.Usage)
 	if r.shouldStore(req) {
 		if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
@@ -277,6 +319,113 @@ func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItem
 		list.LastID = items[len(items)-1].ID
 	}
 	return list, true, nil
+}
+
+func incrementalStreamSupportsTools(tools []protocol.Tool) bool {
+	for _, tool := range tools {
+		if tool.Type != "function" {
+			return false
+		}
+	}
+	return true
+}
+
+type functionCallStreamState struct {
+	sink  FunctionCallArgumentStreamSink
+	calls map[int]*functionCallStreamCall
+}
+
+type functionCallStreamCall struct {
+	index     int
+	callID    string
+	itemID    string
+	arguments strings.Builder
+}
+
+func newFunctionCallStreamState(sink ResponseStreamSink) *functionCallStreamState {
+	out := &functionCallStreamState{}
+	if functionSink, ok := sink.(FunctionCallArgumentStreamSink); ok {
+		out.sink = functionSink
+	}
+	return out
+}
+
+func (s *functionCallStreamState) observe(delta ChatStreamToolCallDelta) {
+	if s == nil || s.sink == nil {
+		return
+	}
+	s.call(delta)
+}
+
+func (s *functionCallStreamState) argumentsDelta(delta ChatStreamToolCallDelta) error {
+	if s == nil || s.sink == nil || delta.ArgumentsDelta == "" {
+		return nil
+	}
+	call := s.call(delta)
+	call.arguments.WriteString(delta.ArgumentsDelta)
+	return s.sink.FunctionCallArgumentsDelta(ResponseFunctionCallArgumentsDelta{
+		OutputIndex: call.index,
+		ItemID:      call.itemID,
+		CallID:      call.callID,
+		Delta:       delta.ArgumentsDelta,
+		Arguments:   call.arguments.String(),
+	})
+}
+
+func (s *functionCallStreamState) argumentsDone(outputItems []protocol.OutputItem) error {
+	if s == nil || s.sink == nil || len(s.calls) == 0 {
+		return nil
+	}
+	itemsByCallID := map[string]protocol.OutputItem{}
+	for _, item := range outputItems {
+		if item.Type == "function_call" && item.CallID != "" {
+			itemsByCallID[item.CallID] = item
+		}
+	}
+	indexes := make([]int, 0, len(s.calls))
+	for index := range s.calls {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		call := s.calls[index]
+		if item, ok := itemsByCallID[call.callID]; ok {
+			call.itemID = item.ID
+		}
+		if err := s.sink.FunctionCallArgumentsDone(ResponseFunctionCallArgumentsDone{
+			OutputIndex: call.index,
+			ItemID:      call.itemID,
+			CallID:      call.callID,
+			Arguments:   call.arguments.String(),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *functionCallStreamState) call(delta ChatStreamToolCallDelta) *functionCallStreamCall {
+	if s.calls == nil {
+		s.calls = map[int]*functionCallStreamCall{}
+	}
+	call := s.calls[delta.Index]
+	if call == nil {
+		callID := delta.ID
+		if callID == "" {
+			callID = "call_" + strconv.Itoa(delta.Index)
+		}
+		call = &functionCallStreamCall{
+			index:  delta.Index,
+			callID: callID,
+			itemID: "fc_" + callID,
+		}
+		s.calls[delta.Index] = call
+	}
+	if delta.ID != "" && delta.ID != call.callID {
+		call.callID = delta.ID
+		call.itemID = "fc_" + delta.ID
+	}
+	return call
 }
 
 func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseRequest) (protocol.Response, error) {

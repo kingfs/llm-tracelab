@@ -47,7 +47,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 完成后 `responses` / `response_items` 可查到完整结果。
 - 非流式路径、record/replay cassette 和现有 deferred stream 行为不回退。
 
-当前状态：简单文本输出路径已落地；带 tools、需要 auto compact 等复杂路径仍 fallback 到 deferred SSE。后续工作是 tool streaming、cancel 传播和已写出 SSE 后的失败事件细化。
+当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。hosted tools、server-side tool execution、需要 auto compact 等复杂路径仍 fallback 到 deferred SSE。后续工作是 hosted/server-side tool streaming、cancel 传播和已写出 SSE 后的失败事件细化。
 
 ### Stage 21：Model Profile 与 Context Budget 骨架
 
@@ -101,11 +101,11 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 开启 executor 后写 tool_call started/completed/failed events。
 - 明确超时、错误、结果大小和敏感信息处理边界。
 
-当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。YAML/Monitor 配置、超时/隔离策略和 streaming tool events 仍未完成。
+当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。普通 function call argument streaming 已有首切；YAML/Monitor 配置、超时/隔离策略和 server-side tool streaming events 仍未完成。
 
 ## 并行开发规则
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全首切顺序合入。后续优先补 tool streaming/cancel，再做 executor 配置化和 provider detection 的 Monitor/setup flow 集成。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切顺序合入。后续优先补 hosted/server-side tool streaming 和 cancel，再做 executor 配置化和 provider detection 的 Monitor/setup flow 集成。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。

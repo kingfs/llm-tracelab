@@ -247,6 +247,46 @@ func TestChatCompletionStreamAggregatesToolCallDeltas(t *testing.T) {
 	}
 }
 
+func TestChatCompletionStreamCallbackReceivesToolCallDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"id":"chatcmpl_tools","model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\""}}]},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_tools","model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"Paris\"}"}}]},"finish_reason":"tool_calls"}]}`,
+			`data: [DONE]`,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	var deltas []runtime.ChatStreamToolCallDelta
+	resp, err := client.ChatCompletionStream(context.Background(), runtime.ChatCompletionRequest{Model: "gpt-4o"}, func(event runtime.ChatStreamEvent) error {
+		deltas = append(deltas, event.ToolCallDeltas...)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletionStream() error = %v", err)
+	}
+
+	if len(deltas) != 2 {
+		t.Fatalf("tool deltas = %#v, want two chunks", deltas)
+	}
+	if deltas[0].Index != 0 || deltas[0].ID != "call_1" || deltas[0].Type != "function" || deltas[0].FunctionName != "weather" || deltas[0].ArgumentsDelta != `{"city"` {
+		t.Fatalf("first tool delta = %#v", deltas[0])
+	}
+	if deltas[1].Index != 0 || deltas[1].ArgumentsDelta != `:"Paris"}` {
+		t.Fatalf("second tool delta = %#v", deltas[1])
+	}
+	call := resp.Choices[0].Message.ToolCalls[0]
+	if call.Function.Arguments != `{"city":"Paris"}` {
+		t.Fatalf("aggregated tool arguments = %q", call.Function.Arguments)
+	}
+}
+
 func TestChatCompletionStreamInvalidJSONReturnsDiagnosticError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
