@@ -12,7 +12,7 @@
 - 配置：新增 `responses_server` 配置块，字段包括 `enabled`、`default_model`、`force_store`、`max_request_body_bytes` 和 `path`。默认 `enabled: false`，默认 path 为 `/v1/responses`。
 - server-mode path：当 `responses_server.enabled=true` 且请求路径等于配置的 Responses path 时，proxy handler 直接进入本地 Responses HTTP handler；非 Responses 请求仍走现有代理热路径。
 - Chat Completions adapter：本地 Responses runtime 会把非流式 Responses 请求映射为内部上游 `POST /v1/chat/completions` 调用，由现有 router 选择目标 OpenAI-compatible upstream。
-- cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；有 ent-backed audit store 时还会写一条 `upstream_exchanges`，把 request audit、recorder request id、cassette path、route target、model、endpoint、status 和时间戳关联起来；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
+- cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；有 ent-backed audit store 时还会写一条 `upstream_exchanges`，把 response id、request audit、recorder request id、cassette path、route target、model、endpoint、status 和时间戳关联起来；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
 - ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
 - hosted web_search 首切：新增 `tools.web_search` 配置和 `internal/responses/tools/websearch` provider，支持 disabled/mock/SearXNG。开启后，非流式 Responses runtime 可把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把 tool result 注入第二轮 Chat Completions。
 - SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client。`db migrate up` 已从 auth migrator 中拆出并归入应用库命令，但当前 Postgres 路径仍依赖 ent `Schema.Create` 这类非版本化建表能力；完整生产 migration、运维流程和审计查询仍未完成。详见 [Postgres Storage Migration](./POSTGRES_STORAGE_MIGRATION.md)。
@@ -205,11 +205,11 @@ Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库�
 - `items`：input/output message、tool call、tool result、reasoning、summary、compact item。
 - `request_audits`：入站 Responses request envelope、client request id、headers allowlist、redaction metadata、body hash/preview，用于说明 client 请求进入 runtime 前后的审计边界。
 - `execution_events`：runtime plan、model call start/end、tool start/end、compact decision、stream lifecycle、cancel/error 等生命周期事件，用于解释一次 response 如何被编排出来。
-- `upstream_exchanges`：semantic response/request 与外部 `.http` cassette、trace id、route target 的关联，用于把 Responses runtime 状态和现有 recorder 事实源连接起来。当前最小实现只覆盖内部 Chat Completions exchange，`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
+- `upstream_exchanges`：semantic response/request 与外部 `.http` cassette、trace id、route target 的关联，用于把 Responses runtime 状态和现有 recorder 事实源连接起来。当前最小实现只覆盖内部 Chat Completions exchange，并在 response 完成后回填 semantic `response_id`；`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
 
 Stage 10 后续 audit 接入顺序建议：
 
-1. 补齐 `upstream_exchanges` 与 semantic response id 的 correlation 和查询 API。
+1. 补齐 Responses audit 查询 API。
 2. 再接 tool lifecycle events，包括 hosted tool start/end/error、redaction 和 tool result persistence。
 3. 最后补 streaming、cancel、compact 事件，因为这些事件对顺序、幂等和部分失败恢复要求更高。
 
@@ -354,7 +354,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 
 当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、应用库 `db migrate up` 初始化路径、最小 request audit 写入，以及内部 Chat Completions cassette 的最小 upstream exchange correlation 已落地；完整 Postgres migration 生产化、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
 
-Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation。它不等于 Monitor/MCP 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先补 response id/query correlation，再补 tool events，最后处理 streaming/cancel/compact events。
+Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation 并回填 response id。它不等于 Monitor/MCP 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先补查询 API，再补 tool events，最后处理 streaming/cancel/compact events。
 
 ### Stage 3：Hosted tools 与 compact（部分落地）
 

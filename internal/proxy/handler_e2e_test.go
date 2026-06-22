@@ -934,6 +934,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	if exchange.RequestAuditID != audit.ID {
 		t.Fatalf("upstream exchange request_audit_id = %q, want %q", exchange.RequestAuditID, audit.ID)
 	}
+	if exchange.ResponseID != responseID {
+		t.Fatalf("upstream exchange response_id = %q, want %q", exchange.ResponseID, responseID)
+	}
 	if exchange.TraceID != parsed.Header.Meta.RequestID {
 		t.Fatalf("upstream exchange trace_id = %q, want recorder request_id %q", exchange.TraceID, parsed.Header.Meta.RequestID)
 	}

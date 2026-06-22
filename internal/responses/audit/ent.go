@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 )
 
 type EntAuditor struct {
@@ -47,14 +48,30 @@ func (a *EntAuditor) Completed(ctx context.Context, id string, result Completion
 	if a == nil || a.client == nil || id == "" {
 		return nil
 	}
-	update := a.client.RequestAudit.UpdateOneID(id).SetStatus("completed")
+	tx, err := a.client.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	client := tx.Client()
+	update := client.RequestAudit.UpdateOneID(id).SetStatus("completed")
 	if result.ResponseID != "" {
 		update.SetResponseID(result.ResponseID)
 	}
 	if result.ConversationID != "" {
 		update.SetConversationID(result.ConversationID)
 	}
-	return update.Exec(ctx)
+	if err := update.Exec(ctx); err != nil {
+		return rollback(tx, err)
+	}
+	if result.ResponseID != "" {
+		if _, err := client.UpstreamExchange.Update().
+			Where(upstreamexchange.RequestAuditIDEQ(id)).
+			SetResponseID(result.ResponseID).
+			Save(ctx); err != nil {
+			return rollback(tx, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (a *EntAuditor) Rejected(ctx context.Context, id string, failure Failure) error {
@@ -121,4 +138,14 @@ func nilToEmptyMap(values map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return values
+}
+
+func rollback(tx *dao.Tx, err error) error {
+	if tx == nil {
+		return err
+	}
+	if rollbackErr := tx.Rollback(); rollbackErr != nil {
+		return rollbackErr
+	}
+	return err
 }
