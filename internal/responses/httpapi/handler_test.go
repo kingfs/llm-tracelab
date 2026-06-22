@@ -41,6 +41,7 @@ type fakeIncrementalRuntime struct {
 	streamOutputAdded    []runtime.ResponseOutputItemAdded
 	streamOutputDone     []runtime.ResponseOutputItemDone
 	streamErr            error
+	streamErrAfterOutput error
 }
 
 func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink runtime.ResponseStreamSink) (protocol.Response, error) {
@@ -81,6 +82,9 @@ func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.
 		for _, added := range f.streamOutputAdded {
 			if err := outputSink.OutputItemAdded(added); err != nil {
 				return protocol.Response{}, err
+			}
+			if f.streamErrAfterOutput != nil {
+				return protocol.Response{}, f.streamErrAfterOutput
 			}
 		}
 	}
@@ -538,6 +542,86 @@ func TestCreateResponseStreamUsesIncrementalFunctionCallArgumentDeltas(t *testin
 	}
 	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
 		t.Fatalf("stream audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+}
+
+func TestCreateResponseIncrementalStreamWritesFailedEventAfterOutput(t *testing.T) {
+	rt := &fakeIncrementalRuntime{
+		fakeRuntime: fakeRuntime{
+			createResp: protocol.Response{
+				ID:        "resp_deferred_unexpected",
+				Object:    "response",
+				Status:    "completed",
+				Model:     "gpt-test",
+				CreatedAt: 123,
+			},
+		},
+		streamResp: protocol.Response{
+			ID:        "resp_stream_tool_failed",
+			Object:    "response",
+			Status:    "completed",
+			Model:     "gpt-test",
+			CreatedAt: 123,
+			Output: []protocol.OutputItem{{
+				ID:        "fc_call_lookup",
+				Type:      "function_call",
+				Status:    "completed",
+				CallID:    "call_lookup",
+				Name:      "lookup",
+				Arguments: `{"q":"codex"}`,
+			}},
+		},
+		streamOutputAdded: []runtime.ResponseOutputItemAdded{{
+			OutputIndex: 0,
+			Item: protocol.OutputItem{
+				ID:     "fco_call_lookup",
+				Type:   "function_call_output",
+				Status: "in_progress",
+				CallID: "call_lookup",
+				Name:   "lookup",
+			},
+		}},
+		streamErrAfterOutput: errors.New("executor failed after stream write"),
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if rt.createReq.Stream {
+		t.Fatalf("fallback Create unexpectedly called: %#v", rt.createReq)
+	}
+	body := rec.Body.String()
+	for _, event := range []string{"response.created", "response.output_item.added", "response.failed"} {
+		if !strings.Contains(body, "event: "+event+"\n") {
+			t.Fatalf("incremental failed stream missing event %q:\n%s", event, body)
+		}
+	}
+	if strings.Contains(body, "event: response.completed\n") {
+		t.Fatalf("incremental failed stream unexpectedly completed:\n%s", body)
+	}
+	if !strings.Contains(body, `"message":"executor failed after stream write"`) || !strings.Contains(body, `"code":"server_error"`) {
+		t.Fatalf("incremental failed stream missing error payload:\n%s", body)
+	}
+	addedIndex := strings.Index(body, "event: response.output_item.added\n")
+	failedIndex := strings.Index(body, "event: response.failed\n")
+	if addedIndex < 0 || failedIndex < 0 || addedIndex >= failedIndex {
+		t.Fatalf("incremental failed stream event order mismatch:\n%s", body)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "" || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "failed" || auditor.rejected.ErrorText != "executor failed after stream write" {
+		t.Fatalf("stream failed audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 3 {
+		t.Fatalf("execution events = %d, want accepted/stream started/stream failed: %#v", len(auditor.events), auditor.events)
+	}
+	if auditor.events[1].EventType != "response.stream" || auditor.events[1].Status != "started" {
+		t.Fatalf("stream started event mismatch: %#v", auditor.events[1])
+	}
+	if auditor.events[2].EventType != "response.stream" || auditor.events[2].Status != "failed" || auditor.events[2].Message != "executor failed after stream write" {
+		t.Fatalf("stream failed event mismatch: %#v", auditor.events[2])
 	}
 }
 
