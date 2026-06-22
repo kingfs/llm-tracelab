@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
@@ -1125,6 +1126,164 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	}
 	if streamEvents[0].Status != "started" || streamEvents[1].Status != "completed" {
 		t.Fatalf("stream event statuses = %q/%q, want started/completed", streamEvents[0].Status, streamEvents[1].Status)
+	}
+}
+
+func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamStarted := make(chan struct{})
+	upstreamCanceled := make(chan struct{})
+	releaseUpstream := make(chan struct{})
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var chatReq map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		close(upstreamStarted)
+		select {
+		case <-r.Context().Done():
+			close(upstreamCanceled)
+		case <-releaseUpstream:
+		}
+	}))
+	defer upstreamServer.Close()
+	defer close(releaseUpstream)
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"cancel me"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequestWithContext() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	clientDone := make(chan error, 1)
+	go func() {
+		resp, err := proxyServer.Client().Do(req)
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+		clientDone <- err
+	}()
+
+	select {
+	case <-upstreamStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for upstream request")
+	}
+	cancel()
+
+	select {
+	case <-upstreamCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for upstream request context cancellation")
+	}
+
+	select {
+	case err := <-clientDone:
+		if err == nil {
+			t.Fatal("client.Do() error = nil, want cancellation error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cancelled client request")
+	}
+
+	audits, err := waitForRequestAuditsWithStatus(st, 1, "cancelled", time.Second)
+	if err != nil {
+		t.Fatalf("waitForRequestAuditsWithStatus() error = %v", err)
+	}
+	if len(audits) != 1 {
+		t.Fatalf("request audits len = %d, want 1: %+v", len(audits), audits)
+	}
+	audit := audits[0]
+	if audit.Status != "cancelled" {
+		t.Fatalf("request audit status = %q, want cancelled", audit.Status)
+	}
+	if !strings.Contains(audit.ErrorText, context.Canceled.Error()) {
+		t.Fatalf("request audit error_text = %q, want contains %q", audit.ErrorText, context.Canceled.Error())
+	}
+
+	events, err := waitForExecutionEvents(st, 4, time.Second)
+	if err != nil {
+		t.Fatalf("waitForExecutionEvents() error = %v", err)
+	}
+	eventsByKey := map[string]bool{}
+	for _, event := range events {
+		eventsByKey[event.EventType+"/"+event.Phase+"/"+event.Status] = true
+		eventAuditID := event.RequestAuditID
+		if eventAuditID == "" {
+			eventAuditID, _ = event.DetailsJSON["request_audit_id"].(string)
+		}
+		if eventAuditID != audit.ID {
+			t.Fatalf("execution event request_audit_id = %q, details=%#v, want %q", event.RequestAuditID, event.DetailsJSON, audit.ID)
+		}
+	}
+	for _, key := range []string{
+		"response.request/request/accepted",
+		"response.model_call/model_call/started",
+		"response.model_call/model_call/cancelled",
+		"response.request/request/cancelled",
+	} {
+		if !eventsByKey[key] {
+			t.Fatalf("missing execution event %q in %+v", key, events)
+		}
+	}
+
+	exchanges, err := waitForUpstreamExchanges(st, 1, time.Second)
+	if err != nil {
+		t.Fatalf("waitForUpstreamExchanges() error = %v", err)
+	}
+	if len(exchanges) != 1 {
+		t.Fatalf("upstream exchanges len = %d, want 1: %+v", len(exchanges), exchanges)
+	}
+	if exchanges[0].RequestAuditID != audit.ID || exchanges[0].StatusCode != 0 {
+		t.Fatalf("upstream exchange audit/status = %q/%d, want %q/0", exchanges[0].RequestAuditID, exchanges[0].StatusCode, audit.ID)
+	}
+	if !strings.Contains(exchanges[0].ErrorText, context.Canceled.Error()) {
+		t.Fatalf("upstream exchange error_text = %q, want contains %q", exchanges[0].ErrorText, context.Canceled.Error())
 	}
 }
 
@@ -2714,6 +2873,73 @@ func waitForRecentEntries(st *store.Store, limit int, timeout time.Duration) ([]
 				return nil, lastErr
 			}
 			return lastEntries, nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForRequestAuditsWithStatus(st *store.Store, limit int, status string, timeout time.Duration) ([]*dao.RequestAudit, error) {
+	deadline := time.Now().Add(timeout)
+	var lastAudits []*dao.RequestAudit
+	var lastErr error
+
+	for {
+		lastAudits, lastErr = st.EntClient().RequestAudit.Query().
+			Where(requestaudit.StatusEQ(status)).
+			Order(requestaudit.ByCreatedAt(), requestaudit.ByID()).
+			All(context.Background())
+		if lastErr == nil && len(lastAudits) >= limit {
+			return lastAudits, nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return lastAudits, nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForExecutionEvents(st *store.Store, limit int, timeout time.Duration) ([]*dao.ExecutionEvent, error) {
+	deadline := time.Now().Add(timeout)
+	var lastEvents []*dao.ExecutionEvent
+	var lastErr error
+
+	for {
+		lastEvents, lastErr = st.EntClient().ExecutionEvent.Query().
+			Order(executionevent.ByOccurredAt(), executionevent.ByID()).
+			All(context.Background())
+		if lastErr == nil && len(lastEvents) >= limit {
+			return lastEvents, nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return lastEvents, nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForUpstreamExchanges(st *store.Store, limit int, timeout time.Duration) ([]*dao.UpstreamExchange, error) {
+	deadline := time.Now().Add(timeout)
+	var lastExchanges []*dao.UpstreamExchange
+	var lastErr error
+
+	for {
+		lastExchanges, lastErr = st.EntClient().UpstreamExchange.Query().
+			Order(upstreamexchange.ByStartedAt(), upstreamexchange.ByID()).
+			All(context.Background())
+		if lastErr == nil && len(lastExchanges) >= limit {
+			return lastExchanges, nil
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return lastExchanges, nil
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

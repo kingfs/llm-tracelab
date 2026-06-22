@@ -262,7 +262,7 @@ func (a *responsesChatCompletionsAdapter) recordModelCallEvent(ctx context.Conte
 		}
 	}
 	event.DetailsJSON = details
-	if err := a.events.RecordExecutionEvent(ctx, event); err != nil {
+	if err := a.events.RecordExecutionEvent(context.WithoutCancel(ctx), event); err != nil {
 		slog.Error("Failed to record responses model call event", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
 	}
 }
@@ -288,7 +288,7 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 		CompletedAt:    completedAt,
 		ErrorText:      logInfo.Header.Meta.Error,
 	}
-	if err := a.auditor.RecordUpstreamExchange(ctx, entry); err != nil {
+	if err := a.auditor.RecordUpstreamExchange(context.WithoutCancel(ctx), entry); err != nil {
 		slog.Error("Failed to record responses upstream exchange", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
 	}
 }

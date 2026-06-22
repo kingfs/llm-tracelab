@@ -47,7 +47,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 完成后 `responses` / `response_items` 可查到完整结果。
 - 非流式路径、record/replay cassette 和现有 deferred stream 行为不回退。
 
-当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。hosted tools、server-side tool execution、需要 auto compact 等复杂路径仍 fallback 到 deferred SSE。后续工作是 hosted/server-side tool streaming、cancel 传播和已写出 SSE 后的失败事件细化。
+当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。hosted tools、server-side tool execution、需要 auto compact 等复杂路径仍 fallback 到 deferred SSE。后续工作是 hosted/server-side tool streaming 和已写出 SSE 后的失败事件细化。
 
 ### Stage 21：Model Profile 与 Context Budget 骨架
 
@@ -107,5 +107,5 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切顺序合入。后续优先补 hosted/server-side tool streaming 和 cancel，再做 executor 配置化和 provider detection 的 Monitor/setup flow 集成。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播顺序合入。后续优先补 hosted/server-side tool streaming，再做 executor 配置化和 provider detection 的 Monitor/setup flow 集成。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
