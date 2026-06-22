@@ -13,6 +13,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
+	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
@@ -68,6 +69,167 @@ func TestNewInitializesResponsesStateSchema(t *testing.T) {
 				t.Fatalf("sqlite table = %q, want %q", name, table)
 			}
 		})
+	}
+}
+
+func TestNewInitializesAppSettingsSchema(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	var name string
+	if err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, "app_settings").Scan(&name); err != nil {
+		t.Fatalf("query sqlite_master app_settings error = %v", err)
+	}
+	if name != "app_settings" {
+		t.Fatalf("sqlite table = %q, want app_settings", name)
+	}
+}
+
+func TestResponsesFunctionExecutorConfigSnapshotMissing(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	got, ok, err := st.LoadResponsesFunctionExecutorConfigSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() error = %v", err)
+	}
+	if ok {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() ok = true, want false")
+	}
+	if got.Enabled || got.Timeout != 0 || len(got.Executors) != 0 {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() = %+v, want zero config", got)
+	}
+}
+
+func TestResponsesFunctionExecutorConfigSnapshotRoundTripSQLite(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	disabled := false
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled:        true,
+		Timeout:        7 * time.Second,
+		MaxResultBytes: 12345,
+		Redaction: config.ResponsesFunctionRedactionConfig{
+			Arguments: true,
+			Output:    true,
+		},
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:    " echo_weather ",
+				Type:    "STATIC_RESPONSE",
+				Enabled: &disabled,
+				Output:  map[string]any{"secret": "do-not-store-static-output"},
+				Process: config.ResponsesFunctionExecutorProcessConfig{
+					WorkingDir:             " /tmp ",
+					RequireAbsoluteCommand: true,
+				},
+			},
+			{
+				Name:         "shell_weather",
+				Type:         config.ResponsesFunctionExecutorTypeExternalCommand,
+				Command:      "/usr/bin/printenv DO_NOT_STORE_COMMAND",
+				Args:         []string{"do-not-store-arg"},
+				Env:          map[string]string{"SECRET_ENV": "do-not-store-env"},
+				EnvAllowlist: []string{"DO_NOT_STORE_ALLOWLIST"},
+				Process: config.ResponsesFunctionExecutorProcessConfig{
+					WorkingDir:             "/tmp",
+					RequireAbsoluteCommand: true,
+				},
+			},
+		},
+		Warnings: []string{"do-not-store-warning"},
+	}
+
+	if err := st.SaveResponsesFunctionExecutorConfigSnapshot(context.Background(), cfg); err != nil {
+		t.Fatalf("SaveResponsesFunctionExecutorConfigSnapshot() error = %v", err)
+	}
+
+	got, ok, err := st.LoadResponsesFunctionExecutorConfigSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() ok = false, want true")
+	}
+	if !got.Enabled || got.Timeout != 7*time.Second || got.MaxResultBytes != 12345 {
+		t.Fatalf("loaded top-level config = %+v, want saved safe fields", got)
+	}
+	if !got.Redaction.Arguments || !got.Redaction.Output {
+		t.Fatalf("loaded redaction = %+v, want arguments/output true", got.Redaction)
+	}
+	if len(got.Executors) != 2 {
+		t.Fatalf("loaded executors len = %d, want 2: %+v", len(got.Executors), got.Executors)
+	}
+	first := got.Executors[0]
+	if first.Name != "echo_weather" || first.Type != config.ResponsesFunctionExecutorTypeStaticResponse || first.Enabled == nil || *first.Enabled != false {
+		t.Fatalf("loaded first executor = %+v, want sanitized safe fields", first)
+	}
+	if first.Output != nil || first.Command != "" || len(first.Args) != 0 || len(first.Env) != 0 || len(first.EnvAllowlist) != 0 || len(first.Warnings) != 0 || first.Available {
+		t.Fatalf("loaded first executor kept sensitive/runtime fields: %+v", first)
+	}
+	second := got.Executors[1]
+	if second.Name != "shell_weather" || second.Type != config.ResponsesFunctionExecutorTypeExternalCommand {
+		t.Fatalf("loaded second executor = %+v, want name/type", second)
+	}
+	if second.Command != "" || len(second.Args) != 0 || len(second.Env) != 0 || len(second.EnvAllowlist) != 0 {
+		t.Fatalf("loaded second executor kept executable fields: %+v", second)
+	}
+	if second.Process.WorkingDir != "/tmp" || !second.Process.RequireAbsoluteCommand {
+		t.Fatalf("loaded second process = %+v, want safe process isolation fields", second.Process)
+	}
+}
+
+func TestResponsesFunctionExecutorConfigSnapshotDoesNotPersistSensitiveFields(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:         "danger",
+				Type:         config.ResponsesFunctionExecutorTypeExternalCommand,
+				Output:       "sensitive-static-output",
+				Command:      "/bin/echo sensitive-command",
+				Args:         []string{"sensitive-arg"},
+				Env:          map[string]string{"SECRET": "sensitive-env"},
+				EnvAllowlist: []string{"SENSITIVE_ALLOWLIST"},
+				Timeout:      time.Minute,
+			},
+		},
+		Warnings: []string{"runtime warning should not persist"},
+	}
+	if err := st.SaveResponsesFunctionExecutorConfigSnapshot(context.Background(), cfg); err != nil {
+		t.Fatalf("SaveResponsesFunctionExecutorConfigSnapshot() error = %v", err)
+	}
+
+	var raw string
+	if err := st.db.QueryRow(`SELECT value_json FROM app_settings WHERE setting_key = ?`, responsesFunctionExecutorConfigSnapshotKey).Scan(&raw); err != nil {
+		t.Fatalf("query app_settings value_json error = %v", err)
+	}
+	for _, secret := range []string{
+		"sensitive-static-output",
+		"sensitive-command",
+		"sensitive-arg",
+		"sensitive-env",
+		"SENSITIVE_ALLOWLIST",
+		"runtime warning should not persist",
+	} {
+		if strings.Contains(raw, secret) {
+			t.Fatalf("persisted snapshot contains sensitive/runtime value %q in %s", secret, raw)
+		}
 	}
 }
 
