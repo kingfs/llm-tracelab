@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/spf13/cobra"
@@ -35,6 +36,7 @@ func newProviderCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	cmd.AddCommand(newProviderProbeCommand(runtime))
 	cmd.AddCommand(newProviderProbeReportCommand(runtime))
+	cmd.AddCommand(newProviderProbeApplyCommand(runtime))
 	return cmd
 }
 
@@ -59,6 +61,31 @@ func newProviderProbeCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", "Probe only the upstream target with this id")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP timeout for each probe request")
+	return cmd
+}
+
+func newProviderProbeApplyCommand(runtime *cliRuntime) *cobra.Command {
+	var id string
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "probe-apply",
+		Short: "Apply provider probe suggestions to managed channels",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runProviderProbeApplyWithOptions(providerProbeOptions{
+					configPath: runtime.configPath(),
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+					id:         id,
+					timeout:    timeout,
+					command:    "provider.probe_apply",
+				})
+			})
+		},
+	}
+	cmd.Flags().StringVar(&id, "id", "", "Apply suggestions only to the channel with this id")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP timeout for each probe request")
 	return cmd
 }
@@ -187,6 +214,49 @@ func cloneProviderProbeHeaders(in map[string]string) map[string]string {
 	return out
 }
 
+func runProviderProbeApplyWithOptions(opts providerProbeOptions) int {
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
+		return 1
+	}
+	st, err := openApplicationDatabase(cfg)
+	if err != nil {
+		slog.Error("Open application store failed", "error", err)
+		return 1
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			slog.Error("Close application store failed", "error", err)
+		}
+	}()
+
+	timeout := opts.timeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	svc := channel.NewService(st).WithHTTPClient(&http.Client{Timeout: timeout})
+	result, err := svc.ApplyProviderProbeReport(context.Background(), channel.ProviderProbeReportOptions{
+		ChannelID: strings.TrimSpace(opts.id),
+	})
+	if err != nil {
+		slog.Error("Provider probe apply failed", "error", err)
+		return 2
+	}
+	command := strings.TrimSpace(opts.command)
+	if command == "" {
+		command = "provider.probe_apply"
+	}
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, command, result, func(w io.Writer) error {
+		writeProviderProbeApplyText(w, result)
+		return nil
+	}); err != nil {
+		slog.Error("Write provider probe apply result failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
 func writeProviderProbeText(w io.Writer, result providerprobe.BatchReport) {
 	for _, report := range result.Reports {
 		id := report.ProviderID
@@ -210,6 +280,32 @@ func writeProviderProbeText(w io.Writer, result providerprobe.BatchReport) {
 		}
 		if len(report.Warnings) > 0 {
 			fmt.Fprintf(w, "warnings: %s\n", strings.Join(report.Warnings, "; "))
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func writeProviderProbeApplyText(w io.Writer, result channel.ProviderProbeApplyResult) {
+	fmt.Fprintln(w, "provider probe report")
+	writeProviderProbeText(w, result.Report)
+	if len(result.Applied) == 0 {
+		fmt.Fprintln(w, "applied: none")
+		return
+	}
+	fmt.Fprintln(w, "channel apply results")
+	for _, item := range result.Applied {
+		channelID := item.ChannelID
+		if channelID == "" {
+			channelID = "default"
+		}
+		fmt.Fprintf(w, "channel: %s\n", channelID)
+		fmt.Fprintf(w, "status: %s\n", item.Status)
+		fmt.Fprintf(w, "applied: %t\n", item.Applied)
+		if len(item.AppliedFields) > 0 {
+			fmt.Fprintf(w, "applied_fields: %s\n", strings.Join(item.AppliedFields, ","))
+		}
+		if item.SkippedReason != "" {
+			fmt.Fprintf(w, "skipped_reason: %s\n", item.SkippedReason)
 		}
 		fmt.Fprintln(w)
 	}
