@@ -1,0 +1,32 @@
+{
+  "model": "local-test-model",
+  "input": "Read package metadata.",
+  "tools": [
+    {
+      "type": "function",
+      "name": "read_file",
+      "description": "Read a UTF-8 text file from the workspace.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "store": true,
+  "metadata": {
+    "fixture": "codex_function_call",
+    "codex": {
+      "thread_id": "thread_fixture_tool",
+      "client_request_id": "turn_fixture_tool_1"
+    }
+  }
+}

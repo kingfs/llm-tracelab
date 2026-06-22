@@ -1,0 +1,19 @@
+{
+  "id": "resp_fixture_tool_call",
+  "object": "response",
+  "status": "completed",
+  "model": "local-test-model",
+  "output": [
+    {
+      "id": "fc_fixture_read_file",
+      "type": "function_call",
+      "status": "completed",
+      "call_id": "call_read_file_1",
+      "name": "read_file",
+      "arguments": "{\"path\":\"go.mod\"}"
+    }
+  ],
+  "metadata": {
+    "fixture": "codex_function_call"
+  }
+}

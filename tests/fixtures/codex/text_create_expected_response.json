@@ -1,0 +1,23 @@
+{
+  "id": "resp_fixture_text",
+  "object": "response",
+  "status": "completed",
+  "model": "local-test-model",
+  "output": [
+    {
+      "id": "msg_fixture_text",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Hello from the offline fixture."
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "fixture": "codex_text_create"
+  }
+}

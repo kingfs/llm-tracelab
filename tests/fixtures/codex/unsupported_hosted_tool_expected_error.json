@@ -1,0 +1,63 @@
+{
+  "request_examples": [
+    {
+      "model": "local-test-model",
+      "input": "List project files through an MCP hosted tool.",
+      "tools": [
+        {
+          "type": "mcp",
+          "server_label": "workspace"
+        }
+      ],
+      "tool_choice": {
+        "type": "mcp",
+        "server_label": "workspace"
+      },
+      "store": true
+    },
+    {
+      "model": "local-test-model",
+      "input": "Search an indexed file store.",
+      "tools": [
+        {
+          "type": "file_search",
+          "vector_store_ids": [
+            "vs_fixture"
+          ]
+        }
+      ],
+      "tool_choice": {
+        "type": "file_search"
+      },
+      "store": true
+    },
+    {
+      "model": "local-test-model",
+      "input": "Run Python code.",
+      "tools": [
+        {
+          "type": "code_interpreter",
+          "container": {
+            "type": "auto"
+          }
+        }
+      ],
+      "tool_choice": {
+        "type": "code_interpreter"
+      },
+      "store": true
+    }
+  ],
+  "expected_error": {
+    "error": {
+      "message": "unsupported hosted tool",
+      "type": "invalid_request_error",
+      "code": "unsupported_tool"
+    }
+  },
+  "notes": [
+    "llm-tracelab must not execute mcp, file_search, code_interpreter, or computer_use_preview until an explicit runtime exists.",
+    "The stable target is a machine-readable OpenAI-style error before tool execution or fabricated tool output.",
+    "This fixture is a compatibility target for a future runner; current runtime code only has explicit hosted execution for web_search/web_search_preview."
+  ]
+}
