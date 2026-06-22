@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -201,6 +202,62 @@ type systemEventView struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 	ReadAt          *time.Time      `json:"read_at,omitempty"`
 	ResolvedAt      *time.Time      `json:"resolved_at,omitempty"`
+}
+
+type responsesAuditTraceResponse struct {
+	Query             responsesAuditTraceQuery      `json:"query"`
+	RequestAudit      *responsesRequestAuditView    `json:"request_audit,omitempty"`
+	Events            []responsesExecutionEventView `json:"events"`
+	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
+}
+
+type responsesAuditTraceQuery struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+}
+
+type responsesRequestAuditView struct {
+	ID              string         `json:"id"`
+	ResponseID      string         `json:"response_id,omitempty"`
+	ConversationID  string         `json:"conversation_id,omitempty"`
+	Method          string         `json:"method"`
+	Path            string         `json:"path"`
+	ClientRequestID string         `json:"client_request_id,omitempty"`
+	HeaderJSON      map[string]any `json:"header_json,omitempty"`
+	BodyPreview     string         `json:"body_preview,omitempty"`
+	BodySHA256      string         `json:"body_sha256,omitempty"`
+	Status          string         `json:"status,omitempty"`
+	ErrorText       string         `json:"error_text,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+}
+
+type responsesExecutionEventView struct {
+	ID             string         `json:"id"`
+	ResponseID     string         `json:"response_id,omitempty"`
+	RequestAuditID string         `json:"request_audit_id,omitempty"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	EventType      string         `json:"event_type"`
+	Phase          string         `json:"phase,omitempty"`
+	Status         string         `json:"status,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	DetailsJSON    map[string]any `json:"details_json,omitempty"`
+	OccurredAt     time.Time      `json:"occurred_at"`
+}
+
+type responsesUpstreamExchange struct {
+	ID             string    `json:"id"`
+	ResponseID     string    `json:"response_id,omitempty"`
+	RequestAuditID string    `json:"request_audit_id,omitempty"`
+	TraceID        string    `json:"trace_id,omitempty"`
+	CassettePath   string    `json:"cassette_path,omitempty"`
+	UpstreamID     string    `json:"upstream_id,omitempty"`
+	RouteTarget    string    `json:"route_target,omitempty"`
+	Model          string    `json:"model,omitempty"`
+	Endpoint       string    `json:"endpoint,omitempty"`
+	StatusCode     int       `json:"status_code,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	CompletedAt    time.Time `json:"completed_at,omitempty"`
+	ErrorText      string    `json:"error_text,omitempty"`
 }
 
 type traceListItem struct {
@@ -974,6 +1031,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
@@ -1078,6 +1136,38 @@ func systemEventSummaryAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, systemEventSummaryView(summary, windowLabel))
+	}
+}
+
+func responsesAuditTraceAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		responseID := strings.TrimSpace(r.URL.Query().Get("response_id"))
+		requestAuditID := strings.TrimSpace(r.URL.Query().Get("request_audit_id"))
+		if responseID == "" && requestAuditID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "response_id or request_audit_id is required"})
+			return
+		}
+		if st == nil || st.EntClient() == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "responses audit store not configured"})
+			return
+		}
+		trace, found, err := responsesaudit.NewQueryService(st.EntClient()).GetRequestAuditTrace(r.Context(), responsesaudit.GetRequestAuditTraceParams{
+			ResponseID:     responseID,
+			RequestAuditID: requestAuditID,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "responses audit query error: " + err.Error()})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "responses audit trace not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, responsesAuditTraceFromAudit(trace, responseID, requestAuditID))
 	}
 }
 
@@ -4002,6 +4092,75 @@ func systemEventViews(events []store.SystemEvent) []systemEventView {
 		out = append(out, systemEventViewFromStore(event))
 	}
 	return out
+}
+
+func responsesAuditTraceFromAudit(trace responsesaudit.RequestAuditTrace, responseID string, requestAuditID string) responsesAuditTraceResponse {
+	out := responsesAuditTraceResponse{
+		Query: responsesAuditTraceQuery{
+			ResponseID:     firstNonEmpty(responseID, trace.RequestAudit.ResponseID),
+			RequestAuditID: firstNonEmpty(requestAuditID, trace.RequestAudit.ID),
+		},
+		RequestAudit:      responsesRequestAuditFromAudit(trace.RequestAudit),
+		Events:            make([]responsesExecutionEventView, 0, len(trace.ExecutionEvents)),
+		UpstreamExchanges: make([]responsesUpstreamExchange, 0, len(trace.UpstreamExchanges)),
+	}
+	for _, event := range trace.ExecutionEvents {
+		out.Events = append(out.Events, responsesExecutionEventFromAudit(event))
+	}
+	for _, exchange := range trace.UpstreamExchanges {
+		out.UpstreamExchanges = append(out.UpstreamExchanges, responsesUpstreamExchangeFromAudit(exchange))
+	}
+	return out
+}
+
+func responsesRequestAuditFromAudit(audit responsesaudit.RequestAuditView) *responsesRequestAuditView {
+	return &responsesRequestAuditView{
+		ID:              audit.ID,
+		ResponseID:      audit.ResponseID,
+		ConversationID:  audit.ConversationID,
+		Method:          audit.Method,
+		Path:            audit.Path,
+		ClientRequestID: audit.ClientRequestID,
+		HeaderJSON:      audit.HeaderJSON,
+		BodyPreview:     audit.BodyPreview,
+		BodySHA256:      audit.BodySha256,
+		Status:          audit.Status,
+		ErrorText:       audit.ErrorText,
+		CreatedAt:       audit.CreatedAt,
+	}
+}
+
+func responsesExecutionEventFromAudit(event responsesaudit.ExecutionEventView) responsesExecutionEventView {
+	return responsesExecutionEventView{
+		ID:             event.ID,
+		ResponseID:     event.ResponseID,
+		RequestAuditID: event.RequestAuditID,
+		ConversationID: event.ConversationID,
+		EventType:      event.EventType,
+		Phase:          event.Phase,
+		Status:         event.Status,
+		Message:        event.Message,
+		DetailsJSON:    event.DetailsJSON,
+		OccurredAt:     event.OccurredAt,
+	}
+}
+
+func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchangeView) responsesUpstreamExchange {
+	return responsesUpstreamExchange{
+		ID:             exchange.ID,
+		ResponseID:     exchange.ResponseID,
+		RequestAuditID: exchange.RequestAuditID,
+		TraceID:        exchange.TraceID,
+		CassettePath:   exchange.CassettePath,
+		UpstreamID:     exchange.UpstreamID,
+		RouteTarget:    exchange.RouteTarget,
+		Model:          exchange.Model,
+		Endpoint:       exchange.Endpoint,
+		StatusCode:     exchange.StatusCode,
+		StartedAt:      exchange.StartedAt,
+		CompletedAt:    exchange.CompletedAt,
+		ErrorText:      exchange.ErrorText,
+	}
 }
 
 func systemEventViewFromStore(event store.SystemEvent) systemEventView {

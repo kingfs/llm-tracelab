@@ -183,8 +183,8 @@ been committed or applied in a shared environment.
 - Postgres application migration files are not checked in, and the Stage 7B
   generator entry intentionally does not write them yet.
 - Postgres auth migrations are not implemented.
-- Request audit, execution events, upstream exchange correlation, and MCP
-  semantic diagnostics have a minimal Responses path; Monitor semantic
+- Request audit, execution events, upstream exchange correlation, Monitor API,
+  and MCP semantic diagnostics have a minimal Responses path; Monitor UI
   diagnostics are still incomplete.
 - Existing raw SQL paths may still contain SQLite-specific assumptions.
 - There is no automatic SQLite-to-Postgres data migration.

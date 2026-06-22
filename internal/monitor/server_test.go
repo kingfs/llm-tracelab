@@ -168,6 +168,88 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	}
 }
 
+func TestResponsesAuditTraceAPIHandler(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-monitor-1").
+		SetResponseID("resp-monitor-1").
+		SetConversationID("thread-monitor-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetClientRequestID("client-monitor-1").
+		SetHeaderJSON(map[string]any{"content-type": "application/json"}).
+		SetBodyPreview(`{"input":"hello"}`).
+		SetBodySha256("sha-monitor").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("exev-monitor-1").
+		SetRequestAuditID("reqaudit-monitor-1").
+		SetEventType("response.model_call").
+		SetPhase("model_call").
+		SetStatus("started").
+		SetDetailsJSON(map[string]any{"request_audit_id": "reqaudit-monitor-1"}).
+		SetOccurredAt(base.Add(time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create execution event: %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex-monitor-1").
+		SetRequestAuditID("reqaudit-monitor-1").
+		SetResponseID("resp-monitor-1").
+		SetTraceID("trace-monitor-1").
+		SetStatusCode(http.StatusOK).
+		SetStartedAt(base.Add(2 * time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st)
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace?response_id=resp-monitor-1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesAuditTraceResponse
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.RequestAudit == nil || payload.RequestAudit.ID != "reqaudit-monitor-1" {
+		t.Fatalf("request audit = %+v, want reqaudit-monitor-1", payload.RequestAudit)
+	}
+	if len(payload.Events) != 1 || payload.Events[0].RequestAuditID != "reqaudit-monitor-1" {
+		t.Fatalf("events = %+v, want request-scoped event", payload.Events)
+	}
+	if len(payload.UpstreamExchanges) != 1 || payload.UpstreamExchanges[0].TraceID != "trace-monitor-1" {
+		t.Fatalf("upstream exchanges = %+v, want trace-monitor-1", payload.UpstreamExchanges)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing query status = %d, want 400", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace?request_audit_id=missing", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing audit status = %d, want 404", rr.Code)
+	}
+}
+
 func TestSystemEventListAndSummaryAPIHandlers(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {

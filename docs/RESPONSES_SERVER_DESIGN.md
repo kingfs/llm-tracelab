@@ -22,7 +22,7 @@
 - streaming Responses server-mode。
 - 完整 tool call/tool result 生命周期和 tool audit。当前只支持非流式 hosted `web_search` 首切。
 - compact workflow。
-- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务和 MCP `responses_audit_trace` 工具；Monitor API/UI 和更完整的 tool/stream/cancel/compact events 尚未接入。
+- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具；Monitor UI 和更完整的 tool/stream/cancel/compact events 尚未接入。
 - 完整 Postgres migration 生产化。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
@@ -120,7 +120,7 @@ client
 4. Runtime 将 Responses input、instructions、tools、tool choice、reasoning/metadata 等映射到 OpenAI-compatible Chat Completions 请求。
 5. TraceLab 调用上游 `POST /chat/completions`。这个外部 exchange 进入现有 Proxy Recording 能力，写为 `.http` V3 cassette。
 6. 当前 Runtime 输出非流式 OpenAI Responses 兼容 response；streaming events 尚未支持。
-7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Stage 10A 还会写入 `request_audits` 的 accepted/completed/failed/rejected 状态。Stage 11A 会为内部 Chat Completions cassette 写入最小 `upstream_exchanges` correlation。Stage 12A 会写入 request 与内部 model_call 的最小 `execution_events`。Stage 13A 提供核心 audit 查询服务和 MCP 查询工具；Monitor API/UI 后续再接。
+7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Stage 10A 还会写入 `request_audits` 的 accepted/completed/failed/rejected 状态。Stage 11A 会为内部 Chat Completions cassette 写入最小 `upstream_exchanges` correlation。Stage 12A 会写入 request 与内部 model_call 的最小 `execution_events`。Stage 13A 提供核心 audit 查询服务、Monitor API 和 MCP 查询工具；Monitor UI 后续再接。
 
 关键边界：
 
@@ -192,7 +192,7 @@ providers:
 
 目标是 Postgres-first，但保留 SQLite fallback 和旧 replay 兼容。
 
-截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration 和生产运维流程仍未完成。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；Stage 11A 已接入内部 Chat Completions `upstream_exchanges` correlation；Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入；Stage 13A 已接入核心 audit 查询服务和 MCP 查询工具。
+截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration 和生产运维流程仍未完成。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；Stage 11A 已接入内部 Chat Completions `upstream_exchanges` correlation；Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入；Stage 13A 已接入核心 audit 查询服务、Monitor API 和 MCP 查询工具。
 
 Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 `db migrate up` 已拆出为应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持；它还不是基于 checked-in SQL 的版本化 Postgres migrator。`internal/auth/migrate.go` 的 embedded migrations 仍只支持 SQLite。Postgres auth migration 是后续独立缺口，不应阻塞把 Responses ent store 归入应用库迁移域。
 
@@ -209,7 +209,7 @@ Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库�
 
 Stage 10 后续 audit 接入顺序建议：
 
-1. 补齐 Responses audit Monitor API/UI。
+1. 补齐 Responses audit Monitor UI。
 2. 再接 tool lifecycle events，包括 hosted tool start/end/error、redaction 和 tool result persistence。
 3. 最后补 streaming、cancel、compact 事件，因为这些事件对顺序、幂等和部分失败恢复要求更高。
 
@@ -352,9 +352,9 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - SQLite fallback 仍能运行最小 server/test。
 - 旧 `.http` replay 不连接 DB。
 
-当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、应用库 `db migrate up` 初始化路径、最小 request audit 写入、内部 Chat Completions cassette 的最小 upstream exchange correlation、request/model_call 最小 execution events，以及核心 audit 查询服务/MCP 查询工具已落地；完整 Postgres migration 生产化和 Monitor semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
+当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、应用库 `db migrate up` 初始化路径、最小 request audit 写入、内部 Chat Completions cassette 的最小 upstream exchange correlation、request/model_call 最小 execution events，以及核心 audit 查询服务/Monitor API/MCP 查询工具已落地；完整 Postgres migration 生产化和 Monitor UI semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
 
-Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation 并回填 response id，Stage 12A 接入 request 与内部 model_call 的最小 execution events，Stage 13A 接入核心 audit 查询服务和 MCP `responses_audit_trace` 工具。它不等于 Monitor UI 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先补 Monitor API/UI，再补 tool events，最后处理 streaming/cancel/compact events。
+Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation 并回填 response id，Stage 12A 接入 request 与内部 model_call 的最小 execution events，Stage 13A 接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。它不等于 Monitor UI 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先补 Monitor UI，再补 tool events，最后处理 streaming/cancel/compact events。
 
 ### Stage 3：Hosted tools 与 compact（部分落地）
 
