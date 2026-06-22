@@ -25,6 +25,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
 	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
@@ -867,6 +868,32 @@ func init() {
 	systemeventDescID := systemeventFields[0].Descriptor()
 	// systemevent.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	systemevent.IDValidator = systemeventDescID.Validators[0].(func(string) error)
+	toolcallauditFields := schema.ToolCallAudit{}.Fields()
+	_ = toolcallauditFields
+	// toolcallauditDescCallID is the schema descriptor for call_id field.
+	toolcallauditDescCallID := toolcallauditFields[4].Descriptor()
+	// toolcallaudit.CallIDValidator is a validator for the "call_id" field. It is called by the builders before save.
+	toolcallaudit.CallIDValidator = toolcallauditDescCallID.Validators[0].(func(string) error)
+	// toolcallauditDescToolType is the schema descriptor for tool_type field.
+	toolcallauditDescToolType := toolcallauditFields[5].Descriptor()
+	// toolcallaudit.ToolTypeValidator is a validator for the "tool_type" field. It is called by the builders before save.
+	toolcallaudit.ToolTypeValidator = toolcallauditDescToolType.Validators[0].(func(string) error)
+	// toolcallauditDescStatus is the schema descriptor for status field.
+	toolcallauditDescStatus := toolcallauditFields[8].Descriptor()
+	// toolcallaudit.DefaultStatus holds the default value on creation for the status field.
+	toolcallaudit.DefaultStatus = toolcallauditDescStatus.Default.(string)
+	// toolcallauditDescPhase is the schema descriptor for phase field.
+	toolcallauditDescPhase := toolcallauditFields[9].Descriptor()
+	// toolcallaudit.DefaultPhase holds the default value on creation for the phase field.
+	toolcallaudit.DefaultPhase = toolcallauditDescPhase.Default.(string)
+	// toolcallauditDescCreatedAt is the schema descriptor for created_at field.
+	toolcallauditDescCreatedAt := toolcallauditFields[16].Descriptor()
+	// toolcallaudit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	toolcallaudit.DefaultCreatedAt = toolcallauditDescCreatedAt.Default.(func() time.Time)
+	// toolcallauditDescID is the schema descriptor for id field.
+	toolcallauditDescID := toolcallauditFields[0].Descriptor()
+	// toolcallaudit.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	toolcallaudit.IDValidator = toolcallauditDescID.Validators[0].(func(string) error)
 	tracefindingFields := schema.TraceFinding{}.Fields()
 	_ = tracefindingFields
 	// tracefindingDescTraceID is the schema descriptor for trace_id field.

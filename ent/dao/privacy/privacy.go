@@ -591,6 +591,30 @@ func (f SystemEventMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mut
 	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.SystemEventMutation", m)
 }
 
+// The ToolCallAuditQueryRuleFunc type is an adapter to allow the use of ordinary
+// functions as a query rule.
+type ToolCallAuditQueryRuleFunc func(context.Context, *dao.ToolCallAuditQuery) error
+
+// EvalQuery return f(ctx, q).
+func (f ToolCallAuditQueryRuleFunc) EvalQuery(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ToolCallAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return Denyf("dao/privacy: unexpected query type %T, expect *dao.ToolCallAuditQuery", q)
+}
+
+// The ToolCallAuditMutationRuleFunc type is an adapter to allow the use of ordinary
+// functions as a mutation rule.
+type ToolCallAuditMutationRuleFunc func(context.Context, *dao.ToolCallAuditMutation) error
+
+// EvalMutation calls f(ctx, m).
+func (f ToolCallAuditMutationRuleFunc) EvalMutation(ctx context.Context, m dao.Mutation) error {
+	if m, ok := m.(*dao.ToolCallAuditMutation); ok {
+		return f(ctx, m)
+	}
+	return Denyf("dao/privacy: unexpected mutation type %T, expect *dao.ToolCallAuditMutation", m)
+}
+
 // The TraceFindingQueryRuleFunc type is an adapter to allow the use of ordinary
 // functions as a query rule.
 type TraceFindingQueryRuleFunc func(context.Context, *dao.TraceFindingQuery) error
@@ -834,6 +858,8 @@ func queryFilter(q dao.Query) (Filter, error) {
 		return q.Filter(), nil
 	case *dao.SystemEventQuery:
 		return q.Filter(), nil
+	case *dao.ToolCallAuditQuery:
+		return q.Filter(), nil
 	case *dao.TraceFindingQuery:
 		return q.Filter(), nil
 	case *dao.TraceLogQuery:
@@ -894,6 +920,8 @@ func mutationFilter(m dao.Mutation) (Filter, error) {
 	case *dao.SemanticNodeMutation:
 		return m.Filter(), nil
 	case *dao.SystemEventMutation:
+		return m.Filter(), nil
+	case *dao.ToolCallAuditMutation:
 		return m.Filter(), nil
 	case *dao.TraceFindingMutation:
 		return m.Filter(), nil

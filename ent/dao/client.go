@@ -35,6 +35,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
 	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
@@ -93,6 +94,8 @@ type Client struct {
 	SemanticNode *SemanticNodeClient
 	// SystemEvent is the client for interacting with the SystemEvent builders.
 	SystemEvent *SystemEventClient
+	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
+	ToolCallAudit *ToolCallAuditClient
 	// TraceFinding is the client for interacting with the TraceFinding builders.
 	TraceFinding *TraceFindingClient
 	// TraceLog is the client for interacting with the TraceLog builders.
@@ -138,6 +141,7 @@ func (c *Client) init() {
 	c.Score = NewScoreClient(c.config)
 	c.SemanticNode = NewSemanticNodeClient(c.config)
 	c.SystemEvent = NewSystemEventClient(c.config)
+	c.ToolCallAudit = NewToolCallAuditClient(c.config)
 	c.TraceFinding = NewTraceFindingClient(c.config)
 	c.TraceLog = NewTraceLogClient(c.config)
 	c.TraceObservation = NewTraceObservationClient(c.config)
@@ -259,6 +263,7 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Score:            NewScoreClient(cfg),
 		SemanticNode:     NewSemanticNodeClient(cfg),
 		SystemEvent:      NewSystemEventClient(cfg),
+		ToolCallAudit:    NewToolCallAuditClient(cfg),
 		TraceFinding:     NewTraceFindingClient(cfg),
 		TraceLog:         NewTraceLogClient(cfg),
 		TraceObservation: NewTraceObservationClient(cfg),
@@ -305,6 +310,7 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Score:            NewScoreClient(cfg),
 		SemanticNode:     NewSemanticNodeClient(cfg),
 		SystemEvent:      NewSystemEventClient(cfg),
+		ToolCallAudit:    NewToolCallAuditClient(cfg),
 		TraceFinding:     NewTraceFindingClient(cfg),
 		TraceLog:         NewTraceLogClient(cfg),
 		TraceObservation: NewTraceObservationClient(cfg),
@@ -345,8 +351,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
 		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
 		c.Response, c.ResponseItem, c.Score, c.SemanticNode, c.SystemEvent,
-		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
-		c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
+		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -360,8 +366,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
 		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
 		c.Response, c.ResponseItem, c.Score, c.SemanticNode, c.SystemEvent,
-		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
-		c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.ToolCallAudit, c.TraceFinding, c.TraceLog, c.TraceObservation,
+		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -410,6 +416,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SemanticNode.mutate(ctx, m)
 	case *SystemEventMutation:
 		return c.SystemEvent.mutate(ctx, m)
+	case *ToolCallAuditMutation:
+		return c.ToolCallAudit.mutate(ctx, m)
 	case *TraceFindingMutation:
 		return c.TraceFinding.mutate(ctx, m)
 	case *TraceLogMutation:
@@ -3108,6 +3116,139 @@ func (c *SystemEventClient) mutate(ctx context.Context, m *SystemEventMutation) 
 	}
 }
 
+// ToolCallAuditClient is a client for the ToolCallAudit schema.
+type ToolCallAuditClient struct {
+	config
+}
+
+// NewToolCallAuditClient returns a client for the ToolCallAudit from the given config.
+func NewToolCallAuditClient(c config) *ToolCallAuditClient {
+	return &ToolCallAuditClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `toolcallaudit.Hooks(f(g(h())))`.
+func (c *ToolCallAuditClient) Use(hooks ...Hook) {
+	c.hooks.ToolCallAudit = append(c.hooks.ToolCallAudit, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `toolcallaudit.Intercept(f(g(h())))`.
+func (c *ToolCallAuditClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ToolCallAudit = append(c.inters.ToolCallAudit, interceptors...)
+}
+
+// Create returns a builder for creating a ToolCallAudit entity.
+func (c *ToolCallAuditClient) Create() *ToolCallAuditCreate {
+	mutation := newToolCallAuditMutation(c.config, OpCreate)
+	return &ToolCallAuditCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ToolCallAudit entities.
+func (c *ToolCallAuditClient) CreateBulk(builders ...*ToolCallAuditCreate) *ToolCallAuditCreateBulk {
+	return &ToolCallAuditCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ToolCallAuditClient) MapCreateBulk(slice any, setFunc func(*ToolCallAuditCreate, int)) *ToolCallAuditCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ToolCallAuditCreateBulk{err: fmt.Errorf("calling to ToolCallAuditClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ToolCallAuditCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ToolCallAuditCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ToolCallAudit.
+func (c *ToolCallAuditClient) Update() *ToolCallAuditUpdate {
+	mutation := newToolCallAuditMutation(c.config, OpUpdate)
+	return &ToolCallAuditUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ToolCallAuditClient) UpdateOne(_m *ToolCallAudit) *ToolCallAuditUpdateOne {
+	mutation := newToolCallAuditMutation(c.config, OpUpdateOne, withToolCallAudit(_m))
+	return &ToolCallAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ToolCallAuditClient) UpdateOneID(id string) *ToolCallAuditUpdateOne {
+	mutation := newToolCallAuditMutation(c.config, OpUpdateOne, withToolCallAuditID(id))
+	return &ToolCallAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ToolCallAudit.
+func (c *ToolCallAuditClient) Delete() *ToolCallAuditDelete {
+	mutation := newToolCallAuditMutation(c.config, OpDelete)
+	return &ToolCallAuditDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ToolCallAuditClient) DeleteOne(_m *ToolCallAudit) *ToolCallAuditDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ToolCallAuditClient) DeleteOneID(id string) *ToolCallAuditDeleteOne {
+	builder := c.Delete().Where(toolcallaudit.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ToolCallAuditDeleteOne{builder}
+}
+
+// Query returns a query builder for ToolCallAudit.
+func (c *ToolCallAuditClient) Query() *ToolCallAuditQuery {
+	return &ToolCallAuditQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeToolCallAudit},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ToolCallAudit entity by its id.
+func (c *ToolCallAuditClient) Get(ctx context.Context, id string) (*ToolCallAudit, error) {
+	return c.Query().Where(toolcallaudit.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ToolCallAuditClient) GetX(ctx context.Context, id string) *ToolCallAudit {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ToolCallAuditClient) Hooks() []Hook {
+	return c.hooks.ToolCallAudit
+}
+
+// Interceptors returns the client interceptors.
+func (c *ToolCallAuditClient) Interceptors() []Interceptor {
+	return c.inters.ToolCallAudit
+}
+
+func (c *ToolCallAuditClient) mutate(ctx context.Context, m *ToolCallAuditMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ToolCallAuditCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ToolCallAuditUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ToolCallAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ToolCallAuditDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ToolCallAudit mutation op: %q", m.Op())
+	}
+}
+
 // TraceFindingClient is a client for the TraceFinding schema.
 type TraceFindingClient struct {
 	config
@@ -4064,16 +4205,16 @@ type (
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
 		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
 		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
-		ResponseItem, Score, SemanticNode, SystemEvent, TraceFinding, TraceLog,
-		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		ResponseItem, Score, SemanticNode, SystemEvent, ToolCallAudit, TraceFinding,
+		TraceLog, TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
 		User []ent.Hook
 	}
 	inters struct {
 		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
 		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
 		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
-		ResponseItem, Score, SemanticNode, SystemEvent, TraceFinding, TraceLog,
-		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		ResponseItem, Score, SemanticNode, SystemEvent, ToolCallAudit, TraceFinding,
+		TraceLog, TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
 		User []ent.Interceptor
 	}
 )

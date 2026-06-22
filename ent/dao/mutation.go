@@ -32,6 +32,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
 	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
@@ -70,6 +71,7 @@ const (
 	TypeScore            = "Score"
 	TypeSemanticNode     = "SemanticNode"
 	TypeSystemEvent      = "SystemEvent"
+	TypeToolCallAudit    = "ToolCallAudit"
 	TypeTraceFinding     = "TraceFinding"
 	TypeTraceLog         = "TraceLog"
 	TypeTraceObservation = "TraceObservation"
@@ -19398,6 +19400,1360 @@ func (m *SystemEventMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *SystemEventMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown SystemEvent edge %s", name)
+}
+
+// ToolCallAuditMutation represents an operation that mutates the ToolCallAudit nodes in the graph.
+type ToolCallAuditMutation struct {
+	config
+	op               Op
+	typ              string
+	id               *string
+	response_id      *string
+	request_audit_id *string
+	conversation_id  *string
+	call_id          *string
+	tool_type        *string
+	tool_name        *string
+	executor         *string
+	status           *string
+	phase            *string
+	input_json       *map[string]interface{}
+	output_json      *map[string]interface{}
+	error_text       *string
+	metadata_json    *map[string]interface{}
+	started_at       *time.Time
+	completed_at     *time.Time
+	created_at       *time.Time
+	clearedFields    map[string]struct{}
+	done             bool
+	oldValue         func(context.Context) (*ToolCallAudit, error)
+	predicates       []predicate.ToolCallAudit
+}
+
+var _ ent.Mutation = (*ToolCallAuditMutation)(nil)
+
+// toolcallauditOption allows management of the mutation configuration using functional options.
+type toolcallauditOption func(*ToolCallAuditMutation)
+
+// newToolCallAuditMutation creates new mutation for the ToolCallAudit entity.
+func newToolCallAuditMutation(c config, op Op, opts ...toolcallauditOption) *ToolCallAuditMutation {
+	m := &ToolCallAuditMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeToolCallAudit,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withToolCallAuditID sets the ID field of the mutation.
+func withToolCallAuditID(id string) toolcallauditOption {
+	return func(m *ToolCallAuditMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *ToolCallAudit
+		)
+		m.oldValue = func(ctx context.Context) (*ToolCallAudit, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().ToolCallAudit.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withToolCallAudit sets the old ToolCallAudit of the mutation.
+func withToolCallAudit(node *ToolCallAudit) toolcallauditOption {
+	return func(m *ToolCallAuditMutation) {
+		m.oldValue = func(context.Context) (*ToolCallAudit, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m ToolCallAuditMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m ToolCallAuditMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("dao: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of ToolCallAudit entities.
+func (m *ToolCallAuditMutation) SetID(id string) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *ToolCallAuditMutation) ID() (id string, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *ToolCallAuditMutation) IDs(ctx context.Context) ([]string, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []string{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().ToolCallAudit.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetResponseID sets the "response_id" field.
+func (m *ToolCallAuditMutation) SetResponseID(s string) {
+	m.response_id = &s
+}
+
+// ResponseID returns the value of the "response_id" field in the mutation.
+func (m *ToolCallAuditMutation) ResponseID() (r string, exists bool) {
+	v := m.response_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResponseID returns the old "response_id" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldResponseID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResponseID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResponseID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResponseID: %w", err)
+	}
+	return oldValue.ResponseID, nil
+}
+
+// ClearResponseID clears the value of the "response_id" field.
+func (m *ToolCallAuditMutation) ClearResponseID() {
+	m.response_id = nil
+	m.clearedFields[toolcallaudit.FieldResponseID] = struct{}{}
+}
+
+// ResponseIDCleared returns if the "response_id" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) ResponseIDCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldResponseID]
+	return ok
+}
+
+// ResetResponseID resets all changes to the "response_id" field.
+func (m *ToolCallAuditMutation) ResetResponseID() {
+	m.response_id = nil
+	delete(m.clearedFields, toolcallaudit.FieldResponseID)
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (m *ToolCallAuditMutation) SetRequestAuditID(s string) {
+	m.request_audit_id = &s
+}
+
+// RequestAuditID returns the value of the "request_audit_id" field in the mutation.
+func (m *ToolCallAuditMutation) RequestAuditID() (r string, exists bool) {
+	v := m.request_audit_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestAuditID returns the old "request_audit_id" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldRequestAuditID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestAuditID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestAuditID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestAuditID: %w", err)
+	}
+	return oldValue.RequestAuditID, nil
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (m *ToolCallAuditMutation) ClearRequestAuditID() {
+	m.request_audit_id = nil
+	m.clearedFields[toolcallaudit.FieldRequestAuditID] = struct{}{}
+}
+
+// RequestAuditIDCleared returns if the "request_audit_id" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) RequestAuditIDCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldRequestAuditID]
+	return ok
+}
+
+// ResetRequestAuditID resets all changes to the "request_audit_id" field.
+func (m *ToolCallAuditMutation) ResetRequestAuditID() {
+	m.request_audit_id = nil
+	delete(m.clearedFields, toolcallaudit.FieldRequestAuditID)
+}
+
+// SetConversationID sets the "conversation_id" field.
+func (m *ToolCallAuditMutation) SetConversationID(s string) {
+	m.conversation_id = &s
+}
+
+// ConversationID returns the value of the "conversation_id" field in the mutation.
+func (m *ToolCallAuditMutation) ConversationID() (r string, exists bool) {
+	v := m.conversation_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConversationID returns the old "conversation_id" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldConversationID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConversationID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConversationID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConversationID: %w", err)
+	}
+	return oldValue.ConversationID, nil
+}
+
+// ClearConversationID clears the value of the "conversation_id" field.
+func (m *ToolCallAuditMutation) ClearConversationID() {
+	m.conversation_id = nil
+	m.clearedFields[toolcallaudit.FieldConversationID] = struct{}{}
+}
+
+// ConversationIDCleared returns if the "conversation_id" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) ConversationIDCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldConversationID]
+	return ok
+}
+
+// ResetConversationID resets all changes to the "conversation_id" field.
+func (m *ToolCallAuditMutation) ResetConversationID() {
+	m.conversation_id = nil
+	delete(m.clearedFields, toolcallaudit.FieldConversationID)
+}
+
+// SetCallID sets the "call_id" field.
+func (m *ToolCallAuditMutation) SetCallID(s string) {
+	m.call_id = &s
+}
+
+// CallID returns the value of the "call_id" field in the mutation.
+func (m *ToolCallAuditMutation) CallID() (r string, exists bool) {
+	v := m.call_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCallID returns the old "call_id" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldCallID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCallID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCallID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCallID: %w", err)
+	}
+	return oldValue.CallID, nil
+}
+
+// ResetCallID resets all changes to the "call_id" field.
+func (m *ToolCallAuditMutation) ResetCallID() {
+	m.call_id = nil
+}
+
+// SetToolType sets the "tool_type" field.
+func (m *ToolCallAuditMutation) SetToolType(s string) {
+	m.tool_type = &s
+}
+
+// ToolType returns the value of the "tool_type" field in the mutation.
+func (m *ToolCallAuditMutation) ToolType() (r string, exists bool) {
+	v := m.tool_type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldToolType returns the old "tool_type" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldToolType(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldToolType is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldToolType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldToolType: %w", err)
+	}
+	return oldValue.ToolType, nil
+}
+
+// ResetToolType resets all changes to the "tool_type" field.
+func (m *ToolCallAuditMutation) ResetToolType() {
+	m.tool_type = nil
+}
+
+// SetToolName sets the "tool_name" field.
+func (m *ToolCallAuditMutation) SetToolName(s string) {
+	m.tool_name = &s
+}
+
+// ToolName returns the value of the "tool_name" field in the mutation.
+func (m *ToolCallAuditMutation) ToolName() (r string, exists bool) {
+	v := m.tool_name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldToolName returns the old "tool_name" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldToolName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldToolName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldToolName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldToolName: %w", err)
+	}
+	return oldValue.ToolName, nil
+}
+
+// ClearToolName clears the value of the "tool_name" field.
+func (m *ToolCallAuditMutation) ClearToolName() {
+	m.tool_name = nil
+	m.clearedFields[toolcallaudit.FieldToolName] = struct{}{}
+}
+
+// ToolNameCleared returns if the "tool_name" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) ToolNameCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldToolName]
+	return ok
+}
+
+// ResetToolName resets all changes to the "tool_name" field.
+func (m *ToolCallAuditMutation) ResetToolName() {
+	m.tool_name = nil
+	delete(m.clearedFields, toolcallaudit.FieldToolName)
+}
+
+// SetExecutor sets the "executor" field.
+func (m *ToolCallAuditMutation) SetExecutor(s string) {
+	m.executor = &s
+}
+
+// Executor returns the value of the "executor" field in the mutation.
+func (m *ToolCallAuditMutation) Executor() (r string, exists bool) {
+	v := m.executor
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExecutor returns the old "executor" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldExecutor(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExecutor is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExecutor requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExecutor: %w", err)
+	}
+	return oldValue.Executor, nil
+}
+
+// ClearExecutor clears the value of the "executor" field.
+func (m *ToolCallAuditMutation) ClearExecutor() {
+	m.executor = nil
+	m.clearedFields[toolcallaudit.FieldExecutor] = struct{}{}
+}
+
+// ExecutorCleared returns if the "executor" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) ExecutorCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldExecutor]
+	return ok
+}
+
+// ResetExecutor resets all changes to the "executor" field.
+func (m *ToolCallAuditMutation) ResetExecutor() {
+	m.executor = nil
+	delete(m.clearedFields, toolcallaudit.FieldExecutor)
+}
+
+// SetStatus sets the "status" field.
+func (m *ToolCallAuditMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *ToolCallAuditMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *ToolCallAuditMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetPhase sets the "phase" field.
+func (m *ToolCallAuditMutation) SetPhase(s string) {
+	m.phase = &s
+}
+
+// Phase returns the value of the "phase" field in the mutation.
+func (m *ToolCallAuditMutation) Phase() (r string, exists bool) {
+	v := m.phase
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPhase returns the old "phase" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldPhase(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPhase is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPhase requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPhase: %w", err)
+	}
+	return oldValue.Phase, nil
+}
+
+// ResetPhase resets all changes to the "phase" field.
+func (m *ToolCallAuditMutation) ResetPhase() {
+	m.phase = nil
+}
+
+// SetInputJSON sets the "input_json" field.
+func (m *ToolCallAuditMutation) SetInputJSON(value map[string]interface{}) {
+	m.input_json = &value
+}
+
+// InputJSON returns the value of the "input_json" field in the mutation.
+func (m *ToolCallAuditMutation) InputJSON() (r map[string]interface{}, exists bool) {
+	v := m.input_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInputJSON returns the old "input_json" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldInputJSON(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInputJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInputJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInputJSON: %w", err)
+	}
+	return oldValue.InputJSON, nil
+}
+
+// ClearInputJSON clears the value of the "input_json" field.
+func (m *ToolCallAuditMutation) ClearInputJSON() {
+	m.input_json = nil
+	m.clearedFields[toolcallaudit.FieldInputJSON] = struct{}{}
+}
+
+// InputJSONCleared returns if the "input_json" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) InputJSONCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldInputJSON]
+	return ok
+}
+
+// ResetInputJSON resets all changes to the "input_json" field.
+func (m *ToolCallAuditMutation) ResetInputJSON() {
+	m.input_json = nil
+	delete(m.clearedFields, toolcallaudit.FieldInputJSON)
+}
+
+// SetOutputJSON sets the "output_json" field.
+func (m *ToolCallAuditMutation) SetOutputJSON(value map[string]interface{}) {
+	m.output_json = &value
+}
+
+// OutputJSON returns the value of the "output_json" field in the mutation.
+func (m *ToolCallAuditMutation) OutputJSON() (r map[string]interface{}, exists bool) {
+	v := m.output_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOutputJSON returns the old "output_json" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldOutputJSON(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOutputJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOutputJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOutputJSON: %w", err)
+	}
+	return oldValue.OutputJSON, nil
+}
+
+// ClearOutputJSON clears the value of the "output_json" field.
+func (m *ToolCallAuditMutation) ClearOutputJSON() {
+	m.output_json = nil
+	m.clearedFields[toolcallaudit.FieldOutputJSON] = struct{}{}
+}
+
+// OutputJSONCleared returns if the "output_json" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) OutputJSONCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldOutputJSON]
+	return ok
+}
+
+// ResetOutputJSON resets all changes to the "output_json" field.
+func (m *ToolCallAuditMutation) ResetOutputJSON() {
+	m.output_json = nil
+	delete(m.clearedFields, toolcallaudit.FieldOutputJSON)
+}
+
+// SetErrorText sets the "error_text" field.
+func (m *ToolCallAuditMutation) SetErrorText(s string) {
+	m.error_text = &s
+}
+
+// ErrorText returns the value of the "error_text" field in the mutation.
+func (m *ToolCallAuditMutation) ErrorText() (r string, exists bool) {
+	v := m.error_text
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldErrorText returns the old "error_text" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldErrorText(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldErrorText is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldErrorText requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldErrorText: %w", err)
+	}
+	return oldValue.ErrorText, nil
+}
+
+// ClearErrorText clears the value of the "error_text" field.
+func (m *ToolCallAuditMutation) ClearErrorText() {
+	m.error_text = nil
+	m.clearedFields[toolcallaudit.FieldErrorText] = struct{}{}
+}
+
+// ErrorTextCleared returns if the "error_text" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) ErrorTextCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldErrorText]
+	return ok
+}
+
+// ResetErrorText resets all changes to the "error_text" field.
+func (m *ToolCallAuditMutation) ResetErrorText() {
+	m.error_text = nil
+	delete(m.clearedFields, toolcallaudit.FieldErrorText)
+}
+
+// SetMetadataJSON sets the "metadata_json" field.
+func (m *ToolCallAuditMutation) SetMetadataJSON(value map[string]interface{}) {
+	m.metadata_json = &value
+}
+
+// MetadataJSON returns the value of the "metadata_json" field in the mutation.
+func (m *ToolCallAuditMutation) MetadataJSON() (r map[string]interface{}, exists bool) {
+	v := m.metadata_json
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMetadataJSON returns the old "metadata_json" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldMetadataJSON(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMetadataJSON is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMetadataJSON requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMetadataJSON: %w", err)
+	}
+	return oldValue.MetadataJSON, nil
+}
+
+// ClearMetadataJSON clears the value of the "metadata_json" field.
+func (m *ToolCallAuditMutation) ClearMetadataJSON() {
+	m.metadata_json = nil
+	m.clearedFields[toolcallaudit.FieldMetadataJSON] = struct{}{}
+}
+
+// MetadataJSONCleared returns if the "metadata_json" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) MetadataJSONCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldMetadataJSON]
+	return ok
+}
+
+// ResetMetadataJSON resets all changes to the "metadata_json" field.
+func (m *ToolCallAuditMutation) ResetMetadataJSON() {
+	m.metadata_json = nil
+	delete(m.clearedFields, toolcallaudit.FieldMetadataJSON)
+}
+
+// SetStartedAt sets the "started_at" field.
+func (m *ToolCallAuditMutation) SetStartedAt(t time.Time) {
+	m.started_at = &t
+}
+
+// StartedAt returns the value of the "started_at" field in the mutation.
+func (m *ToolCallAuditMutation) StartedAt() (r time.Time, exists bool) {
+	v := m.started_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStartedAt returns the old "started_at" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldStartedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStartedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStartedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStartedAt: %w", err)
+	}
+	return oldValue.StartedAt, nil
+}
+
+// ClearStartedAt clears the value of the "started_at" field.
+func (m *ToolCallAuditMutation) ClearStartedAt() {
+	m.started_at = nil
+	m.clearedFields[toolcallaudit.FieldStartedAt] = struct{}{}
+}
+
+// StartedAtCleared returns if the "started_at" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) StartedAtCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldStartedAt]
+	return ok
+}
+
+// ResetStartedAt resets all changes to the "started_at" field.
+func (m *ToolCallAuditMutation) ResetStartedAt() {
+	m.started_at = nil
+	delete(m.clearedFields, toolcallaudit.FieldStartedAt)
+}
+
+// SetCompletedAt sets the "completed_at" field.
+func (m *ToolCallAuditMutation) SetCompletedAt(t time.Time) {
+	m.completed_at = &t
+}
+
+// CompletedAt returns the value of the "completed_at" field in the mutation.
+func (m *ToolCallAuditMutation) CompletedAt() (r time.Time, exists bool) {
+	v := m.completed_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCompletedAt returns the old "completed_at" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldCompletedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCompletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCompletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCompletedAt: %w", err)
+	}
+	return oldValue.CompletedAt, nil
+}
+
+// ClearCompletedAt clears the value of the "completed_at" field.
+func (m *ToolCallAuditMutation) ClearCompletedAt() {
+	m.completed_at = nil
+	m.clearedFields[toolcallaudit.FieldCompletedAt] = struct{}{}
+}
+
+// CompletedAtCleared returns if the "completed_at" field was cleared in this mutation.
+func (m *ToolCallAuditMutation) CompletedAtCleared() bool {
+	_, ok := m.clearedFields[toolcallaudit.FieldCompletedAt]
+	return ok
+}
+
+// ResetCompletedAt resets all changes to the "completed_at" field.
+func (m *ToolCallAuditMutation) ResetCompletedAt() {
+	m.completed_at = nil
+	delete(m.clearedFields, toolcallaudit.FieldCompletedAt)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *ToolCallAuditMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *ToolCallAuditMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the ToolCallAudit entity.
+// If the ToolCallAudit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ToolCallAuditMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *ToolCallAuditMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// Where appends a list predicates to the ToolCallAuditMutation builder.
+func (m *ToolCallAuditMutation) Where(ps ...predicate.ToolCallAudit) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ToolCallAuditMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ToolCallAuditMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.ToolCallAudit, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *ToolCallAuditMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *ToolCallAuditMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (ToolCallAudit).
+func (m *ToolCallAuditMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *ToolCallAuditMutation) Fields() []string {
+	fields := make([]string, 0, 16)
+	if m.response_id != nil {
+		fields = append(fields, toolcallaudit.FieldResponseID)
+	}
+	if m.request_audit_id != nil {
+		fields = append(fields, toolcallaudit.FieldRequestAuditID)
+	}
+	if m.conversation_id != nil {
+		fields = append(fields, toolcallaudit.FieldConversationID)
+	}
+	if m.call_id != nil {
+		fields = append(fields, toolcallaudit.FieldCallID)
+	}
+	if m.tool_type != nil {
+		fields = append(fields, toolcallaudit.FieldToolType)
+	}
+	if m.tool_name != nil {
+		fields = append(fields, toolcallaudit.FieldToolName)
+	}
+	if m.executor != nil {
+		fields = append(fields, toolcallaudit.FieldExecutor)
+	}
+	if m.status != nil {
+		fields = append(fields, toolcallaudit.FieldStatus)
+	}
+	if m.phase != nil {
+		fields = append(fields, toolcallaudit.FieldPhase)
+	}
+	if m.input_json != nil {
+		fields = append(fields, toolcallaudit.FieldInputJSON)
+	}
+	if m.output_json != nil {
+		fields = append(fields, toolcallaudit.FieldOutputJSON)
+	}
+	if m.error_text != nil {
+		fields = append(fields, toolcallaudit.FieldErrorText)
+	}
+	if m.metadata_json != nil {
+		fields = append(fields, toolcallaudit.FieldMetadataJSON)
+	}
+	if m.started_at != nil {
+		fields = append(fields, toolcallaudit.FieldStartedAt)
+	}
+	if m.completed_at != nil {
+		fields = append(fields, toolcallaudit.FieldCompletedAt)
+	}
+	if m.created_at != nil {
+		fields = append(fields, toolcallaudit.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *ToolCallAuditMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case toolcallaudit.FieldResponseID:
+		return m.ResponseID()
+	case toolcallaudit.FieldRequestAuditID:
+		return m.RequestAuditID()
+	case toolcallaudit.FieldConversationID:
+		return m.ConversationID()
+	case toolcallaudit.FieldCallID:
+		return m.CallID()
+	case toolcallaudit.FieldToolType:
+		return m.ToolType()
+	case toolcallaudit.FieldToolName:
+		return m.ToolName()
+	case toolcallaudit.FieldExecutor:
+		return m.Executor()
+	case toolcallaudit.FieldStatus:
+		return m.Status()
+	case toolcallaudit.FieldPhase:
+		return m.Phase()
+	case toolcallaudit.FieldInputJSON:
+		return m.InputJSON()
+	case toolcallaudit.FieldOutputJSON:
+		return m.OutputJSON()
+	case toolcallaudit.FieldErrorText:
+		return m.ErrorText()
+	case toolcallaudit.FieldMetadataJSON:
+		return m.MetadataJSON()
+	case toolcallaudit.FieldStartedAt:
+		return m.StartedAt()
+	case toolcallaudit.FieldCompletedAt:
+		return m.CompletedAt()
+	case toolcallaudit.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *ToolCallAuditMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case toolcallaudit.FieldResponseID:
+		return m.OldResponseID(ctx)
+	case toolcallaudit.FieldRequestAuditID:
+		return m.OldRequestAuditID(ctx)
+	case toolcallaudit.FieldConversationID:
+		return m.OldConversationID(ctx)
+	case toolcallaudit.FieldCallID:
+		return m.OldCallID(ctx)
+	case toolcallaudit.FieldToolType:
+		return m.OldToolType(ctx)
+	case toolcallaudit.FieldToolName:
+		return m.OldToolName(ctx)
+	case toolcallaudit.FieldExecutor:
+		return m.OldExecutor(ctx)
+	case toolcallaudit.FieldStatus:
+		return m.OldStatus(ctx)
+	case toolcallaudit.FieldPhase:
+		return m.OldPhase(ctx)
+	case toolcallaudit.FieldInputJSON:
+		return m.OldInputJSON(ctx)
+	case toolcallaudit.FieldOutputJSON:
+		return m.OldOutputJSON(ctx)
+	case toolcallaudit.FieldErrorText:
+		return m.OldErrorText(ctx)
+	case toolcallaudit.FieldMetadataJSON:
+		return m.OldMetadataJSON(ctx)
+	case toolcallaudit.FieldStartedAt:
+		return m.OldStartedAt(ctx)
+	case toolcallaudit.FieldCompletedAt:
+		return m.OldCompletedAt(ctx)
+	case toolcallaudit.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown ToolCallAudit field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ToolCallAuditMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case toolcallaudit.FieldResponseID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResponseID(v)
+		return nil
+	case toolcallaudit.FieldRequestAuditID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestAuditID(v)
+		return nil
+	case toolcallaudit.FieldConversationID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConversationID(v)
+		return nil
+	case toolcallaudit.FieldCallID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCallID(v)
+		return nil
+	case toolcallaudit.FieldToolType:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetToolType(v)
+		return nil
+	case toolcallaudit.FieldToolName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetToolName(v)
+		return nil
+	case toolcallaudit.FieldExecutor:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExecutor(v)
+		return nil
+	case toolcallaudit.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case toolcallaudit.FieldPhase:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPhase(v)
+		return nil
+	case toolcallaudit.FieldInputJSON:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInputJSON(v)
+		return nil
+	case toolcallaudit.FieldOutputJSON:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOutputJSON(v)
+		return nil
+	case toolcallaudit.FieldErrorText:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetErrorText(v)
+		return nil
+	case toolcallaudit.FieldMetadataJSON:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMetadataJSON(v)
+		return nil
+	case toolcallaudit.FieldStartedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStartedAt(v)
+		return nil
+	case toolcallaudit.FieldCompletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCompletedAt(v)
+		return nil
+	case toolcallaudit.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ToolCallAudit field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *ToolCallAuditMutation) AddedFields() []string {
+	return nil
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *ToolCallAuditMutation) AddedField(name string) (ent.Value, bool) {
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ToolCallAuditMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown ToolCallAudit numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *ToolCallAuditMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(toolcallaudit.FieldResponseID) {
+		fields = append(fields, toolcallaudit.FieldResponseID)
+	}
+	if m.FieldCleared(toolcallaudit.FieldRequestAuditID) {
+		fields = append(fields, toolcallaudit.FieldRequestAuditID)
+	}
+	if m.FieldCleared(toolcallaudit.FieldConversationID) {
+		fields = append(fields, toolcallaudit.FieldConversationID)
+	}
+	if m.FieldCleared(toolcallaudit.FieldToolName) {
+		fields = append(fields, toolcallaudit.FieldToolName)
+	}
+	if m.FieldCleared(toolcallaudit.FieldExecutor) {
+		fields = append(fields, toolcallaudit.FieldExecutor)
+	}
+	if m.FieldCleared(toolcallaudit.FieldInputJSON) {
+		fields = append(fields, toolcallaudit.FieldInputJSON)
+	}
+	if m.FieldCleared(toolcallaudit.FieldOutputJSON) {
+		fields = append(fields, toolcallaudit.FieldOutputJSON)
+	}
+	if m.FieldCleared(toolcallaudit.FieldErrorText) {
+		fields = append(fields, toolcallaudit.FieldErrorText)
+	}
+	if m.FieldCleared(toolcallaudit.FieldMetadataJSON) {
+		fields = append(fields, toolcallaudit.FieldMetadataJSON)
+	}
+	if m.FieldCleared(toolcallaudit.FieldStartedAt) {
+		fields = append(fields, toolcallaudit.FieldStartedAt)
+	}
+	if m.FieldCleared(toolcallaudit.FieldCompletedAt) {
+		fields = append(fields, toolcallaudit.FieldCompletedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *ToolCallAuditMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *ToolCallAuditMutation) ClearField(name string) error {
+	switch name {
+	case toolcallaudit.FieldResponseID:
+		m.ClearResponseID()
+		return nil
+	case toolcallaudit.FieldRequestAuditID:
+		m.ClearRequestAuditID()
+		return nil
+	case toolcallaudit.FieldConversationID:
+		m.ClearConversationID()
+		return nil
+	case toolcallaudit.FieldToolName:
+		m.ClearToolName()
+		return nil
+	case toolcallaudit.FieldExecutor:
+		m.ClearExecutor()
+		return nil
+	case toolcallaudit.FieldInputJSON:
+		m.ClearInputJSON()
+		return nil
+	case toolcallaudit.FieldOutputJSON:
+		m.ClearOutputJSON()
+		return nil
+	case toolcallaudit.FieldErrorText:
+		m.ClearErrorText()
+		return nil
+	case toolcallaudit.FieldMetadataJSON:
+		m.ClearMetadataJSON()
+		return nil
+	case toolcallaudit.FieldStartedAt:
+		m.ClearStartedAt()
+		return nil
+	case toolcallaudit.FieldCompletedAt:
+		m.ClearCompletedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ToolCallAudit nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *ToolCallAuditMutation) ResetField(name string) error {
+	switch name {
+	case toolcallaudit.FieldResponseID:
+		m.ResetResponseID()
+		return nil
+	case toolcallaudit.FieldRequestAuditID:
+		m.ResetRequestAuditID()
+		return nil
+	case toolcallaudit.FieldConversationID:
+		m.ResetConversationID()
+		return nil
+	case toolcallaudit.FieldCallID:
+		m.ResetCallID()
+		return nil
+	case toolcallaudit.FieldToolType:
+		m.ResetToolType()
+		return nil
+	case toolcallaudit.FieldToolName:
+		m.ResetToolName()
+		return nil
+	case toolcallaudit.FieldExecutor:
+		m.ResetExecutor()
+		return nil
+	case toolcallaudit.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case toolcallaudit.FieldPhase:
+		m.ResetPhase()
+		return nil
+	case toolcallaudit.FieldInputJSON:
+		m.ResetInputJSON()
+		return nil
+	case toolcallaudit.FieldOutputJSON:
+		m.ResetOutputJSON()
+		return nil
+	case toolcallaudit.FieldErrorText:
+		m.ResetErrorText()
+		return nil
+	case toolcallaudit.FieldMetadataJSON:
+		m.ResetMetadataJSON()
+		return nil
+	case toolcallaudit.FieldStartedAt:
+		m.ResetStartedAt()
+		return nil
+	case toolcallaudit.FieldCompletedAt:
+		m.ResetCompletedAt()
+		return nil
+	case toolcallaudit.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ToolCallAudit field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *ToolCallAuditMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *ToolCallAuditMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *ToolCallAuditMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *ToolCallAuditMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *ToolCallAuditMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *ToolCallAuditMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *ToolCallAuditMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown ToolCallAudit unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *ToolCallAuditMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown ToolCallAudit edge %s", name)
 }
 
 // TraceFindingMutation represents an operation that mutates the TraceFinding nodes in the graph.

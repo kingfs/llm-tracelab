@@ -249,6 +249,18 @@ func (f SystemEventFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value,
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.SystemEventMutation", m)
 }
 
+// The ToolCallAuditFunc type is an adapter to allow the use of ordinary
+// function as ToolCallAudit mutator.
+type ToolCallAuditFunc func(context.Context, *dao.ToolCallAuditMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ToolCallAuditFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ToolCallAuditMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ToolCallAuditMutation", m)
+}
+
 // The TraceFindingFunc type is an adapter to allow the use of ordinary
 // function as TraceFinding mutator.
 type TraceFindingFunc func(context.Context, *dao.TraceFindingMutation) (dao.Value, error)

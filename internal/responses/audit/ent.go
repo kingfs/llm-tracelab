@@ -180,6 +180,68 @@ func (a *EntAuditor) RecordExecutionEvent(ctx context.Context, event ExecutionEv
 	return create.Exec(ctx)
 }
 
+func (a *EntAuditor) RecordToolCallAudit(ctx context.Context, entry ToolCallAudit) (string, error) {
+	if a == nil || a.client == nil {
+		return "", nil
+	}
+	id := entry.ID
+	if id == "" {
+		id = "tcaud_" + uuid.NewString()
+	}
+	createdAt := entry.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	requestAuditID := entry.RequestAuditID
+	if requestAuditID == "" {
+		if id, ok := RequestAuditIDFromContext(ctx); ok {
+			requestAuditID = id
+		}
+	}
+	create := a.client.ToolCallAudit.Create().
+		SetID(id).
+		SetCallID(entry.CallID).
+		SetToolType(entry.ToolType).
+		SetInputJSON(nilToEmptyMap(entry.InputJSON)).
+		SetOutputJSON(nilToEmptyMap(entry.OutputJSON)).
+		SetMetadataJSON(nilToEmptyMap(entry.MetadataJSON)).
+		SetCreatedAt(createdAt)
+	if entry.ResponseID != "" {
+		create.SetResponseID(entry.ResponseID)
+	}
+	if requestAuditID != "" {
+		create.SetRequestAuditID(requestAuditID)
+	}
+	if entry.ConversationID != "" {
+		create.SetConversationID(entry.ConversationID)
+	}
+	if entry.ToolName != "" {
+		create.SetToolName(entry.ToolName)
+	}
+	if entry.Executor != "" {
+		create.SetExecutor(entry.Executor)
+	}
+	if entry.Status != "" {
+		create.SetStatus(entry.Status)
+	}
+	if entry.Phase != "" {
+		create.SetPhase(entry.Phase)
+	}
+	if entry.ErrorText != "" {
+		create.SetErrorText(entry.ErrorText)
+	}
+	if !entry.StartedAt.IsZero() {
+		create.SetStartedAt(entry.StartedAt)
+	}
+	if !entry.CompletedAt.IsZero() {
+		create.SetCompletedAt(entry.CompletedAt)
+	}
+	if err := create.Exec(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 func nilToEmptyMap(values map[string]any) map[string]any {
 	if values == nil {
 		return map[string]any{}

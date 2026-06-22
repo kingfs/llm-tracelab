@@ -54,6 +54,8 @@ type Tx struct {
 	SemanticNode *SemanticNodeClient
 	// SystemEvent is the client for interacting with the SystemEvent builders.
 	SystemEvent *SystemEventClient
+	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
+	ToolCallAudit *ToolCallAuditClient
 	// TraceFinding is the client for interacting with the TraceFinding builders.
 	TraceFinding *TraceFindingClient
 	// TraceLog is the client for interacting with the TraceLog builders.
@@ -219,6 +221,7 @@ func (tx *Tx) init() {
 	tx.Score = NewScoreClient(tx.config)
 	tx.SemanticNode = NewSemanticNodeClient(tx.config)
 	tx.SystemEvent = NewSystemEventClient(tx.config)
+	tx.ToolCallAudit = NewToolCallAuditClient(tx.config)
 	tx.TraceFinding = NewTraceFindingClient(tx.config)
 	tx.TraceLog = NewTraceLogClient(tx.config)
 	tx.TraceObservation = NewTraceObservationClient(tx.config)
