@@ -171,7 +171,7 @@ providers:
 - `mode`：TraceLab 对该 provider 的处理模式。当前接受空值、`proxy`、`record_only`、`server`、`responses_server`；空值保持历史兼容。
 - `capabilities`：当前代码支持 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize` 布尔能力，用于 routing 和 runtime plan，不应从 provider preset 中隐式猜测所有细节。
 - `model_profiles`：provider/channel 级 profile 仍是后续字段，计划用于模型上下文窗口、输出上限、tool 能力、compact 阈值、上游模型名映射和兼容性参数。当前已先在 `responses_server.model_profiles` 中落地配置骨架和 item-count compact 阈值覆盖。
-- `provider probe`：手动诊断命令，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals。默认启动不会执行 probe；显式配置 `provider_probe.startup_fill=true` 后，serve 启动只在内存中填补 YAML upstream 缺失字段，不写回配置，也不覆盖显式配置。Monitor/provider setup 已有 `POST /api/provider-setup/validate`、`POST /api/provider-setup/apply` 和 create dialog 状态编排首切；更完整 provider 配置持久化/批量 setup 工作流仍是后续工作。
+- `provider probe`：手动诊断命令，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals。默认启动不会执行 probe；显式配置 `provider_probe.startup_fill=true` 后，serve 启动只在内存中填补 YAML upstream 缺失字段，不写回配置，也不覆盖显式配置。Monitor/provider setup 已有 `POST /api/provider-setup/validate`、`POST /api/provider-setup/apply` 和 create dialog 状态编排首切；Providers 列表页与 CLI `provider probe-apply` 已能对 managed channels 执行保守批量补全，只填缺失 API surface 和未设置 capability，不覆盖显式配置或 capability false。更完整 provider onboarding 和自动修复策略仍是后续工作。
 
 配置原则：
 
