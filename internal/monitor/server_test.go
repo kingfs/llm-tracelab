@@ -190,8 +190,8 @@ func TestResponsesFunctionExecutorsAPIHandlerDefaultDisabled(t *testing.T) {
 	if payload.Timeout != "5s" || payload.MaxResultBytes != 64<<10 {
 		t.Fatalf("defaults = timeout %q max %d, want 5s and %d", payload.Timeout, payload.MaxResultBytes, 64<<10)
 	}
-	if got := strings.Join(payload.SupportedTypes, ","); got != "static_response" {
-		t.Fatalf("supported_types = %q, want static_response", got)
+	if got := strings.Join(payload.SupportedTypes, ","); got != "static_response,external_command" {
+		t.Fatalf("supported_types = %q, want static_response,external_command", got)
 	}
 	if len(payload.Executors) != 0 || len(payload.Warnings) != 0 {
 		t.Fatalf("executors/warnings = %+v/%+v, want empty", payload.Executors, payload.Warnings)
@@ -249,11 +249,55 @@ func TestResponsesFunctionExecutorsAPIHandlerStaticResponseRedactsOutput(t *test
 	if len(payload.Executors) != 2 {
 		t.Fatalf("len(executors) = %d, want 2", len(payload.Executors))
 	}
-	if payload.Executors[0].Name != "lookup_order" || !payload.Executors[0].Enabled || !payload.Executors[0].OutputConfigured {
+	if payload.Executors[0].Name != "lookup_order" || !payload.Executors[0].Enabled || !payload.Executors[0].Available || !payload.Executors[0].OutputConfigured {
 		t.Fatalf("first executor = %+v, want enabled configured lookup_order", payload.Executors[0])
 	}
-	if payload.Executors[1].Name != "disabled_tool" || payload.Executors[1].Enabled || !payload.Executors[1].OutputConfigured {
+	if payload.Executors[1].Name != "disabled_tool" || payload.Executors[1].Enabled || payload.Executors[1].Available || !payload.Executors[1].OutputConfigured {
 		t.Fatalf("second executor = %+v, want disabled configured disabled_tool", payload.Executors[1])
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerValidationWarnings(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: true,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{Name: " ", Type: "static_response", Output: "do-not-leak"},
+			{Name: "future", Type: "external_command", Command: "echo ok"},
+			{Name: "mystery", Type: "unknown_type"},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "do-not-leak") || strings.Contains(body, "echo ok") {
+		t.Fatalf("response leaked executor payload: %s", body)
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Executors) != 3 {
+		t.Fatalf("len(executors) = %d, want 3", len(payload.Executors))
+	}
+	if payload.Executors[0].Available || !strings.Contains(strings.Join(payload.Executors[0].Warnings, " "), "name is required") {
+		t.Fatalf("empty-name executor = %+v, want unavailable name warning", payload.Executors[0])
+	}
+	if payload.Executors[1].Available || !payload.Executors[1].CommandConfigured || !strings.Contains(strings.Join(payload.Executors[1].Warnings, " "), "not implemented") {
+		t.Fatalf("external executor = %+v, want unavailable command-configured warning", payload.Executors[1])
+	}
+	if payload.Executors[2].Available || !strings.Contains(strings.Join(payload.Executors[2].Warnings, " "), "unsupported executor type") {
+		t.Fatalf("unknown executor = %+v, want unavailable unsupported warning", payload.Executors[2])
+	}
+	if got := strings.Join(payload.Warnings, " "); !strings.Contains(got, "no available executors") || !strings.Contains(got, "unsupported executor type") {
+		t.Fatalf("warnings = %q, want validation and no-available warnings", got)
 	}
 }
 

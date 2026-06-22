@@ -659,10 +659,13 @@ type responsesFunctionExecutorRedactionView struct {
 }
 
 type responsesFunctionExecutorBindingView struct {
-	Name             string `json:"name"`
-	Type             string `json:"type"`
-	Enabled          bool   `json:"enabled"`
-	OutputConfigured bool   `json:"output_configured"`
+	Name              string   `json:"name"`
+	Type              string   `json:"type"`
+	Enabled           bool     `json:"enabled"`
+	Available         bool     `json:"available"`
+	OutputConfigured  bool     `json:"output_configured"`
+	CommandConfigured bool     `json:"command_configured"`
+	Warnings          []string `json:"warnings"`
 }
 
 type loginRequest struct {
@@ -1161,8 +1164,9 @@ func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExe
 			Arguments: cfg.Redaction.Arguments,
 			Output:    cfg.Redaction.Output,
 		},
-		SupportedTypes: []string{"static_response"},
+		SupportedTypes: config.SupportedResponsesFunctionExecutorTypes(),
 		Executors:      make([]responsesFunctionExecutorBindingView, 0, len(cfg.Executors)),
+		Warnings:       append([]string{}, cfg.Warnings...),
 	}
 	for _, binding := range cfg.Executors {
 		enabled := true
@@ -1170,14 +1174,14 @@ func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExe
 			enabled = *binding.Enabled
 		}
 		out.Executors = append(out.Executors, responsesFunctionExecutorBindingView{
-			Name:             binding.Name,
-			Type:             binding.Type,
-			Enabled:          enabled,
-			OutputConfigured: binding.Output != nil,
+			Name:              binding.Name,
+			Type:              binding.Type,
+			Enabled:           enabled,
+			Available:         binding.Available,
+			OutputConfigured:  binding.Output != nil,
+			CommandConfigured: binding.Command != "",
+			Warnings:          append([]string{}, binding.Warnings...),
 		})
-	}
-	if out.Enabled && len(out.Executors) == 0 {
-		out.Warnings = append(out.Warnings, "responses function executors are enabled but no executors are configured")
 	}
 	if out.Warnings == nil {
 		out.Warnings = []string{}
