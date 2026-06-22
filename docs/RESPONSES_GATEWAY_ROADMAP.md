@@ -29,7 +29,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
 - model profile 驱动的 context window/token budgeting。
-- 启动时自动采用 provider detection 结果；当前已有手动 `provider probe` 诊断建议。
+- provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议，以及默认关闭的启动时保守补全开关。
 - server-side function executor 配置化；当前已有默认空 registry 代码扩展点。
 - SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
 
@@ -87,7 +87,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 支持 OpenAI-compatible Chat Completions、Responses-native、Anthropic Messages、Gemini 的最小 endpoint/capability 探测。
 - 失败时不阻塞启动，可在诊断命令或 probe report 中暴露。
 
-当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议。它不写回配置，也不在启动时覆盖显式 `api_type` / `protocol_family`；后续可把 probe report 接入 Monitor/provider setup flow。
+当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议。serve 侧已有默认关闭的 `provider_probe.startup_fill` 首切；开启后只填补 YAML upstream 中缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置，也不覆盖显式配置。后续可把 probe report 接入 Monitor/provider setup flow。
 
 ### Stage 24：Tool Execution 扩展（registry 首切已落地）
 
@@ -107,5 +107,5 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry 首切顺序合入。后续优先补 tool streaming/cancel，再做 executor 配置化和 provider detection 的启动集成。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全首切顺序合入。后续优先补 tool streaming/cancel，再做 executor 配置化和 provider detection 的 Monitor/setup flow 集成。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。

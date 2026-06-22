@@ -1086,6 +1086,129 @@ upstreams:
 	}
 }
 
+func TestStartupProviderProbeDefaultDisabledDoesNotProbe(t *testing.T) {
+	var calls int
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.NotFound(w, r)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.Upstreams = []config.UpstreamTargetConfig{
+		{
+			ID: "local",
+			Upstream: config.UpstreamConfig{
+				BaseURL: upstreamServer.URL + "/api/v1",
+			},
+		},
+	}
+
+	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
+		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("startup probe made %d HTTP calls with default config, want 0", calls)
+	}
+	if cfg.Upstreams[0].Upstream.APIType != "" || cfg.Upstreams[0].Upstream.ProtocolFamily != "" {
+		t.Fatalf("upstream config was modified while disabled: %+v", cfg.Upstreams[0].Upstream)
+	}
+}
+
+func TestStartupProviderProbeFillsMissingAPISurface(t *testing.T) {
+	upstreamServer := newOpenAIProbeTestServer(t)
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{}
+	cfg.ProviderProbe.StartupFill = true
+	cfg.Upstreams = []config.UpstreamTargetConfig{
+		{
+			ID: "local",
+			Upstream: config.UpstreamConfig{
+				BaseURL: upstreamServer.URL + "/api/v1",
+			},
+		},
+	}
+
+	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
+		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v", err)
+	}
+	got := cfg.Upstreams[0].Upstream
+	if got.ProtocolFamily != upstream.ProtocolFamilyOpenAICompatible {
+		t.Fatalf("ProtocolFamily = %q, want %q", got.ProtocolFamily, upstream.ProtocolFamilyOpenAICompatible)
+	}
+	if got.APIType != upstream.APITypeResponses {
+		t.Fatalf("APIType = %q, want %q", got.APIType, upstream.APITypeResponses)
+	}
+	if got.Capabilities.Responses == nil || !*got.Capabilities.Responses {
+		t.Fatalf("capabilities.responses = %v, want true", got.Capabilities.Responses)
+	}
+	if got.Capabilities.ChatCompletions == nil || !*got.Capabilities.ChatCompletions {
+		t.Fatalf("capabilities.chat_completions = %v, want true", got.Capabilities.ChatCompletions)
+	}
+	if got.Capabilities.Models == nil || !*got.Capabilities.Models {
+		t.Fatalf("capabilities.models = %v, want true", got.Capabilities.Models)
+	}
+}
+
+func TestStartupProviderProbeDoesNotOverrideExplicitAPISurface(t *testing.T) {
+	upstreamServer := newOpenAIProbeTestServer(t)
+	defer upstreamServer.Close()
+
+	responsesDisabled := false
+	cfg := &config.Config{}
+	cfg.ProviderProbe.StartupFill = true
+	cfg.Upstreams = []config.UpstreamTargetConfig{
+		{
+			ID: "local",
+			Upstream: config.UpstreamConfig{
+				BaseURL:        upstreamServer.URL + "/api/v1",
+				APIType:        upstream.APITypeChatCompletions,
+				ProtocolFamily: upstream.ProtocolFamilyAnthropicMessages,
+				Capabilities: config.UpstreamCapabilitiesConfig{
+					Responses: &responsesDisabled,
+				},
+			},
+		},
+	}
+
+	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, upstreamServer.Client()); err != nil {
+		t.Fatalf("applyStartupProviderProbeSuggestions() error = %v", err)
+	}
+	got := cfg.Upstreams[0].Upstream
+	if got.ProtocolFamily != upstream.ProtocolFamilyAnthropicMessages {
+		t.Fatalf("ProtocolFamily = %q, want explicit %q", got.ProtocolFamily, upstream.ProtocolFamilyAnthropicMessages)
+	}
+	if got.APIType != upstream.APITypeChatCompletions {
+		t.Fatalf("APIType = %q, want explicit %q", got.APIType, upstream.APITypeChatCompletions)
+	}
+	if got.Capabilities.Responses == nil || *got.Capabilities.Responses {
+		t.Fatalf("capabilities.responses = %v, want explicit false", got.Capabilities.Responses)
+	}
+	if got.Capabilities.Models == nil || !*got.Capabilities.Models {
+		t.Fatalf("capabilities.models = %v, want missing field filled true", got.Capabilities.Models)
+	}
+}
+
+func newOpenAIProbeTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/models":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-test"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/chat/completions":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"model is required"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/responses":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"input is required"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+}
+
 func hasString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
