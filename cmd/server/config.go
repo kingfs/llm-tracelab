@@ -168,7 +168,7 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 		},
 		Database: configInspectDatabase{
 			Driver:      cfg.DatabaseDriver(),
-			DSN:         appconfig.RedactDSN(cfg.DatabaseDSN()),
+			DSN:         redactConfigInspectDSN(cfg.DatabaseDSN()),
 			AutoMigrate: cfg.DatabaseAutoMigrate(),
 		},
 		Trace: configInspectTrace{
@@ -265,6 +265,12 @@ func redactURLLike(raw string) string {
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func redactConfigInspectDSN(raw string) string {
+	redacted := redactURLLike(raw)
+	redacted = appconfig.RedactDSN(redacted)
+	return strings.ReplaceAll(redacted, "%3Credacted%3E", "<redacted>")
 }
 
 func shouldRedactKey(key string) bool {

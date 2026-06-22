@@ -104,6 +104,145 @@ upstream:
 	}
 }
 
+func TestDoctorResponsesServerMissingDefaultModelWarns(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	if envelope.Result.Status != doctorStatusWarn || envelope.Result.Summary.Warn == 0 || envelope.Result.Summary.Fail != 0 {
+		t.Fatalf("doctor summary = %+v", envelope.Result.Summary)
+	}
+	if got := doctorCheckStatusForTest(envelope, "responses_server.default_model"); got != doctorStatusWarn {
+		t.Fatalf("responses_server.default_model status = %q, want warn", got)
+	}
+	if got := doctorCheckStatusForTest(envelope, "responses_server.backend"); got != doctorStatusPass {
+		t.Fatalf("responses_server.backend status = %q, want pass", got)
+	}
+}
+
+func TestDoctorResponsesServerDefaultModelPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	if envelope.Result.Status != doctorStatusPass || envelope.Result.Summary.Fail != 0 || envelope.Result.Summary.Warn != 0 {
+		t.Fatalf("doctor summary = %+v", envelope.Result.Summary)
+	}
+	if got := doctorCheckStatusForTest(envelope, "responses_server.default_model"); got != doctorStatusPass {
+		t.Fatalf("responses_server.default_model status = %q, want pass", got)
+	}
+	if got := doctorCheckStatusForTest(envelope, "responses_server.store"); got != doctorStatusPass {
+		t.Fatalf("responses_server.store status = %q, want pass", got)
+	}
+	if got := doctorCheckStatusForTest(envelope, "responses_server.model_profiles"); got != doctorStatusPass {
+		t.Fatalf("responses_server.model_profiles status = %q, want pass", got)
+	}
+}
+
+func TestDoctorResponsesServerUnsupportedStoreDriverFails(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+database:
+  driver: mysql
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	if got := doctorCheckStatusForTest(envelope, "responses_server.store"); got != doctorStatusFail {
+		t.Fatalf("responses_server.store status = %q, want fail", got)
+	}
+}
+
+func TestDoctorResponsesServerInvalidModelProfileRelationFails(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  auto_compact: true
+  model_profiles:
+    - name: gpt-test
+      context_window_tokens: 1024
+      max_output_tokens: 1024
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	if got := doctorCheckStatusForTest(envelope, "responses_server.model_profiles"); got != doctorStatusFail {
+		t.Fatalf("responses_server.model_profiles status = %q, want fail", got)
+	}
+}
+
 func TestDoctorWebSearchSearXNGWithoutBaseURLFails(t *testing.T) {
 	t.Parallel()
 
@@ -168,7 +307,7 @@ server:
   port: "8080"
 database:
   driver: postgres
-  dsn: postgres://app:doctor-db-secret@example.com:5432/traces?sslmode=disable
+  dsn: postgres://app:doctor-db-secret@example.com:5432/traces?sslmode=disable&api_key=doctor-db-query-secret
   auto_migrate: false
 trace:
   output_dir: "`+t.TempDir()+`"
@@ -201,6 +340,7 @@ upstreams:
 	}
 	for _, secret := range []string{
 		"doctor-db-secret",
+		"doctor-db-query-secret",
 		"doctor-search-secret",
 		"doctor-url-secret",
 		"doctor-url-token",
