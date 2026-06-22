@@ -108,6 +108,20 @@ Monitor 使用两类数据：
 
 `GET /api/routing/summary` 会读取 V3 cassette prelude 中的路由事件，并按 failure reason、selected route、sticky 状态等聚合。
 
+### Responses Function Executors API
+
+`GET /api/responses/function-executors` 返回当前启动配置中的 server-side function executor 只读摘要。
+
+返回内容包括：
+
+- `enabled`、`timeout`、`max_result_bytes`。
+- `redaction.arguments`、`redaction.output`。
+- `supported_types`，当前为 `["static_response"]`。
+- `executors[]` 中的 `name`、`type`、`enabled`、`output_configured`。
+- `warnings`，例如开启 executor 但未配置任何 binding。
+
+该 API 不返回 `static_response` 的 output 内容，也不提供 UI 或写配置能力。
+
 ### Events
 
 TraceLab 自身事件收件箱。

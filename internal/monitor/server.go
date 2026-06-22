@@ -18,6 +18,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
+	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -633,11 +634,34 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router         *router.Router
-	ChannelService *channel.Service
-	AuthVerifier   auth.TokenVerifier
-	AuthStore      *auth.Store
-	SessionTTL     time.Duration
+	Router                     *router.Router
+	ChannelService             *channel.Service
+	AuthVerifier               auth.TokenVerifier
+	AuthStore                  *auth.Store
+	SessionTTL                 time.Duration
+	ResponsesFunctionExecutors config.ResponsesFunctionExecutorConfig
+}
+
+type responsesFunctionExecutorsSummary struct {
+	Enabled        bool                                   `json:"enabled"`
+	Timeout        string                                 `json:"timeout"`
+	MaxResultBytes int                                    `json:"max_result_bytes"`
+	Redaction      responsesFunctionExecutorRedactionView `json:"redaction"`
+	SupportedTypes []string                               `json:"supported_types"`
+	Executors      []responsesFunctionExecutorBindingView `json:"executors"`
+	Warnings       []string                               `json:"warnings"`
+}
+
+type responsesFunctionExecutorRedactionView struct {
+	Arguments bool `json:"arguments"`
+	Output    bool `json:"output"`
+}
+
+type responsesFunctionExecutorBindingView struct {
+	Name             string `json:"name"`
+	Type             string `json:"type"`
+	Enabled          bool   `json:"enabled"`
+	OutputConfigured bool   `json:"output_configured"`
 }
 
 type loginRequest struct {
@@ -1033,6 +1057,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(opt.ResponsesFunctionExecutors), opt.AuthVerifier))
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
@@ -1084,6 +1109,54 @@ func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerF
 		}
 		writeJSON(w, http.StatusOK, loginResponse{Token: token.Token, Prefix: token.Prefix})
 	}
+}
+
+func responsesFunctionExecutorsAPIHandler(cfg config.ResponsesFunctionExecutorConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, responsesFunctionExecutorsSummaryFromConfig(cfg))
+	}
+}
+
+func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExecutorConfig) responsesFunctionExecutorsSummary {
+	cfg = (config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			FunctionExecutors: cfg,
+		},
+	}).ResponsesFunctionExecutorsConfig()
+	out := responsesFunctionExecutorsSummary{
+		Enabled:        cfg.Enabled,
+		Timeout:        cfg.Timeout.String(),
+		MaxResultBytes: cfg.MaxResultBytes,
+		Redaction: responsesFunctionExecutorRedactionView{
+			Arguments: cfg.Redaction.Arguments,
+			Output:    cfg.Redaction.Output,
+		},
+		SupportedTypes: []string{"static_response"},
+		Executors:      make([]responsesFunctionExecutorBindingView, 0, len(cfg.Executors)),
+	}
+	for _, binding := range cfg.Executors {
+		enabled := true
+		if binding.Enabled != nil {
+			enabled = *binding.Enabled
+		}
+		out.Executors = append(out.Executors, responsesFunctionExecutorBindingView{
+			Name:             binding.Name,
+			Type:             binding.Type,
+			Enabled:          enabled,
+			OutputConfigured: binding.Output != nil,
+		})
+	}
+	if out.Enabled && len(out.Executors) == 0 {
+		out.Warnings = append(out.Warnings, "responses function executors are enabled but no executors are configured")
+	}
+	if out.Warnings == nil {
+		out.Warnings = []string{}
+	}
+	return out
 }
 
 func authCheckAPIHandler() http.HandlerFunc {

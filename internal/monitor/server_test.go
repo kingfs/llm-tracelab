@@ -168,6 +168,121 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	}
 }
 
+func TestResponsesFunctionExecutorsAPIHandlerDefaultDisabled(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Enabled {
+		t.Fatalf("enabled = true, want false")
+	}
+	if payload.Timeout != "5s" || payload.MaxResultBytes != 64<<10 {
+		t.Fatalf("defaults = timeout %q max %d, want 5s and %d", payload.Timeout, payload.MaxResultBytes, 64<<10)
+	}
+	if got := strings.Join(payload.SupportedTypes, ","); got != "static_response" {
+		t.Fatalf("supported_types = %q, want static_response", got)
+	}
+	if len(payload.Executors) != 0 || len(payload.Warnings) != 0 {
+		t.Fatalf("executors/warnings = %+v/%+v, want empty", payload.Executors, payload.Warnings)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerStaticResponseRedactsOutput(t *testing.T) {
+	t.Parallel()
+
+	disabled := false
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled:        true,
+		Timeout:        2 * time.Second,
+		MaxResultBytes: 256,
+		Redaction: config.ResponsesFunctionRedactionConfig{
+			Arguments: true,
+			Output:    true,
+		},
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:   "lookup_order",
+				Type:   "static_response",
+				Output: map[string]any{"secret": "do-not-leak"},
+			},
+			{
+				Name:    "disabled_tool",
+				Type:    "static_response",
+				Enabled: &disabled,
+				Output:  "also-do-not-leak",
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "do-not-leak") || strings.Contains(body, "also-do-not-leak") {
+		t.Fatalf("response leaked configured output: %s", body)
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Enabled || payload.Timeout != "2s" || payload.MaxResultBytes != 256 {
+		t.Fatalf("summary = %+v, want enabled 2s max 256", payload)
+	}
+	if !payload.Redaction.Arguments || !payload.Redaction.Output {
+		t.Fatalf("redaction = %+v, want arguments/output true", payload.Redaction)
+	}
+	if len(payload.Executors) != 2 {
+		t.Fatalf("len(executors) = %d, want 2", len(payload.Executors))
+	}
+	if payload.Executors[0].Name != "lookup_order" || !payload.Executors[0].Enabled || !payload.Executors[0].OutputConfigured {
+		t.Fatalf("first executor = %+v, want enabled configured lookup_order", payload.Executors[0])
+	}
+	if payload.Executors[1].Name != "disabled_tool" || payload.Executors[1].Enabled || !payload.Executors[1].OutputConfigured {
+		t.Fatalf("second executor = %+v, want disabled configured disabled_tool", payload.Executors[1])
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerWarnsWhenEnabledWithoutExecutors(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{
+		ResponsesFunctionExecutors: config.ResponsesFunctionExecutorConfig{
+			Enabled: true,
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Enabled {
+		t.Fatalf("enabled = false, want true")
+	}
+	if len(payload.Warnings) != 1 || !strings.Contains(payload.Warnings[0], "enabled but no executors") {
+		t.Fatalf("warnings = %+v, want enabled-without-executors warning", payload.Warnings)
+	}
+}
+
 func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {
