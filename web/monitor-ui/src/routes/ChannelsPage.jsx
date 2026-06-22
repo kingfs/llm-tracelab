@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
@@ -138,10 +138,20 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
   const [validating, setValidating] = useState(false);
   const [probeReport, setProbeReport] = useState(null);
   const [setupResult, setSetupResult] = useState(null);
+  const [validatedSignature, setValidatedSignature] = useState("");
   const [error, setError] = useState("");
+  const formVersion = useRef(0);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
-  const updateForm = (key, value) => {
+  const currentSetupSignature = setupValidationSignature(form);
+  const setupStale = Boolean(setupResult && validatedSignature !== currentSetupSignature);
+  const setupStatus = buildSetupStatus(setupResult, setupStale, form);
+  const updateForm = (key, value, options = {}) => {
+    formVersion.current += 1;
     setForm((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
+    if (!options.keepSetupResult && SETUP_VALIDATION_FIELDS.has(key)) {
+      setSetupResult(null);
+      setValidatedSignature("");
+    }
   };
   const detectProvider = async () => {
     setDetecting(true);
@@ -160,28 +170,46 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
     }
   };
   const applyProbeSuggestions = () => {
+    formVersion.current += 1;
     setForm((current) => ({
       ...current,
       ...providerProbeSuggestionPayload(current, probeReport),
     }));
+    setSetupResult(null);
+    setValidatedSignature("");
   };
   const applySetupConfig = (normalized = {}) => {
-    setForm((current) => ({
-      ...current,
-      ...providerConfigFormPatch(normalized),
-      api_key: current.api_key,
-    }));
+    setForm((current) => {
+      const next = {
+        ...current,
+        ...providerConfigFormPatch(normalized),
+        api_key: current.api_key,
+      };
+      setValidatedSignature(setupValidationSignature(next));
+      return next;
+    });
   };
   const validateSetup = async () => {
     setValidating(true);
     setError("");
+    setSetupResult(null);
+    setValidatedSignature("");
+    const validationVersion = formVersion.current;
     try {
       const result = await postJSON(apiPaths.providerSetupValidate, normalizeProviderPayload(form));
+      if (validationVersion !== formVersion.current) {
+        setError("Configuration changed during validation. Run Validate setup again.");
+        return;
+      }
       setSetupResult(result);
       setProbeReport(result.probe || null);
       applySetupConfig(result.normalized_config);
       setAdvancedOpen(true);
     } catch (err) {
+      if (validationVersion !== formVersion.current) {
+        setError("Configuration changed during validation. Run Validate setup again.");
+        return;
+      }
       if (err.payload?.normalized_config) {
         setSetupResult(err.payload);
         setProbeReport(err.payload.probe || null);
@@ -196,6 +224,10 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
 
   const submit = async (event) => {
     event.preventDefault();
+    if (!setupStatus.canApply) {
+      setError(setupStatus.reason);
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -227,11 +259,11 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         </div>
         <div className="provider-form-actions">
           <button className="ghost-button" type="button" onClick={detectProvider} disabled={detecting || !form.base_url.trim()}>{detecting ? "Detecting" : "Detect provider"}</button>
-          <button className="ghost-button active" type="button" onClick={validateSetup} disabled={validating || !form.base_url.trim()}>{validating ? "Validating" : "Validate & apply suggestions"}</button>
+          <button className="ghost-button active" type="button" onClick={validateSetup} disabled={validating || !form.base_url.trim()}>{validating ? "Validating" : "Validate setup"}</button>
           <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
         </div>
+        {setupResult ? <ProviderSetupStatusPanel result={setupResult} status={setupStatus} /> : <p className="trace-subline">Validate setup before creating the provider.</p>}
         {probeReport ? <ProviderProbeSuggestionPanel report={probeReport} onApply={applyProbeSuggestions} /> : null}
-        {setupResult?.secret?.api_key_hint ? <p className="trace-subline">API key {setupResult.secret.api_key_hint}</p> : null}
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
@@ -240,7 +272,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         {error ? <p className="auth-error">{error}</p> : null}
         <div className="nav-modal-actions">
           <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
-          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Save provider"}</button>
+          <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply}>{saving ? "Creating" : "Create provider"}</button>
         </div>
       </form>
     </div>,
@@ -443,6 +475,34 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
   );
 }
 
+function ProviderSetupStatusPanel({ result, status }) {
+  const normalized = result?.normalized_config || {};
+  const probe = result?.probe || {};
+  const warnings = Array.isArray(probe.warnings) ? probe.warnings : [];
+  const secret = result?.secret || {};
+  return (
+    <div className="provider-probe-card">
+      <div className="provider-probe-card-head">
+        <div>
+          <p className="eyebrow">Setup validation</p>
+          <h3>{status.title}</h3>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone={status.tone}>{status.label}</InlineTag>
+          {probe.status ? <InlineTag tone={probe.status === "detected" ? "green" : probe.status === "error" ? "danger" : "gold"}>{probe.status}</InlineTag> : null}
+        </div>
+      </div>
+      <div className="detail-meta-strip">
+        <Metric label="api type" value={normalized.api_type || "-"} />
+        <Metric label="protocol" value={normalized.protocol_family || "-"} />
+        <Metric label="secret" value={secret.api_key_hint ? `stored as ${secret.api_key_hint}` : secret.secret_storage_mode || "-"} />
+      </div>
+      <p className="trace-subline">{status.reason}</p>
+      {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
+    </div>
+  );
+}
+
 function ProviderProbeSuggestionPanel({ report, onApply }) {
   const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
   const warnings = Array.isArray(report.warnings) ? report.warnings : [];
@@ -510,6 +570,29 @@ const CAPABILITY_OPTIONS = [
   { value: "false", label: "Unsupported" },
 ];
 
+const SETUP_VALIDATION_FIELDS = new Set([
+  "name",
+  "base_url",
+  "provider_preset",
+  "api_type",
+  "mode",
+  "capabilities",
+  "protocol_family",
+  "routing_profile",
+  "api_version",
+  "deployment",
+  "project",
+  "location",
+  "model_resource",
+  "api_key",
+  "enabled",
+  "priority",
+  "weight",
+  "capacity_hint",
+  "model_discovery",
+  "allow_unknown_models",
+]);
+
 export function buildPresetState(presetData, providerPreset, routingProfile) {
   const presets = Array.isArray(presetData?.presets) ? presetData.presets : [];
   const byID = new Map(presets.map((item) => [item.id, item]));
@@ -576,6 +659,64 @@ function normalizeProviderPayload(form) {
     weight: Number(form.weight || 1),
     capacity_hint: Number(form.capacity_hint || 1),
     capabilities: normalizeCapabilities(form.capabilities),
+  };
+}
+
+function setupValidationSignature(form) {
+  const payload = normalizeProviderPayload(form);
+  const apiKey = payload.api_key || "";
+  delete payload.api_key;
+  payload.api_key_present = apiKey.trim() !== "";
+  payload.api_key_length = apiKey.length;
+  return JSON.stringify(payload);
+}
+
+function buildSetupStatus(result, stale, form) {
+  if (!result) {
+    return {
+      canApply: false,
+      title: "Not validated",
+      label: "required",
+      tone: "gold",
+      reason: "Validate setup before creating the provider.",
+    };
+  }
+  if (stale) {
+    return {
+      canApply: false,
+      title: "Validation is stale",
+      label: "stale",
+      tone: "gold",
+      reason: "Configuration changed after validation. Run Validate setup again.",
+    };
+  }
+  const detected = result.probe?.status === "detected";
+  const normalized = result.normalized_config || {};
+  const explicitSurface = Boolean((form.api_type || normalized.api_type || "").trim() && (form.protocol_family || normalized.protocol_family || "").trim());
+  if (detected) {
+    return {
+      canApply: true,
+      title: "Ready to create",
+      label: "detected",
+      tone: "green",
+      reason: "Provider probe detected a compatible setup.",
+    };
+  }
+  if (explicitSurface) {
+    return {
+      canApply: true,
+      title: "Ready with explicit protocol",
+      label: "explicit",
+      tone: "gold",
+      reason: "Probe did not detect the provider, but API type and protocol family are explicitly set.",
+    };
+  }
+  return {
+    canApply: false,
+    title: "Needs protocol selection",
+    label: "blocked",
+    tone: "danger",
+    reason: "Probe did not detect the provider. Select both API type and protocol family in advanced options, then validate again.",
   };
 }
 
