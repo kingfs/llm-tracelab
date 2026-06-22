@@ -177,7 +177,7 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 长期配置以 SQLite 中的 channel/model 记录为准，并通过 Monitor Web 管理：
 
 - 创建/更新渠道。
-- 创建前 provider setup validate 不落库，Save provider 才写入 channel store；若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
+- 创建前 provider setup validate 不落库，Create provider 才写入 channel store；Monitor create dialog 已展示 normalized config/probe/redacted secret state，字段变更会清空旧验证结果；若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
 - 探测上游模型。
 - 启停渠道。
 - 启停模型。
