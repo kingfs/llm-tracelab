@@ -121,12 +121,12 @@ Monitor 使用两类数据：
 - `enabled`、`timeout`、`max_result_bytes`。
 - `redaction.arguments`、`redaction.output`。
 - `supported_types`，当前为 `["static_response", "external_command"]`。
-- `executors[]` 中的 `name`、`type`、`enabled`、`available`、`output_configured`、`command_configured` 和 `warnings`。
+- `executors[]` 中的 `name`、`type`、`enabled`、`available`、`process`、`output_configured`、`command_configured` 和 `warnings`。
 - `warnings`，例如开启 executor 但未配置任何 binding、没有可用 executor、重复 name、空 name、未知 type 或 `external_command` 缺少 command。
 
-该 API 不返回 `static_response` 的 output 内容，也不返回 `external_command` 的 command 内容。`POST /api/responses/function-executors` 是保守的 Monitor 写配置入口：默认 `validate_only=true`，返回 normalized summary 和 warnings；`validate_only=false` 时会把非敏感 overlay 持久化到应用库 `app_settings`，并热更新当前进程的 Responses runtime executor registry，后续新请求生效。写入 payload 只接受 `enabled`、`timeout`、`max_result_bytes`、`redaction.arguments`、`redaction.output`、executor `name` / `type` / `enabled`，以及 `external_command` 的 `process.working_dir` / `process.require_absolute_command` 隔离字段；`output`、`command`、`args`、`env` 等敏感可执行字段不被写接口接受，响应和持久化 snapshot 中也不会回显或保存。
+该 API 不返回 `static_response` 的 output 内容，也不返回 `external_command` 的 command 内容。`POST /api/responses/function-executors` 是保守的 Monitor 写配置入口：默认 `validate_only=true`，返回 normalized summary 和 warnings；`validate_only=false` 时会把非敏感 overlay 持久化到应用库 `app_settings`，并热更新当前进程的 Responses runtime executor registry，后续新请求生效。写入 payload 只接受 `enabled`、`timeout`、`max_result_bytes`、`redaction.arguments`、`redaction.output`、executor `name` / `type` / `enabled`，以及 `external_command` 的 `process.working_dir` / `process.require_absolute_command` / `process.allowed_command_dirs` / `process.reject_root` 隔离字段；`output`、`command`、`args`、`env` 等敏感可执行字段不被写接口接受，响应和持久化 snapshot 中也不会回显或保存。
 
-`external_command` 必须通过 YAML 显式配置真实 command，运行时不使用 shell，默认不继承环境变量，tool call 输入通过 stdin JSON 传入命令。Monitor overlay 只能调整开关、全局策略和进程隔离字段，不能创建新的可执行 command。可选 `process.working_dir` 会要求绝对且已存在的执行目录；可选 `process.require_absolute_command=true` 会拒绝相对 command/PATH 查找，相关危险配置会以 validation warning 形式出现在摘要中。
+`external_command` 必须通过 YAML 显式配置真实 command，运行时不使用 shell，默认不继承环境变量，tool call 输入通过 stdin JSON 传入命令。Monitor overlay 只能调整开关、全局策略和进程隔离字段，不能创建新的可执行 command。可选 `process.working_dir` 会要求绝对且已存在的执行目录；可选 `process.require_absolute_command=true` 会拒绝相对 command/PATH 查找；可选 `process.allowed_command_dirs` 会要求 command 为绝对路径并解析到允许目录内；可选 `process.reject_root=true` 会在当前进程以 root 运行时拒绝执行 external command。相关危险配置会以 validation warning 形式出现在摘要中。当前这些能力是轻量进程约束，不等同于容器或 root namespace 沙箱。
 
 ### Events
 

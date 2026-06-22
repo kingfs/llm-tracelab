@@ -110,15 +110,17 @@ func Registrations(cfg config.ResponsesFunctionExecutorConfig) (map[string]respo
 			}
 			registrations[binding.Name] = responsesruntime.FunctionToolExecutorRegistration{
 				Executor: responsesruntime.ExternalCommandFunctionToolExecutor{
-					Command:        binding.Command,
-					Args:           binding.Args,
-					Env:            binding.Env,
-					EnvAllowlist:   binding.EnvAllowlist,
-					WorkingDir:     binding.Process.WorkingDir,
-					RequireAbsPath: binding.Process.RequireAbsoluteCommand,
-					Timeout:        binding.Timeout,
-					MaxStdoutBytes: executorConfig.MaxResultBytes + 1,
-					MaxStderrBytes: executorConfig.MaxResultBytes + 1,
+					Command:            binding.Command,
+					Args:               binding.Args,
+					Env:                binding.Env,
+					EnvAllowlist:       binding.EnvAllowlist,
+					WorkingDir:         binding.Process.WorkingDir,
+					RequireAbsPath:     binding.Process.RequireAbsoluteCommand,
+					AllowedCommandDirs: binding.Process.AllowedCommandDirs,
+					RejectRoot:         binding.Process.RejectRoot,
+					Timeout:            binding.Timeout,
+					MaxStdoutBytes:     executorConfig.MaxResultBytes + 1,
+					MaxStderrBytes:     executorConfig.MaxResultBytes + 1,
 				},
 				Policy: policy,
 			}

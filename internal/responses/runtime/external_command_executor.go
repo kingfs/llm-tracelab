@@ -118,11 +118,17 @@ func (e ExternalCommandFunctionToolExecutor) validateSandboxConstraints() error 
 	}
 	resolvedDirs := make([]string, 0, len(e.AllowedCommandDirs))
 	for _, dir := range e.AllowedCommandDirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
 		resolvedDir, err := validatedAllowedCommandDir(dir)
 		if err != nil {
 			return err
 		}
 		resolvedDirs = append(resolvedDirs, resolvedDir)
+	}
+	if len(resolvedDirs) == 0 {
+		return nil
 	}
 	for _, resolvedDir := range resolvedDirs {
 		if pathWithinDir(resolvedCommand, resolvedDir) {

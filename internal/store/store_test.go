@@ -191,7 +191,7 @@ func TestResponsesFunctionExecutorConfigSnapshotRoundTripSQLite(t *testing.T) {
 	if second.Command != "" || len(second.Args) != 0 || len(second.Env) != 0 || len(second.EnvAllowlist) != 0 {
 		t.Fatalf("loaded second executor kept executable fields: %+v", second)
 	}
-	if second.Process.WorkingDir != "/tmp" || !second.Process.RequireAbsoluteCommand || len(second.Process.AllowedCommandDirs) != 2 || second.Process.AllowedCommandDirs[0] != "/tmp" || second.Process.AllowedCommandDirs[1] != "" || !second.Process.RejectRoot {
+	if second.Process.WorkingDir != "/tmp" || !second.Process.RequireAbsoluteCommand || len(second.Process.AllowedCommandDirs) != 1 || second.Process.AllowedCommandDirs[0] != "/tmp" || !second.Process.RejectRoot {
 		t.Fatalf("loaded second process = %+v, want safe process isolation fields", second.Process)
 	}
 }

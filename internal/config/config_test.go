@@ -701,7 +701,7 @@ func TestResponsesFunctionExecutorsConfigValidatesAllowedCommandDirs(t *testing.
 	if len(executors.Executors) != 6 {
 		t.Fatalf("len(executors) = %d, want 6", len(executors.Executors))
 	}
-	if got := executors.Executors[0]; !got.Available || len(got.Warnings) != 0 || len(got.Process.AllowedCommandDirs) != 2 || got.Process.AllowedCommandDirs[0] != allowedDir || got.Process.AllowedCommandDirs[1] != "" || !got.Process.RejectRoot {
+	if got := executors.Executors[0]; !got.Available || len(got.Warnings) != 0 || len(got.Process.AllowedCommandDirs) != 1 || got.Process.AllowedCommandDirs[0] != allowedDir || !got.Process.RejectRoot {
 		t.Fatalf("allowed executor = %+v, want available with trimmed allowed dirs", got)
 	}
 	if got := executors.Executors[1]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "allowed_command_dirs entries must be absolute") {

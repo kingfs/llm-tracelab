@@ -951,7 +951,11 @@ func trimStringSlice(values []string) []string {
 	}
 	out := make([]string, 0, len(values))
 	for _, value := range values {
-		out = append(out, strings.TrimSpace(value))
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
 	}
 	return out
 }
