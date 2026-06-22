@@ -71,6 +71,19 @@ type ProviderProbeReportOptions struct {
 	ChannelID string
 }
 
+type ProviderProbeApplyResult struct {
+	Report  providerprobe.BatchReport `json:"report"`
+	Applied []ProviderProbeApplyItem  `json:"applied"`
+}
+
+type ProviderProbeApplyItem struct {
+	ChannelID     string   `json:"channel_id"`
+	Status        string   `json:"status"`
+	Applied       bool     `json:"applied"`
+	AppliedFields []string `json:"applied_fields,omitempty"`
+	SkippedReason string   `json:"skipped_reason,omitempty"`
+}
+
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 	if s == nil || s.store == nil {
 		return 0, fmt.Errorf("channel service store is required")
@@ -249,6 +262,58 @@ func (s *Service) ProviderProbeReport(ctx context.Context, options ProviderProbe
 	return providerprobe.ProbeBatch(ctx, targets, s.httpClient), nil
 }
 
+func (s *Service) ApplyProviderProbeReport(ctx context.Context, options ProviderProbeReportOptions) (ProviderProbeApplyResult, error) {
+	report, err := s.ProviderProbeReport(ctx, options)
+	if err != nil {
+		return ProviderProbeApplyResult{}, err
+	}
+	channels, err := s.store.ListChannelConfigs()
+	if err != nil {
+		return ProviderProbeApplyResult{}, err
+	}
+	byID := make(map[string]store.ChannelConfigRecord, len(channels))
+	for _, channel := range channels {
+		byID[channel.ID] = channel
+	}
+	result := ProviderProbeApplyResult{
+		Report:  report,
+		Applied: make([]ProviderProbeApplyItem, 0, len(report.Reports)),
+	}
+	for _, probeReport := range report.Reports {
+		item := ProviderProbeApplyItem{
+			ChannelID: strings.TrimSpace(probeReport.ProviderID),
+			Status:    probeReport.Status,
+		}
+		if probeReport.Status != providerprobe.StatusDetected {
+			item.SkippedReason = "probe status is not detected"
+			result.Applied = append(result.Applied, item)
+			continue
+		}
+		channel, ok := byID[item.ChannelID]
+		if !ok {
+			item.SkippedReason = "channel not found"
+			result.Applied = append(result.Applied, item)
+			continue
+		}
+		updated, fields, err := applyProviderProbeSuggestions(channel, probeReport)
+		if err != nil {
+			return ProviderProbeApplyResult{}, err
+		}
+		if len(fields) == 0 {
+			item.SkippedReason = "no missing fields to apply"
+			result.Applied = append(result.Applied, item)
+			continue
+		}
+		if _, err := s.store.UpsertChannelConfig(updated); err != nil {
+			return ProviderProbeApplyResult{}, err
+		}
+		item.Applied = true
+		item.AppliedFields = fields
+		result.Applied = append(result.Applied, item)
+	}
+	return result, nil
+}
+
 func (s *Service) ProviderProbeTargets(channelID string) ([]providerprobe.ProbeTarget, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("channel service store is required")
@@ -302,6 +367,69 @@ func unmarshalCapabilities(raw string) (config.UpstreamCapabilitiesConfig, error
 		return config.UpstreamCapabilitiesConfig{}, err
 	}
 	return capabilities, nil
+}
+
+func applyProviderProbeSuggestions(channel store.ChannelConfigRecord, report providerprobe.Report) (store.ChannelConfigRecord, []string, error) {
+	updated := channel
+	var fields []string
+	if strings.TrimSpace(updated.APIType) == "" && strings.TrimSpace(report.SuggestedAPIType) != "" {
+		updated.APIType = strings.TrimSpace(report.SuggestedAPIType)
+		fields = append(fields, "api_type")
+	}
+	if strings.TrimSpace(updated.ProtocolFamily) == "" && strings.TrimSpace(report.SuggestedProtocolFamily) != "" {
+		updated.ProtocolFamily = strings.TrimSpace(report.SuggestedProtocolFamily)
+		fields = append(fields, "protocol_family")
+	}
+	capabilities, err := unmarshalCapabilities(updated.CapabilitiesJSON)
+	if err != nil {
+		return store.ChannelConfigRecord{}, nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
+	}
+	for _, capability := range report.Capabilities {
+		switch capability {
+		case upstream.CapabilityResponses:
+			if setCapabilityIfUnset(&capabilities.Responses) {
+				fields = append(fields, "capabilities.responses")
+			}
+		case upstream.CapabilityChatCompletions:
+			if setCapabilityIfUnset(&capabilities.ChatCompletions) {
+				fields = append(fields, "capabilities.chat_completions")
+			}
+		case upstream.CapabilityToolCalling:
+			if setCapabilityIfUnset(&capabilities.ToolCalling) {
+				fields = append(fields, "capabilities.tool_calling")
+			}
+		case upstream.CapabilityModels:
+			if setCapabilityIfUnset(&capabilities.Models) {
+				fields = append(fields, "capabilities.models")
+			}
+		case upstream.CapabilityEmbeddings:
+			if setCapabilityIfUnset(&capabilities.Embeddings) {
+				fields = append(fields, "capabilities.embeddings")
+			}
+		case upstream.CapabilityTokenize:
+			if setCapabilityIfUnset(&capabilities.Tokenize) {
+				fields = append(fields, "capabilities.tokenize")
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return updated, nil, nil
+	}
+	capabilitiesJSON, err := marshalCapabilities(capabilities)
+	if err != nil {
+		return store.ChannelConfigRecord{}, nil, err
+	}
+	updated.CapabilitiesJSON = capabilitiesJSON
+	return updated, fields, nil
+}
+
+func setCapabilityIfUnset(target **bool) bool {
+	if target == nil || *target != nil {
+		return false
+	}
+	value := true
+	*target = &value
+	return true
 }
 
 func (s *Service) Probe(channelID string) (ProbeResult, error) {
