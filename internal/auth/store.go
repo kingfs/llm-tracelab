@@ -22,6 +22,7 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -63,17 +64,10 @@ func Open(path string) (*Store, error) {
 
 func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
 	driver = normalizeDriver(driver)
-	if driver != "sqlite" {
+	if driver != "sqlite" && driver != "postgres" {
 		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
-	path := config.SQLitePathFromDSN(dsn)
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("auth database path is required")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
+	db, path, entDialect, err := openAuthDatabase(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +77,7 @@ func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int)
 	if maxIdleConns > 0 {
 		db.SetMaxIdleConns(maxIdleConns)
 	}
-	drv := entsql.OpenDB(dialect.SQLite, db)
+	drv := entsql.OpenDB(entDialect, db)
 	return &Store{
 		client: dao.NewClient(dao.Driver(drv)),
 		db:     db,
@@ -93,10 +87,43 @@ func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int)
 
 func normalizeDriver(driver string) string {
 	driver = strings.ToLower(strings.TrimSpace(driver))
-	if driver == "" {
+	switch driver {
+	case "":
 		return "sqlite"
+	case "postgresql":
+		return "postgres"
+	default:
+		return driver
 	}
-	return driver
+}
+
+func openAuthDatabase(driver string, dsn string) (*sql.DB, string, string, error) {
+	switch driver {
+	case "sqlite":
+		path := config.SQLitePathFromDSN(dsn)
+		if strings.TrimSpace(path) == "" {
+			return nil, "", "", errors.New("auth database path is required")
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, "", "", err
+		}
+		db, err := sql.Open("sqlite", sqliteDSN(path))
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, path, dialect.SQLite, nil
+	case "postgres":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, "", "", errors.New("postgres auth database dsn is required")
+		}
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, dsn, dialect.Postgres, nil
+	default:
+		return nil, "", "", fmt.Errorf("auth store driver %q is not supported yet", driver)
+	}
 }
 
 func sqliteDSN(dbPath string) string {

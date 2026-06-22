@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -253,6 +254,63 @@ func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	}
 	if _, err := st.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
+	}
+}
+
+func TestNormalizeDriver(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		driver string
+		want   string
+	}{
+		{name: "empty defaults sqlite", driver: "", want: "sqlite"},
+		{name: "trims lowercases", driver: " SQLite ", want: "sqlite"},
+		{name: "postgres", driver: "postgres", want: "postgres"},
+		{name: "postgresql alias", driver: " PostgreSQL ", want: "postgres"},
+		{name: "unsupported preserved", driver: "mysql", want: "mysql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDriver(tt.driver); got != tt.want {
+				t.Fatalf("normalizeDriver(%q) = %q, want %q", tt.driver, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenDatabaseRejectsPostgresWithoutDSN(t *testing.T) {
+	t.Parallel()
+
+	_, err := OpenDatabase("postgresql", "", 4, 4)
+	if err == nil || !strings.Contains(err.Error(), "postgres auth database dsn is required") {
+		t.Fatalf("OpenDatabase(postgresql empty dsn) error = %v, want required dsn", err)
+	}
+}
+
+func TestOpenDatabaseAcceptsPostgresDSNWithoutConnecting(t *testing.T) {
+	t.Parallel()
+
+	st, err := OpenDatabase("postgres", "postgres://user:pass@example.invalid/traces?sslmode=disable", 7, 3)
+	if err != nil {
+		t.Fatalf("OpenDatabase(postgres) error = %v", err)
+	}
+	defer st.Close()
+	if st.Path() != "postgres://user:pass@example.invalid/traces?sslmode=disable" {
+		t.Fatalf("store path = %q, want dsn", st.Path())
+	}
+	if stats := st.db.Stats(); stats.MaxOpenConnections != 7 {
+		t.Fatalf("MaxOpenConnections = %d, want 7", stats.MaxOpenConnections)
+	}
+}
+
+func TestMigrateDatabaseUpRejectsPostgres(t *testing.T) {
+	t.Parallel()
+
+	err := MigrateDatabaseUp("postgresql", "postgres://user:pass@example.invalid/traces", 0)
+	if err == nil || !strings.Contains(err.Error(), `database driver "postgres" is not supported by embedded migrations yet`) {
+		t.Fatalf("MigrateDatabaseUp(postgresql) error = %v, want unsupported embedded migrations", err)
 	}
 }
 

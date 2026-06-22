@@ -45,6 +45,7 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
 
@@ -73,6 +74,7 @@ type Store struct {
 	client    *dao.Client
 	outputDir string
 	dbPath    string
+	driver    string
 	secrets   *secretBox
 	syncMu    sync.Mutex
 	eventMu   sync.Mutex
@@ -2189,23 +2191,12 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	if err != nil {
 		return nil, err
 	}
-	driver = strings.ToLower(strings.TrimSpace(driver))
-	if driver == "" {
-		driver = "sqlite"
-	}
-	if driver != "sqlite" {
+	driver = normalizeDatabaseDriver(driver)
+	if driver != "sqlite" && driver != "postgres" {
 		return nil, fmt.Errorf("store driver %q is not supported yet", driver)
 	}
-	dbPath := config.SQLitePathFromDSN(dsn)
-	if strings.TrimSpace(dbPath) == "" {
-		dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
-	}
-	if dbPath != ":memory:" {
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-			return nil, err
-		}
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+
+	db, dbPath, entDialect, err := openStoreDatabase(outputDir, driver, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -2218,9 +2209,10 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 
 	st := &Store{
 		db:        db,
-		client:    dao.NewClient(dao.Driver(entsql.OpenDB(dialect.SQLite, db))),
+		client:    dao.NewClient(dao.Driver(entsql.OpenDB(entDialect, db))),
 		outputDir: outputDir,
 		dbPath:    dbPath,
+		driver:    driver,
 		secrets:   secrets,
 	}
 	if err := st.initSchema(); err != nil {
@@ -2229,6 +2221,49 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	}
 
 	return st, nil
+}
+
+func normalizeDatabaseDriver(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	switch driver {
+	case "":
+		return "sqlite"
+	case "postgresql":
+		return "postgres"
+	default:
+		return driver
+	}
+}
+
+func openStoreDatabase(outputDir string, driver string, dsn string) (*sql.DB, string, string, error) {
+	switch driver {
+	case "sqlite":
+		dbPath := config.SQLitePathFromDSN(dsn)
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
+		}
+		if dbPath != ":memory:" {
+			if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+				return nil, "", "", err
+			}
+		}
+		db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, dbPath, dialect.SQLite, nil
+	case "postgres":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, "", "", errors.New("postgres store dsn is required")
+		}
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, dsn, dialect.Postgres, nil
+	default:
+		return nil, "", "", fmt.Errorf("store driver %q is not supported yet", driver)
+	}
 }
 
 func newLocalSecretBox(outputDir string) (*secretBox, error) {
@@ -2651,6 +2686,9 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) initSchema() error {
+	if s.driver == "postgres" {
+		return s.client.Schema.Create(context.Background())
+	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
 		`CREATE TABLE IF NOT EXISTS logs (
