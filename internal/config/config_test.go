@@ -460,6 +460,10 @@ responses_server:
       max_output_tokens: 4096
       compact_history_item_threshold: 8
       upstream_model: "qwen/qwen3"
+      tokenize_counter:
+        enabled: true
+        upstream_id: " primary "
+        timeout: 750ms
     - pattern: "gpt-4o*"
       compact_history_item_threshold: 6
 `)
@@ -495,6 +499,9 @@ responses_server:
 	}
 	if got := profiles[0]; got.Name != "qwen3" || got.ContextWindowTokens != 32768 || got.MaxOutputTokens != 4096 || got.CompactHistoryItemThreshold != 8 || got.UpstreamModel != "qwen/qwen3" {
 		t.Fatalf("first model profile = %+v", got)
+	}
+	if got := profiles[0].TokenizeCounter; !got.Enabled || got.UpstreamID != "primary" || got.Timeout != 750*time.Millisecond {
+		t.Fatalf("first model profile tokenize_counter = %+v, want enabled primary 750ms", got)
 	}
 	if got := profiles[1]; got.Pattern != "gpt-4o*" || got.CompactHistoryItemThreshold != 6 {
 		t.Fatalf("second model profile = %+v", got)

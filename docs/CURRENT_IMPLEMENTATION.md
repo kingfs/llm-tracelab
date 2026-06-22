@@ -42,6 +42,15 @@ Hosted `web_search` 已有首切实现。配置 `tools.web_search.enabled=true` 
 ```yaml
 responses_server:
   enabled: true
+  auto_compact: true
+  model_profiles:
+    - pattern: gpt-4o*
+      context_window_tokens: 128000
+      upstream_model: gpt-4o-mini
+      tokenize_counter:
+        enabled: true
+        upstream_id: primary
+        timeout: 2s
   function_executors:
     enabled: true
     timeout: 2s
@@ -62,7 +71,7 @@ responses_server:
         timeout: 2s
 ```
 
-Compact workflow 已有首切实现。server-mode 会把配置 Responses path 下的子路径一起分流到本地 Responses handler；`POST /v1/responses/compact` 接收 `response_id`，读取目标 response 的 continuation history，调用上游 Chat Completions 生成 `summary` output，并把新的 compact response 存入 runtime store。compact response 的 input item 是 `compact_request`，后续 `previous_response_id` 指向该 compact response 时，history 会停在 compact boundary，并把 `summary` 作为 system message 注入下一轮模型上下文。配置 `responses_server.auto_compact=true` 后，create continuation 会在加载 history item 数超过阈值或估算的 prompt+reserved output 超过 `context_window_tokens` 时先自动 compact，再把本次 response 接到 compact response 后面。有效 item 阈值默认来自 `responses_server.compact_history_item_threshold`，也可由匹配当前 model 的 `responses_server.model_profiles[].compact_history_item_threshold` 覆盖；匹配 profile 且配置 `upstream_model` 时，runtime 的内部 Chat Completions 请求会使用该上游模型名，外部 Responses `model` 仍保留客户端请求 model 或默认 model。匹配 profile 的 `max_output_tokens` 会在客户端未显式传 `max_output_tokens` 时作为内部 Chat Completions `max_tokens` 默认值。当前 token budgeting 已有可注入 estimator 和 adapter-backed chat prompt counter 边界，默认实现仍是确定性的保守计数器，adapter 失败会 fallback 到 conservative estimator；代码层也已有可注入 HTTP provider `/tokenize` chat prompt counter，支持 `/v1` base URL 归一化、API key/header、自定义 header、timeout 和 `count`/`token_count`/`tokens`/`token_ids` 等响应形状，但尚未接入默认 runtime/provider 装配。真实模型专用 tokenizer 自动选择和完整 context optimization 尚未接入。
+Compact workflow 已有首切实现。server-mode 会把配置 Responses path 下的子路径一起分流到本地 Responses handler；`POST /v1/responses/compact` 接收 `response_id`，读取目标 response 的 continuation history，调用上游 Chat Completions 生成 `summary` output，并把新的 compact response 存入 runtime store。compact response 的 input item 是 `compact_request`，后续 `previous_response_id` 指向该 compact response 时，history 会停在 compact boundary，并把 `summary` 作为 system message 注入下一轮模型上下文。配置 `responses_server.auto_compact=true` 后，create continuation 会在加载 history item 数超过阈值或估算的 prompt+reserved output 超过 `context_window_tokens` 时先自动 compact，再把本次 response 接到 compact response 后面。有效 item 阈值默认来自 `responses_server.compact_history_item_threshold`，也可由匹配当前 model 的 `responses_server.model_profiles[].compact_history_item_threshold` 覆盖；匹配 profile 且配置 `upstream_model` 时，runtime 的内部 Chat Completions 请求会使用该上游模型名，外部 Responses `model` 仍保留客户端请求 model 或默认 model。匹配 profile 的 `max_output_tokens` 会在客户端未显式传 `max_output_tokens` 时作为内部 Chat Completions `max_tokens` 默认值。当前 token budgeting 已有可注入 estimator 和 adapter-backed chat prompt counter 边界，默认实现仍是确定性的保守计数器；只有显式配置 `responses_server.model_profiles[].tokenize_counter.enabled=true`，并匹配一个声明 `capabilities.tokenize=true` 的 upstream/router target 时，proxy 装配才会用该 target 的 base URL、API key 和 headers 构造 HTTP provider `/tokenize` counter。`/tokenize` counter 支持 `/v1` base URL 归一化、timeout 和 `count`/`token_count`/`tokens`/`token_ids` 等响应形状；adapter 或 provider 失败会 fallback 到 conservative estimator，且不会把 provider 错误 body 作为 token 估算错误向外暴露。真实模型专用 tokenizer 自动选择和完整 context optimization 尚未接入。
 
 详细协议说明见 [协议参考](./protocol-reference/README.md)。
 
