@@ -65,7 +65,7 @@ SQLite 当前负责：
 
 启动时 schema 升级必须兼容已有本地 DB。
 
-Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration 和运维生产化还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束。Monitor UI 查询与完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client。`ent/postgres-migrations` 已包含初始 Postgres application schema SQL，并已验证 up/down 可执行；但 `db migrate up` 仍未切到 checked-in SQL migrator，所以完整 Postgres 运维生产化还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束，Stage 16A 已接入 Postgres ent migration SQL 生成链路和初始 checked-in migration。完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
 
 Stage 9 audit 表职责边界：
 

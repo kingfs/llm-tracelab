@@ -49,6 +49,27 @@ tasks:
     cmds:
       - go generate ./ent/...
 
+  migrate:ent:sqlite:
+    desc: Generate a SQLite ent migration, pass NAME=change_name
+    cmds:
+      - >-
+        sh -c 'test -n "{{.NAME}}" ||
+        { echo "NAME is required, for example: task migrate:ent:sqlite NAME=add_table"; exit 2; }'
+      - go run -mod=mod ent/migrate/main.go --dialect sqlite --dir ent/migrations "{{.NAME}}"
+      - go run -mod=mod ent/migrate/update_hash.go ent/migrations
+
+  migrate:ent:postgres:
+    desc: Generate a Postgres ent migration, pass NAME=change_name and DEV_URL=postgres://...
+    cmds:
+      - >-
+        sh -c 'test -n "{{.NAME}}" ||
+        { echo "NAME is required, for example: task migrate:ent:postgres NAME=add_table DEV_URL=postgres://..."; exit 2; }'
+      - >-
+        sh -c 'test -n "{{.DEV_URL}}" ||
+        { echo "DEV_URL is required and must point to a temporary development Postgres database"; exit 2; }'
+      - go run -mod=mod ent/migrate/main.go --dialect postgres --dir ent/postgres-migrations --dev-url "{{.DEV_URL}}" "{{.NAME}}"
+      - go run -mod=mod ent/migrate/update_hash.go ent/postgres-migrations
+
   fmt:
     desc: Format Go code
     cmds:

@@ -15,15 +15,15 @@
 - cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；有 ent-backed audit store 时还会写一条 `upstream_exchanges`，把 response id、request audit、recorder request id、cassette path、route target、model、endpoint、status 和时间戳关联起来；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
 - ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
 - hosted web_search 首切：新增 `tools.web_search` 配置和 `internal/responses/tools/websearch` provider，支持 disabled/mock/SearXNG。开启后，非流式 Responses runtime 可把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把 tool result 注入第二轮 Chat Completions；有 ent-backed audit store 时还会写 hosted web_search `response.tool_call` started/completed/failed events。
-- SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client。`db migrate up` 已从 auth migrator 中拆出并归入应用库命令，但当前 Postgres 路径仍依赖 ent `Schema.Create` 这类非版本化建表能力；完整生产 migration 和运维流程仍未完成。详见 [Postgres Storage Migration](./POSTGRES_STORAGE_MIGRATION.md)。
+- SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client。`ent/postgres-migrations` 已包含从 ent schema 生成并在 Postgres 17 dev database 上验证过的初始应用 schema SQL。`db migrate up` 已从 auth migrator 中拆出并归入应用库命令，但运行时仍使用 ent `Schema.Create` 初始化；把 `db migrate` 切到 checked-in SQL migrator 仍未完成。详见 [Postgres Storage Migration](./POSTGRES_STORAGE_MIGRATION.md)。
 
 当前明确未完成：
 
 - streaming Responses server-mode。
 - 完整 function tool call/tool result 生命周期。当前只支持非流式 hosted `web_search` 首切及其 started/completed/failed execution events。
 - compact workflow。
-- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 和更完整的 function-tool/stream/cancel/compact events 尚未接入。
-- 完整 Postgres migration 生产化。
+- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup，更完整的 function-tool/stream/cancel/compact events 尚未接入。
+- 完整 Postgres migration 生产化。当前已有 checked-in 初始 SQL，但 `db migrate up` 还没有应用版本化 SQL。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
 ## 背景与目标
@@ -183,7 +183,7 @@ providers:
 
 目标是 Postgres-first，但保留 SQLite fallback 和旧 replay 兼容。
 
-截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration 和生产运维流程仍未完成。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；Stage 11A 已接入内部 Chat Completions `upstream_exchanges` correlation；Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入；Stage 13A 已接入核心 audit 查询服务、Monitor API 和 MCP 查询工具；Stage 14A 已接入 hosted `web_search` tool_call events；Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束。
+截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client；`ent/postgres-migrations` 已有初始 schema SQL，但运行时 `db migrate up` 仍未切到版本化 SQL migrator。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；Stage 11A 已接入内部 Chat Completions `upstream_exchanges` correlation；Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入；Stage 13A 已接入核心 audit 查询服务、Monitor API 和 MCP 查询工具；Stage 14A 已接入 hosted `web_search` tool_call events；Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束；Stage 16A 已接入 Postgres ent migration SQL 生成链路和初始 checked-in migration。
 
 Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 `db migrate up` 已拆出为应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持；它还不是基于 checked-in SQL 的版本化 Postgres migrator。`internal/auth/migrate.go` 的 embedded migrations 仍只支持 SQLite。Postgres auth migration 是后续独立缺口，不应阻塞把 Responses ent store 归入应用库迁移域。
 

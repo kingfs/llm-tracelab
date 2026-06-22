@@ -23,10 +23,12 @@ claim that Postgres persistence is fully production mature today.
 - SQLite remains the default for empty driver values and keeps the existing
   local path / `file:` DSN behavior.
 - The checked-in `ent/migrations` directory contains SQLite-oriented
-  golang-migrate files. `ent/migrate/main.go` is now a minimal dialect-aware
-  entry point: SQLite remains the default and still writes to `ent/migrations`;
-  Postgres mode requires an explicit Atlas dev URL but intentionally stops
-  before generating SQL in this stage.
+  golang-migrate files. The checked-in `ent/postgres-migrations` directory now
+  contains the initial Postgres application schema generated from
+  `ent/schema/**`, including Responses state and audit/correlation tables.
+  `ent/migrate/main.go` is a dialect-aware generator: SQLite remains the
+  default and writes to `ent/migrations`; Postgres requires an explicit Atlas
+  dev URL and writes to `ent/postgres-migrations`.
 - `internal/auth/migrate.go` embeds `ent/migrations` and wires only the SQLite
   golang-migrate driver. For any non-SQLite driver, it returns a clear
   unsupported-driver error.
@@ -47,7 +49,7 @@ Stage 6 splits migration ownership explicitly:
 
 | Command | Intended owner | SQLite status | Postgres status |
 | --- | --- | --- | --- |
-| `db migrate up|down` | Application database: trace index, routing/channel/model data, Responses state, and future audit tables | `up` uses current application schema initialization; `down` is unsupported except dry-run | `up` can initialize the current ent schema with `Schema.Create`; versioned Postgres migrations remain incomplete |
+| `db migrate up|down` | Application database: trace index, routing/channel/model data, Responses state, and future audit tables | `up` uses current application schema initialization; `down` is unsupported except dry-run | checked-in SQL now exists in `ent/postgres-migrations`, but `db migrate up` still uses current ent `Schema.Create` initialization until the versioned migrator is wired in |
 | `auth migrate up|down` | Auth database: users, tokens, auth-owned schema | Currently supported through embedded SQLite migrations | Separate future gap; not covered by the Stage 6A application migration slice |
 
 `db migrate` is no longer an alias for the auth migrator. Operators should
@@ -70,9 +72,13 @@ For Postgres evaluation:
 
 - Use an explicit `database.driver: postgres` or `postgresql` and a full
   `database.dsn`.
-- `db migrate up` can initialize the current application schema using the ent
-  `Schema.Create` path. Use this only for disposable evaluation databases or
-  controlled trials where recreating the database is acceptable.
+- `ent/postgres-migrations` contains reviewable initial SQL for the current
+  application schema. This migration has been generated from ent and verified
+  against a fresh Postgres 17 development database.
+- `db migrate up` can still initialize the current application schema using the
+  ent `Schema.Create` path. Use that CLI path only for disposable evaluation
+  databases or controlled trials where recreating the database is acceptable,
+  until the versioned migrator is wired behind `db migrate`.
 - `database.auto_migrate: true` can initialize both the application schema and
   the current auth schema through ent `Schema.Create` when using Postgres. This
   is an evaluation convenience only.
@@ -129,11 +135,12 @@ The production route should be additive and reviewable:
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
 
-## Stage 7B Generation Entry
+## Stage 7B/16A Generation Entry
 
-Stage 7B adds only the minimum CLI surface needed for future checked-in
-Postgres migrations. It does not add Postgres migration SQL and does not change
-`ent/dao/**` or the existing SQLite migration files.
+Stage 7B added the minimum CLI surface needed for dialect-aware migration
+generation. Stage 16A enables real Postgres SQL generation and checks in the
+initial `ent/postgres-migrations` directory. It does not change `ent/dao/**` or
+the existing SQLite migration files.
 
 SQLite compatibility:
 
@@ -162,11 +169,15 @@ go run -mod=mod ent/migrate/main.go \
 ```
 
 `LLM_TRACELAB_ENT_MIGRATE_DEV_URL` can supply the dev URL when `--dev-url` is
-omitted. In the current stage, this command validates the Postgres generation
-configuration and then exits before writing migration files.
+omitted. The `task` wrapper is:
 
-When Postgres SQL generation is enabled later, each generated directory must
-have its matching checksum refreshed immediately:
+```bash
+task migrate:ent:postgres \
+  NAME=<migration_name> \
+  DEV_URL='postgres://user:pass@localhost:5432/llm_tracelab_migrate_dev?sslmode=disable'
+```
+
+Each generated directory must have its matching checksum refreshed immediately:
 
 ```bash
 go run -mod=mod ent/migrate/update_hash.go <migration_dir>
@@ -180,11 +191,11 @@ been committed or applied in a shared environment.
 
 - `db migrate up` is application-owned but still uses ent auto schema creation,
   not checked-in versioned migrations.
-- Postgres application migration files are not checked in, and the Stage 7B
-  generator entry intentionally does not write them yet.
+- `ent/postgres-migrations` now contains an initial schema, but the runtime
+  application migrator is not wired to apply checked-in SQL yet.
 - Postgres auth migrations are not implemented.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
-  and MCP semantic diagnostics have a minimal Responses path; Monitor UI
-  diagnostics are still incomplete.
+  MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
+  Responses path.
 - Existing raw SQL paths may still contain SQLite-specific assumptions.
 - There is no automatic SQLite-to-Postgres data migration.

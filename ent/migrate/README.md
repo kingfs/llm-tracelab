@@ -24,10 +24,8 @@ go run -mod=mod ent/migrate/main.go \
 
 ## Postgres Entry Point
 
-`ent/migrate/main.go` has a dialect-aware entry for future checked-in Postgres
-migrations, but this repository does not currently commit Postgres migration
-SQL. In the current stage, Postgres mode validates that a dev database URL was
-provided and then stops before generating files.
+`ent/migrate/main.go` also generates checked-in Postgres migration SQL. The
+initial Postgres migration directory is `ent/postgres-migrations`.
 
 Use only a temporary development database URL for generation trials. Never use a
 production DSN as the Atlas dev database.
@@ -42,8 +40,15 @@ go run -mod=mod ent/migrate/main.go \
 
 The dev URL can also be supplied with `LLM_TRACELAB_ENT_MIGRATE_DEV_URL`.
 
-When Postgres SQL generation is enabled in a future stage, the required flow
-will be:
+Equivalent task entry:
+
+```bash
+task migrate:ent:postgres \
+  NAME=<migration_name> \
+  DEV_URL='postgres://user:pass@localhost:5432/llm_tracelab_migrate_dev?sslmode=disable'
+```
+
+The required flow is:
 
 1. Generate SQL from `ent/schema/**` into the dialect-specific migration
    directory.
