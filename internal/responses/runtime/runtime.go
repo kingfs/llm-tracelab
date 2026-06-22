@@ -39,6 +39,7 @@ type Runtime struct {
 	functionExecutorsMu sync.RWMutex
 	functionExecutors   *FunctionToolExecutorRegistry
 	events              audit.ExecutionEventRecorder
+	toolCallAudits      audit.ToolCallAuditRecorder
 }
 
 type Option func(*Runtime)
@@ -64,6 +65,12 @@ func WithWebSearchProvider(provider websearch.Provider) Option {
 func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
 	return func(r *Runtime) {
 		r.events = recorder
+	}
+}
+
+func WithToolCallAuditRecorder(recorder audit.ToolCallAuditRecorder) Option {
+	return func(r *Runtime) {
+		r.toolCallAudits = recorder
 	}
 }
 
@@ -450,7 +457,11 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 			if err := streamOutputItemAdded(sink, outputIndex, startedToolOutputItem(call)); err != nil {
 				return protocol.Response{}, err
 			}
-			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{Stream: true})
+			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{
+				Stream:         true,
+				ResponseID:     responseID,
+				ConversationID: audit.CodexConversationID(req.Metadata),
+			})
 			if err != nil {
 				_ = streamOutputItemDone(sink, outputIndex, failedToolOutputItem(call))
 				return protocol.Response{}, err
@@ -863,6 +874,8 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 	var usage ChatUsage
 	output := []protocol.OutputItem{}
 	toolIterations := 0
+	responseID := newResponseID()
+	conversationID := audit.CodexConversationID(req.Metadata)
 
 	for {
 		chatResp, err := r.client.ChatCompletion(ctx, chatReq)
@@ -877,7 +890,7 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 			outputItems := chatToOutputItems(chatResp)
 			r.recordRequestedFunctionCalls(ctx, outputItems)
 			output = append(output, outputItems...)
-			return responseFromOutput(req, model, output, usage), nil
+			return responseFromOutputWithID(responseID, req, model, output, usage), nil
 		}
 		if len(calls) == 0 {
 			return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
@@ -894,7 +907,10 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 
 		for _, call := range calls {
-			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{})
+			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{
+				ResponseID:     responseID,
+				ConversationID: conversationID,
+			})
 			if err != nil {
 				return protocol.Response{}, err
 			}
@@ -909,7 +925,9 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 }
 
 type toolExecutionContext struct {
-	Stream bool
+	Stream         bool
+	ResponseID     string
+	ConversationID string
 }
 
 func (r *Runtime) executeToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
@@ -924,6 +942,7 @@ func (r *Runtime) executeToolCall(ctx context.Context, call executableToolCall, 
 }
 
 func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
+	startedAt := time.Now()
 	eventDetails := map[string]any{
 		"tool_name":   "web_search",
 		"call_id":     call.call.ID,
@@ -939,11 +958,30 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 		Status:      "started",
 		DetailsJSON: eventDetails,
 	})
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ResponseID:     exec.ResponseID,
+		ConversationID: exec.ConversationID,
+		CallID:         call.call.ID,
+		ToolType:       "hosted",
+		ToolName:       "web_search",
+		Executor:       "hosted:web_search",
+		Status:         "started",
+		Phase:          "tool_call",
+		InputJSON: map[string]any{
+			"query_chars":  len(call.query),
+			"query_sha256": auditSHA256(call.query),
+			"max_results":  r.cfg.WebSearchMaxResults,
+		},
+		MetadataJSON: toolCallAuditMetadata(iteration, exec),
+		StartedAt:    startedAt,
+		CreatedAt:    startedAt,
+	})
 	result, err := r.webSearchProvider.Search(ctx, websearch.Query{
 		Text:       call.query,
 		MaxResults: r.cfg.WebSearchMaxResults,
 	})
 	if err != nil {
+		completedAt := time.Now()
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			EventType: "response.tool_call",
 			Phase:     "tool_call",
@@ -953,10 +991,31 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 				"error": err.Error(),
 			}),
 		})
+		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+			ResponseID:     exec.ResponseID,
+			ConversationID: exec.ConversationID,
+			CallID:         call.call.ID,
+			ToolType:       "hosted",
+			ToolName:       "web_search",
+			Executor:       "hosted:web_search",
+			Status:         "failed",
+			Phase:          "tool_call",
+			InputJSON: map[string]any{
+				"query_chars":  len(call.query),
+				"query_sha256": auditSHA256(call.query),
+				"max_results":  r.cfg.WebSearchMaxResults,
+			},
+			ErrorText:    err.Error(),
+			MetadataJSON: toolCallAuditMetadata(iteration, exec),
+			StartedAt:    startedAt,
+			CompletedAt:  completedAt,
+			CreatedAt:    completedAt,
+		})
 		return protocol.OutputItem{}, "", err
 	}
 	toolContent, err := webSearchToolMessageContent(call.query, result)
 	if err != nil {
+		completedAt := time.Now()
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			EventType: "response.tool_call",
 			Phase:     "tool_call",
@@ -967,8 +1026,32 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 				"result_count": len(result.Results),
 			}),
 		})
+		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+			ResponseID:     exec.ResponseID,
+			ConversationID: exec.ConversationID,
+			CallID:         call.call.ID,
+			ToolType:       "hosted",
+			ToolName:       "web_search",
+			Executor:       "hosted:web_search",
+			Status:         "failed",
+			Phase:          "tool_call",
+			InputJSON: map[string]any{
+				"query_chars":  len(call.query),
+				"query_sha256": auditSHA256(call.query),
+				"max_results":  r.cfg.WebSearchMaxResults,
+			},
+			OutputJSON: map[string]any{
+				"result_count": len(result.Results),
+			},
+			ErrorText:    err.Error(),
+			MetadataJSON: toolCallAuditMetadata(iteration, exec),
+			StartedAt:    startedAt,
+			CompletedAt:  completedAt,
+			CreatedAt:    completedAt,
+		})
 		return protocol.OutputItem{}, "", err
 	}
+	completedAt := time.Now()
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType: "response.tool_call",
 		Phase:     "tool_call",
@@ -977,10 +1060,33 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 			"result_count": len(result.Results),
 		}),
 	})
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ResponseID:     exec.ResponseID,
+		ConversationID: exec.ConversationID,
+		CallID:         call.call.ID,
+		ToolType:       "hosted",
+		ToolName:       "web_search",
+		Executor:       "hosted:web_search",
+		Status:         "completed",
+		Phase:          "tool_call",
+		InputJSON: map[string]any{
+			"query_chars":  len(call.query),
+			"query_sha256": auditSHA256(call.query),
+			"max_results":  r.cfg.WebSearchMaxResults,
+		},
+		OutputJSON: map[string]any{
+			"result_count": len(result.Results),
+		},
+		MetadataJSON: toolCallAuditMetadata(iteration, exec),
+		StartedAt:    startedAt,
+		CompletedAt:  completedAt,
+		CreatedAt:    completedAt,
+	})
 	return webSearchCallOutput(call.call, call.query, result), toolContent, nil
 }
 
 func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
+	startedAt := time.Now()
 	argumentsForEvent := call.call.Function.Arguments
 	if call.policy.RedactArguments {
 		argumentsForEvent = "<redacted>"
@@ -999,6 +1105,24 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 		Status:      "started",
 		DetailsJSON: eventDetails,
 	})
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ResponseID:     exec.ResponseID,
+		ConversationID: exec.ConversationID,
+		CallID:         call.call.ID,
+		ToolType:       "function",
+		ToolName:       call.call.Function.Name,
+		Executor:       "function_executor:" + call.call.Function.Name,
+		Status:         "started",
+		Phase:          "tool_call",
+		InputJSON: map[string]any{
+			"argument_bytes":     len([]byte(call.call.Function.Arguments)),
+			"argument_sha256":    auditSHA256(call.call.Function.Arguments),
+			"arguments_redacted": call.policy.RedactArguments,
+		},
+		MetadataJSON: toolCallAuditMetadata(iteration, exec),
+		StartedAt:    startedAt,
+		CreatedAt:    startedAt,
+	})
 	execCtx := ctx
 	cancel := func() {}
 	if call.policy.Timeout > 0 {
@@ -1011,6 +1135,7 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 		Arguments: call.call.Function.Arguments,
 	})
 	if err != nil {
+		completedAt := time.Now()
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			EventType: "response.tool_call",
 			Phase:     "tool_call",
@@ -1020,10 +1145,31 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 				"error": err.Error(),
 			}),
 		})
+		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+			ResponseID:     exec.ResponseID,
+			ConversationID: exec.ConversationID,
+			CallID:         call.call.ID,
+			ToolType:       "function",
+			ToolName:       call.call.Function.Name,
+			Executor:       "function_executor:" + call.call.Function.Name,
+			Status:         "failed",
+			Phase:          "tool_call",
+			InputJSON: map[string]any{
+				"argument_bytes":     len([]byte(call.call.Function.Arguments)),
+				"argument_sha256":    auditSHA256(call.call.Function.Arguments),
+				"arguments_redacted": call.policy.RedactArguments,
+			},
+			ErrorText:    err.Error(),
+			MetadataJSON: toolCallAuditMetadata(iteration, exec),
+			StartedAt:    startedAt,
+			CompletedAt:  completedAt,
+			CreatedAt:    completedAt,
+		})
 		return protocol.OutputItem{}, "", err
 	}
 	toolContent := toolOutputContent(result.Output)
 	if call.policy.MaxResultBytes > 0 && len([]byte(toolContent)) > call.policy.MaxResultBytes {
+		completedAt := time.Now()
 		err := FunctionToolResultTooLargeError{
 			Name:           call.call.Function.Name,
 			MaxResultBytes: call.policy.MaxResultBytes,
@@ -1039,12 +1185,36 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 				"result_bytes": err.ResultBytes,
 			}),
 		})
+		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+			ResponseID:     exec.ResponseID,
+			ConversationID: exec.ConversationID,
+			CallID:         call.call.ID,
+			ToolType:       "function",
+			ToolName:       call.call.Function.Name,
+			Executor:       "function_executor:" + call.call.Function.Name,
+			Status:         "failed",
+			Phase:          "tool_call",
+			InputJSON: map[string]any{
+				"argument_bytes":     len([]byte(call.call.Function.Arguments)),
+				"argument_sha256":    auditSHA256(call.call.Function.Arguments),
+				"arguments_redacted": call.policy.RedactArguments,
+			},
+			OutputJSON: map[string]any{
+				"result_bytes": err.ResultBytes,
+			},
+			ErrorText:    err.Error(),
+			MetadataJSON: toolCallAuditMetadata(iteration, exec),
+			StartedAt:    startedAt,
+			CompletedAt:  completedAt,
+			CreatedAt:    completedAt,
+		})
 		return protocol.OutputItem{}, "", err
 	}
 	outputChars := len(toolContent)
 	if call.policy.RedactOutput {
 		outputChars = 0
 	}
+	completedAt := time.Now()
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType: "response.tool_call",
 		Phase:     "tool_call",
@@ -1052,6 +1222,29 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
 			"output_chars": outputChars,
 		}),
+	})
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ResponseID:     exec.ResponseID,
+		ConversationID: exec.ConversationID,
+		CallID:         call.call.ID,
+		ToolType:       "function",
+		ToolName:       call.call.Function.Name,
+		Executor:       "function_executor:" + call.call.Function.Name,
+		Status:         "completed",
+		Phase:          "tool_call",
+		InputJSON: map[string]any{
+			"argument_bytes":     len([]byte(call.call.Function.Arguments)),
+			"argument_sha256":    auditSHA256(call.call.Function.Arguments),
+			"arguments_redacted": call.policy.RedactArguments,
+		},
+		OutputJSON: map[string]any{
+			"output_chars":    outputChars,
+			"output_redacted": call.policy.RedactOutput,
+		},
+		MetadataJSON: toolCallAuditMetadata(iteration, exec),
+		StartedAt:    startedAt,
+		CompletedAt:  completedAt,
+		CreatedAt:    completedAt,
 	})
 	return functionToolCallOutput(call.call, result.Output), toolContent, nil
 }
@@ -1063,6 +1256,29 @@ func (r *Runtime) recordExecutionEvent(ctx context.Context, event audit.Executio
 	if err := r.events.RecordExecutionEvent(ctx, event); err != nil {
 		slog.Error("Failed to record responses runtime execution event", "event_type", event.EventType, "status", event.Status, "err", err)
 	}
+}
+
+func (r *Runtime) recordToolCallAudit(ctx context.Context, entry audit.ToolCallAudit) {
+	if r == nil || r.toolCallAudits == nil {
+		return
+	}
+	if _, err := r.toolCallAudits.RecordToolCallAudit(ctx, entry); err != nil {
+		slog.Error("Failed to record responses runtime tool call audit", "tool_name", entry.ToolName, "status", entry.Status, "err", err)
+	}
+}
+
+func toolCallAuditMetadata(iteration int, exec toolExecutionContext) map[string]any {
+	return map[string]any{
+		"iteration": iteration,
+		"stream":    exec.Stream,
+	}
+}
+
+func auditSHA256(value string) string {
+	if value == "" {
+		return ""
+	}
+	return audit.BodySHA256([]byte(value))
 }
 
 func (r *Runtime) recordRequestedFunctionCalls(ctx context.Context, outputItems []protocol.OutputItem) {
