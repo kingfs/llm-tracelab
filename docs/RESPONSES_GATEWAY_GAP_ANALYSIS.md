@@ -172,8 +172,8 @@
 
 ### Codex fixture/runbook 资产
 
-- 已吸收首切：已有集中 `tests/fixtures/codex` 离线 fixture 和 `docs/CODEX_RESPONSES_COMPATIBILITY.md` profile 文档。
-- 剩余缺口：fixture 尚未接自动 runner；没有长任务 compact/cancel/run-report 脚本资产；没有 Codex TOML/profile 生成命令。
+- 已吸收首切：已有集中 `tests/fixtures/codex` 离线 fixture、`docs/CODEX_RESPONSES_COMPATIBILITY.md` profile 文档，以及 `internal/responses/httpapi` / `internal/responses/runtime` focused offline Go tests。
+- 剩余缺口：当前只是 focused fixture/contract tests，不是完整 Codex/e2e runner；没有长任务 compact/cancel/run-report 脚本资产；没有 Codex TOML/profile 生成命令。
 - responses-gateway 能力：`docs/codex-longrun-compact-runbook.md`、`scripts/codex-longrun-*.sh`、Codex fixture profile。
 - llm-tracelab 建议落点：在现有离线 fixtures 基础上决定是否引入脚本；不要让测试依赖真实 Codex 或网络。
 
@@ -198,7 +198,7 @@
 3. 接入 Codex fixture runner 和 profile 生成。
    - 价值：把已固化的最小兼容合约变成可回归检查，并减少 Codex 本地配置漂移。
    - 模块：`tests/fixtures/codex`、`internal/responses/httpapi`、`runtime` 测试、`cmd/server/provider.go` 或新增 `cmd/server/models.go`。
-   - 验收：离线 runner 覆盖 text create、stream text、function call、function result continuation、ordinary web_search descriptor、unsupported hosted tool；输出 JSON + TOML profile 片段。
+   - 验收：在已接 focused offline tests 基础上，补更完整 runner 或 e2e harness；输出 JSON + TOML profile 片段。
 
 4. 收敛 hosted tool audit schema。
    - 价值：为 web_search、external_command、未来 MCP/file/code 工具提供统一排障面。
