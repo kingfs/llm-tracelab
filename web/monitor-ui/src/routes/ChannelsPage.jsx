@@ -107,6 +107,8 @@ export function ProvidersPage() {
 
       <LocalSecretPanel data={secret.data} loading={secret.loading} error={secret.error} onRefresh={() => setSecretTick((tick) => tick + 1)} />
 
+      <ProviderProbeBatchPanel providers={items} onApplied={() => setRefreshTick((tick) => tick + 1)} />
+
       {providers.error ? <EmptyState title="Unable to load providers" detail={providers.error} tone="danger" /> : null}
       {providers.loading && !providers.data ? <EmptyState title="Loading providers" detail="Collecting provider configuration and usage summary." /> : null}
       {providers.data ? (
@@ -129,6 +131,99 @@ export function ProvidersPage() {
 }
 
 export const ChannelsPage = ProvidersPage;
+
+function ProviderProbeBatchPanel({ providers, onApplied }) {
+  const [report, setReport] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const [applyResult, setApplyResult] = useState(null);
+  const providerMap = useMemo(() => new Map((providers || []).map((item) => [item.id, item])), [providers]);
+  const summary = useMemo(() => summarizeProbeBatchReport(report, providerMap), [report, providerMap]);
+
+  const previewReport = async () => {
+    setBusy("preview");
+    setError("");
+    setApplyResult(null);
+    try {
+      const nextReport = await postJSON(apiPaths.providerProbeReport, {});
+      setReport(nextReport);
+    } catch (err) {
+      setError(err.message || "Unable to preview provider probe report.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const applyDetected = async () => {
+    if (!summary.applyable.length) {
+      return;
+    }
+    setBusy("apply");
+    setError("");
+    try {
+      const result = await postJSON(apiPaths.providerProbeApply, providerProbeBatchApplyPayload());
+      setApplyResult(result);
+      onApplied?.();
+    } catch (err) {
+      setError(err.message || "Unable to apply provider probe suggestions.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <section className="panel provider-batch-probe-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Provider detection</p>
+          <h2>Batch probe and apply</h2>
+        </div>
+        <div className="panel-head-actions">
+          <button className="ghost-button" type="button" onClick={previewReport} disabled={busy === "preview" || !providers.length}>{busy === "preview" ? "Previewing" : "Preview batch probe"}</button>
+          <button className="ghost-button active" type="button" onClick={applyDetected} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? "Applying" : "Apply detected suggestions"}</button>
+        </div>
+      </div>
+      <p className="trace-subline">Preview runs a read-only provider probe report first. Apply only fills missing API type, missing protocol family, and capabilities that are not set; explicit configuration and false capabilities are preserved.</p>
+      <div className="detail-meta-strip">
+        <Metric label="detected" value={formatCount(summary.detected)} />
+        <Metric label="unknown" value={formatCount(summary.unknown)} />
+        <Metric label="errors" value={formatCount(summary.errors)} />
+        <Metric label="applyable" value={formatCount(summary.applyable.length)} />
+      </div>
+      {report ? (
+        <div className="provider-batch-report-list">
+          {summary.rows.length ? summary.rows.map((row) => <ProviderProbeBatchRow key={row.providerID || row.baseURL} row={row} />) : <EmptyState title="No probe targets" detail="No enabled provider with a base URL was returned by the report." compact />}
+        </div>
+      ) : null}
+      {applyResult ? <p className="trace-subline">Apply request accepted: {formatProviderProbeApplyResult(applyResult)}</p> : null}
+      {error ? <EmptyState title="Provider batch probe failed" detail={error} tone="danger" compact /> : null}
+    </section>
+  );
+}
+
+function ProviderProbeBatchRow({ row }) {
+  return (
+    <div className={row.status === "error" ? "provider-probe-card provider-probe-card-failed" : "provider-probe-card"}>
+      <div className="provider-probe-card-head">
+        <div>
+          <p className="eyebrow">{row.providerID || "provider"}</p>
+          <h3>{row.providerName || row.providerID || row.baseURL || "Unnamed provider"}</h3>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone={row.status === "detected" ? "green" : row.status === "error" ? "danger" : "gold"}>{row.status || "unknown"}</InlineTag>
+          {row.fillableCount ? <InlineTag tone="accent">{row.fillableCount} fillable</InlineTag> : null}
+        </div>
+      </div>
+      <div className="detail-meta-strip">
+        <Metric label="api type" value={row.suggestedAPIType || "-"} detail={row.apiTypeFillable ? "missing" : row.currentAPIType ? "set" : ""} />
+        <Metric label="protocol" value={row.suggestedProtocolFamily || "-"} detail={row.protocolFillable ? "missing" : row.currentProtocolFamily ? "set" : ""} />
+        <Metric label="capabilities" value={row.capabilities.length ? row.capabilities.join(", ") : "-"} detail={row.fillableCapabilities.length ? `${row.fillableCapabilities.length} unset` : ""} />
+      </div>
+      {row.warnings.length ? <p className="trace-subline">{row.warnings.join(" · ")}</p> : null}
+      {!row.fillableCount && row.status === "detected" ? <p className="trace-subline">Detected suggestions are already explicit or protected by capability false.</p> : null}
+    </div>
+  );
+}
 
 function CreateProviderDialog({ presetData, onClose, onCreated }) {
   const [form, setForm] = useState(DEFAULT_FORM);
@@ -795,6 +890,76 @@ function providerProbeSuggestionPayload(form = {}, report = {}) {
   }
   payload.capabilities = normalizeCapabilities(capabilities);
   return payload;
+}
+
+function providerProbeBatchApplyPayload(channelID = "") {
+  return channelID ? { channel_id: channelID } : {};
+}
+
+function summarizeProbeBatchReport(report, providerMap) {
+  const rows = (Array.isArray(report?.reports) ? report.reports : []).map((item) => buildProbeBatchRow(item, providerMap));
+  return rows.reduce(
+    (state, row) => {
+      if (row.status === "detected") {
+        state.detected += 1;
+      } else if (row.status === "error") {
+        state.errors += 1;
+      } else {
+        state.unknown += 1;
+      }
+      if (row.status === "detected" && row.fillableCount > 0) {
+        state.applyable.push(row);
+      }
+      state.rows.push(row);
+      return state;
+    },
+    { rows: [], detected: 0, unknown: 0, errors: 0, applyable: [] },
+  );
+}
+
+function buildProbeBatchRow(report, providerMap) {
+  const providerID = report.provider_id || "";
+  const provider = providerMap.get(providerID) || {};
+  const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
+  const currentCapabilities = normalizeCapabilities(provider.capabilities || {});
+  const fillableCapabilities = capabilities.filter((capability) => BATCH_APPLY_CAPABILITIES.has(capability) && currentCapabilities[capability] === undefined);
+  const currentAPIType = provider.api_type || report.specified_api_type || "";
+  const currentProtocolFamily = provider.protocol_family || report.specified_protocol_family || "";
+  const suggestedAPIType = report.suggested_api_type || "";
+  const suggestedProtocolFamily = report.suggested_protocol_family || "";
+  const apiTypeFillable = Boolean(suggestedAPIType && !currentAPIType);
+  const protocolFillable = Boolean(suggestedProtocolFamily && !currentProtocolFamily);
+  const fillableCount = Number(apiTypeFillable) + Number(protocolFillable) + fillableCapabilities.length;
+  return {
+    providerID,
+    providerName: provider.name || "",
+    baseURL: report.base_url || provider.base_url || "",
+    status: report.status || "unknown",
+    warnings: Array.isArray(report.warnings) ? report.warnings : [],
+    capabilities,
+    fillableCapabilities,
+    fillableCount,
+    currentAPIType,
+    currentProtocolFamily,
+    suggestedAPIType,
+    suggestedProtocolFamily,
+    apiTypeFillable,
+    protocolFillable,
+  };
+}
+
+const BATCH_APPLY_CAPABILITIES = new Set(["responses", "chat_completions", "tool_calling", "models", "embeddings", "tokenize"]);
+
+function formatProviderProbeApplyResult(result = {}) {
+  const applied = Array.isArray(result.applied) ? result.applied : [];
+  if (applied.length) {
+    const updated = applied.filter((item) => item.applied).length;
+    return `${formatCount(updated)} applied, ${formatCount(applied.length - updated)} skipped`;
+  }
+  if (result.status) {
+    return result.status;
+  }
+  return "backend response received";
 }
 
 function normalizeCapabilities(value) {

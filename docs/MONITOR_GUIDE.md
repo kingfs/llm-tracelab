@@ -93,6 +93,7 @@ Monitor 使用两类数据：
 - 创建前需用 Validate setup 调用 provider setup validate：它会组合 base URL、API key、provider preset、model discovery 和 capability 字段做一次探测并把归一化配置写回表单，但不会落库；dialog 会展示 normalized config、probe 和 redacted secret state，字段变更会清空旧验证结果；Create provider 才通过 setup apply 写入 channel store；若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
 - setup validate/apply 响应不会回显 API key；只返回 `api_key_hint`、secret storage mode 和 redacted header 状态。
 - 探测模型，并查看 provider detection 建议；需要写回建议时，使用 Apply suggestions 显式更新 channel 配置。
+- 在 Channels/Providers 列表页使用 Batch probe and apply 先运行只读 `POST /api/provider-probe/report` 预览，再对 detected 且有可补字段的 provider 执行批量 Apply detected suggestions；Monitor 不展示或传递 API key。批量应用只填缺失的 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置，也不覆盖显式 `false` capability。
 - 启停渠道。
 - 启停单个模型。
 - 查看渠道用量、token、失败和 probe 结果。

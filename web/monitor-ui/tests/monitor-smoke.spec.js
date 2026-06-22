@@ -24,6 +24,22 @@ test.beforeEach(async ({ page }) => {
       expect(body.api_type).toBe("chat_completions");
       return route.fulfill({ json: providerProbePreviewPayload() });
     }
+    if (path === "/api/provider-probe/report" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body).toEqual({});
+      return route.fulfill({ json: providerProbeBatchReportPayload() });
+    }
+    if (path === "/api/provider-probe/report/apply" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body).toEqual({});
+      expect(JSON.stringify(body)).not.toContain("sk-test-secret");
+      return route.fulfill({
+        json: {
+          report: providerProbeBatchReportPayload(),
+          applied: [{ channel_id: "openai-primary", status: "detected", applied: true, applied_fields: ["capabilities.models"] }],
+        },
+      });
+    }
     if (path === "/api/provider-setup/validate" && method === "POST") {
       const body = route.request().postDataJSON();
       expect(body.base_url).toBe("https://api.openai.example/v1");
@@ -140,6 +156,12 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Provider secret storage" })).toBeVisible();
   await expect(page.getByText("abc123")).toBeVisible();
   await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Apply detected suggestions" })).toBeDisabled();
+  await page.getByRole("button", { name: "Preview batch probe" }).click();
+  await expect(page.getByText("1 fillable")).toBeVisible();
+  await expect(page.getByText("explicit configuration and false capabilities are preserved")).toBeVisible();
+  await page.getByRole("button", { name: "Apply detected suggestions" }).click();
+  await expect(page.getByText("1 applied, 0 skipped")).toBeVisible();
   await page.getByRole("button", { name: "New provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
@@ -632,6 +654,26 @@ function providerProbePreviewPayload() {
     suggested_protocol_family: "openai_compatible",
     capabilities: ["chat_completions", "models"],
     confidence: 0.7,
+  };
+}
+
+function providerProbeBatchReportPayload() {
+  return {
+    reports: [
+      {
+        target_source: "channel",
+        provider_id: "openai-primary",
+        base_url: "https://api.openai.example/v1",
+        specified_api_type: "chat_completions",
+        specified_protocol_family: "openai_compatible",
+        checked_endpoints: [],
+        status: "detected",
+        suggested_api_type: "responses",
+        suggested_protocol_family: "openai_compatible",
+        capabilities: ["chat_completions", "models"],
+        confidence: 0.7,
+      },
+    ],
   };
 }
 
