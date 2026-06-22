@@ -142,7 +142,9 @@
 
 ### `config inspect` 有效配置视图
 
-- 缺口：llm-tracelab 只能加载 YAML + env，缺少稳定 JSON 的 effective config inspect。
+- 已新增首切：`llm-tracelab config inspect --format json` 读取同一套配置加载链路，输出稳定 envelope 与脱敏后的 effective 摘要。
+- 当前覆盖：server/monitor/MCP、database driver/DSN/auto_migrate、trace output dir、Responses server、web_search、provider_probe、upstream targets 与 credential/static model 计数。
+- 剩余缺口：尚未标注每个字段的来源优先级（config 文件、env、CLI flag），也未做 doctor 式联动校验。
 - responses-gateway 能力：明确默认值、config 文件、env、CLI flag 优先级，并支持脱敏输出。
 - llm-tracelab 建议落点：`cmd/server/config_inspect.go` 或 `cmd/server/config.go`，复用 `internal/config` 的 default/effective helper 和 `config.RedactDSN`。
 
