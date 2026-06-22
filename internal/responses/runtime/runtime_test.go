@@ -70,6 +70,7 @@ type fakeResponseStreamSink struct {
 	deltas        []ResponseTextDelta
 	functionDelta []ResponseFunctionCallArgumentsDelta
 	functionDone  []ResponseFunctionCallArgumentsDone
+	outputAdded   []ResponseOutputItemAdded
 	outputDone    []ResponseOutputItemDone
 	completed     []protocol.Response
 	events        []string
@@ -97,6 +98,12 @@ func (f *fakeResponseStreamSink) FunctionCallArgumentsDelta(delta ResponseFuncti
 func (f *fakeResponseStreamSink) FunctionCallArgumentsDone(done ResponseFunctionCallArgumentsDone) error {
 	f.functionDone = append(f.functionDone, done)
 	f.events = append(f.events, "response.function_call_arguments.done")
+	return f.err
+}
+
+func (f *fakeResponseStreamSink) OutputItemAdded(added ResponseOutputItemAdded) error {
+	f.outputAdded = append(f.outputAdded, added)
+	f.events = append(f.events, "response.output_item.added")
 	return f.err
 }
 
@@ -627,6 +634,9 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
 		t.Fatalf("function argument done = %#v", sink.functionDone)
 	}
+	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Output != nil {
+		t.Fatalf("output item added = %#v, want started function_call_output call_lookup without output", sink.outputAdded)
+	}
 	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.CallID != "call_lookup" {
 		t.Fatalf("output item done = %#v, want function_call_output call_lookup", sink.outputDone)
 	}
@@ -638,6 +648,7 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_text.delta",
 		"response.output_text.delta",
@@ -780,6 +791,12 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_search" || sink.functionDone[0].Arguments != `{"query":"llm trace replay"}` {
 		t.Fatalf("function argument done = %#v", sink.functionDone)
 	}
+	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "web_search_call" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_search" {
+		t.Fatalf("output item added = %#v, want started web_search_call call_search", sink.outputAdded)
+	}
+	if got := sink.outputAdded[0].Item.Action["query"]; got != "llm trace replay" {
+		t.Fatalf("output item added query = %#v", got)
+	}
 	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "web_search_call" || sink.outputDone[0].Item.CallID != "call_search" {
 		t.Fatalf("output item done = %#v, want web_search_call call_search", sink.outputDone)
 	}
@@ -791,6 +808,7 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.delta",
 		"response.function_call_arguments.done",
+		"response.output_item.added",
 		"response.output_item.done",
 		"response.output_text.delta",
 		"response.output_text.delta",
