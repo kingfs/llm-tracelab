@@ -516,6 +516,32 @@ func TestRuntimeCreateStreamEmitsFunctionCallArgumentDeltas(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateStreamFallsBackForRegisteredFunctionToolExecutor(t *testing.T) {
+	client := &fakeChatClient{}
+	rt := New(
+		Config{DefaultModel: "fallback-model"},
+		client,
+		NewMemoryStore(),
+		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}),
+	)
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "lookup codex",
+		Stream: true,
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}, &fakeResponseStreamSink{})
+	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
+		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
+	}
+	if len(client.streamReqs) != 0 {
+		t.Fatalf("stream requests = %#v, want none before deferred fallback", client.streamReqs)
+	}
+}
+
 func TestRuntimeCompactStoresSummaryBoundaryForContinuation(t *testing.T) {
 	store := NewMemoryStore()
 	target := protocol.Response{

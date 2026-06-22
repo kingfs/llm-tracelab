@@ -216,6 +216,9 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !incrementalStreamSupportsTools(req.Tools) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
+	if r.incrementalStreamRequiresDeferredToolLoop(req.Tools) {
+		return protocol.Response{}, ErrIncrementalStreamUnsupported
+	}
 	if sink == nil {
 		return protocol.Response{}, fmt.Errorf("response stream sink is required")
 	}
@@ -344,6 +347,22 @@ func incrementalStreamSupportsTools(tools []protocol.Tool) bool {
 		}
 	}
 	return true
+}
+
+func (r *Runtime) incrementalStreamRequiresDeferredToolLoop(tools []protocol.Tool) bool {
+	if len(r.functionExecutors) == 0 {
+		return false
+	}
+	for _, tool := range tools {
+		if tool.Type != "function" {
+			continue
+		}
+		configured := r.functionExecutors[normalizeFunctionToolName(tool.Name)]
+		if configured.executor != nil {
+			return true
+		}
+	}
+	return false
 }
 
 type functionCallStreamState struct {
