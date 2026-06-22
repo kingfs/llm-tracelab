@@ -13,6 +13,7 @@ TraceLab 当前提供：
 - cassette replay。
 - SQLite 元数据索引。
 - 多上游和模型/渠道管理。
+- 可选 Responses server-mode。
 - Monitor Web。
 - MCP 排障工具。
 - Observation IR、findings、reanalysis jobs。
@@ -31,6 +32,9 @@ TraceLab 当前提供：
 - 可以识别、记录、解析这些协议。
 - 不在代理热路径中做跨协议请求转换。
 - OpenAI-compatible provider 只能声明兼容其实际支持的 endpoint。
+- Responses server-mode 默认关闭；关闭时 `/v1/responses` 仍按普通 OpenAI-compatible endpoint 代理透传。
+- 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现非流式 Responses 响应。
+- 非 Responses 请求不进入 Responses runtime，继续走现有代理、路由、录制和解析路径。
 
 详细内容见 [协议参考](./protocol-reference/README.md)。
 
@@ -40,6 +44,7 @@ TraceLab 当前提供：
 - 读取兼容：`LLM_PROXY_V2`。
 - `.http` cassette 是 replay 和详情页事实源。
 - `pkg/replay` 是硬要求，测试 replay 不访问上游网络。
+- Responses server-mode 内部调用上游 Chat Completions 时，该上游 HTTP exchange 也写入 `.http` cassette；Responses semantic state 不替代 raw cassette。
 
 ## SQLite 基线
 
@@ -55,8 +60,11 @@ SQLite 当前负责：
 - trace findings。
 - analysis jobs。
 - eval、dataset、score、experiment。
+- Responses semantic state fallback 表：`responses`、`response_items`。
 
 启动时 schema 升级必须兼容已有本地 DB。
+
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration、运维生产化和 request/tool audit 查询还不是当前基线能力。
 
 ## Session 基线
 
@@ -151,6 +159,10 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 跨协议转换。
 - 用派生数据替代 raw cassette。
 - 让测试依赖真实 provider。
+- Responses server-mode streaming。
+- Responses tool loop、hosted web search、compact workflow。
+- request/tool audit 表和完整 Postgres migration 生产化。
+- provider auto-detect。
 
 ## 推荐验证
 

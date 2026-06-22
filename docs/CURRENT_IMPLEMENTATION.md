@@ -29,6 +29,10 @@
 
 TraceLab 能解析这些协议并写入统一观测结构，但不会在转发热路径中把 Anthropic Messages 转成 OpenAI-compatible，也不会把 OpenAI Responses 转成 Gemini 或 Claude。
 
+Responses server-mode 是一个可选功能。默认情况下 `/v1/responses` 仍按 OpenAI-compatible Responses endpoint 代理透传；只有配置 `responses_server.enabled=true` 后，配置的 Responses path 才由本地 Responses runtime 接管。
+
+开启 server-mode 后，当前已支持非流式 Responses 请求经本地 runtime 映射为内部上游 `/v1/chat/completions` 调用；该内部上游 HTTP exchange 会按现有 recorder 写入 `.http` cassette。非 Responses 请求仍走现有代理、路由、录制和解析路径。
+
 详细协议说明见 [协议参考](./protocol-reference/README.md)。
 
 ## 录制格式
@@ -53,9 +57,13 @@ V3 文件结构：
 
 SQLite 是 Monitor 列表、统计、过滤、分页、模型/渠道配置、系统事件、Observation IR、findings、分析任务和 eval 结果的结构化索引。
 
+Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这两张表，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。
+
 当前重要表包括：
 
 - `logs`
+- `responses`
+- `response_items`
 - `upstream_targets`
 - `upstream_models`
 - `channel_configs`
@@ -133,3 +141,7 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 - 跨协议请求转换网关。
 - 让 replay 依赖网络访问。
 - 用 SQLite 替代 raw cassette 作为 replay 事实源。
+- Responses server-mode streaming。
+- Responses tool loop、hosted web search、compact workflow。
+- request/tool audit 表和完整 Postgres migration 生产化。
+- provider auto-detect。
