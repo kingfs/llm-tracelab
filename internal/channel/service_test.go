@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -269,6 +270,72 @@ func TestProbeWithOptionsDetectsProviderSurface(t *testing.T) {
 	}
 	if len(runs) != 1 || !strings.Contains(runs[0].RequestMetaJSON, `"provider_probe"`) {
 		t.Fatalf("probe run meta = %#v", runs)
+	}
+}
+
+func TestProviderProbeReportDetectsChannelsReadOnly(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "probe-channel",
+		Name:             "Probe Channel",
+		BaseURL:          upstreamServer.URL + "/v1",
+		APIType:          "responses",
+		ProtocolFamily:   "openai_compatible",
+		APIKeyCiphertext: []byte("sk-probe"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	report, err := NewService(st).ProviderProbeReport(context.Background(), ProviderProbeReportOptions{})
+	if err != nil {
+		t.Fatalf("ProviderProbeReport() error = %v", err)
+	}
+	if len(report.Reports) != 1 {
+		t.Fatalf("len(report.Reports) = %d, want 1", len(report.Reports))
+	}
+	got := report.Reports[0]
+	if got.TargetSource != "channel" || got.ProviderID != "probe-channel" || got.Status != "detected" {
+		t.Fatalf("report identity/status = %+v", got)
+	}
+	if got.SuggestedAPIType != "chat_completions" || got.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("suggestion = %q/%q", got.SuggestedAPIType, got.SuggestedProtocolFamily)
+	}
+	if !slices.Contains(got.Warnings, `specified api_type "responses" differs from probed suggestion "chat_completions"`) {
+		t.Fatalf("Warnings = %#v, want api_type mismatch", got.Warnings)
+	}
+	runs, err := st.ListChannelProbeRuns("probe-channel", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("ProviderProbeReport wrote probe runs: %#v", runs)
+	}
+	models, err := st.ListChannelModels("probe-channel", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels() error = %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("ProviderProbeReport wrote channel models: %#v", models)
 	}
 }
 

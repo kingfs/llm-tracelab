@@ -1814,6 +1814,67 @@ func TestProviderProbePreviewAPI(t *testing.T) {
 	}
 }
 
+func TestProviderProbeReportAPIUsesChannelsReadOnly(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        upstreamServer.URL + "/v1",
+		APIType:        "responses",
+		ProtocolFamily: "openai_compatible",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe/report", strings.NewReader(`{"channel_id":"openai-primary"}`))
+	rr := httptest.NewRecorder()
+	providerProbeReportAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe report status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var report providerprobe.BatchReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &report); err != nil {
+		t.Fatalf("json.Unmarshal(report) error = %v", err)
+	}
+	if len(report.Reports) != 1 {
+		t.Fatalf("len(report.Reports) = %d, want 1", len(report.Reports))
+	}
+	got := report.Reports[0]
+	if got.TargetSource != "channel" || got.ProviderID != "openai-primary" || got.Status != "detected" {
+		t.Fatalf("report identity/status = %+v", got)
+	}
+	if got.SuggestedAPIType != "chat_completions" || got.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("suggestion = %q/%q", got.SuggestedAPIType, got.SuggestedProtocolFamily)
+	}
+	runs, err := st.ListChannelProbeRuns("openai-primary", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("provider probe report wrote probe runs: %#v", runs)
+	}
+}
+
 func TestChannelProbeFailureResponseIncludesClassification(t *testing.T) {
 	t.Parallel()
 

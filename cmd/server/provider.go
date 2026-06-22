@@ -20,10 +20,7 @@ type providerProbeOptions struct {
 	stdout     io.Writer
 	id         string
 	timeout    time.Duration
-}
-
-type providerProbeResult struct {
-	Reports []providerprobe.Report `json:"reports"`
+	command    string
 }
 
 func newProviderCommand(runtime *cliRuntime) *cobra.Command {
@@ -37,6 +34,7 @@ func newProviderCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newProviderProbeCommand(runtime))
+	cmd.AddCommand(newProviderProbeReportCommand(runtime))
 	return cmd
 }
 
@@ -55,11 +53,37 @@ func newProviderProbeCommand(runtime *cliRuntime) *cobra.Command {
 					stdout:     cmd.OutOrStdout(),
 					id:         id,
 					timeout:    timeout,
+					command:    "provider.probe",
 				})
 			})
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", "Probe only the upstream target with this id")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP timeout for each probe request")
+	return cmd
+}
+
+func newProviderProbeReportCommand(runtime *cliRuntime) *cobra.Command {
+	var id string
+	var timeout time.Duration
+	cmd := &cobra.Command{
+		Use:   "probe-report",
+		Short: "Generate a read-only batch provider probe report for configured upstreams",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runProviderProbeWithOptions(providerProbeOptions{
+					configPath: runtime.configPath(),
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+					id:         id,
+					timeout:    timeout,
+					command:    "provider.probe_report",
+				})
+			})
+		},
+	}
+	cmd.Flags().StringVar(&id, "id", "", "Report only the upstream target with this id")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP timeout for each probe request")
 	return cmd
 }
@@ -81,16 +105,17 @@ func runProviderProbeWithOptions(opts providerProbeOptions) int {
 	}
 	client := &http.Client{Timeout: timeout}
 	ctx := context.Background()
-	reports := make([]providerprobe.Report, 0, len(targets))
-	for _, target := range targets {
-		report, err := providerprobe.Probe(ctx, target, client)
-		if err != nil {
-			slog.Error("Provider probe failed", "provider_id", target.ProviderID, "error", err)
+	result := providerprobe.ProbeBatch(ctx, targets, client)
+	for _, report := range result.Reports {
+		if report.Status == providerprobe.StatusError && report.Error != "" {
+			slog.Error("Provider probe failed", "provider_id", report.ProviderID, "error", report.Error)
 		}
-		reports = append(reports, report)
 	}
-	result := providerProbeResult{Reports: reports}
-	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "provider.probe", result, func(w io.Writer) error {
+	command := strings.TrimSpace(opts.command)
+	if command == "" {
+		command = "provider.probe"
+	}
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, command, result, func(w io.Writer) error {
 		writeProviderProbeText(w, result)
 		return nil
 	}); err != nil {
@@ -113,6 +138,7 @@ func providerProbeTargets(cfg config.Config, id string) ([]providerprobe.ProbeTa
 			continue
 		}
 		probeTarget := providerProbeTargetFromConfig(target)
+		probeTarget.TargetSource = "upstream"
 		if strings.TrimSpace(probeTarget.BaseURL) == "" {
 			continue
 		}
@@ -161,11 +187,14 @@ func cloneProviderProbeHeaders(in map[string]string) map[string]string {
 	return out
 }
 
-func writeProviderProbeText(w io.Writer, result providerProbeResult) {
+func writeProviderProbeText(w io.Writer, result providerprobe.BatchReport) {
 	for _, report := range result.Reports {
 		id := report.ProviderID
 		if id == "" {
 			id = "default"
+		}
+		if report.TargetSource != "" {
+			fmt.Fprintf(w, "source: %s\n", report.TargetSource)
 		}
 		fmt.Fprintf(w, "provider: %s\n", id)
 		fmt.Fprintf(w, "base_url: %s\n", report.BaseURL)

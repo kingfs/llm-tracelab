@@ -927,6 +927,10 @@ type providerProbeRequest struct {
 	ProtocolFamily string            `json:"protocol_family"`
 }
 
+type providerProbeReportRequest struct {
+	ChannelID string `json:"channel_id"`
+}
+
 type channelUpsertRequest struct {
 	ID                 string                             `json:"id"`
 	Name               string                             `json:"name"`
@@ -1092,6 +1096,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
@@ -1712,6 +1717,35 @@ func providerProbeAPIHandler() http.HandlerFunc {
 			status = http.StatusBadGateway
 		}
 		writeJSON(w, status, report)
+	}
+}
+
+func providerProbeReportAPIHandler(st *store.Store, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		var req providerProbeReportRequest
+		if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe report payload"})
+				return
+			}
+		}
+		svc := effectiveChannelService(st, channelService)
+		report, err := svc.ProviderProbeReport(r.Context(), channel.ProviderProbeReportOptions{
+			ChannelID: strings.TrimSpace(req.ChannelID),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
 	}
 }
 

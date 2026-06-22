@@ -1134,6 +1134,83 @@ upstreams:
 	}
 }
 
+func TestProviderProbeReportJSONReportsConfiguredUpstreams(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/models":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-test"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"model is required"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+upstreams:
+  - id: "openai-report"
+    upstream:
+      base_url: "` + upstreamServer.URL + `/v1"
+      api_key: "secret-report-key"
+      api_type: "responses"
+      protocol_family: "openai_compatible"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "provider", "probe-report", "--timeout", "2s"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "secret-report-key") {
+		t.Fatalf("provider probe-report output leaked api key: %s", out.String())
+	}
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Reports []struct {
+				TargetSource            string   `json:"target_source"`
+				ProviderID              string   `json:"provider_id"`
+				Status                  string   `json:"status"`
+				SuggestedAPIType        string   `json:"suggested_api_type"`
+				SuggestedProtocolFamily string   `json:"suggested_protocol_family"`
+				Capabilities            []string `json:"capabilities"`
+				Warnings                []string `json:"warnings"`
+			} `json:"reports"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "provider.probe_report" || len(envelope.Result.Reports) != 1 {
+		t.Fatalf("probe-report envelope = %+v", envelope)
+	}
+	report := envelope.Result.Reports[0]
+	if report.TargetSource != "upstream" || report.ProviderID != "openai-report" || report.Status != "detected" {
+		t.Fatalf("probe-report identity/status = %+v", report)
+	}
+	if report.SuggestedAPIType != "chat_completions" || report.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("probe-report suggestion = %+v", report)
+	}
+	if !hasString(report.Capabilities, "chat_completions") || !hasString(report.Capabilities, "models") {
+		t.Fatalf("probe-report capabilities = %+v", report.Capabilities)
+	}
+	if !containsStringFragment(report.Warnings, "specified api_type") {
+		t.Fatalf("probe-report warnings = %+v, want api_type mismatch warning", report.Warnings)
+	}
+}
+
 func TestStartupProviderProbeDefaultDisabledDoesNotProbe(t *testing.T) {
 	var calls int
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
