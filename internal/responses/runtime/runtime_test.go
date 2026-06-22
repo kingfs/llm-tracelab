@@ -710,6 +710,171 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	}
 }
 
+func TestRuntimeCreateStreamExecutesMultipleFunctionToolCallsInOrder(t *testing.T) {
+	client := &fakeChatClient{
+		streamEventBatches: [][]ChatStreamEvent{
+			{
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{
+					{
+						Index:          0,
+						ID:             "call_lookup",
+						FunctionName:   "lookup",
+						ArgumentsDelta: `{"q"`,
+					},
+					{
+						Index:          1,
+						ID:             "call_summarize",
+						FunctionName:   "summarize",
+						ArgumentsDelta: `{"text"`,
+					},
+				}},
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{
+					{
+						Index:          0,
+						ArgumentsDelta: `:"codex"}`,
+					},
+					{
+						Index:          1,
+						ArgumentsDelta: `:"trace"}`,
+					},
+				}},
+			},
+			{
+				{ChoiceIndex: 0, ContentDelta: "Both "},
+				{ChoiceIndex: 0, ContentDelta: "complete."},
+			},
+		},
+		streamResps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{
+							{
+								ID:   "call_lookup",
+								Type: "function",
+								Function: ChatToolCallFunction{
+									Name:      "lookup",
+									Arguments: `{"q":"codex"}`,
+								},
+							},
+							{
+								ID:   "call_summarize",
+								Type: "function",
+								Function: ChatToolCallFunction{
+									Name:      "summarize",
+									Arguments: `{"text":"trace"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "Both complete."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12},
+			},
+		},
+	}
+	sink := &fakeResponseStreamSink{}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(
+		Config{DefaultModel: "fallback-model"},
+		client,
+		NewMemoryStore(),
+		WithExecutionEventRecorder(events),
+		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
+		WithFunctionToolExecutor("summarize", StaticFunctionToolExecutor{Output: "short"}),
+	)
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "run both",
+		Stream: true,
+		Tools: []protocol.Tool{
+			{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}},
+			{Type: "function", Name: "summarize", Parameters: map[string]any{"type": "object"}},
+		},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.streamReqs) != 2 {
+		t.Fatalf("stream requests = %d, want tool call + final call", len(client.streamReqs))
+	}
+	secondMessages := client.streamReqs[1].Messages
+	if len(secondMessages) != 4 {
+		t.Fatalf("second stream messages len = %d, want 4: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 2 || secondMessages[1].ToolCalls[0].ID != "call_lookup" || secondMessages[1].ToolCalls[1].ID != "call_summarize" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_lookup" || secondMessages[3].Role != "tool" || secondMessages[3].ToolCallID != "call_summarize" {
+		t.Fatalf("second tool message order mismatch: %#v", secondMessages[2:])
+	}
+	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_summarize" {
+		t.Fatalf("function argument done = %#v, want lookup then summarize", sink.functionDone)
+	}
+	if len(sink.outputAdded) != 2 {
+		t.Fatalf("output item added = %#v, want two started items", sink.outputAdded)
+	}
+	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "in_progress" {
+		t.Fatalf("first output item added = %#v, want started lookup", sink.outputAdded[0])
+	}
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.CallID != "call_summarize" || sink.outputAdded[1].Item.Status != "in_progress" {
+		t.Fatalf("second output item added = %#v, want started summarize", sink.outputAdded[1])
+	}
+	if len(sink.outputDone) != 2 {
+		t.Fatalf("output item done = %#v, want two completed items", sink.outputDone)
+	}
+	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
+		t.Fatalf("first output item done = %#v, want completed lookup", sink.outputDone[0])
+	}
+	if sink.outputDone[1].OutputIndex != 1 || sink.outputDone[1].Item.CallID != "call_summarize" || sink.outputDone[1].Item.Status != "completed" {
+		t.Fatalf("second output item done = %#v, want completed summarize", sink.outputDone[1])
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(resp.Output) != 3 {
+		t.Fatalf("output len = %d, want two tool outputs + final message: %#v", len(resp.Output), resp.Output)
+	}
+	if resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "function_call_output" || resp.Output[1].CallID != "call_summarize" {
+		t.Fatalf("tool output order mismatch: %#v", resp.Output)
+	}
+	if resp.Output[2].Type != "message" || resp.Output[2].Content[0].Text != "Both complete." {
+		t.Fatalf("final output = %#v, want final message", resp.Output[2])
+	}
+	if len(events.events) != 6 {
+		t.Fatalf("execution events len = %d, want two requested plus two started/completed pairs: %#v", len(events.events), events.events)
+	}
+	wantStatuses := []string{"requested", "requested", "started", "completed", "started", "completed"}
+	for i, want := range wantStatuses {
+		if events.events[i].Status != want {
+			t.Fatalf("execution event %d status = %q, want %q: %#v", i, events.events[i].Status, want, events.events[i])
+		}
+	}
+}
+
 func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForFunctionToolExecutorFailure(t *testing.T) {
 	client := &fakeChatClient{
 		streamEvents: []ChatStreamEvent{
@@ -787,6 +952,115 @@ func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForFunctionToolExecutorFail
 	}
 	if done.Output != nil || strings.Contains(toJSONForTest(t, done), "sensitive-output") {
 		t.Fatalf("failed output item leaked output: %#v", done)
+	}
+}
+
+func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForSecondFunctionToolExecutorFailure(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{
+				{
+					Index:          0,
+					ID:             "call_lookup",
+					FunctionName:   "lookup",
+					ArgumentsDelta: `{"q":"codex"}`,
+				},
+				{
+					Index:          1,
+					ID:             "call_summarize",
+					FunctionName:   "summarize",
+					ArgumentsDelta: `{"text":"trace"}`,
+				},
+			}},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{
+					ToolCalls: []ChatToolCall{
+						{
+							ID:   "call_lookup",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "lookup",
+								Arguments: `{"q":"codex"}`,
+							},
+						},
+						{
+							ID:   "call_summarize",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "summarize",
+								Arguments: `{"text":"trace"}`,
+							},
+						},
+					},
+				},
+				FinishReason: "tool_calls",
+			}},
+			Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12},
+		},
+	}
+	executorErr := errors.New("summarize backend failed")
+	sink := &fakeResponseStreamSink{}
+	rt := New(
+		Config{DefaultModel: "fallback-model"},
+		client,
+		NewMemoryStore(),
+		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
+		WithFunctionToolExecutor("summarize", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+			return FunctionToolResult{Output: "sensitive-output"}, executorErr
+		})),
+	)
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "run both",
+		Stream: true,
+		Tools: []protocol.Tool{
+			{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}},
+			{Type: "function", Name: "summarize", Parameters: map[string]any{"type": "object"}},
+		},
+	}, sink)
+	if !errors.Is(err, executorErr) {
+		t.Fatalf("CreateStream() error = %v, want executor error", err)
+	}
+	if len(client.streamReqs) != 1 {
+		t.Fatalf("stream requests = %d, want only failed tool-call round", len(client.streamReqs))
+	}
+	if len(sink.outputAdded) != 2 {
+		t.Fatalf("output item added = %#v, want started lookup and summarize", sink.outputAdded)
+	}
+	if sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[0].Item.Status != "in_progress" {
+		t.Fatalf("first output item added = %#v, want started lookup", sink.outputAdded[0])
+	}
+	if sink.outputAdded[1].OutputIndex != 1 || sink.outputAdded[1].Item.CallID != "call_summarize" || sink.outputAdded[1].Item.Status != "in_progress" {
+		t.Fatalf("second output item added = %#v, want started summarize", sink.outputAdded[1])
+	}
+	if len(sink.outputDone) != 2 {
+		t.Fatalf("output item done = %#v, want completed lookup and failed summarize", sink.outputDone)
+	}
+	if sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.CallID != "call_lookup" || sink.outputDone[0].Item.Status != "completed" {
+		t.Fatalf("first output item done = %#v, want completed lookup", sink.outputDone[0])
+	}
+	failed := sink.outputDone[1].Item
+	if sink.outputDone[1].OutputIndex != 1 || failed.Type != "function_call_output" || failed.CallID != "call_summarize" || failed.Name != "summarize" || failed.Status != "failed" {
+		t.Fatalf("second output item done = %#v, want failed summarize", sink.outputDone[1])
+	}
+	if failed.Output != nil || strings.Contains(toJSONForTest(t, failed), "sensitive-output") {
+		t.Fatalf("failed output item leaked output: %#v", failed)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
 }
 
