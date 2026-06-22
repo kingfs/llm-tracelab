@@ -274,7 +274,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "provider", "provider probe", "provider probe-report", "provider probe-apply", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "provider", "provider probe", "provider probe-report", "provider probe-apply", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -359,6 +359,165 @@ func TestSchemaCommandSupportsJSONEnvelopeForCommandPath(t *testing.T) {
 	}
 	if !foundDryRun {
 		t.Fatalf("schema flags = %+v, want dry-run", envelope.Result.Commands[0].Flags)
+	}
+}
+
+func TestConfigInspectCommandSupportsRedactedJSONEnvelope(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "sk-secret-from-env")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+monitor:
+  port: "9090"
+mcp:
+  enabled: true
+  path: "mcp"
+database:
+  driver: postgres
+  dsn: postgres://app:super-secret-db@example.com:5432/traces?sslmode=disable
+  auto_migrate: false
+trace:
+  output_dir: /tmp/llm-traces
+responses_server:
+  enabled: true
+  path: /v1/responses
+  default_model: gpt-5
+  force_store: true
+  max_request_body_bytes: 12345
+  auto_compact: true
+  model_profiles:
+    - name: default
+      pattern: "*"
+  function_executors:
+    enabled: true
+tools:
+  web_search:
+    enabled: true
+    provider: searxng
+    base_url: https://search.example.com/search?api_key=web-secret&q=test
+provider_probe:
+  startup_fill: true
+  timeout: 3s
+upstreams:
+  - id: openai
+    enabled: true
+    model_discovery: static
+    static_models: [gpt-5, gpt-5-mini]
+    upstream:
+      base_url: https://user:upstream-url-secret@api.example.com/v1?token=url-token-secret
+      api_key: "$env:OPENAI_TEST_KEY"
+      api_type: chat_completions
+      protocol_family: openai
+      provider_preset: openai
+      mode: proxy
+      headers:
+        Authorization: Bearer upstream-header-secret
+    credentials:
+      - id: primary
+        api_key: credential-api-secret
+        headers:
+          X-API-Key: credential-header-secret
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "config", "inspect"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	output := out.String()
+	for _, secret := range []string{
+		"super-secret-db",
+		"web-secret",
+		"upstream-url-secret",
+		"url-token-secret",
+		"sk-secret-from-env",
+		"upstream-header-secret",
+		"credential-api-secret",
+		"credential-header-secret",
+	} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("config inspect output leaked secret marker %q", secret)
+		}
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Database struct {
+				Driver      string `json:"driver"`
+				DSN         string `json:"dsn"`
+				AutoMigrate bool   `json:"auto_migrate"`
+			} `json:"database"`
+			MCP struct {
+				Enabled bool   `json:"enabled"`
+				Path    string `json:"path"`
+			} `json:"mcp"`
+			ResponsesServer struct {
+				Enabled            bool  `json:"enabled"`
+				MaxBody            int64 `json:"max_body"`
+				ModelProfilesCount int   `json:"model_profiles_count"`
+				FunctionExecutors  struct {
+					Enabled bool `json:"enabled"`
+				} `json:"function_executors"`
+			} `json:"responses_server"`
+			Tools struct {
+				WebSearch struct {
+					BaseURL string `json:"base_url"`
+				} `json:"web_search"`
+			} `json:"tools"`
+			ProviderProbe struct {
+				StartupFill bool   `json:"startup_fill"`
+				Timeout     string `json:"timeout"`
+			} `json:"provider_probe"`
+			Upstreams struct {
+				Targets []struct {
+					ID               string `json:"id"`
+					Enabled          bool   `json:"enabled"`
+					BaseURL          string `json:"base_url"`
+					StaticModelCount int    `json:"static_model_count"`
+					CredentialCount  int    `json:"credential_count"`
+				} `json:"targets"`
+			} `json:"upstreams"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "config.inspect" {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+	if envelope.Result.Database.Driver != "postgres" || envelope.Result.Database.AutoMigrate || !strings.Contains(envelope.Result.Database.DSN, "<redacted>") {
+		t.Fatalf("database result = %+v", envelope.Result.Database)
+	}
+	if !envelope.Result.MCP.Enabled || envelope.Result.MCP.Path != "/mcp" {
+		t.Fatalf("mcp result = %+v", envelope.Result.MCP)
+	}
+	if !envelope.Result.ResponsesServer.Enabled || envelope.Result.ResponsesServer.MaxBody != 12345 || envelope.Result.ResponsesServer.ModelProfilesCount != 1 || !envelope.Result.ResponsesServer.FunctionExecutors.Enabled {
+		t.Fatalf("responses_server result = %+v", envelope.Result.ResponsesServer)
+	}
+	if !strings.Contains(envelope.Result.Tools.WebSearch.BaseURL, "%3Credacted%3E") {
+		t.Fatalf("tools.web_search.base_url = %q, want redacted query", envelope.Result.Tools.WebSearch.BaseURL)
+	}
+	if !envelope.Result.ProviderProbe.StartupFill || envelope.Result.ProviderProbe.Timeout != "3s" {
+		t.Fatalf("provider_probe result = %+v", envelope.Result.ProviderProbe)
+	}
+	if len(envelope.Result.Upstreams.Targets) != 1 {
+		t.Fatalf("upstreams targets = %+v", envelope.Result.Upstreams.Targets)
+	}
+	target := envelope.Result.Upstreams.Targets[0]
+	if target.ID != "openai" || !target.Enabled || target.StaticModelCount != 2 || target.CredentialCount != 1 || !strings.Contains(target.BaseURL, "%3Credacted%3E") {
+		t.Fatalf("upstream target = %+v", target)
 	}
 }
 
