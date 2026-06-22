@@ -30,7 +30,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
 - model profile 驱动的真实模型专用 tokenizer/provider tokenize adapter 与完整 context optimization；当前仅已有可注入 estimator 边界和默认保守估算。
 - provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、只读批量 `provider probe-report` / Monitor report API，以及默认关闭的启动时保守补全开关。
-- server-side function executor 的 Monitor/外部 executor 配置化；当前已有默认关闭的 YAML `static_response` executor 首切。
+- server-side function executor 的 Monitor 写配置和更强隔离；当前已有默认关闭的 YAML `static_response` 与 `external_command` executor 首切。
 - SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
 
 ## 阶段计划
@@ -91,7 +91,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 当前状态：已新增 `internal/providerprobe` 和 `provider probe` CLI，可对配置中的 upstream 做 endpoint/capability 诊断并输出建议；`provider probe-report` 是只读批量报告入口，面向 YAML upstream 列表输出 report，不写配置。serve 侧已有默认关闭的 `provider_probe.startup_fill` 首切；开启后只填补 YAML upstream 中缺失的 `api_type`、`protocol_family` 和未声明 capability，不写回配置，也不覆盖显式配置。Monitor provider create dialog 已有临时 preview endpoint，不落库返回同类 report；`POST /api/provider-probe/report` 会面向 SQLite channel 列表返回批量 detection report，不写 probe run、model 或 channel 配置；provider detail 的 probe 动作也已接入 report 展示，用户点击 Apply suggestions 后才会把建议的 `api_type`、`protocol_family` 和 capability bool 写入表单或 channel 配置。后续仍需更完整的 provider setup wizard。
 
-### Stage 24：Tool Execution 扩展（registry 与 YAML static_response 首切已落地）
+### Stage 24：Tool Execution 扩展（registry、YAML static_response 与 external_command 首切已落地）
 
 目标：在 hosted tools 之外，为 server-side function executor 提供受控扩展点。
 
@@ -103,11 +103,11 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 开启 executor 后写 tool_call started/completed/failed events。
 - 明确超时、错误、结果大小和敏感信息处理边界。
 
-当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。已注册 server-side function executor 在 `stream:true` 下已有首切 tool loop：参数分片继续 streaming，executor 执行前输出 started 态 `response.output_item.added` tool item，执行成功后输出完成态 `response.output_item.done` tool item，进入下一轮内部 Chat Completions，并继续输出最终文本 delta；对应 tool_call started/completed/failed events 会标记 `stream=true`。Monitor 已有只读 API 和 Audit 页面状态面板；Monitor 写配置、外部 executor 隔离策略和更完整的 server-side tool failed SSE lifecycle events 仍未完成。
+当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明可用的 `static_response` 或 `external_command` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。`external_command` 不使用 shell，通过 stdin JSON 传入 tool call，默认不继承环境变量，仅支持显式 static env / env allowlist，stdout 作为 tool output，stderr 只进入失败摘要并受截断上限保护。配置规范化会标记 binding `available` 与 validation warnings，Monitor 只读 API 会返回支持类型、可用状态和 warning，不返回 `static_response` output 或 `external_command` command。已注册 server-side function executor 在 `stream:true` 下已有首切 tool loop：参数分片继续 streaming，executor 执行前输出 started 态 `response.output_item.added` tool item，执行成功后输出完成态 `response.output_item.done` tool item，进入下一轮内部 Chat Completions，并继续输出最终文本 delta；对应 tool_call started/completed/failed events 会标记 `stream=true`。Monitor 写配置、外部 executor 进程级强隔离策略和更完整的 server-side tool failed SSE lifecycle events 仍未完成。
 
 ## 并行开发规则
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算与 estimator 边界 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入 -> 最小 tool output item added started SSE 顺序合入 -> 已写出 SSE 后最小 `response.failed` 顺序合入。后续优先补 hosted/server-side tool failed SSE lifecycle 细化，再做外部 executor/Monitor 配置和更完整的 provider setup wizard。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算与 estimator 边界 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入 -> 最小 tool output item added started SSE 顺序合入 -> 已写出 SSE 后最小 `response.failed` 顺序合入 -> function executor validation/Monitor 摘要 -> YAML `external_command` executor 首切。后续优先补 hosted/server-side tool failed SSE lifecycle 细化，再做 Monitor 写配置、进程级强隔离和更完整的 provider setup wizard。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
