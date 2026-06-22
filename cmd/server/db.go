@@ -54,6 +54,7 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "up", "Apply application database migrations"))
 	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "down", "Roll back application database migrations"))
+	migrateCmd.AddCommand(newAppDBMigrateStatusCommand(runtime))
 	cmd.AddCommand(migrateCmd)
 	cmd.AddCommand(newDBSecretCommand(runtime))
 	return cmd
@@ -97,6 +98,25 @@ func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, shor
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview migration without changing the database")
 	if direction == "down" {
 		cmd.Flags().BoolVar(&all, "all", false, "Roll back all migrations")
+	}
+	return cmd
+}
+
+func newAppDBMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show application database migration status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runAppDBMigrateWithOptions(appDBMigrateOptions{
+					configPath: runtime.configPath(),
+					direction:  "status",
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+				})
+			})
+		},
 	}
 	return cmd
 }
@@ -183,20 +203,21 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	result := map[string]any{
-		"dry_run":        opts.dryRun,
-		"mutated":        false,
-		"driver":         cfg.DatabaseDriver(),
-		"dsn":            config.RedactDSN(cfg.DatabaseDSN()),
-		"direction":      opts.direction,
-		"steps":          opts.steps,
-		"all":            opts.all,
-		"migration_mode": appDBMigrationMode(cfg.DatabaseDriver()),
-	}
+	result := appDBMigrationReport(cfg, opts.direction, opts.steps, opts.all, opts.dryRun, false)
 	if opts.dryRun {
 		return writeDryRunResult(opts.stdout, opts.format, "db.migrate."+opts.direction, result)
 	}
 	switch opts.direction {
+	case "status":
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.status", result, func(w io.Writer) error {
+			fmt.Fprintf(w, "application database migration status\n")
+			writeAppDBMigrationReportText(w, result)
+			return nil
+		}); err != nil {
+			slog.Error("Write db migrate status result failed", "error", err)
+			return 1
+		}
+		return 0
 	case "up":
 		if err := migrateApplicationDatabaseUp(cfg, opts.steps); err != nil {
 			slog.Error("Application database migration failed", "error", err)
@@ -205,9 +226,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		result["mutated"] = true
 		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.up", result, func(w io.Writer) error {
 			fmt.Fprintf(w, "application database schema migration applied\n")
-			fmt.Fprintf(w, "driver: %s\n", cfg.DatabaseDriver())
-			fmt.Fprintf(w, "dsn: %s\n", config.RedactDSN(cfg.DatabaseDSN()))
-			fmt.Fprintf(w, "migration_mode: %s\n", appDBMigrationMode(cfg.DatabaseDriver()))
+			writeAppDBMigrationReportText(w, result)
 			return nil
 		}); err != nil {
 			slog.Error("Write db migrate result failed", "error", err)
@@ -221,6 +240,47 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		fmt.Fprintf(os.Stderr, "unknown db migrate direction %q\n", opts.direction)
 		return 2
 	}
+}
+
+func appDBMigrationReport(cfg *config.Config, direction string, steps int, all bool, dryRun bool, mutated bool) map[string]any {
+	source := "sqlite-startup-schema-fallback"
+	sourcePath := "internal/store raw DDL startup initialization"
+	versioned := false
+	if appDBMigrationMode(cfg.DatabaseDriver()) == "versioned-sql" {
+		source = "postgres-checked-in-sql"
+		sourcePath = "ent/postgres-migrations"
+		versioned = true
+	}
+	return map[string]any{
+		"dry_run":                dryRun,
+		"mutated":                mutated,
+		"driver":                 cfg.DatabaseDriver(),
+		"dsn":                    config.RedactDSN(cfg.DatabaseDSN()),
+		"direction":              direction,
+		"steps":                  steps,
+		"all":                    all,
+		"database_namespace":     "application",
+		"migration_mode":         appDBMigrationMode(cfg.DatabaseDriver()),
+		"migration_source":       source,
+		"migration_source_path":  sourcePath,
+		"schema_versioned":       versioned,
+		"status_check":           "configuration-only",
+		"rollback_supported":     false,
+		"auth_migration_scope":   "excluded",
+		"auth_migration_command": "auth migrate",
+	}
+}
+
+func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
+	fmt.Fprintf(w, "driver: %s\n", result["driver"])
+	fmt.Fprintf(w, "dsn: %s\n", result["dsn"])
+	fmt.Fprintf(w, "database_namespace: %s\n", result["database_namespace"])
+	fmt.Fprintf(w, "migration_mode: %s\n", result["migration_mode"])
+	fmt.Fprintf(w, "migration_source: %s\n", result["migration_source"])
+	fmt.Fprintf(w, "migration_source_path: %s\n", result["migration_source_path"])
+	fmt.Fprintf(w, "schema_versioned: %v\n", result["schema_versioned"])
+	fmt.Fprintf(w, "rollback_supported: %v\n", result["rollback_supported"])
+	fmt.Fprintf(w, "auth_migration_scope: %s (%s)\n", result["auth_migration_scope"], result["auth_migration_command"])
 }
 
 func migrateApplicationDatabaseUp(cfg *config.Config, steps int) error {

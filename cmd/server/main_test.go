@@ -404,6 +404,12 @@ func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 			Steps     int    `json:"steps"`
 			All       bool   `json:"all"`
 			Mode      string `json:"migration_mode"`
+			Source    string `json:"migration_source"`
+			Path      string `json:"migration_source_path"`
+			Namespace string `json:"database_namespace"`
+			Versioned bool   `json:"schema_versioned"`
+			Auth      string `json:"auth_migration_scope"`
+			Rollback  bool   `json:"rollback_supported"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -418,8 +424,100 @@ func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 	if envelope.Result.Mode != "versioned-sql" {
 		t.Fatalf("migration_mode = %q, want versioned-sql", envelope.Result.Mode)
 	}
+	if envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || envelope.Result.Namespace != "application" || !envelope.Result.Versioned || envelope.Result.Auth != "excluded" || envelope.Result.Rollback {
+		t.Fatalf("migration report = %+v", envelope.Result)
+	}
 	if strings.Contains(envelope.Result.DSN, "secret") || strings.Contains(envelope.Command, "auth") {
 		t.Fatalf("db migrate dry-run leaked auth namespace or secret: command=%q dsn=%q", envelope.Command, envelope.Result.DSN)
+	}
+}
+
+func TestDBMigrateStatusJSONReportsPostgresApplicationSource(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun      bool   `json:"dry_run"`
+			Mutated     bool   `json:"mutated"`
+			Driver      string `json:"driver"`
+			DSN         string `json:"dsn"`
+			Direction   string `json:"direction"`
+			Namespace   string `json:"database_namespace"`
+			Mode        string `json:"migration_mode"`
+			Source      string `json:"migration_source"`
+			Path        string `json:"migration_source_path"`
+			Versioned   bool   `json:"schema_versioned"`
+			StatusCheck string `json:"status_check"`
+			Rollback    bool   `json:"rollback_supported"`
+			AuthScope   string `json:"auth_migration_scope"`
+			AuthCommand string `json:"auth_migration_command"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.status" {
+		t.Fatalf("envelope command = %+v, want db.migrate.status", envelope)
+	}
+	if envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "status" {
+		t.Fatalf("status result = %+v", envelope.Result)
+	}
+	if envelope.Result.Namespace != "application" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || !envelope.Result.Versioned {
+		t.Fatalf("postgres status source = %+v", envelope.Result)
+	}
+	if envelope.Result.StatusCheck != "configuration-only" || envelope.Result.Rollback || envelope.Result.AuthScope != "excluded" || envelope.Result.AuthCommand != "auth migrate" {
+		t.Fatalf("postgres status scope = %+v", envelope.Result)
+	}
+	if strings.Contains(envelope.Result.DSN, "secret") || strings.Contains(envelope.Command, "auth") {
+		t.Fatalf("db migrate status leaked auth namespace or secret: command=%q dsn=%q", envelope.Command, envelope.Result.DSN)
+	}
+}
+
+func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeSQLiteDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Driver    string `json:"driver"`
+			Mode      string `json:"migration_mode"`
+			Source    string `json:"migration_source"`
+			Path      string `json:"migration_source_path"`
+			Versioned bool   `json:"schema_versioned"`
+			Auth      string `json:"auth_migration_scope"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.status" {
+		t.Fatalf("envelope command = %+v, want db.migrate.status", envelope)
+	}
+	if envelope.Result.Driver != "sqlite" || envelope.Result.Mode != "schema-init" || envelope.Result.Source != "sqlite-startup-schema-fallback" || envelope.Result.Path != "internal/store raw DDL startup initialization" || envelope.Result.Versioned || envelope.Result.Auth != "excluded" {
+		t.Fatalf("sqlite status source = %+v", envelope.Result)
 	}
 }
 
@@ -674,6 +772,24 @@ trace:
 database:
   driver: postgres
   dsn: "postgres://user:secret@127.0.0.1:15432/llm_tracelab?sslmode=disable"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	return configPath
+}
+
+func writeSQLiteDBMigrateConfig(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + filepath.Join(dir, "trace_index.sqlite3") + `"
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
