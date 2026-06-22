@@ -4,17 +4,32 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 
 	entmigrations "github.com/kingfs/llm-tracelab/ent"
+	"github.com/kingfs/llm-tracelab/internal/config"
 
 	gomigrate "github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/lib/pq"
+	_ "modernc.org/sqlite"
 )
 
 const postgresMigrationRoot = "postgres-migrations"
+const sqliteApplicationSchemaMarker = "app_schema_status"
+const sqliteApplicationSchemaNamespace = "application"
+
+var sqliteApplicationRequiredTables = []string{
+	"logs",
+	"responses",
+	"response_items",
+	"request_audits",
+	"execution_events",
+	"upstream_exchanges",
+}
 
 func MigrateUp(driver string, dsn string, steps int) error {
 	driver = normalizeDriver(driver)
@@ -43,12 +58,16 @@ func MigrateDown(driver string, dsn string, steps int, all bool) error {
 }
 
 type Status struct {
-	Driver    string
-	Versioned bool
-	Available bool
-	Version   uint
-	Dirty     bool
-	Message   string
+	Driver                string
+	Versioned             bool
+	Available             bool
+	Version               uint
+	Dirty                 bool
+	SchemaMarker          string
+	SchemaMarkerVersion   int
+	RequiredTablesPresent bool
+	MissingTables         []string
+	Message               string
 }
 
 func CheckStatus(driver string, dsn string) (Status, error) {
@@ -59,11 +78,91 @@ func CheckStatus(driver string, dsn string) (Status, error) {
 		status.Versioned = true
 		return checkPostgresStatus(dsn, status)
 	case "sqlite":
-		status.Message = ErrSQLiteUsesStoreInit.Error()
-		return status, nil
+		return checkSQLiteStatus(dsn, status)
 	default:
 		return status, fmt.Errorf("application database driver %q is not supported by versioned migrations yet", driver)
 	}
+}
+
+func checkSQLiteStatus(dsn string, status Status) (Status, error) {
+	dbPath := config.SQLitePathFromDSN(dsn)
+	if strings.TrimSpace(dbPath) == "" {
+		status.Message = "sqlite application database path is empty; " + ErrSQLiteUsesStoreInit.Error()
+		return status, nil
+	}
+	if dbPath == ":memory:" {
+		status.Message = "sqlite in-memory database status is not inspectable; " + ErrSQLiteUsesStoreInit.Error()
+		return status, nil
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			status.Message = "sqlite application database file does not exist; " + ErrSQLiteUsesStoreInit.Error()
+			return status, nil
+		}
+		return status, err
+	}
+
+	db, err := sql.Open("sqlite", sqliteReadOnlyDSN(dbPath))
+	if err != nil {
+		return status, err
+	}
+	defer db.Close()
+
+	for _, table := range sqliteApplicationRequiredTables {
+		exists, err := sqliteTableExists(db, table)
+		if err != nil {
+			return status, err
+		}
+		if !exists {
+			status.MissingTables = append(status.MissingTables, table)
+		}
+	}
+	status.RequiredTablesPresent = len(status.MissingTables) == 0
+	status.Available = status.RequiredTablesPresent
+
+	markerExists, err := sqliteTableExists(db, sqliteApplicationSchemaMarker)
+	if err != nil {
+		return status, err
+	}
+	if !markerExists {
+		if status.RequiredTablesPresent {
+			status.Message = "sqlite application schema tables are present; marker missing for legacy database; " + ErrSQLiteUsesStoreInit.Error()
+		} else {
+			status.Message = "sqlite application schema marker is missing and required tables are incomplete; " + ErrSQLiteUsesStoreInit.Error()
+		}
+		return status, nil
+	}
+
+	status.SchemaMarker = sqliteApplicationSchemaMarker
+	if err := db.QueryRow(`SELECT version FROM app_schema_status WHERE namespace = ?`, sqliteApplicationSchemaNamespace).Scan(&status.SchemaMarkerVersion); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			status.Message = "sqlite application schema marker table exists but application row is missing; " + ErrSQLiteUsesStoreInit.Error()
+			return status, nil
+		}
+		return status, err
+	}
+	if status.RequiredTablesPresent {
+		status.Message = fmt.Sprintf("sqlite application schema marker version %d is present; %s", status.SchemaMarkerVersion, ErrSQLiteUsesStoreInit.Error())
+	} else {
+		status.Message = fmt.Sprintf("sqlite application schema marker version %d is present but required tables are incomplete; %s", status.SchemaMarkerVersion, ErrSQLiteUsesStoreInit.Error())
+	}
+	return status, nil
+}
+
+func sqliteTableExists(db *sql.DB, table string) (bool, error) {
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS (
+		SELECT 1
+		FROM sqlite_master
+		WHERE type = 'table' AND name = ?
+	)`, table).Scan(&exists)
+	return exists, err
+}
+
+func sqliteReadOnlyDSN(dbPath string) string {
+	values := url.Values{}
+	values.Set("mode", "ro")
+	return (&url.URL{Scheme: "file", Path: dbPath, RawQuery: values.Encode()}).String()
 }
 
 func checkPostgresStatus(dsn string, status Status) (Status, error) {

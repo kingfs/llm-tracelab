@@ -296,9 +296,19 @@ func applyAppDBStatusCheck(cfg *config.Config, result map[string]any) error {
 	result["database_status_available"] = status.Available
 	result["database_status_versioned"] = status.Versioned
 	result["database_status_driver"] = status.Driver
-	if status.Available {
+	if status.Driver == "sqlite" {
+		result["database_required_tables_present"] = status.RequiredTablesPresent
+	}
+	if status.Available && status.Versioned {
 		result["database_migration_version"] = status.Version
 		result["database_migration_dirty"] = status.Dirty
+	}
+	if status.SchemaMarker != "" {
+		result["database_schema_marker"] = status.SchemaMarker
+		result["database_schema_marker_version"] = status.SchemaMarkerVersion
+	}
+	if len(status.MissingTables) > 0 {
+		result["database_missing_tables"] = status.MissingTables
 	}
 	if status.Message != "" {
 		result["database_status_message"] = status.Message
@@ -323,6 +333,16 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	if result["database_migration_version"] != nil {
 		fmt.Fprintf(w, "database_migration_version: %v\n", result["database_migration_version"])
 		fmt.Fprintf(w, "database_migration_dirty: %v\n", result["database_migration_dirty"])
+	}
+	if result["database_schema_marker"] != nil {
+		fmt.Fprintf(w, "database_schema_marker: %s\n", result["database_schema_marker"])
+		fmt.Fprintf(w, "database_schema_marker_version: %v\n", result["database_schema_marker_version"])
+	}
+	if result["database_required_tables_present"] != nil {
+		fmt.Fprintf(w, "database_required_tables_present: %v\n", result["database_required_tables_present"])
+	}
+	if result["database_missing_tables"] != nil {
+		fmt.Fprintf(w, "database_missing_tables: %v\n", result["database_missing_tables"])
 	}
 	if result["database_status_message"] != nil {
 		fmt.Fprintf(w, "database_status_message: %s\n", result["database_status_message"])

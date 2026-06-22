@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -32,8 +33,81 @@ func TestCheckStatusSQLiteReportsSchemaInitFallback(t *testing.T) {
 	if status.Driver != "sqlite" || status.Versioned || status.Available {
 		t.Fatalf("CheckStatus(sqlite) = %+v, want non-versioned unavailable fallback", status)
 	}
-	if !strings.Contains(status.Message, ErrSQLiteUsesStoreInit.Error()) {
+	if !strings.Contains(status.Message, "database file does not exist") || !strings.Contains(status.Message, ErrSQLiteUsesStoreInit.Error()) {
 		t.Fatalf("CheckStatus(sqlite) message = %q, want fallback explanation", status.Message)
+	}
+}
+
+func TestCheckStatusSQLiteReportsApplicationSchemaMarker(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "trace_index.sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open(sqlite) error = %v", err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE logs (path TEXT PRIMARY KEY)`,
+		`CREATE TABLE responses (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE response_items (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE request_audits (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE execution_events (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE upstream_exchanges (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE app_schema_status (
+			namespace TEXT PRIMARY KEY,
+			version INTEGER NOT NULL,
+			mode TEXT NOT NULL,
+			source TEXT NOT NULL,
+			updated_at datetime NOT NULL
+		)`,
+		`INSERT INTO app_schema_status (namespace, version, mode, source, updated_at)
+		 VALUES ('application', 1, 'schema-init', 'internal/store raw DDL startup initialization', CURRENT_TIMESTAMP)`,
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("db.Exec(%q) error = %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus(sqlite) error = %v", err)
+	}
+	if status.Driver != "sqlite" || status.Versioned || !status.Available || !status.RequiredTablesPresent {
+		t.Fatalf("CheckStatus(sqlite) = %+v, want readable non-versioned application schema", status)
+	}
+	if status.SchemaMarker != "app_schema_status" || status.SchemaMarkerVersion != 1 || len(status.MissingTables) != 0 {
+		t.Fatalf("sqlite marker status = %+v", status)
+	}
+	if !strings.Contains(status.Message, "marker version 1") || !strings.Contains(status.Message, ErrSQLiteUsesStoreInit.Error()) {
+		t.Fatalf("CheckStatus(sqlite) message = %q, want marker and fallback explanation", status.Message)
+	}
+}
+
+func TestCheckStatusSQLiteReportsLegacySchemaWithoutMarker(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "trace_index.sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open(sqlite) error = %v", err)
+	}
+	for _, table := range sqliteApplicationRequiredTables {
+		if _, err := db.Exec(`CREATE TABLE ` + table + ` (id TEXT PRIMARY KEY)`); err != nil {
+			t.Fatalf("create table %q error = %v", table, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus(sqlite) error = %v", err)
+	}
+	if !status.Available || !status.RequiredTablesPresent || status.SchemaMarker != "" || status.SchemaMarkerVersion != 0 {
+		t.Fatalf("legacy sqlite status = %+v, want available schema without marker", status)
+	}
+	if !strings.Contains(status.Message, "marker missing for legacy database") {
+		t.Fatalf("legacy sqlite message = %q", status.Message)
 	}
 }
 
