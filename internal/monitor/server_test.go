@@ -1858,6 +1858,184 @@ func TestProviderProbePreviewAPI(t *testing.T) {
 	}
 }
 
+func TestProviderSetupValidateDoesNotPersistAndRedactsSecrets(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"openai-primary",
+		"name":"OpenAI Primary",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_key":"sk-setup-secret",
+		"headers":{"Authorization":"Bearer setup-secret","X-Test":"visible"},
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/validate", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup validate status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-setup-secret") || strings.Contains(rr.Body.String(), "Bearer setup-secret") {
+		t.Fatalf("setup validate response leaked secret: %s", rr.Body.String())
+	}
+	var payload providerSetupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if payload.Applied || payload.Channel != nil {
+		t.Fatalf("validate applied provider: %+v", payload)
+	}
+	if !payload.Secret.APIKeySet || payload.Secret.APIKeyHint == "" {
+		t.Fatalf("secret state = %+v", payload.Secret)
+	}
+	if payload.NormalizedConfig.APIType != "chat_completions" || payload.NormalizedConfig.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("normalized config = %+v", payload.NormalizedConfig)
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		t.Fatalf("ListChannelConfigs() error = %v", err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("validate persisted channels: %#v", channels)
+	}
+}
+
+func TestProviderSetupApplyPersistsNormalizedProvider(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"openai-primary",
+		"name":"OpenAI Primary",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_key":"sk-apply-secret",
+		"enabled":true,
+		"priority":100,
+		"weight":1,
+		"capacity_hint":1,
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-apply-secret") {
+		t.Fatalf("setup apply response leaked api key: %s", rr.Body.String())
+	}
+	var payload providerSetupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if !payload.Applied || payload.Channel == nil {
+		t.Fatalf("setup apply did not return applied channel: %+v", payload)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record suggestions = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	if string(record.APIKeyCiphertext) != "sk-apply-secret" || record.APIKeyHint == "" {
+		t.Fatalf("record api key state = %q/%q", string(record.APIKeyCiphertext), record.APIKeyHint)
+	}
+}
+
+func TestProviderSetupSuggestionsDoNotOverrideExplicitFields(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"explicit-provider",
+		"name":"Explicit Provider",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"custom",
+		"api_type":"messages",
+		"protocol_family":"anthropic_messages",
+		"capabilities":{"chat_completions":false},
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	record, err := st.GetChannelConfig("explicit-provider")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "messages" || record.ProtocolFamily != "anthropic_messages" {
+		t.Fatalf("explicit fields were overwritten: %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	var capabilities config.UpstreamCapabilitiesConfig
+	if err := json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities); err != nil {
+		t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+	}
+	if capabilities.ChatCompletions == nil || *capabilities.ChatCompletions {
+		t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+	}
+	if capabilities.Models == nil || !*capabilities.Models {
+		t.Fatalf("models capability was not merged: %#v", capabilities.Models)
+	}
+}
+
 func TestProviderProbeReportAPIUsesChannelsReadOnly(t *testing.T) {
 	t.Parallel()
 

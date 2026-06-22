@@ -930,6 +930,27 @@ type providerProbeRequest struct {
 	ProtocolFamily string            `json:"protocol_family"`
 }
 
+type providerSetupRequest struct {
+	channelUpsertRequest
+}
+
+type providerSetupResponse struct {
+	Status           string                `json:"status"`
+	Applied          bool                  `json:"applied"`
+	NormalizedConfig channelItem           `json:"normalized_config"`
+	Secret           providerSetupSecret   `json:"secret"`
+	Probe            *providerprobe.Report `json:"probe,omitempty"`
+	Channel          *channelItem          `json:"channel,omitempty"`
+	Warnings         []string              `json:"warnings,omitempty"`
+}
+
+type providerSetupSecret struct {
+	APIKeySet          bool   `json:"api_key_set"`
+	APIKeyHint         string `json:"api_key_hint,omitempty"`
+	SecretStorageMode  string `json:"secret_storage_mode,omitempty"`
+	RedactionGuarantee string `json:"redaction_guarantee"`
+}
+
 type providerProbeReportRequest struct {
 	ChannelID string `json:"channel_id"`
 }
@@ -1099,6 +1120,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
@@ -1721,6 +1743,215 @@ func providerProbeAPIHandler() http.HandlerFunc {
 			status = http.StatusBadGateway
 		}
 		writeJSON(w, status, report)
+	}
+}
+
+func providerSetupAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		action := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/provider-setup/"), "/")
+		if action != "validate" && action != "apply" {
+			http.NotFound(w, r)
+			return
+		}
+		var req providerSetupRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider setup payload"})
+			return
+		}
+		resp, probeErr := buildProviderSetupResponse(r.Context(), req, st)
+		if action == "validate" {
+			status := http.StatusOK
+			if probeErr != nil {
+				status = http.StatusBadGateway
+			}
+			writeJSON(w, status, resp)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		record, err := st.UpsertChannelConfig(channelRecordFromRequest(providerSetupUpsertRequest(resp.NormalizedConfig, req.ChannelUpsertRequest), store.ChannelConfigRecord{}))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		svc := effectiveChannelService(st, channelService)
+		if err := reloadRouterFromChannels(rtr, svc); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+			return
+		}
+		item := channelItemFromRecord(st, record, 0, 0)
+		resp.Applied = true
+		resp.Channel = &item
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, st *store.Store) (providerSetupResponse, error) {
+	report, probeErr := providerprobe.Probe(ctx, providerprobe.ProbeTarget{
+		ProviderID:              strings.TrimSpace(valueOrExisting(req.ID, req.Name)),
+		BaseURL:                 strings.TrimSpace(req.BaseURL),
+		APIKey:                  strings.TrimSpace(req.APIKey),
+		Headers:                 setupPlainHeaders(req.Headers),
+		SpecifiedAPIType:        strings.TrimSpace(req.APIType),
+		SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+	}, nil)
+	normalizedReq := mergeProviderSetupSuggestions(req.ChannelUpsertRequest, report)
+	record := channelRecordFromRequest(normalizedReq, store.ChannelConfigRecord{})
+	normalized := channelItemFromSetupRecord(st, record, normalizedReq)
+	resp := providerSetupResponse{
+		Status:           report.Status,
+		NormalizedConfig: normalized,
+		Secret: providerSetupSecret{
+			APIKeySet:          strings.TrimSpace(req.APIKey) != "",
+			APIKeyHint:         secretHint(req.APIKey),
+			SecretStorageMode:  secretStorageMode(st),
+			RedactionGuarantee: "api_key is never echoed; secret headers are redacted",
+		},
+		Probe:    &report,
+		Warnings: append([]string(nil), report.Warnings...),
+	}
+	if resp.Status == "" {
+		resp.Status = "unknown"
+	}
+	return resp, probeErr
+}
+
+func mergeProviderSetupSuggestions(req channelUpsertRequest, report providerprobe.Report) channelUpsertRequest {
+	out := req
+	if out.Enabled == nil {
+		enabled := true
+		out.Enabled = &enabled
+	}
+	if strings.TrimSpace(out.APIType) == "" && strings.TrimSpace(report.SuggestedAPIType) != "" {
+		out.APIType = report.SuggestedAPIType
+	}
+	if strings.TrimSpace(out.ProtocolFamily) == "" && strings.TrimSpace(report.SuggestedProtocolFamily) != "" {
+		out.ProtocolFamily = report.SuggestedProtocolFamily
+	}
+	if out.Capabilities == nil {
+		out.Capabilities = &config.UpstreamCapabilitiesConfig{}
+	}
+	for _, capability := range report.Capabilities {
+		switch capability {
+		case upstream.CapabilityResponses:
+			setBoolIfNil(&out.Capabilities.Responses, true)
+		case upstream.CapabilityChatCompletions:
+			setBoolIfNil(&out.Capabilities.ChatCompletions, true)
+		case upstream.CapabilityToolCalling:
+			setBoolIfNil(&out.Capabilities.ToolCalling, true)
+		case upstream.CapabilityModels:
+			setBoolIfNil(&out.Capabilities.Models, true)
+		case upstream.CapabilityEmbeddings:
+			setBoolIfNil(&out.Capabilities.Embeddings, true)
+		case upstream.CapabilityTokenize:
+			setBoolIfNil(&out.Capabilities.Tokenize, true)
+		}
+	}
+	return out
+}
+
+func setBoolIfNil(target **bool, value bool) {
+	if target == nil || *target != nil {
+		return
+	}
+	next := value
+	*target = &next
+}
+
+func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecord, req channelUpsertRequest) channelItem {
+	headers := map[string]string{}
+	if strings.TrimSpace(record.HeadersJSON) != "" {
+		_ = json.Unmarshal([]byte(record.HeadersJSON), &headers)
+	}
+	capabilities := upstreamCapabilities{}
+	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
+		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
+	}
+	return channelItem{
+		ID:                 record.ID,
+		Name:               record.Name,
+		Description:        record.Description,
+		Source:             record.Source,
+		BaseURL:            record.BaseURL,
+		ProviderPreset:     record.ProviderPreset,
+		APIType:            record.APIType,
+		Mode:               record.Mode,
+		Capabilities:       capabilities,
+		ProtocolFamily:     record.ProtocolFamily,
+		RoutingProfile:     record.RoutingProfile,
+		APIVersion:         record.APIVersion,
+		Deployment:         record.Deployment,
+		Project:            record.Project,
+		Location:           record.Location,
+		ModelResource:      record.ModelResource,
+		APIKeyHint:         secretHint(req.APIKey),
+		SecretStorageMode:  secretStorageMode(st),
+		Headers:            redactHeaders(headers),
+		Enabled:            record.Enabled,
+		Priority:           record.Priority,
+		Weight:             record.Weight,
+		CapacityHint:       record.CapacityHint,
+		ModelDiscovery:     record.ModelDiscovery,
+		AllowUnknownModels: record.AllowUnknownModels,
+	}
+}
+
+func secretStorageMode(st *store.Store) string {
+	if st == nil {
+		return ""
+	}
+	return st.SecretStorageMode()
+}
+
+func setupPlainHeaders(headers map[string]channelHeaderUpdate) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, update := range headers {
+		if update.Delete || update.Keep {
+			continue
+		}
+		name := strings.TrimSpace(key)
+		if name == "" {
+			continue
+		}
+		out[name] = update.Value
+	}
+	return out
+}
+
+func providerSetupUpsertRequest(normalized channelItem, original channelUpsertRequest) channelUpsertRequest {
+	return channelUpsertRequest{
+		ID:                 normalized.ID,
+		Name:               normalized.Name,
+		Description:        normalized.Description,
+		BaseURL:            normalized.BaseURL,
+		ProviderPreset:     normalized.ProviderPreset,
+		APIType:            normalized.APIType,
+		Mode:               normalized.Mode,
+		Capabilities:       &normalized.Capabilities,
+		ProtocolFamily:     normalized.ProtocolFamily,
+		RoutingProfile:     normalized.RoutingProfile,
+		APIVersion:         normalized.APIVersion,
+		Deployment:         normalized.Deployment,
+		Project:            normalized.Project,
+		Location:           normalized.Location,
+		ModelResource:      normalized.ModelResource,
+		APIKey:             original.APIKey,
+		Headers:            original.Headers,
+		Enabled:            &normalized.Enabled,
+		Priority:           &normalized.Priority,
+		Weight:             &normalized.Weight,
+		CapacityHint:       &normalized.CapacityHint,
+		ModelDiscovery:     normalized.ModelDiscovery,
+		AllowUnknownModels: &normalized.AllowUnknownModels,
 	}
 }
 

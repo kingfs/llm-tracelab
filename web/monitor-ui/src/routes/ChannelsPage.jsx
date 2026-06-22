@@ -135,7 +135,9 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [validating, setValidating] = useState(false);
   const [probeReport, setProbeReport] = useState(null);
+  const [setupResult, setSetupResult] = useState(null);
   const [error, setError] = useState("");
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
   const updateForm = (key, value) => {
@@ -163,13 +165,41 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
       ...providerProbeSuggestionPayload(current, probeReport),
     }));
   };
+  const applySetupConfig = (normalized = {}) => {
+    setForm((current) => ({
+      ...current,
+      ...providerConfigFormPatch(normalized),
+      api_key: current.api_key,
+    }));
+  };
+  const validateSetup = async () => {
+    setValidating(true);
+    setError("");
+    try {
+      const result = await postJSON(apiPaths.providerSetupValidate, normalizeProviderPayload(form));
+      setSetupResult(result);
+      setProbeReport(result.probe || null);
+      applySetupConfig(result.normalized_config);
+      setAdvancedOpen(true);
+    } catch (err) {
+      if (err.payload?.normalized_config) {
+        setSetupResult(err.payload);
+        setProbeReport(err.payload.probe || null);
+        applySetupConfig(err.payload.normalized_config);
+        setAdvancedOpen(true);
+      }
+      setError(err.message || "Unable to validate provider setup.");
+    } finally {
+      setValidating(false);
+    }
+  };
 
   const submit = async (event) => {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await postJSON(apiPaths.providers, normalizeProviderPayload(form));
+      await postJSON(apiPaths.providerSetupApply, normalizeProviderPayload(form));
       onCreated();
     } catch (err) {
       setError(err.message || "Unable to save provider.");
@@ -197,9 +227,11 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         </div>
         <div className="provider-form-actions">
           <button className="ghost-button" type="button" onClick={detectProvider} disabled={detecting || !form.base_url.trim()}>{detecting ? "Detecting" : "Detect provider"}</button>
+          <button className="ghost-button active" type="button" onClick={validateSetup} disabled={validating || !form.base_url.trim()}>{validating ? "Validating" : "Validate & apply suggestions"}</button>
           <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
         </div>
         {probeReport ? <ProviderProbeSuggestionPanel report={probeReport} onApply={applyProbeSuggestions} /> : null}
+        {setupResult?.secret?.api_key_hint ? <p className="trace-subline">API key {setupResult.secret.api_key_hint}</p> : null}
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
@@ -208,7 +240,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         {error ? <p className="auth-error">{error}</p> : null}
         <div className="nav-modal-actions">
           <button className="ghost-button" type="button" onClick={onClose}>Cancel</button>
-          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Create provider"}</button>
+          <button className="ghost-button active" type="submit" disabled={saving}>{saving ? "Saving" : "Save provider"}</button>
         </div>
       </form>
     </div>,
@@ -545,6 +577,36 @@ function normalizeProviderPayload(form) {
     capacity_hint: Number(form.capacity_hint || 1),
     capabilities: normalizeCapabilities(form.capabilities),
   };
+}
+
+function providerConfigFormPatch(config = {}) {
+  const patch = {};
+  for (const key of [
+    "name",
+    "base_url",
+    "provider_preset",
+    "api_type",
+    "mode",
+    "capabilities",
+    "protocol_family",
+    "routing_profile",
+    "api_version",
+    "deployment",
+    "project",
+    "location",
+    "model_resource",
+    "enabled",
+    "priority",
+    "weight",
+    "capacity_hint",
+    "model_discovery",
+    "allow_unknown_models",
+  ]) {
+    if (config[key] !== undefined && config[key] !== null) {
+      patch[key] = config[key];
+    }
+  }
+  return patch;
 }
 
 function providerProbePreviewPayload(form) {
