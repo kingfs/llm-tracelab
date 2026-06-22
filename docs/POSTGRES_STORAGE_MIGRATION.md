@@ -39,6 +39,11 @@ claim that Postgres persistence is fully production mature today.
   `ent/postgres-migrations` through `internal/appdbmigrate` and
   `golang-migrate`; SQLite `db migrate up` continues to use the existing store
   schema initialization path.
+- `internal/store` has an initial Postgres raw SQL compatibility pass:
+  store-owned `?` placeholders are rebound to `$n` for Postgres, transaction
+  helpers use the same rebind path, `logs.is_stream` can round-trip as a
+  Postgres boolean, and the migrated `logs` path is covered by a
+  `LLM_TRACELAB_TEST_POSTGRES_DSN` integration test.
 - `db migrate down` is intentionally unsupported outside `--dry-run`; ent auto
   migration does not provide a safe rollback plan.
 - The Responses runtime has ent-backed persistence for `responses` and
@@ -143,7 +148,10 @@ The production route should be additive and reviewable:
    remains.
 6. Audit raw SQL in `internal/store` for placeholder syntax, SQLite functions,
    partial index behavior, time encoding, and transaction assumptions before
-   declaring Postgres runtime support complete.
+   declaring Postgres runtime support complete. The first pass covers
+   placeholder rebinding and the migrated `logs` path; deeper analytics,
+   observation, findings, analysis, and eval paths still need table coverage
+   and real Postgres tests.
 7. Define a separate SQLite-to-Postgres data migration/export plan for existing
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
@@ -165,6 +173,12 @@ Stage 16C separates application store opening from schema creation:
 serve/top-level migrate/analyze/db command paths run the explicit application
 migrator only when `database.auto_migrate` is enabled before reopening the
 store with `AutoMigrate:false`.
+
+Stage 16D adds the first runtime SQL compatibility pass: store raw SQL can
+rebind positional placeholders for Postgres, transaction helpers share the same
+path, and `logs.is_stream` supports Postgres boolean round trips. This is not
+complete runtime parity because several SQLite raw DDL tables are not yet part
+of the Postgres migration set.
 
 SQLite compatibility:
 
@@ -217,8 +231,14 @@ been committed or applied in a shared environment.
   schema creation when `database.auto_migrate` is enabled for Postgres.
 - SQLite application migrations still use schema initialization rather than
   explicit versioned files.
+- The initial Postgres application migration is ent-derived and does not yet
+  cover every SQLite raw DDL table used by `internal/store`, such as
+  `analysis_runs`, `analysis_jobs`, parse/observation/finding helper tables,
+  and some eval/operational tables. Those paths must be promoted into ent
+  schema or explicit Postgres migrations before claiming full runtime parity.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.
-- Existing raw SQL paths may still contain SQLite-specific assumptions.
+- Existing raw SQL paths may still contain SQLite-specific assumptions beyond
+  placeholder rebinding.
 - There is no automatic SQLite-to-Postgres data migration.

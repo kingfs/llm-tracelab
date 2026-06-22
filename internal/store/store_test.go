@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
@@ -203,6 +204,47 @@ func TestRebindPostgresPlaceholders(t *testing.T) {
 				t.Fatalf("rebindPostgresPlaceholders() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	defer st.Close()
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	recordPath := filepath.Join(dir, suffix+".http")
+	if err := os.WriteFile(recordPath, []byte("# smoke\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(record) error = %v", err)
+	}
+	requestID := "req_" + suffix
+	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+	header.Meta.RequestID = requestID
+	header.Meta.Time = time.Now().UTC()
+	header.Meta.URL = "https://api.openai.com/v1/chat/completions"
+	header.Meta.Method = http.MethodPost
+	header.Meta.StatusCode = http.StatusOK
+	header.Layout.IsStream = true
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(postgres) error = %v", err)
+	}
+	got, err := st.GetByRequestID(requestID)
+	if err != nil {
+		t.Fatalf("GetByRequestID(postgres) error = %v", err)
+	}
+	if got.LogPath != recordPath || !got.Header.Layout.IsStream {
+		t.Fatalf("postgres log round trip mismatch: path=%q stream=%v", got.LogPath, got.Header.Layout.IsStream)
 	}
 }
 
