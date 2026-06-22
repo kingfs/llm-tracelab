@@ -181,10 +181,15 @@ type ResponsesFunctionRedactionConfig struct {
 }
 
 type ResponsesFunctionExecutorBinding struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
-	Enabled *bool  `yaml:"enabled"`
-	Output  any    `yaml:"output"`
+	Name         string            `yaml:"name"`
+	Type         string            `yaml:"type"`
+	Enabled      *bool             `yaml:"enabled"`
+	Output       any               `yaml:"output"`
+	Command      string            `yaml:"command"`
+	Args         []string          `yaml:"args"`
+	Timeout      time.Duration     `yaml:"timeout"`
+	Env          map[string]string `yaml:"env"`
+	EnvAllowlist []string          `yaml:"env_allowlist"`
 }
 
 type ToolsConfig struct {
@@ -801,6 +806,10 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 	for _, binding := range cfg.Executors {
 		binding.Name = strings.TrimSpace(binding.Name)
 		binding.Type = strings.ToLower(strings.TrimSpace(binding.Type))
+		binding.Command = strings.TrimSpace(binding.Command)
+		for i := range binding.EnvAllowlist {
+			binding.EnvAllowlist[i] = strings.TrimSpace(binding.EnvAllowlist[i])
+		}
 		bindings = append(bindings, binding)
 	}
 	cfg.Executors = bindings

@@ -1161,7 +1161,7 @@ func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExe
 			Arguments: cfg.Redaction.Arguments,
 			Output:    cfg.Redaction.Output,
 		},
-		SupportedTypes: []string{"static_response"},
+		SupportedTypes: []string{"static_response", "external_command"},
 		Executors:      make([]responsesFunctionExecutorBindingView, 0, len(cfg.Executors)),
 	}
 	for _, binding := range cfg.Executors {

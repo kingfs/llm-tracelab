@@ -445,6 +445,14 @@ responses_server:
         type: "static_response"
         enabled: false
         output: "off"
+      - name: "run_lookup"
+        type: "external_command"
+        command: " /bin/echo "
+        args: ["ok"]
+        timeout: 1s
+        env:
+          STATIC_VALUE: "static"
+        env_allowlist: [" PATH "]
   model_profiles:
     - name: "qwen3"
       context_window_tokens: 32768
@@ -494,14 +502,17 @@ responses_server:
 	if !executors.Enabled || executors.Timeout != 2*time.Second || executors.MaxResultBytes != 128 || !executors.Redaction.Arguments || !executors.Redaction.Output {
 		t.Fatalf("function executors policy = %+v, want enabled 2s 128 redacted", executors)
 	}
-	if len(executors.Executors) != 2 {
-		t.Fatalf("function executors len = %d, want 2", len(executors.Executors))
+	if len(executors.Executors) != 3 {
+		t.Fatalf("function executors len = %d, want 3", len(executors.Executors))
 	}
 	if got := executors.Executors[0]; got.Name != "lookup" || got.Type != "static_response" {
 		t.Fatalf("first function executor = %+v", got)
 	}
 	if got := executors.Executors[1]; got.Name != "disabled_lookup" || got.Enabled == nil || *got.Enabled {
 		t.Fatalf("second function executor = %+v", got)
+	}
+	if got := executors.Executors[2]; got.Name != "run_lookup" || got.Type != "external_command" || got.Command != "/bin/echo" || got.Timeout != time.Second || len(got.Args) != 1 || got.Args[0] != "ok" || got.Env["STATIC_VALUE"] != "static" || len(got.EnvAllowlist) != 1 || got.EnvAllowlist[0] != "PATH" {
+		t.Fatalf("third function executor = %+v", got)
 	}
 }
 

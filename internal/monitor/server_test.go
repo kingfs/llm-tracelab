@@ -190,8 +190,8 @@ func TestResponsesFunctionExecutorsAPIHandlerDefaultDisabled(t *testing.T) {
 	if payload.Timeout != "5s" || payload.MaxResultBytes != 64<<10 {
 		t.Fatalf("defaults = timeout %q max %d, want 5s and %d", payload.Timeout, payload.MaxResultBytes, 64<<10)
 	}
-	if got := strings.Join(payload.SupportedTypes, ","); got != "static_response" {
-		t.Fatalf("supported_types = %q, want static_response", got)
+	if got := strings.Join(payload.SupportedTypes, ","); got != "static_response,external_command" {
+		t.Fatalf("supported_types = %q, want static_response,external_command", got)
 	}
 	if len(payload.Executors) != 0 || len(payload.Warnings) != 0 {
 		t.Fatalf("executors/warnings = %+v/%+v, want empty", payload.Executors, payload.Warnings)

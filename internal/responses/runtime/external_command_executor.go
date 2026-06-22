@@ -1,0 +1,154 @@
+package runtime
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+const defaultExternalCommandCaptureBytes = 64 << 10
+
+type ExternalCommandFunctionToolExecutor struct {
+	Command        string
+	Args           []string
+	Env            map[string]string
+	EnvAllowlist   []string
+	Timeout        time.Duration
+	MaxStdoutBytes int
+	MaxStderrBytes int
+}
+
+type externalCommandFunctionToolInput struct {
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+func (e ExternalCommandFunctionToolExecutor) ExecuteFunctionTool(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+	if strings.TrimSpace(e.Command) == "" {
+		return FunctionToolResult{}, fmt.Errorf("external command function executor command is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return FunctionToolResult{}, err
+	}
+	execCtx := ctx
+	cancel := func() {}
+	if e.Timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, e.Timeout)
+	}
+	defer cancel()
+
+	input, err := json.Marshal(externalCommandFunctionToolInput{
+		CallID:    call.CallID,
+		Name:      call.Name,
+		Arguments: call.Arguments,
+	})
+	if err != nil {
+		return FunctionToolResult{}, fmt.Errorf("marshal external command function input: %w", err)
+	}
+	input = append(input, '\n')
+
+	cmd := exec.CommandContext(execCtx, e.Command, e.Args...)
+	cmd.Env = e.commandEnv()
+	cmd.Stdin = bytes.NewReader(input)
+
+	stdout := newLimitedCapture(e.stdoutLimit())
+	stderr := newLimitedCapture(e.stderrLimit())
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err = cmd.Run()
+	if execCtx.Err() != nil {
+		return FunctionToolResult{}, execCtx.Err()
+	}
+	if err != nil {
+		return FunctionToolResult{}, externalCommandError(err, stderr.String())
+	}
+	return FunctionToolResult{Output: stdout.String()}, nil
+}
+
+func (e ExternalCommandFunctionToolExecutor) stdoutLimit() int {
+	if e.MaxStdoutBytes > 0 {
+		return e.MaxStdoutBytes
+	}
+	return defaultExternalCommandCaptureBytes
+}
+
+func (e ExternalCommandFunctionToolExecutor) stderrLimit() int {
+	if e.MaxStderrBytes > 0 {
+		return e.MaxStderrBytes
+	}
+	return defaultExternalCommandCaptureBytes
+}
+
+func (e ExternalCommandFunctionToolExecutor) commandEnv() []string {
+	env := make([]string, 0, len(e.Env)+len(e.EnvAllowlist))
+	for _, key := range e.EnvAllowlist {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if value, ok := os.LookupEnv(key); ok {
+			env = append(env, key+"="+value)
+		}
+	}
+	for key, value := range e.Env {
+		key = strings.TrimSpace(key)
+		if key == "" || strings.Contains(key, "=") {
+			continue
+		}
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+func externalCommandError(err error, stderr string) error {
+	summary := strings.TrimSpace(stderr)
+	if summary == "" {
+		return fmt.Errorf("external command function executor failed: %w", err)
+	}
+	return fmt.Errorf("external command function executor failed: %w: stderr: %s", err, summary)
+}
+
+type limitedCapture struct {
+	buf       bytes.Buffer
+	limit     int
+	total     int
+	truncated bool
+}
+
+func newLimitedCapture(limit int) *limitedCapture {
+	if limit < 0 {
+		limit = 0
+	}
+	return &limitedCapture{limit: limit}
+}
+
+func (c *limitedCapture) Write(p []byte) (int, error) {
+	c.total += len(p)
+	remaining := c.limit - c.buf.Len()
+	if remaining > 0 {
+		if len(p) <= remaining {
+			_, _ = c.buf.Write(p)
+		} else {
+			_, _ = c.buf.Write(p[:remaining])
+			c.truncated = true
+		}
+	} else if len(p) > 0 {
+		c.truncated = true
+	}
+	return len(p), nil
+}
+
+func (c *limitedCapture) String() string {
+	out := c.buf.String()
+	if c.truncated {
+		out += fmt.Sprintf("\n<truncated: captured %d of %d bytes>", c.buf.Len(), c.total)
+	}
+	return out
+}

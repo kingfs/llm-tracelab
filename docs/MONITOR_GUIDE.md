@@ -118,11 +118,11 @@ Monitor 使用两类数据：
 
 - `enabled`、`timeout`、`max_result_bytes`。
 - `redaction.arguments`、`redaction.output`。
-- `supported_types`，当前为 `["static_response"]`。
+- `supported_types`，当前为 `["static_response", "external_command"]`。
 - `executors[]` 中的 `name`、`type`、`enabled`、`output_configured`。
 - `warnings`，例如开启 executor 但未配置任何 binding。
 
-该 API 不返回 `static_response` 的 output 内容；当前 UI 只展示只读状态，不提供写配置能力。
+该 API 不返回 `static_response` 的 output 内容；当前 UI 只展示只读状态，不提供写配置能力。`external_command` 必须通过 YAML 显式配置，运行时不使用 shell，默认不继承环境变量，tool call 输入通过 stdin JSON 传入命令。
 
 ### Events
 
