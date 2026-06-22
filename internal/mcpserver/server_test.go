@@ -160,6 +160,51 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByRequestID(req-credential-failure) error = %v", err)
 	}
+	auditTime := time.Date(2026, 4, 21, 8, 2, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-mcp-1").
+		SetResponseID("resp-mcp-1").
+		SetConversationID("thread-mcp-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetClientRequestID("client-mcp-1").
+		SetHeaderJSON(map[string]any{"content-type": "application/json"}).
+		SetBodyPreview(`{"model":"gpt-5.1-codex","input":"audit"}`).
+		SetBodySha256("sha256-mcp").
+		SetStatus("completed").
+		SetCreatedAt(auditTime).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit error = %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex-mcp-1").
+		SetResponseID("resp-mcp-1").
+		SetRequestAuditID("reqaudit-mcp-1").
+		SetTraceID(credentialEntry.ID).
+		SetCassettePath(credentialEntry.LogPath).
+		SetUpstreamID("openai-primary").
+		SetRouteTarget("openai-primary:cred-a").
+		SetModel("gpt-5.1-codex").
+		SetEndpoint("/v1/responses").
+		SetStatusCode(http.StatusOK).
+		SetStartedAt(auditTime.Add(10 * time.Millisecond)).
+		SetCompletedAt(auditTime.Add(120 * time.Millisecond)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange error = %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("exev-mcp-1").
+		SetResponseID("resp-mcp-1").
+		SetConversationID("thread-mcp-1").
+		SetEventType("response.request").
+		SetPhase("request").
+		SetStatus("completed").
+		SetMessage("request completed").
+		SetDetailsJSON(map[string]any{"request_audit_id": "reqaudit-mcp-1"}).
+		SetOccurredAt(auditTime.Add(130 * time.Millisecond)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create execution event error = %v", err)
+	}
 	if err := st.SaveFindings(failureEntry.ID, []observe.Finding{{
 		ID:              "finding-danger",
 		TraceID:         failureEntry.ID,
@@ -223,8 +268,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 19 {
-		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
+	if len(tools.Tools) != 20 {
+		t.Fatalf("len(tools.Tools) = %d, want 20", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -330,6 +375,48 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := credentialRoutingPayload["selected_credential_id"].(string); got != "cred-a" {
 		t.Fatalf("credential selected_credential_id = %q, want cred-a", got)
+	}
+
+	responsesAudit, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "responses_audit_trace",
+		Arguments: map[string]any{"response_id": "resp-mcp-1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_trace response_id) error = %v", err)
+	}
+	auditPayload := responsesAudit.StructuredContent.(map[string]any)
+	requestAudit := auditPayload["request_audit"].(map[string]any)
+	if got := requestAudit["id"].(string); got != "reqaudit-mcp-1" {
+		t.Fatalf("responses_audit_trace request audit id = %q, want reqaudit-mcp-1", got)
+	}
+	if got := requestAudit["client_request_id"].(string); got != "client-mcp-1" {
+		t.Fatalf("responses_audit_trace client_request_id = %q, want client-mcp-1", got)
+	}
+	auditEvents := auditPayload["events"].([]any)
+	if len(auditEvents) != 1 {
+		t.Fatalf("len(responses_audit_trace.events) = %d, want 1", len(auditEvents))
+	}
+	if got := auditEvents[0].(map[string]any)["status"].(string); got != "completed" {
+		t.Fatalf("responses_audit_trace event status = %q, want completed", got)
+	}
+	auditExchanges := auditPayload["upstream_exchanges"].([]any)
+	if len(auditExchanges) != 1 {
+		t.Fatalf("len(responses_audit_trace.upstream_exchanges) = %d, want 1", len(auditExchanges))
+	}
+	if got := auditExchanges[0].(map[string]any)["trace_id"].(string); got != credentialEntry.ID {
+		t.Fatalf("responses_audit_trace exchange trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+
+	responsesAuditByRequest, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "responses_audit_trace",
+		Arguments: map[string]any{"request_audit_id": "reqaudit-mcp-1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_trace request_audit_id) error = %v", err)
+	}
+	requestQuery := responsesAuditByRequest.StructuredContent.(map[string]any)["query"].(map[string]any)
+	if got := requestQuery["response_id"].(string); got != "resp-mcp-1" {
+		t.Fatalf("responses_audit_trace request lookup response_id = %q, want resp-mcp-1", got)
 	}
 
 	stickyRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{

@@ -128,6 +128,11 @@ type queryUnreadSystemEventsInput struct {
 	MinSeverity string `json:"min_severity,omitempty" jsonschema:"minimum severity: info, warning, error, or critical"`
 }
 
+type responsesAuditTraceInput struct {
+	ResponseID     string `json:"response_id,omitempty" jsonschema:"Responses API response id"`
+	RequestAuditID string `json:"request_audit_id,omitempty" jsonschema:"Responses request audit id"`
+}
+
 type reanalyzeTraceInput struct {
 	TraceID     string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
 	RepairUsage bool   `json:"repair_usage,omitempty" jsonschema:"repair indexed usage before reparse/scan"`
@@ -386,6 +391,10 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "query_unread_system_events",
 		Description: "Return unread warning/error/critical TraceLab system events ordered by severity and recency.",
 	}, api.queryUnreadSystemEvents)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "responses_audit_trace",
+		Description: "Return Responses request audit, execution events, and upstream exchange summaries by response_id or request_audit_id.",
+	}, api.responsesAuditTrace)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "reanalyze_trace",
 		Description: "Run or enqueue controlled reanalysis for one trace.",
