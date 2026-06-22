@@ -90,7 +90,8 @@ Codex/OpenAI SDK 可能在普通请求中携带 `{"type":"web_search"}` 或
   server-side web search。
 - 强制 `tool_choice` 为 `web_search` / `web_search_preview` 但 provider 不可用时，
   当前 runtime 返回 OpenAI-style error envelope，message 中包含
-  `unsupported hosted tool "web_search"`。
+  `unsupported hosted tool "web_search"`，并在可用 audit store 中写入
+  `tool_call_audits` rejected read model。
 
 Fixture:
 
@@ -106,7 +107,8 @@ runtime 尚未实现。当前首切合约是保守的：
   computer-use side effects。
 - 强制 `tool_choice` 为这些 hosted tool 时，runtime 返回稳定 OpenAI-style
   error envelope，`code` 为 `unsupported_tool`，message 中包含
-  `unsupported hosted tool "<tool>"`。
+  `unsupported hosted tool "<tool>"`，并写入不含 raw descriptor/payload 的
+  `tool_call_audits` rejected 记录。
 
 Fixture:
 
@@ -125,10 +127,10 @@ Fixture:
 | `function_call_output` continuation | 已支持 | 客户端 tool result 转内部 Chat `tool` message。 |
 | server-side function executor | 部分支持 | 默认 client-owned；YAML opt-in executor 才 server-owned。 |
 | ordinary `web_search` descriptor | 部分支持 | 可解析；provider 就绪时可执行 hosted search；未就绪时不应阻断普通 text path。 |
-| forced `web_search` with no provider | 已支持错误 | 返回 server error envelope，message 指出 unsupported hosted tool。 |
-| MCP hosted tool runtime | 稳定拒绝 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor；强制执行时返回 `unsupported_tool`。 |
-| file search hosted runtime | 稳定拒绝 | 无 vector store/retrieval/citation runtime；强制执行时返回 `unsupported_tool`。 |
-| code interpreter hosted runtime | 稳定拒绝 | 无 sandboxed code runtime；强制执行时返回 `unsupported_tool`。 |
+| forced `web_search` with no provider | 已支持错误和审计 | 返回 server error envelope，message 指出 unsupported hosted tool，并写 rejected tool_call audit。 |
+| MCP hosted tool runtime | 稳定拒绝并审计 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
+| file search hosted runtime | 稳定拒绝并审计 | 无 vector store/retrieval/citation runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
+| code interpreter hosted runtime | 稳定拒绝并审计 | 无 sandboxed code runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议。 |
 | Codex fixture runner | 部分支持 | `internal/responses/httpapi` 与 `internal/responses/runtime` 有 focused 离线 Go tests，覆盖 fixture schema/contract 和最小 runtime/parser 对齐；不是完整 Codex/e2e runner。 |
 

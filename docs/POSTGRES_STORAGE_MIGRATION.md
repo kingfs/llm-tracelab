@@ -32,8 +32,8 @@ claim that Postgres persistence is fully production mature today.
   `ent/schema/**`, including Responses state, audit/correlation tables, trace
   index tables, observation/finding tables, analysis tables, and system events.
   It also includes `tool_call_audits` for durable hosted tool lifecycle read
-  models; runtime web_search/function executor writes and CLI/Monitor/MCP
-  query surfaces are wired.
+  models; runtime web_search/function executor writes, unsupported hosted tool
+  rejected writes, and CLI/Monitor/MCP query surfaces are wired.
   `ent/migrate/main.go` is a dialect-aware generator: SQLite remains the
   default and writes to `ent/migrations`; Postgres requires an explicit Atlas
   dev URL and writes to `ent/postgres-migrations`.
@@ -258,10 +258,11 @@ fallback, covered by a minimal additive SQLite migration, and checked into
 table is available through `internal/responses/audit.RecordToolCallAudit` and
 `ListToolCallAudits`; runtime now writes hosted `web_search` and configured
 function executor started/completed/failed lifecycle into the table, and
+unsupported hosted tool choices write rejected records without raw payloads.
 `audit tool-calls`, Monitor `/api/responses/audit/tool-calls`, and MCP
 `responses_audit_tool_calls` expose query paths with payload summaries by
-default. Unsupported hosted tool rejection and future MCP/file/code/computer-use
-runtime lifecycle remain follow-up work.
+default. Future MCP/file/code/computer-use runtime execution lifecycle remains
+follow-up work.
 
 SQLite compatibility:
 
