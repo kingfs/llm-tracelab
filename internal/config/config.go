@@ -182,17 +182,23 @@ type ResponsesFunctionRedactionConfig struct {
 }
 
 type ResponsesFunctionExecutorBinding struct {
-	Name         string            `yaml:"name"`
-	Type         string            `yaml:"type"`
-	Enabled      *bool             `yaml:"enabled"`
-	Output       any               `yaml:"output"`
-	Command      string            `yaml:"command"`
-	Args         []string          `yaml:"args"`
-	Timeout      time.Duration     `yaml:"timeout"`
-	Env          map[string]string `yaml:"env"`
-	EnvAllowlist []string          `yaml:"env_allowlist"`
-	Available    bool              `yaml:"-" json:"-"`
-	Warnings     []string          `yaml:"-" json:"-"`
+	Name         string                                 `yaml:"name"`
+	Type         string                                 `yaml:"type"`
+	Enabled      *bool                                  `yaml:"enabled"`
+	Output       any                                    `yaml:"output"`
+	Command      string                                 `yaml:"command"`
+	Args         []string                               `yaml:"args"`
+	Timeout      time.Duration                          `yaml:"timeout"`
+	Env          map[string]string                      `yaml:"env"`
+	EnvAllowlist []string                               `yaml:"env_allowlist"`
+	Process      ResponsesFunctionExecutorProcessConfig `yaml:"process"`
+	Available    bool                                   `yaml:"-" json:"-"`
+	Warnings     []string                               `yaml:"-" json:"-"`
+}
+
+type ResponsesFunctionExecutorProcessConfig struct {
+	WorkingDir             string `yaml:"working_dir"`
+	RequireAbsoluteCommand bool   `yaml:"require_absolute_command"`
 }
 
 const (
@@ -825,6 +831,7 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 		binding.Name = strings.TrimSpace(binding.Name)
 		binding.Type = strings.ToLower(strings.TrimSpace(binding.Type))
 		binding.Command = strings.TrimSpace(binding.Command)
+		binding.Process.WorkingDir = strings.TrimSpace(binding.Process.WorkingDir)
 		binding.Available = false
 		binding.Warnings = nil
 		for i := range binding.EnvAllowlist {
@@ -850,6 +857,18 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 		case ResponsesFunctionExecutorTypeExternalCommand:
 			if binding.Command == "" {
 				binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command is required", binding.Name))
+			}
+			if binding.Process.WorkingDir != "" {
+				if !filepath.IsAbs(binding.Process.WorkingDir) {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.working_dir must be absolute", binding.Name))
+				} else if info, err := os.Stat(binding.Process.WorkingDir); err != nil {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.working_dir is not accessible: %v", binding.Name, err))
+				} else if !info.IsDir() {
+					binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q process.working_dir must be a directory", binding.Name))
+				}
+			}
+			if binding.Process.RequireAbsoluteCommand && binding.Command != "" && !filepath.IsAbs(binding.Command) {
+				binding.Warnings = append(binding.Warnings, fmt.Sprintf("external_command executor %q command must be absolute when process.require_absolute_command is true", binding.Name))
 			}
 			if len(binding.Warnings) == 0 && enabled {
 				binding.Available = true

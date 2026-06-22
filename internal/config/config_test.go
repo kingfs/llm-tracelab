@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -421,7 +422,8 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 }
 
 func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
-	path := writeTempConfig(t, `
+	workingDir := t.TempDir()
+	path := writeTempConfig(t, fmt.Sprintf(`
 responses_server:
   enabled: true
   default_model: "qwen3"
@@ -454,6 +456,9 @@ responses_server:
         env:
           STATIC_VALUE: "static"
         env_allowlist: [" PATH "]
+        process:
+          working_dir: %q
+          require_absolute_command: true
   model_profiles:
     - name: "qwen3"
       context_window_tokens: 32768
@@ -462,7 +467,7 @@ responses_server:
       upstream_model: "qwen/qwen3"
     - pattern: "gpt-4o*"
       compact_history_item_threshold: 6
-`)
+`, workingDir))
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -512,7 +517,7 @@ responses_server:
 	if got := executors.Executors[1]; got.Name != "disabled_lookup" || got.Enabled == nil || *got.Enabled {
 		t.Fatalf("second function executor = %+v", got)
 	}
-	if got := executors.Executors[2]; got.Name != "run_lookup" || got.Type != "external_command" || got.Command != "/bin/echo" || got.Timeout != time.Second || len(got.Args) != 1 || got.Args[0] != "ok" || got.Env["STATIC_VALUE"] != "static" || len(got.EnvAllowlist) != 1 || got.EnvAllowlist[0] != "PATH" {
+	if got := executors.Executors[2]; got.Name != "run_lookup" || got.Type != "external_command" || got.Command != "/bin/echo" || got.Timeout != time.Second || len(got.Args) != 1 || got.Args[0] != "ok" || got.Env["STATIC_VALUE"] != "static" || len(got.EnvAllowlist) != 1 || got.EnvAllowlist[0] != "PATH" || got.Process.WorkingDir != workingDir || !got.Process.RequireAbsoluteCommand {
 		t.Fatalf("third function executor = %+v", got)
 	}
 }
@@ -567,6 +572,43 @@ func TestResponsesFunctionExecutorsConfigWarnsWhenEnabledWithoutAvailableExecuto
 	}
 
 	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if got := strings.Join(executors.Warnings, " "); !strings.Contains(got, "no available executors") {
+		t.Fatalf("warnings = %q, want no available executors warning", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsConfigValidatesExternalCommandProcessIsolation(t *testing.T) {
+	cfg := Config{}
+	cfg.ResponsesServer.FunctionExecutors.Enabled = true
+	cfg.ResponsesServer.FunctionExecutors.Executors = []ResponsesFunctionExecutorBinding{
+		{
+			Name:    "relative_working_dir",
+			Type:    "external_command",
+			Command: "/bin/echo",
+			Process: ResponsesFunctionExecutorProcessConfig{
+				WorkingDir: "relative-dir",
+			},
+		},
+		{
+			Name:    "relative_command",
+			Type:    "external_command",
+			Command: "echo",
+			Process: ResponsesFunctionExecutorProcessConfig{
+				RequireAbsoluteCommand: true,
+			},
+		},
+	}
+
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if len(executors.Executors) != 2 {
+		t.Fatalf("len(executors) = %d, want 2", len(executors.Executors))
+	}
+	if got := executors.Executors[0]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "working_dir must be absolute") {
+		t.Fatalf("relative working dir executor = %+v, want unavailable working_dir warning", got)
+	}
+	if got := executors.Executors[1]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "command must be absolute") {
+		t.Fatalf("relative command executor = %+v, want unavailable absolute command warning", got)
+	}
 	if got := strings.Join(executors.Warnings, " "); !strings.Contains(got, "no available executors") {
 		t.Fatalf("warnings = %q, want no available executors warning", got)
 	}
