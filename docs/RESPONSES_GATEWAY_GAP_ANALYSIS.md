@@ -89,6 +89,14 @@
 - llm-tracelab 落点：`cmd/server/provider.go`、`cmd/server/provider_startup_probe.go`、`internal/providerprobe`、`internal/monitor`。
 - responses-gateway 对照：`cmd/responses-gateway/doctor.go` 只探测 vLLM `/models`，范围更窄。
 
+### Doctor 启动前诊断首切
+
+- 已吸收首切：`llm-tracelab doctor` 读取同一套配置，输出稳定 JSON envelope，`result` 包含 overall status、summary counts、redacted config summary 和 checks 列表。
+- 当前覆盖：`config.load`、`server.port`、monitor/MCP consistency、application database migration mode/report、Responses server backend validation、web_search provider config validation、provider config basic count、auth migration scope note。
+- 安全边界：默认离线，不做真实模型推理或 provider 网络请求；`--check-db` 才读取数据库 migration status；输出复用 DSN/URL 脱敏摘要，不输出 API key/header secret。
+- llm-tracelab 落点：`cmd/server/doctor.go`，复用 `appDBMigrationReport`、`router.ValidateLocalResponsesServerBackendConfig`、`websearch.NewProvider` 和 `config inspect` 的脱敏摘要。
+- 剩余缺口：`--probe-providers` 仍是首切占位提示，尚未接入受控的 provider probe；model profile context window drift、store backend 深度健康检查、HTTP guard/default model 诊断仍待补齐。
+
 ## 部分吸收能力
 
 ### Codex compatibility profile
@@ -134,11 +142,12 @@
 
 ## 仍缺能力
 
-### `doctor` 一站式启动前诊断
+### `doctor` 深度诊断
 
-- 缺口：llm-tracelab 没有等价 `doctor` 命令。
+- 已吸收首切：`llm-tracelab doctor` 覆盖离线启动前诊断、稳定 JSON envelope、`--check-db`、`--fail-on-warn`、`--fail-on-fail`。
+- 剩余缺口：provider 网络 probe 尚未真正执行；尚未检查 HTTP guard、默认模型可用性、model profile context window drift、store backend 深度健康、Codex profile 建议与 compact threshold drift。
 - responses-gateway 能力：读取同一套配置，输出稳定 JSON，检查 config、HTTP guard、默认模型、vLLM `/models`、model profile context window drift、store backend、web_search 配置。
-- llm-tracelab 建议落点：`cmd/server/doctor.go`，复用 `internal/providerprobe`、`internal/appdbmigrate.CheckStatus`、`internal/auth` status、`internal/responses/tools/websearch.NewProvider` 和 `responses_server` 配置校验。
+- llm-tracelab 后续落点：继续扩展 `cmd/server/doctor.go`，受控复用 `internal/providerprobe` 和更细的 responses/profile/store 诊断，但保持默认离线。
 
 ### `config inspect` 有效配置视图
 
@@ -176,10 +185,10 @@
 
 ## 建议下一阶段优先级
 
-1. 补 `doctor` 与 `config inspect`。
+1. 扩展 `doctor` 深度诊断与 `config inspect` 字段来源。
    - 价值：降低 server-mode/Postgres/web_search/Codex 接入排障成本。
-   - 模块：`cmd/server/doctor.go`、`cmd/server/config_inspect.go`、`internal/config`、`internal/providerprobe`。
-   - 验收：稳定 JSON envelope、默认脱敏、无真实模型推理、可选 `--fail-on-warn/--fail-on-fail`。
+   - 模块：`cmd/server/doctor.go`、`cmd/server/config.go`、`internal/config`、`internal/providerprobe`。
+   - 验收：在首切稳定 JSON envelope 基础上补 provider probe、profile/store/default-model 深度诊断；继续默认脱敏、无真实模型推理。
 
 2. 扩展 `audit query` CLI，并复用现有 QueryService。
    - 价值：把 Monitor/MCP 才能看的 Responses audit 变成 agent 可脚本化入口。
