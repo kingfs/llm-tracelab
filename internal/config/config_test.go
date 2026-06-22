@@ -338,6 +338,85 @@ limits:
 	}
 }
 
+func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
+	cfg := Config{}
+	if cfg.ResponsesServerEnabled() {
+		t.Fatalf("ResponsesServerEnabled() = true, want false")
+	}
+	if cfg.ResponsesDefaultModel() != "" {
+		t.Fatalf("ResponsesDefaultModel() = %q, want empty", cfg.ResponsesDefaultModel())
+	}
+	if cfg.ResponsesForceStore() {
+		t.Fatalf("ResponsesForceStore() = true, want false")
+	}
+	if got := cfg.ResponsesMaxRequestBodyBytes(); got != 16<<20 {
+		t.Fatalf("ResponsesMaxRequestBodyBytes() = %d, want %d", got, 16<<20)
+	}
+	if got := cfg.ResponsesServerPath(); got != "/v1/responses" {
+		t.Fatalf("ResponsesServerPath() = %q, want /v1/responses", got)
+	}
+}
+
+func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
+	path := writeTempConfig(t, `
+responses_server:
+  enabled: true
+  default_model: "qwen3"
+  force_store: true
+  max_request_body_bytes: 1048576
+  path: "/v1/responses"
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.ResponsesServerEnabled() {
+		t.Fatalf("ResponsesServerEnabled() = false, want true")
+	}
+	if got := cfg.ResponsesDefaultModel(); got != "qwen3" {
+		t.Fatalf("ResponsesDefaultModel() = %q, want qwen3", got)
+	}
+	if !cfg.ResponsesForceStore() {
+		t.Fatalf("ResponsesForceStore() = false, want true")
+	}
+	if got := cfg.ResponsesMaxRequestBodyBytes(); got != 1048576 {
+		t.Fatalf("ResponsesMaxRequestBodyBytes() = %d, want 1048576", got)
+	}
+	if got := cfg.ResponsesServerPath(); got != "/v1/responses" {
+		t.Fatalf("ResponsesServerPath() = %q, want /v1/responses", got)
+	}
+}
+
+func TestResponsesServerEnvOverrides(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_RESPONSES_ENABLED", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL", "env-model")
+	t.Setenv("LLM_TRACELAB_RESPONSES_FORCE_STORE", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES", "2097152")
+	t.Setenv("LLM_TRACELAB_RESPONSES_PATH", "/custom/responses")
+
+	cfg := Config{}
+	cfg.ResponsesServer.DefaultModel = "yaml-model"
+	cfg.ResponsesServer.MaxRequestBodyBytes = 1024
+	applyEnvOverrides(&cfg)
+
+	if !cfg.ResponsesServerEnabled() {
+		t.Fatalf("ResponsesServerEnabled() = false, want true")
+	}
+	if got := cfg.ResponsesDefaultModel(); got != "env-model" {
+		t.Fatalf("ResponsesDefaultModel() = %q, want env-model", got)
+	}
+	if !cfg.ResponsesForceStore() {
+		t.Fatalf("ResponsesForceStore() = false, want true")
+	}
+	if got := cfg.ResponsesMaxRequestBodyBytes(); got != 2097152 {
+		t.Fatalf("ResponsesMaxRequestBodyBytes() = %d, want 2097152", got)
+	}
+	if got := cfg.ResponsesServerPath(); got != "/custom/responses" {
+		t.Fatalf("ResponsesServerPath() = %q, want /custom/responses", got)
+	}
+}
+
 func TestLimitScopeDefaults(t *testing.T) {
 	if got := (LimitConfig{}).ScopeOrDefault(); got != "global" {
 		t.Fatalf("ScopeOrDefault() = %q, want global", got)

@@ -160,6 +160,53 @@ func TestRouterConfigFromChannelsFallsBackToYAML(t *testing.T) {
 	}
 }
 
+func TestResponsesServerConfigFromServeConfigDefaultsDisabled(t *testing.T) {
+	got := responsesServerConfigFromServeConfig(&config.Config{})
+
+	if got.Enabled {
+		t.Fatalf("Enabled = true, want false")
+	}
+	if got.DefaultModel != "" {
+		t.Fatalf("DefaultModel = %q, want empty", got.DefaultModel)
+	}
+	if got.ForceStore {
+		t.Fatalf("ForceStore = true, want false")
+	}
+	if got.MaxRequestBodyBytes != 16<<20 {
+		t.Fatalf("MaxRequestBodyBytes = %d, want %d", got.MaxRequestBodyBytes, 16<<20)
+	}
+	if got.Path != "/v1/responses" {
+		t.Fatalf("Path = %q, want /v1/responses", got.Path)
+	}
+}
+
+func TestResponsesServerConfigFromServeConfigCopiesEnabledValues(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.ResponsesServer.Enabled = true
+	cfg.ResponsesServer.DefaultModel = "qwen3"
+	cfg.ResponsesServer.ForceStore = true
+	cfg.ResponsesServer.MaxRequestBodyBytes = 1024
+	cfg.ResponsesServer.Path = "/custom/responses"
+
+	got := responsesServerConfigFromServeConfig(cfg)
+
+	if !got.Enabled {
+		t.Fatalf("Enabled = false, want true")
+	}
+	if got.DefaultModel != "qwen3" {
+		t.Fatalf("DefaultModel = %q, want qwen3", got.DefaultModel)
+	}
+	if !got.ForceStore {
+		t.Fatalf("ForceStore = false, want true")
+	}
+	if got.MaxRequestBodyBytes != 1024 {
+		t.Fatalf("MaxRequestBodyBytes = %d, want 1024", got.MaxRequestBodyBytes)
+	}
+	if got.Path != "/custom/responses" {
+		t.Fatalf("Path = %q, want /custom/responses", got.Path)
+	}
+}
+
 func TestRouterConfigFromChannelsKeepsYAMLWhenExplicitCredentialsExist(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {

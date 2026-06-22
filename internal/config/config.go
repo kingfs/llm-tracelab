@@ -50,6 +50,8 @@ type Config struct {
 
 	Limits LimitConfig `yaml:"limits"`
 
+	ResponsesServer ResponsesServerConfig `yaml:"responses_server"`
+
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
 		MaskKey   bool   `yaml:"mask_key"`
@@ -132,6 +134,14 @@ type LimitConfig struct {
 	MaxConcurrent    int    `yaml:"max_concurrent"`
 	MaxQueued        int    `yaml:"max_queued"`
 	ChannelKeyHeader string `yaml:"channel_key_header"`
+}
+
+type ResponsesServerConfig struct {
+	Enabled             bool   `yaml:"enabled"`
+	DefaultModel        string `yaml:"default_model"`
+	ForceStore          bool   `yaml:"force_store"`
+	MaxRequestBodyBytes int64  `yaml:"max_request_body_bytes"`
+	Path                string `yaml:"path"`
 }
 
 func (c LimitConfig) LocalConcurrencyEnabled() bool {
@@ -301,6 +311,27 @@ func applyEnvOverrides(cfg *Config) {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Debug.MaskKey = parsed
 		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_ENABLED"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.Enabled = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"); v != "" {
+		cfg.ResponsesServer.DefaultModel = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_FORCE_STORE"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.ForceStore = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cfg.ResponsesServer.MaxRequestBodyBytes = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_PATH"); v != "" {
+		cfg.ResponsesServer.Path = v
 	}
 }
 
@@ -572,4 +603,30 @@ func (c Config) DatabaseMaxIdleConns() int {
 		return c.Database.MaxIdleConns
 	}
 	return 4
+}
+
+func (c Config) ResponsesServerEnabled() bool {
+	return c.ResponsesServer.Enabled
+}
+
+func (c Config) ResponsesDefaultModel() string {
+	return strings.TrimSpace(c.ResponsesServer.DefaultModel)
+}
+
+func (c Config) ResponsesForceStore() bool {
+	return c.ResponsesServer.ForceStore
+}
+
+func (c Config) ResponsesMaxRequestBodyBytes() int64 {
+	if c.ResponsesServer.MaxRequestBodyBytes > 0 {
+		return c.ResponsesServer.MaxRequestBodyBytes
+	}
+	return 16 << 20
+}
+
+func (c Config) ResponsesServerPath() string {
+	if path := strings.TrimSpace(c.ResponsesServer.Path); path != "" {
+		return path
+	}
+	return "/v1/responses"
 }

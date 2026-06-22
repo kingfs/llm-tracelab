@@ -310,6 +310,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - Postgres semantic schema 和 migration。
 - request audit / execution events / upstream exchange 查询。
 - Monitor/MCP semantic diagnostics。
+- Stage 2C 先引入 `responses_server` 配置草案和未接线装配判断；默认 `enabled: false`，不改变现有 proxy 热路径。
 
 验收：
 

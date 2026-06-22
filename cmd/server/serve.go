@@ -243,6 +243,30 @@ func validateServeConfig(cfg *config.Config) error {
 	return nil
 }
 
+type responsesServerAssemblyConfig struct {
+	Enabled             bool
+	DefaultModel        string
+	ForceStore          bool
+	MaxRequestBodyBytes int64
+	Path                string
+}
+
+func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAssemblyConfig {
+	if cfg == nil {
+		return responsesServerAssemblyConfig{
+			MaxRequestBodyBytes: (config.Config{}).ResponsesMaxRequestBodyBytes(),
+			Path:                (config.Config{}).ResponsesServerPath(),
+		}
+	}
+	return responsesServerAssemblyConfig{
+		Enabled:             cfg.ResponsesServerEnabled(),
+		DefaultModel:        cfg.ResponsesDefaultModel(),
+		ForceStore:          cfg.ResponsesForceStore(),
+		MaxRequestBodyBytes: cfg.ResponsesMaxRequestBodyBytes(),
+		Path:                cfg.ResponsesServerPath(),
+	}
+}
+
 func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {
 	if configHasExplicitCredentials(cfg) {
 		return cfg, "yaml", nil
