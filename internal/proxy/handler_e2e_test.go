@@ -30,6 +30,46 @@ import (
 
 func boolPtr(v bool) *bool { return &v }
 
+func TestProxyExternalCommandExecutorHelper(t *testing.T) {
+	if os.Getenv("LLM_TRACELAB_PROXY_EXTERNAL_EXECUTOR_HELPER") != "1" {
+		return
+	}
+	args := os.Args
+	modeIndex := -1
+	for i, arg := range args {
+		if arg == "--" && i+1 < len(args) {
+			modeIndex = i + 1
+			break
+		}
+	}
+	if modeIndex < 0 {
+		fmt.Fprintln(os.Stderr, "missing mode")
+		os.Exit(2)
+	}
+	switch args[modeIndex] {
+	case "responses-e2e":
+		var input struct {
+			CallID    string `json:"call_id"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+		}
+		if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
+			fmt.Fprintf(os.Stderr, "decode stdin: %v", err)
+			os.Exit(2)
+		}
+		var arguments map[string]any
+		if err := json.Unmarshal([]byte(input.Arguments), &arguments); err != nil {
+			fmt.Fprintf(os.Stderr, "decode arguments: %v", err)
+			os.Exit(2)
+		}
+		q, _ := arguments["q"].(string)
+		fmt.Printf(`{"source":"external_command","call_id":%q,"name":%q,"q":%q}`, input.CallID, input.Name, q)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown mode %q", args[modeIndex])
+		os.Exit(2)
+	}
+}
+
 func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 	tests := []struct {
 		name                 string
@@ -1800,6 +1840,133 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 	}
 	if len(responsePayload.Output) != 2 || responsePayload.Output[0].Type != "function_call_output" {
 		t.Fatalf("response output = %#v, want function_call_output + final message", responsePayload.Output)
+	}
+}
+
+func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamCalls := 0
+	var secondChatBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var chatBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch upstreamCalls {
+		case 1:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_lookup","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_external_lookup","type":"function","function":{"name":"lookup_external","arguments":"{\"q\":\"codex\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`)
+		case 2:
+			secondChatBody = chatBody
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_final","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"External lookup completed."},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`)
+		default:
+			http.Error(w, "unexpected extra call", http.StatusInternalServerError)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
+				Enabled:        true,
+				Timeout:        time.Second,
+				MaxResultBytes: 512,
+				Executors: []config.ResponsesFunctionExecutorBinding{
+					{
+						Name:    "lookup_external",
+						Type:    "external_command",
+						Command: os.Args[0],
+						Args:    []string{"-test.run=TestProxyExternalCommandExecutorHelper", "--", "responses-e2e"},
+						Env:     map[string]string{"LLM_TRACELAB_PROXY_EXTERNAL_EXECUTOR_HELPER": "1"},
+					},
+				},
+			},
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"lookup","tools":[{"type":"function","name":"lookup_external","parameters":{"type":"object"}}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(body))
+	}
+	var responsePayload protocol.Response
+	if err := json.NewDecoder(resp.Body).Decode(&responsePayload); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if upstreamCalls != 2 {
+		t.Fatalf("upstreamCalls = %d, want 2", upstreamCalls)
+	}
+	messages, ok := secondChatBody["messages"].([]any)
+	if !ok || len(messages) < 3 {
+		t.Fatalf("second chat messages missing: %#v", secondChatBody)
+	}
+	toolMessage, ok := messages[len(messages)-1].(map[string]any)
+	if !ok || toolMessage["role"] != "tool" || toolMessage["tool_call_id"] != "call_external_lookup" {
+		t.Fatalf("tool message mismatch: %#v", messages[len(messages)-1])
+	}
+	content, _ := toolMessage["content"].(string)
+	for _, want := range []string{`"source":"external_command"`, `"call_id":"call_external_lookup"`, `"name":"lookup_external"`, `"q":"codex"`} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("tool message content = %q, want %s", content, want)
+		}
+	}
+	if len(responsePayload.Output) != 2 || responsePayload.Output[0].Type != "function_call_output" {
+		t.Fatalf("response output = %#v, want function_call_output + final message", responsePayload.Output)
+	}
+	output, _ := responsePayload.Output[0].Output.(string)
+	if !strings.Contains(output, `"source":"external_command"`) {
+		t.Fatalf("function_call_output output = %#v, want external command stdout", responsePayload.Output[0].Output)
+	}
+	if responsePayload.Output[1].Type != "message" || len(responsePayload.Output[1].Content) == 0 || responsePayload.Output[1].Content[0].Text != "External lookup completed." {
+		t.Fatalf("final response output = %#v, want final assistant message", responsePayload.Output[1])
 	}
 }
 
