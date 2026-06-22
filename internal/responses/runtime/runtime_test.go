@@ -650,6 +650,146 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	}
 }
 
+func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
+	client := &fakeChatClient{
+		streamEventBatches: [][]ChatStreamEvent{
+			{
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ID:             "call_search",
+					FunctionName:   "web_search",
+					ArgumentsDelta: `{"query"`,
+				}}},
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ArgumentsDelta: `:"llm trace replay"}`,
+				}}},
+			},
+			{
+				{ChoiceIndex: 0, ContentDelta: "Use "},
+				{ChoiceIndex: 0, ContentDelta: "cassettes."},
+			},
+		},
+		streamResps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_search",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "web_search",
+								Arguments: `{"query":"llm trace replay"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "Use cassettes."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16},
+			},
+		},
+	}
+	provider := &fakeWebSearchProvider{
+		result: websearch.Result{Results: []websearch.SearchResult{{
+			Title:   "TraceLab docs",
+			URL:     "https://example.test/docs",
+			Snippet: "Record and replay LLM API traffic.",
+		}}},
+	}
+	store := NewMemoryStore()
+	sink := &fakeResponseStreamSink{}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:        "fallback-model",
+		WebSearchEnabled:    true,
+		WebSearchMaxResults: 2,
+	}, client, store, WithWebSearchProvider(provider), WithExecutionEventRecorder(events))
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:      "search docs",
+		Stream:     true,
+		ToolChoice: "web_search",
+		Tools:      []protocol.Tool{{Type: "web_search_preview"}},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.streamReqs) != 2 {
+		t.Fatalf("stream requests = %d, want tool call + final call", len(client.streamReqs))
+	}
+	firstTools := client.streamReqs[0].Tools
+	if len(firstTools) != 1 || firstTools[0].Function.Name != "web_search" {
+		t.Fatalf("first stream tools = %#v, want web_search", firstTools)
+	}
+	if len(provider.queries) != 1 || provider.queries[0].Text != "llm trace replay" || provider.queries[0].MaxResults != 2 {
+		t.Fatalf("provider queries = %#v", provider.queries)
+	}
+	secondMessages := client.streamReqs[1].Messages
+	if len(secondMessages) != 3 {
+		t.Fatalf("second stream messages len = %d, want 3: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 1 || secondMessages[1].ToolCalls[0].Function.Name != "web_search" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_search" {
+		t.Fatalf("second tool message metadata mismatch: %#v", secondMessages[2])
+	}
+	toolContent, _ := secondMessages[2].Content.(string)
+	if !strings.Contains(toolContent, "TraceLab docs") || !strings.Contains(toolContent, "llm trace replay") {
+		t.Fatalf("second tool message content missing result: %q", toolContent)
+	}
+	if len(sink.functionDelta) != 2 || sink.functionDelta[1].Arguments != `{"query":"llm trace replay"}` {
+		t.Fatalf("function argument deltas = %#v", sink.functionDelta)
+	}
+	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_search" || sink.functionDone[0].Arguments != `{"query":"llm trace replay"}` {
+		t.Fatalf("function argument done = %#v", sink.functionDone)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
+		t.Fatalf("text deltas = %#v", sink.deltas)
+	}
+	if resp.Usage != (protocol.Usage{InputTokens: 22, OutputTokens: 7, TotalTokens: 29}) {
+		t.Fatalf("usage = %#v", resp.Usage)
+	}
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len = %d, want web_search_call + final message: %#v", len(resp.Output), resp.Output)
+	}
+	if resp.Output[0].Type != "web_search_call" || resp.Output[0].CallID != "call_search" {
+		t.Fatalf("first output = %#v", resp.Output[0])
+	}
+	if got := resp.Output[0].Action["query"]; got != "llm trace replay" {
+		t.Fatalf("web_search action query = %#v", got)
+	}
+	if resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Use cassettes." {
+		t.Fatalf("second output = %#v", resp.Output[1])
+	}
+	if len(events.events) != 3 {
+		t.Fatalf("execution events len = %d, want requested/started/completed: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "web_search" || events.events[0].DetailsJSON["call_id"] != "call_search" {
+		t.Fatalf("requested event mismatch: %#v", events.events[0])
+	}
+	if events.events[1].Status != "started" || events.events[1].DetailsJSON["tool_name"] != "web_search" || events.events[1].DetailsJSON["stream"] != true {
+		t.Fatalf("started event mismatch: %#v", events.events[1])
+	}
+	if events.events[2].Status != "completed" || events.events[2].DetailsJSON["tool_name"] != "web_search" || events.events[2].DetailsJSON["call_id"] != "call_search" || events.events[2].DetailsJSON["stream"] != true {
+		t.Fatalf("completed event mismatch: %#v", events.events[2])
+	}
+	stored, ok, err := store.Get(context.Background(), resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored response lookup ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(stored.Output, resp.Output) {
+		t.Fatalf("stored output mismatch\nwant: %#v\n got: %#v", resp.Output, stored.Output)
+	}
+}
+
 func TestRuntimeCompactStoresSummaryBoundaryForContinuation(t *testing.T) {
 	store := NewMemoryStore()
 	target := protocol.Response{

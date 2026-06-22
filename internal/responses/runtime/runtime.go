@@ -213,9 +213,6 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !ok {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
-	if !incrementalStreamSupportsTools(req.Tools) {
-		return protocol.Response{}, ErrIncrementalStreamUnsupported
-	}
 	if sink == nil {
 		return protocol.Response{}, fmt.Errorf("response stream sink is required")
 	}
@@ -236,6 +233,9 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
 	webSearchReady := r.webSearchReady()
+	if !incrementalStreamSupportsTools(req.Tools, webSearchReady) {
+		return protocol.Response{}, ErrIncrementalStreamUnsupported
+	}
 	if r.autoCompactDecision(req, budget, history, inputItems, webSearchReady).ShouldCompact {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
@@ -372,9 +372,17 @@ func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItem
 	return list, true, nil
 }
 
-func incrementalStreamSupportsTools(tools []protocol.Tool) bool {
+func incrementalStreamSupportsTools(tools []protocol.Tool, webSearchReady bool) bool {
 	for _, tool := range tools {
-		if tool.Type != "function" {
+		switch tool.Type {
+		case "function":
+			continue
+		case "web_search", "web_search_preview":
+			if webSearchReady {
+				continue
+			}
+			return false
+		default:
 			return false
 		}
 	}
