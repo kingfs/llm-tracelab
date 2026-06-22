@@ -574,10 +574,12 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	}
 	store := NewMemoryStore()
 	sink := &fakeResponseStreamSink{}
+	events := &fakeExecutionEventRecorder{}
 	rt := New(
 		Config{DefaultModel: "fallback-model"},
 		client,
 		store,
+		WithExecutionEventRecorder(events),
 		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}),
 	)
 
@@ -633,6 +635,18 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	}
 	if !reflect.DeepEqual(stored.Output, resp.Output) {
 		t.Fatalf("stored output mismatch\nwant: %#v\n got: %#v", resp.Output, stored.Output)
+	}
+	if len(events.events) != 3 {
+		t.Fatalf("execution events len = %d, want requested/started/completed: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "lookup" || events.events[0].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("requested event mismatch: %#v", events.events[0])
+	}
+	if events.events[1].Status != "started" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" || events.events[1].DetailsJSON["stream"] != true {
+		t.Fatalf("started event mismatch: %#v", events.events[1])
+	}
+	if events.events[2].Status != "completed" || events.events[2].DetailsJSON["tool_name"] != "lookup" || events.events[2].DetailsJSON["call_id"] != "call_lookup" || events.events[2].DetailsJSON["stream"] != true {
+		t.Fatalf("completed event mismatch: %#v", events.events[2])
 	}
 }
 

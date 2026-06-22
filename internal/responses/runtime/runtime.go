@@ -341,7 +341,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		}
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 		for _, call := range calls {
-			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations)
+			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{Stream: true})
 			if err != nil {
 				return protocol.Response{}, err
 			}
@@ -720,7 +720,7 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 
 		for _, call := range calls {
-			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations)
+			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{})
 			if err != nil {
 				return protocol.Response{}, err
 			}
@@ -734,18 +734,22 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 	}
 }
 
-func (r *Runtime) executeToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+type toolExecutionContext struct {
+	Stream bool
+}
+
+func (r *Runtime) executeToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
 	switch call.kind {
 	case executableToolKindWebSearch:
-		return r.executeWebSearchToolCall(ctx, call, iteration)
+		return r.executeWebSearchToolCall(ctx, call, iteration, exec)
 	case executableToolKindFunction:
-		return r.executeFunctionToolCall(ctx, call, iteration)
+		return r.executeFunctionToolCall(ctx, call, iteration, exec)
 	default:
 		return protocol.OutputItem{}, "", fmt.Errorf("unsupported executable tool kind %q", call.kind)
 	}
 }
 
-func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
 	eventDetails := map[string]any{
 		"tool_name":   "web_search",
 		"call_id":     call.call.ID,
@@ -753,6 +757,7 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 		"iteration":   iteration,
 		"max_results": r.cfg.WebSearchMaxResults,
 		"executor":    "hosted:web_search",
+		"stream":      exec.Stream,
 	}
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType:   "response.tool_call",
@@ -801,7 +806,7 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 	return webSearchCallOutput(call.call, call.query, result), toolContent, nil
 }
 
-func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
 	argumentsForEvent := call.call.Function.Arguments
 	if call.policy.RedactArguments {
 		argumentsForEvent = "<redacted>"
@@ -812,6 +817,7 @@ func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableTo
 		"arguments": argumentsForEvent,
 		"iteration": iteration,
 		"executor":  "function",
+		"stream":    exec.Stream,
 	}
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType:   "response.tool_call",
