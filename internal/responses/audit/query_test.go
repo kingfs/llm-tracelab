@@ -116,6 +116,91 @@ func TestQueryServiceGetRequestAuditTrace(t *testing.T) {
 	}
 }
 
+func TestQueryServiceGetRequestAuditTraceFiltersByClientRequestAndConversation(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 22, 10, 30, 0, 0, time.UTC)
+
+	for _, seed := range []requestAuditSeed{
+		{
+			id:              "audit_old",
+			responseID:      "resp_old",
+			conversationID:  "conv_shared",
+			method:          "POST",
+			path:            "/v1/responses",
+			clientRequestID: "client_shared",
+			status:          "completed",
+			createdAt:       base,
+		},
+		{
+			id:              "audit_new",
+			responseID:      "resp_new",
+			conversationID:  "conv_shared",
+			method:          "POST",
+			path:            "/v1/responses",
+			clientRequestID: "client_shared",
+			status:          "completed",
+			createdAt:       base.Add(time.Minute),
+		},
+		{
+			id:              "audit_other",
+			responseID:      "resp_other",
+			conversationID:  "conv_other",
+			method:          "POST",
+			path:            "/v1/responses",
+			clientRequestID: "client_other",
+			status:          "completed",
+			createdAt:       base.Add(2 * time.Minute),
+		},
+	} {
+		mustCreateRequestAudit(t, client, seed)
+	}
+
+	service := NewQueryService(client)
+	trace, found, err := service.GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		ClientRequestID: "client_shared",
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace(client) error = %v", err)
+	}
+	if !found || trace.RequestAudit.ID != "audit_new" {
+		t.Fatalf("GetRequestAuditTrace(client) = %+v/%v, want latest audit_new", trace.RequestAudit, found)
+	}
+
+	trace, found, err = service.GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		ConversationID: "conv_shared",
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace(conversation) error = %v", err)
+	}
+	if !found || trace.RequestAudit.ID != "audit_new" {
+		t.Fatalf("GetRequestAuditTrace(conversation) = %+v/%v, want latest audit_new", trace.RequestAudit, found)
+	}
+
+	trace, found, err = service.GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		ResponseID:      "resp_old",
+		ClientRequestID: "client_shared",
+		ConversationID:  "conv_shared",
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace(and filters) error = %v", err)
+	}
+	if !found || trace.RequestAudit.ID != "audit_old" {
+		t.Fatalf("GetRequestAuditTrace(and filters) = %+v/%v, want audit_old", trace.RequestAudit, found)
+	}
+
+	trace, found, err = service.GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		ClientRequestID: "client_shared",
+		ConversationID:  "conv_other",
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace(mismatched filters) error = %v", err)
+	}
+	if found || trace.RequestAudit.ID != "" {
+		t.Fatalf("GetRequestAuditTrace(mismatched filters) = %+v/%v, want zero/false", trace, found)
+	}
+}
+
 func TestQueryServiceListRequestAuditsLimitAndEmptyResults(t *testing.T) {
 	ctx := context.Background()
 	client := openAuditTestClient(t)

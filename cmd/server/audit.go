@@ -19,6 +19,8 @@ type auditQueryOptions struct {
 	stdout           io.Writer
 	responseID       string
 	requestAuditID   string
+	clientRequestID  string
+	conversationID   string
 	includeEvents    bool
 	includeExchanges bool
 	limit            int
@@ -35,6 +37,8 @@ type auditQueryResult struct {
 type auditQuerySelector struct {
 	ResponseID       string `json:"response_id,omitempty"`
 	RequestAuditID   string `json:"request_audit_id,omitempty"`
+	ClientRequestID  string `json:"client_request_id,omitempty"`
+	ConversationID   string `json:"conversation_id,omitempty"`
 	IncludeEvents    bool   `json:"include_events"`
 	IncludeExchanges bool   `json:"include_exchanges"`
 	Limit            int    `json:"limit,omitempty"`
@@ -105,7 +109,8 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 		Use:     "query",
 		Aliases: []string{"responses"},
 		Short:   "Query a stored Responses audit trace",
-		Long: "Query a stored Responses audit trace by response id or request audit id.\n" +
+		Long: "Query a stored Responses audit trace by response id, request audit id, client request id, or conversation id.\n" +
+			"Multiple selectors are combined with AND semantics. If a selector matches multiple request audits, the latest trace is returned.\n" +
 			"By default only the request audit envelope is printed; use --include-events and --include-exchanges to include related rows.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -117,6 +122,8 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opts.responseID, "response-id", "", "Responses response id to query")
 	cmd.Flags().StringVar(&opts.requestAuditID, "request-audit-id", "", "Request audit id to query")
+	cmd.Flags().StringVar(&opts.clientRequestID, "client-request-id", "", "Client request id to query")
+	cmd.Flags().StringVar(&opts.conversationID, "conversation-id", "", "Conversation id to query")
 	cmd.Flags().BoolVar(&opts.includeEvents, "include-events", false, "Include execution events in the output")
 	cmd.Flags().BoolVar(&opts.includeExchanges, "include-exchanges", false, "Include upstream exchanges in the output")
 	cmd.Flags().IntVar(&opts.limit, "limit", responsesaudit.DefaultAuditQueryLimit, "Maximum events and upstream exchanges to return when included")
@@ -126,8 +133,10 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 func runAuditQueryWithOptions(opts auditQueryOptions) error {
 	responseID := strings.TrimSpace(opts.responseID)
 	requestAuditID := strings.TrimSpace(opts.requestAuditID)
-	if responseID == "" && requestAuditID == "" {
-		return cliUsageError("--response-id or --request-audit-id is required", "response-id")
+	clientRequestID := strings.TrimSpace(opts.clientRequestID)
+	conversationID := strings.TrimSpace(opts.conversationID)
+	if responseID == "" && requestAuditID == "" && clientRequestID == "" && conversationID == "" {
+		return cliUsageError("--response-id, --request-audit-id, --client-request-id, or --conversation-id is required", "response-id")
 	}
 	if opts.limit < 0 {
 		return cliUsageError("--limit must be greater than or equal to 0", "limit")
@@ -159,6 +168,8 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 	trace, found, err := responsesaudit.NewQueryService(st.EntClient()).GetRequestAuditTrace(context.Background(), responsesaudit.GetRequestAuditTraceParams{
 		ResponseID:            responseID,
 		RequestAuditID:        requestAuditID,
+		ClientRequestID:       clientRequestID,
+		ConversationID:        conversationID,
 		EventLimit:            opts.limit,
 		UpstreamExchangeLimit: opts.limit,
 	})
@@ -174,6 +185,8 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 		Query: auditQuerySelector{
 			ResponseID:       responseID,
 			RequestAuditID:   requestAuditID,
+			ClientRequestID:  clientRequestID,
+			ConversationID:   conversationID,
 			IncludeEvents:    opts.includeEvents,
 			IncludeExchanges: opts.includeExchanges,
 			Limit:            opts.limit,
@@ -191,8 +204,6 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 		}
 	}
 	result.RequestAudit = auditRequestAuditFromAudit(trace.RequestAudit)
-	result.Query.ResponseID = trace.RequestAudit.ResponseID
-	result.Query.RequestAuditID = trace.RequestAudit.ID
 	if opts.includeEvents {
 		for _, event := range trace.ExecutionEvents {
 			result.Events = append(result.Events, auditExecutionEventFromAudit(event))
