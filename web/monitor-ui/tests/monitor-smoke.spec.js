@@ -114,7 +114,7 @@ test.beforeEach(async ({ page }) => {
       return route.fulfill({ json: { total: 0, items: [] } });
     }
     if (path === "/api/responses/audit/trace") {
-      expect(url.searchParams.get("response_id")).toBe("resp_123");
+      expect(["resp_123", "resp 123/encoded"]).toContain(url.searchParams.get("response_id"));
       return route.fulfill({ json: responsesAuditTracePayload() });
     }
     if (path === "/api/responses/function-executors") {
@@ -250,6 +250,7 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByText("Routing decision")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/channels/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
+  await expect(page.getByRole("link", { name: "Responses audit" })).toHaveAttribute("href", "/audit?response_id=resp+123%2Fencoded");
   await page.getByRole("button", { name: "Reanalyze" }).click();
   await expect(page.getByText(/Reanalysis job #301 completed/)).toBeVisible();
 });
@@ -501,6 +502,8 @@ function tracePayload() {
         routing_policy: "p2c",
         routing_score: 0.82,
         routing_candidate_count: 2,
+        response_id: "resp 123/encoded",
+        request_audit_id: "audit_resp_123",
       },
       usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
       layout: { is_stream: false },
