@@ -1,13 +1,17 @@
 package main
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 
 	appconfig "github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -66,6 +70,13 @@ type modelsCodexDiagnostics struct {
 	CompactHistoryItemThreshold       int                       `json:"compact_history_item_threshold"`
 	CompactHistoryItemThresholdSource string                    `json:"compact_history_item_threshold_source"`
 	ResponsesServerEnabled            bool                      `json:"responses_server_enabled"`
+	DatabaseAvailable                 bool                      `json:"database_available"`
+	CatalogModelPresent               bool                      `json:"catalog_model_present"`
+	ChannelModelPresent               bool                      `json:"channel_model_present"`
+	ChannelModelCount                 int                       `json:"channel_model_count"`
+	CatalogSource                     string                    `json:"catalog_source"`
+	ChannelSource                     string                    `json:"channel_source"`
+	DriftWarnings                     []string                  `json:"drift_warnings,omitempty"`
 }
 
 type modelsCodexMatchedProfile struct {
@@ -157,6 +168,8 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCod
 	provider, providerWarnings := buildModelsCodexProviderConfig(cfg)
 	warnings = append(warnings, providerWarnings...)
 	historyThreshold, historyThresholdSource := codexCompactHistoryItemThreshold(cfg, match)
+	catalogDiagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched)
+	warnings = append(warnings, catalogDiagnostics.DriftWarnings...)
 	diagnostics := modelsCodexDiagnostics{
 		MatchedProfile: modelsCodexMatchedProfile{
 			Matched:       match.Matched,
@@ -172,6 +185,13 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCod
 		CompactHistoryItemThreshold:       historyThreshold,
 		CompactHistoryItemThresholdSource: historyThresholdSource,
 		ResponsesServerEnabled:            cfg.ResponsesServerEnabled(),
+		DatabaseAvailable:                 catalogDiagnostics.DatabaseAvailable,
+		CatalogModelPresent:               catalogDiagnostics.CatalogModelPresent,
+		ChannelModelPresent:               catalogDiagnostics.ChannelModelPresent,
+		ChannelModelCount:                 catalogDiagnostics.ChannelModelCount,
+		CatalogSource:                     catalogDiagnostics.CatalogSource,
+		ChannelSource:                     catalogDiagnostics.ChannelSource,
+		DriftWarnings:                     catalogDiagnostics.DriftWarnings,
 	}
 	result := modelsCodexConfigResult{
 		Model:   model,
@@ -188,6 +208,105 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCod
 	}
 	result.TOML = modelsCodexConfigTOML(result)
 	return result
+}
+
+type modelsCatalogDriftDiagnostics struct {
+	DatabaseAvailable   bool
+	CatalogModelPresent bool
+	ChannelModelPresent bool
+	ChannelModelCount   int
+	CatalogSource       string
+	ChannelSource       string
+	DriftWarnings       []string
+}
+
+func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, profileMatched bool) modelsCatalogDriftDiagnostics {
+	diagnostics := modelsCatalogDriftDiagnostics{
+		CatalogSource: "unavailable",
+		ChannelSource: "unavailable",
+	}
+	if cfg == nil || cfg.DatabaseDriver() != "sqlite" {
+		return diagnostics
+	}
+	dbPath := cfg.DatabasePath()
+	if strings.TrimSpace(dbPath) == "" || dbPath == ":memory:" {
+		return diagnostics
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		return diagnostics
+	}
+	outputDir := cfg.TraceOutputDir()
+	if strings.TrimSpace(outputDir) == "" {
+		outputDir = "."
+	}
+
+	st, err := store.NewWithDatabaseOptions(
+		outputDir,
+		cfg.DatabaseDriver(),
+		cfg.DatabaseDSN(),
+		cfg.DatabaseMaxOpenConns(),
+		cfg.DatabaseMaxIdleConns(),
+		store.DatabaseOptions{AutoMigrate: false},
+	)
+	if err != nil {
+		return diagnostics
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			slog.Debug("Close application store after model diagnostics failed", "error", err)
+		}
+	}()
+
+	model = strings.ToLower(strings.TrimSpace(model))
+	channelModels, err := st.ListChannelModels("", false)
+	if err != nil {
+		return diagnostics
+	}
+	diagnostics.DatabaseAvailable = true
+	diagnostics.ChannelSource = "missing"
+	for _, channelModel := range channelModels {
+		if strings.ToLower(strings.TrimSpace(channelModel.Model)) != model {
+			continue
+		}
+		diagnostics.ChannelModelCount++
+		diagnostics.ChannelModelPresent = true
+		diagnostics.ChannelSource = "channel_models"
+	}
+
+	if _, err := st.GetModelCatalog(model); err == nil {
+		diagnostics.CatalogModelPresent = true
+		diagnostics.CatalogSource = "model_catalog"
+	} else if errors.Is(err, sql.ErrNoRows) {
+		diagnostics.CatalogSource = "missing"
+	} else {
+		return modelsCatalogDriftDiagnostics{
+			CatalogSource: "unavailable",
+			ChannelSource: "unavailable",
+		}
+	}
+
+	diagnostics.DriftWarnings = modelsCatalogDriftWarnings(model, profileMatched, diagnostics)
+	return diagnostics
+}
+
+func modelsCatalogDriftWarnings(model string, profileMatched bool, diagnostics modelsCatalogDriftDiagnostics) []string {
+	if !diagnostics.DatabaseAvailable {
+		return nil
+	}
+	warnings := make([]string, 0, 2)
+	if profileMatched && !diagnostics.CatalogModelPresent {
+		warnings = append(warnings, fmt.Sprintf("matched responses_server.model_profiles for model %q, but model_catalog has no entry for it", model))
+	}
+	if profileMatched && !diagnostics.ChannelModelPresent {
+		warnings = append(warnings, fmt.Sprintf("matched responses_server.model_profiles for model %q, but channel_models has no entry for it", model))
+	}
+	if diagnostics.ChannelModelPresent && !diagnostics.CatalogModelPresent {
+		warnings = append(warnings, fmt.Sprintf("channel_models contains model %q, but model_catalog has no entry for it", model))
+	}
+	if diagnostics.CatalogModelPresent && !diagnostics.ChannelModelPresent {
+		warnings = append(warnings, fmt.Sprintf("model_catalog contains model %q, but channel_models has no entry for it", model))
+	}
+	return warnings
 }
 
 func buildModelsCodexProviderConfig(cfg *appconfig.Config) (modelsCodexProviderConfig, []string) {
@@ -271,6 +390,14 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 			fmt.Fprintf(w, "# - %s\n", warning)
 		}
 	}
+	fmt.Fprintf(w, "# diagnostics: database_available=%t catalog_model_present=%t channel_model_present=%t channel_model_count=%d catalog_source=%s channel_source=%s\n",
+		result.Diagnostics.DatabaseAvailable,
+		result.Diagnostics.CatalogModelPresent,
+		result.Diagnostics.ChannelModelPresent,
+		result.Diagnostics.ChannelModelCount,
+		result.Diagnostics.CatalogSource,
+		result.Diagnostics.ChannelSource,
+	)
 	fmt.Fprintln(w)
 	fmt.Fprint(w, result.TOML)
 }
