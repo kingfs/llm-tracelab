@@ -168,6 +168,44 @@ func TestOpenStoreDatabaseAcceptsPostgresDSNWithoutConnecting(t *testing.T) {
 	}
 }
 
+func TestRebindPostgresPlaceholders(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{
+			name:  "ordinary placeholder",
+			query: "SELECT * FROM logs WHERE trace_id = ?",
+			want:  "SELECT * FROM logs WHERE trace_id = $1",
+		},
+		{
+			name:  "multiple placeholders",
+			query: "UPDATE logs SET model = ?, status_code = ? WHERE path = ?",
+			want:  "UPDATE logs SET model = $1, status_code = $2 WHERE path = $3",
+		},
+		{
+			name:  "question mark in string literal",
+			query: "SELECT '?' AS literal, path FROM logs WHERE trace_id = ?",
+			want:  "SELECT '?' AS literal, path FROM logs WHERE trace_id = $1",
+		},
+		{
+			name:  "escaped single quote in string literal",
+			query: "SELECT 'can''t ?' AS literal, path FROM logs WHERE trace_id = ? AND model = ?",
+			want:  "SELECT 'can''t ?' AS literal, path FROM logs WHERE trace_id = $1 AND model = $2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rebindPostgresPlaceholders(tt.query); got != tt.want {
+				t.Fatalf("rebindPostgresPlaceholders() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
 	t.Parallel()
 
