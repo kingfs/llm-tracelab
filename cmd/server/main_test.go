@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -276,7 +277,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -1748,6 +1749,204 @@ func TestAuditQueryCommandIncludesDerivedToolCallsJSON(t *testing.T) {
 	}
 	if strings.Contains(out.String(), secretMarker) {
 		t.Fatalf("audit query tool_calls leaked secret marker: %s", out.String())
+	}
+}
+
+func TestAuditToolCallsCommandListsRecordsWithoutPayloadsByDefault(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	base := time.Date(2026, 6, 23, 10, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit_tca_cli").
+		SetResponseID("resp_tca_cli").
+		SetConversationID("conv_tca_cli").
+		SetMethod("POST").
+		SetPath("/v1/responses").
+		SetHeaderJSON(map[string]any{"content-type": "application/json"}).
+		SetBodySha256("sha-tca-cli").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	const secretMarker = "SECRET_TOOL_CALL_AUDIT_PAYLOAD"
+	if _, err := auditor.RecordToolCallAudit(responsesaudit.ContextWithRequestAuditID(context.Background(), "reqaudit_tca_cli"), responsesaudit.ToolCallAudit{
+		ID:             "tcaud_cli_1",
+		ResponseID:     "resp_tca_cli",
+		ConversationID: "conv_tca_cli",
+		CallID:         "call_lookup_cli",
+		ToolType:       "function",
+		ToolName:       "lookup",
+		Executor:       "function_executor:lookup",
+		Status:         "completed",
+		Phase:          "tool_call",
+		InputJSON:      map[string]any{"q": "lookup " + secretMarker},
+		OutputJSON:     map[string]any{"answer": "found " + secretMarker},
+		MetadataJSON:   map[string]any{"attempt": 1, "note": secretMarker},
+		StartedAt:      base.Add(time.Second),
+		CompletedAt:    base.Add(2 * time.Second),
+		CreatedAt:      base.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+	if _, err := auditor.RecordToolCallAudit(context.Background(), responsesaudit.ToolCallAudit{
+		ID:         "tcaud_cli_other",
+		ResponseID: "resp_tca_cli",
+		CallID:     "call_other_cli",
+		ToolType:   "function",
+		ToolName:   "other",
+		Status:     "failed",
+		Phase:      "tool_call",
+		CreatedAt:  base.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit(other) error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "json",
+		"audit", "tool-calls",
+		"--response-id", "resp_tca_cli",
+		"--tool-name", "lookup",
+		"--status", "completed",
+		"--limit", "10",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Query struct {
+				ResponseID      string `json:"response_id"`
+				ToolName        string `json:"tool_name"`
+				Status          string `json:"status"`
+				IncludePayloads bool   `json:"include_payloads"`
+			} `json:"query"`
+			Count          int `json:"count"`
+			ToolCallAudits []struct {
+				ID               string `json:"id"`
+				RequestAuditID   string `json:"request_audit_id"`
+				CallID           string `json:"call_id"`
+				ToolName         string `json:"tool_name"`
+				Status           string `json:"status"`
+				InputJSONSummary struct {
+					Present    bool     `json:"present"`
+					Keys       []string `json:"keys"`
+					FieldCount int      `json:"field_count"`
+				} `json:"input_json_summary"`
+				InputJSON    map[string]any `json:"input_json"`
+				OutputJSON   map[string]any `json:"output_json"`
+				MetadataJSON map[string]any `json:"metadata_json"`
+			} `json:"tool_call_audits"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "audit.tool_calls" {
+		t.Fatalf("envelope = %+v, want ok audit.tool_calls", envelope)
+	}
+	if envelope.Result.Query.ResponseID != "resp_tca_cli" || envelope.Result.Query.ToolName != "lookup" || envelope.Result.Query.Status != "completed" || envelope.Result.Query.IncludePayloads {
+		t.Fatalf("query = %+v, want lookup completed without payloads", envelope.Result.Query)
+	}
+	if envelope.Result.Count != 1 || len(envelope.Result.ToolCallAudits) != 1 {
+		t.Fatalf("tool_call_audits = %+v count=%d, want one", envelope.Result.ToolCallAudits, envelope.Result.Count)
+	}
+	record := envelope.Result.ToolCallAudits[0]
+	if record.ID != "tcaud_cli_1" || record.RequestAuditID != "reqaudit_tca_cli" || record.CallID != "call_lookup_cli" || record.ToolName != "lookup" || record.Status != "completed" {
+		t.Fatalf("record = %+v, want lookup completed audit", record)
+	}
+	if !record.InputJSONSummary.Present || !reflect.DeepEqual(record.InputJSONSummary.Keys, []string{"q"}) || record.InputJSONSummary.FieldCount != 1 {
+		t.Fatalf("input summary = %+v, want q-only summary", record.InputJSONSummary)
+	}
+	if record.InputJSON != nil || record.OutputJSON != nil || record.MetadataJSON != nil {
+		t.Fatalf("payloads = input:%v output:%v metadata:%v, want omitted by default", record.InputJSON, record.OutputJSON, record.MetadataJSON)
+	}
+	if strings.Contains(out.String(), secretMarker) {
+		t.Fatalf("audit tool-calls leaked payload by default: %s", out.String())
+	}
+}
+
+func TestAuditToolCallsCommandCanIncludePayloads(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	const secretMarker = "SECRET_TOOL_CALL_AUDIT_INCLUDED"
+	if _, err := auditor.RecordToolCallAudit(context.Background(), responsesaudit.ToolCallAudit{
+		ID:           "tcaud_payload_cli",
+		ResponseID:   "resp_payload_cli",
+		CallID:       "call_payload_cli",
+		ToolType:     "function",
+		ToolName:     "lookup",
+		Status:       "completed",
+		InputJSON:    map[string]any{"q": secretMarker},
+		OutputJSON:   map[string]any{"answer": secretMarker},
+		MetadataJSON: map[string]any{"note": secretMarker},
+		CreatedAt:    time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "json",
+		"audit", "tool-call-audits",
+		"--call-id", "call_payload_cli",
+		"--include-payloads",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var envelope struct {
+		Result struct {
+			Query struct {
+				IncludePayloads bool `json:"include_payloads"`
+			} `json:"query"`
+			ToolCallAudits []struct {
+				InputJSON    map[string]any `json:"input_json"`
+				OutputJSON   map[string]any `json:"output_json"`
+				MetadataJSON map[string]any `json:"metadata_json"`
+			} `json:"tool_call_audits"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
+	}
+	if !envelope.Result.Query.IncludePayloads || len(envelope.Result.ToolCallAudits) != 1 {
+		t.Fatalf("envelope = %+v, want one record with payloads", envelope)
+	}
+	record := envelope.Result.ToolCallAudits[0]
+	if record.InputJSON["q"] != secretMarker || record.OutputJSON["answer"] != secretMarker || record.MetadataJSON["note"] != secretMarker {
+		t.Fatalf("payloads = input:%v output:%v metadata:%v, want marker values", record.InputJSON, record.OutputJSON, record.MetadataJSON)
 	}
 }
 

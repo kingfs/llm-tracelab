@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,6 +29,20 @@ type auditQueryOptions struct {
 	limit            int
 }
 
+type auditToolCallAuditsOptions struct {
+	configPath      string
+	format          string
+	stdout          io.Writer
+	responseID      string
+	requestAuditID  string
+	conversationID  string
+	callID          string
+	toolName        string
+	status          string
+	includePayloads bool
+	limit           int
+}
+
 type auditQueryResult struct {
 	Query             auditQuerySelector        `json:"query"`
 	Found             bool                      `json:"found"`
@@ -34,6 +50,12 @@ type auditQueryResult struct {
 	Events            []auditExecutionEventView `json:"events"`
 	UpstreamExchanges []auditUpstreamExchange   `json:"upstream_exchanges"`
 	ToolCalls         []auditToolCallView       `json:"tool_calls"`
+}
+
+type auditToolCallAuditsResult struct {
+	Query          auditToolCallAuditsSelector `json:"query"`
+	Count          int                         `json:"count"`
+	ToolCallAudits []auditToolCallAuditView    `json:"tool_call_audits"`
 }
 
 type auditQuerySelector struct {
@@ -45,6 +67,17 @@ type auditQuerySelector struct {
 	IncludeExchanges bool   `json:"include_exchanges"`
 	IncludeTools     bool   `json:"include_tools"`
 	Limit            int    `json:"limit,omitempty"`
+}
+
+type auditToolCallAuditsSelector struct {
+	ResponseID      string `json:"response_id,omitempty"`
+	RequestAuditID  string `json:"request_audit_id,omitempty"`
+	ConversationID  string `json:"conversation_id,omitempty"`
+	CallID          string `json:"call_id,omitempty"`
+	ToolName        string `json:"tool_name,omitempty"`
+	Status          string `json:"status,omitempty"`
+	IncludePayloads bool   `json:"include_payloads"`
+	Limit           int    `json:"limit,omitempty"`
 }
 
 type auditRequestAuditView struct {
@@ -118,6 +151,37 @@ type auditToolCallView struct {
 	ConversationID   string                        `json:"conversation_id,omitempty"`
 }
 
+type auditJSONPayloadSummary struct {
+	Present     bool     `json:"present"`
+	Type        string   `json:"type,omitempty"`
+	Keys        []string `json:"keys,omitempty"`
+	FieldCount  int      `json:"field_count,omitempty"`
+	ApproxBytes int      `json:"approx_bytes,omitempty"`
+}
+
+type auditToolCallAuditView struct {
+	ID                  string                  `json:"id"`
+	ResponseID          string                  `json:"response_id,omitempty"`
+	RequestAuditID      string                  `json:"request_audit_id,omitempty"`
+	ConversationID      string                  `json:"conversation_id,omitempty"`
+	CallID              string                  `json:"call_id,omitempty"`
+	ToolType            string                  `json:"tool_type,omitempty"`
+	ToolName            string                  `json:"tool_name,omitempty"`
+	Executor            string                  `json:"executor,omitempty"`
+	Status              string                  `json:"status,omitempty"`
+	Phase               string                  `json:"phase,omitempty"`
+	InputJSONSummary    auditJSONPayloadSummary `json:"input_json_summary"`
+	OutputJSONSummary   auditJSONPayloadSummary `json:"output_json_summary"`
+	MetadataJSONSummary auditJSONPayloadSummary `json:"metadata_json_summary"`
+	InputJSON           map[string]any          `json:"input_json,omitempty"`
+	OutputJSON          map[string]any          `json:"output_json,omitempty"`
+	MetadataJSON        map[string]any          `json:"metadata_json,omitempty"`
+	ErrorText           string                  `json:"error_text,omitempty"`
+	StartedAt           time.Time               `json:"started_at,omitempty"`
+	CompletedAt         time.Time               `json:"completed_at,omitempty"`
+	CreatedAt           time.Time               `json:"created_at"`
+}
+
 func newAuditCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "audit",
@@ -129,6 +193,7 @@ func newAuditCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newAuditQueryCommand(runtime))
+	cmd.AddCommand(newAuditToolCallsCommand(runtime))
 	return cmd
 }
 
@@ -157,6 +222,33 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.includeExchanges, "include-exchanges", false, "Include upstream exchanges in the output")
 	cmd.Flags().BoolVar(&opts.includeTools, "include-tools", false, "Include derived tool-call diagnostics in the output")
 	cmd.Flags().IntVar(&opts.limit, "limit", responsesaudit.DefaultAuditQueryLimit, "Maximum events, tool-call events, and upstream exchanges to return when included")
+	return cmd
+}
+
+func newAuditToolCallsCommand(runtime *cliRuntime) *cobra.Command {
+	opts := auditToolCallAuditsOptions{}
+	cmd := &cobra.Command{
+		Use:     "tool-calls",
+		Aliases: []string{"tool-call-audits"},
+		Short:   "Query stored tool-call audit records",
+		Long: "Query durable tool-call audit records by response id, request audit id, conversation id, call id, tool name, or status.\n" +
+			"Multiple selectors are combined with AND semantics. JSON output defaults to payload summaries only; use --include-payloads to include raw input_json, output_json, and metadata_json, which may contain sensitive data.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.configPath = runtime.configPath()
+			opts.format = runtime.outputFormat()
+			opts.stdout = cmd.OutOrStdout()
+			return runAuditToolCallAuditsWithOptions(opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.responseID, "response-id", "", "Responses response id to query")
+	cmd.Flags().StringVar(&opts.requestAuditID, "request-audit-id", "", "Request audit id to query")
+	cmd.Flags().StringVar(&opts.conversationID, "conversation-id", "", "Conversation id to query")
+	cmd.Flags().StringVar(&opts.callID, "call-id", "", "Tool call id to query")
+	cmd.Flags().StringVar(&opts.toolName, "tool-name", "", "Tool name to query")
+	cmd.Flags().StringVar(&opts.status, "status", "", "Tool-call audit status to query")
+	cmd.Flags().BoolVar(&opts.includePayloads, "include-payloads", false, "Include raw input_json, output_json, and metadata_json; may expose sensitive data")
+	cmd.Flags().IntVar(&opts.limit, "limit", responsesaudit.DefaultAuditQueryLimit, "Maximum tool-call audit records to return")
 	return cmd
 }
 
@@ -253,6 +345,88 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 	}
 	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "audit.query", result, func(w io.Writer) error {
 		writeAuditQueryText(w, result)
+		return nil
+	}); err != nil {
+		return cliExitError{
+			code:     exitCodeInternal,
+			category: errorCategoryInternal,
+			errCode:  "OUTPUT_WRITE_FAILED",
+			message:  err.Error(),
+		}
+	}
+	return nil
+}
+
+func runAuditToolCallAuditsWithOptions(opts auditToolCallAuditsOptions) error {
+	responseID := strings.TrimSpace(opts.responseID)
+	requestAuditID := strings.TrimSpace(opts.requestAuditID)
+	conversationID := strings.TrimSpace(opts.conversationID)
+	callID := strings.TrimSpace(opts.callID)
+	toolName := strings.TrimSpace(opts.toolName)
+	status := strings.TrimSpace(opts.status)
+	if opts.limit < 0 {
+		return cliUsageError("--limit must be greater than or equal to 0", "limit")
+	}
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		return cliExitError{
+			code:     exitCodeAPI,
+			category: errorCategoryAPI,
+			errCode:  "CONFIG_LOAD_FAILED",
+			message:  err.Error(),
+		}
+	}
+	st, err := openApplicationDatabase(cfg)
+	if err != nil {
+		return cliExitError{
+			code:     exitCodeAPI,
+			category: errorCategoryAPI,
+			errCode:  "STORE_OPEN_FAILED",
+			message:  err.Error(),
+		}
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			slog.Error("Close application store failed", "error", err)
+		}
+	}()
+
+	records, err := responsesaudit.NewQueryService(st.EntClient()).ListToolCallAudits(context.Background(), responsesaudit.ListToolCallAuditsParams{
+		ResponseID:     responseID,
+		RequestAuditID: requestAuditID,
+		ConversationID: conversationID,
+		CallID:         callID,
+		ToolName:       toolName,
+		Status:         status,
+		Limit:          opts.limit,
+	})
+	if err != nil {
+		return cliExitError{
+			code:     exitCodeAPI,
+			category: errorCategoryAPI,
+			errCode:  "TOOL_CALL_AUDITS_QUERY_FAILED",
+			message:  err.Error(),
+		}
+	}
+	result := auditToolCallAuditsResult{
+		Query: auditToolCallAuditsSelector{
+			ResponseID:      responseID,
+			RequestAuditID:  requestAuditID,
+			ConversationID:  conversationID,
+			CallID:          callID,
+			ToolName:        toolName,
+			Status:          status,
+			IncludePayloads: opts.includePayloads,
+			Limit:           opts.limit,
+		},
+		ToolCallAudits: []auditToolCallAuditView{},
+	}
+	for _, record := range records {
+		result.ToolCallAudits = append(result.ToolCallAudits, auditToolCallAuditFromAudit(record, opts.includePayloads))
+	}
+	result.Count = len(result.ToolCallAudits)
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "audit.tool_calls", result, func(w io.Writer) error {
+		writeAuditToolCallAuditsText(w, result)
 		return nil
 	}); err != nil {
 		return cliExitError{
@@ -371,6 +545,53 @@ func auditToolCallFromAudit(toolCall responsesaudit.ToolCallView) auditToolCallV
 	}
 }
 
+func auditToolCallAuditFromAudit(record responsesaudit.ToolCallAuditView, includePayloads bool) auditToolCallAuditView {
+	view := auditToolCallAuditView{
+		ID:                  record.ID,
+		ResponseID:          record.ResponseID,
+		RequestAuditID:      record.RequestAuditID,
+		ConversationID:      record.ConversationID,
+		CallID:              record.CallID,
+		ToolType:            record.ToolType,
+		ToolName:            record.ToolName,
+		Executor:            record.Executor,
+		Status:              record.Status,
+		Phase:               record.Phase,
+		InputJSONSummary:    auditJSONSummary(record.InputJSON),
+		OutputJSONSummary:   auditJSONSummary(record.OutputJSON),
+		MetadataJSONSummary: auditJSONSummary(record.MetadataJSON),
+		ErrorText:           record.ErrorText,
+		StartedAt:           record.StartedAt,
+		CompletedAt:         record.CompletedAt,
+		CreatedAt:           record.CreatedAt,
+	}
+	if includePayloads {
+		view.InputJSON = record.InputJSON
+		view.OutputJSON = record.OutputJSON
+		view.MetadataJSON = record.MetadataJSON
+	}
+	return view
+}
+
+func auditJSONSummary(payload map[string]any) auditJSONPayloadSummary {
+	if len(payload) == 0 {
+		return auditJSONPayloadSummary{Present: false, Type: "object", Keys: []string{}, FieldCount: 0}
+	}
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	encoded, _ := json.Marshal(payload)
+	return auditJSONPayloadSummary{
+		Present:     true,
+		Type:        "object",
+		Keys:        keys,
+		FieldCount:  len(payload),
+		ApproxBytes: len(encoded),
+	}
+}
+
 func writeAuditQueryText(w io.Writer, result auditQueryResult) {
 	if result.RequestAudit == nil {
 		fmt.Fprintln(w, "responses audit trace not found")
@@ -418,5 +639,34 @@ func writeAuditQueryText(w io.Writer, result auditQueryResult) {
 			}
 			fmt.Fprintln(w)
 		}
+	}
+}
+
+func writeAuditToolCallAuditsText(w io.Writer, result auditToolCallAuditsResult) {
+	fmt.Fprintf(w, "tool_call_audits: %d\n", result.Count)
+	for _, record := range result.ToolCallAudits {
+		fmt.Fprintf(w, "- %s", record.ID)
+		if record.CallID != "" {
+			fmt.Fprintf(w, " call_id=%s", record.CallID)
+		}
+		if record.ToolName != "" {
+			fmt.Fprintf(w, " tool_name=%s", record.ToolName)
+		}
+		if record.Executor != "" {
+			fmt.Fprintf(w, " executor=%s", record.Executor)
+		}
+		if record.Status != "" {
+			fmt.Fprintf(w, " status=%s", record.Status)
+		}
+		if record.ResponseID != "" {
+			fmt.Fprintf(w, " response_id=%s", record.ResponseID)
+		}
+		if record.RequestAuditID != "" {
+			fmt.Fprintf(w, " request_audit_id=%s", record.RequestAuditID)
+		}
+		if !record.CreatedAt.IsZero() {
+			fmt.Fprintf(w, " created_at=%s", record.CreatedAt.Format(time.RFC3339))
+		}
+		fmt.Fprintln(w)
 	}
 }
