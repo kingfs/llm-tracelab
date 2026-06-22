@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	appconfig "github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/spf13/cobra"
@@ -61,6 +65,13 @@ type doctorUpstreamsSummary struct {
 	EnabledTargets int `json:"enabled_targets"`
 	Credentials    int `json:"credentials"`
 	StaticModels   int `json:"static_models"`
+}
+
+type doctorProviderProbeSummary struct {
+	Total    int `json:"total"`
+	Detected int `json:"detected"`
+	Error    int `json:"error"`
+	Unknown  int `json:"unknown"`
 }
 
 type doctorCheck struct {
@@ -153,7 +164,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorWebSearch(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderConfig(cfg))
 	result.Checks = append(result.Checks, checkDoctorAuthMigrationScope())
-	result.Checks = append(result.Checks, checkDoctorProviderProbe(opts.probeProviders))
+	result.Checks = append(result.Checks, checkDoctorProviderProbe(cfg, opts.probeProviders))
 	finalizeDoctorResult(&result)
 	return result
 }
@@ -479,16 +490,79 @@ func checkDoctorAuthMigrationScope() doctorCheck {
 	}
 }
 
-func checkDoctorProviderProbe(probeProviders bool) doctorCheck {
+func checkDoctorProviderProbe(cfg *appconfig.Config, probeProviders bool) doctorCheck {
 	if !probeProviders {
 		return doctorCheck{Name: "provider_probe.network", Status: doctorStatusPass, Message: "provider network probe skipped", Detail: map[string]any{"enabled": false}}
 	}
+	targets, err := providerProbeTargets(*cfg, "")
+	if err != nil {
+		return doctorCheck{
+			Name:    "provider_probe.network",
+			Status:  doctorStatusWarn,
+			Message: "provider network probe requested but no enabled provider target with base_url is configured",
+			Detail: map[string]any{
+				"enabled":          true,
+				"network_requests": false,
+				"summary":          doctorProviderProbeSummary{},
+				"error":            redactDoctorMessage(err.Error()),
+			},
+		}
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	report := providerprobe.ProbeBatch(context.Background(), targets, client)
+	report = redactDoctorProviderProbeReport(report)
+	summary := summarizeDoctorProviderProbe(report)
+	status := doctorStatusPass
+	if summary.Error > 0 {
+		status = doctorStatusFail
+	} else if summary.Unknown > 0 {
+		status = doctorStatusWarn
+	}
 	return doctorCheck{
 		Name:    "provider_probe.network",
-		Status:  doctorStatusWarn,
-		Message: "provider probe is requested but doctor keeps startup diagnostics offline and does not make provider network requests",
-		Detail:  map[string]any{"enabled": true, "network_requests": false},
+		Status:  status,
+		Message: fmt.Sprintf("provider network probe completed: total=%d detected=%d error=%d unknown=%d", summary.Total, summary.Detected, summary.Error, summary.Unknown),
+		Detail: map[string]any{
+			"enabled":          true,
+			"network_requests": true,
+			"summary":          summary,
+			"reports":          report.Reports,
+		},
 	}
+}
+
+func summarizeDoctorProviderProbe(report providerprobe.BatchReport) doctorProviderProbeSummary {
+	summary := doctorProviderProbeSummary{Total: len(report.Reports)}
+	for _, item := range report.Reports {
+		switch item.Status {
+		case providerprobe.StatusDetected:
+			summary.Detected++
+		case providerprobe.StatusError:
+			summary.Error++
+		default:
+			summary.Unknown++
+		}
+	}
+	return summary
+}
+
+func redactDoctorProviderProbeReport(report providerprobe.BatchReport) providerprobe.BatchReport {
+	for reportIdx := range report.Reports {
+		item := &report.Reports[reportIdx]
+		item.BaseURL = redactURLLike(item.BaseURL)
+		item.Error = redactDoctorMessage(item.Error)
+		for warningIdx := range item.Warnings {
+			item.Warnings[warningIdx] = redactDoctorMessage(item.Warnings[warningIdx])
+		}
+		for endpointIdx := range item.CheckedEndpoints {
+			endpoint := &item.CheckedEndpoints[endpointIdx]
+			endpoint.URL = redactURLLike(endpoint.URL)
+			endpoint.Error = redactDoctorMessage(endpoint.Error)
+			endpoint.StatusText = redactDoctorMessage(endpoint.StatusText)
+		}
+	}
+	return report
 }
 
 func finalizeDoctorResult(result *doctorResult) {
