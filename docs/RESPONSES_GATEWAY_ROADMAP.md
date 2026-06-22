@@ -28,9 +28,9 @@ TraceLab 的新定位是 production-grade LLM gateway：
 尚未作为基线能力：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
-- model profile 驱动的默认 tokenizer/provider tokenize 装配与完整 context optimization；当前已有可注入 estimator 边界、adapter-backed estimator 层、默认确定性保守计数器，以及可注入 HTTP provider `/tokenize` chat prompt counter，但尚未把 `/tokenize` counter 接入默认 runtime/provider 配置。
+- model profile 驱动的自动 tokenizer/provider tokenize 选择与完整 context optimization；当前已有可注入 estimator 边界、adapter-backed estimator 层、默认确定性保守计数器，以及显式 opt-in 的 HTTP provider `/tokenize` chat prompt counter runtime 装配。
 - provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、只读批量 `provider probe-report` / Monitor report API，以及默认关闭的启动时保守补全开关。
-- server-side function executor 的 Monitor 写配置和更强隔离；当前已有默认关闭的 YAML `static_response` 与 `external_command` executor 首切。
+- server-side function executor 的 Monitor 写配置和更强隔离；当前已有默认关闭的 YAML `static_response` / `external_command` executor 首切，以及 `external_command` opt-in working directory / absolute command 进程隔离首切。
 - SQLite 版本化迁移、auth 独立 Postgres namespace、剩余 raw SQL 方言审计。
 
 ## 阶段计划
@@ -110,5 +110,5 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算与 estimator 边界 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入 -> 最小 tool output item added started SSE 顺序合入 -> 已写出 SSE 后最小 `response.failed` 顺序合入 -> function executor validation/Monitor 摘要 -> YAML `external_command` executor 首切 -> stream tool failed output item done -> token estimator adapter 层 -> 可注入 provider `/tokenize` counter -> auth migration status reporting -> `external_command` opt-in process working directory/absolute command 隔离首切。后续优先接 provider tokenize 默认装配、Monitor 写配置、root/container 级 executor 沙箱和更完整的 provider setup wizard。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算与 estimator 边界 -> provider detection Monitor preview/report/apply 首切 -> hosted `web_search` stream tool loop 首切 -> 最小 tool output item done SSE 顺序合入 -> 最小 tool output item added started SSE 顺序合入 -> 已写出 SSE 后最小 `response.failed` 顺序合入 -> function executor validation/Monitor 摘要 -> YAML `external_command` executor 首切 -> stream tool failed output item done -> token estimator adapter 层 -> 可注入 provider `/tokenize` counter -> auth migration status reporting -> provider `/tokenize` opt-in runtime 装配 -> `external_command` opt-in process working directory/absolute command 隔离首切。后续优先接 Monitor 写配置、provider setup wizard、provider tokenizer 自动选择、root/container 级 executor 沙箱和更完整的 stream multi-tool lifecycle。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
