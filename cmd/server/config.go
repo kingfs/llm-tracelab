@@ -5,10 +5,22 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 
 	appconfig "github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	configSourceConfigFile    = "config_file"
+	configSourceDefault       = "default"
+	configSourceEffective     = "effective"
+	configSourceEmpty         = "empty"
+	configSourceDerived       = "derived"
+	configSourceNotConfigured = "not_configured"
 )
 
 type configInspectOptions struct {
@@ -28,6 +40,7 @@ type configInspectResult struct {
 	Tools           configInspectTools         `json:"tools"`
 	ProviderProbe   configInspectProviderProbe `json:"provider_probe"`
 	Upstreams       configInspectUpstreams     `json:"upstreams"`
+	Sources         configInspectSources       `json:"sources"`
 }
 
 type configInspectServer struct {
@@ -101,6 +114,62 @@ type configInspectUpstreamTarget struct {
 	CredentialCount  int                                  `json:"credential_count"`
 }
 
+type configInspectSources struct {
+	ConfigPath      string                              `json:"config_path"`
+	Server          configInspectServerSources          `json:"server"`
+	Monitor         configInspectMonitorSources         `json:"monitor"`
+	MCP             configInspectMCPSources             `json:"mcp"`
+	Database        configInspectDatabaseSources        `json:"database"`
+	Trace           configInspectTraceSources           `json:"trace"`
+	ResponsesServer configInspectResponsesSources       `json:"responses_server"`
+	Tools           configInspectToolsSources           `json:"tools"`
+	Upstreams       configInspectUpstreamsSourceSummary `json:"upstreams"`
+}
+
+type configInspectServerSources struct {
+	Port string `json:"port"`
+}
+
+type configInspectMonitorSources struct {
+	Port string `json:"port"`
+}
+
+type configInspectMCPSources struct {
+	Enabled string `json:"enabled"`
+	Path    string `json:"path"`
+}
+
+type configInspectDatabaseSources struct {
+	Driver      string `json:"driver"`
+	DSN         string `json:"dsn"`
+	AutoMigrate string `json:"auto_migrate"`
+}
+
+type configInspectTraceSources struct {
+	OutputDir string `json:"output_dir"`
+}
+
+type configInspectResponsesSources struct {
+	Enabled      string `json:"enabled"`
+	Path         string `json:"path"`
+	DefaultModel string `json:"default_model"`
+}
+
+type configInspectToolsSources struct {
+	WebSearch configInspectWebSearchSources `json:"web_search"`
+}
+
+type configInspectWebSearchSources struct {
+	Enabled  string `json:"enabled"`
+	Provider string `json:"provider"`
+	BaseURL  string `json:"base_url"`
+}
+
+type configInspectUpstreamsSourceSummary struct {
+	Targets     string `json:"targets"`
+	Credentials string `json:"credentials"`
+}
+
 func newConfigCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "config",
@@ -154,6 +223,7 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 		cfg = &appconfig.Config{}
 	}
 	functionExecutors := cfg.ResponsesFunctionExecutorsConfig()
+	webSearch := cfg.WebSearchConfig()
 	result := configInspectResult{
 		ConfigPath: configPath,
 		Server: configInspectServer{
@@ -188,9 +258,9 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 		},
 		Tools: configInspectTools{
 			WebSearch: configInspectWebSearch{
-				Enabled:  cfg.Tools.WebSearch.Enabled,
-				Provider: strings.TrimSpace(cfg.Tools.WebSearch.Provider),
-				BaseURL:  redactURLLike(cfg.Tools.WebSearch.BaseURL),
+				Enabled:  webSearch.Enabled,
+				Provider: webSearch.Provider,
+				BaseURL:  redactURLLike(webSearch.BaseURL),
 			},
 		},
 		ProviderProbe: configInspectProviderProbe{
@@ -201,7 +271,237 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 	for _, target := range cfg.EffectiveUpstreams() {
 		result.Upstreams.Targets = append(result.Upstreams.Targets, inspectUpstreamTarget(target))
 	}
+	result.Sources = buildConfigInspectSources(configPath, cfg)
 	return result
+}
+
+func buildConfigInspectSources(configPath string, cfg *appconfig.Config) configInspectSources {
+	probe := loadConfigSourceProbe(configPath)
+	return configInspectSources{
+		ConfigPath: configPathSource(configPath),
+		Server: configInspectServerSources{
+			Port: probe.stringFieldSource("server.port", cfg.Server.Port, "LLM_TRACELAB_SERVER_PORT"),
+		},
+		Monitor: configInspectMonitorSources{
+			Port: probe.stringFieldSource("monitor.port", cfg.Monitor.Port, "LLM_TRACELAB_MONITOR_PORT"),
+		},
+		MCP: configInspectMCPSources{
+			Enabled: probe.boolFieldSource("mcp.enabled", "LLM_TRACELAB_MCP_ENABLED"),
+			Path:    probe.stringFieldSource("mcp.path", configInspectMCPPath(cfg), "LLM_TRACELAB_MCP_PATH"),
+		},
+		Database: configInspectDatabaseSources{
+			Driver:      probe.defaultableStringFieldSource("database.driver", cfg.Database.Driver, "LLM_TRACELAB_DATABASE_DRIVER"),
+			DSN:         probe.databaseDSNSource(cfg),
+			AutoMigrate: probe.pointerBoolFieldSource("database.auto_migrate", cfg.Database.AutoMigrate, "LLM_TRACELAB_DATABASE_AUTO_MIGRATE"),
+		},
+		Trace: configInspectTraceSources{
+			OutputDir: probe.traceOutputDirSource(cfg),
+		},
+		ResponsesServer: configInspectResponsesSources{
+			Enabled:      probe.boolFieldSource("responses_server.enabled", "LLM_TRACELAB_RESPONSES_ENABLED"),
+			Path:         probe.defaultableStringFieldSource("responses_server.path", cfg.ResponsesServer.Path, "LLM_TRACELAB_RESPONSES_PATH"),
+			DefaultModel: probe.stringFieldSource("responses_server.default_model", cfg.ResponsesDefaultModel(), "LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"),
+		},
+		Tools: configInspectToolsSources{
+			WebSearch: configInspectWebSearchSources{
+				Enabled:  probe.boolFieldSource("tools.web_search.enabled", "LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"),
+				Provider: probe.defaultableStringFieldSource("tools.web_search.provider", cfg.Tools.WebSearch.Provider, "LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER"),
+				BaseURL:  probe.stringFieldSource("tools.web_search.base_url", cfg.Tools.WebSearch.BaseURL, "LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL"),
+			},
+		},
+		Upstreams: probe.upstreamsSourceSummary(cfg),
+	}
+}
+
+func configPathSource(configPath string) string {
+	if strings.TrimSpace(configPath) == "" {
+		return configSourceNotConfigured
+	}
+	return configSourceEffective
+}
+
+type configSourceProbe struct {
+	fields map[string]struct{}
+}
+
+func loadConfigSourceProbe(configPath string) configSourceProbe {
+	probe := configSourceProbe{fields: make(map[string]struct{})}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return probe
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return probe
+	}
+	node := &root
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
+		node = root.Content[0]
+	}
+	collectYAMLFields(node, "", probe.fields)
+	return probe
+}
+
+func collectYAMLFields(node *yaml.Node, prefix string, fields map[string]struct{}) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		path := key
+		if prefix != "" {
+			path = prefix + "." + key
+		}
+		fields[path] = struct{}{}
+		collectYAMLFields(node.Content[i+1], path, fields)
+	}
+}
+
+func (p configSourceProbe) has(path string) bool {
+	_, ok := p.fields[path]
+	return ok
+}
+
+func (p configSourceProbe) stringFieldSource(path string, effectiveValue string, envNames ...string) string {
+	if anyStringEnvSet(envNames...) {
+		return configSourceEffective
+	}
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	if strings.TrimSpace(effectiveValue) == "" {
+		return configSourceEmpty
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) defaultableStringFieldSource(path string, rawValue string, envNames ...string) string {
+	if anyStringEnvSet(envNames...) {
+		return configSourceEffective
+	}
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	if strings.TrimSpace(rawValue) == "" {
+		return configSourceDefault
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) boolFieldSource(path string, envNames ...string) string {
+	if anyBoolEnvSet(envNames...) {
+		return configSourceEffective
+	}
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	return configSourceDefault
+}
+
+func (p configSourceProbe) pointerBoolFieldSource(path string, rawValue *bool, envNames ...string) string {
+	if anyBoolEnvSet(envNames...) {
+		return configSourceEffective
+	}
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	if rawValue == nil {
+		return configSourceDefault
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) traceOutputDirSource(cfg *appconfig.Config) string {
+	if anyStringEnvSet("LLM_TRACELAB_TRACE_OUTPUT_DIR") {
+		return configSourceEffective
+	}
+	if anyStringEnvSet("LLM_TRACELAB_OUTPUT_DIR") {
+		return configSourceEffective
+	}
+	if p.has("trace.output_dir") {
+		return configSourceConfigFile
+	}
+	if p.has("debug.output_dir") && strings.TrimSpace(cfg.Trace.OutputDir) == "" {
+		return configSourceDerived
+	}
+	if strings.TrimSpace(cfg.TraceOutputDir()) == "" {
+		return configSourceEmpty
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) databaseDSNSource(cfg *appconfig.Config) string {
+	if anyStringEnvSet("LLM_TRACELAB_DATABASE_DSN") {
+		return configSourceEffective
+	}
+	if p.has("database.dsn") {
+		return configSourceConfigFile
+	}
+	if strings.TrimSpace(cfg.DatabaseDSN()) == "" {
+		return configSourceEmpty
+	}
+	return configSourceDerived
+}
+
+func (p configSourceProbe) upstreamsSourceSummary(cfg *appconfig.Config) configInspectUpstreamsSourceSummary {
+	targets := configSourceDefault
+	credentials := configSourceNotConfigured
+	if p.has("upstreams") {
+		targets = configSourceConfigFile
+		credentials = configSourceConfigFile
+	}
+	if p.has("upstream") && !p.has("upstreams") {
+		targets = configSourceConfigFile
+	}
+	if anyStringEnvSet(
+		"LLM_TRACELAB_UPSTREAM_BASE_URL",
+		"LLM_TRACELAB_UPSTREAM_API_KEY",
+		"LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET",
+		"LLM_TRACELAB_UPSTREAM_API_TYPE",
+		"LLM_TRACELAB_UPSTREAM_MODE",
+		"LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY",
+		"LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE",
+		"LLM_TRACELAB_UPSTREAM_API_VERSION",
+		"LLM_TRACELAB_UPSTREAM_DEPLOYMENT",
+		"LLM_TRACELAB_UPSTREAM_PROJECT",
+		"LLM_TRACELAB_UPSTREAM_LOCATION",
+		"LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE",
+	) {
+		targets = configSourceEffective
+	}
+	if anyStringEnvSet("LLM_TRACELAB_UPSTREAM_API_KEY") {
+		credentials = configSourceEffective
+	}
+	if strings.TrimSpace(cfg.Upstream.ApiKey) != "" && len(cfg.Upstreams) == 0 && credentials == configSourceNotConfigured {
+		credentials = configSourceDerived
+	}
+	return configInspectUpstreamsSourceSummary{
+		Targets:     targets,
+		Credentials: credentials,
+	}
+}
+
+func anyStringEnvSet(names ...string) bool {
+	for _, name := range names {
+		if os.Getenv(name) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func anyBoolEnvSet(names ...string) bool {
+	for _, name := range names {
+		if raw := os.Getenv(name); raw != "" {
+			if _, err := strconv.ParseBool(raw); err == nil {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func configInspectMCPPath(cfg *appconfig.Config) string {
@@ -304,6 +604,18 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		result.Tools.WebSearch.BaseURL,
 	)
 	fmt.Fprintf(w, "provider_probe: startup_fill=%t timeout=%s\n", result.ProviderProbe.StartupFill, result.ProviderProbe.Timeout)
+	fmt.Fprintf(w, "sources: config_path=%s server.port=%s monitor.port=%s database.driver=%s database.dsn=%s trace.output_dir=%s responses_server.default_model=%s tools.web_search.provider=%s upstreams.targets=%s upstreams.credentials=%s\n",
+		result.Sources.ConfigPath,
+		result.Sources.Server.Port,
+		result.Sources.Monitor.Port,
+		result.Sources.Database.Driver,
+		result.Sources.Database.DSN,
+		result.Sources.Trace.OutputDir,
+		result.Sources.ResponsesServer.DefaultModel,
+		result.Sources.Tools.WebSearch.Provider,
+		result.Sources.Upstreams.Targets,
+		result.Sources.Upstreams.Credentials,
+	)
 	for _, target := range result.Upstreams.Targets {
 		fmt.Fprintf(w, "upstream: id=%s enabled=%t base_url=%s api_type=%s protocol_family=%s provider_preset=%s mode=%s model_discovery=%s static_models=%d credentials=%d\n",
 			target.ID,
