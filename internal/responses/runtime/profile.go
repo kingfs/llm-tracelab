@@ -20,6 +20,18 @@ type ResolvedModelProfile struct {
 	Budget  ContextBudget
 }
 
+func (r ResolvedModelProfile) UpstreamModelOr(model string) string {
+	model = strings.TrimSpace(model)
+	if r.Profile == nil {
+		return model
+	}
+	upstreamModel := strings.TrimSpace(r.Profile.UpstreamModel)
+	if upstreamModel == "" {
+		return model
+	}
+	return upstreamModel
+}
+
 func (c Config) ContextBudgetForModel(model string) ResolvedModelProfile {
 	resolved := ResolvedModelProfile{
 		Budget: ContextBudget{

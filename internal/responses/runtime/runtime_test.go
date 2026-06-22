@@ -206,6 +206,74 @@ func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) 
 	}
 }
 
+func TestRuntimeCreateUsesProfileUpstreamModelForChatRequest(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "done"},
+				FinishReason: "stop",
+			}},
+		},
+	}
+	rt := New(Config{
+		DefaultModel: "public-model",
+		ModelProfiles: []ModelProfile{{
+			Name:          "public-model",
+			UpstreamModel: "provider/private-model",
+		}},
+	}, client, NewMemoryStore())
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("chat requests = %d, want 1", len(client.reqs))
+	}
+	if client.reqs[0].Model != "provider/private-model" {
+		t.Fatalf("chat request model = %q, want provider/private-model", client.reqs[0].Model)
+	}
+	if resp.Model != "public-model" {
+		t.Fatalf("response model = %q, want public-model", resp.Model)
+	}
+}
+
+func TestRuntimeCreateKeepsModelWhenProfileHasNoUpstreamModel(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "done"},
+				FinishReason: "stop",
+			}},
+		},
+	}
+	rt := New(Config{
+		DefaultModel: "fallback-model",
+		ModelProfiles: []ModelProfile{{
+			Pattern: "public-*",
+		}},
+	}, client, NewMemoryStore())
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Model: "public-model",
+		Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("chat requests = %d, want 1", len(client.reqs))
+	}
+	if client.reqs[0].Model != "public-model" {
+		t.Fatalf("chat request model = %q, want public-model", client.reqs[0].Model)
+	}
+	if resp.Model != "public-model" {
+		t.Fatalf("response model = %q, want public-model", resp.Model)
+	}
+}
+
 func TestRuntimeCreateStreamRequestsStreamingChatCompletion(t *testing.T) {
 	client := &fakeChatClient{
 		resp: ChatCompletionResponse{

@@ -99,7 +99,9 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	budget := r.cfg.ContextBudgetForModel(model).Budget
+	modelProfile := r.cfg.ContextBudgetForModel(model)
+	budget := modelProfile.Budget
+	chatModel := modelProfile.UpstreamModelOr(model)
 	if r.shouldAutoCompact(req, budget, history) {
 		compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
 			ResponseID: req.PreviousResponseID,
@@ -140,7 +142,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
-	chatReq := chatCompletionRequest(req, model, history, inputItems, webSearchReady)
+	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady)
 	resp, err := r.createWithToolLoop(ctx, req, model, chatReq)
 	if err != nil {
 		return protocol.Response{}, err
@@ -193,7 +195,9 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	budget := r.cfg.ContextBudgetForModel(model).Budget
+	modelProfile := r.cfg.ContextBudgetForModel(model)
+	budget := modelProfile.Budget
+	chatModel := modelProfile.UpstreamModelOr(model)
 	if r.shouldAutoCompact(req, budget, history) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
@@ -201,7 +205,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
-	chatReq := chatCompletionRequest(req, model, history, inputItems, webSearchReady)
+	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady)
 	chatReq.Stream = true
 
 	responseID := newResponseID()
@@ -317,7 +321,8 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 			"history_items":      len(history),
 		},
 	})
-	chatResp, err := r.client.ChatCompletion(ctx, compactChatRequest(model, history))
+	chatModel := r.cfg.ContextBudgetForModel(model).UpstreamModelOr(model)
+	chatResp, err := r.client.ChatCompletion(ctx, compactChatRequest(chatModel, history))
 	if err != nil {
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			EventType: "response.compact",
