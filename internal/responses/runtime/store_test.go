@@ -2,8 +2,13 @@ package runtime
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	tracestore "github.com/kingfs/llm-tracelab/internal/store"
 )
@@ -333,6 +338,80 @@ func TestEntStoreLatestResponseIDByConversation(t *testing.T) {
 	}
 	if got != "resp_thread_2" {
 		t.Fatalf("latest response = %q, want resp_thread_2", got)
+	}
+}
+
+func TestEntStorePostgresPersistenceRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	st, err := tracestore.NewWithDatabaseOptions(t.TempDir(), "postgres", dsn, 4, 4, tracestore.DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Fatalf("store.Close() error = %v", err)
+		}
+	})
+
+	ctx := context.Background()
+	store := NewEntStore(st.EntClient())
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	resp := protocol.Response{
+		ID:                 "resp_pg_" + suffix,
+		Object:             "response",
+		CreatedAt:          time.Now().UTC().Unix(),
+		Status:             "completed",
+		Model:              "gpt-postgres-test",
+		PreviousResponseID: "",
+		Output: []protocol.OutputItem{{
+			ID:      "out_pg_" + suffix,
+			Type:    "message",
+			Role:    "assistant",
+			Status:  "completed",
+			Content: []protocol.ContentPart{{Type: "output_text", Text: "postgres pong"}},
+		}},
+		Usage: protocol.Usage{InputTokens: 4, OutputTokens: 3, TotalTokens: 7},
+		Metadata: map[string]any{
+			"codex": map[string]any{"thread_id": "thread_pg_" + suffix},
+			"test":  "postgres_responses_round_trip",
+		},
+	}
+	inputs := []protocol.InputItem{messageInput("in_pg_"+suffix, "postgres ping")}
+	t.Cleanup(func() {
+		_, _ = store.client.ResponseItem.Delete().Where(responseitem.ResponseID(resp.ID)).Exec(context.Background())
+		_ = store.client.Response.DeleteOneID(resp.ID).Exec(context.Background())
+	})
+
+	if err := store.Put(ctx, resp, protocol.CreateResponseRequest{Input: "postgres ping"}, inputs, resp.Output); err != nil {
+		t.Fatalf("Put(postgres) error = %v", err)
+	}
+	got, ok, err := store.Get(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("Get(postgres) ok=%v err=%v", ok, err)
+	}
+	if got.ID != resp.ID || got.Model != resp.Model || got.Status != resp.Status {
+		t.Fatalf("Get(postgres) = %#v, want id/model/status from original", got)
+	}
+	if got.Usage != resp.Usage {
+		t.Fatalf("Usage(postgres) = %#v, want %#v", got.Usage, resp.Usage)
+	}
+	if len(got.Output) != 1 || got.Output[0].ID != resp.Output[0].ID || got.Output[0].Content[0].Text != "postgres pong" {
+		t.Fatalf("Output(postgres) = %#v, want stored output item", got.Output)
+	}
+
+	gotInputs, ok, err := store.InputItems(ctx, resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("InputItems(postgres) ok=%v err=%v", ok, err)
+	}
+	if len(gotInputs) != 1 || gotInputs[0].ID != inputs[0].ID || gotInputs[0].Content[0].Text != "postgres ping" {
+		t.Fatalf("InputItems(postgres) = %#v, want stored input item", gotInputs)
 	}
 }
 

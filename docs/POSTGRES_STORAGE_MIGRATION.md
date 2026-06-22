@@ -159,9 +159,9 @@ The production route should be additive and reviewable:
 4. Keep SQLite application migrations working for local fallback and tests.
 5. Add DSN-gated Postgres integration tests for clean migrate-up, idempotent
    no-change behavior, core store runtime paths, and a small Responses
-   persistence round trip. The migrate-up, idempotent no-change, and core store
-   runtime portions now exist under `LLM_TRACELAB_TEST_POSTGRES_DSN`; the small
-   Responses persistence round trip remains.
+   persistence round trip. These now exist under
+   `LLM_TRACELAB_TEST_POSTGRES_DSN`, including an ent-backed Responses runtime
+   store round trip through checked-in Postgres migrations.
 6. Audit raw SQL in `internal/store` for placeholder syntax, SQLite functions,
    partial index behavior, time encoding, and transaction assumptions before
    declaring Postgres runtime support complete. The first pass covers
