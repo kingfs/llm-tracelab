@@ -273,7 +273,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "provider", "provider probe", "provider probe-report", "provider probe-apply", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -1440,6 +1440,137 @@ upstreams:
 	}
 	if !containsStringFragment(report.Warnings, "specified api_type") {
 		t.Fatalf("probe-report warnings = %+v, want api_type mismatch warning", report.Warnings)
+	}
+}
+
+func TestProviderProbeApplyJSONAppliesManagedChannelSuggestions(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer header-apply-secret" {
+			http.Error(w, "missing auth", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/models":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-test"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/chat/completions":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"model is required"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	disabled := false
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{ChatCompletions: &disabled})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "apply-channel",
+		Name:             "Apply Channel",
+		BaseURL:          upstreamServer.URL + "/v1",
+		APIType:          "responses",
+		APIKeyCiphertext: []byte("sk-apply-cli-secret"),
+		APIKeyHint:       "sk...cret",
+		HeadersJSON:      `{"Authorization":"Bearer header-apply-secret","X-Test":"visible"}`,
+		CapabilitiesJSON: string(capabilitiesJSON),
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig(apply-channel) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:      "other-channel",
+		Name:    "Other Channel",
+		BaseURL: upstreamServer.URL + "/v1",
+		Enabled: true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig(other-channel) error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Store.Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "provider", "probe-apply", "--id", "apply-channel", "--timeout", "2s"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "sk-apply-cli-secret") || strings.Contains(out.String(), "header-apply-secret") {
+		t.Fatalf("provider probe-apply output leaked secret: %s", out.String())
+	}
+	var envelope struct {
+		OK      bool                             `json:"ok"`
+		Command string                           `json:"command"`
+		Result  channel.ProviderProbeApplyResult `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "provider.probe_apply" || len(envelope.Result.Applied) != 1 {
+		t.Fatalf("probe-apply envelope = %+v", envelope)
+	}
+	applied := envelope.Result.Applied[0]
+	if applied.ChannelID != "apply-channel" || !applied.Applied {
+		t.Fatalf("probe-apply item = %+v", applied)
+	}
+	if !hasString(applied.AppliedFields, "protocol_family") || !hasString(applied.AppliedFields, "capabilities.models") {
+		t.Fatalf("applied fields = %+v", applied.AppliedFields)
+	}
+	if hasString(applied.AppliedFields, "api_type") || hasString(applied.AppliedFields, "capabilities.chat_completions") {
+		t.Fatalf("explicit fields were overwritten: %+v", applied.AppliedFields)
+	}
+
+	reopened, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
+	}
+	defer reopened.Close()
+	record, err := reopened.GetChannelConfig("apply-channel")
+	if err != nil {
+		t.Fatalf("GetChannelConfig(apply-channel) error = %v", err)
+	}
+	if record.APIType != "responses" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record api surface = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	var capabilities config.UpstreamCapabilitiesConfig
+	if err := json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities); err != nil {
+		t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+	}
+	if capabilities.ChatCompletions == nil || *capabilities.ChatCompletions {
+		t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+	}
+	if capabilities.Models == nil || !*capabilities.Models {
+		t.Fatalf("models capability was not applied: %#v", capabilities.Models)
+	}
+	other, err := reopened.GetChannelConfig("other-channel")
+	if err != nil {
+		t.Fatalf("GetChannelConfig(other-channel) error = %v", err)
+	}
+	if other.APIType != "" || other.ProtocolFamily != "" || other.CapabilitiesJSON != "{}" {
+		t.Fatalf("--id modified unselected channel: %+v", other)
 	}
 }
 
