@@ -78,6 +78,63 @@ func TestNewWithDatabaseAcceptsRelativeSQLitePath(t *testing.T) {
 	}
 }
 
+func TestNormalizeDatabaseDriver(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		driver string
+		want   string
+	}{
+		{name: "empty defaults sqlite", driver: "", want: "sqlite"},
+		{name: "trims lowercases", driver: " SQLite ", want: "sqlite"},
+		{name: "postgres", driver: "postgres", want: "postgres"},
+		{name: "postgresql alias", driver: " PostgreSQL ", want: "postgres"},
+		{name: "unsupported preserved", driver: "mysql", want: "mysql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDatabaseDriver(tt.driver); got != tt.want {
+				t.Fatalf("normalizeDatabaseDriver(%q) = %q, want %q", tt.driver, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewWithDatabaseRejectsPostgresWithoutDSN(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewWithDatabase(t.TempDir(), "postgresql", "", 4, 4)
+	if err == nil || !strings.Contains(err.Error(), "postgres store dsn is required") {
+		t.Fatalf("NewWithDatabase(postgresql empty dsn) error = %v, want required dsn", err)
+	}
+}
+
+func TestOpenStoreDatabaseAcceptsPostgresDSNWithoutConnecting(t *testing.T) {
+	t.Parallel()
+
+	db, path, entDialect, err := openStoreDatabase(t.TempDir(), "postgres", "postgres://user:pass@example.invalid/traces?sslmode=disable")
+	if err != nil {
+		t.Fatalf("openStoreDatabase(postgres) error = %v", err)
+	}
+	defer db.Close()
+	if path != "postgres://user:pass@example.invalid/traces?sslmode=disable" {
+		t.Fatalf("path = %q, want dsn", path)
+	}
+	if entDialect != "postgres" {
+		t.Fatalf("entDialect = %q, want postgres", entDialect)
+	}
+}
+
+func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewWithDatabase(t.TempDir(), "mysql", "mysql://example", 4, 4)
+	if err == nil || !strings.Contains(err.Error(), `store driver "mysql" is not supported yet`) {
+		t.Fatalf("NewWithDatabase(mysql) error = %v, want unsupported driver", err)
+	}
+}
+
 func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
