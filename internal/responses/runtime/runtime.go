@@ -235,6 +235,9 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
+	if tool, ok := forcedUnsupportedHostedTool(req.ToolChoice); ok {
+		return protocol.Response{}, UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
+	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	functionExecutors := r.functionToolExecutorSnapshot()
 	resp, err := r.createWithToolLoop(ctx, req, model, chatReq, functionExecutors)
@@ -328,14 +331,17 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
 	webSearchReady := r.webSearchReady()
+	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
+		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+	}
+	if tool, ok := forcedUnsupportedHostedTool(req.ToolChoice); ok {
+		return protocol.Response{}, UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
+	}
 	if !incrementalStreamSupportsTools(req.Tools, webSearchReady) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
 	if r.autoCompactDecision(req, budget, history, inputItems, webSearchReady).ShouldCompact {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
-	}
-	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
-		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	chatReq.Stream = true
@@ -1211,21 +1217,46 @@ func webSearchChatTool() ChatTool {
 }
 
 func forcedWebSearchTool(toolChoice any) bool {
+	tool, ok := forcedHostedToolName(toolChoice)
+	return ok && (tool == "web_search" || tool == "web_search_preview")
+}
+
+func forcedUnsupportedHostedTool(toolChoice any) (string, bool) {
+	tool, ok := forcedHostedToolName(toolChoice)
+	if !ok {
+		return "", false
+	}
+	switch tool {
+	case "mcp", "file_search", "code_interpreter", "computer_use_preview":
+		return tool, true
+	default:
+		return "", false
+	}
+}
+
+func forcedHostedToolName(toolChoice any) (string, bool) {
 	switch value := toolChoice.(type) {
 	case string:
-		return value == "web_search" || value == "web_search_preview"
-	case map[string]any:
-		if typ, _ := value["type"].(string); typ == "web_search" || typ == "web_search_preview" {
-			return true
+		value = strings.TrimSpace(value)
+		if value == "" || value == "auto" || value == "none" || value == "required" {
+			return "", false
 		}
-		if name, _ := value["name"].(string); name == "web_search" {
-			return true
+		return value, true
+	case map[string]any:
+		if typ, _ := value["type"].(string); typ != "" && typ != "function" {
+			return strings.TrimSpace(typ), strings.TrimSpace(typ) != ""
+		}
+		if name, _ := value["name"].(string); strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name), true
 		}
 		function, _ := value["function"].(map[string]any)
 		name, _ := function["name"].(string)
-		return name == "web_search"
+		if strings.TrimSpace(name) != "" {
+			return strings.TrimSpace(name), true
+		}
+		return "", false
 	default:
-		return false
+		return "", false
 	}
 }
 

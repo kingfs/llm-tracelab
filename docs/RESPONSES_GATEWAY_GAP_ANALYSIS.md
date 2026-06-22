@@ -101,7 +101,7 @@
 - 已吸收首切：新增独立 [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)，固化 text create、stream text、function call、`function_call_output` continuation、ordinary `web_search` descriptor、unsupported hosted tool 的最小兼容合约。
 - fixture 资产：新增 `tests/fixtures/codex/` 离线 examples，覆盖请求、期望 response/event/error 形状；不依赖真实 Codex、真实模型或网络。
 - llm-tracelab 落点：`docs/CODEX_RESPONSES_COMPATIBILITY.md`、`tests/fixtures/codex/*`，运行时事实仍以 `internal/responses/httpapi`、`internal/responses/runtime`、`internal/proxy/responses_server.go` 为准。
-- 剩余缺口：fixture 尚未接自动 Go/e2e runner；Codex TOML/profile 生成已接首切但尚未联动 catalog/channel drift；unsupported hosted tools 还没有 runtime-level stable `unsupported_tool` gate；Codex-specific audit diagnostics 仍只覆盖 response/request 查询首切。
+- 剩余缺口：fixture 尚未接自动 Go/e2e runner；Codex TOML/profile 生成已接首切但尚未联动 catalog/channel drift；unsupported hosted tools 已有强制执行时的 stable `unsupported_tool` gate，但尚无真实执行器；Codex-specific audit diagnostics 仍只覆盖 response/request 查询首切。
 
 ## 部分吸收能力
 
@@ -121,7 +121,7 @@
 ### Hosted/server-side tool lifecycle
 
 - 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切。
-- 缺口：没有独立 `tool_call_audits` 表；跨轮/混合工具失败 lifecycle 仍不完整；MCP、file search、code interpreter、computer-use 仍未实现或未形成 runtime contract。
+- 缺口：没有独立 `tool_call_audits` 表；跨轮/混合工具失败 lifecycle 仍不完整；MCP、file search、code interpreter、computer-use 仍未实现执行器，只有强制执行时的 stable rejection contract。
 - llm-tracelab 下一步落点：`ent/schema`、`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
 - responses-gateway 对照：`docs/tool-runtime.md` 的 `tool_call_audits` 和 MCP runtime boundary。
 
@@ -181,9 +181,10 @@
 
 ### MCP hosted tool runtime
 
-- 缺口：MCP 当前是 llm-tracelab 对外排障 server，不是 Responses runtime 内部的 MCP client/tool executor。
+- 已吸收首切：`mcp`、`file_search`、`code_interpreter`、`computer_use_preview` 在强制 `tool_choice` 执行时返回 OpenAI-style `unsupported_tool` error；普通 descriptor 仍按兼容输入保守解析，不伪造执行结果。
+- 缺口：MCP 当前仍是 llm-tracelab 对外排障 server，不是 Responses runtime 内部的 MCP client/tool executor；尚无 file/code/computer-use 执行器，也没有独立 tool audit 表。
 - responses-gateway 设计：`type:"mcp"` descriptor 作为 gateway-hosted runtime 请求，当前先明确拒绝并审计。
-- llm-tracelab 建议落点：`internal/responses/runtime` 的 hosted tool gate、`internal/responses/audit` 的 tool diagnostics；第一步只做 recognized-and-rejected，不接执行器。
+- llm-tracelab 下一步落点：`internal/responses/audit` 的 tool diagnostics 和后续 `tool_call_audits` schema；执行器本身需单独设计安全边界。
 
 ## 建议下一阶段优先级
 

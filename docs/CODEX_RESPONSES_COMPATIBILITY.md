@@ -104,8 +104,9 @@ runtime 尚未实现。当前首切合约是保守的：
 - 不声称会执行这些工具。
 - 不伪造 file citations、retrieved chunks、code outputs、MCP tool results 或
   computer-use side effects。
-- 后续 runtime gate 应在强制 tool choice 或需要执行时返回稳定
-  OpenAI-style error envelope；fixture 记录期望错误形状，便于后续接自动 runner。
+- 强制 `tool_choice` 为这些 hosted tool 时，runtime 返回稳定 OpenAI-style
+  error envelope，`code` 为 `unsupported_tool`，message 中包含
+  `unsupported hosted tool "<tool>"`。
 
 Fixture:
 
@@ -125,9 +126,9 @@ Fixture:
 | server-side function executor | 部分支持 | 默认 client-owned；YAML opt-in executor 才 server-owned。 |
 | ordinary `web_search` descriptor | 部分支持 | 可解析；provider 就绪时可执行 hosted search；未就绪时不应阻断普通 text path。 |
 | forced `web_search` with no provider | 已支持错误 | 返回 server error envelope，message 指出 unsupported hosted tool。 |
-| MCP hosted tool runtime | 不支持 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor。 |
-| file search hosted runtime | 不支持 | 无 vector store/retrieval/citation runtime。 |
-| code interpreter hosted runtime | 不支持 | 无 sandboxed code runtime。 |
+| MCP hosted tool runtime | 稳定拒绝 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor；强制执行时返回 `unsupported_tool`。 |
+| file search hosted runtime | 稳定拒绝 | 无 vector store/retrieval/citation runtime；强制执行时返回 `unsupported_tool`。 |
+| code interpreter hosted runtime | 稳定拒绝 | 无 sandboxed code runtime；强制执行时返回 `unsupported_tool`。 |
 | Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议。 |
 | Codex fixture runner | 部分支持 | `internal/responses/httpapi` 与 `internal/responses/runtime` 有 focused 离线 Go tests，覆盖 fixture schema/contract 和最小 runtime/parser 对齐；不是完整 Codex/e2e runner。 |
 

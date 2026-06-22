@@ -2112,6 +2112,48 @@ func TestResponseToolsToChatToolsMapsHostedWebSearchWhenReady(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateRejectsForcedUnsupportedHostedTool(t *testing.T) {
+	client := &fakeChatClient{resp: finalChatResponse("should not be called")}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore())
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input:      "use workspace",
+		Tools:      []protocol.Tool{{Type: "mcp", ServerLabel: "workspace"}},
+		ToolChoice: map[string]any{"type": "mcp"},
+	})
+	if err == nil {
+		t.Fatal("Create returned nil error, want unsupported hosted tool")
+	}
+	var unsupported UnsupportedHostedToolError
+	if !errors.As(err, &unsupported) || unsupported.Tool != "mcp" {
+		t.Fatalf("Create error = %T %v, want UnsupportedHostedToolError for mcp", err, err)
+	}
+	if len(client.reqs) != 0 {
+		t.Fatalf("chat requests = %d, want 0 for rejected hosted tool", len(client.reqs))
+	}
+}
+
+func TestRuntimeCreateStreamRejectsForcedUnsupportedHostedTool(t *testing.T) {
+	client := &fakeChatClient{streamResp: finalChatResponse("should not be called")}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore())
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:      "search files",
+		Tools:      []protocol.Tool{{Type: "file_search"}},
+		ToolChoice: map[string]any{"type": "file_search"},
+	}, &fakeResponseStreamSink{})
+	if err == nil {
+		t.Fatal("CreateStream returned nil error, want unsupported hosted tool")
+	}
+	var unsupported UnsupportedHostedToolError
+	if !errors.As(err, &unsupported) || unsupported.Tool != "file_search" {
+		t.Fatalf("CreateStream error = %T %v, want UnsupportedHostedToolError for file_search", err, err)
+	}
+	if len(client.streamReqs) != 0 {
+		t.Fatalf("stream chat requests = %d, want 0 for rejected hosted tool", len(client.streamReqs))
+	}
+}
+
 func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{

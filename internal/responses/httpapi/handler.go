@@ -712,6 +712,11 @@ func writeRuntimeError(w http.ResponseWriter, err error) {
 		writeNotFound(w, notFound.ID)
 		return
 	}
+	var unsupportedTool runtime.UnsupportedHostedToolError
+	if errors.As(err, &unsupportedTool) {
+		writeError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "unsupported_tool")
+		return
+	}
 	if errors.Is(err, context.Canceled) {
 		writeError(w, statusClientClosedRequest, "request cancelled", "server_error", "cancelled")
 		return
@@ -737,6 +742,14 @@ func runtimeErrorBody(err error) protocol.ErrorBody {
 			Message: "request cancelled",
 			Type:    "server_error",
 			Code:    "cancelled",
+		}
+	}
+	var unsupportedTool runtime.UnsupportedHostedToolError
+	if errors.As(err, &unsupportedTool) {
+		return protocol.ErrorBody{
+			Message: err.Error(),
+			Type:    "invalid_request_error",
+			Code:    "unsupported_tool",
 		}
 	}
 	return protocol.ErrorBody{

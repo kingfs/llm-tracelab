@@ -270,6 +270,27 @@ func TestCreateResponseBodyLimit(t *testing.T) {
 	assertError(t, rec, "invalid_request_error", "invalid_json")
 }
 
+func TestCreateResponseUnsupportedHostedToolError(t *testing.T) {
+	rec := httptest.NewRecorder()
+	NewHandler(&fakeRuntime{createErr: runtime.UnsupportedHostedToolError{Tool: "mcp", Reason: "hosted tool runtime is not implemented"}}).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","tools":[{"type":"mcp"}],"tool_choice":{"type":"mcp"}}`)))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	assertError(t, rec, "invalid_request_error", "unsupported_tool")
+	if !strings.Contains(rec.Body.String(), `unsupported hosted tool`) || !strings.Contains(rec.Body.String(), `mcp`) {
+		t.Fatalf("body = %s, want unsupported hosted tool message", rec.Body.String())
+	}
+}
+
+func TestRuntimeErrorBodyUnsupportedHostedTool(t *testing.T) {
+	body := runtimeErrorBody(runtime.UnsupportedHostedToolError{Tool: "file_search", Reason: "hosted tool runtime is not implemented"})
+	if body.Type != "invalid_request_error" || body.Code != "unsupported_tool" || !strings.Contains(body.Message, `unsupported hosted tool "file_search"`) {
+		t.Fatalf("runtimeErrorBody = %+v, want unsupported_tool invalid request", body)
+	}
+}
+
 func TestCreateResponseStreamSuccess(t *testing.T) {
 	rt := &fakeRuntime{
 		createResp: protocol.Response{

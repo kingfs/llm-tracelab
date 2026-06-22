@@ -22,6 +22,6 @@ Coverage:
   descriptor accepted as compatibility input.
 - `unsupported_hosted_tool_expected_error.json`: expected stable error shape for
   unsupported hosted tools such as `mcp`, `file_search`, and
-  `code_interpreter` once runtime gating is added. The current fixture tests
-  treat this as a pending compatibility contract and do not assert that runtime
-  gating for those hosted tools is already implemented.
+  `code_interpreter`. Runtime and HTTP tests assert the stable `unsupported_tool`
+  rejection path for forced hosted tool execution; the tools themselves are not
+  implemented.
