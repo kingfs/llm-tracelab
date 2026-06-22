@@ -470,7 +470,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.responsesHandler != nil && r.URL.Path == h.responsesPath {
+	if h.responsesHandler != nil && h.localResponsesPath(r.URL.Path) {
 		h.serveLocalResponses(w, r)
 		return
 	}

@@ -20,6 +20,10 @@ type fakeRuntime struct {
 	createReq       protocol.CreateResponseRequest
 	createResp      protocol.Response
 	createErr       error
+	compactCtx      context.Context
+	compactReq      protocol.CompactResponseRequest
+	compactResp     protocol.Response
+	compactErr      error
 	inputItemsID    string
 	inputItemsResp  protocol.InputItemList
 	inputItemsFound bool
@@ -30,6 +34,12 @@ func (f *fakeRuntime) Create(ctx context.Context, req protocol.CreateResponseReq
 	f.createCtx = ctx
 	f.createReq = req
 	return f.createResp, f.createErr
+}
+
+func (f *fakeRuntime) Compact(ctx context.Context, req protocol.CompactResponseRequest) (protocol.Response, error) {
+	f.compactCtx = ctx
+	f.compactReq = req
+	return f.compactResp, f.compactErr
 }
 
 func (f *fakeRuntime) InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error) {
@@ -319,6 +329,75 @@ func TestCreateResponseStreamRuntimeContextCanceledAuditsCancelled(t *testing.T)
 		t.Fatalf("stream cancelled events mismatch: %#v", auditor.events)
 	}
 	assertError(t, rec, "server_error", "cancelled")
+}
+
+func TestCompactResponseSuccessAuditsLifecycle(t *testing.T) {
+	rt := &fakeRuntime{
+		compactResp: protocol.Response{
+			ID:                 "resp_compact",
+			Object:             "response",
+			Status:             "completed",
+			Model:              "gpt-test",
+			PreviousResponseID: "resp_source",
+			Metadata: map[string]any{
+				"codex": map[string]any{"thread_id": "thread_1"},
+			},
+			Output: []protocol.OutputItem{{
+				ID:      "summary_1",
+				Type:    "summary",
+				Status:  "completed",
+				Content: []protocol.ContentPart{{Type: "summary_text", Text: "summary"}},
+			}},
+		},
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"response_id":"resp_source","model":"gpt-test"}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if rt.compactReq.ResponseID != "resp_source" || rt.compactReq.Model != "gpt-test" {
+		t.Fatalf("compact request = %#v, want source/model", rt.compactReq)
+	}
+	if auditID, ok := audit.RequestAuditIDFromContext(rt.compactCtx); !ok || auditID != "audit_1" {
+		t.Fatalf("compact context audit id = %q/%v, want audit_1/true", auditID, ok)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
+		t.Fatalf("compact audit mismatch: accepted=%d completed=%q rejected=%q", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID)
+	}
+	if len(auditor.events) != 2 {
+		t.Fatalf("compact events = %d, want started/completed: %#v", len(auditor.events), auditor.events)
+	}
+	if auditor.events[0].EventType != "response.compact" || auditor.events[0].Status != "started" || auditor.events[0].DetailsJSON["target_response_id"] != "resp_source" {
+		t.Fatalf("compact started event mismatch: %#v", auditor.events[0])
+	}
+	if auditor.events[1].EventType != "response.compact" || auditor.events[1].Status != "completed" || auditor.events[1].ResponseID != "resp_compact" || auditor.events[1].ConversationID != "thread_1" {
+		t.Fatalf("compact completed event mismatch: %#v", auditor.events[1])
+	}
+	var got protocol.Response
+	decodeBody(t, rec, &got)
+	if got.ID != "resp_compact" || got.Output[0].Type != "summary" {
+		t.Fatalf("compact response = %#v, want summary response", got)
+	}
+}
+
+func TestCompactResponseRuntimeErrorAuditsFailure(t *testing.T) {
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(&fakeRuntime{compactErr: errors.New("compact failed")}, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses/compact", strings.NewReader(`{"response_id":"resp_source"}`)))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+	if auditor.rejectedID != "audit_1" || auditor.rejected.Status != "failed" {
+		t.Fatalf("compact rejected audit = %q/%#v, want failed", auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 2 || auditor.events[1].EventType != "response.compact" || auditor.events[1].Status != "failed" {
+		t.Fatalf("compact failed events = %#v", auditor.events)
+	}
 }
 
 func TestInputItemsSuccess(t *testing.T) {

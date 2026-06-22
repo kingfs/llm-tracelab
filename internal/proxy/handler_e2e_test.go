@@ -1127,6 +1127,117 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	}
 }
 
+func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	callCount := 0
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		switch callCount {
+		case 1:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_first","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Use cassettes for deterministic replay."},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":5,"total_tokens":9}}`)
+		case 2:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"The user is working on llm-tracelab Responses server mode and must preserve cassette replay."},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":8,"total_tokens":28}}`)
+		default:
+			t.Fatalf("unexpected upstream call %d", callCount)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	createResp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":"what matters?","metadata":{"codex":{"thread_id":"thread_compact"}}}`))
+	if err != nil {
+		t.Fatalf("create response request: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("create status = %d, want 200; body=%s", createResp.StatusCode, string(body))
+	}
+	var created protocol.Response
+	if err := json.NewDecoder(createResp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("created response id empty: %#v", created)
+	}
+
+	compactBody := fmt.Sprintf(`{"response_id":%q}`, created.ID)
+	compactResp, err := http.Post(proxyServer.URL+"/v1/responses/compact", "application/json", strings.NewReader(compactBody))
+	if err != nil {
+		t.Fatalf("compact response request: %v", err)
+	}
+	defer compactResp.Body.Close()
+	if compactResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(compactResp.Body)
+		t.Fatalf("compact status = %d, want 200; body=%s", compactResp.StatusCode, string(body))
+	}
+	var compacted protocol.Response
+	if err := json.NewDecoder(compactResp.Body).Decode(&compacted); err != nil {
+		t.Fatalf("decode compact response: %v", err)
+	}
+	if compacted.PreviousResponseID != created.ID || len(compacted.Output) != 1 || compacted.Output[0].Type != "summary" {
+		t.Fatalf("compact response = %#v, want summary linked to %q", compacted, created.ID)
+	}
+	if !strings.Contains(compacted.Output[0].Content[0].Text, "Responses server mode") {
+		t.Fatalf("compact summary text = %q, want upstream summary", compacted.Output[0].Content[0].Text)
+	}
+
+	events, err := st.EntClient().ExecutionEvent.Query().
+		Where(executionevent.EventTypeEQ("response.compact")).
+		Order(executionevent.ByOccurredAt(), executionevent.ByID()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query compact execution events: %v", err)
+	}
+	if len(events) < 2 {
+		t.Fatalf("compact events len = %d, want started/completed: %+v", len(events), events)
+	}
+	if events[0].Status != "started" || events[len(events)-1].Status != "completed" || events[len(events)-1].ResponseID != compacted.ID {
+		t.Fatalf("compact event statuses/response = %+v", events)
+	}
+}
+
 func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCompletions(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

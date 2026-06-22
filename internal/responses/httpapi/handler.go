@@ -21,6 +21,7 @@ const statusClientClosedRequest = 499
 
 type Runtime interface {
 	Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error)
+	Compact(ctx context.Context, req protocol.CompactResponseRequest) (protocol.Response, error)
 	InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error)
 }
 
@@ -72,6 +73,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/v1/responses":
 		h.serveResponses(w, r)
+	case r.URL.Path == "/v1/responses/compact":
+		h.serveCompact(w, r)
 	case strings.HasPrefix(r.URL.Path, "/v1/responses/"):
 		h.serveResponseSubresource(w, r)
 	default:
@@ -149,6 +152,79 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		Status:         "completed",
 		DetailsJSON: map[string]any{
 			"request_audit_id": auditID,
+		},
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) serveCompact(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w, http.MethodPost)
+		return
+	}
+	defer r.Body.Close()
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON request body: %v", err), "invalid_request_error", "invalid_json")
+		return
+	}
+
+	var req protocol.CompactResponseRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON request body: %v", err), "invalid_request_error", "invalid_json")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err == nil {
+		writeError(w, http.StatusBadRequest, "request body must contain a single JSON object", "invalid_request_error", "invalid_json")
+		return
+	} else if !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "request body must contain a single JSON object", "invalid_request_error", "invalid_json")
+		return
+	}
+
+	auditID := h.auditAccepted(r, body)
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		EventType: "response.compact",
+		Phase:     "compact",
+		Status:    "started",
+		DetailsJSON: map[string]any{
+			"request_audit_id":   auditID,
+			"target_response_id": req.ResponseID,
+			"path":               r.URL.Path,
+		},
+	})
+
+	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
+	resp, err := h.runtime.Compact(ctx, req)
+	if err != nil {
+		failureStatus := runtimeFailureStatus(err)
+		h.auditRejected(r, auditID, failureStatus, err.Error())
+		h.recordExecutionEvent(r, audit.ExecutionEvent{
+			EventType: "response.compact",
+			Phase:     "compact",
+			Status:    failureStatus,
+			Message:   err.Error(),
+			DetailsJSON: map[string]any{
+				"request_audit_id":   auditID,
+				"target_response_id": req.ResponseID,
+			},
+		})
+		writeRuntimeError(w, err)
+		return
+	}
+	h.auditCompleted(r, auditID, resp)
+	completion := audit.CompletionFromResponse(resp)
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.compact",
+		Phase:          "compact",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"request_audit_id":   auditID,
+			"target_response_id": req.ResponseID,
 		},
 	})
 	writeJSON(w, http.StatusOK, resp)

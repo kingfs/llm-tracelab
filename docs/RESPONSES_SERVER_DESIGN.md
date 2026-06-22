@@ -21,7 +21,7 @@
 
 - 下游边转发 streaming。当前 Stage 18A 已支持 `stream:true` 返回 Responses SSE envelope，但输出仍先等待 runtime 得到完整 response，再展开为 SSE events。Stage 18B 已让直接 Chat Completions client 可以聚合 OpenAI-compatible SSE，并让 Responses server-mode 的内部 Chat Completions model call 在下游 `stream:true` 时请求和记录上游 SSE cassette；Stage 18C 已让 context cancellation 以 `cancelled` request/model_call audit 状态落库。proxy adapter/HTTP handler 尚未切到边接收上游边输出下游的真实流式链路。
 - 服务端任意 function tool 执行器。当前普通 `function` tool 已支持非流式 schema 转发、模型 `function_call` output、客户端 `function_call_output` continuation 和 requested/submitted execution events；hosted `web_search` 仍是唯一 server-side 自动执行 tool。
-- compact workflow。
+- 自动 compact workflow。当前显式 `/v1/responses/compact` 首切已落地，但尚未按 model profile/context budget 自动触发。
 - Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 17B 已接入 `capabilities.tool_calling` 路由硬约束。Stage 18A 已接入 deferred Responses SSE envelope 和 stream started/completed events。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup，更完整的真实增量 streaming/cancel/compact events 尚未接入。
 - 完整 Postgres migration 生产化。当前已有 checked-in SQL，Postgres `db migrate up`/`auth migrate up` 会应用版本化 SQL，application store 已拆分 open-vs-migrate，Postgres migration 覆盖 `internal/store` SQLite application raw DDL 表集，并完成 migrated logs/observation/finding/analysis/system-event 路径的首轮 raw SQL 兼容；剩余缺口是 SQLite 应用迁移仍未版本化、Postgres auth rollback/独立 migration namespace 未完成、analytics/eval 等 raw SQL 兼容性仍需持续审计。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
@@ -365,7 +365,7 @@ Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstre
 - compact 产出 summary/item，并保留原始 item lineage。
 - Codex 长会话可通过 audit 解释 compact 行为。
 
-当前状态：`tools.web_search` 配置、mock/SearXNG provider、非流式 hosted `web_search` tool loop 及其 started/completed/failed execution events 已落地。普通 function tool 的客户端执行回路和 requested/submitted audit events 已落地；真实 streaming tool events、compact workflow 和 model profile 驱动的 context budgeting 仍未完成。
+当前状态：`tools.web_search` 配置、mock/SearXNG provider、非流式 hosted `web_search` tool loop 及其 started/completed/failed execution events 已落地。普通 function tool 的客户端执行回路和 requested/submitted audit events 已落地。Stage 19A 已接入显式 `/v1/responses/compact`：读取目标 response continuation history，调用上游 Chat Completions 生成 `summary` output，把 compact response 存入 runtime store，并写 `response.compact` started/completed/failed events；后续 continuation 会停在 `compact_request` boundary，并把 summary 注入 system message。真实 streaming tool events、自动 compact workflow 和 model profile 驱动的 context budgeting 仍未完成。
 
 ### Stage 4：高级 routing 与多 provider（未完成）
 

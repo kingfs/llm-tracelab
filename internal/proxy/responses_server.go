@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/recorder"
@@ -285,9 +286,23 @@ func (h *Handler) serveLocalResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	localReq := r.Clone(r.Context())
 	localReq.URL = cloneURL(r.URL)
-	localReq.URL.Path = "/v1/responses"
+	localReq.URL.Path = h.localResponsesTargetPath(r.URL.Path)
 	localReq.URL.RawPath = ""
 	h.responsesHandler.ServeHTTP(w, localReq)
+}
+
+func (h *Handler) localResponsesPath(path string) bool {
+	if h == nil || h.responsesPath == "" {
+		return false
+	}
+	base := strings.TrimRight(h.responsesPath, "/")
+	return path == base || strings.HasPrefix(path, base+"/")
+}
+
+func (h *Handler) localResponsesTargetPath(path string) string {
+	base := strings.TrimRight(h.responsesPath, "/")
+	suffix := strings.TrimPrefix(path, base)
+	return "/v1/responses" + suffix
 }
 
 func buildResponsesServerChatRequest(ctx context.Context, selection *router.Selection, body []byte) (*http.Request, *http.Request, error) {

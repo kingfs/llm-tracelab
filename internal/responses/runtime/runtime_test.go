@@ -193,6 +193,95 @@ func TestRuntimeCreateStreamRequestsStreamingChatCompletion(t *testing.T) {
 	}
 }
 
+func TestRuntimeCompactStoresSummaryBoundaryForContinuation(t *testing.T) {
+	store := NewMemoryStore()
+	target := protocol.Response{
+		ID:        "resp_target",
+		Object:    "response",
+		Status:    "completed",
+		Model:     "gpt-test",
+		CreatedAt: 100,
+		Metadata: map[string]any{
+			"codex": map[string]any{"thread_id": "thread_1"},
+		},
+		Output: []protocol.OutputItem{{
+			ID:      "msg_target",
+			Type:    "message",
+			Status:  "completed",
+			Role:    "assistant",
+			Content: []protocol.ContentPart{{Type: "output_text", Text: "assistant answer"}},
+		}},
+	}
+	if err := store.Put(context.Background(), target, protocol.CreateResponseRequest{Input: "first"}, []protocol.InputItem{messageInput("in_target", "first")}, target.Output); err != nil {
+		t.Fatalf("seed target response: %v", err)
+	}
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "User wants deterministic replay. Keep the cassette constraint."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 30, CompletionTokens: 10, TotalTokens: 40},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "continued"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+	}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, store)
+
+	compactResp, err := rt.Compact(context.Background(), protocol.CompactResponseRequest{
+		ResponseID: "resp_target",
+		Metadata:   map[string]any{"source": "test"},
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if compactResp.PreviousResponseID != "resp_target" || compactResp.Model != "gpt-test" {
+		t.Fatalf("compact response link/model = %q/%q, want resp_target/gpt-test", compactResp.PreviousResponseID, compactResp.Model)
+	}
+	if len(compactResp.Output) != 1 || compactResp.Output[0].Type != "summary" || compactResp.Output[0].Content[0].Text == "" {
+		t.Fatalf("compact output = %#v, want summary item", compactResp.Output)
+	}
+	if compactResp.Usage.TotalTokens != 40 {
+		t.Fatalf("compact usage = %#v, want chat usage", compactResp.Usage)
+	}
+	inputs, ok, err := store.InputItems(context.Background(), compactResp.ID)
+	if err != nil || !ok {
+		t.Fatalf("compact input lookup ok=%v err=%v", ok, err)
+	}
+	if len(inputs) != 1 || inputs[0].Type != "compact_request" {
+		t.Fatalf("compact inputs = %#v, want compact_request", inputs)
+	}
+
+	_, err = rt.Create(context.Background(), protocol.CreateResponseRequest{
+		PreviousResponseID: compactResp.ID,
+		Input:              "next",
+	})
+	if err != nil {
+		t.Fatalf("Create after compact error = %v", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat requests = %d, want compact + continuation", len(client.reqs))
+	}
+	continuationMessages := client.reqs[1].Messages
+	if len(continuationMessages) < 2 {
+		t.Fatalf("continuation messages = %#v, want summary system and user", continuationMessages)
+	}
+	if continuationMessages[0].Role != "system" || !strings.Contains(chatMessageContentText(continuationMessages[0].Content), "Previous conversation summary") {
+		t.Fatalf("first continuation message = %#v, want summary system", continuationMessages[0])
+	}
+	for _, message := range continuationMessages {
+		if chatMessageContentText(message.Content) == "first" {
+			t.Fatalf("continuation included pre-compact user message: %#v", continuationMessages)
+		}
+	}
+}
+
 func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{

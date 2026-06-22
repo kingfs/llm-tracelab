@@ -113,6 +113,117 @@ func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItem
 	return list, true, nil
 }
 
+func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseRequest) (protocol.Response, error) {
+	if r.client == nil {
+		return protocol.Response{}, fmt.Errorf("chat completions client is required")
+	}
+	if req.ResponseID == "" {
+		return protocol.Response{}, fmt.Errorf("response_id is required")
+	}
+	target, ok, err := r.store.Get(ctx, req.ResponseID)
+	if err != nil {
+		return protocol.Response{}, err
+	}
+	if !ok {
+		return protocol.Response{}, ResponseNotFoundError{ID: req.ResponseID}
+	}
+	history, ok, err := r.store.ContinuationItems(ctx, req.ResponseID)
+	if err != nil {
+		return protocol.Response{}, err
+	}
+	if !ok {
+		return protocol.Response{}, ResponseNotFoundError{ID: req.ResponseID}
+	}
+	model := req.Model
+	if model == "" {
+		model = target.Model
+	}
+	if model == "" {
+		model = r.cfg.DefaultModel
+	}
+	if model == "" {
+		return protocol.Response{}, fmt.Errorf("model is required")
+	}
+
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType: "response.compact",
+		Phase:     "compact",
+		Status:    "model_call_started",
+		DetailsJSON: map[string]any{
+			"target_response_id": req.ResponseID,
+			"model":              model,
+			"history_items":      len(history),
+		},
+	})
+	chatResp, err := r.client.ChatCompletion(ctx, compactChatRequest(model, history))
+	if err != nil {
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.compact",
+			Phase:     "compact",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: map[string]any{
+				"target_response_id": req.ResponseID,
+				"model":              model,
+			},
+		})
+		return protocol.Response{}, err
+	}
+	summary := compactSummaryText(chatResp)
+	if summary == "" {
+		summary = "No summary was produced."
+	}
+	metadata := compactResponseMetadata(target.Metadata, req.Metadata, req.ResponseID)
+	inputItems := []protocol.InputItem{{
+		ID:   "compact_" + req.ResponseID,
+		Type: "compact_request",
+		Extra: map[string]any{
+			"target_response_id": req.ResponseID,
+		},
+	}}
+	outputItems := []protocol.OutputItem{{
+		ID:      "summary_" + strconv.FormatInt(time.Now().UnixNano(), 36),
+		Type:    "summary",
+		Status:  "completed",
+		Content: []protocol.ContentPart{{Type: "summary_text", Text: summary}},
+	}}
+	resp := protocol.Response{
+		ID:                 newResponseID(),
+		Object:             "response",
+		CreatedAt:          time.Now().Unix(),
+		Status:             "completed",
+		Model:              model,
+		Output:             outputItems,
+		PreviousResponseID: req.ResponseID,
+		Usage: protocol.Usage{
+			InputTokens:  chatResp.Usage.PromptTokens,
+			OutputTokens: chatResp.Usage.CompletionTokens,
+			TotalTokens:  chatResp.Usage.TotalTokens,
+		},
+		Metadata: metadata,
+	}
+	if err := r.store.Put(ctx, resp, protocol.CreateResponseRequest{
+		Model:              model,
+		Input:              []map[string]any{{"type": "compact_request", "response_id": req.ResponseID}},
+		PreviousResponseID: req.ResponseID,
+		Metadata:           metadata,
+	}, inputItems, outputItems); err != nil {
+		return protocol.Response{}, err
+	}
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		ResponseID:     resp.ID,
+		ConversationID: audit.CodexConversationID(resp.Metadata),
+		EventType:      "response.compact",
+		Phase:          "compact",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"target_response_id": req.ResponseID,
+			"summary_chars":      len(summary),
+		},
+	})
+	return resp, nil
+}
+
 func (r *Runtime) loadContinuationHistory(ctx context.Context, previousResponseID string) ([]LedgerItem, error) {
 	if previousResponseID == "" {
 		return nil, nil
@@ -329,6 +440,44 @@ func chatCompletionRequest(req protocol.CreateResponseRequest, model string, his
 		TopP:        req.TopP,
 		Stream:      req.Stream,
 	}
+}
+
+func compactChatRequest(model string, history []LedgerItem) ChatCompletionRequest {
+	messages := []ChatMessage{{
+		Role: "system",
+		Content: strings.Join([]string{
+			"Summarize the prior conversation for future continuation.",
+			"Keep durable user goals, decisions, constraints, tool results, open tasks, and named IDs.",
+			"Do not invent facts. Write a concise but complete summary.",
+		}, "\n"),
+	}}
+	messages = append(messages, ledgerToChatMessages(history)...)
+	messages = append(messages, ChatMessage{
+		Role:    "user",
+		Content: "Create the compact conversation summary now.",
+	})
+	return ChatCompletionRequest{
+		Model:    model,
+		Messages: normalizeChatMessages(messages),
+	}
+}
+
+func compactSummaryText(chat ChatCompletionResponse) string {
+	if len(chat.Choices) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(chatMessageContentText(chat.Choices[0].Message.Content))
+}
+
+func compactResponseMetadata(target map[string]any, request map[string]any, targetResponseID string) map[string]any {
+	metadata := mergeMetadata(target, request)
+	return mergeMetadata(metadata, map[string]any{
+		"_gateway": map[string]any{
+			"compact": map[string]any{
+				"source_response_id": targetResponseID,
+			},
+		},
+	})
 }
 
 func responseInputToMessages(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem) []ChatMessage {
