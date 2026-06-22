@@ -26,6 +26,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/redaction"
 	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
 	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -388,14 +389,35 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 				responseStore = responsesruntime.NewEntStore(entClient)
 			}
 		}
-		rt := responsesruntime.New(responsesruntime.Config{
-			DefaultModel: cfg.ResponsesDefaultModel(),
-			ForceStore:   cfg.ResponsesForceStore(),
-		}, &responsesChatCompletionsAdapter{
+		runtimeConfig := responsesruntime.Config{
+			DefaultModel:        cfg.ResponsesDefaultModel(),
+			ForceStore:          cfg.ResponsesForceStore(),
+			WebSearchEnabled:    cfg.WebSearchEnabled(),
+			WebSearchMaxResults: cfg.WebSearchConfig().MaxResults,
+		}
+		runtimeOptions := []responsesruntime.Option{}
+		if cfg.WebSearchEnabled() {
+			webSearchConfig := cfg.WebSearchConfig()
+			if webSearchConfig.Provider == websearch.ProviderDisabled {
+				return nil, fmt.Errorf("build web_search provider: provider is disabled")
+			}
+			provider, err := websearch.NewProvider(websearch.Options{
+				Provider:   webSearchConfig.Provider,
+				BaseURL:    webSearchConfig.BaseURL,
+				TimeoutMS:  webSearchConfig.TimeoutMS,
+				UserAgent:  webSearchConfig.UserAgent,
+				MaxResults: webSearchConfig.MaxResults,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("build web_search provider: %w", err)
+			}
+			runtimeOptions = append(runtimeOptions, responsesruntime.WithWebSearchProvider(provider))
+		}
+		rt := responsesruntime.New(runtimeConfig, &responsesChatCompletionsAdapter{
 			router:        rtr,
 			recorder:      rec,
 			routingPolicy: rtr.Policy(),
-		}, responseStore)
+		}, responseStore, runtimeOptions...)
 		localResponses = httpapi.NewHandler(rt, httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()))
 	}
 

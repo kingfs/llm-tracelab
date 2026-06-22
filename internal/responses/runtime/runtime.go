@@ -2,34 +2,55 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
 
 type Config struct {
-	DefaultModel string
-	ForceStore   bool
+	DefaultModel        string
+	ForceStore          bool
+	MaxToolIterations   int
+	WebSearchEnabled    bool
+	WebSearchMaxResults int
 }
 
 type Runtime struct {
-	cfg    Config
-	client ChatCompletionsClient
-	store  Store
+	cfg               Config
+	client            ChatCompletionsClient
+	store             Store
+	webSearchProvider websearch.Provider
 }
 
-func New(cfg Config, client ChatCompletionsClient, store Store) *Runtime {
+type Option func(*Runtime)
+
+func WithWebSearchProvider(provider websearch.Provider) Option {
+	return func(r *Runtime) {
+		r.webSearchProvider = provider
+	}
+}
+
+func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) *Runtime {
 	if store == nil {
 		store = NewMemoryStore()
 	}
-	return &Runtime{
+	if cfg.MaxToolIterations <= 0 {
+		cfg.MaxToolIterations = 4
+	}
+	rt := &Runtime{
 		cfg:    cfg,
 		client: client,
 		store:  store,
 	}
+	for _, opt := range opts {
+		opt(rt)
+	}
+	return rt
 }
 
 func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error) {
@@ -48,12 +69,15 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	chatReq := chatCompletionRequest(req, model, history, inputItems)
-	chatResp, err := r.client.ChatCompletion(ctx, chatReq)
+	webSearchReady := r.webSearchReady()
+	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
+		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+	}
+	chatReq := chatCompletionRequest(req, model, history, inputItems, webSearchReady)
+	resp, err := r.createWithToolLoop(ctx, req, model, chatReq)
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	resp := chatToResponse(req, chatResp, model)
 	if r.shouldStore(req) {
 		if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
 			return protocol.Response{}, err
@@ -108,13 +132,91 @@ func (e ResponseNotFoundError) Error() string {
 	return fmt.Sprintf("response %q not found", e.ID)
 }
 
-func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem) ChatCompletionRequest {
-	tools := responseToolsToChatTools(req.Tools)
+type UnsupportedHostedToolError struct {
+	Tool   string
+	Reason string
+}
+
+func (e UnsupportedHostedToolError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("unsupported hosted tool %q: %s", e.Tool, e.Reason)
+	}
+	return fmt.Sprintf("unsupported hosted tool %q", e.Tool)
+}
+
+type MaxToolIterationsError struct {
+	Max int
+}
+
+func (e MaxToolIterationsError) Error() string {
+	return fmt.Sprintf("maximum tool iterations exceeded: %d", e.Max)
+}
+
+func (r *Runtime) webSearchReady() bool {
+	return r.cfg.WebSearchEnabled && r.webSearchProvider != nil
+}
+
+func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateResponseRequest, model string, chatReq ChatCompletionRequest) (protocol.Response, error) {
+	var usage ChatUsage
+	output := []protocol.OutputItem{}
+	toolIterations := 0
+
+	for {
+		chatResp, err := r.client.ChatCompletion(ctx, chatReq)
+		if err != nil {
+			return protocol.Response{}, err
+		}
+		usage = addChatUsage(usage, chatResp.Usage)
+
+		calls := executableWebSearchCalls(chatResp)
+		if len(calls) == 0 {
+			chatResp.Usage = usage
+			output = append(output, chatToOutputItems(chatResp)...)
+			return responseFromOutput(req, model, output, usage), nil
+		}
+		if !r.webSearchReady() {
+			return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+		}
+		if toolIterations >= r.cfg.MaxToolIterations {
+			return protocol.Response{}, MaxToolIterationsError{Max: r.cfg.MaxToolIterations}
+		}
+		toolIterations++
+
+		assistantMessage := ChatMessage{Role: "assistant", ToolCalls: make([]ChatToolCall, 0, len(calls))}
+		for _, call := range calls {
+			assistantMessage.ToolCalls = append(assistantMessage.ToolCalls, call.call)
+		}
+		chatReq.Messages = append(chatReq.Messages, assistantMessage)
+
+		for _, call := range calls {
+			result, err := r.webSearchProvider.Search(ctx, websearch.Query{
+				Text:       call.query,
+				MaxResults: r.cfg.WebSearchMaxResults,
+			})
+			if err != nil {
+				return protocol.Response{}, err
+			}
+			output = append(output, webSearchCallOutput(call.call, call.query, result))
+			toolContent, err := webSearchToolMessageContent(call.query, result)
+			if err != nil {
+				return protocol.Response{}, err
+			}
+			chatReq.Messages = append(chatReq.Messages, ChatMessage{
+				Role:       "tool",
+				ToolCallID: call.call.ID,
+				Content:    toolContent,
+			})
+		}
+	}
+}
+
+func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) ChatCompletionRequest {
+	tools := responseToolsToChatTools(req.Tools, webSearchReady)
 	return ChatCompletionRequest{
 		Model:       model,
 		Messages:    responseInputToMessages(req, history, inputItems),
 		Tools:       tools,
-		ToolChoice:  req.ToolChoice,
+		ToolChoice:  chatToolChoice(req.ToolChoice, tools),
 		MaxTokens:   req.MaxOutputTokens,
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
@@ -131,22 +233,178 @@ func responseInputToMessages(req protocol.CreateResponseRequest, history []Ledge
 	return normalizeChatMessages(messages)
 }
 
-func responseToolsToChatTools(tools []protocol.Tool) []ChatTool {
+func responseToolsToChatTools(tools []protocol.Tool, webSearchReady bool) []ChatTool {
 	out := make([]ChatTool, 0, len(tools))
 	for _, tool := range tools {
-		if tool.Type != "function" {
-			continue
+		switch tool.Type {
+		case "function":
+			out = append(out, ChatTool{
+				Type: "function",
+				Function: ChatFunction{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  tool.Parameters,
+				},
+			})
+		case "web_search", "web_search_preview":
+			if webSearchReady {
+				out = append(out, webSearchChatTool())
+			}
 		}
-		out = append(out, ChatTool{
-			Type: "function",
-			Function: ChatFunction{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.Parameters,
-			},
-		})
 	}
 	return out
+}
+
+func webSearchChatTool() ChatTool {
+	return ChatTool{
+		Type: "function",
+		Function: ChatFunction{
+			Name:        "web_search",
+			Description: "Search the web for current or external information.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "The web search query.",
+					},
+				},
+				"required":             []string{"query"},
+				"additionalProperties": false,
+			},
+		},
+	}
+}
+
+func forcedWebSearchTool(toolChoice any) bool {
+	switch value := toolChoice.(type) {
+	case string:
+		return value == "web_search" || value == "web_search_preview"
+	case map[string]any:
+		if typ, _ := value["type"].(string); typ == "web_search" || typ == "web_search_preview" {
+			return true
+		}
+		if name, _ := value["name"].(string); name == "web_search" {
+			return true
+		}
+		function, _ := value["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		return name == "web_search"
+	default:
+		return false
+	}
+}
+
+func chatToolChoice(choice any, tools []ChatTool) any {
+	if len(tools) == 0 {
+		return nil
+	}
+	if !forcedWebSearchTool(choice) {
+		return choice
+	}
+	if !hasChatTool(tools, "web_search") {
+		return nil
+	}
+	return map[string]any{
+		"type": "function",
+		"function": map[string]any{
+			"name": "web_search",
+		},
+	}
+}
+
+func hasChatTool(tools []ChatTool, name string) bool {
+	for _, tool := range tools {
+		if tool.Type == "function" && tool.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+type webSearchCall struct {
+	call  ChatToolCall
+	query string
+}
+
+func executableWebSearchCalls(chat ChatCompletionResponse) []webSearchCall {
+	if len(chat.Choices) == 0 {
+		return nil
+	}
+	calls := chat.Choices[0].Message.ToolCalls
+	out := make([]webSearchCall, 0, len(calls))
+	for i, call := range calls {
+		if call.Function.Name != "web_search" {
+			continue
+		}
+		if call.ID == "" {
+			call.ID = "call_" + strconv.Itoa(i)
+		}
+		query := webSearchQueryFromArguments(call.Function.Arguments)
+		out = append(out, webSearchCall{call: call, query: query})
+	}
+	return out
+}
+
+func webSearchQueryFromArguments(arguments string) string {
+	var payload struct {
+		Query string `json:"query"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
+		return strings.TrimSpace(arguments)
+	}
+	return strings.TrimSpace(payload.Query)
+}
+
+func webSearchCallOutput(call ChatToolCall, query string, result websearch.Result) protocol.OutputItem {
+	sources := make([]any, 0, len(result.Results))
+	for _, item := range result.Results {
+		source := map[string]any{}
+		if item.Title != "" {
+			source["title"] = item.Title
+		}
+		if item.URL != "" {
+			source["url"] = item.URL
+		}
+		if item.Snippet != "" {
+			source["snippet"] = item.Snippet
+		}
+		sources = append(sources, source)
+	}
+	return protocol.OutputItem{
+		ID:     "ws_" + call.ID,
+		Type:   "web_search_call",
+		Status: "completed",
+		CallID: call.ID,
+		Action: map[string]any{
+			"type":    "search",
+			"query":   query,
+			"sources": sources,
+		},
+	}
+}
+
+func webSearchToolMessageContent(query string, result websearch.Result) (string, error) {
+	payload := struct {
+		Query   string                   `json:"query"`
+		Results []websearch.SearchResult `json:"results"`
+	}{
+		Query:   query,
+		Results: result.Results,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal web_search tool output: %w", err)
+	}
+	return string(data), nil
+}
+
+func addChatUsage(left, right ChatUsage) ChatUsage {
+	return ChatUsage{
+		PromptTokens:     left.PromptTokens + right.PromptTokens,
+		CompletionTokens: left.CompletionTokens + right.CompletionTokens,
+		TotalTokens:      left.TotalTokens + right.TotalTokens,
+	}
 }
 
 func requestInputItems(req protocol.CreateResponseRequest) []protocol.InputItem {
@@ -349,18 +607,22 @@ func normalizeChatMessages(messages []ChatMessage) []ChatMessage {
 }
 
 func chatToResponse(req protocol.CreateResponseRequest, chat ChatCompletionResponse, model string) protocol.Response {
+	return responseFromOutput(req, model, chatToOutputItems(chat), chat.Usage)
+}
+
+func responseFromOutput(req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage) protocol.Response {
 	return protocol.Response{
 		ID:                 newResponseID(),
 		Object:             "response",
 		CreatedAt:          time.Now().Unix(),
 		Status:             "completed",
 		Model:              model,
-		Output:             chatToOutputItems(chat),
+		Output:             output,
 		PreviousResponseID: req.PreviousResponseID,
 		Usage: protocol.Usage{
-			InputTokens:  chat.Usage.PromptTokens,
-			OutputTokens: chat.Usage.CompletionTokens,
-			TotalTokens:  chat.Usage.TotalTokens,
+			InputTokens:  usage.PromptTokens,
+			OutputTokens: usage.CompletionTokens,
+			TotalTokens:  usage.TotalTokens,
 		},
 		Metadata: req.Metadata,
 	}

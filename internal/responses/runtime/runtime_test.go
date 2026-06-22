@@ -2,21 +2,52 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
 
 type fakeChatClient struct {
-	req  ChatCompletionRequest
-	resp ChatCompletionResponse
-	err  error
+	reqs  []ChatCompletionRequest
+	req   ChatCompletionRequest
+	resps []ChatCompletionResponse
+	resp  ChatCompletionResponse
+	errs  []error
+	err   error
 }
 
 func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 	f.req = req
-	return f.resp, f.err
+	f.reqs = append(f.reqs, req)
+	index := len(f.reqs) - 1
+	if index < len(f.errs) && f.errs[index] != nil {
+		return ChatCompletionResponse{}, f.errs[index]
+	}
+	if f.err != nil {
+		return ChatCompletionResponse{}, f.err
+	}
+	if index < len(f.resps) {
+		return f.resps[index], nil
+	}
+	return f.resp, nil
+}
+
+type fakeWebSearchProvider struct {
+	queries []websearch.Query
+	result  websearch.Result
+	err     error
+}
+
+func (f *fakeWebSearchProvider) Search(ctx context.Context, query websearch.Query) (websearch.Result, error) {
+	f.queries = append(f.queries, query)
+	if f.err != nil {
+		return websearch.Result{}, f.err
+	}
+	return f.result, nil
 }
 
 func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) {
@@ -123,5 +154,195 @@ func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) 
 	}
 	if len(inputs) != 1 || inputs[0].Type != "message" || inputs[0].Role != "user" || inputs[0].Content[0].Text != "hello" {
 		t.Fatalf("stored input items mismatch: %#v", inputs)
+	}
+}
+
+func TestResponseToolsToChatToolsMapsHostedWebSearchWhenReady(t *testing.T) {
+	tools := responseToolsToChatTools([]protocol.Tool{
+		{Type: "web_search_preview"},
+		{
+			Type:        "function",
+			Name:        "lookup",
+			Description: "lookup docs",
+			Parameters:  map[string]any{"type": "object"},
+		},
+	}, true)
+
+	if len(tools) != 2 {
+		t.Fatalf("tools len = %d, want 2: %#v", len(tools), tools)
+	}
+	if got := tools[0]; got.Type != "function" || got.Function.Name != "web_search" {
+		t.Fatalf("unexpected web_search mapping: %#v", got)
+	}
+	props, ok := tools[0].Function.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("web_search parameters missing properties: %#v", tools[0].Function.Parameters)
+	}
+	if _, ok := props["query"].(map[string]any); !ok {
+		t.Fatalf("web_search query schema missing: %#v", props)
+	}
+	if got := tools[1]; got.Type != "function" || got.Function.Name != "lookup" || got.Function.Description != "lookup docs" {
+		t.Fatalf("function tool mapping changed: %#v", got)
+	}
+
+	disabled := responseToolsToChatTools([]protocol.Tool{{Type: "web_search"}}, false)
+	if len(disabled) != 0 {
+		t.Fatalf("disabled web_search mapped to chat tools: %#v", disabled)
+	}
+}
+
+func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_search",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "web_search",
+								Arguments: `{"query":"llm trace replay"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "Use cassettes for deterministic replay."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 20, CompletionTokens: 7, TotalTokens: 27},
+			},
+		},
+	}
+	provider := &fakeWebSearchProvider{
+		result: websearch.Result{Results: []websearch.SearchResult{{
+			Title:   "TraceLab docs",
+			URL:     "https://example.test/docs",
+			Snippet: "Record and replay LLM API traffic.",
+		}}},
+	}
+	store := NewMemoryStore()
+	rt := New(Config{
+		DefaultModel:        "gpt-test",
+		WebSearchEnabled:    true,
+		WebSearchMaxResults: 2,
+	}, client, store, WithWebSearchProvider(provider))
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input:      "search it",
+		ToolChoice: "web_search",
+		Tools:      []protocol.Tool{{Type: "web_search_preview"}},
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat calls = %d, want 2", len(client.reqs))
+	}
+	if len(provider.queries) != 1 {
+		t.Fatalf("provider queries = %d, want 1", len(provider.queries))
+	}
+	if provider.queries[0].Text != "llm trace replay" || provider.queries[0].MaxResults != 2 {
+		t.Fatalf("provider query mismatch: %#v", provider.queries[0])
+	}
+	firstTools := client.reqs[0].Tools
+	if len(firstTools) != 1 || firstTools[0].Function.Name != "web_search" {
+		t.Fatalf("first chat tools = %#v, want web_search", firstTools)
+	}
+	firstChoice, ok := client.reqs[0].ToolChoice.(map[string]any)
+	if !ok || firstChoice["type"] != "function" {
+		t.Fatalf("first chat tool_choice = %#v, want forced function web_search", client.reqs[0].ToolChoice)
+	}
+	firstChoiceFunction, ok := firstChoice["function"].(map[string]any)
+	if !ok || firstChoiceFunction["name"] != "web_search" {
+		t.Fatalf("first chat tool_choice function = %#v, want web_search", firstChoice["function"])
+	}
+	secondMessages := client.reqs[1].Messages
+	if len(secondMessages) != 3 {
+		t.Fatalf("second messages len = %d, want 3: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 1 || secondMessages[1].ToolCalls[0].Function.Name != "web_search" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_search" {
+		t.Fatalf("second tool message metadata mismatch: %#v", secondMessages[2])
+	}
+	toolContent, _ := secondMessages[2].Content.(string)
+	if !strings.Contains(toolContent, "TraceLab docs") || !strings.Contains(toolContent, "llm trace replay") {
+		t.Fatalf("second tool message content missing result: %q", toolContent)
+	}
+
+	if resp.Usage != (protocol.Usage{InputTokens: 30, OutputTokens: 10, TotalTokens: 40}) {
+		t.Fatalf("usage mismatch: %#v", resp.Usage)
+	}
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len = %d, want 2: %#v", len(resp.Output), resp.Output)
+	}
+	if got := resp.Output[0]; got.Type != "web_search_call" || got.Status != "completed" || got.CallID != "call_search" {
+		t.Fatalf("unexpected web_search output: %#v", got)
+	}
+	if got := resp.Output[0].Action["query"]; got != "llm trace replay" {
+		t.Fatalf("web_search action query = %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "Use cassettes for deterministic replay." {
+		t.Fatalf("unexpected final message: %#v", got)
+	}
+
+	stored, ok, err := store.Get(context.Background(), resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored response lookup ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(stored.Output, resp.Output) {
+		t.Fatalf("stored output mismatch\nwant: %#v\n got: %#v", resp.Output, stored.Output)
+	}
+}
+
+func TestRuntimeCreateWebSearchMaxToolIterationsGuard(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{
+					ToolCalls: []ChatToolCall{{
+						ID:   "call_search",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "web_search",
+							Arguments: `{"query":"again"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+		},
+	}
+	provider := &fakeWebSearchProvider{}
+	rt := New(Config{
+		DefaultModel:      "gpt-test",
+		MaxToolIterations: 1,
+		WebSearchEnabled:  true,
+	}, client, NewMemoryStore(), WithWebSearchProvider(provider))
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "loop",
+		Tools: []protocol.Tool{{Type: "web_search"}},
+	})
+	if err == nil {
+		t.Fatal("Create returned nil error, want max iteration error")
+	}
+	var maxErr MaxToolIterationsError
+	if !errors.As(err, &maxErr) || maxErr.Max != 1 {
+		t.Fatalf("error = %v, want MaxToolIterationsError{Max:1}", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat calls = %d, want 2", len(client.reqs))
+	}
+	if len(provider.queries) != 1 {
+		t.Fatalf("provider queries = %d, want 1", len(provider.queries))
 	}
 }
