@@ -18,6 +18,7 @@ export const apiPaths = {
   traces: "/api/traces",
   findings: "/api/findings",
   responsesAuditTrace: "/api/responses/audit/trace",
+  responsesFunctionExecutors: "/api/responses/function-executors",
   analysis: "/api/analysis",
   analysisJobs: "/api/analysis/jobs",
   analysisJob: (jobID) => `/api/analysis/jobs/${encodeURIComponent(jobID)}`,

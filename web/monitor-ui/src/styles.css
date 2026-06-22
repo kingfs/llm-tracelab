@@ -592,6 +592,27 @@ a {
   gap: 12px;
 }
 
+.responses-function-executors-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.responses-function-executor-warnings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.responses-function-executor-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.responses-function-executor-card {
+  min-width: 0;
+}
+
 .panel-head-compact h2 {
   font-size: 1.08rem;
 }

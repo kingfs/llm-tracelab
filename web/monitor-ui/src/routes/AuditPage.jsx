@@ -23,6 +23,7 @@ export function AuditPage() {
     params.set("severity", severity);
   }
   const findings = useJSON(apiURL(apiPaths.findings, params), [category, severity]);
+  const functionExecutors = useJSON(apiPaths.responsesFunctionExecutors, []);
   const items = findings.data?.items || [];
 
   useEffect(() => {
@@ -129,6 +130,7 @@ export function AuditPage() {
         {traceState.error ? <EmptyState title="Unable to load Responses trace" detail={traceState.error} tone="danger" compact /> : null}
         {traceState.data ? <ResponsesAuditTrace trace={traceState.data} /> : null}
       </section>
+      <ResponsesFunctionExecutorsPanel state={functionExecutors} />
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -181,6 +183,63 @@ export function AuditPage() {
         ) : null}
       </section>
     </div>
+  );
+}
+
+function ResponsesFunctionExecutorsPanel({ state }) {
+  const data = state.data || {};
+  const executors = data.executors || [];
+  const warnings = data.warnings || [];
+  return (
+    <section className="panel responses-function-executors-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Responses function executors</p>
+          <h2>Server-side tools</h2>
+        </div>
+        {state.loading && !state.data ? <InlineTag>loading</InlineTag> : <InlineTag tone={data.enabled ? "green" : "gold"}>{data.enabled ? "enabled" : "disabled"}</InlineTag>}
+      </div>
+      {state.error ? <EmptyState title="Unable to load function executors" detail={state.error} tone="danger" compact /> : null}
+      {!state.error ? (
+        <>
+          <div className="detail-meta-strip">
+            <DetailMetaPill label="timeout" value={data.timeout || "-"} />
+            <DetailMetaPill label="max result" value={data.max_result_bytes ? `${data.max_result_bytes} bytes` : "-"} />
+            <DetailMetaPill label="arguments" value={data.redaction?.arguments ? "redacted" : "visible"} />
+            <DetailMetaPill label="output" value={data.redaction?.output ? "redacted" : "visible"} />
+          </div>
+          <div className="trace-tag-group">
+            {(data.supported_types || []).map((type) => <InlineTag key={type} tone="accent">{type}</InlineTag>)}
+            {!data.supported_types?.length ? <InlineTag>no supported types</InlineTag> : null}
+          </div>
+          {warnings.length ? (
+            <div className="responses-function-executor-warnings">
+              {warnings.map((warning) => <InlineTag key={warning} tone="gold">{warning}</InlineTag>)}
+            </div>
+          ) : null}
+          {executors.length ? (
+            <div className="responses-function-executor-list">
+              {executors.map((executor) => (
+                <article key={`${executor.name}:${executor.type}`} className="finding-card responses-function-executor-card">
+                  <div className="finding-card-head">
+                    <div>
+                      <strong>{executor.name || "(unnamed)"}</strong>
+                      <span>{executor.type || "unknown"}</span>
+                    </div>
+                    <div className="trace-tag-group">
+                      <InlineTag tone={executor.enabled ? "green" : "gold"}>{executor.enabled ? "enabled" : "disabled"}</InlineTag>
+                      <InlineTag tone={executor.output_configured ? "accent" : "default"}>{executor.output_configured ? "output configured" : "no output"}</InlineTag>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No function executors" detail="No server-side function executor bindings are configured for this process." compact />
+          )}
+        </>
+      ) : null}
+    </section>
   );
 }
 

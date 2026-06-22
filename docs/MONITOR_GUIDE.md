@@ -110,7 +110,7 @@ Monitor 使用两类数据：
 
 ### Responses Function Executors API
 
-`GET /api/responses/function-executors` 返回当前启动配置中的 server-side function executor 只读摘要。
+`GET /api/responses/function-executors` 返回当前启动配置中的 server-side function executor 只读摘要；Audit 页面会读取该接口并展示状态面板。
 
 返回内容包括：
 
@@ -120,7 +120,7 @@ Monitor 使用两类数据：
 - `executors[]` 中的 `name`、`type`、`enabled`、`output_configured`。
 - `warnings`，例如开启 executor 但未配置任何 binding。
 
-该 API 不返回 `static_response` 的 output 内容，也不提供 UI 或写配置能力。
+该 API 不返回 `static_response` 的 output 内容；当前 UI 只展示只读状态，不提供写配置能力。
 
 ### Events
 

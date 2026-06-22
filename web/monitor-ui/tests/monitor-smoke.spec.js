@@ -80,6 +80,9 @@ test.beforeEach(async ({ page }) => {
       expect(url.searchParams.get("response_id")).toBe("resp_123");
       return route.fulfill({ json: responsesAuditTracePayload() });
     }
+    if (path === "/api/responses/function-executors") {
+      return route.fulfill({ json: responsesFunctionExecutorsPayload() });
+    }
     if (path === "/api/analysis") {
       return route.fulfill({ json: analysisPayload() });
     }
@@ -187,6 +190,10 @@ test("audit page renders responses audit trace", async ({ page }) => {
   await page.goto("/audit?response_id=resp_123");
   await expect(page.getByRole("heading", { name: "Audit", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Request lineage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Server-side tools" })).toBeVisible();
+  await expect(page.getByText("lookup_order")).toBeVisible();
+  await expect(page.getByText("output configured")).toBeVisible();
+  await expect(page.getByText("do-not-leak")).toHaveCount(0);
   await expect(page.getByText("audit_resp_123")).toBeVisible();
   await expect(page.getByText("response.request").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "trace-routed" })).toHaveAttribute("href", "/traces/trace-routed");
@@ -476,6 +483,28 @@ function traceListPayload() {
       cached_tokens: 0,
       is_stream: false,
     }],
+  };
+}
+
+function responsesFunctionExecutorsPayload() {
+  return {
+    enabled: true,
+    timeout: "2s",
+    max_result_bytes: 256,
+    redaction: {
+      arguments: true,
+      output: true,
+    },
+    supported_types: ["static_response"],
+    executors: [
+      {
+        name: "lookup_order",
+        type: "static_response",
+        enabled: true,
+        output_configured: true,
+      },
+    ],
+    warnings: [],
   };
 }
 
