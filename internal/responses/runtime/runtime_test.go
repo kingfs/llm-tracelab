@@ -14,16 +14,18 @@ import (
 )
 
 type fakeChatClient struct {
-	reqs         []ChatCompletionRequest
-	req          ChatCompletionRequest
-	resps        []ChatCompletionResponse
-	resp         ChatCompletionResponse
-	errs         []error
-	err          error
-	streamReqs   []ChatCompletionRequest
-	streamEvents []ChatStreamEvent
-	streamResp   ChatCompletionResponse
-	streamErr    error
+	reqs               []ChatCompletionRequest
+	req                ChatCompletionRequest
+	resps              []ChatCompletionResponse
+	resp               ChatCompletionResponse
+	errs               []error
+	err                error
+	streamReqs         []ChatCompletionRequest
+	streamEvents       []ChatStreamEvent
+	streamEventBatches [][]ChatStreamEvent
+	streamResp         ChatCompletionResponse
+	streamResps        []ChatCompletionResponse
+	streamErr          error
 }
 
 func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
@@ -44,13 +46,21 @@ func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionR
 
 func (f *fakeChatClient) ChatCompletionStream(ctx context.Context, req ChatCompletionRequest, handle ChatStreamCallback) (ChatCompletionResponse, error) {
 	f.streamReqs = append(f.streamReqs, req)
+	index := len(f.streamReqs) - 1
 	if f.streamErr != nil {
 		return ChatCompletionResponse{}, f.streamErr
 	}
-	for _, event := range f.streamEvents {
+	events := f.streamEvents
+	if index < len(f.streamEventBatches) {
+		events = f.streamEventBatches[index]
+	}
+	for _, event := range events {
 		if err := handle(event); err != nil {
 			return ChatCompletionResponse{}, err
 		}
+	}
+	if index < len(f.streamResps) {
+		return f.streamResps[index], nil
 	}
 	return f.streamResp, nil
 }
@@ -516,16 +526,62 @@ func TestRuntimeCreateStreamEmitsFunctionCallArgumentDeltas(t *testing.T) {
 	}
 }
 
-func TestRuntimeCreateStreamFallsBackForRegisteredFunctionToolExecutor(t *testing.T) {
-	client := &fakeChatClient{}
+func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T) {
+	client := &fakeChatClient{
+		streamEventBatches: [][]ChatStreamEvent{
+			{
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ID:             "call_lookup",
+					FunctionName:   "lookup",
+					ArgumentsDelta: `{"q"`,
+				}}},
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ArgumentsDelta: `:"codex"}`,
+				}}},
+			},
+			{
+				{ChoiceIndex: 0, ContentDelta: "Lookup "},
+				{ChoiceIndex: 0, ContentDelta: "complete."},
+			},
+		},
+		streamResps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_lookup",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "lookup",
+								Arguments: `{"q":"codex"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "Lookup complete."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+			},
+		},
+	}
+	store := NewMemoryStore()
+	sink := &fakeResponseStreamSink{}
 	rt := New(
 		Config{DefaultModel: "fallback-model"},
 		client,
-		NewMemoryStore(),
+		store,
 		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}),
 	)
 
-	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
 		Input:  "lookup codex",
 		Stream: true,
 		Tools: []protocol.Tool{{
@@ -533,12 +589,50 @@ func TestRuntimeCreateStreamFallsBackForRegisteredFunctionToolExecutor(t *testin
 			Name:       "lookup",
 			Parameters: map[string]any{"type": "object"},
 		}},
-	}, &fakeResponseStreamSink{})
-	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
-		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
 	}
-	if len(client.streamReqs) != 0 {
-		t.Fatalf("stream requests = %#v, want none before deferred fallback", client.streamReqs)
+	if len(client.streamReqs) != 2 {
+		t.Fatalf("stream requests = %d, want tool call + final call", len(client.streamReqs))
+	}
+	secondMessages := client.streamReqs[1].Messages
+	if len(secondMessages) != 3 {
+		t.Fatalf("second stream messages len = %d, want 3: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 1 || secondMessages[1].ToolCalls[0].ID != "call_lookup" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_lookup" || secondMessages[2].Content != `{"ok":true}` {
+		t.Fatalf("second tool message mismatch: %#v", secondMessages[2])
+	}
+	if len(sink.functionDelta) != 2 || sink.functionDelta[1].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function argument deltas = %#v", sink.functionDelta)
+	}
+	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function argument done = %#v", sink.functionDone)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
+		t.Fatalf("text deltas = %#v", sink.deltas)
+	}
+	if resp.Usage != (protocol.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22}) {
+		t.Fatalf("usage = %#v", resp.Usage)
+	}
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len = %d, want function_call_output + final message: %#v", len(resp.Output), resp.Output)
+	}
+	if resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" {
+		t.Fatalf("first output = %#v", resp.Output[0])
+	}
+	if resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Lookup complete." {
+		t.Fatalf("second output = %#v", resp.Output[1])
+	}
+	stored, ok, err := store.Get(context.Background(), resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored response lookup ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(stored.Output, resp.Output) {
+		t.Fatalf("stored output mismatch\nwant: %#v\n got: %#v", resp.Output, stored.Output)
 	}
 }
 

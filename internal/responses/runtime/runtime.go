@@ -216,9 +216,6 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !incrementalStreamSupportsTools(req.Tools) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
-	if r.incrementalStreamRequiresDeferredToolLoop(req.Tools) {
-		return protocol.Response{}, ErrIncrementalStreamUnsupported
-	}
 	if sink == nil {
 		return protocol.Response{}, fmt.Errorf("response stream sink is required")
 	}
@@ -249,7 +246,6 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	chatReq.Stream = true
 
 	responseID := newResponseID()
-	messageID := "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	created := protocol.Response{
 		ID:                 responseID,
 		Object:             "response",
@@ -260,7 +256,6 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		Metadata:           req.Metadata,
 	}
 	createdSent := false
-	functionStream := newFunctionCallStreamState(sink)
 	sendCreated := func() error {
 		if createdSent {
 			return nil
@@ -269,58 +264,95 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		return sink.ResponseCreated(created)
 	}
 
-	chatResp, err := streamer.ChatCompletionStream(ctx, chatReq, func(event ChatStreamEvent) error {
-		if event.ChoiceIndex != 0 {
+	var usage ChatUsage
+	output := []protocol.OutputItem{}
+	toolIterations := 0
+	for {
+		messageID := "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+		outputOffset := len(output)
+		functionStream := newFunctionCallStreamState(sink, outputOffset)
+		chatResp, err := streamer.ChatCompletionStream(ctx, chatReq, func(event ChatStreamEvent) error {
+			if event.ChoiceIndex != 0 {
+				return nil
+			}
+			if event.ContentDelta != "" {
+				if err := sendCreated(); err != nil {
+					return err
+				}
+				if err := sink.OutputTextDelta(ResponseTextDelta{
+					OutputIndex:  outputOffset,
+					ItemID:       messageID,
+					ContentIndex: 0,
+					Delta:        event.ContentDelta,
+				}); err != nil {
+					return err
+				}
+			}
+			for _, toolDelta := range event.ToolCallDeltas {
+				functionStream.observe(toolDelta)
+				if toolDelta.ArgumentsDelta == "" {
+					continue
+				}
+				if err := sendCreated(); err != nil {
+					return err
+				}
+				if err := functionStream.argumentsDelta(toolDelta); err != nil {
+					return err
+				}
+			}
 			return nil
-		}
-		if event.ContentDelta != "" {
-			if err := sendCreated(); err != nil {
-				return err
-			}
-			if err := sink.OutputTextDelta(ResponseTextDelta{
-				OutputIndex:  0,
-				ItemID:       messageID,
-				ContentIndex: 0,
-				Delta:        event.ContentDelta,
-			}); err != nil {
-				return err
-			}
-		}
-		for _, toolDelta := range event.ToolCallDeltas {
-			functionStream.observe(toolDelta)
-			if toolDelta.ArgumentsDelta == "" {
-				continue
-			}
-			if err := sendCreated(); err != nil {
-				return err
-			}
-			if err := functionStream.argumentsDelta(toolDelta); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return protocol.Response{}, err
-	}
-	if err := sendCreated(); err != nil {
-		return protocol.Response{}, err
-	}
-	outputItems := chatToOutputItemsWithMessageID(chatResp, messageID)
-	r.recordRequestedFunctionCalls(ctx, outputItems)
-	if err := functionStream.argumentsDone(outputItems); err != nil {
-		return protocol.Response{}, err
-	}
-	resp := responseFromOutputWithID(responseID, req, model, outputItems, chatResp.Usage)
-	if r.shouldStore(req) {
-		if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
+		})
+		if err != nil {
 			return protocol.Response{}, err
 		}
+		usage = addChatUsage(usage, chatResp.Usage)
+		if err := sendCreated(); err != nil {
+			return protocol.Response{}, err
+		}
+		outputItems := chatToOutputItemsWithMessageID(chatResp, messageID)
+		r.recordRequestedFunctionCalls(ctx, outputItems)
+		if err := functionStream.argumentsDone(outputItems); err != nil {
+			return protocol.Response{}, err
+		}
+		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp)
+		if !hasToolCalls || !allExecutable {
+			output = append(output, outputItems...)
+			resp := responseFromOutputWithID(responseID, req, model, output, usage)
+			if r.shouldStore(req) {
+				if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
+					return protocol.Response{}, err
+				}
+			}
+			if err := sink.ResponseCompleted(resp); err != nil {
+				return protocol.Response{}, err
+			}
+			return resp, nil
+		}
+		if len(calls) == 0 {
+			return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+		}
+		if toolIterations >= r.cfg.MaxToolIterations {
+			return protocol.Response{}, MaxToolIterationsError{Max: r.cfg.MaxToolIterations}
+		}
+		toolIterations++
+		assistantMessage := ChatMessage{Role: "assistant", ToolCalls: make([]ChatToolCall, 0, len(calls))}
+		for _, call := range calls {
+			assistantMessage.ToolCalls = append(assistantMessage.ToolCalls, call.call)
+		}
+		chatReq.Messages = append(chatReq.Messages, assistantMessage)
+		for _, call := range calls {
+			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations)
+			if err != nil {
+				return protocol.Response{}, err
+			}
+			output = append(output, outputItem)
+			chatReq.Messages = append(chatReq.Messages, ChatMessage{
+				Role:       "tool",
+				ToolCallID: call.call.ID,
+				Content:    toolContent,
+			})
+		}
 	}
-	if err := sink.ResponseCompleted(resp); err != nil {
-		return protocol.Response{}, err
-	}
-	return resp, nil
 }
 
 func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error) {
@@ -349,25 +381,10 @@ func incrementalStreamSupportsTools(tools []protocol.Tool) bool {
 	return true
 }
 
-func (r *Runtime) incrementalStreamRequiresDeferredToolLoop(tools []protocol.Tool) bool {
-	if len(r.functionExecutors) == 0 {
-		return false
-	}
-	for _, tool := range tools {
-		if tool.Type != "function" {
-			continue
-		}
-		configured := r.functionExecutors[normalizeFunctionToolName(tool.Name)]
-		if configured.executor != nil {
-			return true
-		}
-	}
-	return false
-}
-
 type functionCallStreamState struct {
-	sink  FunctionCallArgumentStreamSink
-	calls map[int]*functionCallStreamCall
+	sink         FunctionCallArgumentStreamSink
+	outputOffset int
+	calls        map[int]*functionCallStreamCall
 }
 
 type functionCallStreamCall struct {
@@ -377,8 +394,8 @@ type functionCallStreamCall struct {
 	arguments strings.Builder
 }
 
-func newFunctionCallStreamState(sink ResponseStreamSink) *functionCallStreamState {
-	out := &functionCallStreamState{}
+func newFunctionCallStreamState(sink ResponseStreamSink, outputOffset int) *functionCallStreamState {
+	out := &functionCallStreamState{outputOffset: outputOffset}
 	if functionSink, ok := sink.(FunctionCallArgumentStreamSink); ok {
 		out.sink = functionSink
 	}
@@ -450,7 +467,7 @@ func (s *functionCallStreamState) call(delta ChatStreamToolCallDelta) *functionC
 			callID = "call_" + strconv.Itoa(delta.Index)
 		}
 		call = &functionCallStreamCall{
-			index:  delta.Index,
+			index:  s.outputOffset + delta.Index,
 			callID: callID,
 			itemID: "fc_" + callID,
 		}

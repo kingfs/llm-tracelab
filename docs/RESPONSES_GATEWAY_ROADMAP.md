@@ -47,7 +47,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 完成后 `responses` / `response_items` 可查到完整结果。
 - 非流式路径、record/replay cassette 和现有 deferred stream 行为不回退。
 
-当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。hosted tools、已注册 server-side function executor、需要 auto compact 等复杂路径会 fallback 到 deferred SSE；真正边执行 server-side tool 边输出细粒度 streaming events 仍未完成。后续工作是 hosted/server-side tool streaming 和已写出 SSE 后的失败事件细化。
+当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。已注册 server-side function executor 的 stream 首切会输出 arguments delta/done、执行 executor、把 tool output 注入下一轮模型上下文并继续流式输出最终文本。hosted tools、需要 auto compact 等复杂路径仍会 fallback 到 deferred SSE；完整细粒度 tool lifecycle streaming events 仍未完成。后续工作是 hosted/server-side tool streaming 事件细化和已写出 SSE 后的失败事件细化。
 
 ### Stage 21：Model Profile 与 Context Budget（保守估算首切已落地）
 
@@ -103,7 +103,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 开启 executor 后写 tool_call started/completed/failed events。
 - 明确超时、错误、结果大小和敏感信息处理边界。
 
-当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。Stage 24C 已让已注册 server-side function executor 遇到 `stream:true` 时明确退回 deferred SSE 执行路径；未注册普通 function 仍保留参数分片 streaming。Monitor 已有只读 API 和 Audit 页面状态面板；Monitor 写配置、外部 executor 隔离策略和真正边执行 server-side tool 边输出的 streaming events 仍未完成。
+当前状态：runtime 已新增默认空 server-side function executor registry。调用方显式注册同名 executor 后，非流式 runtime 会自动执行该 function tool、把输出注入下一轮模型上下文，并写 started/completed/failed events；未注册 tool 仍走客户端 `function_call_output` 回路。配置 `responses_server.function_executors.enabled=true` 并声明 `static_response` executor 后，proxy 装配会注册同名受控 executor；首切策略支持 timeout、max-result-bytes、audit arguments/output redaction，默认关闭。已注册 server-side function executor 在 `stream:true` 下已有首切 tool loop：参数分片继续 streaming，executor 执行后进入下一轮内部 Chat Completions，并继续输出最终文本 delta。Monitor 已有只读 API 和 Audit 页面状态面板；Monitor 写配置、外部 executor 隔离策略和完整细粒度 server-side tool streaming lifecycle events 仍未完成。
 
 ## 并行开发规则
 
