@@ -183,6 +183,10 @@ type FunctionCallArgumentStreamSink interface {
 	FunctionCallArgumentsDone(done ResponseFunctionCallArgumentsDone) error
 }
 
+type OutputItemStreamSink interface {
+	OutputItemDone(done ResponseOutputItemDone) error
+}
+
 type ResponseTextDelta struct {
 	OutputIndex  int
 	ItemID       string
@@ -203,6 +207,11 @@ type ResponseFunctionCallArgumentsDone struct {
 	ItemID      string
 	CallID      string
 	Arguments   string
+}
+
+type ResponseOutputItemDone struct {
+	OutputIndex int
+	Item        protocol.OutputItem
 }
 
 func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink ResponseStreamSink) (protocol.Response, error) {
@@ -345,6 +354,12 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 			if err != nil {
 				return protocol.Response{}, err
 			}
+			if err := sendCreated(); err != nil {
+				return protocol.Response{}, err
+			}
+			if err := streamOutputItemDone(sink, len(output), outputItem); err != nil {
+				return protocol.Response{}, err
+			}
 			output = append(output, outputItem)
 			chatReq.Messages = append(chatReq.Messages, ChatMessage{
 				Role:       "tool",
@@ -353,6 +368,17 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 			})
 		}
 	}
+}
+
+func streamOutputItemDone(sink ResponseStreamSink, outputIndex int, item protocol.OutputItem) error {
+	itemSink, ok := sink.(OutputItemStreamSink)
+	if !ok {
+		return nil
+	}
+	return itemSink.OutputItemDone(ResponseOutputItemDone{
+		OutputIndex: outputIndex,
+		Item:        item,
+	})
 }
 
 func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error) {

@@ -70,32 +70,45 @@ type fakeResponseStreamSink struct {
 	deltas        []ResponseTextDelta
 	functionDelta []ResponseFunctionCallArgumentsDelta
 	functionDone  []ResponseFunctionCallArgumentsDone
+	outputDone    []ResponseOutputItemDone
 	completed     []protocol.Response
+	events        []string
 	err           error
 }
 
 func (f *fakeResponseStreamSink) ResponseCreated(resp protocol.Response) error {
 	f.created = append(f.created, resp)
+	f.events = append(f.events, "response.created")
 	return f.err
 }
 
 func (f *fakeResponseStreamSink) OutputTextDelta(delta ResponseTextDelta) error {
 	f.deltas = append(f.deltas, delta)
+	f.events = append(f.events, "response.output_text.delta")
 	return f.err
 }
 
 func (f *fakeResponseStreamSink) FunctionCallArgumentsDelta(delta ResponseFunctionCallArgumentsDelta) error {
 	f.functionDelta = append(f.functionDelta, delta)
+	f.events = append(f.events, "response.function_call_arguments.delta")
 	return f.err
 }
 
 func (f *fakeResponseStreamSink) FunctionCallArgumentsDone(done ResponseFunctionCallArgumentsDone) error {
 	f.functionDone = append(f.functionDone, done)
+	f.events = append(f.events, "response.function_call_arguments.done")
+	return f.err
+}
+
+func (f *fakeResponseStreamSink) OutputItemDone(done ResponseOutputItemDone) error {
+	f.outputDone = append(f.outputDone, done)
+	f.events = append(f.events, "response.output_item.done")
 	return f.err
 }
 
 func (f *fakeResponseStreamSink) ResponseCompleted(resp protocol.Response) error {
 	f.completed = append(f.completed, resp)
+	f.events = append(f.events, "response.completed")
 	return f.err
 }
 
@@ -614,8 +627,24 @@ func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T)
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
 		t.Fatalf("function argument done = %#v", sink.functionDone)
 	}
+	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.CallID != "call_lookup" {
+		t.Fatalf("output item done = %#v, want function_call_output call_lookup", sink.outputDone)
+	}
 	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
 		t.Fatalf("text deltas = %#v", sink.deltas)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.done",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
 	if resp.Usage != (protocol.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22}) {
 		t.Fatalf("usage = %#v", resp.Usage)
@@ -751,8 +780,24 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_search" || sink.functionDone[0].Arguments != `{"query":"llm trace replay"}` {
 		t.Fatalf("function argument done = %#v", sink.functionDone)
 	}
+	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "web_search_call" || sink.outputDone[0].Item.CallID != "call_search" {
+		t.Fatalf("output item done = %#v, want web_search_call call_search", sink.outputDone)
+	}
 	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
 		t.Fatalf("text deltas = %#v", sink.deltas)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.done",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
 	}
 	if resp.Usage != (protocol.Usage{InputTokens: 22, OutputTokens: 7, TotalTokens: 29}) {
 		t.Fatalf("usage = %#v", resp.Usage)
