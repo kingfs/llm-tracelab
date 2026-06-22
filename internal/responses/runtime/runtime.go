@@ -179,7 +179,8 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	if r.shouldAutoCompact(req, history) {
+	budget := r.cfg.ContextBudgetForModel(model).Budget
+	if r.shouldAutoCompact(req, budget, history) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
 	webSearchReady := r.webSearchReady()

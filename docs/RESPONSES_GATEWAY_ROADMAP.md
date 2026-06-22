@@ -21,13 +21,13 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - hosted `web_search` 非流式 tool loop。
 - 普通 function tool 的 requested/submitted continuation。
 - Chat Completions SSE cassette 记录与聚合。
-- deferred Responses SSE envelope。
+- deferred Responses SSE envelope，以及简单文本输出的真实增量 Responses streaming 首切。
 - context cancellation audit。
 - 显式 `/v1/responses/compact` 和 item-count 自动 compact 阈值。
 
 尚未作为基线能力：
 
-- 下游 Responses SSE 真实边读边转发。
+- tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
 - model profile 驱动的 context window/token budgeting。
 - provider auto-detect。
 - server-side 任意 function executor。
@@ -35,7 +35,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 ## 阶段计划
 
-### Stage 20：Runtime Streaming 首切
+### Stage 20：Runtime Streaming 首切（已落地）
 
 目标：让 Responses server-mode 在 `stream:true` 时从内部 Chat Completions SSE 增量生成下游 Responses SSE delta，同时完成后仍存完整 response。
 
@@ -46,6 +46,8 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 本地 httptest upstream 能验证 `response.created`、`response.output_text.delta`、`response.completed` 的真实增量顺序。
 - 完成后 `responses` / `response_items` 可查到完整结果。
 - 非流式路径、record/replay cassette 和现有 deferred stream 行为不回退。
+
+当前状态：简单文本输出路径已落地；带 tools、需要 auto compact 等复杂路径仍 fallback 到 deferred SSE。后续工作是 tool streaming、cancel 传播和已写出 SSE 后的失败事件细化。
 
 ### Stage 21：Model Profile 与 Context Budget 骨架
 
@@ -101,5 +103,5 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 合入顺序优先：operability 小切片 -> model profile -> streaming。若 streaming 修改 runtime 接口较大，应最后合入并补全回归。
+- 已按 operability 小切片 -> model profile -> streaming 顺序合入。后续优先补 tool streaming/cancel，再做 provider detection 和 executor registry。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。
