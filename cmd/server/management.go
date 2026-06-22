@@ -34,13 +34,15 @@ func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.C
 		}, nil)
 		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier))
 	}
+	functionExecutorConfig := cfg.ResponsesFunctionExecutorsConfig()
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
-		Router:                     rtr,
-		ChannelService:             channel.NewService(traceStore),
-		AuthVerifier:               verifier,
-		AuthStore:                  authStorePtr,
-		SessionTTL:                 cfg.AuthSessionTTL(),
-		ResponsesFunctionExecutors: cfg.ResponsesFunctionExecutorsConfig(),
+		Router:                         rtr,
+		ChannelService:                 channel.NewService(traceStore),
+		AuthVerifier:                   verifier,
+		AuthStore:                      authStorePtr,
+		SessionTTL:                     cfg.AuthSessionTTL(),
+		ResponsesFunctionExecutors:     functionExecutorConfig,
+		ResponsesFunctionExecutorState: monitor.NewResponsesFunctionExecutorState(functionExecutorConfig),
 	})
 	return mux
 }

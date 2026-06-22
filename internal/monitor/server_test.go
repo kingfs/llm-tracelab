@@ -328,6 +328,179 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsWhenEnabledWithoutExecutors(t 
 	}
 }
 
+func TestResponsesFunctionExecutorsAPIHandlerValidateOnlyDoesNotPersist(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"enabled": true,
+		"timeout": "2s",
+		"max_result_bytes": 128,
+		"redaction": {"arguments": true, "output": true}
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var update responsesFunctionExecutorUpdateResponse
+	if err := json.NewDecoder(rr.Body).Decode(&update); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if update.Applied || !update.ValidateOnly || !update.Summary.Enabled || update.Summary.Timeout != "2s" || update.Summary.MaxResultBytes != 128 {
+		t.Fatalf("update response = %+v, want validate-only enabled 2s max 128", update)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Enabled || payload.Timeout != "5s" || payload.MaxResultBytes != 64<<10 {
+		t.Fatalf("summary after validate-only = %+v, want original defaults", payload)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSecrets(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: false,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:    "lookup_order",
+				Type:    "external_command",
+				Command: "echo do-not-leak",
+				Output:  map[string]any{"secret": "also-do-not-leak"},
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": false,
+		"enabled": true,
+		"timeout": "3s",
+		"max_result_bytes": 256,
+		"redaction": {"arguments": true, "output": true},
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "enabled": true}
+		]
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); strings.Contains(body, "do-not-leak") || strings.Contains(body, "echo ") {
+		t.Fatalf("response leaked sensitive executor config: %s", body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "do-not-leak") || strings.Contains(body, "echo ") {
+		t.Fatalf("GET response leaked sensitive executor config: %s", body)
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Enabled || payload.Timeout != "3s" || payload.MaxResultBytes != 256 || !payload.Redaction.Arguments || !payload.Redaction.Output {
+		t.Fatalf("summary after apply = %+v, want applied global policy", payload)
+	}
+	if len(payload.Executors) != 1 || !payload.Executors[0].Enabled || !payload.Executors[0].CommandConfigured || !payload.Executors[0].OutputConfigured {
+		t.Fatalf("executors after apply = %+v, want preserved non-echoed command/output flags", payload.Executors)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerRejectsSensitiveWriteFields(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{"name": "lookup_order", "type": "static_response", "output": "do-not-leak"}
+		]
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "do-not-leak") {
+		t.Fatalf("error response leaked sensitive field value: %s", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "command": "echo do-not-leak"}
+		]
+	}`))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "do-not-leak") {
+		t.Fatalf("error response leaked sensitive field value: %s", rr.Body.String())
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: true,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{Name: "lookup_order", Type: "external_command", Command: "echo ok"},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{
+				"name": "lookup_order",
+				"type": "external_command",
+				"enabled": true,
+				"process": {"working_dir": "relative-dir", "require_absolute_command": true}
+			}
+		]
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var update responsesFunctionExecutorUpdateResponse
+	if err := json.NewDecoder(rr.Body).Decode(&update); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(update.Summary.Executors) != 1 {
+		t.Fatalf("executors = %+v, want one executor", update.Summary.Executors)
+	}
+	warnings := strings.Join(update.Summary.Executors[0].Warnings, " ")
+	if update.Summary.Executors[0].Available || !strings.Contains(warnings, "working_dir must be absolute") || !strings.Contains(warnings, "command must be absolute") {
+		t.Fatalf("executor = %+v, want invalid process warnings", update.Summary.Executors[0])
+	}
+}
+
 func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {

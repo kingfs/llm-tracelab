@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
@@ -635,12 +636,13 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router                     *router.Router
-	ChannelService             *channel.Service
-	AuthVerifier               auth.TokenVerifier
-	AuthStore                  *auth.Store
-	SessionTTL                 time.Duration
-	ResponsesFunctionExecutors config.ResponsesFunctionExecutorConfig
+	Router                         *router.Router
+	ChannelService                 *channel.Service
+	AuthVerifier                   auth.TokenVerifier
+	AuthStore                      *auth.Store
+	SessionTTL                     time.Duration
+	ResponsesFunctionExecutors     config.ResponsesFunctionExecutorConfig
+	ResponsesFunctionExecutorState *ResponsesFunctionExecutorState
 }
 
 type responsesFunctionExecutorsSummary struct {
@@ -666,6 +668,86 @@ type responsesFunctionExecutorBindingView struct {
 	OutputConfigured  bool     `json:"output_configured"`
 	CommandConfigured bool     `json:"command_configured"`
 	Warnings          []string `json:"warnings"`
+}
+
+type responsesFunctionExecutorUpdateRequest struct {
+	ValidateOnly   *bool                                    `json:"validate_only"`
+	Enabled        *bool                                    `json:"enabled"`
+	Timeout        string                                   `json:"timeout"`
+	MaxResultBytes *int                                     `json:"max_result_bytes"`
+	Redaction      *responsesFunctionExecutorRedactionPatch `json:"redaction"`
+	Executors      []responsesFunctionExecutorBindingPatch  `json:"executors"`
+	ExecutorsSet   bool                                     `json:"-"`
+}
+
+type responsesFunctionExecutorRedactionPatch struct {
+	Arguments *bool `json:"arguments"`
+	Output    *bool `json:"output"`
+}
+
+type responsesFunctionExecutorBindingPatch struct {
+	Name    string                                 `json:"name"`
+	Type    string                                 `json:"type"`
+	Enabled *bool                                  `json:"enabled"`
+	Process *responsesFunctionExecutorProcessPatch `json:"process"`
+}
+
+type responsesFunctionExecutorProcessPatch struct {
+	WorkingDir             string `json:"working_dir"`
+	RequireAbsoluteCommand *bool  `json:"require_absolute_command"`
+}
+
+type responsesFunctionExecutorUpdateResponse struct {
+	Applied      bool                              `json:"applied"`
+	ValidateOnly bool                              `json:"validate_only"`
+	Summary      responsesFunctionExecutorsSummary `json:"summary"`
+}
+
+type ResponsesFunctionExecutorState struct {
+	mu  sync.RWMutex
+	cfg config.ResponsesFunctionExecutorConfig
+}
+
+func NewResponsesFunctionExecutorState(cfg config.ResponsesFunctionExecutorConfig) *ResponsesFunctionExecutorState {
+	return &ResponsesFunctionExecutorState{cfg: cloneResponsesFunctionExecutorConfig(cfg)}
+}
+
+func (s *ResponsesFunctionExecutorState) summary() responsesFunctionExecutorsSummary {
+	if s == nil {
+		return responsesFunctionExecutorsSummaryFromConfig(config.ResponsesFunctionExecutorConfig{})
+	}
+	s.mu.RLock()
+	cfg := cloneResponsesFunctionExecutorConfig(s.cfg)
+	s.mu.RUnlock()
+	return responsesFunctionExecutorsSummaryFromConfig(cfg)
+}
+
+func (s *ResponsesFunctionExecutorState) validate(req responsesFunctionExecutorUpdateRequest) (responsesFunctionExecutorsSummary, error) {
+	if s == nil {
+		s = NewResponsesFunctionExecutorState(config.ResponsesFunctionExecutorConfig{})
+	}
+	s.mu.RLock()
+	cfg := cloneResponsesFunctionExecutorConfig(s.cfg)
+	s.mu.RUnlock()
+	updated, err := applyResponsesFunctionExecutorUpdate(cfg, req)
+	if err != nil {
+		return responsesFunctionExecutorsSummary{}, err
+	}
+	return responsesFunctionExecutorsSummaryFromConfig(updated), nil
+}
+
+func (s *ResponsesFunctionExecutorState) apply(req responsesFunctionExecutorUpdateRequest) (responsesFunctionExecutorsSummary, error) {
+	if s == nil {
+		s = NewResponsesFunctionExecutorState(config.ResponsesFunctionExecutorConfig{})
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	updated, err := applyResponsesFunctionExecutorUpdate(cloneResponsesFunctionExecutorConfig(s.cfg), req)
+	if err != nil {
+		return responsesFunctionExecutorsSummary{}, err
+	}
+	s.cfg = cloneResponsesFunctionExecutorConfig(updated)
+	return responsesFunctionExecutorsSummaryFromConfig(updated), nil
 }
 
 type loginRequest struct {
@@ -1071,6 +1153,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	functionExecutorState := opt.ResponsesFunctionExecutorState
+	if functionExecutorState == nil {
+		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors)
+	}
 	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.SessionTTL))
 	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthVerifier))
@@ -1084,7 +1170,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(opt.ResponsesFunctionExecutors), opt.AuthVerifier))
+	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), opt.AuthVerifier))
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
@@ -1140,14 +1226,198 @@ func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerF
 	}
 }
 
-func responsesFunctionExecutorsAPIHandler(cfg config.ResponsesFunctionExecutorConfig) http.HandlerFunc {
+func responsesFunctionExecutorsAPIHandler(state *ResponsesFunctionExecutorState) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, state.summary())
+		case http.MethodPost:
+			var req responsesFunctionExecutorUpdateRequest
+			dec := json.NewDecoder(r.Body)
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid function executor configuration payload"})
+				return
+			}
+			validateOnly := true
+			if req.ValidateOnly != nil {
+				validateOnly = *req.ValidateOnly
+			}
+			var (
+				summary responsesFunctionExecutorsSummary
+				err     error
+			)
+			if validateOnly {
+				summary, err = state.validate(req)
+			} else {
+				summary, err = state.apply(req)
+			}
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, responsesFunctionExecutorUpdateResponse{
+				Applied:      !validateOnly,
+				ValidateOnly: validateOnly,
+				Summary:      summary,
+			})
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		writeJSON(w, http.StatusOK, responsesFunctionExecutorsSummaryFromConfig(cfg))
 	}
+}
+
+func (r *responsesFunctionExecutorUpdateRequest) UnmarshalJSON(data []byte) error {
+	type alias responsesFunctionExecutorUpdateRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if err := validateJSONKeys(raw, map[string]struct{}{
+		"validate_only":    {},
+		"enabled":          {},
+		"timeout":          {},
+		"max_result_bytes": {},
+		"redaction":        {},
+		"executors":        {},
+	}); err != nil {
+		return err
+	}
+	if redactionRaw, ok := raw["redaction"]; ok {
+		var redaction map[string]json.RawMessage
+		if err := json.Unmarshal(redactionRaw, &redaction); err != nil {
+			return err
+		}
+		if err := validateJSONKeys(redaction, map[string]struct{}{"arguments": {}, "output": {}}); err != nil {
+			return err
+		}
+	}
+	if executorsRaw, ok := raw["executors"]; ok {
+		var executors []map[string]json.RawMessage
+		if err := json.Unmarshal(executorsRaw, &executors); err != nil {
+			return err
+		}
+		for _, executor := range executors {
+			if err := validateJSONKeys(executor, map[string]struct{}{
+				"name":    {},
+				"type":    {},
+				"enabled": {},
+				"process": {},
+			}); err != nil {
+				return err
+			}
+			if processRaw, ok := executor["process"]; ok {
+				var process map[string]json.RawMessage
+				if err := json.Unmarshal(processRaw, &process); err != nil {
+					return err
+				}
+				if err := validateJSONKeys(process, map[string]struct{}{
+					"working_dir":              {},
+					"require_absolute_command": {},
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = responsesFunctionExecutorUpdateRequest(decoded)
+	_, r.ExecutorsSet = raw["executors"]
+	return nil
+}
+
+func validateJSONKeys(raw map[string]json.RawMessage, allowed map[string]struct{}) error {
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown field %q", key)
+		}
+	}
+	return nil
+}
+
+func applyResponsesFunctionExecutorUpdate(cfg config.ResponsesFunctionExecutorConfig, req responsesFunctionExecutorUpdateRequest) (config.ResponsesFunctionExecutorConfig, error) {
+	if req.Enabled != nil {
+		cfg.Enabled = *req.Enabled
+	}
+	if strings.TrimSpace(req.Timeout) != "" {
+		timeout, err := time.ParseDuration(strings.TrimSpace(req.Timeout))
+		if err != nil {
+			return config.ResponsesFunctionExecutorConfig{}, fmt.Errorf("timeout must be a Go duration such as 5s")
+		}
+		cfg.Timeout = timeout
+	}
+	if req.MaxResultBytes != nil {
+		cfg.MaxResultBytes = *req.MaxResultBytes
+	}
+	if req.Redaction != nil {
+		if req.Redaction.Arguments != nil {
+			cfg.Redaction.Arguments = *req.Redaction.Arguments
+		}
+		if req.Redaction.Output != nil {
+			cfg.Redaction.Output = *req.Redaction.Output
+		}
+	}
+	if req.ExecutorsSet {
+		cfg.Executors = mergeResponsesFunctionExecutorBindings(cfg.Executors, req.Executors)
+	}
+	return cfg, nil
+}
+
+func mergeResponsesFunctionExecutorBindings(current []config.ResponsesFunctionExecutorBinding, patches []responsesFunctionExecutorBindingPatch) []config.ResponsesFunctionExecutorBinding {
+	byName := make(map[string]config.ResponsesFunctionExecutorBinding, len(current))
+	for _, binding := range current {
+		byName[strings.TrimSpace(binding.Name)] = binding
+	}
+	out := make([]config.ResponsesFunctionExecutorBinding, 0, len(patches))
+	for _, patch := range patches {
+		name := strings.TrimSpace(patch.Name)
+		binding := byName[name]
+		binding.Name = name
+		if strings.TrimSpace(patch.Type) != "" {
+			binding.Type = patch.Type
+		}
+		if patch.Enabled != nil {
+			binding.Enabled = cloneBoolPtr(patch.Enabled)
+		}
+		if patch.Process != nil {
+			binding.Process.WorkingDir = patch.Process.WorkingDir
+			if patch.Process.RequireAbsoluteCommand != nil {
+				binding.Process.RequireAbsoluteCommand = *patch.Process.RequireAbsoluteCommand
+			}
+		}
+		out = append(out, binding)
+	}
+	return out
+}
+
+func cloneResponsesFunctionExecutorConfig(cfg config.ResponsesFunctionExecutorConfig) config.ResponsesFunctionExecutorConfig {
+	cfg.Warnings = append([]string{}, cfg.Warnings...)
+	cfg.Executors = append([]config.ResponsesFunctionExecutorBinding(nil), cfg.Executors...)
+	for i := range cfg.Executors {
+		cfg.Executors[i].Enabled = cloneBoolPtr(cfg.Executors[i].Enabled)
+		cfg.Executors[i].Args = append([]string{}, cfg.Executors[i].Args...)
+		cfg.Executors[i].EnvAllowlist = append([]string{}, cfg.Executors[i].EnvAllowlist...)
+		cfg.Executors[i].Warnings = append([]string{}, cfg.Executors[i].Warnings...)
+		if cfg.Executors[i].Env != nil {
+			env := make(map[string]string, len(cfg.Executors[i].Env))
+			for key, value := range cfg.Executors[i].Env {
+				env[key] = value
+			}
+			cfg.Executors[i].Env = env
+		}
+	}
+	return cfg
+}
+
+func cloneBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExecutorConfig) responsesFunctionExecutorsSummary {

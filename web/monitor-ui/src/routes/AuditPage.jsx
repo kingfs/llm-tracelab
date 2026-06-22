@@ -187,9 +187,39 @@ export function AuditPage() {
 }
 
 function ResponsesFunctionExecutorsPanel({ state }) {
-  const data = state.data || {};
+  const [localSummary, setLocalSummary] = useState(null);
+  const [enabledDraft, setEnabledDraft] = useState(false);
+  const [writeState, setWriteState] = useState({ loading: false, message: "", error: "" });
+  const data = localSummary || state.data || {};
   const executors = data.executors || [];
   const warnings = data.warnings || [];
+
+  useEffect(() => {
+    if (state.data) {
+      setLocalSummary(null);
+      setEnabledDraft(Boolean(state.data.enabled));
+      setWriteState({ loading: false, message: "", error: "" });
+    }
+  }, [state.data]);
+
+  const submitExecutorConfig = (validateOnly) => {
+    setWriteState({ loading: true, message: "", error: "" });
+    requestJSON(apiPaths.responsesFunctionExecutors, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ validate_only: validateOnly, enabled: enabledDraft }),
+    })
+      .then((payload) => {
+        if (!payload.validate_only && payload.summary) {
+          setLocalSummary(payload.summary);
+        }
+        setWriteState({ loading: false, message: payload.validate_only ? "Validation passed" : "Applied to current process", error: "" });
+      })
+      .catch((error) => {
+        setWriteState({ loading: false, message: "", error: error.message || "Unable to update function executors" });
+      });
+  };
+
   return (
     <section className="panel responses-function-executors-panel">
       <div className="panel-head">
@@ -202,6 +232,18 @@ function ResponsesFunctionExecutorsPanel({ state }) {
       {state.error ? <EmptyState title="Unable to load function executors" detail={state.error} tone="danger" compact /> : null}
       {!state.error ? (
         <>
+          <div className="responses-function-executor-controls">
+            <label className="provider-form-check">
+              <input type="checkbox" checked={enabledDraft} onChange={(event) => setEnabledDraft(event.target.checked)} />
+              Enabled
+            </label>
+            <div className="provider-form-actions">
+              <button className="ghost-button" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(true)}>Validate</button>
+              <button className="ghost-button active" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(false)}>Apply</button>
+            </div>
+            {writeState.message ? <InlineTag tone="green">{writeState.message}</InlineTag> : null}
+            {writeState.error ? <InlineTag tone="danger">{writeState.error}</InlineTag> : null}
+          </div>
           <div className="detail-meta-strip">
             <DetailMetaPill label="timeout" value={data.timeout || "-"} />
             <DetailMetaPill label="max result" value={data.max_result_bytes ? `${data.max_result_bytes} bytes` : "-"} />
