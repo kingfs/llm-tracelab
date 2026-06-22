@@ -2,7 +2,9 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestRedactDSN(t *testing.T) {
@@ -98,6 +100,43 @@ func TestTraceOutputDirEnvOverridesLegacyOutputDirEnv(t *testing.T) {
 	}
 	if cfg.Debug.OutputDir != "/app/data/legacy" {
 		t.Fatalf("Debug.OutputDir = %q, want /app/data/legacy", cfg.Debug.OutputDir)
+	}
+}
+
+func TestProviderProbeConfigLoadsStartupFillAndTimeout(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+provider_probe:
+  startup_fill: true
+  timeout: 2s
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.ProviderProbeStartupFillEnabled() {
+		t.Fatalf("ProviderProbeStartupFillEnabled() = false, want true")
+	}
+	if got := cfg.ProviderProbeTimeout(); got != 2*time.Second {
+		t.Fatalf("ProviderProbeTimeout() = %v, want 2s", got)
+	}
+}
+
+func TestProviderProbeConfigEnvOverrides(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_PROVIDER_PROBE_STARTUP_FILL", "true")
+	t.Setenv("LLM_TRACELAB_PROVIDER_PROBE_TIMEOUT", "3s")
+
+	cfg := Config{}
+	applyEnvOverrides(&cfg)
+
+	if !cfg.ProviderProbeStartupFillEnabled() {
+		t.Fatalf("ProviderProbeStartupFillEnabled() = false, want true")
+	}
+	if got := cfg.ProviderProbeTimeout(); got != 3*time.Second {
+		t.Fatalf("ProviderProbeTimeout() = %v, want 3s", got)
 	}
 }
 

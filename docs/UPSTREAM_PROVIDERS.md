@@ -138,7 +138,15 @@ llm-tracelab --config config.yaml provider probe --id openai-local --format json
 
 当前 probe 会检查 OpenAI-compatible `/v1/models`、`/v1/chat/completions`、`/v1/responses`，Anthropic `/v1/messages` / `/v1/models`，以及 Gemini `/v1beta/models`。输出包含建议的 `api_type`、`protocol_family`、capability signals、confidence 和 warnings。
 
-该命令不会写回配置，也不会在服务启动时覆盖显式 `api_type`、`protocol_family` 或 `capabilities`。如果 probe 建议和显式配置不同，应由操作者审查后手动调整。
+默认启动不会执行 provider probe，也不会依赖网络。需要明确 opt-in 时，可配置：
+
+```yaml
+provider_probe:
+  startup_fill: true
+  timeout: 2s
+```
+
+开启后，serve 启动会对启用的 YAML upstream target 做一次 best-effort probe，并只在内存配置中填补缺失的 `api_type`、`protocol_family` 和未声明的 capability bool；不会写回 YAML。显式配置的 `api_type`、`protocol_family` 或 capability 值不会被覆盖，probe 失败或建议不一致时只记录 warning/log，不阻断服务启动。
 
 ## 新增 preset 的原则
 

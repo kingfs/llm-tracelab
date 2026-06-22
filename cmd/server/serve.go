@@ -65,6 +65,10 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return 1
 	}
+	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, nil); err != nil {
+		slog.Error("Startup provider probe failed", "error", err)
+		return 1
+	}
 	if err := validateServeConfig(cfg); err != nil {
 		slog.Error("Invalid serve config", "error", err)
 		return 1

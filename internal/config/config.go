@@ -46,6 +46,8 @@ type Config struct {
 	Upstream  UpstreamConfig         `yaml:"upstream"`
 	Upstreams []UpstreamTargetConfig `yaml:"upstreams"`
 
+	ProviderProbe ProviderProbeConfig `yaml:"provider_probe"`
+
 	Router RouterConfig `yaml:"router"`
 
 	Limits LimitConfig `yaml:"limits"`
@@ -103,6 +105,11 @@ type UpstreamTargetConfig struct {
 	AllowUnknownModels *bool              `yaml:"allow_unknown_models"`
 	Upstream           UpstreamConfig     `yaml:"upstream"`
 	Credentials        []CredentialConfig `yaml:"credentials"`
+}
+
+type ProviderProbeConfig struct {
+	StartupFill bool          `yaml:"startup_fill"`
+	Timeout     time.Duration `yaml:"timeout"`
 }
 
 type CredentialConfig struct {
@@ -327,6 +334,16 @@ func applyEnvOverrides(cfg *Config) {
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.ModelResource = v
 		})
+	}
+	if v := os.Getenv("LLM_TRACELAB_PROVIDER_PROBE_STARTUP_FILL"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ProviderProbe.StartupFill = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_PROVIDER_PROBE_TIMEOUT"); v != "" {
+		if parsed, err := time.ParseDuration(v); err == nil {
+			cfg.ProviderProbe.Timeout = parsed
+		}
 	}
 	if v := os.Getenv("LLM_TRACELAB_OUTPUT_DIR"); v != "" {
 		cfg.Debug.OutputDir = v
@@ -665,6 +682,17 @@ func (c Config) DatabaseMaxIdleConns() int {
 		return c.Database.MaxIdleConns
 	}
 	return 4
+}
+
+func (c Config) ProviderProbeStartupFillEnabled() bool {
+	return c.ProviderProbe.StartupFill
+}
+
+func (c Config) ProviderProbeTimeout() time.Duration {
+	if c.ProviderProbe.Timeout > 0 {
+		return c.ProviderProbe.Timeout
+	}
+	return 10 * time.Second
 }
 
 func (c Config) ResponsesServerEnabled() bool {
