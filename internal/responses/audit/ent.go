@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kingfs/llm-tracelab/ent/dao"
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 )
 
@@ -66,6 +67,12 @@ func (a *EntAuditor) Completed(ctx context.Context, id string, result Completion
 	if result.ResponseID != "" {
 		if _, err := client.UpstreamExchange.Update().
 			Where(upstreamexchange.RequestAuditIDEQ(id)).
+			SetResponseID(result.ResponseID).
+			Save(ctx); err != nil {
+			return rollback(tx, err)
+		}
+		if _, err := client.ExecutionEvent.Update().
+			Where(executionevent.RequestAuditIDEQ(id)).
 			SetResponseID(result.ResponseID).
 			Save(ctx); err != nil {
 			return rollback(tx, err)
@@ -141,6 +148,12 @@ func (a *EntAuditor) RecordExecutionEvent(ctx context.Context, event ExecutionEv
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
 	}
+	requestAuditID := event.RequestAuditID
+	if requestAuditID == "" {
+		if id, ok := RequestAuditIDFromContext(ctx); ok {
+			requestAuditID = id
+		}
+	}
 	create := a.client.ExecutionEvent.Create().
 		SetID("exev_" + uuid.NewString()).
 		SetEventType(event.EventType).
@@ -148,6 +161,9 @@ func (a *EntAuditor) RecordExecutionEvent(ctx context.Context, event ExecutionEv
 		SetOccurredAt(occurredAt)
 	if event.ResponseID != "" {
 		create.SetResponseID(event.ResponseID)
+	}
+	if requestAuditID != "" {
+		create.SetRequestAuditID(requestAuditID)
 	}
 	if event.ConversationID != "" {
 		create.SetConversationID(event.ConversationID)

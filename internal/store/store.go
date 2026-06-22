@@ -3085,6 +3085,7 @@ func (s *Store) initSchema() error {
 		`CREATE TABLE IF NOT EXISTS execution_events (
 			id TEXT PRIMARY KEY,
 			response_id TEXT NULL,
+			request_audit_id TEXT NULL,
 			conversation_id TEXT NULL,
 			event_type TEXT NOT NULL,
 			phase TEXT NOT NULL DEFAULT '',
@@ -3125,6 +3126,12 @@ func (s *Store) initSchema() error {
 		}
 	}
 	if err := s.ensureColumn("logs", "trace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("execution_events", "request_audit_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS executionevent_request_audit_id_occurred_at ON execution_events(request_audit_id, occurred_at)`); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("logs", "provider", "TEXT NOT NULL DEFAULT ''"); err != nil {

@@ -56,6 +56,7 @@ type RequestAuditView struct {
 type ExecutionEventView struct {
 	ID             string
 	ResponseID     string
+	RequestAuditID string
 	ConversationID string
 	EventType      string
 	Phase          string
@@ -128,7 +129,7 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 		return trace, false, nil
 	}
 	trace.RequestAudit = audits[0]
-	events, err := s.listExecutionEvents(ctx, trace.RequestAudit.ResponseID, params.EventLimit)
+	events, err := s.listExecutionEvents(ctx, trace.RequestAudit.ID, trace.RequestAudit.ResponseID, params.EventLimit)
 	if err != nil {
 		return trace, false, err
 	}
@@ -141,15 +142,25 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 	return trace, true, nil
 }
 
-func (s *QueryService) listExecutionEvents(ctx context.Context, responseID string, limit int) ([]ExecutionEventView, error) {
-	if responseID == "" {
+func (s *QueryService) listExecutionEvents(ctx context.Context, requestAuditID, responseID string, limit int) ([]ExecutionEventView, error) {
+	if requestAuditID == "" && responseID == "" {
 		return nil, nil
 	}
-	records, err := s.client.ExecutionEvent.Query().
-		Where(executionevent.ResponseIDEQ(responseID)).
+	query := s.client.ExecutionEvent.Query().
 		Order(executionevent.ByOccurredAt(), executionevent.ByID()).
-		Limit(normalizeAuditQueryLimit(limit)).
-		All(ctx)
+		Limit(normalizeAuditQueryLimit(limit))
+	switch {
+	case requestAuditID != "" && responseID != "":
+		query.Where(executionevent.Or(
+			executionevent.RequestAuditIDEQ(requestAuditID),
+			executionevent.ResponseIDEQ(responseID),
+		))
+	case requestAuditID != "":
+		query.Where(executionevent.RequestAuditIDEQ(requestAuditID))
+	case responseID != "":
+		query.Where(executionevent.ResponseIDEQ(responseID))
+	}
+	records, err := query.All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -227,6 +238,7 @@ func executionEventView(record *dao.ExecutionEvent) ExecutionEventView {
 	return ExecutionEventView{
 		ID:             record.ID,
 		ResponseID:     record.ResponseID,
+		RequestAuditID: record.RequestAuditID,
 		ConversationID: record.ConversationID,
 		EventType:      record.EventType,
 		Phase:          record.Phase,

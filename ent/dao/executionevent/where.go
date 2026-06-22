@@ -69,6 +69,11 @@ func ResponseID(v string) predicate.ExecutionEvent {
 	return predicate.ExecutionEvent(sql.FieldEQ(FieldResponseID, v))
 }
 
+// RequestAuditID applies equality check predicate on the "request_audit_id" field. It's identical to RequestAuditIDEQ.
+func RequestAuditID(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldEQ(FieldRequestAuditID, v))
+}
+
 // ConversationID applies equality check predicate on the "conversation_id" field. It's identical to ConversationIDEQ.
 func ConversationID(v string) predicate.ExecutionEvent {
 	return predicate.ExecutionEvent(sql.FieldEQ(FieldConversationID, v))
@@ -172,6 +177,81 @@ func ResponseIDEqualFold(v string) predicate.ExecutionEvent {
 // ResponseIDContainsFold applies the ContainsFold predicate on the "response_id" field.
 func ResponseIDContainsFold(v string) predicate.ExecutionEvent {
 	return predicate.ExecutionEvent(sql.FieldContainsFold(FieldResponseID, v))
+}
+
+// RequestAuditIDEQ applies the EQ predicate on the "request_audit_id" field.
+func RequestAuditIDEQ(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldEQ(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDNEQ applies the NEQ predicate on the "request_audit_id" field.
+func RequestAuditIDNEQ(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldNEQ(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDIn applies the In predicate on the "request_audit_id" field.
+func RequestAuditIDIn(vs ...string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldIn(FieldRequestAuditID, vs...))
+}
+
+// RequestAuditIDNotIn applies the NotIn predicate on the "request_audit_id" field.
+func RequestAuditIDNotIn(vs ...string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldNotIn(FieldRequestAuditID, vs...))
+}
+
+// RequestAuditIDGT applies the GT predicate on the "request_audit_id" field.
+func RequestAuditIDGT(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldGT(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDGTE applies the GTE predicate on the "request_audit_id" field.
+func RequestAuditIDGTE(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldGTE(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDLT applies the LT predicate on the "request_audit_id" field.
+func RequestAuditIDLT(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldLT(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDLTE applies the LTE predicate on the "request_audit_id" field.
+func RequestAuditIDLTE(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldLTE(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDContains applies the Contains predicate on the "request_audit_id" field.
+func RequestAuditIDContains(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldContains(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDHasPrefix applies the HasPrefix predicate on the "request_audit_id" field.
+func RequestAuditIDHasPrefix(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldHasPrefix(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDHasSuffix applies the HasSuffix predicate on the "request_audit_id" field.
+func RequestAuditIDHasSuffix(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldHasSuffix(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDIsNil applies the IsNil predicate on the "request_audit_id" field.
+func RequestAuditIDIsNil() predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldIsNull(FieldRequestAuditID))
+}
+
+// RequestAuditIDNotNil applies the NotNil predicate on the "request_audit_id" field.
+func RequestAuditIDNotNil() predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldNotNull(FieldRequestAuditID))
+}
+
+// RequestAuditIDEqualFold applies the EqualFold predicate on the "request_audit_id" field.
+func RequestAuditIDEqualFold(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldEqualFold(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDContainsFold applies the ContainsFold predicate on the "request_audit_id" field.
+func RequestAuditIDContainsFold(v string) predicate.ExecutionEvent {
+	return predicate.ExecutionEvent(sql.FieldContainsFold(FieldRequestAuditID, v))
 }
 
 // ConversationIDEQ applies the EQ predicate on the "conversation_id" field.

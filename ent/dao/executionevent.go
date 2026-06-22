@@ -20,6 +20,8 @@ type ExecutionEvent struct {
 	ID string `json:"id,omitempty"`
 	// ResponseID holds the value of the "response_id" field.
 	ResponseID string `json:"response_id,omitempty"`
+	// RequestAuditID holds the value of the "request_audit_id" field.
+	RequestAuditID string `json:"request_audit_id,omitempty"`
 	// ConversationID holds the value of the "conversation_id" field.
 	ConversationID string `json:"conversation_id,omitempty"`
 	// EventType holds the value of the "event_type" field.
@@ -44,7 +46,7 @@ func (*ExecutionEvent) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case executionevent.FieldDetailsJSON:
 			values[i] = new([]byte)
-		case executionevent.FieldID, executionevent.FieldResponseID, executionevent.FieldConversationID, executionevent.FieldEventType, executionevent.FieldPhase, executionevent.FieldStatus, executionevent.FieldMessage:
+		case executionevent.FieldID, executionevent.FieldResponseID, executionevent.FieldRequestAuditID, executionevent.FieldConversationID, executionevent.FieldEventType, executionevent.FieldPhase, executionevent.FieldStatus, executionevent.FieldMessage:
 			values[i] = new(sql.NullString)
 		case executionevent.FieldOccurredAt:
 			values[i] = new(sql.NullTime)
@@ -74,6 +76,12 @@ func (_m *ExecutionEvent) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field response_id", values[i])
 			} else if value.Valid {
 				_m.ResponseID = value.String
+			}
+		case executionevent.FieldRequestAuditID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field request_audit_id", values[i])
+			} else if value.Valid {
+				_m.RequestAuditID = value.String
 			}
 		case executionevent.FieldConversationID:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -157,6 +165,9 @@ func (_m *ExecutionEvent) String() string {
 	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("response_id=")
 	builder.WriteString(_m.ResponseID)
+	builder.WriteString(", ")
+	builder.WriteString("request_audit_id=")
+	builder.WriteString(_m.RequestAuditID)
 	builder.WriteString(", ")
 	builder.WriteString("conversation_id=")
 	builder.WriteString(_m.ConversationID)

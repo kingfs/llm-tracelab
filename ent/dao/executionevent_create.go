@@ -37,6 +37,20 @@ func (_c *ExecutionEventCreate) SetNillableResponseID(v *string) *ExecutionEvent
 	return _c
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_c *ExecutionEventCreate) SetRequestAuditID(v string) *ExecutionEventCreate {
+	_c.mutation.SetRequestAuditID(v)
+	return _c
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_c *ExecutionEventCreate) SetNillableRequestAuditID(v *string) *ExecutionEventCreate {
+	if v != nil {
+		_c.SetRequestAuditID(*v)
+	}
+	return _c
+}
+
 // SetConversationID sets the "conversation_id" field.
 func (_c *ExecutionEventCreate) SetConversationID(v string) *ExecutionEventCreate {
 	_c.mutation.SetConversationID(v)
@@ -239,6 +253,10 @@ func (_c *ExecutionEventCreate) createSpec() (*ExecutionEvent, *sqlgraph.CreateS
 		_spec.SetField(executionevent.FieldResponseID, field.TypeString, value)
 		_node.ResponseID = value
 	}
+	if value, ok := _c.mutation.RequestAuditID(); ok {
+		_spec.SetField(executionevent.FieldRequestAuditID, field.TypeString, value)
+		_node.RequestAuditID = value
+	}
 	if value, ok := _c.mutation.ConversationID(); ok {
 		_spec.SetField(executionevent.FieldConversationID, field.TypeString, value)
 		_node.ConversationID = value
@@ -334,6 +352,24 @@ func (u *ExecutionEventUpsert) UpdateResponseID() *ExecutionEventUpsert {
 // ClearResponseID clears the value of the "response_id" field.
 func (u *ExecutionEventUpsert) ClearResponseID() *ExecutionEventUpsert {
 	u.SetNull(executionevent.FieldResponseID)
+	return u
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *ExecutionEventUpsert) SetRequestAuditID(v string) *ExecutionEventUpsert {
+	u.Set(executionevent.FieldRequestAuditID, v)
+	return u
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *ExecutionEventUpsert) UpdateRequestAuditID() *ExecutionEventUpsert {
+	u.SetExcluded(executionevent.FieldRequestAuditID)
+	return u
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (u *ExecutionEventUpsert) ClearRequestAuditID() *ExecutionEventUpsert {
+	u.SetNull(executionevent.FieldRequestAuditID)
 	return u
 }
 
@@ -496,6 +532,27 @@ func (u *ExecutionEventUpsertOne) UpdateResponseID() *ExecutionEventUpsertOne {
 func (u *ExecutionEventUpsertOne) ClearResponseID() *ExecutionEventUpsertOne {
 	return u.Update(func(s *ExecutionEventUpsert) {
 		s.ClearResponseID()
+	})
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *ExecutionEventUpsertOne) SetRequestAuditID(v string) *ExecutionEventUpsertOne {
+	return u.Update(func(s *ExecutionEventUpsert) {
+		s.SetRequestAuditID(v)
+	})
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *ExecutionEventUpsertOne) UpdateRequestAuditID() *ExecutionEventUpsertOne {
+	return u.Update(func(s *ExecutionEventUpsert) {
+		s.UpdateRequestAuditID()
+	})
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (u *ExecutionEventUpsertOne) ClearRequestAuditID() *ExecutionEventUpsertOne {
+	return u.Update(func(s *ExecutionEventUpsert) {
+		s.ClearRequestAuditID()
 	})
 }
 
@@ -840,6 +897,27 @@ func (u *ExecutionEventUpsertBulk) UpdateResponseID() *ExecutionEventUpsertBulk 
 func (u *ExecutionEventUpsertBulk) ClearResponseID() *ExecutionEventUpsertBulk {
 	return u.Update(func(s *ExecutionEventUpsert) {
 		s.ClearResponseID()
+	})
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *ExecutionEventUpsertBulk) SetRequestAuditID(v string) *ExecutionEventUpsertBulk {
+	return u.Update(func(s *ExecutionEventUpsert) {
+		s.SetRequestAuditID(v)
+	})
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *ExecutionEventUpsertBulk) UpdateRequestAuditID() *ExecutionEventUpsertBulk {
+	return u.Update(func(s *ExecutionEventUpsert) {
+		s.UpdateRequestAuditID()
+	})
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (u *ExecutionEventUpsertBulk) ClearRequestAuditID() *ExecutionEventUpsertBulk {
+	return u.Update(func(s *ExecutionEventUpsert) {
+		s.ClearRequestAuditID()
 	})
 }
 

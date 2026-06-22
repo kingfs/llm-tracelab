@@ -23,6 +23,7 @@ func (ExecutionEvent) Fields() []ent.Field {
 	return []ent.Field{
 		field.String("id").NotEmpty().Immutable(),
 		field.String("response_id").Optional(),
+		field.String("request_audit_id").Optional(),
 		field.String("conversation_id").Optional(),
 		field.String("event_type").NotEmpty(),
 		field.String("phase").Default(""),
@@ -35,6 +36,7 @@ func (ExecutionEvent) Fields() []ent.Field {
 
 func (ExecutionEvent) Indexes() []ent.Index {
 	return []ent.Index{
+		index.Fields("request_audit_id", "occurred_at"),
 		index.Fields("response_id", "occurred_at"),
 		index.Fields("conversation_id", "occurred_at"),
 		index.Fields("event_type", "occurred_at"),

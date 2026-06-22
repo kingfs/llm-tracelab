@@ -7238,21 +7238,22 @@ func (m *EvalRunMutation) ResetEdge(name string) error {
 // ExecutionEventMutation represents an operation that mutates the ExecutionEvent nodes in the graph.
 type ExecutionEventMutation struct {
 	config
-	op              Op
-	typ             string
-	id              *string
-	response_id     *string
-	conversation_id *string
-	event_type      *string
-	phase           *string
-	status          *string
-	message         *string
-	details_json    *map[string]interface{}
-	occurred_at     *time.Time
-	clearedFields   map[string]struct{}
-	done            bool
-	oldValue        func(context.Context) (*ExecutionEvent, error)
-	predicates      []predicate.ExecutionEvent
+	op               Op
+	typ              string
+	id               *string
+	response_id      *string
+	request_audit_id *string
+	conversation_id  *string
+	event_type       *string
+	phase            *string
+	status           *string
+	message          *string
+	details_json     *map[string]interface{}
+	occurred_at      *time.Time
+	clearedFields    map[string]struct{}
+	done             bool
+	oldValue         func(context.Context) (*ExecutionEvent, error)
+	predicates       []predicate.ExecutionEvent
 }
 
 var _ ent.Mutation = (*ExecutionEventMutation)(nil)
@@ -7406,6 +7407,55 @@ func (m *ExecutionEventMutation) ResponseIDCleared() bool {
 func (m *ExecutionEventMutation) ResetResponseID() {
 	m.response_id = nil
 	delete(m.clearedFields, executionevent.FieldResponseID)
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (m *ExecutionEventMutation) SetRequestAuditID(s string) {
+	m.request_audit_id = &s
+}
+
+// RequestAuditID returns the value of the "request_audit_id" field in the mutation.
+func (m *ExecutionEventMutation) RequestAuditID() (r string, exists bool) {
+	v := m.request_audit_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestAuditID returns the old "request_audit_id" field's value of the ExecutionEvent entity.
+// If the ExecutionEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ExecutionEventMutation) OldRequestAuditID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestAuditID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestAuditID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestAuditID: %w", err)
+	}
+	return oldValue.RequestAuditID, nil
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (m *ExecutionEventMutation) ClearRequestAuditID() {
+	m.request_audit_id = nil
+	m.clearedFields[executionevent.FieldRequestAuditID] = struct{}{}
+}
+
+// RequestAuditIDCleared returns if the "request_audit_id" field was cleared in this mutation.
+func (m *ExecutionEventMutation) RequestAuditIDCleared() bool {
+	_, ok := m.clearedFields[executionevent.FieldRequestAuditID]
+	return ok
+}
+
+// ResetRequestAuditID resets all changes to the "request_audit_id" field.
+func (m *ExecutionEventMutation) ResetRequestAuditID() {
+	m.request_audit_id = nil
+	delete(m.clearedFields, executionevent.FieldRequestAuditID)
 }
 
 // SetConversationID sets the "conversation_id" field.
@@ -7733,9 +7783,12 @@ func (m *ExecutionEventMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ExecutionEventMutation) Fields() []string {
-	fields := make([]string, 0, 8)
+	fields := make([]string, 0, 9)
 	if m.response_id != nil {
 		fields = append(fields, executionevent.FieldResponseID)
+	}
+	if m.request_audit_id != nil {
+		fields = append(fields, executionevent.FieldRequestAuditID)
 	}
 	if m.conversation_id != nil {
 		fields = append(fields, executionevent.FieldConversationID)
@@ -7768,6 +7821,8 @@ func (m *ExecutionEventMutation) Field(name string) (ent.Value, bool) {
 	switch name {
 	case executionevent.FieldResponseID:
 		return m.ResponseID()
+	case executionevent.FieldRequestAuditID:
+		return m.RequestAuditID()
 	case executionevent.FieldConversationID:
 		return m.ConversationID()
 	case executionevent.FieldEventType:
@@ -7793,6 +7848,8 @@ func (m *ExecutionEventMutation) OldField(ctx context.Context, name string) (ent
 	switch name {
 	case executionevent.FieldResponseID:
 		return m.OldResponseID(ctx)
+	case executionevent.FieldRequestAuditID:
+		return m.OldRequestAuditID(ctx)
 	case executionevent.FieldConversationID:
 		return m.OldConversationID(ctx)
 	case executionevent.FieldEventType:
@@ -7822,6 +7879,13 @@ func (m *ExecutionEventMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetResponseID(v)
+		return nil
+	case executionevent.FieldRequestAuditID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestAuditID(v)
 		return nil
 	case executionevent.FieldConversationID:
 		v, ok := value.(string)
@@ -7905,6 +7969,9 @@ func (m *ExecutionEventMutation) ClearedFields() []string {
 	if m.FieldCleared(executionevent.FieldResponseID) {
 		fields = append(fields, executionevent.FieldResponseID)
 	}
+	if m.FieldCleared(executionevent.FieldRequestAuditID) {
+		fields = append(fields, executionevent.FieldRequestAuditID)
+	}
 	if m.FieldCleared(executionevent.FieldConversationID) {
 		fields = append(fields, executionevent.FieldConversationID)
 	}
@@ -7931,6 +7998,9 @@ func (m *ExecutionEventMutation) ClearField(name string) error {
 	case executionevent.FieldResponseID:
 		m.ClearResponseID()
 		return nil
+	case executionevent.FieldRequestAuditID:
+		m.ClearRequestAuditID()
+		return nil
 	case executionevent.FieldConversationID:
 		m.ClearConversationID()
 		return nil
@@ -7950,6 +8020,9 @@ func (m *ExecutionEventMutation) ResetField(name string) error {
 	switch name {
 	case executionevent.FieldResponseID:
 		m.ResetResponseID()
+		return nil
+	case executionevent.FieldRequestAuditID:
+		m.ResetRequestAuditID()
 		return nil
 	case executionevent.FieldConversationID:
 		m.ResetConversationID()

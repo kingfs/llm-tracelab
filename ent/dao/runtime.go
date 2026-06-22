@@ -348,19 +348,19 @@ func init() {
 	executioneventFields := schema.ExecutionEvent{}.Fields()
 	_ = executioneventFields
 	// executioneventDescEventType is the schema descriptor for event_type field.
-	executioneventDescEventType := executioneventFields[3].Descriptor()
+	executioneventDescEventType := executioneventFields[4].Descriptor()
 	// executionevent.EventTypeValidator is a validator for the "event_type" field. It is called by the builders before save.
 	executionevent.EventTypeValidator = executioneventDescEventType.Validators[0].(func(string) error)
 	// executioneventDescPhase is the schema descriptor for phase field.
-	executioneventDescPhase := executioneventFields[4].Descriptor()
+	executioneventDescPhase := executioneventFields[5].Descriptor()
 	// executionevent.DefaultPhase holds the default value on creation for the phase field.
 	executionevent.DefaultPhase = executioneventDescPhase.Default.(string)
 	// executioneventDescStatus is the schema descriptor for status field.
-	executioneventDescStatus := executioneventFields[5].Descriptor()
+	executioneventDescStatus := executioneventFields[6].Descriptor()
 	// executionevent.DefaultStatus holds the default value on creation for the status field.
 	executionevent.DefaultStatus = executioneventDescStatus.Default.(string)
 	// executioneventDescOccurredAt is the schema descriptor for occurred_at field.
-	executioneventDescOccurredAt := executioneventFields[8].Descriptor()
+	executioneventDescOccurredAt := executioneventFields[9].Descriptor()
 	// executionevent.DefaultOccurredAt holds the default value on creation for the occurred_at field.
 	executionevent.DefaultOccurredAt = executioneventDescOccurredAt.Default.(func() time.Time)
 	// executioneventDescID is the schema descriptor for id field.

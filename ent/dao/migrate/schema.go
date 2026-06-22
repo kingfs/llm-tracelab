@@ -253,6 +253,7 @@ var (
 	ExecutionEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
 		{Name: "response_id", Type: field.TypeString, Nullable: true},
+		{Name: "request_audit_id", Type: field.TypeString, Nullable: true},
 		{Name: "conversation_id", Type: field.TypeString, Nullable: true},
 		{Name: "event_type", Type: field.TypeString},
 		{Name: "phase", Type: field.TypeString, Default: ""},
@@ -268,24 +269,29 @@ var (
 		PrimaryKey: []*schema.Column{ExecutionEventsColumns[0]},
 		Indexes: []*schema.Index{
 			{
+				Name:    "executionevent_request_audit_id_occurred_at",
+				Unique:  false,
+				Columns: []*schema.Column{ExecutionEventsColumns[2], ExecutionEventsColumns[9]},
+			},
+			{
 				Name:    "executionevent_response_id_occurred_at",
 				Unique:  false,
-				Columns: []*schema.Column{ExecutionEventsColumns[1], ExecutionEventsColumns[8]},
+				Columns: []*schema.Column{ExecutionEventsColumns[1], ExecutionEventsColumns[9]},
 			},
 			{
 				Name:    "executionevent_conversation_id_occurred_at",
 				Unique:  false,
-				Columns: []*schema.Column{ExecutionEventsColumns[2], ExecutionEventsColumns[8]},
+				Columns: []*schema.Column{ExecutionEventsColumns[3], ExecutionEventsColumns[9]},
 			},
 			{
 				Name:    "executionevent_event_type_occurred_at",
 				Unique:  false,
-				Columns: []*schema.Column{ExecutionEventsColumns[3], ExecutionEventsColumns[8]},
+				Columns: []*schema.Column{ExecutionEventsColumns[4], ExecutionEventsColumns[9]},
 			},
 			{
 				Name:    "executionevent_phase_status_occurred_at",
 				Unique:  false,
-				Columns: []*schema.Column{ExecutionEventsColumns[4], ExecutionEventsColumns[5], ExecutionEventsColumns[8]},
+				Columns: []*schema.Column{ExecutionEventsColumns[5], ExecutionEventsColumns[6], ExecutionEventsColumns[9]},
 			},
 		},
 	}

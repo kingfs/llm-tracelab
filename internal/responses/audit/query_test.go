@@ -39,22 +39,23 @@ func TestQueryServiceGetRequestAuditTrace(t *testing.T) {
 		createdAt:  base.Add(time.Minute),
 	})
 	mustCreateExecutionEvent(t, client, executionEventSeed{
-		id:         "event_late",
-		responseID: "resp_trace",
-		eventType:  "tool_call",
-		phase:      "tool",
-		status:     "completed",
-		message:    "late",
-		occurredAt: base.Add(3 * time.Second),
+		id:             "event_late",
+		requestAuditID: "audit_trace",
+		responseID:     "resp_trace",
+		eventType:      "tool_call",
+		phase:          "tool",
+		status:         "completed",
+		message:        "late",
+		occurredAt:     base.Add(3 * time.Second),
 	})
 	mustCreateExecutionEvent(t, client, executionEventSeed{
-		id:         "event_early",
-		responseID: "resp_trace",
-		eventType:  "model_call",
-		phase:      "model",
-		status:     "completed",
-		message:    "early",
-		occurredAt: base.Add(time.Second),
+		id:             "event_early",
+		requestAuditID: "audit_trace",
+		eventType:      "model_call",
+		phase:          "model",
+		status:         "started",
+		message:        "early",
+		occurredAt:     base.Add(time.Second),
 	})
 	mustCreateExecutionEvent(t, client, executionEventSeed{
 		id:         "event_other",
@@ -213,13 +214,14 @@ func mustCreateRequestAudit(t *testing.T, client *dao.Client, seed requestAuditS
 }
 
 type executionEventSeed struct {
-	id         string
-	responseID string
-	eventType  string
-	phase      string
-	status     string
-	message    string
-	occurredAt time.Time
+	id             string
+	responseID     string
+	requestAuditID string
+	eventType      string
+	phase          string
+	status         string
+	message        string
+	occurredAt     time.Time
 }
 
 func mustCreateExecutionEvent(t *testing.T, client *dao.Client, seed executionEventSeed) {
@@ -231,6 +233,9 @@ func mustCreateExecutionEvent(t *testing.T, client *dao.Client, seed executionEv
 		SetOccurredAt(seed.occurredAt)
 	if seed.responseID != "" {
 		create.SetResponseID(seed.responseID)
+	}
+	if seed.requestAuditID != "" {
+		create.SetRequestAuditID(seed.requestAuditID)
 	}
 	if seed.phase != "" {
 		create.SetPhase(seed.phase)

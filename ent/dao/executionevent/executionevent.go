@@ -15,6 +15,8 @@ const (
 	FieldID = "id"
 	// FieldResponseID holds the string denoting the response_id field in the database.
 	FieldResponseID = "response_id"
+	// FieldRequestAuditID holds the string denoting the request_audit_id field in the database.
+	FieldRequestAuditID = "request_audit_id"
 	// FieldConversationID holds the string denoting the conversation_id field in the database.
 	FieldConversationID = "conversation_id"
 	// FieldEventType holds the string denoting the event_type field in the database.
@@ -37,6 +39,7 @@ const (
 var Columns = []string{
 	FieldID,
 	FieldResponseID,
+	FieldRequestAuditID,
 	FieldConversationID,
 	FieldEventType,
 	FieldPhase,
@@ -80,6 +83,11 @@ func ByID(opts ...sql.OrderTermOption) OrderOption {
 // ByResponseID orders the results by the response_id field.
 func ByResponseID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldResponseID, opts...).ToFunc()
+}
+
+// ByRequestAuditID orders the results by the request_audit_id field.
+func ByRequestAuditID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestAuditID, opts...).ToFunc()
 }
 
 // ByConversationID orders the results by the conversation_id field.

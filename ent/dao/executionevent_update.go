@@ -49,6 +49,26 @@ func (_u *ExecutionEventUpdate) ClearResponseID() *ExecutionEventUpdate {
 	return _u
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_u *ExecutionEventUpdate) SetRequestAuditID(v string) *ExecutionEventUpdate {
+	_u.mutation.SetRequestAuditID(v)
+	return _u
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_u *ExecutionEventUpdate) SetNillableRequestAuditID(v *string) *ExecutionEventUpdate {
+	if v != nil {
+		_u.SetRequestAuditID(*v)
+	}
+	return _u
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (_u *ExecutionEventUpdate) ClearRequestAuditID() *ExecutionEventUpdate {
+	_u.mutation.ClearRequestAuditID()
+	return _u
+}
+
 // SetConversationID sets the "conversation_id" field.
 func (_u *ExecutionEventUpdate) SetConversationID(v string) *ExecutionEventUpdate {
 	_u.mutation.SetConversationID(v)
@@ -209,6 +229,12 @@ func (_u *ExecutionEventUpdate) sqlSave(ctx context.Context) (_node int, err err
 	if _u.mutation.ResponseIDCleared() {
 		_spec.ClearField(executionevent.FieldResponseID, field.TypeString)
 	}
+	if value, ok := _u.mutation.RequestAuditID(); ok {
+		_spec.SetField(executionevent.FieldRequestAuditID, field.TypeString, value)
+	}
+	if _u.mutation.RequestAuditIDCleared() {
+		_spec.ClearField(executionevent.FieldRequestAuditID, field.TypeString)
+	}
 	if value, ok := _u.mutation.ConversationID(); ok {
 		_spec.SetField(executionevent.FieldConversationID, field.TypeString, value)
 	}
@@ -277,6 +303,26 @@ func (_u *ExecutionEventUpdateOne) SetNillableResponseID(v *string) *ExecutionEv
 // ClearResponseID clears the value of the "response_id" field.
 func (_u *ExecutionEventUpdateOne) ClearResponseID() *ExecutionEventUpdateOne {
 	_u.mutation.ClearResponseID()
+	return _u
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_u *ExecutionEventUpdateOne) SetRequestAuditID(v string) *ExecutionEventUpdateOne {
+	_u.mutation.SetRequestAuditID(v)
+	return _u
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_u *ExecutionEventUpdateOne) SetNillableRequestAuditID(v *string) *ExecutionEventUpdateOne {
+	if v != nil {
+		_u.SetRequestAuditID(*v)
+	}
+	return _u
+}
+
+// ClearRequestAuditID clears the value of the "request_audit_id" field.
+func (_u *ExecutionEventUpdateOne) ClearRequestAuditID() *ExecutionEventUpdateOne {
+	_u.mutation.ClearRequestAuditID()
 	return _u
 }
 
@@ -469,6 +515,12 @@ func (_u *ExecutionEventUpdateOne) sqlSave(ctx context.Context) (_node *Executio
 	}
 	if _u.mutation.ResponseIDCleared() {
 		_spec.ClearField(executionevent.FieldResponseID, field.TypeString)
+	}
+	if value, ok := _u.mutation.RequestAuditID(); ok {
+		_spec.SetField(executionevent.FieldRequestAuditID, field.TypeString, value)
+	}
+	if _u.mutation.RequestAuditIDCleared() {
+		_spec.ClearField(executionevent.FieldRequestAuditID, field.TypeString)
 	}
 	if value, ok := _u.mutation.ConversationID(); ok {
 		_spec.SetField(executionevent.FieldConversationID, field.TypeString, value)

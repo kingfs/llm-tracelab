@@ -218,6 +218,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 		Type: "ExecutionEvent",
 		Fields: map[string]*sqlgraph.FieldSpec{
 			executionevent.FieldResponseID:     {Type: field.TypeString, Column: executionevent.FieldResponseID},
+			executionevent.FieldRequestAuditID: {Type: field.TypeString, Column: executionevent.FieldRequestAuditID},
 			executionevent.FieldConversationID: {Type: field.TypeString, Column: executionevent.FieldConversationID},
 			executionevent.FieldEventType:      {Type: field.TypeString, Column: executionevent.FieldEventType},
 			executionevent.FieldPhase:          {Type: field.TypeString, Column: executionevent.FieldPhase},
@@ -1283,6 +1284,11 @@ func (f *ExecutionEventFilter) WhereID(p entql.StringP) {
 // WhereResponseID applies the entql string predicate on the response_id field.
 func (f *ExecutionEventFilter) WhereResponseID(p entql.StringP) {
 	f.Where(p.Field(executionevent.FieldResponseID))
+}
+
+// WhereRequestAuditID applies the entql string predicate on the request_audit_id field.
+func (f *ExecutionEventFilter) WhereRequestAuditID(p entql.StringP) {
+	f.Where(p.Field(executionevent.FieldRequestAuditID))
 }
 
 // WhereConversationID applies the entql string predicate on the conversation_id field.

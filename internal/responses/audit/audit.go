@@ -63,6 +63,7 @@ type UpstreamExchange struct {
 
 type ExecutionEvent struct {
 	ResponseID     string
+	RequestAuditID string
 	ConversationID string
 	EventType      string
 	Phase          string
