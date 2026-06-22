@@ -81,6 +81,10 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "request body must contain a single JSON object", "invalid_request_error", "invalid_json")
 		return
 	}
+	if req.Stream {
+		writeError(w, http.StatusBadRequest, "streaming responses are not supported by the local responses server", "invalid_request_error", "unsupported_stream")
+		return
+	}
 
 	resp, err := h.runtime.Create(r.Context(), req)
 	if err != nil {

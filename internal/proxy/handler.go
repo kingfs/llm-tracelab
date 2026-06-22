@@ -24,6 +24,8 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/limit"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/redaction"
+	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
+	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -260,6 +262,9 @@ type Handler struct {
 	router       *router.Router
 	authVerifier auth.TokenVerifier
 	limiter      *limit.Limiter
+
+	responsesPath    string
+	responsesHandler http.Handler
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
@@ -374,13 +379,25 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
 	}
 
+	var localResponses http.Handler
+	responsesPath := cfg.ResponsesServerPath()
+	if cfg.ResponsesServerEnabled() {
+		rt := responsesruntime.New(responsesruntime.Config{
+			DefaultModel: cfg.ResponsesDefaultModel(),
+			ForceStore:   cfg.ResponsesForceStore(),
+		}, &responsesChatCompletionsAdapter{router: rtr}, responsesruntime.NewMemoryStore())
+		localResponses = httpapi.NewHandler(rt, httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()))
+	}
+
 	return &Handler{
-		proxy:        rp,
-		recorder:     rec,
-		chaosManager: cm,
-		cfg:          cfg,
-		router:       rtr,
-		limiter:      localLimiter,
+		proxy:            rp,
+		recorder:         rec,
+		chaosManager:     cm,
+		cfg:              cfg,
+		router:           rtr,
+		limiter:          localLimiter,
+		responsesPath:    responsesPath,
+		responsesHandler: localResponses,
 	}, nil
 }
 
@@ -400,6 +417,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !auth.RequestAuthorized(r, h.authVerifier) {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-proxy"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	if h.responsesHandler != nil && r.URL.Path == h.responsesPath {
+		h.serveLocalResponses(w, r)
 		return
 	}
 

@@ -88,6 +88,20 @@ func TestCreateResponseBodyLimit(t *testing.T) {
 	assertError(t, rec, "invalid_request_error", "invalid_json")
 }
 
+func TestCreateResponseStreamUnsupported(t *testing.T) {
+	rt := &fakeRuntime{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if rt.createReq.Input != nil {
+		t.Fatalf("runtime Create called for unsupported stream request: %#v", rt.createReq)
+	}
+	assertError(t, rec, "invalid_request_error", "unsupported_stream")
+}
+
 func TestCreateResponseRuntimeError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	NewHandler(&fakeRuntime{createErr: errors.New("upstream failed")}).

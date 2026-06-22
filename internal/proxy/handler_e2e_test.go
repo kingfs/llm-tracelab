@@ -743,6 +743,184 @@ func TestHandlerAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 	}
 }
 
+func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var gotPath string
+	var gotAuth string
+	var gotChatBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotChatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_1","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(body))
+	}
+	var responsePayload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&responsePayload); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if responsePayload["object"] != "response" || responsePayload["status"] != "completed" {
+		t.Fatalf("unexpected responses payload: %+v", responsePayload)
+	}
+	if gotPath != "/v1/chat/completions" {
+		t.Fatalf("upstream path = %q, want /v1/chat/completions", gotPath)
+	}
+	if gotAuth != "Bearer upstream-secret" {
+		t.Fatalf("Authorization = %q, want Bearer upstream-secret", gotAuth)
+	}
+	if gotChatBody["model"] != "gpt-5" {
+		t.Fatalf("chat body model = %v, want gpt-5; body=%+v", gotChatBody["model"], gotChatBody)
+	}
+	messages, ok := gotChatBody["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("chat body messages = %#v, want one user message", gotChatBody["messages"])
+	}
+	firstMessage, ok := messages[0].(map[string]any)
+	if !ok || firstMessage["role"] != "user" || firstMessage["content"] != "ping" {
+		t.Fatalf("first chat message = %#v, want user ping", messages[0])
+	}
+}
+
+func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var gotPath string
+	var gotAuth string
+	var gotBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"resp_upstream","object":"response","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-responses",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if gotPath != "/v1/responses" {
+		t.Fatalf("upstream path = %q, want /v1/responses", gotPath)
+	}
+	if gotAuth != "Bearer upstream-secret" {
+		t.Fatalf("Authorization = %q, want Bearer upstream-secret", gotAuth)
+	}
+	if gotBody["input"] != "ping" {
+		t.Fatalf("upstream body input = %v, want ping; body=%+v", gotBody["input"], gotBody)
+	}
+}
+
 func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
