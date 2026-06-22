@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
+
+var ErrIncrementalStreamUnsupported = errors.New("incremental responses stream unsupported")
 
 type Config struct {
 	DefaultModel                string
@@ -130,6 +133,110 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
 			return protocol.Response{}, err
 		}
+	}
+	return resp, nil
+}
+
+type ResponseStreamSink interface {
+	ResponseCreated(resp protocol.Response) error
+	OutputTextDelta(delta ResponseTextDelta) error
+	ResponseCompleted(resp protocol.Response) error
+}
+
+type ResponseTextDelta struct {
+	OutputIndex  int
+	ItemID       string
+	ContentIndex int
+	Delta        string
+}
+
+func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink ResponseStreamSink) (protocol.Response, error) {
+	if r.client == nil {
+		return protocol.Response{}, fmt.Errorf("chat completions client is required")
+	}
+	streamer, ok := r.client.(ChatCompletionsStreamer)
+	if !ok {
+		return protocol.Response{}, ErrIncrementalStreamUnsupported
+	}
+	if len(req.Tools) > 0 {
+		return protocol.Response{}, ErrIncrementalStreamUnsupported
+	}
+	if sink == nil {
+		return protocol.Response{}, fmt.Errorf("response stream sink is required")
+	}
+	model := req.Model
+	if model == "" {
+		model = r.cfg.DefaultModel
+	}
+	if model == "" {
+		return protocol.Response{}, fmt.Errorf("model is required")
+	}
+	inputItems := requestInputItems(req)
+	r.recordSubmittedFunctionOutputs(ctx, inputItems)
+	history, err := r.loadContinuationHistory(ctx, req.PreviousResponseID)
+	if err != nil {
+		return protocol.Response{}, err
+	}
+	if r.shouldAutoCompact(req, history) {
+		return protocol.Response{}, ErrIncrementalStreamUnsupported
+	}
+	webSearchReady := r.webSearchReady()
+	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
+		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+	}
+	chatReq := chatCompletionRequest(req, model, history, inputItems, webSearchReady)
+	chatReq.Stream = true
+
+	responseID := newResponseID()
+	messageID := "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	created := protocol.Response{
+		ID:                 responseID,
+		Object:             "response",
+		CreatedAt:          time.Now().Unix(),
+		Status:             "in_progress",
+		Model:              model,
+		PreviousResponseID: req.PreviousResponseID,
+		Metadata:           req.Metadata,
+	}
+	createdSent := false
+	sendCreated := func() error {
+		if createdSent {
+			return nil
+		}
+		createdSent = true
+		return sink.ResponseCreated(created)
+	}
+
+	chatResp, err := streamer.ChatCompletionStream(ctx, chatReq, func(event ChatStreamEvent) error {
+		if event.ChoiceIndex != 0 || event.ContentDelta == "" {
+			return nil
+		}
+		if err := sendCreated(); err != nil {
+			return err
+		}
+		return sink.OutputTextDelta(ResponseTextDelta{
+			OutputIndex:  0,
+			ItemID:       messageID,
+			ContentIndex: 0,
+			Delta:        event.ContentDelta,
+		})
+	})
+	if err != nil {
+		return protocol.Response{}, err
+	}
+	if err := sendCreated(); err != nil {
+		return protocol.Response{}, err
+	}
+	outputItems := chatToOutputItemsWithMessageID(chatResp, messageID)
+	r.recordRequestedFunctionCalls(ctx, outputItems)
+	resp := responseFromOutputWithID(responseID, req, model, outputItems, chatResp.Usage)
+	if r.shouldStore(req) {
+		if err := r.store.Put(ctx, resp, req, inputItems, resp.Output); err != nil {
+			return protocol.Response{}, err
+		}
+	}
+	if err := sink.ResponseCompleted(resp); err != nil {
+		return protocol.Response{}, err
 	}
 	return resp, nil
 }
@@ -927,8 +1034,12 @@ func normalizeChatMessages(messages []ChatMessage) []ChatMessage {
 }
 
 func responseFromOutput(req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage) protocol.Response {
+	return responseFromOutputWithID(newResponseID(), req, model, output, usage)
+}
+
+func responseFromOutputWithID(id string, req protocol.CreateResponseRequest, model string, output []protocol.OutputItem, usage ChatUsage) protocol.Response {
 	return protocol.Response{
-		ID:                 newResponseID(),
+		ID:                 id,
 		Object:             "response",
 		CreatedAt:          time.Now().Unix(),
 		Status:             "completed",
@@ -945,6 +1056,10 @@ func responseFromOutput(req protocol.CreateResponseRequest, model string, output
 }
 
 func chatToOutputItems(chat ChatCompletionResponse) []protocol.OutputItem {
+	return chatToOutputItemsWithMessageID(chat, "")
+}
+
+func chatToOutputItemsWithMessageID(chat ChatCompletionResponse, messageID string) []protocol.OutputItem {
 	output := []protocol.OutputItem{}
 	if len(chat.Choices) == 0 {
 		return output
@@ -965,8 +1080,11 @@ func chatToOutputItems(chat ChatCompletionResponse) []protocol.OutputItem {
 		})
 	}
 	if text := chatMessageContentText(msg.Content); text != "" {
+		if messageID == "" {
+			messageID = "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+		}
 		output = append(output, protocol.OutputItem{
-			ID:      "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36),
+			ID:      messageID,
 			Type:    "message",
 			Status:  "completed",
 			Role:    "assistant",

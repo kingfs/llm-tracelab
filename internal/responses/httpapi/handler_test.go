@@ -30,6 +30,43 @@ type fakeRuntime struct {
 	inputItemsErr   error
 }
 
+type fakeIncrementalRuntime struct {
+	fakeRuntime
+	streamCtx    context.Context
+	streamReq    protocol.CreateResponseRequest
+	streamResp   protocol.Response
+	streamDeltas []string
+	streamErr    error
+}
+
+func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.CreateResponseRequest, sink runtime.ResponseStreamSink) (protocol.Response, error) {
+	f.streamCtx = ctx
+	f.streamReq = req
+	if f.streamErr != nil {
+		return protocol.Response{}, f.streamErr
+	}
+	created := f.streamResp
+	created.Status = "in_progress"
+	created.Output = nil
+	if err := sink.ResponseCreated(created); err != nil {
+		return protocol.Response{}, err
+	}
+	for _, delta := range f.streamDeltas {
+		if err := sink.OutputTextDelta(runtime.ResponseTextDelta{
+			OutputIndex:  0,
+			ItemID:       f.streamResp.Output[0].ID,
+			ContentIndex: 0,
+			Delta:        delta,
+		}); err != nil {
+			return protocol.Response{}, err
+		}
+	}
+	if err := sink.ResponseCompleted(f.streamResp); err != nil {
+		return protocol.Response{}, err
+	}
+	return f.streamResp, nil
+}
+
 func (f *fakeRuntime) Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error) {
 	f.createCtx = ctx
 	f.createReq = req
@@ -259,6 +296,64 @@ func TestCreateResponseStreamSuccess(t *testing.T) {
 	}
 	if !strings.Contains(body, `"delta":"done"`) || !strings.Contains(body, `"arguments":"{\"q\":\"codex\"}"`) {
 		t.Fatalf("stream body missing text/function payload:\n%s", body)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
+		t.Fatalf("stream audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 4 {
+		t.Fatalf("execution events = %d, want accepted/stream started/stream completed/request completed: %#v", len(auditor.events), auditor.events)
+	}
+	if auditor.events[1].EventType != "response.stream" || auditor.events[1].Status != "started" {
+		t.Fatalf("stream started event mismatch: %#v", auditor.events[1])
+	}
+	if auditor.events[2].EventType != "response.stream" || auditor.events[2].Status != "completed" {
+		t.Fatalf("stream completed event mismatch: %#v", auditor.events[2])
+	}
+	if auditor.events[3].EventType != "response.request" || auditor.events[3].Status != "completed" || auditor.events[3].ResponseID != "resp_stream" {
+		t.Fatalf("request completed event mismatch: %#v", auditor.events[3])
+	}
+}
+
+func TestCreateResponseStreamUsesIncrementalRuntimeDeltas(t *testing.T) {
+	rt := &fakeIncrementalRuntime{
+		streamResp: protocol.Response{
+			ID:        "resp_stream",
+			Object:    "response",
+			Status:    "completed",
+			Model:     "gpt-test",
+			CreatedAt: 123,
+			Output: []protocol.OutputItem{{
+				ID:      "msg_1",
+				Type:    "message",
+				Status:  "completed",
+				Role:    "assistant",
+				Content: []protocol.ContentPart{{Type: "output_text", Text: "Hello world"}},
+			}},
+		},
+		streamDeltas: []string{"Hello ", "world"},
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !rt.streamReq.Stream || rt.streamReq.Input != "hello" {
+		t.Fatalf("runtime CreateStream request mismatch: %#v", rt.streamReq)
+	}
+	if rt.createReq.Stream {
+		t.Fatalf("fallback Create unexpectedly called: %#v", rt.createReq)
+	}
+	body := rec.Body.String()
+	for _, event := range []string{"response.created", "response.output_text.delta", "response.completed"} {
+		if !strings.Contains(body, "event: "+event+"\n") {
+			t.Fatalf("incremental stream missing event %q:\n%s", event, body)
+		}
+	}
+	if !strings.Contains(body, `"delta":"Hello "`) || !strings.Contains(body, `"delta":"world"`) {
+		t.Fatalf("incremental stream missing separate deltas:\n%s", body)
 	}
 	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
 		t.Fatalf("stream audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)

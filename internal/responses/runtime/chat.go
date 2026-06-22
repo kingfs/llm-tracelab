@@ -6,6 +6,19 @@ type ChatCompletionsClient interface {
 	ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
 }
 
+type ChatCompletionsStreamer interface {
+	ChatCompletionStream(ctx context.Context, req ChatCompletionRequest, handle ChatStreamCallback) (ChatCompletionResponse, error)
+}
+
+type ChatStreamCallback func(ChatStreamEvent) error
+
+type ChatStreamEvent struct {
+	ChoiceIndex  int
+	Role         string
+	ContentDelta string
+	FinishReason *string
+}
+
 type ChatCompletionRequest struct {
 	Model       string        `json:"model"`
 	Messages    []ChatMessage `json:"messages"`
