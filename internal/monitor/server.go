@@ -24,6 +24,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -637,13 +638,15 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router                         *router.Router
-	ChannelService                 *channel.Service
-	AuthVerifier                   auth.TokenVerifier
-	AuthStore                      *auth.Store
-	SessionTTL                     time.Duration
-	ResponsesFunctionExecutors     config.ResponsesFunctionExecutorConfig
-	ResponsesFunctionExecutorState *ResponsesFunctionExecutorState
+	Router                           *router.Router
+	ChannelService                   *channel.Service
+	AuthVerifier                     auth.TokenVerifier
+	AuthStore                        *auth.Store
+	SessionTTL                       time.Duration
+	ResponsesFunctionExecutors       config.ResponsesFunctionExecutorConfig
+	ResponsesFunctionExecutorState   *ResponsesFunctionExecutorState
+	ResponsesFunctionExecutorStore   *store.Store
+	ResponsesFunctionExecutorManager *functionexec.Manager
 }
 
 type responsesFunctionExecutorsSummary struct {
@@ -705,12 +708,34 @@ type responsesFunctionExecutorUpdateResponse struct {
 }
 
 type ResponsesFunctionExecutorState struct {
-	mu  sync.RWMutex
-	cfg config.ResponsesFunctionExecutorConfig
+	mu      sync.RWMutex
+	cfg     config.ResponsesFunctionExecutorConfig
+	store   *store.Store
+	manager *functionexec.Manager
 }
 
-func NewResponsesFunctionExecutorState(cfg config.ResponsesFunctionExecutorConfig) *ResponsesFunctionExecutorState {
-	return &ResponsesFunctionExecutorState{cfg: cloneResponsesFunctionExecutorConfig(cfg)}
+type ResponsesFunctionExecutorStateOption func(*ResponsesFunctionExecutorState)
+
+func WithResponsesFunctionExecutorPersistence(st *store.Store) ResponsesFunctionExecutorStateOption {
+	return func(s *ResponsesFunctionExecutorState) {
+		s.store = st
+	}
+}
+
+func WithResponsesFunctionExecutorManager(manager *functionexec.Manager) ResponsesFunctionExecutorStateOption {
+	return func(s *ResponsesFunctionExecutorState) {
+		s.manager = manager
+	}
+}
+
+func NewResponsesFunctionExecutorState(cfg config.ResponsesFunctionExecutorConfig, opts ...ResponsesFunctionExecutorStateOption) *ResponsesFunctionExecutorState {
+	state := &ResponsesFunctionExecutorState{cfg: cloneResponsesFunctionExecutorConfig(cfg)}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(state)
+		}
+	}
+	return state
 }
 
 func (s *ResponsesFunctionExecutorState) summary() responsesFunctionExecutorsSummary {
@@ -737,7 +762,7 @@ func (s *ResponsesFunctionExecutorState) validate(req responsesFunctionExecutorU
 	return responsesFunctionExecutorsSummaryFromConfig(updated), nil
 }
 
-func (s *ResponsesFunctionExecutorState) apply(req responsesFunctionExecutorUpdateRequest) (responsesFunctionExecutorsSummary, error) {
+func (s *ResponsesFunctionExecutorState) apply(ctx context.Context, req responsesFunctionExecutorUpdateRequest) (responsesFunctionExecutorsSummary, error) {
 	if s == nil {
 		s = NewResponsesFunctionExecutorState(config.ResponsesFunctionExecutorConfig{})
 	}
@@ -746,6 +771,19 @@ func (s *ResponsesFunctionExecutorState) apply(req responsesFunctionExecutorUpda
 	updated, err := applyResponsesFunctionExecutorUpdate(cloneResponsesFunctionExecutorConfig(s.cfg), req)
 	if err != nil {
 		return responsesFunctionExecutorsSummary{}, err
+	}
+	if _, err := functionexec.Registrations(updated); err != nil {
+		return responsesFunctionExecutorsSummary{}, err
+	}
+	if s.store != nil {
+		if err := s.store.SaveResponsesFunctionExecutorConfigSnapshot(ctx, updated); err != nil {
+			return responsesFunctionExecutorsSummary{}, err
+		}
+	}
+	if s.manager != nil {
+		if err := s.manager.Apply(updated); err != nil {
+			return responsesFunctionExecutorsSummary{}, err
+		}
 	}
 	s.cfg = cloneResponsesFunctionExecutorConfig(updated)
 	return responsesFunctionExecutorsSummaryFromConfig(updated), nil
@@ -1177,7 +1215,18 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	}
 	functionExecutorState := opt.ResponsesFunctionExecutorState
 	if functionExecutorState == nil {
-		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors)
+		stateOptions := []ResponsesFunctionExecutorStateOption{}
+		functionExecutorStore := opt.ResponsesFunctionExecutorStore
+		if functionExecutorStore == nil {
+			functionExecutorStore = st
+		}
+		if functionExecutorStore != nil {
+			stateOptions = append(stateOptions, WithResponsesFunctionExecutorPersistence(functionExecutorStore))
+		}
+		if opt.ResponsesFunctionExecutorManager != nil {
+			stateOptions = append(stateOptions, WithResponsesFunctionExecutorManager(opt.ResponsesFunctionExecutorManager))
+		}
+		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors, stateOptions...)
 	}
 	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthVerifier))
 	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.SessionTTL))
@@ -1273,7 +1322,7 @@ func responsesFunctionExecutorsAPIHandler(state *ResponsesFunctionExecutorState)
 			if validateOnly {
 				summary, err = state.validate(req)
 			} else {
-				summary, err = state.apply(req)
+				summary, err = state.apply(r.Context(), req)
 			}
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

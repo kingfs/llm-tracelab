@@ -25,6 +25,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/redaction"
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
 	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
@@ -270,6 +271,10 @@ type Handler struct {
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
+	return newHandler(cfg, st, nil, provided...)
+}
+
+func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *functionexec.Manager, provided ...*router.Router) (*Handler, error) {
 	var rtr *router.Router
 	if len(provided) > 0 {
 		rtr = provided[0]
@@ -434,11 +439,13 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			}
 			runtimeOptions = append(runtimeOptions, responsesruntime.WithWebSearchProvider(provider))
 		}
-		functionExecutorOptions, err := responsesFunctionExecutorOptions(cfg)
-		if err != nil {
-			return nil, err
+		if functionExecutorManager == nil {
+			functionExecutorManager, err = functionexec.NewManager(cfg.ResponsesFunctionExecutorsConfig())
+			if err != nil {
+				return nil, err
+			}
 		}
-		runtimeOptions = append(runtimeOptions, functionExecutorOptions...)
+		runtimeOptions = append(runtimeOptions, responsesruntime.WithFunctionToolExecutorRegistry(functionExecutorManager.Registry()))
 		rt := responsesruntime.New(runtimeConfig, &responsesChatCompletionsAdapter{
 			router:        rtr,
 			recorder:      rec,
@@ -487,63 +494,12 @@ func responsesRuntimeModelProfiles(cfg *config.Config) []responsesruntime.ModelP
 	return out
 }
 
-func responsesFunctionExecutorOptions(cfg *config.Config) ([]responsesruntime.Option, error) {
-	if cfg == nil {
-		return nil, nil
+func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier, managers ...*functionexec.Manager) (*Handler, error) {
+	var manager *functionexec.Manager
+	if len(managers) > 0 {
+		manager = managers[0]
 	}
-	executorConfig := cfg.ResponsesFunctionExecutorsConfig()
-	if !executorConfig.Enabled {
-		return nil, nil
-	}
-	options := make([]responsesruntime.Option, 0, len(executorConfig.Executors))
-	policy := responsesruntime.FunctionToolExecutorPolicy{
-		Timeout:         executorConfig.Timeout,
-		MaxResultBytes:  executorConfig.MaxResultBytes,
-		RedactArguments: executorConfig.Redaction.Arguments,
-		RedactOutput:    executorConfig.Redaction.Output,
-	}
-	for _, binding := range executorConfig.Executors {
-		if !binding.Available {
-			continue
-		}
-		if binding.Name == "" {
-			return nil, fmt.Errorf("responses function executor name is required")
-		}
-		switch binding.Type {
-		case config.ResponsesFunctionExecutorTypeStaticResponse:
-			options = append(options, responsesruntime.WithFunctionToolExecutorPolicy(
-				binding.Name,
-				responsesruntime.StaticFunctionToolExecutor{Output: binding.Output},
-				policy,
-			))
-		case config.ResponsesFunctionExecutorTypeExternalCommand:
-			if binding.Command == "" {
-				return nil, fmt.Errorf("responses external_command executor command is required for %q", binding.Name)
-			}
-			options = append(options, responsesruntime.WithFunctionToolExecutorPolicy(
-				binding.Name,
-				responsesruntime.ExternalCommandFunctionToolExecutor{
-					Command:        binding.Command,
-					Args:           binding.Args,
-					Env:            binding.Env,
-					EnvAllowlist:   binding.EnvAllowlist,
-					WorkingDir:     binding.Process.WorkingDir,
-					RequireAbsPath: binding.Process.RequireAbsoluteCommand,
-					Timeout:        binding.Timeout,
-					MaxStdoutBytes: executorConfig.MaxResultBytes + 1,
-					MaxStderrBytes: executorConfig.MaxResultBytes + 1,
-				},
-				policy,
-			))
-		default:
-			return nil, fmt.Errorf("unsupported responses function executor type %q for %q", binding.Type, binding.Name)
-		}
-	}
-	return options, nil
-}
-
-func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier) (*Handler, error) {
-	h, err := NewHandler(cfg, st, rtr)
+	h, err := newHandler(cfg, st, manager, rtr)
 	if err != nil {
 		return nil, err
 	}

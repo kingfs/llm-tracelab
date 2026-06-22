@@ -11,6 +11,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/mcpserver"
 	"github.com/kingfs/llm-tracelab/internal/monitor"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -18,6 +19,16 @@ import (
 )
 
 func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.Config, authStore ...*auth.Store) *http.ServeMux {
+	return newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, nil, authStore...)
+}
+
+func newManagementMuxWithFunctionExecutorManager(
+	traceStore *store.Store,
+	rtr *router.Router,
+	cfg *config.Config,
+	functionExecutorManager *functionexec.Manager,
+	authStore ...*auth.Store,
+) *http.ServeMux {
 	mux := http.NewServeMux()
 	var authStorePtr *auth.Store
 	var verifier auth.TokenVerifier
@@ -35,14 +46,18 @@ func newManagementMux(traceStore *store.Store, rtr *router.Router, cfg *config.C
 		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier))
 	}
 	functionExecutorConfig := cfg.ResponsesFunctionExecutorsConfig()
+	if functionExecutorManager != nil {
+		functionExecutorConfig = functionExecutorManager.Config()
+	}
 	monitor.RegisterRoutes(mux, traceStore, monitor.RouteOptions{
-		Router:                         rtr,
-		ChannelService:                 channel.NewService(traceStore),
-		AuthVerifier:                   verifier,
-		AuthStore:                      authStorePtr,
-		SessionTTL:                     cfg.AuthSessionTTL(),
-		ResponsesFunctionExecutors:     functionExecutorConfig,
-		ResponsesFunctionExecutorState: monitor.NewResponsesFunctionExecutorState(functionExecutorConfig),
+		Router:                           rtr,
+		ChannelService:                   channel.NewService(traceStore),
+		AuthVerifier:                     verifier,
+		AuthStore:                        authStorePtr,
+		SessionTTL:                       cfg.AuthSessionTTL(),
+		ResponsesFunctionExecutors:       functionExecutorConfig,
+		ResponsesFunctionExecutorStore:   traceStore,
+		ResponsesFunctionExecutorManager: functionExecutorManager,
 	})
 	return mux
 }

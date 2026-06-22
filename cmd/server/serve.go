@@ -17,6 +17,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
@@ -150,9 +151,15 @@ func runServeWithConfig(configPath string) int {
 	rtr.StartBackgroundRefresh()
 	logResolvedTargets(rtr)
 
+	functionExecutorManager, err := buildResponsesFunctionExecutorManager(context.Background(), cfg, traceStore)
+	if err != nil {
+		slog.Error("Failed to initialize responses function executor registry", "error", err)
+		return 1
+	}
+
 	if cfg.Monitor.Port != "" {
 		go func() {
-			mux := newManagementMux(traceStore, rtr, cfg, authStore)
+			mux := newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, functionExecutorManager, authStore)
 
 			addr := ":" + cfg.Monitor.Port
 			srv := &http.Server{
@@ -170,7 +177,7 @@ func runServeWithConfig(configPath string) int {
 		}()
 	}
 
-	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore)
+	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore, functionExecutorManager)
 	if err != nil {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1
@@ -192,6 +199,21 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 	return 0
+}
+
+func buildResponsesFunctionExecutorManager(ctx context.Context, cfg *config.Config, traceStore *store.Store) (*functionexec.Manager, error) {
+	base := cfg.ResponsesFunctionExecutorsConfig()
+	if traceStore != nil {
+		snapshot, ok, err := traceStore.LoadResponsesFunctionExecutorConfigSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			base = functionexec.ApplySafeOverlay(base, snapshot)
+			slog.Info("Loaded persisted responses function executor overlay")
+		}
+	}
+	return functionexec.NewManager(base)
 }
 
 func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, wg *sync.WaitGroup) {

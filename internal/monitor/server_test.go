@@ -425,6 +425,59 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSe
 	}
 }
 
+func TestResponsesFunctionExecutorsAPIHandlerApplyPersistsSafeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: false,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:    "lookup_order",
+				Type:    config.ResponsesFunctionExecutorTypeExternalCommand,
+				Command: "echo do-not-store",
+				Output:  "do-not-store-output",
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": false,
+		"enabled": true,
+		"timeout": "4s",
+		"max_result_bytes": 512,
+		"redaction": {"arguments": true, "output": false},
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "enabled": true}
+		]
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	got, ok, err := st.LoadResponsesFunctionExecutorConfigSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() ok = false, want true")
+	}
+	if !got.Enabled || got.Timeout != 4*time.Second || got.MaxResultBytes != 512 || !got.Redaction.Arguments || got.Redaction.Output {
+		t.Fatalf("persisted config = %+v, want safe applied fields", got)
+	}
+	if len(got.Executors) != 1 || got.Executors[0].Command != "" || got.Executors[0].Output != nil {
+		t.Fatalf("persisted executors = %+v, want sensitive fields stripped", got.Executors)
+	}
+}
+
 func TestResponsesFunctionExecutorsAPIHandlerRejectsSensitiveWriteFields(t *testing.T) {
 	t.Parallel()
 
