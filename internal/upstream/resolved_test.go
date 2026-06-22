@@ -198,6 +198,60 @@ func TestResolveProviderPresets(t *testing.T) {
 	}
 }
 
+func TestResolveKeepsAPISurface(t *testing.T) {
+	responsesEnabled := true
+	chatDisabled := false
+
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com/v1",
+		APIType: "Responses",
+		Mode:    "Server",
+		Capabilities: config.UpstreamCapabilitiesConfig{
+			Responses:       &responsesEnabled,
+			ChatCompletions: &chatDisabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.APIType != APITypeResponses {
+		t.Fatalf("APIType = %q, want %q", resolved.APIType, APITypeResponses)
+	}
+	if resolved.Mode != APIModeServer {
+		t.Fatalf("Mode = %q, want %q", resolved.Mode, APIModeServer)
+	}
+	if enabled, configured := resolved.Capability(CapabilityResponses); !configured || !enabled {
+		t.Fatalf("Capability(responses) = enabled:%v configured:%v, want true/true", enabled, configured)
+	}
+	if enabled, configured := resolved.Capability(CapabilityChatCompletions); !configured || enabled {
+		t.Fatalf("Capability(chat_completions) = enabled:%v configured:%v, want false/true", enabled, configured)
+	}
+	if !resolved.NativeResponsesServerMode() {
+		t.Fatalf("NativeResponsesServerMode() = false, want true")
+	}
+	if resolved.ChatCompletionsServerMode() {
+		t.Fatalf("ChatCompletionsServerMode() = true, want false")
+	}
+}
+
+func TestResolveDefaultsAPISurface(t *testing.T) {
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.APIType != APITypeChatCompletions {
+		t.Fatalf("APIType = %q, want %q", resolved.APIType, APITypeChatCompletions)
+	}
+	if resolved.Mode != "" {
+		t.Fatalf("Mode = %q, want empty", resolved.Mode)
+	}
+	if enabled, configured := resolved.Capability(CapabilityResponses); configured || enabled {
+		t.Fatalf("Capability(responses) = enabled:%v configured:%v, want false/false", enabled, configured)
+	}
+}
+
 func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -314,7 +368,7 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			wantURL: "https://openrouter.example.com/v1/chat/completions",
 		},
 		{
-			name: "openai_compatible_tokenize_uses_top_level_route",
+			name: "chat_completions_tokenize_uses_top_level_route",
 			cfg: config.UpstreamConfig{
 				BaseURL: "http://10.2.69.245:38080/v1",
 			},

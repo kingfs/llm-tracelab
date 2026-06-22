@@ -105,6 +105,8 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 	t.Setenv("LLM_TRACELAB_UPSTREAM_BASE_URL", "https://proxy.example.com/v1")
 	t.Setenv("LLM_TRACELAB_UPSTREAM_API_KEY", "env-placeholder-key")
 	t.Setenv("LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET", "openrouter")
+	t.Setenv("LLM_TRACELAB_UPSTREAM_API_TYPE", "responses")
+	t.Setenv("LLM_TRACELAB_UPSTREAM_MODE", "server")
 
 	cfg := Config{
 		Upstreams: []UpstreamTargetConfig{
@@ -114,6 +116,8 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 					BaseURL:        "https://api.openai.com/v1",
 					ApiKey:         "config-placeholder-key",
 					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "proxy",
 				},
 			},
 			{
@@ -122,6 +126,8 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 					BaseURL:        "https://secondary.example.com/v1",
 					ApiKey:         "secondary-placeholder-key",
 					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "proxy",
 				},
 			},
 		},
@@ -137,8 +143,17 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 	if cfg.Upstreams[0].Upstream.ProviderPreset != "openrouter" {
 		t.Fatalf("first upstream provider_preset = %q", cfg.Upstreams[0].Upstream.ProviderPreset)
 	}
+	if cfg.Upstreams[0].Upstream.APIType != "responses" {
+		t.Fatalf("first upstream api_type = %q", cfg.Upstreams[0].Upstream.APIType)
+	}
+	if cfg.Upstreams[0].Upstream.Mode != "server" {
+		t.Fatalf("first upstream mode = %q", cfg.Upstreams[0].Upstream.Mode)
+	}
 	if cfg.Upstreams[1].Upstream.ApiKey != "secondary-placeholder-key" {
 		t.Fatalf("second upstream api_key = %q", cfg.Upstreams[1].Upstream.ApiKey)
+	}
+	if cfg.Upstreams[1].Upstream.APIType != "chat_completions" {
+		t.Fatalf("second upstream api_type = %q", cfg.Upstreams[1].Upstream.APIType)
 	}
 }
 
@@ -161,6 +176,47 @@ upstreams:
 	}
 	if cfg.Upstreams[0].Upstream.ApiKey != "test-placeholder-key" {
 		t.Fatalf("api_key = %q, want test-placeholder-key", cfg.Upstreams[0].Upstream.ApiKey)
+	}
+}
+
+func TestLoadParsesUpstreamAPISurface(t *testing.T) {
+	path := writeTempConfig(t, `
+upstreams:
+  - id: "primary"
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_type: "responses"
+      mode: "server"
+      capabilities:
+        responses: true
+        chat_completions: false
+        embeddings: true
+        models: true
+        tokenize: false
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	upstream := cfg.Upstreams[0].Upstream
+	if upstream.APIType != "responses" || upstream.Mode != "server" {
+		t.Fatalf("api surface = api_type:%q mode:%q, want responses/server", upstream.APIType, upstream.Mode)
+	}
+	if upstream.Capabilities.Responses == nil || !*upstream.Capabilities.Responses {
+		t.Fatalf("capabilities.responses = %v, want true", upstream.Capabilities.Responses)
+	}
+	if upstream.Capabilities.ChatCompletions == nil || *upstream.Capabilities.ChatCompletions {
+		t.Fatalf("capabilities.chat_completions = %v, want false", upstream.Capabilities.ChatCompletions)
+	}
+	if upstream.Capabilities.Embeddings == nil || !*upstream.Capabilities.Embeddings {
+		t.Fatalf("capabilities.embeddings = %v, want true", upstream.Capabilities.Embeddings)
+	}
+	if upstream.Capabilities.Models == nil || !*upstream.Capabilities.Models {
+		t.Fatalf("capabilities.models = %v, want true", upstream.Capabilities.Models)
+	}
+	if upstream.Capabilities.Tokenize == nil || *upstream.Capabilities.Tokenize {
+		t.Fatalf("capabilities.tokenize = %v, want false", upstream.Capabilities.Tokenize)
 	}
 }
 
