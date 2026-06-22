@@ -25,14 +25,18 @@ func NewQueryService(client *dao.Client) *QueryService {
 }
 
 type ListRequestAuditsParams struct {
-	ResponseID     string
-	RequestAuditID string
-	Limit          int
+	ResponseID      string
+	RequestAuditID  string
+	ClientRequestID string
+	ConversationID  string
+	Limit           int
 }
 
 type GetRequestAuditTraceParams struct {
 	ResponseID            string
 	RequestAuditID        string
+	ClientRequestID       string
+	ConversationID        string
 	EventLimit            int
 	UpstreamExchangeLimit int
 }
@@ -106,6 +110,12 @@ func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequest
 	if params.RequestAuditID != "" {
 		query.Where(requestaudit.IDEQ(params.RequestAuditID))
 	}
+	if params.ClientRequestID != "" {
+		query.Where(requestaudit.ClientRequestIDEQ(params.ClientRequestID))
+	}
+	if params.ConversationID != "" {
+		query.Where(requestaudit.ConversationIDEQ(params.ConversationID))
+	}
 	records, err := query.All(ctx)
 	if err != nil {
 		return nil, err
@@ -119,13 +129,15 @@ func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequest
 
 func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetRequestAuditTraceParams) (RequestAuditTrace, bool, error) {
 	var trace RequestAuditTrace
-	if s == nil || s.client == nil || (params.ResponseID == "" && params.RequestAuditID == "") {
+	if s == nil || s.client == nil || (params.ResponseID == "" && params.RequestAuditID == "" && params.ClientRequestID == "" && params.ConversationID == "") {
 		return trace, false, nil
 	}
 	audits, err := s.ListRequestAudits(ctx, ListRequestAuditsParams{
-		ResponseID:     params.ResponseID,
-		RequestAuditID: params.RequestAuditID,
-		Limit:          1,
+		ResponseID:      params.ResponseID,
+		RequestAuditID:  params.RequestAuditID,
+		ClientRequestID: params.ClientRequestID,
+		ConversationID:  params.ConversationID,
+		Limit:           1,
 	})
 	if err != nil {
 		return trace, false, err

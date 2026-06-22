@@ -1213,6 +1213,21 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 	}
 	base := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
 	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit_cli_old").
+		SetResponseID("resp_cli_old").
+		SetConversationID("conv_cli").
+		SetMethod("POST").
+		SetPath("/v1/responses").
+		SetClientRequestID("client_cli").
+		SetHeaderJSON(map[string]any{"authorization": "Bearer old-secret"}).
+		SetBodyPreview(`{"model":"old"}`).
+		SetBodySha256("sha-cli-old").
+		SetStatus("completed").
+		SetCreatedAt(base.Add(-time.Minute)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create old request audit: %v", err)
+	}
+	if err := st.EntClient().RequestAudit.Create().
 		SetID("reqaudit_cli").
 		SetResponseID("resp_cli").
 		SetConversationID("conv_cli").
@@ -1284,7 +1299,7 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 		"-c", configPath,
 		"--format", "json",
 		"audit", "query",
-		"--response-id", "resp_cli",
+		"--client-request-id", "client_cli",
 		"--include-events",
 		"--include-exchanges",
 		"--limit", "1",
@@ -1296,6 +1311,9 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
+			Query struct {
+				ClientRequestID string `json:"client_request_id"`
+			} `json:"query"`
 			Found        bool `json:"found"`
 			RequestAudit struct {
 				ID          string `json:"id"`
@@ -1323,6 +1341,9 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 	if !envelope.OK || envelope.Command != "audit.query" || !envelope.Result.Found {
 		t.Fatalf("envelope = %+v, want ok audit.query found", envelope)
 	}
+	if envelope.Result.Query.ClientRequestID != "client_cli" {
+		t.Fatalf("query = %+v, want client_cli filter", envelope.Result.Query)
+	}
 	if envelope.Result.RequestAudit.ID != "reqaudit_cli" || envelope.Result.RequestAudit.ResponseID != "resp_cli" {
 		t.Fatalf("request audit = %+v, want reqaudit_cli/resp_cli", envelope.Result.RequestAudit)
 	}
@@ -1344,6 +1365,9 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 	if strings.Contains(out.String(), "audit-secret") || strings.Contains(out.String(), "audit-cookie") {
 		t.Fatalf("audit query output leaked sensitive header: %s", out.String())
 	}
+	if strings.Contains(out.String(), "old-secret") {
+		t.Fatalf("audit query output fell back to older matching secret: %s", out.String())
+	}
 }
 
 func TestAuditQueryCommandRequiresSelector(t *testing.T) {
@@ -1361,6 +1385,42 @@ func TestAuditQueryCommandRequiresSelector(t *testing.T) {
 	var exit cliExitError
 	if !errors.As(err, &exit) || exit.code != exitCodeUsage {
 		t.Fatalf("Execute() error = %v, want usage cliExitError", err)
+	}
+}
+
+func TestAuditQueryCommandReportsNotFound(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "json",
+		"audit", "query",
+		"--client-request-id", "missing_client",
+	})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want not found cliExitError")
+	}
+	var exit cliExitError
+	if !errors.As(err, &exit) || exit.code != exitCodeAPI || exit.errCode != "RESPONSES_AUDIT_NOT_FOUND" {
+		t.Fatalf("Execute() error = %v, want RESPONSES_AUDIT_NOT_FOUND", err)
+	}
+	if strings.Contains(out.String(), "missing_client") {
+		t.Fatalf("audit query not found wrote unexpected result output: %s", out.String())
 	}
 }
 

@@ -159,10 +159,10 @@
 ### `audit query` CLI
 
 - 已吸收首切：`llm-tracelab audit query`（别名 `audit responses`）提供面向 agent 的只读 Responses audit trace 查询入口，复用当前 config 的 application store 和 `internal/responses/audit.QueryService`。
-- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --limit 100`，也支持 `--request-audit-id`；默认只输出 request audit envelope，events/exchanges 需显式打开。
+- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时返回最新一条 trace；默认只输出 request audit envelope，events/exchanges 需显式打开。
 - 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body。
 - responses-gateway 能力：按 response/request/thread/session/turn/client request id 查询，并输出 diagnostics envelope。
-- 剩余缺口：尚未支持 `--client-request-id`、`--conversation-id`、thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics。
+- 剩余缺口：尚未支持 thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics。
 
 ### Codex profile 生成命令
 
