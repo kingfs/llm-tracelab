@@ -187,6 +187,10 @@ type OutputItemStreamSink interface {
 	OutputItemDone(done ResponseOutputItemDone) error
 }
 
+type OutputItemAddedStreamSink interface {
+	OutputItemAdded(added ResponseOutputItemAdded) error
+}
+
 type ResponseTextDelta struct {
 	OutputIndex  int
 	ItemID       string
@@ -210,6 +214,11 @@ type ResponseFunctionCallArgumentsDone struct {
 }
 
 type ResponseOutputItemDone struct {
+	OutputIndex int
+	Item        protocol.OutputItem
+}
+
+type ResponseOutputItemAdded struct {
 	OutputIndex int
 	Item        protocol.OutputItem
 }
@@ -350,14 +359,18 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		}
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 		for _, call := range calls {
+			outputIndex := len(output)
+			if err := sendCreated(); err != nil {
+				return protocol.Response{}, err
+			}
+			if err := streamOutputItemAdded(sink, outputIndex, startedToolOutputItem(call)); err != nil {
+				return protocol.Response{}, err
+			}
 			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations, toolExecutionContext{Stream: true})
 			if err != nil {
 				return protocol.Response{}, err
 			}
-			if err := sendCreated(); err != nil {
-				return protocol.Response{}, err
-			}
-			if err := streamOutputItemDone(sink, len(output), outputItem); err != nil {
+			if err := streamOutputItemDone(sink, outputIndex, outputItem); err != nil {
 				return protocol.Response{}, err
 			}
 			output = append(output, outputItem)
@@ -370,6 +383,17 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	}
 }
 
+func streamOutputItemAdded(sink ResponseStreamSink, outputIndex int, item protocol.OutputItem) error {
+	itemSink, ok := sink.(OutputItemAddedStreamSink)
+	if !ok {
+		return nil
+	}
+	return itemSink.OutputItemAdded(ResponseOutputItemAdded{
+		OutputIndex: outputIndex,
+		Item:        item,
+	})
+}
+
 func streamOutputItemDone(sink ResponseStreamSink, outputIndex int, item protocol.OutputItem) error {
 	itemSink, ok := sink.(OutputItemStreamSink)
 	if !ok {
@@ -379,6 +403,30 @@ func streamOutputItemDone(sink ResponseStreamSink, outputIndex int, item protoco
 		OutputIndex: outputIndex,
 		Item:        item,
 	})
+}
+
+func startedToolOutputItem(call executableToolCall) protocol.OutputItem {
+	switch call.kind {
+	case executableToolKindWebSearch:
+		return protocol.OutputItem{
+			ID:     "ws_" + call.call.ID,
+			Type:   "web_search_call",
+			Status: "in_progress",
+			CallID: call.call.ID,
+			Action: map[string]any{
+				"type":  "search",
+				"query": call.query,
+			},
+		}
+	default:
+		return protocol.OutputItem{
+			ID:     "fco_" + call.call.ID,
+			Type:   "function_call_output",
+			Status: "in_progress",
+			CallID: call.call.ID,
+			Name:   call.call.Function.Name,
+		}
+	}
 }
 
 func (r *Runtime) InputItems(ctx context.Context, id string) (protocol.InputItemList, bool, error) {

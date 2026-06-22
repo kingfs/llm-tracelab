@@ -38,6 +38,7 @@ type fakeIncrementalRuntime struct {
 	streamDeltas         []string
 	streamFunctionDeltas []runtime.ResponseFunctionCallArgumentsDelta
 	streamFunctionDone   []runtime.ResponseFunctionCallArgumentsDone
+	streamOutputAdded    []runtime.ResponseOutputItemAdded
 	streamOutputDone     []runtime.ResponseOutputItemDone
 	streamErr            error
 }
@@ -72,6 +73,13 @@ func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.
 		}
 		for _, done := range f.streamFunctionDone {
 			if err := functionSink.FunctionCallArgumentsDone(done); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+	}
+	if outputSink, ok := sink.(runtime.OutputItemAddedStreamSink); ok {
+		for _, added := range f.streamOutputAdded {
+			if err := outputSink.OutputItemAdded(added); err != nil {
 				return protocol.Response{}, err
 			}
 		}
@@ -479,6 +487,16 @@ func TestCreateResponseStreamUsesIncrementalFunctionCallArgumentDeltas(t *testin
 		streamFunctionDone: []runtime.ResponseFunctionCallArgumentsDone{
 			{OutputIndex: 0, ItemID: "fc_call_lookup", CallID: "call_lookup", Arguments: `{"q":"codex"}`},
 		},
+		streamOutputAdded: []runtime.ResponseOutputItemAdded{{
+			OutputIndex: 0,
+			Item: protocol.OutputItem{
+				ID:     "fco_call_lookup",
+				Type:   "function_call_output",
+				Status: "in_progress",
+				CallID: "call_lookup",
+				Name:   "lookup",
+			},
+		}},
 		streamOutputDone: []runtime.ResponseOutputItemDone{{
 			OutputIndex: 0,
 			Item: protocol.OutputItem{
@@ -500,18 +518,19 @@ func TestCreateResponseStreamUsesIncrementalFunctionCallArgumentDeltas(t *testin
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, event := range []string{"response.created", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.output_item.done", "response.completed"} {
+	for _, event := range []string{"response.created", "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.output_item.added", "response.output_item.done", "response.completed"} {
 		if !strings.Contains(body, "event: "+event+"\n") {
 			t.Fatalf("incremental function stream missing event %q:\n%s", event, body)
 		}
 	}
-	if !strings.Contains(body, `"delta":"{\"q\""`) || !strings.Contains(body, `"delta":":\"codex\"}"`) || !strings.Contains(body, `"arguments":"{\"q\":\"codex\"}"`) || !strings.Contains(body, `"type":"function_call_output"`) {
+	if !strings.Contains(body, `"delta":"{\"q\""`) || !strings.Contains(body, `"delta":":\"codex\"}"`) || !strings.Contains(body, `"arguments":"{\"q\":\"codex\"}"`) || !strings.Contains(body, `"type":"function_call_output"`) || !strings.Contains(body, `"status":"in_progress"`) {
 		t.Fatalf("incremental function stream missing argument payloads:\n%s", body)
 	}
 	doneIndex := strings.Index(body, "event: response.function_call_arguments.done\n")
+	itemAddedIndex := strings.Index(body, "event: response.output_item.added\n")
 	itemDoneIndex := strings.Index(body, "event: response.output_item.done\n")
 	completedIndex := strings.Index(body, "event: response.completed\n")
-	if doneIndex < 0 || itemDoneIndex < 0 || completedIndex < 0 || doneIndex >= itemDoneIndex || itemDoneIndex >= completedIndex {
+	if doneIndex < 0 || itemAddedIndex < 0 || itemDoneIndex < 0 || completedIndex < 0 || doneIndex >= itemAddedIndex || itemAddedIndex >= itemDoneIndex || itemDoneIndex >= completedIndex {
 		t.Fatalf("incremental function stream event order mismatch:\n%s", body)
 	}
 	if rt.createReq.Stream {

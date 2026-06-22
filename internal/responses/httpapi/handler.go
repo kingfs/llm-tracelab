@@ -423,6 +423,11 @@ func (s *auditedStreamSink) FunctionCallArgumentsDone(done runtime.ResponseFunct
 	return s.writer.FunctionCallArgumentsDone(done)
 }
 
+func (s *auditedStreamSink) OutputItemAdded(added runtime.ResponseOutputItemAdded) error {
+	s.start()
+	return s.writer.OutputItemAdded(added)
+}
+
 func (s *auditedStreamSink) OutputItemDone(done runtime.ResponseOutputItemDone) error {
 	s.start()
 	return s.writer.OutputItemDone(done)
@@ -503,6 +508,15 @@ func (s *streamWriter) FunctionCallArgumentsDone(done runtime.ResponseFunctionCa
 		OutputIndex: &outputIndex,
 		ItemID:      done.ItemID,
 		Arguments:   done.Arguments,
+	})
+}
+
+func (s *streamWriter) OutputItemAdded(added runtime.ResponseOutputItemAdded) error {
+	outputIndex := added.OutputIndex
+	return s.write("response.output_item.added", protocol.StreamEvent{
+		Type:        "response.output_item.added",
+		OutputIndex: &outputIndex,
+		Item:        &added.Item,
 	})
 }
 
