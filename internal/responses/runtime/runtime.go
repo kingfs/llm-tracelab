@@ -240,10 +240,14 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		}
 	}
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
-		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+		err := UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+		r.recordUnsupportedHostedToolAudit(ctx, req, forcedHostedToolNameOrDefault(req.ToolChoice, "web_search"), err, false)
+		return protocol.Response{}, err
 	}
 	if tool, ok := forcedUnsupportedHostedTool(req.ToolChoice); ok {
-		return protocol.Response{}, UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
+		err := UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
+		r.recordUnsupportedHostedToolAudit(ctx, req, tool, err, false)
+		return protocol.Response{}, err
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	functionExecutors := r.functionToolExecutorSnapshot()
@@ -339,10 +343,14 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	chatModel := modelProfile.UpstreamModelOr(model)
 	webSearchReady := r.webSearchReady()
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
-		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+		err := UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
+		r.recordUnsupportedHostedToolAudit(ctx, req, forcedHostedToolNameOrDefault(req.ToolChoice, "web_search"), err, true)
+		return protocol.Response{}, err
 	}
 	if tool, ok := forcedUnsupportedHostedTool(req.ToolChoice); ok {
-		return protocol.Response{}, UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
+		err := UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
+		r.recordUnsupportedHostedToolAudit(ctx, req, tool, err, true)
+		return protocol.Response{}, err
 	}
 	if !incrementalStreamSupportsTools(req.Tools, webSearchReady) {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
@@ -1267,6 +1275,26 @@ func (r *Runtime) recordToolCallAudit(ctx context.Context, entry audit.ToolCallA
 	}
 }
 
+func (r *Runtime) recordUnsupportedHostedToolAudit(ctx context.Context, req protocol.CreateResponseRequest, toolName string, unsupported UnsupportedHostedToolError, stream bool) {
+	createdAt := time.Now()
+	reason := unsupported.Reason
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ConversationID: audit.CodexConversationID(req.Metadata),
+		ToolType:       "hosted",
+		ToolName:       toolName,
+		Executor:       "hosted:" + toolName,
+		Status:         "rejected",
+		Phase:          "tool_call",
+		ErrorText:      unsupported.Error(),
+		MetadataJSON: map[string]any{
+			"stream":             stream,
+			"reason":             reason,
+			"forced_tool_choice": true,
+		},
+		CreatedAt: createdAt,
+	})
+}
+
 func toolCallAuditMetadata(iteration int, exec toolExecutionContext) map[string]any {
 	return map[string]any{
 		"iteration": iteration,
@@ -1435,6 +1463,14 @@ func webSearchChatTool() ChatTool {
 func forcedWebSearchTool(toolChoice any) bool {
 	tool, ok := forcedHostedToolName(toolChoice)
 	return ok && (tool == "web_search" || tool == "web_search_preview")
+}
+
+func forcedHostedToolNameOrDefault(toolChoice any, fallback string) string {
+	tool, ok := forcedHostedToolName(toolChoice)
+	if !ok {
+		return fallback
+	}
+	return tool
 }
 
 func forcedUnsupportedHostedTool(toolChoice any) (string, bool) {
