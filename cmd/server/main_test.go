@@ -275,7 +275,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "audit", "audit query", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -519,6 +519,258 @@ upstreams:
 	target := envelope.Result.Upstreams.Targets[0]
 	if target.ID != "openai" || !target.Enabled || target.StaticModelCount != 2 || target.CredentialCount != 1 || !strings.Contains(target.BaseURL, "%3Credacted%3E") {
 		t.Fatalf("upstream target = %+v", target)
+	}
+}
+
+func TestModelsCodexConfigCommandJSONEnvelopeUsesExactProfile(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "sk-secret-from-env")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8181"
+database:
+  driver: postgres
+  dsn: postgres://app:super-secret-db@example.com:5432/traces?sslmode=disable
+responses_server:
+  enabled: true
+  path: /v1/responses
+  compact_history_item_threshold: 12
+  model_profiles:
+    - pattern: "gpt-*"
+      context_window_tokens: 100
+    - name: "gpt-5"
+      context_window_tokens: 200
+      compact_history_item_threshold: 9
+upstreams:
+  - id: openai
+    upstream:
+      base_url: https://user:upstream-url-secret@api.example.com/v1?token=url-token-secret
+      api_key: "$env:OPENAI_TEST_KEY"
+      headers:
+        Authorization: Bearer upstream-header-secret
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "models", "codex-config", "gpt-5"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	output := out.String()
+	for _, secret := range []string{
+		"super-secret-db",
+		"upstream-url-secret",
+		"url-token-secret",
+		"sk-secret-from-env",
+		"upstream-header-secret",
+	} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("models codex-config output leaked secret marker %q", secret)
+		}
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Model   string `json:"model"`
+			WireAPI string `json:"wire_api"`
+			Profile struct {
+				ModelProvider              string `json:"model_provider"`
+				Model                      string `json:"model"`
+				ModelContextWindow         int    `json:"model_context_window"`
+				ModelAutoCompactTokenLimit int    `json:"model_auto_compact_token_limit"`
+			} `json:"profile"`
+			Provider struct {
+				BaseURL       string `json:"base_url"`
+				ResponsesPath string `json:"responses_path"`
+				EnvKey        string `json:"env_key"`
+				WireAPI       string `json:"wire_api"`
+			} `json:"provider"`
+			Diagnostics struct {
+				MatchedProfile struct {
+					Matched bool   `json:"matched"`
+					Index   int    `json:"index"`
+					Kind    string `json:"kind"`
+					Source  string `json:"source"`
+				} `json:"matched_profile"`
+				CompactLimitSource                string `json:"compact_limit_source"`
+				CompactLimitMarginTokens          int    `json:"compact_limit_margin_tokens"`
+				CompactHistoryItemThreshold       int    `json:"compact_history_item_threshold"`
+				CompactHistoryItemThresholdSource string `json:"compact_history_item_threshold_source"`
+				ResponsesServerEnabled            bool   `json:"responses_server_enabled"`
+			} `json:"diagnostics"`
+			TOML     string   `json:"toml"`
+			Warnings []string `json:"warnings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "models.codex_config" {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+	if envelope.Result.Model != "gpt-5" || envelope.Result.WireAPI != "responses" {
+		t.Fatalf("result identity = %+v", envelope.Result)
+	}
+	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8181/v1" || envelope.Result.Provider.ResponsesPath != "/v1/responses" || envelope.Result.Provider.EnvKey != "LLM_TRACELAB_API_KEY" || envelope.Result.Provider.WireAPI != "responses" {
+		t.Fatalf("provider = %+v", envelope.Result.Provider)
+	}
+	if envelope.Result.Profile.ModelProvider != "llm-tracelab" || envelope.Result.Profile.Model != "gpt-5" || envelope.Result.Profile.ModelContextWindow != 200 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 160 {
+		t.Fatalf("profile = %+v", envelope.Result.Profile)
+	}
+	if !envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Kind != "exact" || envelope.Result.Diagnostics.MatchedProfile.Index != 1 || envelope.Result.Diagnostics.MatchedProfile.Source != "responses_server.model_profiles[1].name" {
+		t.Fatalf("matched profile = %+v", envelope.Result.Diagnostics.MatchedProfile)
+	}
+	if envelope.Result.Diagnostics.CompactLimitSource != "responses_server.model_profiles[1].name.context_window_tokens_80_percent" || envelope.Result.Diagnostics.CompactLimitMarginTokens != 40 {
+		t.Fatalf("compact limit diagnostics = %+v", envelope.Result.Diagnostics)
+	}
+	if envelope.Result.Diagnostics.CompactHistoryItemThreshold != 9 || envelope.Result.Diagnostics.CompactHistoryItemThresholdSource != "responses_server.model_profiles[1].name.compact_history_item_threshold" || !envelope.Result.Diagnostics.ResponsesServerEnabled {
+		t.Fatalf("threshold diagnostics = %+v", envelope.Result.Diagnostics)
+	}
+	if len(envelope.Result.Warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none", envelope.Result.Warnings)
+	}
+	if !strings.Contains(envelope.Result.TOML, `wire_api = "responses"`) || !strings.Contains(envelope.Result.TOML, `env_key = "LLM_TRACELAB_API_KEY"`) {
+		t.Fatalf("toml = %s", envelope.Result.TOML)
+	}
+}
+
+func TestModelsCodexConfigCommandTextTOMLUsesPatternProfile(t *testing.T) {
+	t.Setenv("OPENAI_TEST_KEY", "sk-secret-from-env")
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  path: /openai/v1/responses
+  model_profiles:
+    - pattern: "qwen3*"
+      context_window_tokens: 32000
+upstream:
+  api_key: "$env:OPENAI_TEST_KEY"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "models", "codex-config", "qwen3-32b"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	output := out.String()
+	if strings.Contains(output, "sk-secret-from-env") {
+		t.Fatalf("models codex-config text leaked env secret: %s", output)
+	}
+	for _, want := range []string{
+		`model_provider = "llm-tracelab"`,
+		`model = "qwen3-32b"`,
+		`model_context_window = 32000`,
+		`model_auto_compact_token_limit = 25600`,
+		`[model_providers.llm-tracelab]`,
+		`base_url = "http://127.0.0.1:8080/openai/v1"`,
+		`env_key = "LLM_TRACELAB_API_KEY"`,
+		`wire_api = "responses"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("text output missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestModelsCodexConfigCommandWarnsForNoProfileAndDisabledResponses(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8182"
+responses_server:
+  enabled: false
+  path: /custom/respond
+  model_profiles:
+    - name: "known-model"
+      context_window_tokens: 1000
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "models", "codex-config", "unknown-model"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	var envelope struct {
+		Result struct {
+			Profile struct {
+				ModelContextWindow         int `json:"model_context_window"`
+				ModelAutoCompactTokenLimit int `json:"model_auto_compact_token_limit"`
+			} `json:"profile"`
+			Provider struct {
+				BaseURL       string `json:"base_url"`
+				ResponsesPath string `json:"responses_path"`
+			} `json:"provider"`
+			Diagnostics struct {
+				MatchedProfile struct {
+					Matched bool   `json:"matched"`
+					Source  string `json:"source"`
+				} `json:"matched_profile"`
+				ResponsesServerEnabled bool `json:"responses_server_enabled"`
+			} `json:"diagnostics"`
+			Warnings []string `json:"warnings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if envelope.Result.Profile.ModelContextWindow != 0 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 0 {
+		t.Fatalf("profile = %+v, want zero limits", envelope.Result.Profile)
+	}
+	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8182/custom/respond" || envelope.Result.Provider.ResponsesPath != "/custom/respond" {
+		t.Fatalf("provider = %+v", envelope.Result.Provider)
+	}
+	if envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Source != "none" || envelope.Result.Diagnostics.ResponsesServerEnabled {
+		t.Fatalf("diagnostics = %+v", envelope.Result.Diagnostics)
+	}
+	for _, want := range []string{
+		"responses_server.enabled is false",
+		"no responses_server.model_profiles entry matched model",
+		"does not end with /responses",
+	} {
+		if !containsStringFragment(envelope.Result.Warnings, want) {
+			t.Fatalf("warnings = %+v, want contain %q", envelope.Result.Warnings, want)
+		}
+	}
+}
+
+func TestRootCommandRegistersModelsCodexConfig(t *testing.T) {
+	cmd := newRootCommand()
+	found, _, err := cmd.Find([]string{"models", "codex-config"})
+	if err != nil {
+		t.Fatalf("Find(models codex-config) error = %v", err)
+	}
+	if found == nil || found.CommandPath() != "llm-tracelab models codex-config" {
+		t.Fatalf("found command path = %q", found.CommandPath())
 	}
 }
 

@@ -128,7 +128,7 @@ Fixture:
 | MCP hosted tool runtime | 不支持 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor。 |
 | file search hosted runtime | 不支持 | 无 vector store/retrieval/citation runtime。 |
 | code interpreter hosted runtime | 不支持 | 无 sandboxed code runtime。 |
-| Codex TOML profile generation | 不支持 | 尚无 `models codex-config` 等生成命令。 |
+| Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议。 |
 | Codex fixture runner | 部分支持 | `internal/responses/httpapi` 与 `internal/responses/runtime` 有 focused 离线 Go tests，覆盖 fixture schema/contract 和最小 runtime/parser 对齐；不是完整 Codex/e2e runner。 |
 
 ## 配置建议
@@ -172,6 +172,32 @@ tools:
   `capabilities.tool_calling:false` 的 target 不会被选择。
 - 不要把 Responses-native 且关闭 chat capability 的 target 配成 server-mode
   内部 Chat Completions 后端。
+
+## Codex TOML 生成命令
+
+`llm-tracelab models codex-config <model>` 是离线配置建议生成器，不会连接数据库、
+探测上游 provider、运行真实 Codex 或读取真实 API key。命令支持全局
+`--format text|json`：
+
+- JSON 输出使用稳定 envelope，`command` 为 `models.codex_config`。
+- `result.profile` 包含 `model_provider`、`model`、`model_context_window` 和
+  `model_auto_compact_token_limit`。
+- `result.provider.base_url` 根据 `server.port` 和 `responses_server.path` 推导；
+  默认 `/v1/responses` 会生成 `http://127.0.0.1:<port>/v1`，`wire_api` 固定为
+  `responses`。
+- `result.diagnostics` 标注 matched profile、compact token limit 来源、
+  item-count compact threshold 来源和 Responses server 是否启用。
+- `result.warnings` 会提示 `responses_server.enabled=false`、未匹配 profile、
+  profile 缺少 `context_window_tokens` 或 path 无法按 Codex `wire_api=responses`
+  习惯推导。
+- text 输出包含可复制 TOML 片段，使用 `env_key = "LLM_TRACELAB_API_KEY"` 占位，
+  不输出配置文件中的真实 upstream API key、header secret 或数据库 DSN。
+
+Profile 匹配顺序固定为：先按 `responses_server.model_profiles[].name` exact
+匹配，再按 `pattern` wildcard 匹配。无匹配时命令仍成功，模型上下文窗口和 Codex
+auto compact token limit 输出为 `0`，并给出 warning。当前首切没有独立的 Codex
+compatibility 字段，因此 `model_auto_compact_token_limit` 在有 context window 时
+保守回退为 `context_window_tokens` 的 80%。
 
 ## 排障入口
 

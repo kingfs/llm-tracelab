@@ -168,6 +168,14 @@ type ResponsesModelProfileConfig struct {
 	TokenizeCounter             ResponsesTokenizeCounterConfig `yaml:"tokenize_counter"`
 }
 
+type ResponsesModelProfileMatch struct {
+	Matched bool
+	Index   int
+	Kind    string
+	Source  string
+	Profile ResponsesModelProfileConfig
+}
+
 type ResponsesTokenizeCounterConfig struct {
 	Enabled    *bool         `yaml:"enabled"`
 	UpstreamID string        `yaml:"upstream_id"`
@@ -823,6 +831,76 @@ func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
 		profiles = append(profiles, profile)
 	}
 	return profiles
+}
+
+func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMatch {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ResponsesModelProfileMatch{Index: -1, Source: "none"}
+	}
+	profiles := c.ResponsesModelProfiles()
+	for idx, profile := range profiles {
+		if profile.Name == "" || profile.Name != model {
+			continue
+		}
+		return ResponsesModelProfileMatch{
+			Matched: true,
+			Index:   idx,
+			Kind:    "exact",
+			Source:  fmt.Sprintf("responses_server.model_profiles[%d].name", idx),
+			Profile: profile,
+		}
+	}
+	for idx, profile := range profiles {
+		if !wildcardMatchString(profile.Pattern, model) {
+			continue
+		}
+		return ResponsesModelProfileMatch{
+			Matched: true,
+			Index:   idx,
+			Kind:    "pattern",
+			Source:  fmt.Sprintf("responses_server.model_profiles[%d].pattern", idx),
+			Profile: profile,
+		}
+	}
+	return ResponsesModelProfileMatch{Index: -1, Source: "none"}
+}
+
+func wildcardMatchString(pattern string, value string) bool {
+	pattern = strings.TrimSpace(pattern)
+	value = strings.TrimSpace(value)
+	if pattern == "" {
+		return false
+	}
+	if pattern == "*" {
+		return true
+	}
+	pi, vi := 0, 0
+	star, match := -1, 0
+	for vi < len(value) {
+		if pi < len(pattern) && (pattern[pi] == '?' || pattern[pi] == value[vi]) {
+			pi++
+			vi++
+			continue
+		}
+		if pi < len(pattern) && pattern[pi] == '*' {
+			star = pi
+			match = vi
+			pi++
+			continue
+		}
+		if star != -1 {
+			pi = star + 1
+			match++
+			vi = match
+			continue
+		}
+		return false
+	}
+	for pi < len(pattern) && pattern[pi] == '*' {
+		pi++
+	}
+	return pi == len(pattern)
 }
 
 func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConfig {
