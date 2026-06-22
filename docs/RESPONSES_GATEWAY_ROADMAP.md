@@ -76,7 +76,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - 不依赖真实 Postgres 服务。
 - 不破坏旧 SQLite DB 启动。
-- 文档列清仍未完成的 auth rollback/namespace 与 SQLite versioned migration 缺口。
+- 文档列清仍未完成的 auth namespace 与 SQLite versioned migration 缺口。
 
 ### Stage 23：Provider Detection 与 Capability Registry（诊断首切已落地）
 

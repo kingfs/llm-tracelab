@@ -314,6 +314,15 @@ func TestMigrateDatabaseUpPostgresRequiresDSN(t *testing.T) {
 	}
 }
 
+func TestMigrateDatabaseDownPostgresRequiresDSN(t *testing.T) {
+	t.Parallel()
+
+	err := MigrateDatabaseDown("postgresql", "", 1, false)
+	if err == nil || !strings.Contains(err.Error(), "postgres application database dsn is required") {
+		t.Fatalf("MigrateDatabaseDown(postgresql empty dsn) error = %v, want required dsn", err)
+	}
+}
+
 func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
 	if dsn == "" {

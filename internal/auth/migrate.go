@@ -189,6 +189,9 @@ func MigrateDown(dbPath string, steps int, all bool) error {
 }
 
 func MigrateDatabaseDown(driver string, dsn string, steps int, all bool) error {
+	if normalizeDriver(driver) == "postgres" {
+		return appdbmigrate.MigrateDown(driver, dsn, steps, all)
+	}
 	m, err := newMigrator(driver, dsn)
 	if err != nil {
 		return err

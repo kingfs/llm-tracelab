@@ -30,6 +30,18 @@ func MigrateUp(driver string, dsn string, steps int) error {
 
 var ErrSQLiteUsesStoreInit = errors.New("sqlite application migration still uses store schema initialization")
 
+func MigrateDown(driver string, dsn string, steps int, all bool) error {
+	driver = normalizeDriver(driver)
+	switch driver {
+	case "postgres":
+		return migratePostgresDown(dsn, steps, all)
+	case "sqlite":
+		return ErrSQLiteUsesStoreInit
+	default:
+		return fmt.Errorf("application database driver %q is not supported by versioned migrations yet", driver)
+	}
+}
+
 type Status struct {
 	Driver    string
 	Versioned bool
@@ -88,6 +100,28 @@ func checkPostgresStatus(dsn string, status Status) (Status, error) {
 }
 
 func migratePostgresUp(dsn string, steps int) error {
+	return migratePostgres(dsn, func(m *gomigrate.Migrate) error {
+		if steps > 0 {
+			return m.Steps(steps)
+		}
+		return m.Up()
+	})
+}
+
+func migratePostgresDown(dsn string, steps int, all bool) error {
+	return migratePostgres(dsn, func(m *gomigrate.Migrate) error {
+		switch {
+		case all:
+			return m.Down()
+		case steps > 0:
+			return m.Steps(-steps)
+		default:
+			return m.Steps(-1)
+		}
+	})
+}
+
+func migratePostgres(dsn string, run func(*gomigrate.Migrate) error) error {
 	if strings.TrimSpace(dsn) == "" {
 		return fmt.Errorf("postgres application database dsn is required")
 	}
@@ -109,11 +143,7 @@ func migratePostgresUp(dsn string, steps int) error {
 		return err
 	}
 	defer closeMigrator(m)
-	if steps > 0 {
-		err = m.Steps(steps)
-	} else {
-		err = m.Up()
-	}
+	err = run(m)
 	if errors.Is(err, gomigrate.ErrNoChange) {
 		return nil
 	}
