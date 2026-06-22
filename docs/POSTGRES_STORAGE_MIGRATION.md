@@ -31,6 +31,9 @@ claim that Postgres persistence is fully production mature today.
   contains versioned Postgres application schema generated from
   `ent/schema/**`, including Responses state, audit/correlation tables, trace
   index tables, observation/finding tables, analysis tables, and system events.
+  It also includes `tool_call_audits` for durable hosted tool lifecycle read
+  models; runtime writes to that table are still being wired after the
+  schema/recorder/query API landing.
   `ent/migrate/main.go` is a dialect-aware generator: SQLite remains the
   default and writes to `ent/migrations`; Postgres requires an explicit Atlas
   dev URL and writes to `ent/postgres-migrations`.
@@ -70,8 +73,9 @@ claim that Postgres persistence is fully production mature today.
 - `db migrate down` is intentionally unsupported outside `--dry-run`; ent auto
   migration does not provide a safe rollback plan.
 - The Responses runtime has ent-backed persistence for `responses` and
-  `response_items`. These tables belong to the application database, not to the
-  auth migration domain.
+  `response_items`. Request audit, execution events, upstream exchange
+  correlation, and `tool_call_audits` also belong to the application database,
+  not to the auth migration domain.
 
 ## Command Ownership
 
@@ -246,6 +250,14 @@ support, and shared application namespace fields. `auth migrate status
 migration path and reads SQLite auth migration status through the configured
 auth database. This improves operator visibility but deliberately does not
 create an independent Postgres auth migration namespace.
+
+Stage 16K adds the durable hosted tool audit read model. `tool_call_audits` is
+defined in ent, generated into `ent/dao/**`, included in SQLite startup schema
+fallback, covered by a minimal additive SQLite migration, and checked into
+`ent/postgres-migrations` with a matching additive Postgres migration. The
+table is available through `internal/responses/audit.RecordToolCallAudit` and
+`ListToolCallAudits`; hosted tool runtime write-through and CLI-first query
+ergonomics remain follow-up work.
 
 SQLite compatibility:
 
