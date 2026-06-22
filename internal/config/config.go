@@ -169,7 +169,7 @@ type ResponsesModelProfileConfig struct {
 }
 
 type ResponsesTokenizeCounterConfig struct {
-	Enabled    bool          `yaml:"enabled"`
+	Enabled    *bool         `yaml:"enabled"`
 	UpstreamID string        `yaml:"upstream_id"`
 	Timeout    time.Duration `yaml:"timeout"`
 }

@@ -505,7 +505,7 @@ responses_server:
 	if got := profiles[0]; got.Name != "qwen3" || got.ContextWindowTokens != 32768 || got.MaxOutputTokens != 4096 || got.CompactHistoryItemThreshold != 8 || got.UpstreamModel != "qwen/qwen3" {
 		t.Fatalf("first model profile = %+v", got)
 	}
-	if got := profiles[0].TokenizeCounter; !got.Enabled || got.UpstreamID != "primary" || got.Timeout != 750*time.Millisecond {
+	if got := profiles[0].TokenizeCounter; got.Enabled == nil || !*got.Enabled || got.UpstreamID != "primary" || got.Timeout != 750*time.Millisecond {
 		t.Fatalf("first model profile tokenize_counter = %+v, want enabled primary 750ms", got)
 	}
 	if got := profiles[1]; got.Pattern != "gpt-4o*" || got.CompactHistoryItemThreshold != 6 {
