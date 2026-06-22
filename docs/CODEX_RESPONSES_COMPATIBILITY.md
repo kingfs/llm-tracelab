@@ -131,8 +131,8 @@ Fixture:
 | MCP hosted tool runtime | 稳定拒绝并审计 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | file search hosted runtime | 稳定拒绝并审计 | 无 vector store/retrieval/citation runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | code interpreter hosted runtime | 稳定拒绝并审计 | 无 sandboxed code runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
-| Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议。 |
-| Codex fixture runner | 部分支持 | `internal/responses/httpapi` 与 `internal/responses/runtime` 有 focused 离线 Go tests，覆盖 fixture schema/contract 和最小 runtime/parser 对齐；不是完整 Codex/e2e runner。 |
+| Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议；本地 SQLite app DB 可用时还会只读检查 `model_catalog` / `channel_models` drift。 |
+| Codex fixture runner | 已支持离线 gate | `task test:codex-fixtures` 运行 focused 离线 Go tests，枚举并校验当前 fixture inventory、JSON/NDJSON 结构、HTTP handler reachability 和最小 runtime/parser 对齐；不是完整真实 Codex/e2e runner。 |
 
 ## 配置建议
 
@@ -178,8 +178,8 @@ tools:
 
 ## Codex TOML 生成命令
 
-`llm-tracelab models codex-config <model>` 是离线配置建议生成器，不会连接数据库、
-探测上游 provider、运行真实 Codex 或读取真实 API key。命令支持全局
+`llm-tracelab models codex-config <model>` 是离线配置建议生成器，不会探测上游
+provider、运行真实 Codex 或读取真实 API key。命令支持全局
 `--format text|json`：
 
 - JSON 输出使用稳定 envelope，`command` 为 `models.codex_config`。
@@ -189,10 +189,12 @@ tools:
   默认 `/v1/responses` 会生成 `http://127.0.0.1:<port>/v1`，`wire_api` 固定为
   `responses`。
 - `result.diagnostics` 标注 matched profile、compact token limit 来源、
-  item-count compact threshold 来源和 Responses server 是否启用。
+  item-count compact threshold 来源、Responses server 是否启用，以及本地 SQLite
+  app DB 可用时的 `model_catalog` / `channel_models` 命中和 drift warnings。
 - `result.warnings` 会提示 `responses_server.enabled=false`、未匹配 profile、
   profile 缺少 `context_window_tokens` 或 path 无法按 Codex `wire_api=responses`
-  习惯推导。
+  习惯推导；当 profile 命中但 catalog/channel 缺少该 model，或 catalog 与
+  channel 只有一侧存在该 model 时，也会输出 drift warning。
 - text 输出包含可复制 TOML 片段，使用 `env_key = "LLM_TRACELAB_API_KEY"` 占位，
   不输出配置文件中的真实 upstream API key、header secret 或数据库 DSN。
 
@@ -201,6 +203,12 @@ Profile 匹配顺序固定为：先按 `responses_server.model_profiles[].name` 
 auto compact token limit 输出为 `0`，并给出 warning。当前首切没有独立的 Codex
 compatibility 字段，因此 `model_auto_compact_token_limit` 在有 context window 时
 保守回退为 `context_window_tokens` 的 80%。
+
+Catalog/channel drift 诊断只在配置为 SQLite 且 application DB 文件已存在时打开
+store，并以 `AutoMigrate:false` 只读查询当前模型是否存在于 `model_catalog` 与
+`channel_models`。DB 不存在、`:memory:`、非 SQLite 或打开失败时，命令保持原离线
+行为并把 catalog/channel source 标记为 `unavailable`；不会连接 Postgres，也不会输出
+DSN 或 secret。
 
 ## 排障入口
 
@@ -220,8 +228,9 @@ compatibility 字段，因此 `model_auto_compact_token_limit` 在有 context wi
 
 ## Fixture 使用约定
 
-`tests/fixtures/codex/` 是 focused 离线 Go tests 的稳定输入，也可给后续更完整的
-自动 runner 复用。新增 fixture 时遵守：
+`tests/fixtures/codex/` 是 focused 离线 Go tests 的稳定输入。当前
+`task test:codex-fixtures` 会运行 fixture runner，并 pin 当前 fixture inventory；
+新增或删除 fixture 时必须同步更新 runner 期望列表与对应契约测试。新增 fixture 时遵守：
 
 - 不依赖真实 Codex、真实模型、真实网络或当前日期。
 - 使用占位模型 `local-test-model` 和稳定 id。
