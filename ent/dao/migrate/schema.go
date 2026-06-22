@@ -297,6 +297,73 @@ var (
 		Columns:    ModelCatalogColumns,
 		PrimaryKey: []*schema.Column{ModelCatalogColumns[0]},
 	}
+	// ResponsesColumns holds the columns for the "responses" table.
+	ResponsesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "conversation_id", Type: field.TypeString, Default: ""},
+		{Name: "previous_response_id", Type: field.TypeString, Default: ""},
+		{Name: "status", Type: field.TypeEnum, Enums: []string{"queued", "in_progress", "completed", "failed", "incomplete", "cancelled"}, Default: "queued"},
+		{Name: "model", Type: field.TypeString},
+		{Name: "history_item_ids", Type: field.TypeJSON, Nullable: true},
+		{Name: "output_item_ids", Type: field.TypeJSON, Nullable: true},
+		{Name: "effective_tools", Type: field.TypeJSON, Nullable: true},
+		{Name: "metadata", Type: field.TypeJSON, Nullable: true},
+		{Name: "usage", Type: field.TypeJSON, Nullable: true},
+		{Name: "error", Type: field.TypeJSON, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// ResponsesTable holds the schema information for the "responses" table.
+	ResponsesTable = &schema.Table{
+		Name:       "responses",
+		Columns:    ResponsesColumns,
+		PrimaryKey: []*schema.Column{ResponsesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "response_conversation_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ResponsesColumns[1], ResponsesColumns[11]},
+			},
+			{
+				Name:    "response_previous_response_id",
+				Unique:  false,
+				Columns: []*schema.Column{ResponsesColumns[2]},
+			},
+			{
+				Name:    "response_status_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ResponsesColumns[3], ResponsesColumns[11]},
+			},
+		},
+	}
+	// ResponseItemsColumns holds the columns for the "response_items" table.
+	ResponseItemsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "kind", Type: field.TypeEnum, Enums: []string{"input", "output", "tool_call", "tool_result", "reasoning", "summary"}},
+		{Name: "response_id", Type: field.TypeString, Default: ""},
+		{Name: "conversation_id", Type: field.TypeString, Default: ""},
+		{Name: "payload", Type: field.TypeJSON},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// ResponseItemsTable holds the schema information for the "response_items" table.
+	ResponseItemsTable = &schema.Table{
+		Name:       "response_items",
+		Columns:    ResponseItemsColumns,
+		PrimaryKey: []*schema.Column{ResponseItemsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "responseitem_conversation_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ResponseItemsColumns[3], ResponseItemsColumns[5]},
+			},
+			{
+				Name:    "responseitem_response_id_kind",
+				Unique:  false,
+				Columns: []*schema.Column{ResponseItemsColumns[2], ResponseItemsColumns[1]},
+			},
+		},
+	}
 	// ScoresColumns holds the columns for the "scores" table.
 	ScoresColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -484,6 +551,8 @@ var (
 		EvalRunsTable,
 		ExperimentRunsTable,
 		ModelCatalogTable,
+		ResponsesTable,
+		ResponseItemsTable,
 		ScoresTable,
 		LogsTable,
 		UpstreamModelsTable,
@@ -528,6 +597,14 @@ func init() {
 	ModelCatalogTable.Annotation = &entsql.Annotation{
 		Table:          "model_catalog",
 		IncrementStart: func(i int) *int { return &i }(55834574848),
+	}
+	ResponsesTable.Annotation = &entsql.Annotation{
+		Table:          "responses",
+		IncrementStart: func(i int) *int { return &i }(60129542144),
+	}
+	ResponseItemsTable.Annotation = &entsql.Annotation{
+		Table:          "response_items",
+		IncrementStart: func(i int) *int { return &i }(64424509440),
 	}
 	ScoresTable.Annotation = &entsql.Annotation{
 		Table:          "scores",

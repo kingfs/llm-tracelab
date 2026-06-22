@@ -16,6 +16,8 @@ type SchemaConfig struct {
 	EvalRun         string // EvalRun table.
 	ExperimentRun   string // ExperimentRun table.
 	ModelCatalog    string // ModelCatalog table.
+	Response        string // Response table.
+	ResponseItem    string // ResponseItem table.
 	Score           string // Score table.
 	TraceLog        string // TraceLog table.
 	UpstreamModel   string // UpstreamModel table.

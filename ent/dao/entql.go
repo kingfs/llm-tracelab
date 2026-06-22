@@ -13,6 +13,8 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -27,7 +29,7 @@ import (
 
 // schemaGraph holds a representation of ent/schema at runtime.
 var schemaGraph = func() *sqlgraph.Schema {
-	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 14)}
+	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 16)}
 	graph.Nodes[0] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   apitoken.Table,
@@ -250,6 +252,50 @@ var schemaGraph = func() *sqlgraph.Schema {
 	}
 	graph.Nodes[9] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
+			Table:   response.Table,
+			Columns: response.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: response.FieldID,
+			},
+		},
+		Type: "Response",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			response.FieldConversationID:     {Type: field.TypeString, Column: response.FieldConversationID},
+			response.FieldPreviousResponseID: {Type: field.TypeString, Column: response.FieldPreviousResponseID},
+			response.FieldStatus:             {Type: field.TypeEnum, Column: response.FieldStatus},
+			response.FieldModel:              {Type: field.TypeString, Column: response.FieldModel},
+			response.FieldHistoryItemIds:     {Type: field.TypeJSON, Column: response.FieldHistoryItemIds},
+			response.FieldOutputItemIds:      {Type: field.TypeJSON, Column: response.FieldOutputItemIds},
+			response.FieldEffectiveTools:     {Type: field.TypeJSON, Column: response.FieldEffectiveTools},
+			response.FieldMetadata:           {Type: field.TypeJSON, Column: response.FieldMetadata},
+			response.FieldUsage:              {Type: field.TypeJSON, Column: response.FieldUsage},
+			response.FieldError:              {Type: field.TypeJSON, Column: response.FieldError},
+			response.FieldCreatedAt:          {Type: field.TypeTime, Column: response.FieldCreatedAt},
+			response.FieldUpdatedAt:          {Type: field.TypeTime, Column: response.FieldUpdatedAt},
+		},
+	}
+	graph.Nodes[10] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
+			Table:   responseitem.Table,
+			Columns: responseitem.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: responseitem.FieldID,
+			},
+		},
+		Type: "ResponseItem",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			responseitem.FieldKind:           {Type: field.TypeEnum, Column: responseitem.FieldKind},
+			responseitem.FieldResponseID:     {Type: field.TypeString, Column: responseitem.FieldResponseID},
+			responseitem.FieldConversationID: {Type: field.TypeString, Column: responseitem.FieldConversationID},
+			responseitem.FieldPayload:        {Type: field.TypeJSON, Column: responseitem.FieldPayload},
+			responseitem.FieldCreatedAt:      {Type: field.TypeTime, Column: responseitem.FieldCreatedAt},
+			responseitem.FieldUpdatedAt:      {Type: field.TypeTime, Column: responseitem.FieldUpdatedAt},
+		},
+	}
+	graph.Nodes[11] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
 			Table:   score.Table,
 			Columns: score.Columns,
 			ID: &sqlgraph.FieldSpec{
@@ -271,7 +317,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			score.FieldCreatedAt:    {Type: field.TypeTime, Column: score.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[10] = &sqlgraph.Node{
+	graph.Nodes[12] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracelog.Table,
 			Columns: tracelog.Columns,
@@ -322,7 +368,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldRoutingFailureReason:           {Type: field.TypeString, Column: tracelog.FieldRoutingFailureReason},
 		},
 	}
-	graph.Nodes[11] = &sqlgraph.Node{
+	graph.Nodes[13] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreammodel.Table,
 			Columns: upstreammodel.Columns,
@@ -339,7 +385,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreammodel.FieldSeenAt:     {Type: field.TypeTime, Column: upstreammodel.FieldSeenAt},
 		},
 	}
-	graph.Nodes[12] = &sqlgraph.Node{
+	graph.Nodes[14] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamtarget.Table,
 			Columns: upstreamtarget.Columns,
@@ -363,7 +409,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamtarget.FieldLastRefreshError:  {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshError},
 		},
 	}
-	graph.Nodes[13] = &sqlgraph.Node{
+	graph.Nodes[15] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   user.Table,
 			Columns: user.Columns,
@@ -1306,6 +1352,176 @@ func (f *ModelCatalogFilter) WhereLastUsedAt(p entql.TimeP) {
 }
 
 // addPredicate implements the predicateAdder interface.
+func (_q *ResponseQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ResponseQuery builder.
+func (_q *ResponseQuery) Filter() *ResponseFilter {
+	return &ResponseFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ResponseMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ResponseMutation builder.
+func (m *ResponseMutation) Filter() *ResponseFilter {
+	return &ResponseFilter{config: m.config, predicateAdder: m}
+}
+
+// ResponseFilter provides a generic filtering capability at runtime for ResponseQuery.
+type ResponseFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ResponseFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ResponseFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(response.FieldID))
+}
+
+// WhereConversationID applies the entql string predicate on the conversation_id field.
+func (f *ResponseFilter) WhereConversationID(p entql.StringP) {
+	f.Where(p.Field(response.FieldConversationID))
+}
+
+// WherePreviousResponseID applies the entql string predicate on the previous_response_id field.
+func (f *ResponseFilter) WherePreviousResponseID(p entql.StringP) {
+	f.Where(p.Field(response.FieldPreviousResponseID))
+}
+
+// WhereStatus applies the entql string predicate on the status field.
+func (f *ResponseFilter) WhereStatus(p entql.StringP) {
+	f.Where(p.Field(response.FieldStatus))
+}
+
+// WhereModel applies the entql string predicate on the model field.
+func (f *ResponseFilter) WhereModel(p entql.StringP) {
+	f.Where(p.Field(response.FieldModel))
+}
+
+// WhereHistoryItemIds applies the entql json.RawMessage predicate on the history_item_ids field.
+func (f *ResponseFilter) WhereHistoryItemIds(p entql.BytesP) {
+	f.Where(p.Field(response.FieldHistoryItemIds))
+}
+
+// WhereOutputItemIds applies the entql json.RawMessage predicate on the output_item_ids field.
+func (f *ResponseFilter) WhereOutputItemIds(p entql.BytesP) {
+	f.Where(p.Field(response.FieldOutputItemIds))
+}
+
+// WhereEffectiveTools applies the entql json.RawMessage predicate on the effective_tools field.
+func (f *ResponseFilter) WhereEffectiveTools(p entql.BytesP) {
+	f.Where(p.Field(response.FieldEffectiveTools))
+}
+
+// WhereMetadata applies the entql json.RawMessage predicate on the metadata field.
+func (f *ResponseFilter) WhereMetadata(p entql.BytesP) {
+	f.Where(p.Field(response.FieldMetadata))
+}
+
+// WhereUsage applies the entql json.RawMessage predicate on the usage field.
+func (f *ResponseFilter) WhereUsage(p entql.BytesP) {
+	f.Where(p.Field(response.FieldUsage))
+}
+
+// WhereError applies the entql json.RawMessage predicate on the error field.
+func (f *ResponseFilter) WhereError(p entql.BytesP) {
+	f.Where(p.Field(response.FieldError))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *ResponseFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(response.FieldCreatedAt))
+}
+
+// WhereUpdatedAt applies the entql time.Time predicate on the updated_at field.
+func (f *ResponseFilter) WhereUpdatedAt(p entql.TimeP) {
+	f.Where(p.Field(response.FieldUpdatedAt))
+}
+
+// addPredicate implements the predicateAdder interface.
+func (_q *ResponseItemQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ResponseItemQuery builder.
+func (_q *ResponseItemQuery) Filter() *ResponseItemFilter {
+	return &ResponseItemFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ResponseItemMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ResponseItemMutation builder.
+func (m *ResponseItemMutation) Filter() *ResponseItemFilter {
+	return &ResponseItemFilter{config: m.config, predicateAdder: m}
+}
+
+// ResponseItemFilter provides a generic filtering capability at runtime for ResponseItemQuery.
+type ResponseItemFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ResponseItemFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[10].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ResponseItemFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(responseitem.FieldID))
+}
+
+// WhereKind applies the entql string predicate on the kind field.
+func (f *ResponseItemFilter) WhereKind(p entql.StringP) {
+	f.Where(p.Field(responseitem.FieldKind))
+}
+
+// WhereResponseID applies the entql string predicate on the response_id field.
+func (f *ResponseItemFilter) WhereResponseID(p entql.StringP) {
+	f.Where(p.Field(responseitem.FieldResponseID))
+}
+
+// WhereConversationID applies the entql string predicate on the conversation_id field.
+func (f *ResponseItemFilter) WhereConversationID(p entql.StringP) {
+	f.Where(p.Field(responseitem.FieldConversationID))
+}
+
+// WherePayload applies the entql json.RawMessage predicate on the payload field.
+func (f *ResponseItemFilter) WherePayload(p entql.BytesP) {
+	f.Where(p.Field(responseitem.FieldPayload))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *ResponseItemFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(responseitem.FieldCreatedAt))
+}
+
+// WhereUpdatedAt applies the entql time.Time predicate on the updated_at field.
+func (f *ResponseItemFilter) WhereUpdatedAt(p entql.TimeP) {
+	f.Where(p.Field(responseitem.FieldUpdatedAt))
+}
+
+// addPredicate implements the predicateAdder interface.
 func (_q *ScoreQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -1334,7 +1550,7 @@ type ScoreFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *ScoreFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[9].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[11].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1424,7 +1640,7 @@ type TraceLogFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceLogFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[10].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[12].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1654,7 +1870,7 @@ type UpstreamModelFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamModelFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[11].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[13].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1714,7 +1930,7 @@ type UpstreamTargetFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamTargetFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[12].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[14].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -1809,7 +2025,7 @@ type UserFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UserFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[13].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[15].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})

@@ -33,6 +33,12 @@ type ExperimentRun func(*sql.Selector)
 // ModelCatalog is the predicate function for modelcatalog builders.
 type ModelCatalog func(*sql.Selector)
 
+// Response is the predicate function for response builders.
+type Response func(*sql.Selector)
+
+// ResponseItem is the predicate function for responseitem builders.
+type ResponseItem func(*sql.Selector)
+
 // Score is the predicate function for score builders.
 type Score func(*sql.Selector)
 

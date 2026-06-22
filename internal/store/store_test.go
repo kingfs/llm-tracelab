@@ -46,6 +46,30 @@ func TestNewConfiguresSQLiteRuntimePragmas(t *testing.T) {
 	}
 }
 
+func TestNewInitializesResponsesStateSchema(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	if st.EntClient() == nil {
+		t.Fatal("EntClient() is nil")
+	}
+
+	for _, table := range []string{"responses", "response_items"} {
+		t.Run(table, func(t *testing.T) {
+			var name string
+			if err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
+				t.Fatalf("query sqlite_master table %q error = %v", table, err)
+			}
+			if name != table {
+				t.Fatalf("sqlite table = %q, want %q", name, table)
+			}
+		})
+	}
+}
+
 func TestNewWithDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")

@@ -18,6 +18,8 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -324,6 +326,60 @@ func (f TraverseModelCatalog) Traverse(ctx context.Context, q dao.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *dao.ModelCatalogQuery", q)
 }
 
+// The ResponseFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ResponseFunc func(context.Context, *dao.ResponseQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ResponseFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ResponseQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ResponseQuery", q)
+}
+
+// The TraverseResponse type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseResponse func(context.Context, *dao.ResponseQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseResponse) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseResponse) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ResponseQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ResponseQuery", q)
+}
+
+// The ResponseItemFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ResponseItemFunc func(context.Context, *dao.ResponseItemQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ResponseItemFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ResponseItemQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ResponseItemQuery", q)
+}
+
+// The TraverseResponseItem type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseResponseItem func(context.Context, *dao.ResponseItemQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseResponseItem) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseResponseItem) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ResponseItemQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ResponseItemQuery", q)
+}
+
 // The ScoreFunc type is an adapter to allow the use of ordinary function as a Querier.
 type ScoreFunc func(context.Context, *dao.ScoreQuery) (dao.Value, error)
 
@@ -480,6 +536,10 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.ExperimentRunQuery, predicate.ExperimentRun, experimentrun.OrderOption]{typ: dao.TypeExperimentRun, tq: q}, nil
 	case *dao.ModelCatalogQuery:
 		return &query[*dao.ModelCatalogQuery, predicate.ModelCatalog, modelcatalog.OrderOption]{typ: dao.TypeModelCatalog, tq: q}, nil
+	case *dao.ResponseQuery:
+		return &query[*dao.ResponseQuery, predicate.Response, response.OrderOption]{typ: dao.TypeResponse, tq: q}, nil
+	case *dao.ResponseItemQuery:
+		return &query[*dao.ResponseItemQuery, predicate.ResponseItem, responseitem.OrderOption]{typ: dao.TypeResponseItem, tq: q}, nil
 	case *dao.ScoreQuery:
 		return &query[*dao.ScoreQuery, predicate.Score, score.OrderOption]{typ: dao.TypeScore, tq: q}, nil
 	case *dao.TraceLogQuery:

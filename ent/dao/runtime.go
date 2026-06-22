@@ -14,6 +14,8 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -432,6 +434,58 @@ func init() {
 	modelcatalogDescID := modelcatalogFields[0].Descriptor()
 	// modelcatalog.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	modelcatalog.IDValidator = modelcatalogDescID.Validators[0].(func(string) error)
+	responseFields := schema.Response{}.Fields()
+	_ = responseFields
+	// responseDescConversationID is the schema descriptor for conversation_id field.
+	responseDescConversationID := responseFields[1].Descriptor()
+	// response.DefaultConversationID holds the default value on creation for the conversation_id field.
+	response.DefaultConversationID = responseDescConversationID.Default.(string)
+	// responseDescPreviousResponseID is the schema descriptor for previous_response_id field.
+	responseDescPreviousResponseID := responseFields[2].Descriptor()
+	// response.DefaultPreviousResponseID holds the default value on creation for the previous_response_id field.
+	response.DefaultPreviousResponseID = responseDescPreviousResponseID.Default.(string)
+	// responseDescModel is the schema descriptor for model field.
+	responseDescModel := responseFields[4].Descriptor()
+	// response.ModelValidator is a validator for the "model" field. It is called by the builders before save.
+	response.ModelValidator = responseDescModel.Validators[0].(func(string) error)
+	// responseDescCreatedAt is the schema descriptor for created_at field.
+	responseDescCreatedAt := responseFields[11].Descriptor()
+	// response.DefaultCreatedAt holds the default value on creation for the created_at field.
+	response.DefaultCreatedAt = responseDescCreatedAt.Default.(func() time.Time)
+	// responseDescUpdatedAt is the schema descriptor for updated_at field.
+	responseDescUpdatedAt := responseFields[12].Descriptor()
+	// response.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	response.DefaultUpdatedAt = responseDescUpdatedAt.Default.(func() time.Time)
+	// response.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	response.UpdateDefaultUpdatedAt = responseDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// responseDescID is the schema descriptor for id field.
+	responseDescID := responseFields[0].Descriptor()
+	// response.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	response.IDValidator = responseDescID.Validators[0].(func(string) error)
+	responseitemFields := schema.ResponseItem{}.Fields()
+	_ = responseitemFields
+	// responseitemDescResponseID is the schema descriptor for response_id field.
+	responseitemDescResponseID := responseitemFields[2].Descriptor()
+	// responseitem.DefaultResponseID holds the default value on creation for the response_id field.
+	responseitem.DefaultResponseID = responseitemDescResponseID.Default.(string)
+	// responseitemDescConversationID is the schema descriptor for conversation_id field.
+	responseitemDescConversationID := responseitemFields[3].Descriptor()
+	// responseitem.DefaultConversationID holds the default value on creation for the conversation_id field.
+	responseitem.DefaultConversationID = responseitemDescConversationID.Default.(string)
+	// responseitemDescCreatedAt is the schema descriptor for created_at field.
+	responseitemDescCreatedAt := responseitemFields[5].Descriptor()
+	// responseitem.DefaultCreatedAt holds the default value on creation for the created_at field.
+	responseitem.DefaultCreatedAt = responseitemDescCreatedAt.Default.(func() time.Time)
+	// responseitemDescUpdatedAt is the schema descriptor for updated_at field.
+	responseitemDescUpdatedAt := responseitemFields[6].Descriptor()
+	// responseitem.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	responseitem.DefaultUpdatedAt = responseitemDescUpdatedAt.Default.(func() time.Time)
+	// responseitem.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	responseitem.UpdateDefaultUpdatedAt = responseitemDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// responseitemDescID is the schema descriptor for id field.
+	responseitemDescID := responseitemFields[0].Descriptor()
+	// responseitem.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	responseitem.IDValidator = responseitemDescID.Validators[0].(func(string) error)
 	scoreFields := schema.Score{}.Fields()
 	_ = scoreFields
 	// scoreDescTraceID is the schema descriptor for trace_id field.

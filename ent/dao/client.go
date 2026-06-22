@@ -24,6 +24,8 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
@@ -58,6 +60,10 @@ type Client struct {
 	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
+	// Response is the client for interacting with the Response builders.
+	Response *ResponseClient
+	// ResponseItem is the client for interacting with the ResponseItem builders.
+	ResponseItem *ResponseItemClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
 	// TraceLog is the client for interacting with the TraceLog builders.
@@ -88,6 +94,8 @@ func (c *Client) init() {
 	c.EvalRun = NewEvalRunClient(c.config)
 	c.ExperimentRun = NewExperimentRunClient(c.config)
 	c.ModelCatalog = NewModelCatalogClient(c.config)
+	c.Response = NewResponseClient(c.config)
+	c.ResponseItem = NewResponseItemClient(c.config)
 	c.Score = NewScoreClient(c.config)
 	c.TraceLog = NewTraceLogClient(c.config)
 	c.UpstreamModel = NewUpstreamModelClient(c.config)
@@ -196,6 +204,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		EvalRun:         NewEvalRunClient(cfg),
 		ExperimentRun:   NewExperimentRunClient(cfg),
 		ModelCatalog:    NewModelCatalogClient(cfg),
+		Response:        NewResponseClient(cfg),
+		ResponseItem:    NewResponseItemClient(cfg),
 		Score:           NewScoreClient(cfg),
 		TraceLog:        NewTraceLogClient(cfg),
 		UpstreamModel:   NewUpstreamModelClient(cfg),
@@ -229,6 +239,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		EvalRun:         NewEvalRunClient(cfg),
 		ExperimentRun:   NewExperimentRunClient(cfg),
 		ModelCatalog:    NewModelCatalogClient(cfg),
+		Response:        NewResponseClient(cfg),
+		ResponseItem:    NewResponseItemClient(cfg),
 		Score:           NewScoreClient(cfg),
 		TraceLog:        NewTraceLogClient(cfg),
 		UpstreamModel:   NewUpstreamModelClient(cfg),
@@ -264,8 +276,8 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
-		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Score,
-		c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Response,
+		c.ResponseItem, c.Score, c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -276,8 +288,8 @@ func (c *Client) Use(hooks ...Hook) {
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
-		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Score,
-		c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Response,
+		c.ResponseItem, c.Score, c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -304,6 +316,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ExperimentRun.mutate(ctx, m)
 	case *ModelCatalogMutation:
 		return c.ModelCatalog.mutate(ctx, m)
+	case *ResponseMutation:
+		return c.Response.mutate(ctx, m)
+	case *ResponseItemMutation:
+		return c.ResponseItem.mutate(ctx, m)
 	case *ScoreMutation:
 		return c.Score.mutate(ctx, m)
 	case *TraceLogMutation:
@@ -1535,6 +1551,272 @@ func (c *ModelCatalogClient) mutate(ctx context.Context, m *ModelCatalogMutation
 	}
 }
 
+// ResponseClient is a client for the Response schema.
+type ResponseClient struct {
+	config
+}
+
+// NewResponseClient returns a client for the Response from the given config.
+func NewResponseClient(c config) *ResponseClient {
+	return &ResponseClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `response.Hooks(f(g(h())))`.
+func (c *ResponseClient) Use(hooks ...Hook) {
+	c.hooks.Response = append(c.hooks.Response, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `response.Intercept(f(g(h())))`.
+func (c *ResponseClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Response = append(c.inters.Response, interceptors...)
+}
+
+// Create returns a builder for creating a Response entity.
+func (c *ResponseClient) Create() *ResponseCreate {
+	mutation := newResponseMutation(c.config, OpCreate)
+	return &ResponseCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Response entities.
+func (c *ResponseClient) CreateBulk(builders ...*ResponseCreate) *ResponseCreateBulk {
+	return &ResponseCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ResponseClient) MapCreateBulk(slice any, setFunc func(*ResponseCreate, int)) *ResponseCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ResponseCreateBulk{err: fmt.Errorf("calling to ResponseClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ResponseCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ResponseCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Response.
+func (c *ResponseClient) Update() *ResponseUpdate {
+	mutation := newResponseMutation(c.config, OpUpdate)
+	return &ResponseUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ResponseClient) UpdateOne(_m *Response) *ResponseUpdateOne {
+	mutation := newResponseMutation(c.config, OpUpdateOne, withResponse(_m))
+	return &ResponseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ResponseClient) UpdateOneID(id string) *ResponseUpdateOne {
+	mutation := newResponseMutation(c.config, OpUpdateOne, withResponseID(id))
+	return &ResponseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Response.
+func (c *ResponseClient) Delete() *ResponseDelete {
+	mutation := newResponseMutation(c.config, OpDelete)
+	return &ResponseDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ResponseClient) DeleteOne(_m *Response) *ResponseDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ResponseClient) DeleteOneID(id string) *ResponseDeleteOne {
+	builder := c.Delete().Where(response.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ResponseDeleteOne{builder}
+}
+
+// Query returns a query builder for Response.
+func (c *ResponseClient) Query() *ResponseQuery {
+	return &ResponseQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeResponse},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Response entity by its id.
+func (c *ResponseClient) Get(ctx context.Context, id string) (*Response, error) {
+	return c.Query().Where(response.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ResponseClient) GetX(ctx context.Context, id string) *Response {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ResponseClient) Hooks() []Hook {
+	return c.hooks.Response
+}
+
+// Interceptors returns the client interceptors.
+func (c *ResponseClient) Interceptors() []Interceptor {
+	return c.inters.Response
+}
+
+func (c *ResponseClient) mutate(ctx context.Context, m *ResponseMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ResponseCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ResponseUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ResponseUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ResponseDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown Response mutation op: %q", m.Op())
+	}
+}
+
+// ResponseItemClient is a client for the ResponseItem schema.
+type ResponseItemClient struct {
+	config
+}
+
+// NewResponseItemClient returns a client for the ResponseItem from the given config.
+func NewResponseItemClient(c config) *ResponseItemClient {
+	return &ResponseItemClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `responseitem.Hooks(f(g(h())))`.
+func (c *ResponseItemClient) Use(hooks ...Hook) {
+	c.hooks.ResponseItem = append(c.hooks.ResponseItem, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `responseitem.Intercept(f(g(h())))`.
+func (c *ResponseItemClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ResponseItem = append(c.inters.ResponseItem, interceptors...)
+}
+
+// Create returns a builder for creating a ResponseItem entity.
+func (c *ResponseItemClient) Create() *ResponseItemCreate {
+	mutation := newResponseItemMutation(c.config, OpCreate)
+	return &ResponseItemCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ResponseItem entities.
+func (c *ResponseItemClient) CreateBulk(builders ...*ResponseItemCreate) *ResponseItemCreateBulk {
+	return &ResponseItemCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ResponseItemClient) MapCreateBulk(slice any, setFunc func(*ResponseItemCreate, int)) *ResponseItemCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ResponseItemCreateBulk{err: fmt.Errorf("calling to ResponseItemClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ResponseItemCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ResponseItemCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ResponseItem.
+func (c *ResponseItemClient) Update() *ResponseItemUpdate {
+	mutation := newResponseItemMutation(c.config, OpUpdate)
+	return &ResponseItemUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ResponseItemClient) UpdateOne(_m *ResponseItem) *ResponseItemUpdateOne {
+	mutation := newResponseItemMutation(c.config, OpUpdateOne, withResponseItem(_m))
+	return &ResponseItemUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ResponseItemClient) UpdateOneID(id string) *ResponseItemUpdateOne {
+	mutation := newResponseItemMutation(c.config, OpUpdateOne, withResponseItemID(id))
+	return &ResponseItemUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ResponseItem.
+func (c *ResponseItemClient) Delete() *ResponseItemDelete {
+	mutation := newResponseItemMutation(c.config, OpDelete)
+	return &ResponseItemDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ResponseItemClient) DeleteOne(_m *ResponseItem) *ResponseItemDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ResponseItemClient) DeleteOneID(id string) *ResponseItemDeleteOne {
+	builder := c.Delete().Where(responseitem.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ResponseItemDeleteOne{builder}
+}
+
+// Query returns a query builder for ResponseItem.
+func (c *ResponseItemClient) Query() *ResponseItemQuery {
+	return &ResponseItemQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeResponseItem},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ResponseItem entity by its id.
+func (c *ResponseItemClient) Get(ctx context.Context, id string) (*ResponseItem, error) {
+	return c.Query().Where(responseitem.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ResponseItemClient) GetX(ctx context.Context, id string) *ResponseItem {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ResponseItemClient) Hooks() []Hook {
+	return c.hooks.ResponseItem
+}
+
+// Interceptors returns the client interceptors.
+func (c *ResponseItemClient) Interceptors() []Interceptor {
+	return c.inters.ResponseItem
+}
+
+func (c *ResponseItemClient) mutate(ctx context.Context, m *ResponseItemMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ResponseItemCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ResponseItemUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ResponseItemUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ResponseItemDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ResponseItem mutation op: %q", m.Op())
+	}
+}
+
 // ScoreClient is a client for the Score schema.
 type ScoreClient struct {
 	config
@@ -2223,13 +2505,13 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 type (
 	hooks struct {
 		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
-		EvalRun, ExperimentRun, ModelCatalog, Score, TraceLog, UpstreamModel,
-		UpstreamTarget, User []ent.Hook
+		EvalRun, ExperimentRun, ModelCatalog, Response, ResponseItem, Score, TraceLog,
+		UpstreamModel, UpstreamTarget, User []ent.Hook
 	}
 	inters struct {
 		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
-		EvalRun, ExperimentRun, ModelCatalog, Score, TraceLog, UpstreamModel,
-		UpstreamTarget, User []ent.Interceptor
+		EvalRun, ExperimentRun, ModelCatalog, Response, ResponseItem, Score, TraceLog,
+		UpstreamModel, UpstreamTarget, User []ent.Interceptor
 	}
 )
 

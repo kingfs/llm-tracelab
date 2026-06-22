@@ -117,6 +117,30 @@ func (f ModelCatalogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ModelCatalogMutation", m)
 }
 
+// The ResponseFunc type is an adapter to allow the use of ordinary
+// function as Response mutator.
+type ResponseFunc func(context.Context, *dao.ResponseMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ResponseFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ResponseMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ResponseMutation", m)
+}
+
+// The ResponseItemFunc type is an adapter to allow the use of ordinary
+// function as ResponseItem mutator.
+type ResponseItemFunc func(context.Context, *dao.ResponseItemMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ResponseItemFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ResponseItemMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ResponseItemMutation", m)
+}
+
 // The ScoreFunc type is an adapter to allow the use of ordinary
 // function as Score mutator.
 type ScoreFunc func(context.Context, *dao.ScoreMutation) (dao.Value, error)
