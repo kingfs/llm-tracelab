@@ -42,6 +42,11 @@ claim that Postgres persistence is fully production mature today.
   `ent/postgres-migrations` through `internal/appdbmigrate` and
   `golang-migrate`; SQLite `db migrate up` continues to use the existing store
   schema initialization path.
+- `db migrate status` and `db migrate up/down --dry-run` report the configured
+  application migration source without mutating the database: Postgres reports
+  `ent/postgres-migrations` checked-in SQL, SQLite reports the startup schema
+  fallback, and auth migrations are explicitly marked out of scope for the
+  `db migrate` command.
 - `internal/store` has an initial Postgres raw SQL compatibility pass:
   store-owned `?` placeholders are rebound to `$n` for Postgres, transaction
   helpers use the same rebind path, `logs.is_stream` can round-trip as a
@@ -195,6 +200,14 @@ Postgres startup; it runs `auth.MigrateDatabaseUp`, which delegates to
 is idempotent with `db migrate up`. `auth migrate down` for Postgres remains
 unsupported.
 
+Stage 16G adds configuration-level migration reporting for application DB
+operability. `db migrate status` and dry-run output now include
+`database_namespace`, `migration_source`, `migration_source_path`,
+`schema_versioned`, `rollback_supported`, and `auth_migration_scope`. The status
+command intentionally does not connect to Postgres or inspect
+`schema_migrations`; it makes the selected migration source and command
+ownership visible without requiring a running external database.
+
 SQLite compatibility:
 
 ```bash
@@ -246,7 +259,8 @@ been committed or applied in a shared environment.
   `ent/postgres-migrations` set, but `auth migrate down` and a separately owned
   auth migration namespace are still missing.
 - SQLite application migrations still use schema initialization rather than
-  explicit versioned files.
+  explicit versioned files. `db migrate status` reports this fallback, but does
+  not add a SQLite schema version marker or migrate old local databases.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.
