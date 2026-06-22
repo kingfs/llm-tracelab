@@ -1,0 +1,19 @@
+{
+  "model": "local-test-model",
+  "previous_response_id": "resp_fixture_tool_call",
+  "input": [
+    {
+      "type": "function_call_output",
+      "call_id": "call_read_file_1",
+      "output": "{\"content\":\"module github.com/kingfs/llm-tracelab\"}"
+    }
+  ],
+  "store": true,
+  "metadata": {
+    "fixture": "codex_function_call_output_continuation",
+    "codex": {
+      "thread_id": "thread_fixture_tool",
+      "client_request_id": "turn_fixture_tool_2"
+    }
+  }
+}

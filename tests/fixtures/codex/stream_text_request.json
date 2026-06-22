@@ -1,0 +1,14 @@
+{
+  "model": "local-test-model",
+  "instructions": "You are a concise coding assistant.",
+  "input": "Stream a short greeting.",
+  "stream": true,
+  "store": true,
+  "metadata": {
+    "fixture": "codex_stream_text",
+    "codex": {
+      "thread_id": "thread_fixture_stream",
+      "client_request_id": "turn_fixture_stream_1"
+    }
+  }
+}

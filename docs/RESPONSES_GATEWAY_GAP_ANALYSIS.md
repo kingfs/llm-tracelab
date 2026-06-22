@@ -96,21 +96,20 @@
 - 安全边界：默认离线，不做真实模型推理或 provider 网络请求；`--check-db` 才读取数据库 migration status；输出复用 DSN/URL 脱敏摘要，不输出 API key/header secret。
 - llm-tracelab 落点：`cmd/server/doctor.go`，复用 `appDBMigrationReport`、`router.ValidateLocalResponsesServerBackendConfig`、`websearch.NewProvider` 和 `config inspect` 的脱敏摘要。
 - 剩余缺口：`--probe-providers` 仍是首切占位提示，尚未接入受控的 provider probe；model profile context window drift、store backend 深度健康检查、HTTP guard/default model 诊断仍待补齐。
+### Codex compatibility profile
+
+- 已吸收首切：新增独立 [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)，固化 text create、stream text、function call、`function_call_output` continuation、ordinary `web_search` descriptor、unsupported hosted tool 的最小兼容合约。
+- fixture 资产：新增 `tests/fixtures/codex/` 离线 examples，覆盖请求、期望 response/event/error 形状；不依赖真实 Codex、真实模型或网络。
+- llm-tracelab 落点：`docs/CODEX_RESPONSES_COMPATIBILITY.md`、`tests/fixtures/codex/*`，运行时事实仍以 `internal/responses/httpapi`、`internal/responses/runtime`、`internal/proxy/responses_server.go` 为准。
+- 剩余缺口：fixture 尚未接自动 Go/e2e runner；尚未生成 Codex TOML/profile；unsupported hosted tools 还没有 runtime-level stable `unsupported_tool` gate；Codex-specific audit diagnostics 仍只覆盖 response/request 查询首切。
 
 ## 部分吸收能力
 
-### Codex compatibility profile
-
-- 已有：Codex headers / metadata 提取、function continuation、hosted `web_search` ordinary descriptor 兼容、client cancellation、compact candidate 相关审计片段。
-- llm-tracelab 落点：`internal/responses/audit/audit.go`、`internal/responses/runtime`、`internal/proxy/responses_server.go`、`docs/PROJECT_BASELINE.md`。
-- 缺口：没有独立的 Codex compatibility profile 文档和 fixture 目录来固化最小兼容面；后续测试入口分散在 runtime/proxy/handler 单测。
-- responses-gateway 对照：`docs/codex-compatibility-profile.md`、`tests/fixtures/codex/*`。
-
 ### Request audit 诊断深度
 
-- 已有：`request_audits`、`execution_events`、`upstream_exchanges`，以及 Monitor/MCP trace 查询。
-- 缺口：缺少等价 `audit query` CLI；缺少 thread/session/turn/client-request-id 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/tool/request feature 顶层诊断。
-- llm-tracelab 下一步落点：`cmd/server` 新增 `audit` 命令，复用并扩展 `internal/responses/audit.QueryService`。
+- 已有：`request_audits`、`execution_events`、`upstream_exchanges`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request 维度只读 trace 查询首切。
+- 缺口：缺少 thread/session/turn/client-request-id 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/tool/request feature 顶层诊断。
+- llm-tracelab 下一步落点：扩展 `cmd/server/audit.go`，复用并扩展 `internal/responses/audit.QueryService`。
 
 ### Compact 与 context optimization
 
@@ -173,9 +172,10 @@
 
 ### Codex fixture/runbook 资产
 
-- 缺口：没有集中 `tests/fixtures/codex` 和长任务 compact/cancel/run-report 脚本资产。
+- 已吸收首切：已有集中 `tests/fixtures/codex` 离线 fixture 和 `docs/CODEX_RESPONSES_COMPATIBILITY.md` profile 文档。
+- 剩余缺口：fixture 尚未接自动 runner；没有长任务 compact/cancel/run-report 脚本资产；没有 Codex TOML/profile 生成命令。
 - responses-gateway 能力：`docs/codex-longrun-compact-runbook.md`、`scripts/codex-longrun-*.sh`、Codex fixture profile。
-- llm-tracelab 建议落点：先新增 `docs/CODEX_RESPONSES_COMPATIBILITY.md` 和少量 fixtures，再决定是否引入脚本；不要让测试依赖真实 Codex 或网络。
+- llm-tracelab 建议落点：在现有离线 fixtures 基础上决定是否引入脚本；不要让测试依赖真实 Codex 或网络。
 
 ### MCP hosted tool runtime
 
@@ -195,10 +195,10 @@
    - 模块：`cmd/server/audit.go`、`internal/responses/audit/query.go`。
    - 验收：在首切 response/request 查询基础上补 client-request/conversation 查询；输出 request audit、events、upstream exchanges；不输出未脱敏 raw body。
 
-3. 固化 Codex compatibility profile。
-   - 价值：把现有分散能力转成可回归的最小兼容合约。
-   - 模块：`docs/`、`tests/fixtures/codex`、`internal/responses/httpapi` 和 `runtime` 测试。
-   - 验收：覆盖 text create、stream text、function call、function result continuation、ordinary web_search descriptor、unsupported hosted tool。
+3. 接入 Codex fixture runner 和 profile 生成。
+   - 价值：把已固化的最小兼容合约变成可回归检查，并减少 Codex 本地配置漂移。
+   - 模块：`tests/fixtures/codex`、`internal/responses/httpapi`、`runtime` 测试、`cmd/server/provider.go` 或新增 `cmd/server/models.go`。
+   - 验收：离线 runner 覆盖 text create、stream text、function call、function result continuation、ordinary web_search descriptor、unsupported hosted tool；输出 JSON + TOML profile 片段。
 
 4. 收敛 hosted tool audit schema。
    - 价值：为 web_search、external_command、未来 MCP/file/code 工具提供统一排障面。
