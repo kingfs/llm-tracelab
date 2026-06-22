@@ -137,6 +137,10 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 	slog.Info("Resolved router config source", "source", source)
+	if err := validateServeRouterConfig(cfg, routerCfg); err != nil {
+		slog.Error("Invalid serve config", "error", err)
+		return 1
+	}
 
 	rtr, err := router.New(routerCfg, traceStore)
 	if err != nil {
@@ -300,6 +304,15 @@ func validateServeConfig(cfg *config.Config) error {
 	}
 	if cfg.MCP.Enabled {
 		if _, err := normalizeMCPPath(cfg.MCP.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateServeRouterConfig(cfg *config.Config, routerCfg *config.Config) error {
+	if cfg != nil && cfg.ResponsesServerEnabled() {
+		if err := router.ValidateLocalResponsesServerBackendConfig(routerCfg); err != nil {
 			return err
 		}
 	}

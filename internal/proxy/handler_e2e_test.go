@@ -1039,6 +1039,77 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 }
 
+func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "google-genai",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gemini-2.5-pro"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://generativelanguage.googleapis.com/v1beta",
+					ProviderPreset: "google_genai",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+
+	_, err = NewHandler(cfg, st)
+	if err == nil {
+		t.Fatal("NewHandler() error = nil, want local Responses server backend validation error")
+	}
+	if !strings.Contains(err.Error(), router.LocalResponsesServerBackendRequiredError) {
+		t.Fatalf("NewHandler() error = %q, want contain %q", err.Error(), router.LocalResponsesServerBackendRequiredError)
+	}
+}
+
+func TestHandlerResponsesServerModeAllowsChatCompletionsCompatibleUpstream(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+
+	if _, err := NewHandler(cfg, st); err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+}
+
 func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
@@ -2250,6 +2321,10 @@ func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
 					BaseURL:        upstreamServer.URL + "/v1",
 					ApiKey:         "upstream-secret",
 					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ChatCompletions: boolPtr(false),
+					},
 				},
 			},
 		},
