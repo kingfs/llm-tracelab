@@ -143,7 +143,7 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	}
 	defer httpResp.Body.Close()
 
-	respBody, err := recordResponsesServerChatResponse(logInfo, httpResp)
+	respBody, isStream, err := recordResponsesServerChatResponse(logInfo, httpResp)
 	if err != nil {
 		logInfo.Header.Meta.Error = err.Error()
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
@@ -171,8 +171,12 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	var chatResp runtime.ChatCompletionResponse
 	responseErr := chatCompletionResponseError(statusCode, httpResp.Status, respBody)
 	if responseErr == nil {
-		if err := json.Unmarshal(respBody, &chatResp); err != nil {
-			responseErr = fmt.Errorf("decode chat completion response JSON: %w", err)
+		if isStream {
+			chatResp, responseErr = chatclient.AggregateChatCompletionStream(bytes.NewReader(respBody))
+		} else {
+			if err := json.Unmarshal(respBody, &chatResp); err != nil {
+				responseErr = fmt.Errorf("decode chat completion response JSON: %w", err)
+			}
 		}
 	}
 	if responseErr != nil {
@@ -182,7 +186,7 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	logInfo.Header.Meta.DurationMs = duration.Milliseconds()
 	logInfo.Header.Meta.StatusCode = statusCode
 	logInfo.Header.Meta.ContentLength = int64(len(respBody))
-	logInfo.Header.Layout.IsStream = false
+	logInfo.Header.Layout.IsStream = isStream
 	logInfo.Events = append(logInfo.Events, routingOutcomeEvent(selection, statusCode, duration, logInfo.Header.Meta.Error))
 	if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 		slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
@@ -322,39 +326,40 @@ func applyResponsesServerChatHeaders(req *http.Request, selection *router.Select
 	selection.Target.Upstream.ApplyAuthHeaders(req.Header)
 }
 
-func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Response) ([]byte, error) {
+func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Response) ([]byte, bool, error) {
 	if logInfo == nil || logInfo.File == nil {
-		return nil, fmt.Errorf("responses chat completions log file is required")
+		return nil, false, fmt.Errorf("responses chat completions log file is required")
 	}
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
-		return nil, fmt.Errorf("write chat completion response separator: %w", err)
+		return nil, false, fmt.Errorf("write chat completion response separator: %w", err)
 	}
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("%s %s\r\n", resp.Proto, resp.Status))
 	resp.Header.Write(headerBuf)
 	headerBuf.WriteString("\r\n")
 	nHead, err := logInfo.File.Write(headerBuf.Bytes())
 	if err != nil {
-		return nil, fmt.Errorf("write chat completion response header: %w", err)
+		return nil, false, fmt.Errorf("write chat completion response header: %w", err)
 	}
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 
+	isStream := llm.DetectStreamingResponse(resp.Header)
 	sniffer := &UsageSniffer{
 		Source:   resp.Body,
 		File:     logInfo.File,
 		Count:    &logInfo.Header.Layout.ResBodyLen,
 		Usage:    &logInfo.Header.Usage,
-		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, false),
+		Pipeline: llm.NewResponsePipeline(logInfo.Header.Meta.Provider, logInfo.Header.Meta.Endpoint, isStream),
 		Events:   &logInfo.Events,
 	}
 	respBody, readErr := io.ReadAll(sniffer)
 	closeErr := sniffer.Close()
 	if readErr != nil {
-		return respBody, fmt.Errorf("read chat completion response body: %w", readErr)
+		return respBody, isStream, fmt.Errorf("read chat completion response body: %w", readErr)
 	}
 	if closeErr != nil {
-		return respBody, fmt.Errorf("close chat completion response body: %w", closeErr)
+		return respBody, isStream, fmt.Errorf("close chat completion response body: %w", closeErr)
 	}
-	return respBody, nil
+	return respBody, isStream, nil
 }
 
 func chatCompletionResponseError(statusCode int, status string, body []byte) error {

@@ -93,7 +93,7 @@ func (c *Client) ChatCompletion(ctx context.Context, chatReq runtime.ChatComplet
 	}
 
 	if chatReq.Stream {
-		chatResp, err := aggregateChatCompletionStream(httpResp.Body)
+		chatResp, err := AggregateChatCompletionStream(httpResp.Body)
 		if err != nil {
 			return runtime.ChatCompletionResponse{}, err
 		}

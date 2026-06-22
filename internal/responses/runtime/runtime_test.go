@@ -167,6 +167,32 @@ func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) 
 	}
 }
 
+func TestRuntimeCreateStreamRequestsStreamingChatCompletion(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "done"},
+				FinishReason: "stop",
+			}},
+		},
+	}
+	rt := New(Config{DefaultModel: "fallback-model"}, client, NewMemoryStore())
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input:  "hello",
+		Stream: true,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("chat requests = %d, want 1", len(client.reqs))
+	}
+	if !client.reqs[0].Stream {
+		t.Fatalf("chat request stream = false, want true")
+	}
+}
+
 func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{

@@ -1005,13 +1005,24 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	}
 	defer st.Close()
 
+	var gotUpstreamStream bool
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"chatcmpl_stream_1","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"stream pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`)
+		var chatReq map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatReq); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+		gotUpstreamStream, _ = chatReq["stream"].(bool)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, strings.Join([]string{
+			`data: {"id":"chatcmpl_stream_1","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","content":"stream "},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_stream_1","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"content":"pong"},"finish_reason":"stop"}]}`,
+			`data: {"id":"chatcmpl_stream_1","object":"chat.completion.chunk","model":"gpt-5","choices":[],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`,
+			`data: [DONE]`,
+		}, "\n"))
 	}))
 	defer upstreamServer.Close()
 
@@ -1077,6 +1088,9 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	if !strings.Contains(body, `"delta":"stream pong"`) {
 		t.Fatalf("stream body missing output text:\n%s", body)
 	}
+	if !gotUpstreamStream {
+		t.Fatal("upstream chat request stream = false, want true")
+	}
 
 	recordPath := findRecordedHTTP(t, outputDir)
 	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
@@ -1086,8 +1100,16 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	if parsed.Header.Meta.Endpoint != "/v1/chat/completions" {
 		t.Fatalf("recorded endpoint = %q, want /v1/chat/completions", parsed.Header.Meta.Endpoint)
 	}
-	if parsed.Header.Layout.IsStream {
-		t.Fatalf("internal chat cassette IsStream = true, want false for Stage 18A deferred streaming")
+	if !parsed.Header.Layout.IsStream {
+		t.Fatalf("internal chat cassette IsStream = false, want true for upstream Chat Completions SSE")
+	}
+	recordContent, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recorded cassette: %v", err)
+	}
+	_, _, _, recordedResponseBody := recordfile.ExtractSections(recordContent, parsed)
+	if !strings.Contains(string(recordedResponseBody), `data: {"id":"chatcmpl_stream_1"`) {
+		t.Fatalf("recorded response body missing raw SSE data:\n%s", string(recordedResponseBody))
 	}
 
 	streamEvents, err := st.EntClient().ExecutionEvent.Query().

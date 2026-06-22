@@ -11,7 +11,8 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
 )
 
-func aggregateChatCompletionStream(r io.Reader) (runtime.ChatCompletionResponse, error) {
+// AggregateChatCompletionStream folds OpenAI-compatible Chat Completions SSE chunks into a final response.
+func AggregateChatCompletionStream(r io.Reader) (runtime.ChatCompletionResponse, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 

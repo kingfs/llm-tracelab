@@ -327,6 +327,7 @@ func chatCompletionRequest(req protocol.CreateResponseRequest, model string, his
 		MaxTokens:   req.MaxOutputTokens,
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
+		Stream:      req.Stream,
 	}
 }
 
