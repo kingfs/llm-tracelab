@@ -641,6 +641,97 @@ func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) 
 	}
 }
 
+func TestRuntimeCreateExecutesRegisteredFunctionTool(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_lookup",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "lookup",
+								Arguments: `{"q":"codex"}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "The server-side lookup result is ready."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 13, CompletionTokens: 7, TotalTokens: 20},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	var executed []FunctionToolCall
+	rt := New(
+		Config{DefaultModel: "gpt-test"},
+		client,
+		NewMemoryStore(),
+		WithExecutionEventRecorder(events),
+		WithFunctionToolExecutor("lookup", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+			executed = append(executed, call)
+			return FunctionToolResult{Output: map[string]any{"ok": true, "value": "42"}}, nil
+		})),
+	)
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if len(executed) != 1 || executed[0].CallID != "call_lookup" || executed[0].Name != "lookup" || executed[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("executed calls = %#v, want lookup call", executed)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat calls = %d, want tool call + final call", len(client.reqs))
+	}
+	secondMessages := client.reqs[1].Messages
+	if len(secondMessages) != 3 {
+		t.Fatalf("second messages len = %d, want 3: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 1 || secondMessages[1].ToolCalls[0].ID != "call_lookup" {
+		t.Fatalf("assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_lookup" || secondMessages[2].Content != `{"ok":true,"value":"42"}` {
+		t.Fatalf("server-side tool output message mismatch: %#v", secondMessages[2])
+	}
+	if resp.Usage != (protocol.Usage{InputTokens: 21, OutputTokens: 10, TotalTokens: 31}) {
+		t.Fatalf("usage mismatch: %#v", resp.Usage)
+	}
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len = %d, want function_call_output + final message: %#v", len(resp.Output), resp.Output)
+	}
+	if got := resp.Output[0]; got.Type != "function_call_output" || got.Status != "completed" || got.CallID != "call_lookup" || got.Name != "lookup" {
+		t.Fatalf("unexpected function_call_output: %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "The server-side lookup result is ready." {
+		t.Fatalf("unexpected final message: %#v", got)
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want started/completed: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "started" || events.events[0].DetailsJSON["tool_name"] != "lookup" || events.events[0].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("started event mismatch: %#v", events.events[0])
+	}
+	if events.events[1].Status != "completed" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("completed event mismatch: %#v", events.events[1])
+	}
+}
+
 func TestResponseToolsToChatToolsMapsHostedWebSearchWhenReady(t *testing.T) {
 	tools := responseToolsToChatTools([]protocol.Tool{
 		{Type: "web_search_preview"},

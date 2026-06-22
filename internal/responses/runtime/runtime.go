@@ -33,6 +33,7 @@ type Runtime struct {
 	client            ChatCompletionsClient
 	store             Store
 	webSearchProvider websearch.Provider
+	functionExecutors map[string]FunctionToolExecutor
 	events            audit.ExecutionEventRecorder
 }
 
@@ -47,6 +48,19 @@ func WithWebSearchProvider(provider websearch.Provider) Option {
 func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
 	return func(r *Runtime) {
 		r.events = recorder
+	}
+}
+
+func WithFunctionToolExecutor(name string, executor FunctionToolExecutor) Option {
+	return func(r *Runtime) {
+		name = normalizeFunctionToolName(name)
+		if name == "" || executor == nil {
+			return
+		}
+		if r.functionExecutors == nil {
+			r.functionExecutors = map[string]FunctionToolExecutor{}
+		}
+		r.functionExecutors[name] = executor
 	}
 }
 
@@ -445,15 +459,15 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		}
 		usage = addChatUsage(usage, chatResp.Usage)
 
-		calls := executableWebSearchCalls(chatResp)
-		if len(calls) == 0 {
+		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp)
+		if !hasToolCalls || !allExecutable {
 			chatResp.Usage = usage
 			outputItems := chatToOutputItems(chatResp)
 			r.recordRequestedFunctionCalls(ctx, outputItems)
 			output = append(output, outputItems...)
 			return responseFromOutput(req, model, output, usage), nil
 		}
-		if !r.webSearchReady() {
+		if len(calls) == 0 {
 			return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 		}
 		if toolIterations >= r.cfg.MaxToolIterations {
@@ -468,58 +482,11 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 
 		for _, call := range calls {
-			eventDetails := map[string]any{
-				"tool_name":   "web_search",
-				"call_id":     call.call.ID,
-				"query":       call.query,
-				"iteration":   toolIterations,
-				"max_results": r.cfg.WebSearchMaxResults,
-			}
-			r.recordExecutionEvent(ctx, audit.ExecutionEvent{
-				EventType:   "response.tool_call",
-				Phase:       "tool_call",
-				Status:      "started",
-				DetailsJSON: eventDetails,
-			})
-			result, err := r.webSearchProvider.Search(ctx, websearch.Query{
-				Text:       call.query,
-				MaxResults: r.cfg.WebSearchMaxResults,
-			})
+			outputItem, toolContent, err := r.executeToolCall(ctx, call, toolIterations)
 			if err != nil {
-				r.recordExecutionEvent(ctx, audit.ExecutionEvent{
-					EventType: "response.tool_call",
-					Phase:     "tool_call",
-					Status:    "failed",
-					Message:   err.Error(),
-					DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
-						"error": err.Error(),
-					}),
-				})
 				return protocol.Response{}, err
 			}
-			output = append(output, webSearchCallOutput(call.call, call.query, result))
-			toolContent, err := webSearchToolMessageContent(call.query, result)
-			if err != nil {
-				r.recordExecutionEvent(ctx, audit.ExecutionEvent{
-					EventType: "response.tool_call",
-					Phase:     "tool_call",
-					Status:    "failed",
-					Message:   err.Error(),
-					DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
-						"error":        err.Error(),
-						"result_count": len(result.Results),
-					}),
-				})
-				return protocol.Response{}, err
-			}
-			r.recordExecutionEvent(ctx, audit.ExecutionEvent{
-				EventType: "response.tool_call",
-				Phase:     "tool_call",
-				Status:    "completed",
-				DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
-					"result_count": len(result.Results),
-				}),
-			})
+			output = append(output, outputItem)
 			chatReq.Messages = append(chatReq.Messages, ChatMessage{
 				Role:       "tool",
 				ToolCallID: call.call.ID,
@@ -527,6 +494,115 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 			})
 		}
 	}
+}
+
+func (r *Runtime) executeToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+	switch call.kind {
+	case executableToolKindWebSearch:
+		return r.executeWebSearchToolCall(ctx, call, iteration)
+	case executableToolKindFunction:
+		return r.executeFunctionToolCall(ctx, call, iteration)
+	default:
+		return protocol.OutputItem{}, "", fmt.Errorf("unsupported executable tool kind %q", call.kind)
+	}
+}
+
+func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+	eventDetails := map[string]any{
+		"tool_name":   "web_search",
+		"call_id":     call.call.ID,
+		"query":       call.query,
+		"iteration":   iteration,
+		"max_results": r.cfg.WebSearchMaxResults,
+		"executor":    "hosted:web_search",
+	}
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType:   "response.tool_call",
+		Phase:       "tool_call",
+		Status:      "started",
+		DetailsJSON: eventDetails,
+	})
+	result, err := r.webSearchProvider.Search(ctx, websearch.Query{
+		Text:       call.query,
+		MaxResults: r.cfg.WebSearchMaxResults,
+	})
+	if err != nil {
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+				"error": err.Error(),
+			}),
+		})
+		return protocol.OutputItem{}, "", err
+	}
+	toolContent, err := webSearchToolMessageContent(call.query, result)
+	if err != nil {
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+				"error":        err.Error(),
+				"result_count": len(result.Results),
+			}),
+		})
+		return protocol.OutputItem{}, "", err
+	}
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType: "response.tool_call",
+		Phase:     "tool_call",
+		Status:    "completed",
+		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+			"result_count": len(result.Results),
+		}),
+	})
+	return webSearchCallOutput(call.call, call.query, result), toolContent, nil
+}
+
+func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int) (protocol.OutputItem, string, error) {
+	eventDetails := map[string]any{
+		"tool_name": call.call.Function.Name,
+		"call_id":   call.call.ID,
+		"arguments": call.call.Function.Arguments,
+		"iteration": iteration,
+		"executor":  "function",
+	}
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType:   "response.tool_call",
+		Phase:       "tool_call",
+		Status:      "started",
+		DetailsJSON: eventDetails,
+	})
+	result, err := call.executor.ExecuteFunctionTool(ctx, FunctionToolCall{
+		CallID:    call.call.ID,
+		Name:      call.call.Function.Name,
+		Arguments: call.call.Function.Arguments,
+	})
+	if err != nil {
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+				"error": err.Error(),
+			}),
+		})
+		return protocol.OutputItem{}, "", err
+	}
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType: "response.tool_call",
+		Phase:     "tool_call",
+		Status:    "completed",
+		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+			"output_chars": len(toolOutputContent(result.Output)),
+		}),
+	})
+	return functionToolCallOutput(call.call, result.Output), toolOutputContent(result.Output), nil
 }
 
 func (r *Runtime) recordExecutionEvent(ctx context.Context, event audit.ExecutionEvent) {
@@ -735,28 +811,47 @@ func hasChatTool(tools []ChatTool, name string) bool {
 	return false
 }
 
-type webSearchCall struct {
-	call  ChatToolCall
-	query string
+const (
+	executableToolKindWebSearch = "web_search"
+	executableToolKindFunction  = "function"
+)
+
+type executableToolCall struct {
+	kind     string
+	call     ChatToolCall
+	query    string
+	executor FunctionToolExecutor
 }
 
-func executableWebSearchCalls(chat ChatCompletionResponse) []webSearchCall {
+func (r *Runtime) executableToolCalls(chat ChatCompletionResponse) ([]executableToolCall, bool, bool) {
 	if len(chat.Choices) == 0 {
-		return nil
+		return nil, false, false
 	}
 	calls := chat.Choices[0].Message.ToolCalls
-	out := make([]webSearchCall, 0, len(calls))
+	if len(calls) == 0 {
+		return nil, false, false
+	}
+	out := make([]executableToolCall, 0, len(calls))
 	for i, call := range calls {
-		if call.Function.Name != "web_search" {
-			continue
-		}
 		if call.ID == "" {
 			call.ID = "call_" + strconv.Itoa(i)
 		}
-		query := webSearchQueryFromArguments(call.Function.Arguments)
-		out = append(out, webSearchCall{call: call, query: query})
+		switch call.Function.Name {
+		case "web_search":
+			if !r.webSearchReady() {
+				return nil, true, true
+			}
+			query := webSearchQueryFromArguments(call.Function.Arguments)
+			out = append(out, executableToolCall{kind: executableToolKindWebSearch, call: call, query: query})
+		default:
+			executor := r.functionExecutors[normalizeFunctionToolName(call.Function.Name)]
+			if executor == nil {
+				return nil, true, false
+			}
+			out = append(out, executableToolCall{kind: executableToolKindFunction, call: call, executor: executor})
+		}
 	}
-	return out
+	return out, true, true
 }
 
 func webSearchQueryFromArguments(arguments string) string {
@@ -794,6 +889,17 @@ func webSearchCallOutput(call ChatToolCall, query string, result websearch.Resul
 			"query":   query,
 			"sources": sources,
 		},
+	}
+}
+
+func functionToolCallOutput(call ChatToolCall, output any) protocol.OutputItem {
+	return protocol.OutputItem{
+		ID:     "fco_" + call.ID,
+		Type:   "function_call_output",
+		Status: "completed",
+		CallID: call.ID,
+		Name:   call.Function.Name,
+		Output: output,
 	}
 }
 
