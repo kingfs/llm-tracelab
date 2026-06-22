@@ -19,6 +19,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -897,22 +898,24 @@ type channelModelItem struct {
 }
 
 type channelProbeResponse struct {
-	ChannelID       string    `json:"channel_id"`
-	Status          string    `json:"status"`
-	FailureReason   string    `json:"failure_reason,omitempty"`
-	RetryHint       string    `json:"retry_hint,omitempty"`
-	Models          []string  `json:"models"`
-	DiscoveredCount int       `json:"discovered_count"`
-	EnabledCount    int       `json:"enabled_count"`
-	Endpoint        string    `json:"endpoint,omitempty"`
-	ErrorText       string    `json:"error_text,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	CompletedAt     time.Time `json:"completed_at"`
-	DurationMs      int64     `json:"duration_ms"`
+	ChannelID       string                `json:"channel_id"`
+	Status          string                `json:"status"`
+	FailureReason   string                `json:"failure_reason,omitempty"`
+	RetryHint       string                `json:"retry_hint,omitempty"`
+	Models          []string              `json:"models"`
+	DiscoveredCount int                   `json:"discovered_count"`
+	EnabledCount    int                   `json:"enabled_count"`
+	Endpoint        string                `json:"endpoint,omitempty"`
+	ErrorText       string                `json:"error_text,omitempty"`
+	ProviderProbe   *providerprobe.Report `json:"provider_probe,omitempty"`
+	StartedAt       time.Time             `json:"started_at"`
+	CompletedAt     time.Time             `json:"completed_at"`
+	DurationMs      int64                 `json:"duration_ms"`
 }
 
 type channelProbeRequest struct {
 	EnableDiscovered *bool `json:"enable_discovered"`
+	DetectProvider   *bool `json:"detect_provider"`
 }
 
 type channelUpsertRequest struct {
@@ -1833,7 +1836,11 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService
 				return
 			}
 			svc := effectiveChannelService(st, channelService)
-			result, err := svc.ProbeWithOptions(channelID, channel.ProbeOptions{EnableDiscovered: req.EnableDiscovered})
+			detectProvider := true
+			if req.DetectProvider != nil {
+				detectProvider = *req.DetectProvider
+			}
+			result, err := svc.ProbeWithOptions(channelID, channel.ProbeOptions{EnableDiscovered: req.EnableDiscovered, DetectProvider: detectProvider})
 			if err != nil && result.Status == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -2294,7 +2301,7 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID st
 }
 
 func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResponse {
-	return channelProbeResponse{
+	resp := channelProbeResponse{
 		ChannelID:       result.ChannelID,
 		Status:          result.Status,
 		FailureReason:   result.FailureReason,
@@ -2308,6 +2315,10 @@ func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResp
 		CompletedAt:     result.CompletedAt,
 		DurationMs:      result.DurationMs,
 	}
+	if result.ProviderReport.Status != "" {
+		resp.ProviderProbe = &result.ProviderReport
+	}
+	return resp
 }
 
 func channelProbeRunItems(records []store.ChannelProbeRunRecord) []channelProbeRunItem {

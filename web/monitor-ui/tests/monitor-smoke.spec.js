@@ -39,6 +39,7 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels/openai-primary/probe") {
       const body = route.request().postDataJSON();
       expect(body.enable_discovered).toBe(false);
+      expect(body.detect_provider).toBe(true);
       return route.fulfill({ status: 502, json: probeFailurePayload() });
     }
     if (path === "/api/channels/openai-primary/models") {
@@ -159,6 +160,8 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "Probe provider" }).click();
   await expect(page.getByText("auth_error").first()).toBeVisible();
   await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
+  await expect(page.getByText("chat_completions").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Enable new (1)" }).click();
   await expect(page.getByRole("button", { name: "Enabling" })).toBeHidden();
@@ -562,6 +565,18 @@ function probeFailurePayload() {
     enabled_count: 0,
     endpoint: "/v1/models",
     error_text: "upstream status: 401 Unauthorized",
+    provider_probe: {
+      provider_id: "openai-primary",
+      base_url: "https://api.openai.example/v1",
+      specified_api_type: "chat_completions",
+      specified_protocol_family: "openai_compatible",
+      checked_endpoints: [],
+      status: "detected",
+      suggested_api_type: "chat_completions",
+      suggested_protocol_family: "openai_compatible",
+      capabilities: ["chat_completions", "models"],
+      confidence: 0.7,
+    },
     started_at: new Date().toISOString(),
     completed_at: new Date().toISOString(),
     duration_ms: 12,

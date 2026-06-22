@@ -1444,10 +1444,14 @@ func TestChannelManagementAPI(t *testing.T) {
 	t.Parallel()
 
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Fatalf("request path = %q, want /v1/models", r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"},{"id":"gpt-4.1"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"},{"id":"gpt-4.1"}]}`))
 	}))
 	defer upstreamServer.Close()
 
@@ -1519,6 +1523,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if probe.Status != "success" || probe.DiscoveredCount != 2 {
 		t.Fatalf("probe = %+v", probe)
+	}
+	if probe.ProviderProbe == nil || probe.ProviderProbe.SuggestedAPIType != "chat_completions" || probe.ProviderProbe.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("probe.ProviderProbe = %+v", probe.ProviderProbe)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", strings.NewReader(`{"enable_discovered":false}`))

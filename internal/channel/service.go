@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
 )
@@ -54,6 +56,7 @@ type ProbeResult struct {
 	EnabledCount    int
 	Endpoint        string
 	ErrorText       string
+	ProviderReport  providerprobe.Report
 	StartedAt       time.Time
 	CompletedAt     time.Time
 	DurationMs      int64
@@ -61,6 +64,7 @@ type ProbeResult struct {
 
 type ProbeOptions struct {
 	EnableDiscovered *bool
+	DetectProvider   bool
 }
 
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
@@ -274,6 +278,12 @@ func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (Prob
 	if err != nil {
 		return result, err
 	}
+	if options.DetectProvider {
+		providerReport, providerProbeErr := providerprobe.Probe(context.Background(), providerProbeTargetFromChannel(channel), s.httpClient)
+		if providerProbeErr == nil {
+			result.ProviderReport = providerReport
+		}
+	}
 	resolved, err := upstream.Resolve(upstreamConfigFromChannel(channel))
 	if err != nil {
 		return s.finishProbe(result, resolved, nil, err, options)
@@ -411,12 +421,15 @@ func countEnabledModels(records []store.ChannelModelRecord) int {
 }
 
 func probeRequestMetaJSON(result ProbeResult) string {
-	meta := map[string]string{}
+	meta := map[string]any{}
 	if result.FailureReason != "" {
 		meta["failure_reason"] = result.FailureReason
 	}
 	if result.RetryHint != "" {
 		meta["retry_hint"] = result.RetryHint
+	}
+	if result.ProviderReport.Status != "" {
+		meta["provider_probe"] = result.ProviderReport
 	}
 	if len(meta) == 0 {
 		return "{}"
@@ -475,10 +488,14 @@ func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 	if strings.TrimSpace(channel.HeadersJSON) != "" {
 		_ = json.Unmarshal([]byte(channel.HeadersJSON), &headers)
 	}
+	capabilities, _ := unmarshalCapabilities(channel.CapabilitiesJSON)
 	return config.UpstreamConfig{
 		BaseURL:        channel.BaseURL,
 		ApiKey:         string(channel.APIKeyCiphertext),
 		ProviderPreset: channel.ProviderPreset,
+		APIType:        channel.APIType,
+		Mode:           channel.Mode,
+		Capabilities:   capabilities,
 		ProtocolFamily: channel.ProtocolFamily,
 		RoutingProfile: channel.RoutingProfile,
 		APIVersion:     channel.APIVersion,
@@ -487,6 +504,18 @@ func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 		Location:       channel.Location,
 		ModelResource:  channel.ModelResource,
 		Headers:        headers,
+	}
+}
+
+func providerProbeTargetFromChannel(channel store.ChannelConfigRecord) providerprobe.ProbeTarget {
+	upstreamCfg := upstreamConfigFromChannel(channel)
+	return providerprobe.ProbeTarget{
+		ProviderID:              channel.ID,
+		BaseURL:                 upstreamCfg.BaseURL,
+		APIKey:                  upstreamCfg.ApiKey,
+		Headers:                 upstreamCfg.Headers,
+		SpecifiedAPIType:        upstreamCfg.APIType,
+		SpecifiedProtocolFamily: upstreamCfg.ProtocolFamily,
 	}
 }
 

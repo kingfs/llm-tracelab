@@ -3,6 +3,7 @@ package channel
 import (
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -214,6 +215,60 @@ func TestProbeDiscoversModelsAndUpdatesCatalogs(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].Status != "success" || runs[0].DiscoveredCount != 2 {
 		t.Fatalf("probe runs = %#v", runs)
+	}
+}
+
+func TestProbeWithOptionsDetectsProviderSurface(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "probe-channel",
+		Name:             "Probe Channel",
+		BaseURL:          upstreamServer.URL + "/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-probe"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	result, err := NewService(st).ProbeWithOptions("probe-channel", ProbeOptions{DetectProvider: true})
+	if err != nil {
+		t.Fatalf("ProbeWithOptions() error = %v", err)
+	}
+	if result.ProviderReport.Status != "detected" {
+		t.Fatalf("ProviderReport.Status = %q, want detected", result.ProviderReport.Status)
+	}
+	if result.ProviderReport.SuggestedAPIType != "chat_completions" || result.ProviderReport.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("provider suggestion = %q/%q", result.ProviderReport.SuggestedAPIType, result.ProviderReport.SuggestedProtocolFamily)
+	}
+	if !slices.Contains(result.ProviderReport.Capabilities, "chat_completions") || !slices.Contains(result.ProviderReport.Capabilities, "models") {
+		t.Fatalf("ProviderReport.Capabilities = %#v", result.ProviderReport.Capabilities)
+	}
+	runs, err := st.ListChannelProbeRuns("probe-channel", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 1 || !strings.Contains(runs[0].RequestMetaJSON, `"provider_probe"`) {
+		t.Fatalf("probe run meta = %#v", runs)
 	}
 }
 
