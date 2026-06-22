@@ -561,6 +561,93 @@ a {
   gap: 12px;
 }
 
+.responses-audit-panel,
+.responses-audit-trace {
+  display: grid;
+  gap: 16px;
+}
+
+.responses-audit-query {
+  margin-bottom: 0;
+}
+
+.responses-audit-record {
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.responses-audit-json-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.responses-audit-json-grid .code-block {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.responses-audit-section {
+  display: grid;
+  gap: 12px;
+}
+
+.panel-head-compact h2 {
+  font-size: 1.08rem;
+}
+
+.responses-audit-events {
+  gap: 10px;
+}
+
+.responses-audit-error,
+.responses-exchange-error {
+  color: var(--danger);
+}
+
+.responses-exchange-table {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(2, 8, 23, 0.24);
+}
+
+.responses-exchange-head,
+.responses-exchange-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.85fr) minmax(120px, 0.85fr) minmax(74px, 0.42fr) minmax(150px, 0.85fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.responses-exchange-head {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.responses-exchange-row {
+  padding: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 0.84rem;
+}
+
+.responses-exchange-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.responses-exchange-row .responses-exchange-error {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+}
+
 .semantic-node,
 .finding-card {
   display: grid;
@@ -3658,6 +3745,9 @@ a:focus-visible {
   .overview-breakdown-grid,
   .overview-attention-grid,
   .upstream-failure-list,
+  .responses-audit-json-grid,
+  .responses-exchange-head,
+  .responses-exchange-row,
   .trace-table-head,
   .trace-row,
   .overview-attention-panel .trace-row,
@@ -3671,12 +3761,14 @@ a:focus-visible {
 
   .trace-table-head,
   .session-table-head,
+  .responses-exchange-head,
   .token-table-head {
     display: none;
   }
 
   .trace-row,
   .session-row,
+  .responses-exchange-row,
   .token-row {
     border-radius: 18px;
     margin-bottom: 10px;
@@ -3685,6 +3777,7 @@ a:focus-visible {
 
   .trace-table,
   .session-table,
+  .responses-exchange-table,
   .token-table {
     border: 0;
     border-radius: 0;

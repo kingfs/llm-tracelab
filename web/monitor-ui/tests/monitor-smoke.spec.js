@@ -73,6 +73,13 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/traces/trace-routed/observation" || path === "/api/traces/trace-routed/findings" || path === "/api/traces/trace-routed/performance") {
       return route.fulfill({ json: {} });
     }
+    if (path === "/api/findings") {
+      return route.fulfill({ json: { total: 0, items: [] } });
+    }
+    if (path === "/api/responses/audit/trace") {
+      expect(url.searchParams.get("response_id")).toBe("resp_123");
+      return route.fulfill({ json: responsesAuditTracePayload() });
+    }
     if (path === "/api/analysis") {
       return route.fulfill({ json: analysisPayload() });
     }
@@ -174,6 +181,15 @@ test("trace routing links to channel and upstream views", async ({ page }) => {
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
   await page.getByRole("button", { name: "Reanalyze" }).click();
   await expect(page.getByText(/Reanalysis job #301 completed/)).toBeVisible();
+});
+
+test("audit page renders responses audit trace", async ({ page }) => {
+  await page.goto("/audit?response_id=resp_123");
+  await expect(page.getByRole("heading", { name: "Audit", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request lineage" })).toBeVisible();
+  await expect(page.getByText("audit_resp_123")).toBeVisible();
+  await expect(page.getByText("response.request").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "trace-routed" })).toHaveAttribute("href", "/traces/trace-routed");
 });
 
 test("connect page renders protocol entrypoint examples", async ({ page }) => {
@@ -320,6 +336,62 @@ function channelDetailPayload() {
       endpoint: "/v1/models",
       error_text: "upstream status: 401 Unauthorized",
     }],
+  };
+}
+
+function responsesAuditTracePayload() {
+  return {
+    query: { response_id: "resp_123", request_audit_id: "audit_resp_123" },
+    request_audit: {
+      id: "audit_resp_123",
+      response_id: "resp_123",
+      conversation_id: "thread_123",
+      method: "POST",
+      path: "/v1/responses",
+      client_request_id: "client-123",
+      header_json: { "content-type": "application/json", "x-client-request-id": "client-123" },
+      body_preview: "{\"model\":\"gpt-5\",\"input\":\"hello\"}",
+      body_sha256: "sha256-demo",
+      status: "completed",
+      created_at: "2026-06-22T08:00:00Z",
+    },
+    events: [
+      {
+        id: "event-accepted",
+        response_id: "resp_123",
+        request_audit_id: "audit_resp_123",
+        conversation_id: "thread_123",
+        event_type: "response.request",
+        phase: "request",
+        status: "accepted",
+        details_json: { method: "POST", path: "/v1/responses" },
+        occurred_at: "2026-06-22T08:00:00Z",
+      },
+      {
+        id: "event-completed",
+        response_id: "resp_123",
+        request_audit_id: "audit_resp_123",
+        conversation_id: "thread_123",
+        event_type: "response.request",
+        phase: "request",
+        status: "completed",
+        occurred_at: "2026-06-22T08:00:01Z",
+      },
+    ],
+    upstream_exchanges: [
+      {
+        id: "exchange-1",
+        response_id: "resp_123",
+        request_audit_id: "audit_resp_123",
+        trace_id: "trace-routed",
+        upstream_id: "openai-primary",
+        model: "gpt-5",
+        endpoint: "/v1/responses",
+        status_code: 200,
+        started_at: "2026-06-22T08:00:00Z",
+        completed_at: "2026-06-22T08:00:01Z",
+      },
+    ],
   };
 }
 
