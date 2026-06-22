@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -371,6 +372,7 @@ func TestResponsesFunctionExecutorsAPIHandlerValidateOnlyDoesNotPersist(t *testi
 func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSecrets(t *testing.T) {
 	t.Parallel()
 
+	allowedDir := t.TempDir()
 	cfg := config.ResponsesFunctionExecutorConfig{
 		Enabled: false,
 		Executors: []config.ResponsesFunctionExecutorBinding{
@@ -384,16 +386,26 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSe
 	}
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
-	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
 		"validate_only": false,
 		"enabled": true,
 		"timeout": "3s",
 		"max_result_bytes": 256,
 		"redaction": {"arguments": true, "output": true},
 		"executors": [
-			{"name": "lookup_order", "type": "external_command", "enabled": true}
-		]
-	}`))
+			{
+				"name": "lookup_order",
+				"type": "external_command",
+				"enabled": true,
+				"process": {
+					"working_dir": %q,
+					"require_absolute_command": true,
+					"allowed_command_dirs": [%q],
+					"reject_root": true
+				}
+			}
+			]
+		}`, allowedDir, allowedDir)))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -422,6 +434,9 @@ func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSe
 	}
 	if len(payload.Executors) != 1 || !payload.Executors[0].Enabled || !payload.Executors[0].CommandConfigured || !payload.Executors[0].OutputConfigured {
 		t.Fatalf("executors after apply = %+v, want preserved non-echoed command/output flags", payload.Executors)
+	}
+	if got := payload.Executors[0].Process; got.WorkingDir != allowedDir || !got.RequireAbsoluteCommand || len(got.AllowedCommandDirs) != 1 || got.AllowedCommandDirs[0] != allowedDir || !got.RejectRoot {
+		t.Fatalf("process after apply = %+v, want safe process overlay fields", got)
 	}
 }
 
@@ -512,11 +527,30 @@ func TestResponsesFunctionExecutorsAPIHandlerRejectsSensitiveWriteFields(t *test
 	if strings.Contains(rr.Body.String(), "do-not-leak") {
 		t.Fatalf("error response leaked sensitive field value: %s", rr.Body.String())
 	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "process": {"env": {"SECRET": "do-not-leak"}}}
+		]
+	}`))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "do-not-leak") || strings.Contains(rr.Body.String(), "SECRET") {
+		t.Fatalf("error response leaked sensitive process field value: %s", rr.Body.String())
+	}
 }
 
 func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testing.T) {
 	t.Parallel()
 
+	filePath := filepath.Join(t.TempDir(), "not-dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file fixture: %v", err)
+	}
 	cfg := config.ResponsesFunctionExecutorConfig{
 		Enabled: true,
 		Executors: []config.ResponsesFunctionExecutorBinding{
@@ -525,17 +559,22 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testi
 	}
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
-	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
 		"validate_only": true,
 		"executors": [
 			{
 				"name": "lookup_order",
 				"type": "external_command",
 				"enabled": true,
-				"process": {"working_dir": "relative-dir", "require_absolute_command": true}
+				"process": {
+					"working_dir": "relative-dir",
+					"require_absolute_command": true,
+					"allowed_command_dirs": ["relative-dir", %q],
+					"reject_root": true
+				}
 			}
 		]
-	}`))
+	}`, filePath)))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -549,8 +588,11 @@ func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testi
 		t.Fatalf("executors = %+v, want one executor", update.Summary.Executors)
 	}
 	warnings := strings.Join(update.Summary.Executors[0].Warnings, " ")
-	if update.Summary.Executors[0].Available || !strings.Contains(warnings, "working_dir must be absolute") || !strings.Contains(warnings, "command must be absolute") {
+	if update.Summary.Executors[0].Available || !strings.Contains(warnings, "working_dir must be absolute") || !strings.Contains(warnings, "command must be absolute") || !strings.Contains(warnings, "allowed_command_dirs entries must be absolute") || !strings.Contains(warnings, "allowed_command_dirs entries must be directories") {
 		t.Fatalf("executor = %+v, want invalid process warnings", update.Summary.Executors[0])
+	}
+	if got := update.Summary.Executors[0].Process; got.WorkingDir != "relative-dir" || !got.RequireAbsoluteCommand || len(got.AllowedCommandDirs) != 2 || got.AllowedCommandDirs[0] != "relative-dir" || got.AllowedCommandDirs[1] != filePath || !got.RejectRoot {
+		t.Fatalf("process summary = %+v, want patched safe fields", got)
 	}
 }
 

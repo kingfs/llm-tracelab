@@ -665,13 +665,21 @@ type responsesFunctionExecutorRedactionView struct {
 }
 
 type responsesFunctionExecutorBindingView struct {
-	Name              string   `json:"name"`
-	Type              string   `json:"type"`
-	Enabled           bool     `json:"enabled"`
-	Available         bool     `json:"available"`
-	OutputConfigured  bool     `json:"output_configured"`
-	CommandConfigured bool     `json:"command_configured"`
-	Warnings          []string `json:"warnings"`
+	Name              string                               `json:"name"`
+	Type              string                               `json:"type"`
+	Enabled           bool                                 `json:"enabled"`
+	Available         bool                                 `json:"available"`
+	Process           responsesFunctionExecutorProcessView `json:"process"`
+	OutputConfigured  bool                                 `json:"output_configured"`
+	CommandConfigured bool                                 `json:"command_configured"`
+	Warnings          []string                             `json:"warnings"`
+}
+
+type responsesFunctionExecutorProcessView struct {
+	WorkingDir             string   `json:"working_dir,omitempty"`
+	RequireAbsoluteCommand bool     `json:"require_absolute_command,omitempty"`
+	AllowedCommandDirs     []string `json:"allowed_command_dirs,omitempty"`
+	RejectRoot             bool     `json:"reject_root,omitempty"`
 }
 
 type responsesFunctionExecutorUpdateRequest struct {
@@ -697,8 +705,10 @@ type responsesFunctionExecutorBindingPatch struct {
 }
 
 type responsesFunctionExecutorProcessPatch struct {
-	WorkingDir             string `json:"working_dir"`
-	RequireAbsoluteCommand *bool  `json:"require_absolute_command"`
+	WorkingDir             string   `json:"working_dir"`
+	RequireAbsoluteCommand *bool    `json:"require_absolute_command"`
+	AllowedCommandDirs     []string `json:"allowed_command_dirs"`
+	RejectRoot             *bool    `json:"reject_root"`
 }
 
 type responsesFunctionExecutorUpdateResponse struct {
@@ -1386,6 +1396,8 @@ func (r *responsesFunctionExecutorUpdateRequest) UnmarshalJSON(data []byte) erro
 				if err := validateJSONKeys(process, map[string]struct{}{
 					"working_dir":              {},
 					"require_absolute_command": {},
+					"allowed_command_dirs":     {},
+					"reject_root":              {},
 				}); err != nil {
 					return err
 				}
@@ -1459,6 +1471,12 @@ func mergeResponsesFunctionExecutorBindings(current []config.ResponsesFunctionEx
 			if patch.Process.RequireAbsoluteCommand != nil {
 				binding.Process.RequireAbsoluteCommand = *patch.Process.RequireAbsoluteCommand
 			}
+			if patch.Process.AllowedCommandDirs != nil {
+				binding.Process.AllowedCommandDirs = append([]string{}, patch.Process.AllowedCommandDirs...)
+			}
+			if patch.Process.RejectRoot != nil {
+				binding.Process.RejectRoot = *patch.Process.RejectRoot
+			}
 		}
 		out = append(out, binding)
 	}
@@ -1472,6 +1490,7 @@ func cloneResponsesFunctionExecutorConfig(cfg config.ResponsesFunctionExecutorCo
 		cfg.Executors[i].Enabled = cloneBoolPtr(cfg.Executors[i].Enabled)
 		cfg.Executors[i].Args = append([]string{}, cfg.Executors[i].Args...)
 		cfg.Executors[i].EnvAllowlist = append([]string{}, cfg.Executors[i].EnvAllowlist...)
+		cfg.Executors[i].Process.AllowedCommandDirs = append([]string{}, cfg.Executors[i].Process.AllowedCommandDirs...)
 		cfg.Executors[i].Warnings = append([]string{}, cfg.Executors[i].Warnings...)
 		if cfg.Executors[i].Env != nil {
 			env := make(map[string]string, len(cfg.Executors[i].Env))
@@ -1516,10 +1535,16 @@ func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExe
 			enabled = *binding.Enabled
 		}
 		out.Executors = append(out.Executors, responsesFunctionExecutorBindingView{
-			Name:              binding.Name,
-			Type:              binding.Type,
-			Enabled:           enabled,
-			Available:         binding.Available,
+			Name:      binding.Name,
+			Type:      binding.Type,
+			Enabled:   enabled,
+			Available: binding.Available,
+			Process: responsesFunctionExecutorProcessView{
+				WorkingDir:             binding.Process.WorkingDir,
+				RequireAbsoluteCommand: binding.Process.RequireAbsoluteCommand,
+				AllowedCommandDirs:     append([]string{}, binding.Process.AllowedCommandDirs...),
+				RejectRoot:             binding.Process.RejectRoot,
+			},
 			OutputConfigured:  binding.Output != nil,
 			CommandConfigured: binding.Command != "",
 			Warnings:          append([]string{}, binding.Warnings...),
