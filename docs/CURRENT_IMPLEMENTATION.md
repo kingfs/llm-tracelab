@@ -111,7 +111,7 @@ Responses audit schema 的职责边界如下：
 - `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。当前已写入 request、内部 model_call、hosted `web_search` tool_call、普通 function requested/submitted、registered server-side function started/completed/failed（含 stream tool loop 标记）、incremental stream fallback、deferred/incremental stream started/completed、request/model_call cancellation、explicit compact 和 auto compact threshold trigger 的最小生命周期事件。
 - `upstream_exchanges`：关联 semantic response/request 与 `.http` cassette、trace id、route target。当前只覆盖 Responses server-mode 内部 Chat Completions 调用，并在 response 完成后回填 semantic `response_id`；`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
 
-后续接入顺序建议先补 Monitor UI 入口，再处理 hosted/server-side streaming lifecycle 细化和 compact events。
+后续接入顺序建议继续处理 hosted/server-side streaming lifecycle 细化、compact events 和更完整的 Responses audit 关联入口。
 
 当前重要表包括：
 
@@ -142,10 +142,11 @@ Monitor 是 Go embed 的 React/Vite 前端。
 - Sessions：按 session 聚合的请求视角。
 - Models：按模型查看用量、渠道覆盖和失败。
 - Channels：管理上游渠道、执行 provider setup validate/apply、批量 provider probe/apply、探测模型、启停模型。
+- Audit：跨 trace findings、Responses request audit trace、function executor 状态与安全 overlay。
 - Routing：查看 selected route、sticky、候选和失败聚类。
 - Events：系统事件收件箱。
 - Tokens：管理当前用户 API token。
-- Trace detail：Timeline、Summary、Raw Protocol、Declared Tools、Observation、Findings。
+- Trace detail：Timeline、Summary、Raw Protocol、Declared Tools、Observation、Findings；如果 trace payload 携带 `response_id` 或 `request_audit_id`，Reading guide 会提供 Responses audit 跳转入口。
 
 ## MCP 当前能力
 

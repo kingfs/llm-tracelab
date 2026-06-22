@@ -75,7 +75,7 @@ Stage 9 audit 表职责边界：
 - `execution_events`：runtime plan、model/tool/compact/stream/error 生命周期。当前写入 request、内部 model_call、hosted web_search、普通 function requested/submitted、registered server-side function started/completed/failed（含 stream tool loop 标记）、incremental stream fallback、deferred/incremental stream started/completed/failed、request/model_call cancellation、explicit compact 和 item-count auto compact trigger 的最小生命周期。
 - `upstream_exchanges`：semantic response/request 与 `.http` cassette、trace id、route target 的关联。
 
-后续接入顺序建议先补 Responses audit Monitor UI，再补 hosted/server-side streaming lifecycle 细化和 compact events。
+后续接入顺序建议继续补 Responses audit 更完整关联入口，再补 hosted/server-side streaming lifecycle 细化和 compact events。
 
 ## Session 基线
 
@@ -121,6 +121,7 @@ Monitor 当前包括：
 - Events。
 - Tokens。
 - Analysis。
+- Audit。
 - Trace detail。
 
 主要 API：
@@ -132,6 +133,7 @@ Monitor 当前包括：
 - `/api/channels`
 - `/api/routing/summary`
 - `/api/responses/function-executors`
+- `/api/responses/audit/trace`
 - `/api/provider-probe/report`
 - `/api/provider-probe/report/apply`
 - `/api/events`

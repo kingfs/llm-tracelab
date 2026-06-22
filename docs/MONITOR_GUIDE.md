@@ -117,6 +117,8 @@ Monitor 使用两类数据：
 
 `GET /api/responses/function-executors` 返回当前进程中的 server-side function executor 摘要；Audit 页面会读取该接口并展示状态面板。
 
+Audit 页面也可以按 `response_id` 或 `request_audit_id` 查询 Responses server-mode 的 request audit、execution events 和 upstream exchanges。Trace detail 如果携带对应 Responses audit id，会在 Reading guide 中显示 `Responses audit` 入口，直接跳转到 `/audit` 的同一条 request lineage。
+
 返回内容包括：
 
 - `enabled`、`timeout`、`max_result_bytes`。
