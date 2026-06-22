@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	entmigrations "github.com/kingfs/llm-tracelab/ent"
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
 
@@ -26,6 +27,9 @@ func MigrateUp(dbPath string, steps int) error {
 }
 
 func MigrateDatabaseUp(driver string, dsn string, steps int) error {
+	if normalizeDriver(driver) == "postgres" {
+		return appdbmigrate.MigrateUp(driver, dsn, steps)
+	}
 	if steps == 0 {
 		adopted, err := adoptLegacyTraceDatabase(driver, dsn)
 		if err != nil {

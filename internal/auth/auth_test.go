@@ -305,12 +305,55 @@ func TestOpenDatabaseAcceptsPostgresDSNWithoutConnecting(t *testing.T) {
 	}
 }
 
-func TestMigrateDatabaseUpRejectsPostgres(t *testing.T) {
+func TestMigrateDatabaseUpPostgresRequiresDSN(t *testing.T) {
 	t.Parallel()
 
-	err := MigrateDatabaseUp("postgresql", "postgres://user:pass@example.invalid/traces", 0)
-	if err == nil || !strings.Contains(err.Error(), `database driver "postgres" is not supported by embedded migrations yet`) {
-		t.Fatalf("MigrateDatabaseUp(postgresql) error = %v, want unsupported embedded migrations", err)
+	err := MigrateDatabaseUp("postgresql", "", 0)
+	if err == nil || !strings.Contains(err.Error(), "postgres application database dsn is required") {
+		t.Fatalf("MigrateDatabaseUp(postgresql empty dsn) error = %v, want required dsn", err)
+	}
+}
+
+func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := MigrateDatabaseUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp(postgres) error = %v", err)
+	}
+	if err := MigrateDatabaseUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp(postgres idempotent) error = %v", err)
+	}
+
+	st, err := OpenDatabase("postgres", dsn, 4, 4)
+	if err != nil {
+		t.Fatalf("OpenDatabase(postgres) error = %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	username := "admin_" + strings.ReplaceAll(t.Name(), "/", "_")
+	normalizedUsername := normalizeUsername(username)
+	if _, err := st.CreateUser(ctx, username, "change-me-123"); err != nil {
+		t.Fatalf("CreateUser(postgres) error = %v", err)
+	}
+	if err := st.VerifyPassword(ctx, username, "change-me-123"); err != nil {
+		t.Fatalf("VerifyPassword(postgres) error = %v", err)
+	}
+	token, err := st.CreateToken(ctx, username, "postgres-integration", DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken(postgres) error = %v", err)
+	}
+	if token.Token == "" || token.Prefix == "" {
+		t.Fatalf("CreateToken(postgres) returned empty token: %+v", token)
+	}
+	principal, ok, err := st.VerifyToken(ctx, token.Token)
+	if err != nil {
+		t.Fatalf("VerifyToken(postgres) error = %v", err)
+	}
+	if !ok || principal.Username != normalizedUsername {
+		t.Fatalf("VerifyToken(postgres) principal=%+v ok=%v, want username %q", principal, ok, normalizedUsername)
 	}
 }
 

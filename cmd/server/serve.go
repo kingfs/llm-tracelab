@@ -26,9 +26,6 @@ import (
 var (
 	authMigrateDatabaseUp = auth.MigrateDatabaseUp
 	authOpenDatabase      = auth.OpenDatabase
-	authEnsureSchema      = func(st *auth.Store) error {
-		return st.EnsureSchema(context.Background())
-	}
 )
 
 func newServeCommand(runtime *cliRuntime) *cobra.Command {
@@ -237,13 +234,12 @@ func openAuthStore(cfg *config.Config) (*auth.Store, error) {
 func openAuthStoreWithAutoSchema(cfg *config.Config) (*auth.Store, error) {
 	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
 	switch driver {
-	case "sqlite":
+	case "sqlite", "postgres":
 		if cfg.DatabaseAutoMigrate() {
 			if err := authMigrateDatabaseUp(driver, cfg.DatabaseDSN(), 0); err != nil {
 				return nil, fmt.Errorf("migrate database: %w", err)
 			}
 		}
-	case "postgres":
 	default:
 		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
@@ -256,12 +252,6 @@ func openAuthStoreWithAutoSchema(cfg *config.Config) (*auth.Store, error) {
 	)
 	if err != nil {
 		return nil, err
-	}
-	if driver == "postgres" && cfg.DatabaseAutoMigrate() {
-		if err := authEnsureSchema(st); err != nil {
-			_ = st.Close()
-			return nil, fmt.Errorf("ensure auth schema: %w", err)
-		}
 	}
 	return st, nil
 }

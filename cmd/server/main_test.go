@@ -531,24 +531,27 @@ func TestOpenAuthStoreAutoMigrateSQLiteCreatesAuthSchemaAndInitUser(t *testing.T
 	}
 }
 
-func TestOpenAuthStoreAutoMigratePostgresUsesEnsureSchemaWithoutEmbeddedMigrator(t *testing.T) {
+func TestOpenAuthStoreAutoMigratePostgresUsesVersionedMigrator(t *testing.T) {
 	origMigrate := authMigrateDatabaseUp
 	origOpen := authOpenDatabase
-	origEnsure := authEnsureSchema
 	t.Cleanup(func() {
 		authMigrateDatabaseUp = origMigrate
 		authOpenDatabase = origOpen
-		authEnsureSchema = origEnsure
 	})
 
 	var migrated bool
-	var ensured bool
+	var migratedDriver string
+	var migratedDSN string
+	var migratedSteps int
 	var openedDriver string
 	var openedDSN string
 	var openedMaxOpen int
 	var openedMaxIdle int
 	authMigrateDatabaseUp = func(driver string, dsn string, steps int) error {
 		migrated = true
+		migratedDriver = driver
+		migratedDSN = dsn
+		migratedSteps = steps
 		return nil
 	}
 	authOpenDatabase = func(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*auth.Store, error) {
@@ -557,10 +560,6 @@ func TestOpenAuthStoreAutoMigratePostgresUsesEnsureSchemaWithoutEmbeddedMigrator
 		openedMaxOpen = maxOpenConns
 		openedMaxIdle = maxIdleConns
 		return &auth.Store{}, nil
-	}
-	authEnsureSchema = func(st *auth.Store) error {
-		ensured = true
-		return nil
 	}
 
 	autoMigrate := true
@@ -577,11 +576,11 @@ func TestOpenAuthStoreAutoMigratePostgresUsesEnsureSchemaWithoutEmbeddedMigrator
 	}
 	defer st.Close()
 
-	if migrated {
-		t.Fatalf("Postgres auto schema should not call embedded auth migrator")
+	if !migrated {
+		t.Fatalf("Postgres auto schema did not call versioned migrator")
 	}
-	if !ensured {
-		t.Fatalf("Postgres auto schema did not call EnsureSchema")
+	if migratedDriver != "postgres" || migratedDSN != cfg.Database.DSN || migratedSteps != 0 {
+		t.Fatalf("MigrateDatabaseUp args = driver=%q dsn=%q steps=%d", migratedDriver, migratedDSN, migratedSteps)
 	}
 	if openedDriver != "postgres" || openedDSN != cfg.Database.DSN || openedMaxOpen != 7 || openedMaxIdle != 3 {
 		t.Fatalf("OpenDatabase args = driver=%q dsn=%q maxOpen=%d maxIdle=%d", openedDriver, openedDSN, openedMaxOpen, openedMaxIdle)

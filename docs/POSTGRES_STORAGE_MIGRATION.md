@@ -12,11 +12,13 @@ claim that Postgres persistence is fully production mature today.
   `driver=postgresql`, requires an explicit DSN, and binds the application trace
   store ent client with `dialect.Postgres`.
 - `internal/auth.OpenDatabase` also accepts `driver=postgres` and
-  `driver=postgresql`, but auth schema management is not productionized for
-  Postgres.
-- With `database.auto_migrate: true`, the auth store keeps SQLite on the
-  embedded migration path and uses ent `Schema.Create` for Postgres evaluation
-  databases.
+  `driver=postgresql`. For Postgres, `auth migrate up` now applies the
+  checked-in `ent/postgres-migrations` SQL through `internal/appdbmigrate`
+  because the current ent/Postgres schema includes both application and auth
+  tables.
+- With `database.auto_migrate: true`, the auth store runs the explicit auth
+  migrator before opening the store. SQLite stays on the embedded SQLite
+  migration path; Postgres uses the versioned Postgres SQL path.
 - `internal/store.NewWithDatabase` remains the compatibility constructor and
   still initializes schema by default. Command/server paths use
   `NewWithDatabaseOptions(..., AutoMigrate:false)` after running the explicit
@@ -32,9 +34,9 @@ claim that Postgres persistence is fully production mature today.
   `ent/migrate/main.go` is a dialect-aware generator: SQLite remains the
   default and writes to `ent/migrations`; Postgres requires an explicit Atlas
   dev URL and writes to `ent/postgres-migrations`.
-- `internal/auth/migrate.go` embeds `ent/migrations` and wires only the SQLite
-  golang-migrate driver. For any non-SQLite driver, it returns a clear
-  unsupported-driver error.
+- `internal/auth/migrate.go` embeds `ent/migrations` for SQLite and delegates
+  Postgres `up` migrations to `internal/appdbmigrate`. Postgres `down` remains
+  unsupported by the auth migrator.
 - `cmd/server/db.go` now has an application-owned `db migrate` command.
   Postgres `db migrate up` applies checked-in SQL from
   `ent/postgres-migrations` through `internal/appdbmigrate` and
@@ -58,13 +60,14 @@ Stage 6 splits migration ownership explicitly:
 | Command | Intended owner | SQLite status | Postgres status |
 | --- | --- | --- | --- |
 | `db migrate up|down` | Application database: trace index, routing/channel/model data, Responses state, and future audit tables | `up` uses current application schema initialization; `down` is unsupported except dry-run | `up` applies checked-in SQL from `ent/postgres-migrations` via `golang-migrate`; `down` is unsupported except dry-run |
-| `auth migrate up|down` | Auth database: users, tokens, auth-owned schema | Currently supported through embedded SQLite migrations | Separate future gap; not covered by the Stage 6A application migration slice |
+| `auth migrate up|down` | Auth database: users, tokens, auth-owned schema | `up` and `down` use embedded SQLite migrations | `up` applies the shared checked-in `ent/postgres-migrations` SQL; `down` is not supported yet |
 
 `db migrate` is no longer an alias for the auth migrator. Postgres `db migrate
 up` is now the versioned application migration path, and command/server store
 opening has an explicit no-auto-migrate mode. Production operators should still
-account for the remaining auth migration and runtime SQL compatibility gaps
-before declaring the whole Postgres deployment model mature.
+account for the shared application/auth Postgres migration namespace, missing
+Postgres auth rollback, and remaining runtime SQL compatibility gaps before
+declaring the whole Postgres deployment model mature.
 The top-level `migrate` command remains a cassette rewrite/index rebuild
 workflow; when `database.auto_migrate` is enabled, it initializes the
 application database schema and does not run the auth migrator.
@@ -92,24 +95,23 @@ For Postgres evaluation:
 - `database.auto_migrate: true` runs the application migrator before opening
   the trace store. For Postgres this means checked-in SQL; for SQLite this means
   the existing schema initialization compatibility path.
-- Postgres auth schema handling still uses ent `Schema.Create` when
-  `database.auto_migrate: true`. This is an evaluation convenience only.
-- Do not run `auth migrate` expecting Postgres migrations; it still uses the
-  SQLite-only embedded migrator.
+- `auth migrate up` also applies the checked-in `ent/postgres-migrations` SQL.
+  This is currently idempotent with `db migrate up` because both use the same
+  `schema_migrations` table and migration directory.
 - Do not treat `client.Schema.Create` as a production rollout mechanism. It may
   be useful for disposable evaluation databases, but it has no version history,
   downgrade path, reviewable SQL, or drift policy.
 - If `database.auto_migrate: false`, the database schema must already exist.
   Auth commands such as `auth init-user` also require auth tables to exist.
-  Checked-in versioned Postgres auth migrations are still incomplete, so the
-  current Postgres auth path is not yet a documented production path.
+  Postgres auth `up` migrations are versioned, but `auth migrate down` and a
+  separately owned auth migration namespace are still incomplete.
 
 For production-like Postgres trials, run `db migrate up` against a fresh
 database first, capture the exact llm-tracelab build and migration version, and
 then start the service with application store auto schema creation disabled by
-construction. Do not point the remaining auth Postgres auto schema path at a
-long-lived production database that needs fully auditable upgrades and
-rollbacks.
+construction. Treat the shared application/auth migration namespace as a known
+operational constraint until auth migrations are split or formally documented as
+part of the application schema.
 
 ## Stage 6 Target
 
@@ -124,8 +126,9 @@ SQLite fallback or breaking replay:
   migration domain.
 - Add future application tables for request audit, execution events, and
   upstream exchange correlation to the application migration domain.
-- Keep `auth migrate` scoped to users/tokens and document Postgres auth
-  migration as a separate follow-up.
+- Keep `auth migrate` scoped to users/tokens at the command level. Its
+  Postgres `up` path currently reuses the shared checked-in ent/Postgres SQL;
+  a separate auth migration namespace remains a follow-up.
 - Preserve `.http` cassette compatibility: `pkg/replay` must not require
   Postgres or any semantic database.
 
@@ -185,6 +188,13 @@ findings, analysis runs/jobs, parse jobs, parser versions, and system events.
 The Postgres migration table set now covers the SQLite application raw DDL table
 set; auth tables remain a separate migration domain.
 
+Stage 16F routes Postgres auth migration `up` through the same versioned SQL
+path. `database.auto_migrate=true` no longer calls auth `Schema.Create` for
+Postgres startup; it runs `auth.MigrateDatabaseUp`, which delegates to
+`internal/appdbmigrate`. The shared migration set includes the auth tables and
+is idempotent with `db migrate up`. `auth migrate down` for Postgres remains
+unsupported.
+
 SQLite compatibility:
 
 ```bash
@@ -232,8 +242,9 @@ been committed or applied in a shared environment.
 
 ## Remaining Gaps
 
-- Postgres auth migrations are not versioned; auth startup still uses ent auto
-  schema creation when `database.auto_migrate` is enabled for Postgres.
+- Postgres auth migration `up` is versioned through the shared
+  `ent/postgres-migrations` set, but `auth migrate down` and a separately owned
+  auth migration namespace are still missing.
 - SQLite application migrations still use schema initialization rather than
   explicit versioned files.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
