@@ -216,9 +216,26 @@ type responsesAuditTraceResponse struct {
 	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
 }
 
+type responsesToolCallAuditListResponse struct {
+	Query           responsesToolCallAuditQuery  `json:"query"`
+	Items           []responsesToolCallAuditView `json:"items"`
+	Total           int                          `json:"total"`
+	IncludePayloads bool                         `json:"include_payloads"`
+}
+
 type responsesAuditTraceQuery struct {
 	ResponseID     string `json:"response_id,omitempty"`
 	RequestAuditID string `json:"request_audit_id,omitempty"`
+}
+
+type responsesToolCallAuditQuery struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	CallID         string `json:"call_id,omitempty"`
+	ToolName       string `json:"tool_name,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Limit          int    `json:"limit"`
 }
 
 type responsesRequestAuditView struct {
@@ -263,6 +280,29 @@ type responsesUpstreamExchange struct {
 	StartedAt      time.Time `json:"started_at,omitempty"`
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 	ErrorText      string    `json:"error_text,omitempty"`
+}
+
+type responsesToolCallAuditView struct {
+	ID              string                        `json:"id"`
+	ResponseID      string                        `json:"response_id,omitempty"`
+	RequestAuditID  string                        `json:"request_audit_id,omitempty"`
+	ConversationID  string                        `json:"conversation_id,omitempty"`
+	CallID          string                        `json:"call_id"`
+	ToolType        string                        `json:"tool_type,omitempty"`
+	ToolName        string                        `json:"tool_name,omitempty"`
+	Executor        string                        `json:"executor,omitempty"`
+	Status          string                        `json:"status,omitempty"`
+	Phase           string                        `json:"phase,omitempty"`
+	InputSummary    responsesaudit.PayloadSummary `json:"input_summary"`
+	OutputSummary   responsesaudit.PayloadSummary `json:"output_summary"`
+	MetadataSummary responsesaudit.PayloadSummary `json:"metadata_summary"`
+	InputJSON       map[string]any                `json:"input_json,omitempty"`
+	OutputJSON      map[string]any                `json:"output_json,omitempty"`
+	MetadataJSON    map[string]any                `json:"metadata_json,omitempty"`
+	ErrorText       string                        `json:"error_text,omitempty"`
+	StartedAt       time.Time                     `json:"started_at,omitempty"`
+	CompletedAt     time.Time                     `json:"completed_at,omitempty"`
+	CreatedAt       time.Time                     `json:"created_at"`
 }
 
 type traceListItem struct {
@@ -1261,6 +1301,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), opt.AuthVerifier))
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
@@ -1649,6 +1690,54 @@ func responsesAuditTraceAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, responsesAuditTraceFromAudit(trace, responseID, requestAuditID))
+	}
+}
+
+func responsesToolCallAuditsAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil || st.EntClient() == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "responses audit store not configured"})
+			return
+		}
+		query := r.URL.Query()
+		limit := parseInt(query.Get("limit"), responsesaudit.DefaultAuditQueryLimit)
+		params := responsesaudit.ListToolCallAuditsParams{
+			ResponseID:     strings.TrimSpace(query.Get("response_id")),
+			RequestAuditID: strings.TrimSpace(query.Get("request_audit_id")),
+			ConversationID: strings.TrimSpace(query.Get("conversation_id")),
+			CallID:         strings.TrimSpace(query.Get("call_id")),
+			ToolName:       strings.TrimSpace(query.Get("tool_name")),
+			Status:         strings.TrimSpace(query.Get("status")),
+			Limit:          limit,
+		}
+		records, err := responsesaudit.NewQueryService(st.EntClient()).ListToolCallAudits(r.Context(), params)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "responses tool call audit query error: " + err.Error()})
+			return
+		}
+		includePayloads := parseBool(query.Get("include_payloads"))
+		items := make([]responsesToolCallAuditView, 0, len(records))
+		for _, record := range records {
+			items = append(items, responsesToolCallAuditFromAudit(record, includePayloads))
+		}
+		writeJSON(w, http.StatusOK, responsesToolCallAuditListResponse{
+			Query: responsesToolCallAuditQuery{
+				ResponseID:     params.ResponseID,
+				RequestAuditID: params.RequestAuditID,
+				ConversationID: params.ConversationID,
+				CallID:         params.CallID,
+				ToolName:       params.ToolName,
+				Status:         params.Status,
+				Limit:          responsesaudit.NormalizeAuditQueryLimit(limit),
+			},
+			Items:           items,
+			Total:           len(items),
+			IncludePayloads: includePayloads,
+		})
 	}
 }
 
@@ -5024,6 +5113,34 @@ func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchange
 		CompletedAt:    exchange.CompletedAt,
 		ErrorText:      exchange.ErrorText,
 	}
+}
+
+func responsesToolCallAuditFromAudit(record responsesaudit.ToolCallAuditView, includePayloads bool) responsesToolCallAuditView {
+	out := responsesToolCallAuditView{
+		ID:              record.ID,
+		ResponseID:      record.ResponseID,
+		RequestAuditID:  record.RequestAuditID,
+		ConversationID:  record.ConversationID,
+		CallID:          record.CallID,
+		ToolType:        record.ToolType,
+		ToolName:        record.ToolName,
+		Executor:        record.Executor,
+		Status:          record.Status,
+		Phase:           record.Phase,
+		InputSummary:    responsesaudit.SummarizeJSONPayload(record.InputJSON),
+		OutputSummary:   responsesaudit.SummarizeJSONPayload(record.OutputJSON),
+		MetadataSummary: responsesaudit.SummarizeJSONPayload(record.MetadataJSON),
+		ErrorText:       record.ErrorText,
+		StartedAt:       record.StartedAt,
+		CompletedAt:     record.CompletedAt,
+		CreatedAt:       record.CreatedAt,
+	}
+	if includePayloads {
+		out.InputJSON = record.InputJSON
+		out.OutputJSON = record.OutputJSON
+		out.MetadataJSON = record.MetadataJSON
+	}
+	return out
 }
 
 func systemEventViewFromStore(event store.SystemEvent) systemEventView {

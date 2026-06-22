@@ -17,9 +17,26 @@ type responsesAuditTraceOutput struct {
 	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
 }
 
+type responsesAuditToolCallsOutput struct {
+	Query           responsesAuditToolCallsQuery `json:"query"`
+	Items           []responsesToolCallAuditView `json:"items"`
+	Total           int                          `json:"total"`
+	IncludePayloads bool                         `json:"include_payloads"`
+}
+
 type responsesAuditTraceQuery struct {
 	ResponseID     string `json:"response_id,omitempty"`
 	RequestAuditID string `json:"request_audit_id,omitempty"`
+}
+
+type responsesAuditToolCallsQuery struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	CallID         string `json:"call_id,omitempty"`
+	ToolName       string `json:"tool_name,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Limit          int    `json:"limit"`
 }
 
 type responsesRequestAuditView struct {
@@ -66,6 +83,29 @@ type responsesUpstreamExchange struct {
 	ErrorText      string    `json:"error_text,omitempty"`
 }
 
+type responsesToolCallAuditView struct {
+	ID              string                        `json:"id"`
+	ResponseID      string                        `json:"response_id,omitempty"`
+	RequestAuditID  string                        `json:"request_audit_id,omitempty"`
+	ConversationID  string                        `json:"conversation_id,omitempty"`
+	CallID          string                        `json:"call_id"`
+	ToolType        string                        `json:"tool_type,omitempty"`
+	ToolName        string                        `json:"tool_name,omitempty"`
+	Executor        string                        `json:"executor,omitempty"`
+	Status          string                        `json:"status,omitempty"`
+	Phase           string                        `json:"phase,omitempty"`
+	InputSummary    responsesaudit.PayloadSummary `json:"input_summary"`
+	OutputSummary   responsesaudit.PayloadSummary `json:"output_summary"`
+	MetadataSummary responsesaudit.PayloadSummary `json:"metadata_summary"`
+	InputJSON       map[string]any                `json:"input_json,omitempty"`
+	OutputJSON      map[string]any                `json:"output_json,omitempty"`
+	MetadataJSON    map[string]any                `json:"metadata_json,omitempty"`
+	ErrorText       string                        `json:"error_text,omitempty"`
+	StartedAt       time.Time                     `json:"started_at,omitempty"`
+	CompletedAt     time.Time                     `json:"completed_at,omitempty"`
+	CreatedAt       time.Time                     `json:"created_at"`
+}
+
 func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRequest, in *responsesAuditTraceInput) (*mcp.CallToolResult, *responsesAuditTraceOutput, error) {
 	responseID := strings.TrimSpace(in.ResponseID)
 	requestAuditID := strings.TrimSpace(in.RequestAuditID)
@@ -107,6 +147,44 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 	return nil, out, nil
 }
 
+func (a *serverAPI) responsesAuditToolCalls(ctx context.Context, req *mcp.CallToolRequest, in *responsesAuditToolCallsInput) (*mcp.CallToolResult, *responsesAuditToolCallsOutput, error) {
+	if a.store == nil || a.store.EntClient() == nil {
+		return nil, nil, fmt.Errorf("store is not available")
+	}
+	params := responsesaudit.ListToolCallAuditsParams{
+		ResponseID:     strings.TrimSpace(in.ResponseID),
+		RequestAuditID: strings.TrimSpace(in.RequestAuditID),
+		ConversationID: strings.TrimSpace(in.ConversationID),
+		CallID:         strings.TrimSpace(in.CallID),
+		ToolName:       strings.TrimSpace(in.ToolName),
+		Status:         strings.TrimSpace(in.Status),
+		Limit:          in.Limit,
+	}
+	records, err := responsesaudit.NewQueryService(a.store.EntClient()).ListToolCallAudits(ctx, params)
+	if err != nil {
+		return nil, nil, fmt.Errorf("query responses tool call audits: %w", err)
+	}
+	items := make([]responsesToolCallAuditView, 0, len(records))
+	for _, record := range records {
+		items = append(items, responsesToolCallAuditFromAudit(record, in.IncludePayloads))
+	}
+	out := &responsesAuditToolCallsOutput{
+		Query: responsesAuditToolCallsQuery{
+			ResponseID:     params.ResponseID,
+			RequestAuditID: params.RequestAuditID,
+			ConversationID: params.ConversationID,
+			CallID:         params.CallID,
+			ToolName:       params.ToolName,
+			Status:         params.Status,
+			Limit:          responsesaudit.NormalizeAuditQueryLimit(params.Limit),
+		},
+		Items:           items,
+		Total:           len(items),
+		IncludePayloads: in.IncludePayloads,
+	}
+	return nil, out, nil
+}
+
 func responsesRequestAuditFromAudit(audit responsesaudit.RequestAuditView) *responsesRequestAuditView {
 	return &responsesRequestAuditView{
 		ID:              audit.ID,
@@ -122,6 +200,34 @@ func responsesRequestAuditFromAudit(audit responsesaudit.RequestAuditView) *resp
 		ErrorText:       audit.ErrorText,
 		CreatedAt:       audit.CreatedAt,
 	}
+}
+
+func responsesToolCallAuditFromAudit(record responsesaudit.ToolCallAuditView, includePayloads bool) responsesToolCallAuditView {
+	out := responsesToolCallAuditView{
+		ID:              record.ID,
+		ResponseID:      record.ResponseID,
+		RequestAuditID:  record.RequestAuditID,
+		ConversationID:  record.ConversationID,
+		CallID:          record.CallID,
+		ToolType:        record.ToolType,
+		ToolName:        record.ToolName,
+		Executor:        record.Executor,
+		Status:          record.Status,
+		Phase:           record.Phase,
+		InputSummary:    responsesaudit.SummarizeJSONPayload(record.InputJSON),
+		OutputSummary:   responsesaudit.SummarizeJSONPayload(record.OutputJSON),
+		MetadataSummary: responsesaudit.SummarizeJSONPayload(record.MetadataJSON),
+		ErrorText:       record.ErrorText,
+		StartedAt:       record.StartedAt,
+		CompletedAt:     record.CompletedAt,
+		CreatedAt:       record.CreatedAt,
+	}
+	if includePayloads {
+		out.InputJSON = record.InputJSON
+		out.OutputJSON = record.OutputJSON
+		out.MetadataJSON = record.MetadataJSON
+	}
+	return out
 }
 
 func responsesExecutionEventFromAudit(event responsesaudit.ExecutionEventView) responsesExecutionEventView {

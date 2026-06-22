@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -280,8 +281,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 20 {
-		t.Fatalf("len(tools.Tools) = %d, want 20", len(tools.Tools))
+	if len(tools.Tools) != 21 {
+		t.Fatalf("len(tools.Tools) = %d, want 21", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -735,6 +736,101 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := analysisJob.StructuredContent.(map[string]any)["job_type"].(string); got != "session_reanalyze" {
 		t.Fatalf("get_analysis_job.job_type = %q, want session_reanalyze", got)
+	}
+}
+
+func TestResponsesAuditToolCallsTool(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	base := time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-mcp-tool-1").
+		SetResponseID("resp-mcp-tool-1").
+		SetConversationID("thread-mcp-tool-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(ctx); err != nil {
+		t.Fatalf("create request audit error = %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	if _, err := auditor.RecordToolCallAudit(responsesaudit.ContextWithRequestAuditID(ctx, "reqaudit-mcp-tool-1"), responsesaudit.ToolCallAudit{
+		ResponseID:     "resp-mcp-tool-1",
+		ConversationID: "thread-mcp-tool-1",
+		CallID:         "call_mcp_secret",
+		ToolType:       "function",
+		ToolName:       "lookup",
+		Executor:       "function_executor:lookup",
+		Status:         "completed",
+		InputJSON:      map[string]any{"query": "SECRET_MARKER_MCP"},
+		OutputJSON:     map[string]any{"result": "SECRET_MARKER_MCP"},
+		MetadataJSON:   map[string]any{"note": "SECRET_MARKER_MCP"},
+		StartedAt:      base.Add(time.Second),
+		CompletedAt:    base.Add(2 * time.Second),
+		CreatedAt:      base.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+
+	server := New(st, Options{})
+	session, err := connectClient(ctx, server)
+	if err != nil {
+		t.Fatalf("connectClient() error = %v", err)
+	}
+	defer session.Close()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "responses_audit_tool_calls",
+		Arguments: map[string]any{
+			"request_audit_id": "reqaudit-mcp-tool-1",
+			"tool_name":        "lookup",
+			"status":           "completed",
+			"limit":            10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_tool_calls) error = %v", err)
+	}
+	payload := result.StructuredContent.(map[string]any)
+	if strings.Contains(fmt.Sprintf("%v", payload), "SECRET_MARKER_MCP") {
+		t.Fatalf("default MCP response leaked secret marker: %+v", payload)
+	}
+	if got := int(payload["total"].(float64)); got != 1 {
+		t.Fatalf("responses_audit_tool_calls total = %d, want 1", got)
+	}
+	items := payload["items"].([]any)
+	item := items[0].(map[string]any)
+	if got := item["call_id"].(string); got != "call_mcp_secret" {
+		t.Fatalf("responses_audit_tool_calls call_id = %q, want call_mcp_secret", got)
+	}
+	inputSummary := item["input_summary"].(map[string]any)
+	if present, ok := inputSummary["present"].(bool); !ok || !present || inputSummary["sha256"] == "" {
+		t.Fatalf("input_summary = %+v, want present sha", inputSummary)
+	}
+	if _, ok := item["input_json"]; ok {
+		t.Fatalf("default MCP response included input_json: %+v", item)
+	}
+
+	result, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "responses_audit_tool_calls",
+		Arguments: map[string]any{
+			"call_id":          "call_mcp_secret",
+			"include_payloads": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_tool_calls include payloads) error = %v", err)
+	}
+	payload = result.StructuredContent.(map[string]any)
+	if !strings.Contains(fmt.Sprintf("%v", payload), "SECRET_MARKER_MCP") {
+		t.Fatalf("include_payloads MCP response missing secret marker: %+v", payload)
 	}
 }
 

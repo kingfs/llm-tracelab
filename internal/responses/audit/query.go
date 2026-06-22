@@ -360,6 +360,10 @@ func (s *QueryService) listUpstreamExchanges(ctx context.Context, requestAuditID
 }
 
 func normalizeAuditQueryLimit(limit int) int {
+	return NormalizeAuditQueryLimit(limit)
+}
+
+func NormalizeAuditQueryLimit(limit int) int {
 	if limit <= 0 {
 		return DefaultAuditQueryLimit
 	}
