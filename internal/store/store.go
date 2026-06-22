@@ -1154,6 +1154,21 @@ func (s *Store) UpsertModelCatalog(record ModelCatalogRecord) error {
 		Exec(context.Background())
 }
 
+func (s *Store) GetModelCatalog(model string) (ModelCatalogRecord, error) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return ModelCatalogRecord{}, fmt.Errorf("model is required")
+	}
+	row, err := s.client.ModelCatalog.Get(context.Background(), model)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return ModelCatalogRecord{}, sql.ErrNoRows
+		}
+		return ModelCatalogRecord{}, err
+	}
+	return modelCatalogRecordFromEnt(row), nil
+}
+
 func (s *Store) CreateChannelProbeRun(record ChannelProbeRunRecord) (ChannelProbeRunRecord, error) {
 	record.ID = strings.TrimSpace(record.ID)
 	record.ChannelID = strings.TrimSpace(record.ChannelID)
@@ -6436,6 +6451,23 @@ func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 	}
 	if row.LastProbeAt != nil {
 		record.LastProbeAt = *row.LastProbeAt
+	}
+	return record
+}
+
+func modelCatalogRecordFromEnt(row *dao.ModelCatalog) ModelCatalogRecord {
+	record := ModelCatalogRecord{
+		Model:       row.ID,
+		DisplayName: row.DisplayName,
+		Family:      row.Family,
+		Vendor:      row.Vendor,
+		Description: row.Description,
+		TagsJSON:    row.TagsJSON,
+		FirstSeenAt: row.FirstSeenAt,
+		LastSeenAt:  row.LastSeenAt,
+	}
+	if row.LastUsedAt != nil {
+		record.LastUsedAt = *row.LastUsedAt
 	}
 	return record
 }

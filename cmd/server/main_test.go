@@ -765,6 +765,179 @@ responses_server:
 	}
 }
 
+func TestModelsCodexConfigCommandKeepsStableWhenDatabaseUnavailable(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + filepath.Join(dir, "missing.sqlite3") + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5")
+	if len(envelope.Result.Warnings) != 0 {
+		t.Fatalf("warnings = %+v, want none", envelope.Result.Warnings)
+	}
+	if envelope.Result.Diagnostics.DatabaseAvailable || envelope.Result.Diagnostics.CatalogSource != "unavailable" || envelope.Result.Diagnostics.ChannelSource != "unavailable" {
+		t.Fatalf("diagnostics = %+v, want unavailable database", envelope.Result.Diagnostics)
+	}
+}
+
+func TestModelsCodexConfigCommandReportsCatalogAndChannelHits(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.com/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		Priority:       10,
+		Weight:         1,
+		CapacityHint:   1,
+		ModelDiscovery: "list_models",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if err := st.UpsertModelCatalog(store.ModelCatalogRecord{Model: "gpt-5", DisplayName: "GPT-5"}); err != nil {
+		t.Fatalf("UpsertModelCatalog() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5")
+	diagnostics := envelope.Result.Diagnostics
+	if !diagnostics.DatabaseAvailable || !diagnostics.CatalogModelPresent || !diagnostics.ChannelModelPresent || diagnostics.ChannelModelCount != 1 {
+		t.Fatalf("diagnostics = %+v, want catalog and channel hit", diagnostics)
+	}
+	if diagnostics.CatalogSource != "model_catalog" || diagnostics.ChannelSource != "channel_models" {
+		t.Fatalf("sources = %q/%q, want model_catalog/channel_models", diagnostics.CatalogSource, diagnostics.ChannelSource)
+	}
+	if len(envelope.Result.Warnings) != 0 || len(diagnostics.DriftWarnings) != 0 {
+		t.Fatalf("warnings = %+v drift = %+v, want none", envelope.Result.Warnings, diagnostics.DriftWarnings)
+	}
+}
+
+func TestModelsCodexConfigCommandWarnsForProfileCatalogChannelDrift(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5")
+	diagnostics := envelope.Result.Diagnostics
+	if !diagnostics.DatabaseAvailable || diagnostics.CatalogModelPresent || diagnostics.ChannelModelPresent || diagnostics.ChannelModelCount != 0 {
+		t.Fatalf("diagnostics = %+v, want available database with missing catalog/channel", diagnostics)
+	}
+	for _, want := range []string{"model_catalog has no entry", "channel_models has no entry"} {
+		if !containsStringFragment(envelope.Result.Warnings, want) || !containsStringFragment(diagnostics.DriftWarnings, want) {
+			t.Fatalf("warnings missing %q: warnings=%+v drift=%+v", want, envelope.Result.Warnings, diagnostics.DriftWarnings)
+		}
+	}
+}
+
+type modelsCodexConfigEnvelopeForTest struct {
+	OK      bool   `json:"ok"`
+	Command string `json:"command"`
+	Result  struct {
+		Diagnostics struct {
+			DatabaseAvailable   bool     `json:"database_available"`
+			CatalogModelPresent bool     `json:"catalog_model_present"`
+			ChannelModelPresent bool     `json:"channel_model_present"`
+			ChannelModelCount   int      `json:"channel_model_count"`
+			CatalogSource       string   `json:"catalog_source"`
+			ChannelSource       string   `json:"channel_source"`
+			DriftWarnings       []string `json:"drift_warnings"`
+		} `json:"diagnostics"`
+		Warnings []string `json:"warnings"`
+	} `json:"result"`
+}
+
+func executeModelsCodexConfigJSONForTest(t *testing.T, configPath string, model string) modelsCodexConfigEnvelopeForTest {
+	t.Helper()
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "models", "codex-config", model})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var envelope modelsCodexConfigEnvelopeForTest
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "models.codex_config" {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+	return envelope
+}
+
 func TestRootCommandRegistersModelsCodexConfig(t *testing.T) {
 	cmd := newRootCommand()
 	found, _, err := cmd.Find([]string{"models", "codex-config"})
