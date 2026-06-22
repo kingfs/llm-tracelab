@@ -212,11 +212,7 @@ function ResponsesFunctionExecutorsPanel({ state }) {
             {(data.supported_types || []).map((type) => <InlineTag key={type} tone="accent">{type}</InlineTag>)}
             {!data.supported_types?.length ? <InlineTag>no supported types</InlineTag> : null}
           </div>
-          {warnings.length ? (
-            <div className="responses-function-executor-warnings">
-              {warnings.map((warning) => <InlineTag key={warning} tone="gold">{warning}</InlineTag>)}
-            </div>
-          ) : null}
+          <ExecutorWarnings title="Warnings" warnings={warnings} />
           {executors.length ? (
             <div className="responses-function-executor-list">
               {executors.map((executor) => (
@@ -228,9 +224,17 @@ function ResponsesFunctionExecutorsPanel({ state }) {
                     </div>
                     <div className="trace-tag-group">
                       <InlineTag tone={executor.enabled ? "green" : "gold"}>{executor.enabled ? "enabled" : "disabled"}</InlineTag>
+                      <InlineTag tone={executor.available ? "green" : "danger"}>{executor.available ? "available" : "unavailable"}</InlineTag>
                       <InlineTag tone={executor.output_configured ? "accent" : "default"}>{executor.output_configured ? "output configured" : "no output"}</InlineTag>
+                      <InlineTag tone={executor.command_configured ? "accent" : "gold"}>{executor.command_configured ? "command configured" : "no command"}</InlineTag>
                     </div>
                   </div>
+                  <div className="detail-meta-strip responses-function-executor-state">
+                    <DetailMetaPill label="available" value={formatBool(executor.available)} />
+                    <DetailMetaPill label="command" value={formatBool(executor.command_configured)} />
+                    <DetailMetaPill label="output" value={formatBool(executor.output_configured)} />
+                  </div>
+                  <ExecutorWarnings title="Executor warnings" warnings={executor.warnings || []} compact />
                 </article>
               ))}
             </div>
@@ -241,6 +245,25 @@ function ResponsesFunctionExecutorsPanel({ state }) {
       ) : null}
     </section>
   );
+}
+
+function ExecutorWarnings({ title, warnings, compact = false }) {
+  const items = Array.isArray(warnings) ? warnings.filter(Boolean) : [];
+  if (!items.length) {
+    return null;
+  }
+  return (
+    <div className={`responses-function-executor-warnings ${compact ? "responses-function-executor-warnings-compact" : ""}`.trim()}>
+      <strong>{title}</strong>
+      <ul>
+        {items.map((warning, index) => <li key={`${String(warning)}:${index}`}>{String(warning)}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function formatBool(value) {
+  return value ? "yes" : "no";
 }
 
 function ResponsesAuditTrace({ trace }) {
