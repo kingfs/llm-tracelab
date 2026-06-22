@@ -68,7 +68,7 @@ Responses server-mode 的 semantic state 使用 runtime store。当前装配优�
 Responses audit schema 的职责边界如下：
 
 - `request_audits`：记录入站 Responses request envelope、client request id、headers allowlist、body hash/preview 和完成状态。当前只在 Responses server-mode 写入，并可通过 audit query service / MCP 查询。
-- `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。当前已写入 request、内部 model_call、hosted `web_search` tool_call、普通 function requested/submitted、registered server-side function started/completed/failed、deferred/incremental stream started/completed、request/model_call cancellation、explicit compact 和 auto compact threshold trigger 的最小生命周期事件。
+- `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。当前已写入 request、内部 model_call、hosted `web_search` tool_call、普通 function requested/submitted、registered server-side function started/completed/failed、incremental stream fallback、deferred/incremental stream started/completed、request/model_call cancellation、explicit compact 和 auto compact threshold trigger 的最小生命周期事件。
 - `upstream_exchanges`：关联 semantic response/request 与 `.http` cassette、trace id、route target。当前只覆盖 Responses server-mode 内部 Chat Completions 调用，并在 response 完成后回填 semantic `response_id`；`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
 
 后续接入顺序建议先补 Monitor UI 入口，再处理复杂 tool/server-side streaming 和 compact events。
@@ -157,5 +157,5 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 - 用 SQLite 替代 raw cassette 作为 replay 事实源。
 - hosted tool/server-side tool execution、auto-compact 等复杂场景的真实增量 Responses server-mode streaming；内部 Chat Completions upstream cancel 传播已落地。
 - function executor 的 YAML/Monitor 配置、server-side tool streaming events 和完整 model profile/context window/token budgeting；当前仅有默认空 executor registry、profile 配置骨架和 item-count compact 阈值覆盖，普通 function call argument streaming 已有首切。
-- 完整真实 stream/compact execution event 写入和完整 Postgres migration 生产化；当前仅覆盖 `request_audits`、内部 `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed/cancelled、普通 function tool requested/submitted、deferred/incremental stream started/completed 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
+- 完整真实 stream/compact execution event 写入和完整 Postgres migration 生产化；当前仅覆盖 `request_audits`、内部 `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed/cancelled、普通 function tool requested/submitted、incremental stream fallback、deferred/incremental stream started/completed 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
 - provider probe 的完整配置/Monitor 工作流；当前只有手动 `provider probe` 诊断建议和默认关闭的启动时保守补全首切。

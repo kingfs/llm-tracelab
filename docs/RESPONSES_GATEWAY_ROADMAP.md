@@ -21,7 +21,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - hosted `web_search` 非流式 tool loop。
 - 普通 function tool 的 requested/submitted continuation。
 - Chat Completions SSE cassette 记录与聚合。
-- deferred Responses SSE envelope，以及简单文本输出的真实增量 Responses streaming 首切。
+- deferred Responses SSE envelope、incremental fallback 审计事件，以及简单文本输出的真实增量 Responses streaming 首切。
 - context cancellation audit。
 - 显式 `/v1/responses/compact` 和 item-count 自动 compact 阈值。
 

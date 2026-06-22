@@ -270,6 +270,7 @@ func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, au
 		Status:         "started",
 		DetailsJSON: map[string]any{
 			"request_audit_id": auditID,
+			"mode":             "deferred",
 		},
 	})
 
@@ -288,6 +289,7 @@ func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, au
 			Message:        err.Error(),
 			DetailsJSON: map[string]any{
 				"request_audit_id": auditID,
+				"mode":             "deferred",
 			},
 		})
 		return
@@ -300,6 +302,7 @@ func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, au
 		Status:         "completed",
 		DetailsJSON: map[string]any{
 			"request_audit_id": auditID,
+			"mode":             "deferred",
 		},
 	})
 	h.recordExecutionEvent(r, audit.ExecutionEvent{
@@ -326,6 +329,19 @@ func (h *Handler) serveIncrementalResponseStream(w http.ResponseWriter, r *http.
 	resp, err := streamer.CreateStream(ctx, req, sink)
 	if err != nil {
 		if errors.Is(err, runtime.ErrIncrementalStreamUnsupported) && !writer.wrote {
+			h.recordExecutionEvent(r, audit.ExecutionEvent{
+				EventType: "response.stream",
+				Phase:     "stream",
+				Status:    "fallback",
+				Message:   err.Error(),
+				DetailsJSON: map[string]any{
+					"request_audit_id": auditID,
+					"stream":           true,
+					"from_mode":        "incremental",
+					"to_mode":          "deferred",
+					"reason":           err.Error(),
+				},
+			})
 			return true
 		}
 		failureStatus := runtimeFailureStatus(err)

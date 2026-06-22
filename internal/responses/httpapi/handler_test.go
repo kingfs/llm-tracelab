@@ -320,11 +320,72 @@ func TestCreateResponseStreamSuccess(t *testing.T) {
 	if auditor.events[1].EventType != "response.stream" || auditor.events[1].Status != "started" {
 		t.Fatalf("stream started event mismatch: %#v", auditor.events[1])
 	}
+	if auditor.events[1].DetailsJSON["mode"] != "deferred" {
+		t.Fatalf("deferred stream started details = %#v, want mode=deferred", auditor.events[1].DetailsJSON)
+	}
 	if auditor.events[2].EventType != "response.stream" || auditor.events[2].Status != "completed" {
 		t.Fatalf("stream completed event mismatch: %#v", auditor.events[2])
 	}
+	if auditor.events[2].DetailsJSON["mode"] != "deferred" {
+		t.Fatalf("deferred stream completed details = %#v, want mode=deferred", auditor.events[2].DetailsJSON)
+	}
 	if auditor.events[3].EventType != "response.request" || auditor.events[3].Status != "completed" || auditor.events[3].ResponseID != "resp_stream" {
 		t.Fatalf("request completed event mismatch: %#v", auditor.events[3])
+	}
+}
+
+func TestCreateResponseStreamFallbackRecordsUnsupportedIncrementalEvent(t *testing.T) {
+	rt := &fakeIncrementalRuntime{
+		fakeRuntime: fakeRuntime{
+			createResp: protocol.Response{
+				ID:        "resp_deferred",
+				Object:    "response",
+				Status:    "completed",
+				Model:     "gpt-test",
+				CreatedAt: 123,
+				Output: []protocol.OutputItem{{
+					ID:      "msg_1",
+					Type:    "message",
+					Status:  "completed",
+					Role:    "assistant",
+					Content: []protocol.ContentPart{{Type: "output_text", Text: "deferred"}},
+				}},
+			},
+		},
+		streamErr: runtime.ErrIncrementalStreamUnsupported,
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true,"tools":[{"type":"web_search"}]}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !rt.streamReq.Stream || rt.createReq.Input != "hello" || !rt.createReq.Stream {
+		t.Fatalf("runtime fallback requests mismatch: stream=%#v create=%#v", rt.streamReq, rt.createReq)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
+		t.Fatalf("stream fallback audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 5 {
+		t.Fatalf("execution events = %d, want accepted/fallback/stream started/stream completed/request completed: %#v", len(auditor.events), auditor.events)
+	}
+	fallback := auditor.events[1]
+	if fallback.EventType != "response.stream" || fallback.Status != "fallback" || fallback.Message != runtime.ErrIncrementalStreamUnsupported.Error() {
+		t.Fatalf("fallback event mismatch: %#v", fallback)
+	}
+	if fallback.DetailsJSON["from_mode"] != "incremental" || fallback.DetailsJSON["to_mode"] != "deferred" || fallback.DetailsJSON["reason"] != runtime.ErrIncrementalStreamUnsupported.Error() {
+		t.Fatalf("fallback event details = %#v", fallback.DetailsJSON)
+	}
+	if auditor.events[2].EventType != "response.stream" || auditor.events[2].Status != "started" || auditor.events[2].DetailsJSON["mode"] != "deferred" {
+		t.Fatalf("deferred started event mismatch: %#v", auditor.events[2])
+	}
+	if auditor.events[3].EventType != "response.stream" || auditor.events[3].Status != "completed" || auditor.events[3].DetailsJSON["mode"] != "deferred" {
+		t.Fatalf("deferred completed event mismatch: %#v", auditor.events[3])
+	}
+	if auditor.events[4].EventType != "response.request" || auditor.events[4].Status != "completed" || auditor.events[4].ResponseID != "resp_deferred" {
+		t.Fatalf("request completed event mismatch: %#v", auditor.events[4])
 	}
 }
 
