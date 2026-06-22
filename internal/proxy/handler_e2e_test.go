@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -918,6 +919,41 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if audit.HeaderJSON["content-type"] != "application/json" || audit.HeaderJSON["x-client-request-id"] != "client-audit-1" {
 		t.Fatalf("request audit headers = %#v", audit.HeaderJSON)
+	}
+
+	exchanges, err := st.EntClient().UpstreamExchange.Query().
+		Order(upstreamexchange.ByStartedAt()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query upstream exchanges: %v", err)
+	}
+	if len(exchanges) != 1 {
+		t.Fatalf("upstream exchanges len = %d, want 1: %+v", len(exchanges), exchanges)
+	}
+	exchange := exchanges[0]
+	if exchange.RequestAuditID != audit.ID {
+		t.Fatalf("upstream exchange request_audit_id = %q, want %q", exchange.RequestAuditID, audit.ID)
+	}
+	if exchange.TraceID != parsed.Header.Meta.RequestID {
+		t.Fatalf("upstream exchange trace_id = %q, want recorder request_id %q", exchange.TraceID, parsed.Header.Meta.RequestID)
+	}
+	if exchange.CassettePath != recordPath {
+		t.Fatalf("upstream exchange cassette_path = %q, want %q", exchange.CassettePath, recordPath)
+	}
+	if exchange.UpstreamID != "openai-chat" {
+		t.Fatalf("upstream exchange upstream_id = %q, want openai-chat", exchange.UpstreamID)
+	}
+	if exchange.RouteTarget != upstreamServer.URL+"/v1" {
+		t.Fatalf("upstream exchange route_target = %q, want %q", exchange.RouteTarget, upstreamServer.URL+"/v1")
+	}
+	if exchange.Model != "gpt-5" || exchange.Endpoint != "/v1/chat/completions" || exchange.StatusCode != http.StatusOK {
+		t.Fatalf("upstream exchange model/endpoint/status = %q/%q/%d, want gpt-5//v1/chat/completions/200", exchange.Model, exchange.Endpoint, exchange.StatusCode)
+	}
+	if exchange.StartedAt.IsZero() || exchange.CompletedAt.IsZero() || exchange.CompletedAt.Before(exchange.StartedAt) {
+		t.Fatalf("upstream exchange timestamps invalid: started=%s completed=%s", exchange.StartedAt, exchange.CompletedAt)
+	}
+	if exchange.ErrorText != "" {
+		t.Fatalf("upstream exchange error_text = %q, want empty", exchange.ErrorText)
 	}
 }
 

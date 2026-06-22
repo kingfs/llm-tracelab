@@ -386,10 +386,13 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 	if cfg.ResponsesServerEnabled() {
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
 		var requestAuditor responsesaudit.RequestAuditor
+		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder
 		if st != nil {
 			if entClient := st.EntClient(); entClient != nil {
 				responseStore = responsesruntime.NewEntStore(entClient)
-				requestAuditor = responsesaudit.NewEntAuditor(entClient)
+				entAuditor := responsesaudit.NewEntAuditor(entClient)
+				requestAuditor = entAuditor
+				upstreamExchangeRecorder = entAuditor
 			}
 		}
 		runtimeConfig := responsesruntime.Config{
@@ -420,6 +423,7 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			router:        rtr,
 			recorder:      rec,
 			routingPolicy: rtr.Policy(),
+			auditor:       upstreamExchangeRecorder,
 		}, responseStore, runtimeOptions...)
 		localResponses = httpapi.NewHandler(
 			rt,

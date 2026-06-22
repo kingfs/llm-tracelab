@@ -16,6 +16,7 @@ import (
 )
 
 type fakeRuntime struct {
+	createCtx       context.Context
 	createReq       protocol.CreateResponseRequest
 	createResp      protocol.Response
 	createErr       error
@@ -26,6 +27,7 @@ type fakeRuntime struct {
 }
 
 func (f *fakeRuntime) Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error) {
+	f.createCtx = ctx
 	f.createReq = req
 	return f.createResp, f.createErr
 }
@@ -140,6 +142,9 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	}
 	if auditor.completed.ResponseID != "resp_1" || auditor.completed.ConversationID != "thread_1" {
 		t.Fatalf("completed audit mismatch: %#v", auditor.completed)
+	}
+	if auditID, ok := audit.RequestAuditIDFromContext(rt.createCtx); !ok || auditID != "audit_1" {
+		t.Fatalf("runtime context audit id = %q/%v, want audit_1/true", auditID, ok)
 	}
 	if auditor.rejectedID != "" {
 		t.Fatalf("unexpected rejected audit: id=%q failure=%#v", auditor.rejectedID, auditor.rejected)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/recorder"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/chatclient"
 	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -29,6 +30,7 @@ type responsesChatCompletionsAdapter struct {
 	recorder      *recorder.Recorder
 	routingPolicy string
 	httpClient    *http.Client
+	auditor       responsesaudit.UpstreamExchangeRecorder
 }
 
 var _ runtime.ChatCompletionsClient = (*responsesChatCompletionsAdapter)(nil)
@@ -117,6 +119,7 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
+		a.recordUpstreamExchange(ctx, logInfo, start, time.Now(), 0)
 		a.router.Complete(selection, router.Outcome{
 			Success:    false,
 			StatusCode: 0,
@@ -134,6 +137,7 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
+		a.recordUpstreamExchange(ctx, logInfo, start, time.Now(), httpResp.StatusCode)
 		a.router.Complete(selection, router.Outcome{
 			Success:    false,
 			StatusCode: httpResp.StatusCode,
@@ -165,6 +169,7 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 		slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 	}
+	a.recordUpstreamExchange(ctx, logInfo, start, start.Add(duration), statusCode)
 
 	a.router.Complete(selection, router.Outcome{
 		Success:    responseErr == nil && statusCode >= 200 && statusCode < 300,
@@ -177,6 +182,32 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		return runtime.ChatCompletionResponse{}, responseErr
 	}
 	return chatResp, nil
+}
+
+func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Context, logInfo *recorder.LogInfo, startedAt time.Time, completedAt time.Time, statusCode int) {
+	if a == nil || a.auditor == nil || logInfo == nil {
+		return
+	}
+	requestAuditID, ok := responsesaudit.RequestAuditIDFromContext(ctx)
+	if !ok {
+		return
+	}
+	entry := responsesaudit.UpstreamExchange{
+		RequestAuditID: requestAuditID,
+		TraceID:        logInfo.Header.Meta.RequestID,
+		CassettePath:   logInfo.Path,
+		UpstreamID:     logInfo.Header.Meta.SelectedUpstreamID,
+		RouteTarget:    logInfo.Header.Meta.SelectedUpstreamBaseURL,
+		Model:          logInfo.Header.Meta.Model,
+		Endpoint:       logInfo.Header.Meta.Endpoint,
+		StatusCode:     statusCode,
+		StartedAt:      startedAt,
+		CompletedAt:    completedAt,
+		ErrorText:      logInfo.Header.Meta.Error,
+	}
+	if err := a.auditor.RecordUpstreamExchange(ctx, entry); err != nil {
+		slog.Error("Failed to record responses upstream exchange", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
+	}
 }
 
 func (h *Handler) serveLocalResponses(w http.ResponseWriter, r *http.Request) {

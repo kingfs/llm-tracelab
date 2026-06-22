@@ -18,6 +18,10 @@ type RequestAuditor interface {
 	Rejected(ctx context.Context, id string, failure Failure) error
 }
 
+type UpstreamExchangeRecorder interface {
+	RecordUpstreamExchange(ctx context.Context, entry UpstreamExchange) error
+}
+
 type RequestEntry struct {
 	Method          string
 	Path            string
@@ -36,6 +40,21 @@ type Completion struct {
 type Failure struct {
 	Status    string
 	ErrorText string
+}
+
+type UpstreamExchange struct {
+	ResponseID     string
+	RequestAuditID string
+	TraceID        string
+	CassettePath   string
+	UpstreamID     string
+	RouteTarget    string
+	Model          string
+	Endpoint       string
+	StatusCode     int
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	ErrorText      string
 }
 
 func NewRequestEntry(r *http.Request, body []byte) RequestEntry {

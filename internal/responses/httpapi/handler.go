@@ -105,7 +105,8 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.runtime.Create(r.Context(), req)
+	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
+	resp, err := h.runtime.Create(ctx, req)
 	if err != nil {
 		h.auditRejected(r, auditID, "failed", err.Error())
 		writeRuntimeError(w, err)

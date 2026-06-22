@@ -31,7 +31,7 @@ TraceLab 能解析这些协议并写入统一观测结构，但不会在转发�
 
 Responses server-mode 是一个可选功能。默认情况下 `/v1/responses` 仍按 OpenAI-compatible Responses endpoint 代理透传；只有配置 `responses_server.enabled=true` 后，配置的 Responses path 才由本地 Responses runtime 接管。
 
-开启 server-mode 后，当前已支持非流式 Responses 请求经本地 runtime 映射为内部上游 `/v1/chat/completions` 调用；该内部上游 HTTP exchange 会按现有 recorder 写入 `.http` cassette。非 Responses 请求仍走现有代理、路由、录制和解析路径。
+开启 server-mode 后，当前已支持非流式 Responses 请求经本地 runtime 映射为内部上游 `/v1/chat/completions` 调用；该内部上游 HTTP exchange 会按现有 recorder 写入 `.http` cassette，并在有 ent-backed audit store 时写入一条最小 `upstream_exchanges` correlation。非 Responses 请求仍走现有代理、路由、录制和解析路径。
 
 Hosted `web_search` 已有首切实现。配置 `tools.web_search.enabled=true` 后，可选择 `mock` 或 `searxng` provider；非流式 Responses runtime 会把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把结果注入下一轮 Chat Completions。默认关闭，不影响普通代理路径。
 
@@ -59,15 +59,15 @@ V3 文件结构：
 
 SQLite 是 Monitor 列表、统计、过滤、分页、模型/渠道配置、系统事件、Observation IR、findings、分析任务和 eval 结果的结构化索引。
 
-Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。Stage 10A 已让 server-mode `POST /v1/responses` 写入最小 `request_audits` inbound envelope 和 accepted/completed/failed/rejected 状态；`execution_events`、`upstream_exchanges` 仍未写入。
+Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。Stage 10A 已让 server-mode `POST /v1/responses` 写入最小 `request_audits` inbound envelope 和 accepted/completed/failed/rejected 状态；Stage 11A 增加内部 `/v1/chat/completions` cassette 到 `request_audits` 的最小 `upstream_exchanges` 关联，字段包括 request audit id、recorder request id、cassette path、upstream id、route target、model、endpoint、status 和时间戳；`execution_events` 仍未写入。
 
 Responses audit schema 的职责边界如下：
 
 - `request_audits`：记录入站 Responses request envelope、client request id、headers allowlist、body hash/preview 和完成状态。当前只在 Responses server-mode 写入，不提供查询 API。
 - `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。
-- `upstream_exchanges`：关联 semantic response/request 与 `.http` cassette、trace id、route target。
+- `upstream_exchanges`：关联 semantic response/request 与 `.http` cassette、trace id、route target。当前只覆盖 Responses server-mode 内部 Chat Completions 调用，`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
 
-后续接入顺序建议先做 upstream exchange correlation，再补 tool events，最后处理 streaming/cancel/compact events。
+后续接入顺序建议补齐 response id correlation 和查询 API，再补 tool events，最后处理 streaming/cancel/compact events。
 
 当前重要表包括：
 

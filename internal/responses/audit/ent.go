@@ -72,6 +72,50 @@ func (a *EntAuditor) Rejected(ctx context.Context, id string, failure Failure) e
 	return update.Exec(ctx)
 }
 
+func (a *EntAuditor) RecordUpstreamExchange(ctx context.Context, entry UpstreamExchange) error {
+	if a == nil || a.client == nil {
+		return nil
+	}
+	create := a.client.UpstreamExchange.Create().SetID("upex_" + uuid.NewString())
+	if entry.ResponseID != "" {
+		create.SetResponseID(entry.ResponseID)
+	}
+	if entry.RequestAuditID != "" {
+		create.SetRequestAuditID(entry.RequestAuditID)
+	}
+	if entry.TraceID != "" {
+		create.SetTraceID(entry.TraceID)
+	}
+	if entry.CassettePath != "" {
+		create.SetCassettePath(entry.CassettePath)
+	}
+	if entry.UpstreamID != "" {
+		create.SetUpstreamID(entry.UpstreamID)
+	}
+	if entry.RouteTarget != "" {
+		create.SetRouteTarget(entry.RouteTarget)
+	}
+	if entry.Model != "" {
+		create.SetModel(entry.Model)
+	}
+	if entry.Endpoint != "" {
+		create.SetEndpoint(entry.Endpoint)
+	}
+	if entry.StatusCode != 0 {
+		create.SetStatusCode(entry.StatusCode)
+	}
+	if !entry.StartedAt.IsZero() {
+		create.SetStartedAt(entry.StartedAt)
+	}
+	if !entry.CompletedAt.IsZero() {
+		create.SetCompletedAt(entry.CompletedAt)
+	}
+	if entry.ErrorText != "" {
+		create.SetErrorText(entry.ErrorText)
+	}
+	return create.Exec(ctx)
+}
+
 func nilToEmptyMap(values map[string]any) map[string]any {
 	if values == nil {
 		return map[string]any{}
