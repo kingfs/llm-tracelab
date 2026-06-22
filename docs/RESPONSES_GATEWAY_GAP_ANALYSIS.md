@@ -107,8 +107,8 @@
 
 ### Request audit 诊断深度
 
-- 已有：`request_audits`、`execution_events`、`upstream_exchanges`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切。
-- 缺口：缺少 thread/session/turn 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/tool/request feature 顶层诊断。
+- 已有：`request_audits`、`execution_events`、`upstream_exchanges`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切。当前还可通过 `--include-tools` 从既有 `execution_events.event_type == "response.tool_call"` 派生保守的 tool call diagnostics，汇总 call id、工具名、executor、状态序列、latest status、started/completed 时间、error/output/query/arguments 的脱敏摘要和事件计数。
+- 缺口：缺少 thread/session/turn 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/request feature 顶层诊断；tool call diagnostics 目前仍是从 execution events 派生的过渡视图，不是独立事实表。
 - llm-tracelab 下一步落点：扩展 `cmd/server/audit.go`，复用并扩展 `internal/responses/audit.QueryService`。
 
 ### Compact 与 context optimization
@@ -120,8 +120,8 @@
 
 ### Hosted/server-side tool lifecycle
 
-- 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切。
-- 缺口：没有独立 `tool_call_audits` 表；跨轮/混合工具失败 lifecycle 仍不完整；MCP、file search、code interpreter、computer-use 仍未实现执行器，只有强制执行时的 stable rejection contract。
+- 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切；`audit query --include-tools` 已基于这些 events 提供 derived tool call summary，便于在 schema 不变的情况下排障。
+- 缺口：没有独立 `tool_call_audits` 表；derived summary 不能替代可查询、可索引、可长期演进的 tool audit read model。跨轮/混合工具失败 lifecycle 仍不完整；MCP、file search、code interpreter、computer-use 仍未实现执行器，只有强制执行时的 stable rejection contract。
 - llm-tracelab 下一步落点：`ent/schema`、`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
 - responses-gateway 对照：`docs/tool-runtime.md` 的 `tool_call_audits` 和 MCP runtime boundary。
 
@@ -159,10 +159,10 @@
 ### `audit query` CLI
 
 - 已吸收首切：`llm-tracelab audit query`（别名 `audit responses`）提供面向 agent 的只读 Responses audit trace 查询入口，复用当前 config 的 application store 和 `internal/responses/audit.QueryService`。
-- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时返回最新一条 trace；默认只输出 request audit envelope，events/exchanges 需显式打开。
-- 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body。
+- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --include-tools --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时返回最新一条 trace；默认只输出 request audit envelope，events/exchanges/tool calls 需显式打开。
+- 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body；`tool_calls` 是 derived conservative view，不输出 raw arguments/query/output/error，只输出 redacted summary 和事件引用。`--include-events` 仍按原行为输出 events 的 `details_json`，需要调用者自行按权限使用。
 - responses-gateway 能力：按 response/request/thread/session/turn/client request id 查询，并输出 diagnostics envelope。
-- 剩余缺口：尚未支持 thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics。
+- 剩余缺口：尚未支持 thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics；独立 `tool_call_audits` 表仍是下一步。
 
 ### Codex profile 生成命令
 
@@ -206,7 +206,7 @@
 4. 收敛 hosted tool audit schema。
    - 价值：为 web_search、external_command、未来 MCP/file/code 工具提供统一排障面。
    - 模块：`ent/schema`、`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
-   - 验收：不要手改 `ent/dao/**`；先定义 `tool_call_audits` 或等价表，再接 web_search/executor started/finished。
+   - 验收：在现有 derived `tool_calls` 诊断视图基础上，定义 `tool_call_audits` 或等价表；不要手改 `ent/dao/**`；再接 web_search/executor started/finished 的独立写入与查询。
 
 5. 补 model/Codex profile inspect。
    - 价值：让 Codex 本地配置与 `responses_server.model_profiles`、channel model catalog 保持一致。

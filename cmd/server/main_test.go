@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1619,6 +1620,134 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "old-secret") {
 		t.Fatalf("audit query output fell back to older matching secret: %s", out.String())
+	}
+}
+
+func TestAuditQueryCommandIncludesDerivedToolCallsJSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	base := time.Date(2026, 6, 22, 13, 30, 0, 0, time.UTC)
+	const secretMarker = "SECRET_CLI_TOOL_MARKER"
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit_tool_cli").
+		SetResponseID("resp_tool_cli").
+		SetConversationID("conv_tool_cli").
+		SetMethod("POST").
+		SetPath("/v1/responses").
+		SetHeaderJSON(map[string]any{"content-type": "application/json"}).
+		SetBodyPreview(`{"model":"gpt-5"}`).
+		SetBodySha256("sha-tool-cli").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("event_tool_cli_started").
+		SetResponseID("resp_tool_cli").
+		SetRequestAuditID("reqaudit_tool_cli").
+		SetConversationID("conv_tool_cli").
+		SetEventType("response.tool_call").
+		SetPhase("tool_call").
+		SetStatus("started").
+		SetDetailsJSON(map[string]any{
+			"call_id":   "call_tool_cli",
+			"tool_name": "web_search",
+			"executor":  "hosted:web_search",
+			"query":     "lookup " + secretMarker,
+		}).
+		SetOccurredAt(base.Add(time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create started tool event: %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("event_tool_cli_completed").
+		SetResponseID("resp_tool_cli").
+		SetRequestAuditID("reqaudit_tool_cli").
+		SetConversationID("conv_tool_cli").
+		SetEventType("response.tool_call").
+		SetPhase("tool_call").
+		SetStatus("completed").
+		SetDetailsJSON(map[string]any{
+			"call_id":      "call_tool_cli",
+			"tool_name":    "web_search",
+			"executor":     "hosted:web_search",
+			"query":        "lookup " + secretMarker,
+			"result_count": 3,
+		}).
+		SetOccurredAt(base.Add(2 * time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create completed tool event: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "json",
+		"audit", "query",
+		"--response-id", "resp_tool_cli",
+		"--include-tools",
+		"--limit", "10",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Query struct {
+				IncludeTools bool `json:"include_tools"`
+			} `json:"query"`
+			Events    []any `json:"events"`
+			ToolCalls []struct {
+				CallID        string   `json:"call_id"`
+				ToolName      string   `json:"tool_name"`
+				Executor      string   `json:"executor"`
+				StatusesSeen  []string `json:"statuses_seen"`
+				LatestStatus  string   `json:"latest_status"`
+				QuerySummary  string   `json:"query_summary"`
+				OutputSummary string   `json:"output_summary"`
+				EventCount    int      `json:"event_count"`
+				ResponseID    string   `json:"response_id"`
+			} `json:"tool_calls"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
+	}
+	if !envelope.OK || !envelope.Result.Query.IncludeTools {
+		t.Fatalf("envelope = %+v, want ok include_tools", envelope)
+	}
+	if len(envelope.Result.Events) != 0 {
+		t.Fatalf("events len = %d, want 0 without --include-events", len(envelope.Result.Events))
+	}
+	if len(envelope.Result.ToolCalls) != 1 {
+		t.Fatalf("tool_calls = %+v, want one derived tool call", envelope.Result.ToolCalls)
+	}
+	toolCall := envelope.Result.ToolCalls[0]
+	if toolCall.CallID != "call_tool_cli" || toolCall.ToolName != "web_search" || toolCall.Executor != "hosted:web_search" {
+		t.Fatalf("tool call = %+v, want web_search call summary", toolCall)
+	}
+	if !reflect.DeepEqual(toolCall.StatusesSeen, []string{"started", "completed"}) || toolCall.LatestStatus != "completed" {
+		t.Fatalf("tool statuses = %v latest=%q, want started/completed", toolCall.StatusesSeen, toolCall.LatestStatus)
+	}
+	if toolCall.QuerySummary == "" || toolCall.OutputSummary != "results=3" || toolCall.EventCount != 2 || toolCall.ResponseID != "resp_tool_cli" {
+		t.Fatalf("tool summaries = %+v, want redacted query and result count", toolCall)
+	}
+	if strings.Contains(out.String(), secretMarker) {
+		t.Fatalf("audit query tool_calls leaked secret marker: %s", out.String())
 	}
 }
 
