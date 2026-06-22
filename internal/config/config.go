@@ -159,12 +159,19 @@ type ResponsesServerConfig struct {
 }
 
 type ResponsesModelProfileConfig struct {
-	Name                        string `yaml:"name"`
-	Pattern                     string `yaml:"pattern"`
-	ContextWindowTokens         int    `yaml:"context_window_tokens"`
-	MaxOutputTokens             int    `yaml:"max_output_tokens"`
-	CompactHistoryItemThreshold int    `yaml:"compact_history_item_threshold"`
-	UpstreamModel               string `yaml:"upstream_model"`
+	Name                        string                         `yaml:"name"`
+	Pattern                     string                         `yaml:"pattern"`
+	ContextWindowTokens         int                            `yaml:"context_window_tokens"`
+	MaxOutputTokens             int                            `yaml:"max_output_tokens"`
+	CompactHistoryItemThreshold int                            `yaml:"compact_history_item_threshold"`
+	UpstreamModel               string                         `yaml:"upstream_model"`
+	TokenizeCounter             ResponsesTokenizeCounterConfig `yaml:"tokenize_counter"`
+}
+
+type ResponsesTokenizeCounterConfig struct {
+	Enabled    bool          `yaml:"enabled"`
+	UpstreamID string        `yaml:"upstream_id"`
+	Timeout    time.Duration `yaml:"timeout"`
 }
 
 type ResponsesFunctionExecutorConfig struct {
@@ -804,6 +811,7 @@ func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
 		profile.Name = strings.TrimSpace(profile.Name)
 		profile.Pattern = strings.TrimSpace(profile.Pattern)
 		profile.UpstreamModel = strings.TrimSpace(profile.UpstreamModel)
+		profile.TokenizeCounter.UpstreamID = strings.TrimSpace(profile.TokenizeCounter.UpstreamID)
 		profiles = append(profiles, profile)
 	}
 	return profiles

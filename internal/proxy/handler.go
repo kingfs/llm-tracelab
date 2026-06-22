@@ -410,6 +410,13 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		if executionEventRecorder != nil {
 			runtimeOptions = append(runtimeOptions, responsesruntime.WithExecutionEventRecorder(executionEventRecorder))
 		}
+		tokenizeEstimatorOption, err := responsesTokenizeEstimatorOption(cfg, rtr, nil)
+		if err != nil {
+			return nil, err
+		}
+		if tokenizeEstimatorOption != nil {
+			runtimeOptions = append(runtimeOptions, tokenizeEstimatorOption)
+		}
 		if cfg.WebSearchEnabled() {
 			webSearchConfig := cfg.WebSearchConfig()
 			if webSearchConfig.Provider == websearch.ProviderDisabled {

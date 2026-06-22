@@ -51,7 +51,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 ### Stage 21：Model Profile 与 Context Budget（estimator adapter 与可注入 `/tokenize` counter 已落地）
 
-目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的可注入 estimator 触发 auto compact；默认 estimator 现在通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback 到 conservative estimator。代码层已新增可注入 HTTP provider `/tokenize` chat prompt counter，支持 `/v1` base URL 归一化、API key/header、自定义 header、timeout 和多种 token count 响应形状，但尚未接入默认 runtime/provider hot path。后续再做 profile/provider capability 驱动的 `/tokenize` 装配和更完整的上下文优化。
+目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的可注入 estimator 触发 auto compact；默认 estimator 现在通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback 到 conservative estimator。HTTP provider `/tokenize` chat prompt counter 已能通过 `responses_server.model_profiles[].tokenize_counter.enabled=true` 显式接入默认 proxy/runtime 装配，并要求匹配 upstream/router target 声明 `capabilities.tokenize=true`；未开启时默认行为仍是确定性保守估算。后续再做更完整的上下文优化和更自动化的 provider tokenizer 选择。
 
 依赖：Stage 19B 的自动 compact。
 
