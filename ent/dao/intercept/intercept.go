@@ -29,6 +29,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
 	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
@@ -634,6 +635,33 @@ func (f TraverseSystemEvent) Traverse(ctx context.Context, q dao.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *dao.SystemEventQuery", q)
 }
 
+// The ToolCallAuditFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ToolCallAuditFunc func(context.Context, *dao.ToolCallAuditQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ToolCallAuditFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ToolCallAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ToolCallAuditQuery", q)
+}
+
+// The TraverseToolCallAudit type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseToolCallAudit func(context.Context, *dao.ToolCallAuditQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseToolCallAudit) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseToolCallAudit) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ToolCallAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ToolCallAuditQuery", q)
+}
+
 // The TraceFindingFunc type is an adapter to allow the use of ordinary function as a Querier.
 type TraceFindingFunc func(context.Context, *dao.TraceFindingQuery) (dao.Value, error)
 
@@ -866,6 +894,8 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.SemanticNodeQuery, predicate.SemanticNode, semanticnode.OrderOption]{typ: dao.TypeSemanticNode, tq: q}, nil
 	case *dao.SystemEventQuery:
 		return &query[*dao.SystemEventQuery, predicate.SystemEvent, systemevent.OrderOption]{typ: dao.TypeSystemEvent, tq: q}, nil
+	case *dao.ToolCallAuditQuery:
+		return &query[*dao.ToolCallAuditQuery, predicate.ToolCallAudit, toolcallaudit.OrderOption]{typ: dao.TypeToolCallAudit, tq: q}, nil
 	case *dao.TraceFindingQuery:
 		return &query[*dao.TraceFindingQuery, predicate.TraceFinding, tracefinding.OrderOption]{typ: dao.TypeTraceFinding, tq: q}, nil
 	case *dao.TraceLogQuery:

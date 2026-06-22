@@ -3242,6 +3242,31 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_trace_id ON upstream_exchanges(trace_id);`,
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_upstream_id_started_at ON upstream_exchanges(upstream_id, started_at);`,
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_status_code_started_at ON upstream_exchanges(status_code, started_at);`,
+		`CREATE TABLE IF NOT EXISTS tool_call_audits (
+			id TEXT PRIMARY KEY,
+			response_id TEXT NULL,
+			request_audit_id TEXT NULL,
+			conversation_id TEXT NULL,
+			call_id TEXT NOT NULL,
+			tool_type TEXT NOT NULL,
+			tool_name TEXT NULL,
+			executor TEXT NULL,
+			status TEXT NOT NULL DEFAULT '',
+			phase TEXT NOT NULL DEFAULT 'tool_call',
+			input_json json NULL,
+			output_json json NULL,
+			error_text TEXT NULL,
+			metadata_json json NULL,
+			started_at datetime NULL,
+			completed_at datetime NULL,
+			created_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_request_audit_id_created_at ON tool_call_audits(request_audit_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_response_id_created_at ON tool_call_audits(response_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_conversation_id_created_at ON tool_call_audits(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_call_id ON tool_call_audits(call_id);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_tool_name_status_created_at ON tool_call_audits(tool_name, status, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_status_created_at ON tool_call_audits(status, created_at);`,
 	}
 
 	for _, stmt := range stmts {

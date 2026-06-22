@@ -51,6 +51,7 @@ func TestCheckStatusSQLiteReportsApplicationSchemaMarker(t *testing.T) {
 		`CREATE TABLE request_audits (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE execution_events (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE upstream_exchanges (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE tool_call_audits (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE app_schema_status (
 			namespace TEXT PRIMARY KEY,
 			version INTEGER NOT NULL,
@@ -202,6 +203,7 @@ func TestMigrateUpPostgresIntegration(t *testing.T) {
 		"scores",
 		"semantic_nodes",
 		"system_events",
+		"tool_call_audits",
 		"trace_findings",
 		"trace_observations",
 		"upstream_exchanges",

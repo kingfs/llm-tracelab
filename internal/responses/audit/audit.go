@@ -26,6 +26,10 @@ type ExecutionEventRecorder interface {
 	RecordExecutionEvent(ctx context.Context, event ExecutionEvent) error
 }
 
+type ToolCallAuditRecorder interface {
+	RecordToolCallAudit(ctx context.Context, entry ToolCallAudit) (string, error)
+}
+
 type RequestEntry struct {
 	Method          string
 	Path            string
@@ -71,6 +75,26 @@ type ExecutionEvent struct {
 	Message        string
 	DetailsJSON    map[string]any
 	OccurredAt     time.Time
+}
+
+type ToolCallAudit struct {
+	ID             string
+	ResponseID     string
+	RequestAuditID string
+	ConversationID string
+	CallID         string
+	ToolType       string
+	ToolName       string
+	Executor       string
+	Status         string
+	Phase          string
+	InputJSON      map[string]any
+	OutputJSON     map[string]any
+	ErrorText      string
+	MetadataJSON   map[string]any
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	CreatedAt      time.Time
 }
 
 func NewRequestEntry(r *http.Request, body []byte) RequestEntry {

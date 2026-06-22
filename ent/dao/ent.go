@@ -32,6 +32,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
 	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
@@ -119,6 +120,7 @@ func checkColumn(t, c string) error {
 			score.Table:            score.ValidColumn,
 			semanticnode.Table:     semanticnode.ValidColumn,
 			systemevent.Table:      systemevent.ValidColumn,
+			toolcallaudit.Table:    toolcallaudit.ValidColumn,
 			tracefinding.Table:     tracefinding.ValidColumn,
 			tracelog.Table:         tracelog.ValidColumn,
 			traceobservation.Table: traceobservation.ValidColumn,

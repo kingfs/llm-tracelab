@@ -66,6 +66,9 @@ type SemanticNode func(*sql.Selector)
 // SystemEvent is the predicate function for systemevent builders.
 type SystemEvent func(*sql.Selector)
 
+// ToolCallAudit is the predicate function for toolcallaudit builders.
+type ToolCallAudit func(*sql.Selector)
+
 // TraceFinding is the predicate function for tracefinding builders.
 type TraceFinding func(*sql.Selector)
 

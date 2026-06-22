@@ -693,6 +693,64 @@ var (
 			},
 		},
 	}
+	// ToolCallAuditsColumns holds the columns for the "tool_call_audits" table.
+	ToolCallAuditsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "response_id", Type: field.TypeString, Nullable: true},
+		{Name: "request_audit_id", Type: field.TypeString, Nullable: true},
+		{Name: "conversation_id", Type: field.TypeString, Nullable: true},
+		{Name: "call_id", Type: field.TypeString},
+		{Name: "tool_type", Type: field.TypeString},
+		{Name: "tool_name", Type: field.TypeString, Nullable: true},
+		{Name: "executor", Type: field.TypeString, Nullable: true},
+		{Name: "status", Type: field.TypeString, Default: ""},
+		{Name: "phase", Type: field.TypeString, Default: "tool_call"},
+		{Name: "input_json", Type: field.TypeJSON, Nullable: true},
+		{Name: "output_json", Type: field.TypeJSON, Nullable: true},
+		{Name: "error_text", Type: field.TypeString, Nullable: true},
+		{Name: "metadata_json", Type: field.TypeJSON, Nullable: true},
+		{Name: "started_at", Type: field.TypeTime, Nullable: true},
+		{Name: "completed_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// ToolCallAuditsTable holds the schema information for the "tool_call_audits" table.
+	ToolCallAuditsTable = &schema.Table{
+		Name:       "tool_call_audits",
+		Columns:    ToolCallAuditsColumns,
+		PrimaryKey: []*schema.Column{ToolCallAuditsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "toolcallaudit_request_audit_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[2], ToolCallAuditsColumns[16]},
+			},
+			{
+				Name:    "toolcallaudit_response_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[1], ToolCallAuditsColumns[16]},
+			},
+			{
+				Name:    "toolcallaudit_conversation_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[3], ToolCallAuditsColumns[16]},
+			},
+			{
+				Name:    "toolcallaudit_call_id",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[4]},
+			},
+			{
+				Name:    "toolcallaudit_tool_name_status_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[6], ToolCallAuditsColumns[8], ToolCallAuditsColumns[16]},
+			},
+			{
+				Name:    "toolcallaudit_status_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{ToolCallAuditsColumns[8], ToolCallAuditsColumns[16]},
+			},
+		},
+	}
 	// TraceFindingsColumns holds the columns for the "trace_findings" table.
 	TraceFindingsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
@@ -960,6 +1018,7 @@ var (
 		ScoresTable,
 		SemanticNodesTable,
 		SystemEventsTable,
+		ToolCallAuditsTable,
 		TraceFindingsTable,
 		LogsTable,
 		TraceObservationsTable,
@@ -1050,6 +1109,10 @@ func init() {
 	SystemEventsTable.Annotation = &entsql.Annotation{
 		Table:          "system_events",
 		IncrementStart: func(i int) *int { return &i }(103079215104),
+	}
+	ToolCallAuditsTable.Annotation = &entsql.Annotation{
+		Table:          "tool_call_audits",
+		IncrementStart: func(i int) *int { return &i }(115964116992),
 	}
 	TraceFindingsTable.Annotation = &entsql.Annotation{
 		Table:          "trace_findings",

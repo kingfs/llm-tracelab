@@ -24,6 +24,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
 	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
@@ -40,7 +41,7 @@ import (
 
 // schemaGraph holds a representation of ent/schema at runtime.
 var schemaGraph = func() *sqlgraph.Schema {
-	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 27)}
+	graph := &sqlgraph.Schema{Nodes: make([]*sqlgraph.Node, 28)}
 	graph.Nodes[0] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   apitoken.Table,
@@ -525,6 +526,35 @@ var schemaGraph = func() *sqlgraph.Schema {
 	}
 	graph.Nodes[20] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
+			Table:   toolcallaudit.Table,
+			Columns: toolcallaudit.Columns,
+			ID: &sqlgraph.FieldSpec{
+				Type:   field.TypeString,
+				Column: toolcallaudit.FieldID,
+			},
+		},
+		Type: "ToolCallAudit",
+		Fields: map[string]*sqlgraph.FieldSpec{
+			toolcallaudit.FieldResponseID:     {Type: field.TypeString, Column: toolcallaudit.FieldResponseID},
+			toolcallaudit.FieldRequestAuditID: {Type: field.TypeString, Column: toolcallaudit.FieldRequestAuditID},
+			toolcallaudit.FieldConversationID: {Type: field.TypeString, Column: toolcallaudit.FieldConversationID},
+			toolcallaudit.FieldCallID:         {Type: field.TypeString, Column: toolcallaudit.FieldCallID},
+			toolcallaudit.FieldToolType:       {Type: field.TypeString, Column: toolcallaudit.FieldToolType},
+			toolcallaudit.FieldToolName:       {Type: field.TypeString, Column: toolcallaudit.FieldToolName},
+			toolcallaudit.FieldExecutor:       {Type: field.TypeString, Column: toolcallaudit.FieldExecutor},
+			toolcallaudit.FieldStatus:         {Type: field.TypeString, Column: toolcallaudit.FieldStatus},
+			toolcallaudit.FieldPhase:          {Type: field.TypeString, Column: toolcallaudit.FieldPhase},
+			toolcallaudit.FieldInputJSON:      {Type: field.TypeJSON, Column: toolcallaudit.FieldInputJSON},
+			toolcallaudit.FieldOutputJSON:     {Type: field.TypeJSON, Column: toolcallaudit.FieldOutputJSON},
+			toolcallaudit.FieldErrorText:      {Type: field.TypeString, Column: toolcallaudit.FieldErrorText},
+			toolcallaudit.FieldMetadataJSON:   {Type: field.TypeJSON, Column: toolcallaudit.FieldMetadataJSON},
+			toolcallaudit.FieldStartedAt:      {Type: field.TypeTime, Column: toolcallaudit.FieldStartedAt},
+			toolcallaudit.FieldCompletedAt:    {Type: field.TypeTime, Column: toolcallaudit.FieldCompletedAt},
+			toolcallaudit.FieldCreatedAt:      {Type: field.TypeTime, Column: toolcallaudit.FieldCreatedAt},
+		},
+	}
+	graph.Nodes[21] = &sqlgraph.Node{
+		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracefinding.Table,
 			Columns: tracefinding.Columns,
 			ID: &sqlgraph.FieldSpec{
@@ -549,7 +579,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracefinding.FieldCreatedAt:       {Type: field.TypeTime, Column: tracefinding.FieldCreatedAt},
 		},
 	}
-	graph.Nodes[21] = &sqlgraph.Node{
+	graph.Nodes[22] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   tracelog.Table,
 			Columns: tracelog.Columns,
@@ -600,7 +630,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldRoutingFailureReason:           {Type: field.TypeString, Column: tracelog.FieldRoutingFailureReason},
 		},
 	}
-	graph.Nodes[22] = &sqlgraph.Node{
+	graph.Nodes[23] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   traceobservation.Table,
 			Columns: traceobservation.Columns,
@@ -623,7 +653,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			traceobservation.FieldUpdatedAt:     {Type: field.TypeTime, Column: traceobservation.FieldUpdatedAt},
 		},
 	}
-	graph.Nodes[23] = &sqlgraph.Node{
+	graph.Nodes[24] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamexchange.Table,
 			Columns: upstreamexchange.Columns,
@@ -648,7 +678,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamexchange.FieldErrorText:      {Type: field.TypeString, Column: upstreamexchange.FieldErrorText},
 		},
 	}
-	graph.Nodes[24] = &sqlgraph.Node{
+	graph.Nodes[25] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreammodel.Table,
 			Columns: upstreammodel.Columns,
@@ -665,7 +695,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreammodel.FieldSeenAt:     {Type: field.TypeTime, Column: upstreammodel.FieldSeenAt},
 		},
 	}
-	graph.Nodes[25] = &sqlgraph.Node{
+	graph.Nodes[26] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   upstreamtarget.Table,
 			Columns: upstreamtarget.Columns,
@@ -689,7 +719,7 @@ var schemaGraph = func() *sqlgraph.Schema {
 			upstreamtarget.FieldLastRefreshError:  {Type: field.TypeString, Column: upstreamtarget.FieldLastRefreshError},
 		},
 	}
-	graph.Nodes[26] = &sqlgraph.Node{
+	graph.Nodes[27] = &sqlgraph.Node{
 		NodeSpec: sqlgraph.NodeSpec{
 			Table:   user.Table,
 			Columns: user.Columns,
@@ -2667,6 +2697,126 @@ func (f *SystemEventFilter) WhereResolvedAt(p entql.TimeP) {
 }
 
 // addPredicate implements the predicateAdder interface.
+func (_q *ToolCallAuditQuery) addPredicate(pred func(s *sql.Selector)) {
+	_q.predicates = append(_q.predicates, pred)
+}
+
+// Filter returns a Filter implementation to apply filters on the ToolCallAuditQuery builder.
+func (_q *ToolCallAuditQuery) Filter() *ToolCallAuditFilter {
+	return &ToolCallAuditFilter{config: _q.config, predicateAdder: _q}
+}
+
+// addPredicate implements the predicateAdder interface.
+func (m *ToolCallAuditMutation) addPredicate(pred func(s *sql.Selector)) {
+	m.predicates = append(m.predicates, pred)
+}
+
+// Filter returns an entql.Where implementation to apply filters on the ToolCallAuditMutation builder.
+func (m *ToolCallAuditMutation) Filter() *ToolCallAuditFilter {
+	return &ToolCallAuditFilter{config: m.config, predicateAdder: m}
+}
+
+// ToolCallAuditFilter provides a generic filtering capability at runtime for ToolCallAuditQuery.
+type ToolCallAuditFilter struct {
+	predicateAdder
+	config
+}
+
+// Where applies the entql predicate on the query filter.
+func (f *ToolCallAuditFilter) Where(p entql.P) {
+	f.addPredicate(func(s *sql.Selector) {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[20].Type, p, s); err != nil {
+			s.AddError(err)
+		}
+	})
+}
+
+// WhereID applies the entql string predicate on the id field.
+func (f *ToolCallAuditFilter) WhereID(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldID))
+}
+
+// WhereResponseID applies the entql string predicate on the response_id field.
+func (f *ToolCallAuditFilter) WhereResponseID(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldResponseID))
+}
+
+// WhereRequestAuditID applies the entql string predicate on the request_audit_id field.
+func (f *ToolCallAuditFilter) WhereRequestAuditID(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldRequestAuditID))
+}
+
+// WhereConversationID applies the entql string predicate on the conversation_id field.
+func (f *ToolCallAuditFilter) WhereConversationID(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldConversationID))
+}
+
+// WhereCallID applies the entql string predicate on the call_id field.
+func (f *ToolCallAuditFilter) WhereCallID(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldCallID))
+}
+
+// WhereToolType applies the entql string predicate on the tool_type field.
+func (f *ToolCallAuditFilter) WhereToolType(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldToolType))
+}
+
+// WhereToolName applies the entql string predicate on the tool_name field.
+func (f *ToolCallAuditFilter) WhereToolName(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldToolName))
+}
+
+// WhereExecutor applies the entql string predicate on the executor field.
+func (f *ToolCallAuditFilter) WhereExecutor(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldExecutor))
+}
+
+// WhereStatus applies the entql string predicate on the status field.
+func (f *ToolCallAuditFilter) WhereStatus(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldStatus))
+}
+
+// WherePhase applies the entql string predicate on the phase field.
+func (f *ToolCallAuditFilter) WherePhase(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldPhase))
+}
+
+// WhereInputJSON applies the entql json.RawMessage predicate on the input_json field.
+func (f *ToolCallAuditFilter) WhereInputJSON(p entql.BytesP) {
+	f.Where(p.Field(toolcallaudit.FieldInputJSON))
+}
+
+// WhereOutputJSON applies the entql json.RawMessage predicate on the output_json field.
+func (f *ToolCallAuditFilter) WhereOutputJSON(p entql.BytesP) {
+	f.Where(p.Field(toolcallaudit.FieldOutputJSON))
+}
+
+// WhereErrorText applies the entql string predicate on the error_text field.
+func (f *ToolCallAuditFilter) WhereErrorText(p entql.StringP) {
+	f.Where(p.Field(toolcallaudit.FieldErrorText))
+}
+
+// WhereMetadataJSON applies the entql json.RawMessage predicate on the metadata_json field.
+func (f *ToolCallAuditFilter) WhereMetadataJSON(p entql.BytesP) {
+	f.Where(p.Field(toolcallaudit.FieldMetadataJSON))
+}
+
+// WhereStartedAt applies the entql time.Time predicate on the started_at field.
+func (f *ToolCallAuditFilter) WhereStartedAt(p entql.TimeP) {
+	f.Where(p.Field(toolcallaudit.FieldStartedAt))
+}
+
+// WhereCompletedAt applies the entql time.Time predicate on the completed_at field.
+func (f *ToolCallAuditFilter) WhereCompletedAt(p entql.TimeP) {
+	f.Where(p.Field(toolcallaudit.FieldCompletedAt))
+}
+
+// WhereCreatedAt applies the entql time.Time predicate on the created_at field.
+func (f *ToolCallAuditFilter) WhereCreatedAt(p entql.TimeP) {
+	f.Where(p.Field(toolcallaudit.FieldCreatedAt))
+}
+
+// addPredicate implements the predicateAdder interface.
 func (_q *TraceFindingQuery) addPredicate(pred func(s *sql.Selector)) {
 	_q.predicates = append(_q.predicates, pred)
 }
@@ -2695,7 +2845,7 @@ type TraceFindingFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceFindingFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[20].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[21].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -2800,7 +2950,7 @@ type TraceLogFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceLogFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[21].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[22].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3030,7 +3180,7 @@ type TraceObservationFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *TraceObservationFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[22].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[23].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3120,7 +3270,7 @@ type UpstreamExchangeFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamExchangeFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[23].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[24].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3220,7 +3370,7 @@ type UpstreamModelFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamModelFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[24].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[25].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3280,7 +3430,7 @@ type UpstreamTargetFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UpstreamTargetFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[25].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[26].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})
@@ -3375,7 +3525,7 @@ type UserFilter struct {
 // Where applies the entql predicate on the query filter.
 func (f *UserFilter) Where(p entql.P) {
 	f.addPredicate(func(s *sql.Selector) {
-		if err := schemaGraph.EvalP(schemaGraph.Nodes[26].Type, p, s); err != nil {
+		if err := schemaGraph.EvalP(schemaGraph.Nodes[27].Type, p, s); err != nil {
 			s.AddError(err)
 		}
 	})

@@ -29,6 +29,7 @@ var sqliteApplicationRequiredTables = []string{
 	"request_audits",
 	"execution_events",
 	"upstream_exchanges",
+	"tool_call_audits",
 }
 
 func MigrateUp(driver string, dsn string, steps int) error {

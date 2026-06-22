@@ -12,6 +12,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 )
 
@@ -43,6 +44,16 @@ type GetRequestAuditTraceParams struct {
 	ConversationID        string
 	EventLimit            int
 	UpstreamExchangeLimit int
+}
+
+type ListToolCallAuditsParams struct {
+	ResponseID     string
+	RequestAuditID string
+	ConversationID string
+	CallID         string
+	ToolName       string
+	Status         string
+	Limit          int
 }
 
 type RequestAuditReference struct {
@@ -121,6 +132,26 @@ type ToolCallView struct {
 	ConversationID   string
 }
 
+type ToolCallAuditView struct {
+	ID             string
+	ResponseID     string
+	RequestAuditID string
+	ConversationID string
+	CallID         string
+	ToolType       string
+	ToolName       string
+	Executor       string
+	Status         string
+	Phase          string
+	InputJSON      map[string]any
+	OutputJSON     map[string]any
+	ErrorText      string
+	MetadataJSON   map[string]any
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	CreatedAt      time.Time
+}
+
 type RequestAuditTrace struct {
 	RequestAudit      RequestAuditView
 	ExecutionEvents   []ExecutionEventView
@@ -154,6 +185,42 @@ func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequest
 	out := make([]RequestAuditView, 0, len(records))
 	for _, record := range records {
 		out = append(out, requestAuditView(record))
+	}
+	return out, nil
+}
+
+func (s *QueryService) ListToolCallAudits(ctx context.Context, params ListToolCallAuditsParams) ([]ToolCallAuditView, error) {
+	if s == nil || s.client == nil {
+		return nil, nil
+	}
+	query := s.client.ToolCallAudit.Query().
+		Order(toolcallaudit.ByCreatedAt(), toolcallaudit.ByID()).
+		Limit(normalizeAuditQueryLimit(params.Limit))
+	if params.ResponseID != "" {
+		query.Where(toolcallaudit.ResponseIDEQ(params.ResponseID))
+	}
+	if params.RequestAuditID != "" {
+		query.Where(toolcallaudit.RequestAuditIDEQ(params.RequestAuditID))
+	}
+	if params.ConversationID != "" {
+		query.Where(toolcallaudit.ConversationIDEQ(params.ConversationID))
+	}
+	if params.CallID != "" {
+		query.Where(toolcallaudit.CallIDEQ(params.CallID))
+	}
+	if params.ToolName != "" {
+		query.Where(toolcallaudit.ToolNameEQ(params.ToolName))
+	}
+	if params.Status != "" {
+		query.Where(toolcallaudit.StatusEQ(params.Status))
+	}
+	records, err := query.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ToolCallAuditView, 0, len(records))
+	for _, record := range records {
+		out = append(out, toolCallAuditView(record))
 	}
 	return out, nil
 }
@@ -526,6 +593,31 @@ func toolInt(value any) (int, bool) {
 		return n, err == nil
 	default:
 		return 0, false
+	}
+}
+
+func toolCallAuditView(record *dao.ToolCallAudit) ToolCallAuditView {
+	if record == nil {
+		return ToolCallAuditView{}
+	}
+	return ToolCallAuditView{
+		ID:             record.ID,
+		ResponseID:     record.ResponseID,
+		RequestAuditID: record.RequestAuditID,
+		ConversationID: record.ConversationID,
+		CallID:         record.CallID,
+		ToolType:       record.ToolType,
+		ToolName:       record.ToolName,
+		Executor:       record.Executor,
+		Status:         record.Status,
+		Phase:          record.Phase,
+		InputJSON:      cloneMap(record.InputJSON),
+		OutputJSON:     cloneMap(record.OutputJSON),
+		ErrorText:      record.ErrorText,
+		MetadataJSON:   cloneMap(record.MetadataJSON),
+		StartedAt:      record.StartedAt,
+		CompletedAt:    record.CompletedAt,
+		CreatedAt:      record.CreatedAt,
 	}
 }
 
