@@ -15,11 +15,13 @@ import (
 )
 
 type Config struct {
-	DefaultModel        string
-	ForceStore          bool
-	MaxToolIterations   int
-	WebSearchEnabled    bool
-	WebSearchMaxResults int
+	DefaultModel                string
+	ForceStore                  bool
+	MaxToolIterations           int
+	WebSearchEnabled            bool
+	WebSearchMaxResults         int
+	AutoCompact                 bool
+	CompactHistoryItemThreshold int
 }
 
 type Runtime struct {
@@ -78,6 +80,42 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	history, err := r.loadContinuationHistory(ctx, req.PreviousResponseID)
 	if err != nil {
 		return protocol.Response{}, err
+	}
+	if r.shouldAutoCompact(req, history) {
+		compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
+			ResponseID: req.PreviousResponseID,
+			Model:      model,
+			Metadata: map[string]any{
+				"_gateway": map[string]any{
+					"compact": map[string]any{
+						"trigger":                "auto",
+						"history_items":          len(history),
+						"history_item_threshold": r.cfg.CompactHistoryItemThreshold,
+					},
+				},
+			},
+		})
+		if err != nil {
+			return protocol.Response{}, err
+		}
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			ResponseID:     compactResp.ID,
+			ConversationID: audit.CodexConversationID(compactResp.Metadata),
+			EventType:      "response.compact",
+			Phase:          "compact",
+			Status:         "auto_triggered",
+			DetailsJSON: map[string]any{
+				"target_response_id":     req.PreviousResponseID,
+				"compact_response_id":    compactResp.ID,
+				"history_items":          len(history),
+				"history_item_threshold": r.cfg.CompactHistoryItemThreshold,
+			},
+		})
+		req.PreviousResponseID = compactResp.ID
+		history, err = r.loadContinuationHistory(ctx, req.PreviousResponseID)
+		if err != nil {
+			return protocol.Response{}, err
+		}
 	}
 	webSearchReady := r.webSearchReady()
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
@@ -243,6 +281,14 @@ func (r *Runtime) shouldStore(req protocol.CreateResponseRequest) bool {
 		return true
 	}
 	return req.Store == nil || *req.Store
+}
+
+func (r *Runtime) shouldAutoCompact(req protocol.CreateResponseRequest, history []LedgerItem) bool {
+	if !r.cfg.AutoCompact || req.PreviousResponseID == "" {
+		return false
+	}
+	threshold := r.cfg.CompactHistoryItemThreshold
+	return threshold > 0 && len(history) > threshold
 }
 
 type ResponseNotFoundError struct {

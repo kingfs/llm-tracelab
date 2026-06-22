@@ -282,6 +282,78 @@ func TestRuntimeCompactStoresSummaryBoundaryForContinuation(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateAutoCompactsWhenHistoryExceedsThreshold(t *testing.T) {
+	store := NewMemoryStore()
+	target := protocol.Response{
+		ID:        "resp_auto_target",
+		Object:    "response",
+		Status:    "completed",
+		Model:     "gpt-test",
+		CreatedAt: 100,
+		Output: []protocol.OutputItem{{
+			ID:      "msg_auto_target",
+			Type:    "message",
+			Status:  "completed",
+			Role:    "assistant",
+			Content: []protocol.ContentPart{{Type: "output_text", Text: "old answer"}},
+		}},
+	}
+	if err := store.Put(context.Background(), target, protocol.CreateResponseRequest{Input: "old question"}, []protocol.InputItem{messageInput("in_auto_target", "old question")}, target.Output); err != nil {
+		t.Fatalf("seed target response: %v", err)
+	}
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "Auto compact summary."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "new answer"},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 6, CompletionTokens: 3, TotalTokens: 9},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:                "gpt-test",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+	}, client, store, WithExecutionEventRecorder(events))
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		PreviousResponseID: "resp_auto_target",
+		Input:              "new question",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat requests = %d, want compact + create", len(client.reqs))
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_auto_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	compactResp, ok, err := store.Get(context.Background(), resp.PreviousResponseID)
+	if err != nil || !ok {
+		t.Fatalf("compact response lookup ok=%v err=%v", ok, err)
+	}
+	if compactResp.PreviousResponseID != "resp_auto_target" || compactResp.Output[0].Type != "summary" {
+		t.Fatalf("compact response = %#v, want summary linked to target", compactResp)
+	}
+	if len(client.reqs[1].Messages) < 2 || !strings.Contains(chatMessageContentText(client.reqs[1].Messages[0].Content), "Auto compact summary") {
+		t.Fatalf("post-compact chat messages = %#v, want compact summary in context", client.reqs[1].Messages)
+	}
+	if !hasExecutionEvent(events.events, "response.compact", "auto_triggered") {
+		t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
+	}
+}
+
 func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{
@@ -626,4 +698,13 @@ func TestRuntimeCreateRecordsHostedWebSearchToolFailure(t *testing.T) {
 	if events.events[1].DetailsJSON["tool_name"] != "web_search" || events.events[1].DetailsJSON["call_id"] != "call_search" || events.events[1].DetailsJSON["error"] != "search backend failed" {
 		t.Fatalf("failed event details mismatch: %#v", events.events[1].DetailsJSON)
 	}
+}
+
+func hasExecutionEvent(events []audit.ExecutionEvent, eventType string, status string) bool {
+	for _, event := range events {
+		if event.EventType == eventType && event.Status == status {
+			return true
+		}
+	}
+	return false
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -1235,6 +1236,118 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	}
 	if events[0].Status != "started" || events[len(events)-1].Status != "completed" || events[len(events)-1].ResponseID != compacted.ID {
 		t.Fatalf("compact event statuses/response = %+v", events)
+	}
+}
+
+func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	callCount := 0
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		switch callCount {
+		case 1:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_first","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"first answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`)
+		case 2:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_auto_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Auto summary keeps replay constraints."},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`)
+		case 3:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_second","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"second answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`)
+		default:
+			t.Fatalf("unexpected upstream call %d", callCount)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled:                     true,
+			AutoCompact:                 true,
+			CompactHistoryItemThreshold: 1,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	firstHTTPResp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":"first"}`))
+	if err != nil {
+		t.Fatalf("first response request: %v", err)
+	}
+	defer firstHTTPResp.Body.Close()
+	if firstHTTPResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstHTTPResp.Body)
+		t.Fatalf("first status = %d, want 200; body=%s", firstHTTPResp.StatusCode, string(body))
+	}
+	var first protocol.Response
+	if err := json.NewDecoder(firstHTTPResp.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+
+	secondBody := fmt.Sprintf(`{"model":"gpt-5","previous_response_id":%q,"input":"second"}`, first.ID)
+	secondHTTPResp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("second response request: %v", err)
+	}
+	defer secondHTTPResp.Body.Close()
+	if secondHTTPResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondHTTPResp.Body)
+		t.Fatalf("second status = %d, want 200; body=%s", secondHTTPResp.StatusCode, string(body))
+	}
+	var second protocol.Response
+	if err := json.NewDecoder(secondHTTPResp.Body).Decode(&second); err != nil {
+		t.Fatalf("decode second response: %v", err)
+	}
+	if second.PreviousResponseID == "" || second.PreviousResponseID == first.ID {
+		t.Fatalf("second previous_response_id = %q, want generated compact response id", second.PreviousResponseID)
+	}
+	compact, ok, err := responsesruntime.NewEntStore(st.EntClient()).Get(context.Background(), second.PreviousResponseID)
+	if err != nil || !ok {
+		t.Fatalf("compact response lookup ok=%v err=%v", ok, err)
+	}
+	if compact.PreviousResponseID != first.ID || len(compact.Output) != 1 || compact.Output[0].Type != "summary" {
+		t.Fatalf("compact response = %#v, want summary linked to first", compact)
+	}
+
+	events, err := st.EntClient().ExecutionEvent.Query().
+		Where(executionevent.EventTypeEQ("response.compact"), executionevent.StatusEQ("auto_triggered")).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query auto compact events: %v", err)
+	}
+	if len(events) != 1 || events[0].ResponseID != compact.ID {
+		t.Fatalf("auto compact events = %+v, want one event for compact response %q", events, compact.ID)
 	}
 }
 

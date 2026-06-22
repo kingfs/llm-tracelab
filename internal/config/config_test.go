@@ -359,6 +359,12 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 	if got := cfg.ResponsesServerPath(); got != "/v1/responses" {
 		t.Fatalf("ResponsesServerPath() = %q, want /v1/responses", got)
 	}
+	if cfg.ResponsesAutoCompactEnabled() {
+		t.Fatalf("ResponsesAutoCompactEnabled() = true, want false")
+	}
+	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 0 {
+		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 0", got)
+	}
 }
 
 func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
@@ -369,6 +375,8 @@ responses_server:
   force_store: true
   max_request_body_bytes: 1048576
   path: "/v1/responses"
+  auto_compact: true
+  compact_history_item_threshold: 12
 `)
 
 	cfg, err := Load(path)
@@ -390,6 +398,12 @@ responses_server:
 	if got := cfg.ResponsesServerPath(); got != "/v1/responses" {
 		t.Fatalf("ResponsesServerPath() = %q, want /v1/responses", got)
 	}
+	if !cfg.ResponsesAutoCompactEnabled() {
+		t.Fatalf("ResponsesAutoCompactEnabled() = false, want true")
+	}
+	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 12 {
+		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 12", got)
+	}
 }
 
 func TestResponsesServerEnvOverrides(t *testing.T) {
@@ -398,6 +412,8 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	t.Setenv("LLM_TRACELAB_RESPONSES_FORCE_STORE", "true")
 	t.Setenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES", "2097152")
 	t.Setenv("LLM_TRACELAB_RESPONSES_PATH", "/custom/responses")
+	t.Setenv("LLM_TRACELAB_RESPONSES_AUTO_COMPACT", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD", "7")
 
 	cfg := Config{}
 	cfg.ResponsesServer.DefaultModel = "yaml-model"
@@ -418,6 +434,12 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	}
 	if got := cfg.ResponsesServerPath(); got != "/custom/responses" {
 		t.Fatalf("ResponsesServerPath() = %q, want /custom/responses", got)
+	}
+	if !cfg.ResponsesAutoCompactEnabled() {
+		t.Fatalf("ResponsesAutoCompactEnabled() = false, want true")
+	}
+	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 7 {
+		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 7", got)
 	}
 }
 

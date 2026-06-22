@@ -140,11 +140,13 @@ type LimitConfig struct {
 }
 
 type ResponsesServerConfig struct {
-	Enabled             bool   `yaml:"enabled"`
-	DefaultModel        string `yaml:"default_model"`
-	ForceStore          bool   `yaml:"force_store"`
-	MaxRequestBodyBytes int64  `yaml:"max_request_body_bytes"`
-	Path                string `yaml:"path"`
+	Enabled                     bool   `yaml:"enabled"`
+	DefaultModel                string `yaml:"default_model"`
+	ForceStore                  bool   `yaml:"force_store"`
+	MaxRequestBodyBytes         int64  `yaml:"max_request_body_bytes"`
+	Path                        string `yaml:"path"`
+	AutoCompact                 bool   `yaml:"auto_compact"`
+	CompactHistoryItemThreshold int    `yaml:"compact_history_item_threshold"`
 }
 
 type ToolsConfig struct {
@@ -348,6 +350,16 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_RESPONSES_PATH"); v != "" {
 		cfg.ResponsesServer.Path = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_AUTO_COMPACT"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.AutoCompact = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_COMPACT_HISTORY_ITEM_THRESHOLD"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.ResponsesServer.CompactHistoryItemThreshold = parsed
+		}
 	}
 	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
@@ -669,6 +681,17 @@ func (c Config) ResponsesServerPath() string {
 		return path
 	}
 	return "/v1/responses"
+}
+
+func (c Config) ResponsesAutoCompactEnabled() bool {
+	return c.ResponsesServer.AutoCompact
+}
+
+func (c Config) ResponsesCompactHistoryItemThreshold() int {
+	if c.ResponsesServer.CompactHistoryItemThreshold > 0 {
+		return c.ResponsesServer.CompactHistoryItemThreshold
+	}
+	return 0
 }
 
 func (c Config) WebSearchEnabled() bool {

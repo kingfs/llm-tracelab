@@ -398,10 +398,12 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			}
 		}
 		runtimeConfig := responsesruntime.Config{
-			DefaultModel:        cfg.ResponsesDefaultModel(),
-			ForceStore:          cfg.ResponsesForceStore(),
-			WebSearchEnabled:    cfg.WebSearchEnabled(),
-			WebSearchMaxResults: cfg.WebSearchConfig().MaxResults,
+			DefaultModel:                cfg.ResponsesDefaultModel(),
+			ForceStore:                  cfg.ResponsesForceStore(),
+			WebSearchEnabled:            cfg.WebSearchEnabled(),
+			WebSearchMaxResults:         cfg.WebSearchConfig().MaxResults,
+			AutoCompact:                 cfg.ResponsesAutoCompactEnabled(),
+			CompactHistoryItemThreshold: cfg.ResponsesCompactHistoryItemThreshold(),
 		}
 		runtimeOptions := []responsesruntime.Option{}
 		if executionEventRecorder != nil {

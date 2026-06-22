@@ -72,7 +72,7 @@ func (a *EntAuditor) Completed(ctx context.Context, id string, result Completion
 			return rollback(tx, err)
 		}
 		if _, err := client.ExecutionEvent.Update().
-			Where(executionevent.RequestAuditIDEQ(id)).
+			Where(executionevent.RequestAuditIDEQ(id), executionevent.ResponseIDIsNil()).
 			SetResponseID(result.ResponseID).
 			Save(ctx); err != nil {
 			return rollback(tx, err)
