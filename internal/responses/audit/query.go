@@ -37,6 +37,11 @@ type GetRequestAuditTraceParams struct {
 	UpstreamExchangeLimit int
 }
 
+type RequestAuditReference struct {
+	ResponseID     string
+	RequestAuditID string
+}
+
 type RequestAuditView struct {
 	ID              string
 	ResponseID      string
@@ -140,6 +145,49 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 	trace.ExecutionEvents = events
 	trace.UpstreamExchanges = exchanges
 	return trace, true, nil
+}
+
+func (s *QueryService) FindRequestAuditReferenceByTraceID(ctx context.Context, traceID string) (RequestAuditReference, bool, error) {
+	var ref RequestAuditReference
+	if s == nil || s.client == nil || traceID == "" {
+		return ref, false, nil
+	}
+	exchange, err := s.client.UpstreamExchange.Query().
+		Where(upstreamexchange.TraceIDEQ(traceID)).
+		Order(upstreamexchange.ByStartedAt(entsql.OrderDesc()), upstreamexchange.ByCompletedAt(entsql.OrderDesc()), upstreamexchange.ByID(entsql.OrderDesc())).
+		First(ctx)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return ref, false, nil
+		}
+		return ref, false, err
+	}
+	ref.ResponseID = exchange.ResponseID
+	ref.RequestAuditID = exchange.RequestAuditID
+	if ref.ResponseID == "" && ref.RequestAuditID != "" {
+		audit, err := s.client.RequestAudit.Get(ctx, ref.RequestAuditID)
+		if err != nil {
+			if dao.IsNotFound(err) {
+				return ref, true, nil
+			}
+			return ref, false, err
+		}
+		ref.ResponseID = audit.ResponseID
+	}
+	if ref.RequestAuditID == "" && ref.ResponseID != "" {
+		audit, err := s.client.RequestAudit.Query().
+			Where(requestaudit.ResponseIDEQ(ref.ResponseID)).
+			Order(requestaudit.ByCreatedAt(entsql.OrderDesc()), requestaudit.ByID(entsql.OrderDesc())).
+			First(ctx)
+		if err != nil {
+			if dao.IsNotFound(err) {
+				return ref, true, nil
+			}
+			return ref, false, err
+		}
+		ref.RequestAuditID = audit.ID
+	}
+	return ref, ref.ResponseID != "" || ref.RequestAuditID != "", nil
 }
 
 func (s *QueryService) listExecutionEvents(ctx context.Context, requestAuditID, responseID string, limit int) ([]ExecutionEventView, error) {

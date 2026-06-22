@@ -122,7 +122,7 @@ Monitor 当前包括：
 - Tokens。
 - Analysis。
 - Audit。
-- Trace detail。
+- Trace detail，且 trace detail API 会按 `upstream_exchanges.trace_id` 补充 Responses audit 关联 ID。
 
 主要 API：
 
