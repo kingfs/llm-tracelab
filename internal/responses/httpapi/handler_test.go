@@ -189,26 +189,82 @@ func TestCreateResponseBodyLimit(t *testing.T) {
 	assertError(t, rec, "invalid_request_error", "invalid_json")
 }
 
-func TestCreateResponseStreamUnsupported(t *testing.T) {
-	rt := &fakeRuntime{}
+func TestCreateResponseStreamSuccess(t *testing.T) {
+	rt := &fakeRuntime{
+		createResp: protocol.Response{
+			ID:        "resp_stream",
+			Object:    "response",
+			Status:    "completed",
+			Model:     "gpt-test",
+			CreatedAt: 123,
+			Output: []protocol.OutputItem{
+				{
+					ID:      "msg_1",
+					Type:    "message",
+					Status:  "completed",
+					Role:    "assistant",
+					Content: []protocol.ContentPart{{Type: "output_text", Text: "done"}},
+				},
+				{
+					ID:        "fc_call_1",
+					Type:      "function_call",
+					Status:    "completed",
+					CallID:    "call_1",
+					Name:      "lookup",
+					Arguments: `{"q":"codex"}`,
+				},
+			},
+		},
+	}
 	auditor := &fakeAuditor{}
 	rec := httptest.NewRecorder()
 	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
-	if rt.createReq.Input != nil {
-		t.Fatalf("runtime Create called for unsupported stream request: %#v", rt.createReq)
+	if contentType := rec.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("Content-Type = %q, want text/event-stream", contentType)
 	}
-	if auditor.acceptedCalls != 1 || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "rejected" || auditor.rejected.ErrorText == "" {
-		t.Fatalf("rejected audit mismatch: calls=%d id=%q failure=%#v", auditor.acceptedCalls, auditor.rejectedID, auditor.rejected)
+	if !rt.createReq.Stream || rt.createReq.Input != "hello" {
+		t.Fatalf("runtime Create request mismatch: %#v", rt.createReq)
 	}
-	if len(auditor.events) != 2 || auditor.events[1].Status != "rejected" || auditor.events[1].Message == "" {
-		t.Fatalf("rejected events mismatch: %#v", auditor.events)
+	body := rec.Body.String()
+	for _, event := range []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.done",
+		"response.completed",
+	} {
+		if !strings.Contains(body, "event: "+event+"\n") {
+			t.Fatalf("stream body missing event %q:\n%s", event, body)
+		}
 	}
-	assertError(t, rec, "invalid_request_error", "unsupported_stream")
+	if !strings.Contains(body, `"delta":"done"`) || !strings.Contains(body, `"arguments":"{\"q\":\"codex\"}"`) {
+		t.Fatalf("stream body missing text/function payload:\n%s", body)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
+		t.Fatalf("stream audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 4 {
+		t.Fatalf("execution events = %d, want accepted/stream started/stream completed/request completed: %#v", len(auditor.events), auditor.events)
+	}
+	if auditor.events[1].EventType != "response.stream" || auditor.events[1].Status != "started" {
+		t.Fatalf("stream started event mismatch: %#v", auditor.events[1])
+	}
+	if auditor.events[2].EventType != "response.stream" || auditor.events[2].Status != "completed" {
+		t.Fatalf("stream completed event mismatch: %#v", auditor.events[2])
+	}
+	if auditor.events[3].EventType != "response.request" || auditor.events[3].Status != "completed" || auditor.events[3].ResponseID != "resp_stream" {
+		t.Fatalf("request completed event mismatch: %#v", auditor.events[3])
+	}
 }
 
 func TestCreateResponseRuntimeError(t *testing.T) {

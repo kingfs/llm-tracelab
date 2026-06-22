@@ -117,19 +117,7 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if req.Stream {
-		message := "streaming responses are not supported by the local responses server"
-		h.auditRejected(r, auditID, "rejected", "streaming responses are not supported by the local responses server")
-		h.recordExecutionEvent(r, audit.ExecutionEvent{
-			EventType: "response.request",
-			Phase:     "request",
-			Status:    "rejected",
-			Message:   message,
-			DetailsJSON: map[string]any{
-				"request_audit_id": auditID,
-				"reason":           "unsupported_stream",
-			},
-		})
-		writeError(w, http.StatusBadRequest, message, "invalid_request_error", "unsupported_stream")
+		h.serveResponseStream(w, r, auditID, req)
 		return
 	}
 
@@ -162,6 +150,193 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) serveResponseStream(w http.ResponseWriter, r *http.Request, auditID string, req protocol.CreateResponseRequest) {
+	ctx := audit.ContextWithRequestAuditID(r.Context(), auditID)
+	resp, err := h.runtime.Create(ctx, req)
+	if err != nil {
+		h.auditRejected(r, auditID, "failed", err.Error())
+		h.recordExecutionEvent(r, audit.ExecutionEvent{
+			EventType: "response.request",
+			Phase:     "request",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: map[string]any{
+				"request_audit_id": auditID,
+				"stream":           true,
+			},
+		})
+		writeRuntimeError(w, err)
+		return
+	}
+
+	h.auditCompleted(r, auditID, resp)
+	completion := audit.CompletionFromResponse(resp)
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.stream",
+		Phase:          "stream",
+		Status:         "started",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+		},
+	})
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	writer := streamWriter{w: w}
+	if err := writer.writeResponse(resp); err != nil {
+		h.recordExecutionEvent(r, audit.ExecutionEvent{
+			ResponseID:     completion.ResponseID,
+			ConversationID: completion.ConversationID,
+			EventType:      "response.stream",
+			Phase:          "stream",
+			Status:         "failed",
+			Message:        err.Error(),
+			DetailsJSON: map[string]any{
+				"request_audit_id": auditID,
+			},
+		})
+		return
+	}
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.stream",
+		Phase:          "stream",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+		},
+	})
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.request",
+		Phase:          "request",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+			"stream":           true,
+		},
+	})
+}
+
+type streamWriter struct {
+	w http.ResponseWriter
+}
+
+func (s streamWriter) writeResponse(resp protocol.Response) error {
+	if err := s.write("response.created", protocol.StreamEvent{Type: "response.created", Response: &resp}); err != nil {
+		return err
+	}
+	if err := s.write("response.in_progress", protocol.StreamEvent{Type: "response.in_progress", Response: &resp}); err != nil {
+		return err
+	}
+	for outputIndex, item := range resp.Output {
+		if err := s.writeOutputItem(outputIndex, item); err != nil {
+			return err
+		}
+	}
+	return s.write("response.completed", protocol.StreamEvent{Type: "response.completed", Response: &resp})
+}
+
+func (s streamWriter) writeOutputItem(outputIndex int, item protocol.OutputItem) error {
+	index := outputIndex
+	if err := s.write("response.output_item.added", protocol.StreamEvent{
+		Type:        "response.output_item.added",
+		OutputIndex: &index,
+		Item:        &item,
+	}); err != nil {
+		return err
+	}
+	if item.Type == "message" {
+		for contentIndex, part := range item.Content {
+			idx := contentIndex
+			if err := s.write("response.content_part.added", protocol.StreamEvent{
+				Type:         "response.content_part.added",
+				OutputIndex:  &index,
+				ItemID:       item.ID,
+				ContentIndex: &idx,
+				Part:         &part,
+			}); err != nil {
+				return err
+			}
+			if part.Text != "" {
+				if err := s.write("response.output_text.delta", protocol.StreamEvent{
+					Type:         "response.output_text.delta",
+					OutputIndex:  &index,
+					ItemID:       item.ID,
+					ContentIndex: &idx,
+					Delta:        part.Text,
+				}); err != nil {
+					return err
+				}
+				if err := s.write("response.output_text.done", protocol.StreamEvent{
+					Type:         "response.output_text.done",
+					OutputIndex:  &index,
+					ItemID:       item.ID,
+					ContentIndex: &idx,
+					Text:         part.Text,
+				}); err != nil {
+					return err
+				}
+			}
+			if err := s.write("response.content_part.done", protocol.StreamEvent{
+				Type:         "response.content_part.done",
+				OutputIndex:  &index,
+				ItemID:       item.ID,
+				ContentIndex: &idx,
+				Part:         &part,
+			}); err != nil {
+				return err
+			}
+		}
+	} else if item.Type == "function_call" && item.Arguments != "" {
+		if err := s.write("response.function_call_arguments.delta", protocol.StreamEvent{
+			Type:        "response.function_call_arguments.delta",
+			OutputIndex: &index,
+			ItemID:      item.ID,
+			Delta:       item.Arguments,
+			Arguments:   item.Arguments,
+		}); err != nil {
+			return err
+		}
+		if err := s.write("response.function_call_arguments.done", protocol.StreamEvent{
+			Type:        "response.function_call_arguments.done",
+			OutputIndex: &index,
+			ItemID:      item.ID,
+			Arguments:   item.Arguments,
+		}); err != nil {
+			return err
+		}
+	}
+	return s.write("response.output_item.done", protocol.StreamEvent{
+		Type:        "response.output_item.done",
+		OutputIndex: &index,
+		Item:        &item,
+	})
+}
+
+func (s streamWriter) write(event string, payload protocol.StreamEvent) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	if _, err := io.WriteString(s.w, "event: "+event+"\n"); err != nil {
+		return err
+	}
+	if _, err := io.WriteString(s.w, "data: "+string(data)+"\n\n"); err != nil {
+		return err
+	}
+	if flusher, ok := s.w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return nil
 }
 
 func (h *Handler) auditAccepted(r *http.Request, body []byte) string {

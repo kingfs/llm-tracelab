@@ -997,6 +997,114 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 }
 
+func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_stream_1","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"stream pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping","stream":true}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("resp.StatusCode = %d, want 200; body=%s", resp.StatusCode, string(body))
+	}
+	if contentType := resp.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", contentType)
+	}
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response body: %v", err)
+	}
+	body := string(bodyBytes)
+	for _, event := range []string{"response.created", "response.output_text.delta", "response.completed"} {
+		if !strings.Contains(body, "event: "+event+"\n") {
+			t.Fatalf("stream body missing event %q:\n%s", event, body)
+		}
+	}
+	if !strings.Contains(body, `"delta":"stream pong"`) {
+		t.Fatalf("stream body missing output text:\n%s", body)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/chat/completions" {
+		t.Fatalf("recorded endpoint = %q, want /v1/chat/completions", parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Layout.IsStream {
+		t.Fatalf("internal chat cassette IsStream = true, want false for Stage 18A deferred streaming")
+	}
+
+	streamEvents, err := st.EntClient().ExecutionEvent.Query().
+		Where(executionevent.EventTypeEQ("response.stream")).
+		Order(executionevent.ByOccurredAt(), executionevent.ByID()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query stream execution events: %v", err)
+	}
+	if len(streamEvents) != 2 {
+		t.Fatalf("stream events len = %d, want started/completed: %+v", len(streamEvents), streamEvents)
+	}
+	if streamEvents[0].Status != "started" || streamEvents[1].Status != "completed" {
+		t.Fatalf("stream event statuses = %q/%q, want started/completed", streamEvents[0].Status, streamEvents[1].Status)
+	}
+}
+
 func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCompletions(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
