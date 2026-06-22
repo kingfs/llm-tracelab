@@ -1,6 +1,6 @@
 # Responses Server 设计
 
-状态：Responses server 演进设计，Stage 3A/3B、Stage 4A/4B 与 Stage 5A/5B 已部分落地
+状态：Responses server 演进设计，Stage 3A/3B、Stage 4A/4B、Stage 5A/5B 与 Stage 10A 已部分落地
 日期：2026-06-22
 
 本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-22 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
@@ -22,7 +22,7 @@
 - streaming Responses server-mode。
 - 完整 tool call/tool result 生命周期和 tool audit。当前只支持非流式 hosted `web_search` 首切。
 - compact workflow。
-- Stage 9 Responses audit schema 骨架已落地：`request_audits`、`execution_events`、`upstream_exchanges` 的 runtime 写入和语义查询尚未接入。
+- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态；`execution_events`、`upstream_exchanges` 写入和语义查询尚未接入。
 - 完整 Postgres migration 生产化。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
@@ -114,13 +114,13 @@ client
 
 当 client 请求 `/v1/responses`，选中的 provider 是 OpenAI-compatible 且只暴露 `/chat/completions` 时：
 
-1. TraceLab HTTP server 接收 Responses 请求，进行鉴权和 body limit；Stage 9 已补齐独立 `request_audits` schema 骨架，但当前 runtime 尚未写入。
+1. TraceLab HTTP server 接收 Responses 请求，进行鉴权和 body limit；Stage 10A 在请求 body 成功 decode 后写入最小 `request_audits` inbound envelope。
 2. Gateway Routing 根据 requested model、provider 配置、capabilities、model profile 选择支持 `chat_completions` model client 的 route target。
 3. Responses Runtime 读取 `previous_response_id`、conversation item 和 request input，构造当前 turn 的 model context。
 4. Runtime 将 Responses input、instructions、tools、tool choice、reasoning/metadata 等映射到 OpenAI-compatible Chat Completions 请求。
 5. TraceLab 调用上游 `POST /chat/completions`。这个外部 exchange 进入现有 Proxy Recording 能力，写为 `.http` V3 cassette。
 6. 当前 Runtime 输出非流式 OpenAI Responses 兼容 response；streaming events 尚未支持。
-7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Stage 9 已补齐 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，后续再接 runtime 写入和查询。
+7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Stage 10A 还会写入 `request_audits` 的 accepted/completed/failed/rejected 状态。`execution_events`、`upstream_exchanges` 和查询 API 后续再接。
 
 关键边界：
 
@@ -192,7 +192,7 @@ providers:
 
 目标是 Postgres-first，但保留 SQLite fallback 和旧 replay 兼容。
 
-截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这两张表。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration、生产运维流程和 Responses audit runtime 写入仍未完成。Stage 9A 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；该骨架定义了可持久化的 audit surface，但还不是已可查询的 runtime 审计能力。
+截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration、生产运维流程和 Responses audit 查询仍未完成。Stage 10A 已接入 `request_audits` 的最小 inbound runtime 写入；`execution_events`、`upstream_exchanges` 仍只是已定义的 audit surface。
 
 Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 `db migrate up` 已拆出为应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持；它还不是基于 checked-in SQL 的版本化 Postgres migrator。`internal/auth/migrate.go` 的 embedded migrations 仍只支持 SQLite。Postgres auth migration 是后续独立缺口，不应阻塞把 Responses ent store 归入应用库迁移域。
 
@@ -207,9 +207,9 @@ Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库�
 - `execution_events`：runtime plan、model call start/end、tool start/end、compact decision、stream lifecycle、cancel/error 等生命周期事件，用于解释一次 response 如何被编排出来。
 - `upstream_exchanges`：semantic response/request 与外部 `.http` cassette、trace id、route target 的关联，用于把 Responses runtime 状态和现有 recorder 事实源连接起来。
 
-Stage 9 audit 接入顺序建议：
+Stage 10 后续 audit 接入顺序建议：
 
-1. 先写入 request accepted/completed 事件，并建立 `upstream_exchanges` 与 response id、trace id、cassette path、route target 的 correlation。
+1. 在已完成 request accepted/completed 写入的基础上，建立 `upstream_exchanges` 与 response id、trace id、cassette path、route target 的 correlation。
 2. 再接 tool lifecycle events，包括 hosted tool start/end/error、redaction 和 tool result persistence。
 3. 最后补 streaming、cancel、compact 事件，因为这些事件对顺序、幂等和部分失败恢复要求更高。
 
@@ -352,9 +352,9 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - SQLite fallback 仍能运行最小 server/test。
 - 旧 `.http` replay 不连接 DB。
 
-当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径和应用库 `db migrate up` 初始化路径已落地；完整 Postgres migration 生产化、request audit、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
+当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、应用库 `db migrate up` 初始化路径，以及最小 request audit 写入已落地；完整 Postgres migration 生产化、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
 
-Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，但它的边界应保持清晰：schema 骨架只定义可持久化的 audit surface，不等于 runtime 已写入、Monitor/MCP 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。runtime 接入顺序建议先完成 request accepted/completed 与 upstream exchange correlation，再补 tool events，最后处理 streaming/cancel/compact events。
+Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 只接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入。它不等于 Monitor/MCP 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先完成 upstream exchange correlation，再补 tool events，最后处理 streaming/cancel/compact events。
 
 ### Stage 3：Hosted tools 与 compact（部分落地）
 

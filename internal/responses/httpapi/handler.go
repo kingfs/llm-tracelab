@@ -1,14 +1,17 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
 )
@@ -23,6 +26,7 @@ type Runtime interface {
 type Handler struct {
 	runtime      Runtime
 	maxBodyBytes int64
+	auditor      audit.RequestAuditor
 }
 
 type Option func(*Handler)
@@ -32,6 +36,12 @@ func WithMaxBodyBytes(limit int64) Option {
 		if limit > 0 {
 			h.maxBodyBytes = limit
 		}
+	}
+}
+
+func WithRequestAuditor(auditor audit.RequestAuditor) Option {
+	return func(h *Handler) {
+		h.auditor = auditor
 	}
 }
 
@@ -68,8 +78,14 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON request body: %v", err), "invalid_request_error", "invalid_json")
+		return
+	}
+
 	var req protocol.CreateResponseRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON request body: %v", err), "invalid_request_error", "invalid_json")
 		return
@@ -81,17 +97,52 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "request body must contain a single JSON object", "invalid_request_error", "invalid_json")
 		return
 	}
+
+	auditID := h.auditAccepted(r, body)
 	if req.Stream {
+		h.auditRejected(r, auditID, "rejected", "streaming responses are not supported by the local responses server")
 		writeError(w, http.StatusBadRequest, "streaming responses are not supported by the local responses server", "invalid_request_error", "unsupported_stream")
 		return
 	}
 
 	resp, err := h.runtime.Create(r.Context(), req)
 	if err != nil {
+		h.auditRejected(r, auditID, "failed", err.Error())
 		writeRuntimeError(w, err)
 		return
 	}
+	h.auditCompleted(r, auditID, resp)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) auditAccepted(r *http.Request, body []byte) string {
+	if h.auditor == nil {
+		return ""
+	}
+	id, err := h.auditor.Accepted(r.Context(), audit.NewRequestEntry(r, body))
+	if err != nil {
+		slog.Error("Failed to write responses request audit", "err", err)
+		return ""
+	}
+	return id
+}
+
+func (h *Handler) auditCompleted(r *http.Request, id string, resp protocol.Response) {
+	if h.auditor == nil || id == "" {
+		return
+	}
+	if err := h.auditor.Completed(r.Context(), id, audit.CompletionFromResponse(resp)); err != nil {
+		slog.Error("Failed to complete responses request audit", "audit_id", id, "err", err)
+	}
+}
+
+func (h *Handler) auditRejected(r *http.Request, id string, status string, errorText string) {
+	if h.auditor == nil || id == "" {
+		return
+	}
+	if err := h.auditor.Rejected(r.Context(), id, audit.Failure{Status: status, ErrorText: errorText}); err != nil {
+		slog.Error("Failed to reject responses request audit", "audit_id", id, "err", err)
+	}
 }
 
 func (h *Handler) serveResponseSubresource(w http.ResponseWriter, r *http.Request) {

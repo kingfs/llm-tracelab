@@ -24,6 +24,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/limit"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/redaction"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
 	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
@@ -384,9 +385,11 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 	responsesPath := cfg.ResponsesServerPath()
 	if cfg.ResponsesServerEnabled() {
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
+		var requestAuditor responsesaudit.RequestAuditor
 		if st != nil {
 			if entClient := st.EntClient(); entClient != nil {
 				responseStore = responsesruntime.NewEntStore(entClient)
+				requestAuditor = responsesaudit.NewEntAuditor(entClient)
 			}
 		}
 		runtimeConfig := responsesruntime.Config{
@@ -418,7 +421,11 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			recorder:      rec,
 			routingPolicy: rtr.Policy(),
 		}, responseStore, runtimeOptions...)
-		localResponses = httpapi.NewHandler(rt, httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()))
+		localResponses = httpapi.NewHandler(
+			rt,
+			httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()),
+			httpapi.WithRequestAuditor(requestAuditor),
+		)
 	}
 
 	return &Handler{

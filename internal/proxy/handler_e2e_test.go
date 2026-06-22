@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/router"
@@ -808,6 +809,7 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Client-Request-Id", "client-audit-1")
 
 	resp, err := proxyServer.Client().Do(req)
 	if err != nil {
@@ -825,6 +827,10 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if responsePayload["object"] != "response" || responsePayload["status"] != "completed" {
 		t.Fatalf("unexpected responses payload: %+v", responsePayload)
+	}
+	responseID, ok := responsePayload["id"].(string)
+	if !ok || responseID == "" {
+		t.Fatalf("response id missing from payload: %+v", responsePayload)
 	}
 	if gotPath != "/v1/chat/completions" {
 		t.Fatalf("upstream path = %q, want /v1/chat/completions", gotPath)
@@ -886,6 +892,32 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if entries[0].Header.Meta.Endpoint != "/v1/chat/completions" {
 		t.Fatalf("indexed endpoint = %q, want /v1/chat/completions", entries[0].Header.Meta.Endpoint)
+	}
+
+	audits, err := st.EntClient().RequestAudit.Query().
+		Order(requestaudit.ByCreatedAt()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query request audits: %v", err)
+	}
+	if len(audits) != 1 {
+		t.Fatalf("request audits len = %d, want 1: %+v", len(audits), audits)
+	}
+	audit := audits[0]
+	if audit.Status != "completed" || audit.ResponseID != responseID {
+		t.Fatalf("request audit status/response_id = %q/%q, want completed/%q", audit.Status, audit.ResponseID, responseID)
+	}
+	if audit.Method != http.MethodPost || audit.Path != "/v1/responses" {
+		t.Fatalf("request audit method/path = %q/%q, want POST /v1/responses", audit.Method, audit.Path)
+	}
+	if audit.ClientRequestID != "client-audit-1" {
+		t.Fatalf("request audit client_request_id = %q, want client-audit-1", audit.ClientRequestID)
+	}
+	if audit.BodySha256 == "" || audit.BodyPreview == "" {
+		t.Fatalf("request audit missing body fields: %#v", audit)
+	}
+	if audit.HeaderJSON["content-type"] != "application/json" || audit.HeaderJSON["x-client-request-id"] != "client-audit-1" {
+		t.Fatalf("request audit headers = %#v", audit.HeaderJSON)
 	}
 }
 
