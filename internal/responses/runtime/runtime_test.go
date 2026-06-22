@@ -253,6 +253,73 @@ func TestRuntimeCreateUsesProfileUpstreamModelForChatRequest(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateUsesProfileMaxOutputTokensWhenRequestOmitsLimit(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "done"},
+				FinishReason: "stop",
+			}},
+		},
+	}
+	rt := New(Config{
+		DefaultModel: "public-model",
+		ModelProfiles: []ModelProfile{{
+			Name: "public-model",
+			Budget: ContextBudget{
+				MaxOutputTokens: 321,
+			},
+		}},
+	}, client, NewMemoryStore())
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "hello",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("chat requests = %d, want 1", len(client.reqs))
+	}
+	if client.reqs[0].MaxTokens != 321 {
+		t.Fatalf("chat request max tokens = %d, want profile max 321", client.reqs[0].MaxTokens)
+	}
+}
+
+func TestRuntimeCreateRequestMaxOutputTokensOverridesProfileLimit(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "done"},
+				FinishReason: "stop",
+			}},
+		},
+	}
+	rt := New(Config{
+		DefaultModel: "public-model",
+		ModelProfiles: []ModelProfile{{
+			Name: "public-model",
+			Budget: ContextBudget{
+				MaxOutputTokens: 321,
+			},
+		}},
+	}, client, NewMemoryStore())
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input:           "hello",
+		MaxOutputTokens: 123,
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("chat requests = %d, want 1", len(client.reqs))
+	}
+	if client.reqs[0].MaxTokens != 123 {
+		t.Fatalf("chat request max tokens = %d, want request max 123", client.reqs[0].MaxTokens)
+	}
+}
+
 func TestRuntimeCreateKeepsModelWhenProfileHasNoUpstreamModel(t *testing.T) {
 	client := &fakeChatClient{
 		resp: ChatCompletionResponse{
@@ -660,6 +727,63 @@ func TestRuntimeCreateAutoCompactUsesMatchedModelProfileThreshold(t *testing.T) 
 	}
 	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil || got.DetailsJSON["history_item_threshold"] != 1 {
 		t.Fatalf("auto_triggered event = %#v, want profile threshold 1", got)
+	}
+}
+
+func TestRuntimeCreateAutoCompactsWhenEstimatedTokensExceedContextWindow(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_token_target", "gpt-4o-mini")
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "Token compact summary."},
+					FinishReason: "stop",
+				}},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "new answer"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel: "fallback-model",
+		AutoCompact:  true,
+		ModelProfiles: []ModelProfile{{
+			Pattern: "gpt-4o*",
+			Budget: ContextBudget{
+				ContextWindowTokens: 10,
+				MaxOutputTokens:     8,
+			},
+		}},
+	}, client, store, WithExecutionEventRecorder(events))
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-4o-mini",
+		PreviousResponseID: "resp_token_target",
+		Input:              "new question",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat requests = %d, want compact + create", len(client.reqs))
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_token_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil ||
+		got.DetailsJSON["trigger"] != "context_window_tokens" ||
+		got.DetailsJSON["context_window_tokens"] != 10 ||
+		got.DetailsJSON["reserved_output_tokens"] != 8 {
+		t.Fatalf("auto_triggered event = %#v, want context_window token trigger", got)
+	}
+	if client.reqs[1].MaxTokens != 8 {
+		t.Fatalf("post-compact chat request max tokens = %d, want profile max 8", client.reqs[1].MaxTokens)
 	}
 }
 

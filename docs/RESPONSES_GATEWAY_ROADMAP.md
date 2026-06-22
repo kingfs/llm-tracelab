@@ -28,7 +28,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 尚未作为基线能力：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
-- model profile 驱动的 context window/token budgeting。
+- model profile 驱动的模型专用 tokenizer 与完整 context optimization。
 - provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议，以及默认关闭的启动时保守补全开关。
 - server-side function executor 的 Monitor/外部 executor 配置化；当前已有默认关闭的 YAML `static_response` executor 首切。
 - SQLite 版本化迁移、auth 独立 Postgres namespace/rollback、剩余 raw SQL 方言审计。
@@ -49,9 +49,9 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 当前状态：简单文本输出路径已落地；普通 `function` tool call argument 分片会输出 `response.function_call_arguments.delta/done`。内部 Chat Completions upstream cancel 传播已落地，并会记录 cancelled request/model_call/upstream_exchange。hosted tools、server-side tool execution、需要 auto compact 等复杂路径仍 fallback 到 deferred SSE。后续工作是 hosted/server-side tool streaming 和已写出 SSE 后的失败事件细化。
 
-### Stage 21：Model Profile 与 Context Budget 骨架
+### Stage 21：Model Profile 与 Context Budget（保守估算首切已落地）
 
-目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。首切只允许 profile 覆盖 item-count compact 阈值，不实现 token estimator。
+目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的保守字符估算触发 auto compact；后续再接模型专用 tokenizer 和更完整的上下文优化。
 
 依赖：Stage 19B 的自动 compact。
 
@@ -59,7 +59,9 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - 全局 compact 阈值继续兼容。
 - model profile 匹配当前 model 时覆盖 compact 阈值。
-- 文档明确 token budgeting 仍未完成。
+- profile `max_output_tokens` 在客户端未显式传值时作为内部 Chat Completions `max_tokens` 默认值。
+- `context_window_tokens` 超预算时写 `response.compact` `auto_triggered` 事件，details 标明 `trigger=context_window_tokens`、估算输入 tokens、窗口和预留输出。
+- 文档明确当前 token budgeting 是保守估算，不是模型专用 tokenizer。
 
 ### Stage 22：Persistence Operability 收敛
 
@@ -107,5 +109,5 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 - Streaming、model profile、migration operability 可以并行；三者写入模块应尽量分离。
 - 所有 worker 使用独立 git worktree 和分支提交。
-- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置顺序合入。后续优先补 hosted/server-side tool streaming，再做外部 executor/Monitor 配置和 provider detection 的 Monitor/setup flow 集成。
+- 已按 operability 小切片 -> model profile -> streaming -> provider probe -> executor registry -> provider probe 启动保守补全 -> function argument streaming 首切 -> 内部 upstream cancel 传播 -> incremental stream fallback audit -> YAML `static_response` executor 配置 -> profile token-budget 保守估算顺序合入。后续优先补 hosted/server-side tool streaming，再做外部 executor/Monitor 配置和 provider detection 的 Monitor/setup flow 集成。
 - 每个阶段合入后必须更新 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和必要的设计文档，不能只改代码。

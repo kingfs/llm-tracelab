@@ -110,7 +110,9 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	modelProfile := r.cfg.ContextBudgetForModel(model)
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
-	if r.shouldAutoCompact(req, budget, history) {
+	webSearchReady := r.webSearchReady()
+	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
+	if compactDecision.ShouldCompact {
 		compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
 			ResponseID: req.PreviousResponseID,
 			Model:      model,
@@ -118,8 +120,12 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 				"_gateway": map[string]any{
 					"compact": map[string]any{
 						"trigger":                "auto",
+						"trigger_reason":         compactDecision.Trigger,
 						"history_items":          len(history),
 						"history_item_threshold": budget.CompactHistoryItemThreshold,
+						"estimated_input_tokens": compactDecision.EstimatedInputTokens,
+						"context_window_tokens":  compactDecision.ContextWindowTokens,
+						"reserved_output_tokens": compactDecision.ReservedOutputTokens,
 					},
 				},
 			},
@@ -136,8 +142,12 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 			DetailsJSON: map[string]any{
 				"target_response_id":     req.PreviousResponseID,
 				"compact_response_id":    compactResp.ID,
+				"trigger":                compactDecision.Trigger,
 				"history_items":          len(history),
 				"history_item_threshold": budget.CompactHistoryItemThreshold,
+				"estimated_input_tokens": compactDecision.EstimatedInputTokens,
+				"context_window_tokens":  compactDecision.ContextWindowTokens,
+				"reserved_output_tokens": compactDecision.ReservedOutputTokens,
 			},
 		})
 		req.PreviousResponseID = compactResp.ID
@@ -146,11 +156,10 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 			return protocol.Response{}, err
 		}
 	}
-	webSearchReady := r.webSearchReady()
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
-	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady)
+	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	resp, err := r.createWithToolLoop(ctx, req, model, chatReq)
 	if err != nil {
 		return protocol.Response{}, err
@@ -226,14 +235,14 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	modelProfile := r.cfg.ContextBudgetForModel(model)
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
-	if r.shouldAutoCompact(req, budget, history) {
+	webSearchReady := r.webSearchReady()
+	if r.autoCompactDecision(req, budget, history, inputItems, webSearchReady).ShouldCompact {
 		return protocol.Response{}, ErrIncrementalStreamUnsupported
 	}
-	webSearchReady := r.webSearchReady()
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
-	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady)
+	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	chatReq.Stream = true
 
 	responseID := newResponseID()
@@ -568,12 +577,44 @@ func (r *Runtime) shouldStore(req protocol.CreateResponseRequest) bool {
 	return req.Store == nil || *req.Store
 }
 
-func (r *Runtime) shouldAutoCompact(req protocol.CreateResponseRequest, budget ContextBudget, history []LedgerItem) bool {
+type autoCompactDecision struct {
+	ShouldCompact        bool
+	Trigger              string
+	EstimatedInputTokens int
+	ContextWindowTokens  int
+	ReservedOutputTokens int
+}
+
+func (r *Runtime) autoCompactDecision(req protocol.CreateResponseRequest, budget ContextBudget, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) autoCompactDecision {
+	decision := autoCompactDecision{}
 	if !r.cfg.AutoCompact || req.PreviousResponseID == "" {
-		return false
+		return decision
 	}
 	threshold := budget.CompactHistoryItemThreshold
-	return threshold > 0 && len(history) > threshold
+	if threshold > 0 && len(history) > threshold {
+		decision.ShouldCompact = true
+		decision.Trigger = "history_items"
+	}
+	if budget.ContextWindowTokens <= 0 {
+		return decision
+	}
+	estimatedInputTokens := estimateResponsePromptTokens(req, history, inputItems, webSearchReady)
+	reservedOutputTokens := effectiveMaxOutputTokens(req, budget)
+	if estimatedInputTokens+reservedOutputTokens > budget.ContextWindowTokens {
+		decision.ShouldCompact = true
+		decision.Trigger = "context_window_tokens"
+		decision.EstimatedInputTokens = estimatedInputTokens
+		decision.ContextWindowTokens = budget.ContextWindowTokens
+		decision.ReservedOutputTokens = reservedOutputTokens
+	}
+	return decision
+}
+
+func effectiveMaxOutputTokens(req protocol.CreateResponseRequest, budget ContextBudget) int {
+	if req.MaxOutputTokens > 0 {
+		return req.MaxOutputTokens
+	}
+	return budget.MaxOutputTokens
 }
 
 type ResponseNotFoundError struct {
@@ -854,18 +895,75 @@ func mergeEventDetails(base map[string]any, extra map[string]any) map[string]any
 	return out
 }
 
-func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) ChatCompletionRequest {
+func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool, budget ContextBudget) ChatCompletionRequest {
 	tools := responseToolsToChatTools(req.Tools, webSearchReady)
 	return ChatCompletionRequest{
 		Model:       model,
 		Messages:    responseInputToMessages(req, history, inputItems),
 		Tools:       tools,
 		ToolChoice:  chatToolChoice(req.ToolChoice, tools),
-		MaxTokens:   req.MaxOutputTokens,
+		MaxTokens:   effectiveMaxOutputTokens(req, budget),
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
 		Stream:      req.Stream,
 	}
+}
+
+func estimateResponsePromptTokens(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) int {
+	tools := responseToolsToChatTools(req.Tools, webSearchReady)
+	messages := responseInputToMessages(req, history, inputItems)
+	return estimateChatMessagesTokens(messages) + estimateChatToolsTokens(tools) + estimateJSONishTokens(req.ToolChoice) + 8
+}
+
+func estimateChatMessagesTokens(messages []ChatMessage) int {
+	total := 0
+	for _, message := range messages {
+		total += 4
+		total += estimateTextTokens(message.Role)
+		total += estimateTextTokens(chatMessageContentText(message.Content))
+		for _, call := range message.ToolCalls {
+			total += 4
+			total += estimateTextTokens(call.ID)
+			total += estimateTextTokens(call.Type)
+			total += estimateTextTokens(call.Function.Name)
+			total += estimateTextTokens(call.Function.Arguments)
+		}
+		if message.ToolCallID != "" {
+			total += estimateTextTokens(message.ToolCallID)
+		}
+	}
+	return total
+}
+
+func estimateChatToolsTokens(tools []ChatTool) int {
+	total := 0
+	for _, tool := range tools {
+		total += 4
+		total += estimateTextTokens(tool.Type)
+		total += estimateTextTokens(tool.Function.Name)
+		total += estimateTextTokens(tool.Function.Description)
+		total += estimateJSONishTokens(tool.Function.Parameters)
+	}
+	return total
+}
+
+func estimateJSONishTokens(value any) int {
+	if value == nil {
+		return 0
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return estimateTextTokens(fmt.Sprint(value))
+	}
+	return estimateTextTokens(string(data))
+}
+
+func estimateTextTokens(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	return (len([]byte(text)) + 3) / 4
 }
 
 func compactChatRequest(model string, history []LedgerItem) ChatCompletionRequest {
