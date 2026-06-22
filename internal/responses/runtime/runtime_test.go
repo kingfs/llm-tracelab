@@ -28,6 +28,16 @@ type fakeChatClient struct {
 	streamErr          error
 }
 
+type fixedTokenEstimator struct {
+	tokens int
+	calls  int
+}
+
+func (f *fixedTokenEstimator) EstimateResponsePromptTokens(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) int {
+	f.calls++
+	return f.tokens
+}
+
 func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 	f.req = req
 	f.reqs = append(f.reqs, req)
@@ -1115,12 +1125,72 @@ func TestRuntimeCreateAutoCompactsWhenEstimatedTokensExceedContextWindow(t *test
 	}
 	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil ||
 		got.DetailsJSON["trigger"] != "context_window_tokens" ||
+		got.DetailsJSON["estimated_input_tokens"] == nil ||
 		got.DetailsJSON["context_window_tokens"] != 10 ||
 		got.DetailsJSON["reserved_output_tokens"] != 8 {
 		t.Fatalf("auto_triggered event = %#v, want context_window token trigger", got)
 	}
 	if client.reqs[1].MaxTokens != 8 {
 		t.Fatalf("post-compact chat request max tokens = %d, want profile max 8", client.reqs[1].MaxTokens)
+	}
+}
+
+func TestRuntimeCreateAutoCompactUsesInjectedTokenEstimator(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_estimator_target", "gpt-4o-mini")
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "Injected estimator compact summary."},
+					FinishReason: "stop",
+				}},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "new answer"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	estimator := &fixedTokenEstimator{tokens: 7}
+	rt := New(Config{
+		DefaultModel: "fallback-model",
+		AutoCompact:  true,
+		ModelProfiles: []ModelProfile{{
+			Pattern: "gpt-4o*",
+			Budget: ContextBudget{
+				ContextWindowTokens: 10,
+				MaxOutputTokens:     4,
+			},
+		}},
+	}, client, store, WithExecutionEventRecorder(events), WithTokenEstimator(estimator))
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-4o-mini",
+		PreviousResponseID: "resp_estimator_target",
+		Input:              "new question",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat requests = %d, want compact + create", len(client.reqs))
+	}
+	if estimator.calls != 1 {
+		t.Fatalf("token estimator calls = %d, want 1", estimator.calls)
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_estimator_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil ||
+		got.DetailsJSON["trigger"] != "context_window_tokens" ||
+		got.DetailsJSON["estimated_input_tokens"] != 7 ||
+		got.DetailsJSON["context_window_tokens"] != 10 ||
+		got.DetailsJSON["reserved_output_tokens"] != 4 {
+		t.Fatalf("auto_triggered event = %#v, want injected estimator token trigger", got)
 	}
 }
 
