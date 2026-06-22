@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -502,6 +503,61 @@ responses_server:
 	}
 	if got := executors.Executors[1]; got.Name != "disabled_lookup" || got.Enabled == nil || *got.Enabled {
 		t.Fatalf("second function executor = %+v", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsConfigValidation(t *testing.T) {
+	disabled := false
+	cfg := Config{}
+	cfg.ResponsesServer.FunctionExecutors.Enabled = true
+	cfg.ResponsesServer.FunctionExecutors.Executors = []ResponsesFunctionExecutorBinding{
+		{Name: " lookup ", Type: " STATIC_RESPONSE ", Output: "ok"},
+		{Name: "lookup", Type: "static_response", Output: "duplicate"},
+		{Name: " ", Type: "static_response", Output: "missing name"},
+		{Name: "future", Type: "external_command", Command: "echo ok"},
+		{Name: "mystery", Type: "unknown_type"},
+		{Name: "off", Type: "static_response", Enabled: &disabled},
+	}
+
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if len(executors.Executors) != 6 {
+		t.Fatalf("len(executors) = %d, want 6", len(executors.Executors))
+	}
+	if got := executors.Executors[0]; got.Name != "lookup" || got.Type != "static_response" || !got.Available || len(got.Warnings) != 0 {
+		t.Fatalf("first executor = %+v, want normalized available static_response", got)
+	}
+	if got := executors.Executors[1]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "duplicate executor name") {
+		t.Fatalf("duplicate executor = %+v, want unavailable duplicate warning", got)
+	}
+	if got := executors.Executors[2]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "name is required") {
+		t.Fatalf("empty-name executor = %+v, want unavailable name warning", got)
+	}
+	if got := executors.Executors[3]; got.Available || got.Command != "echo ok" || !strings.Contains(strings.Join(got.Warnings, " "), "not implemented") {
+		t.Fatalf("external command executor = %+v, want recognized unavailable warning", got)
+	}
+	if got := executors.Executors[4]; got.Available || !strings.Contains(strings.Join(got.Warnings, " "), "unsupported executor type") {
+		t.Fatalf("unknown executor = %+v, want unavailable unsupported warning", got)
+	}
+	if got := executors.Executors[5]; got.Available || len(got.Warnings) != 0 {
+		t.Fatalf("disabled executor = %+v, want unavailable without validation warning", got)
+	}
+	if got := strings.Join(executors.Warnings, " "); strings.Contains(got, "no available executors") {
+		t.Fatalf("warnings = %q, did not expect no-available warning when one static executor is available", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsConfigWarnsWhenEnabledWithoutAvailableExecutor(t *testing.T) {
+	disabled := false
+	cfg := Config{}
+	cfg.ResponsesServer.FunctionExecutors.Enabled = true
+	cfg.ResponsesServer.FunctionExecutors.Executors = []ResponsesFunctionExecutorBinding{
+		{Name: "future", Type: "external_command", Command: "echo ok"},
+		{Name: "off", Type: "static_response", Enabled: &disabled},
+	}
+
+	executors := cfg.ResponsesFunctionExecutorsConfig()
+	if got := strings.Join(executors.Warnings, " "); !strings.Contains(got, "no available executors") {
+		t.Fatalf("warnings = %q, want no available executors warning", got)
 	}
 }
 

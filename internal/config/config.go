@@ -173,6 +173,7 @@ type ResponsesFunctionExecutorConfig struct {
 	MaxResultBytes int                                `yaml:"max_result_bytes"`
 	Redaction      ResponsesFunctionRedactionConfig   `yaml:"redaction"`
 	Executors      []ResponsesFunctionExecutorBinding `yaml:"executors"`
+	Warnings       []string                           `yaml:"-" json:"-"`
 }
 
 type ResponsesFunctionRedactionConfig struct {
@@ -181,10 +182,25 @@ type ResponsesFunctionRedactionConfig struct {
 }
 
 type ResponsesFunctionExecutorBinding struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
-	Enabled *bool  `yaml:"enabled"`
-	Output  any    `yaml:"output"`
+	Name      string   `yaml:"name"`
+	Type      string   `yaml:"type"`
+	Enabled   *bool    `yaml:"enabled"`
+	Output    any      `yaml:"output"`
+	Command   string   `yaml:"command"`
+	Available bool     `yaml:"-" json:"-"`
+	Warnings  []string `yaml:"-" json:"-"`
+}
+
+const (
+	ResponsesFunctionExecutorTypeStaticResponse  = "static_response"
+	ResponsesFunctionExecutorTypeExternalCommand = "external_command"
+)
+
+func SupportedResponsesFunctionExecutorTypes() []string {
+	return []string{
+		ResponsesFunctionExecutorTypeStaticResponse,
+		ResponsesFunctionExecutorTypeExternalCommand,
+	}
 }
 
 type ToolsConfig struct {
@@ -791,6 +807,7 @@ func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
 
 func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConfig {
 	cfg := c.ResponsesServer.FunctionExecutors
+	cfg.Warnings = nil
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 5 * time.Second
 	}
@@ -798,10 +815,50 @@ func (c Config) ResponsesFunctionExecutorsConfig() ResponsesFunctionExecutorConf
 		cfg.MaxResultBytes = 64 << 10
 	}
 	bindings := make([]ResponsesFunctionExecutorBinding, 0, len(cfg.Executors))
+	seen := map[string]struct{}{}
+	enabledAvailable := 0
 	for _, binding := range cfg.Executors {
 		binding.Name = strings.TrimSpace(binding.Name)
 		binding.Type = strings.ToLower(strings.TrimSpace(binding.Type))
+		binding.Command = strings.TrimSpace(binding.Command)
+		binding.Available = false
+		binding.Warnings = nil
+		enabled := true
+		if binding.Enabled != nil {
+			enabled = *binding.Enabled
+		}
+		if binding.Name == "" {
+			binding.Warnings = append(binding.Warnings, "executor name is required")
+		} else if _, ok := seen[binding.Name]; ok {
+			binding.Warnings = append(binding.Warnings, fmt.Sprintf("duplicate executor name %q is ignored", binding.Name))
+		} else {
+			seen[binding.Name] = struct{}{}
+		}
+		switch binding.Type {
+		case ResponsesFunctionExecutorTypeStaticResponse:
+			if len(binding.Warnings) == 0 && enabled {
+				binding.Available = true
+				enabledAvailable++
+			}
+		case ResponsesFunctionExecutorTypeExternalCommand:
+			binding.Warnings = append(binding.Warnings, "external_command executors are recognized but not implemented")
+		default:
+			if binding.Type == "" {
+				binding.Warnings = append(binding.Warnings, fmt.Sprintf("executor %q type is required", binding.Name))
+			} else {
+				binding.Warnings = append(binding.Warnings, fmt.Sprintf("unsupported executor type %q for %q", binding.Type, binding.Name))
+			}
+		}
+		cfg.Warnings = append(cfg.Warnings, binding.Warnings...)
 		bindings = append(bindings, binding)
+	}
+	if cfg.Enabled && len(bindings) == 0 {
+		cfg.Warnings = append(cfg.Warnings, "responses function executors are enabled but no executors are configured")
+	} else if cfg.Enabled && enabledAvailable == 0 {
+		cfg.Warnings = append(cfg.Warnings, "responses function executors are enabled but no available executors are configured")
+	}
+	if cfg.Warnings == nil {
+		cfg.Warnings = []string{}
 	}
 	cfg.Executors = bindings
 	return cfg

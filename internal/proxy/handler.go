@@ -496,14 +496,14 @@ func responsesFunctionExecutorOptions(cfg *config.Config) ([]responsesruntime.Op
 		RedactOutput:    executorConfig.Redaction.Output,
 	}
 	for _, binding := range executorConfig.Executors {
-		if binding.Enabled != nil && !*binding.Enabled {
+		if !binding.Available {
 			continue
 		}
 		if binding.Name == "" {
 			return nil, fmt.Errorf("responses function executor name is required")
 		}
 		switch binding.Type {
-		case "static_response":
+		case config.ResponsesFunctionExecutorTypeStaticResponse:
 			options = append(options, responsesruntime.WithFunctionToolExecutorPolicy(
 				binding.Name,
 				responsesruntime.StaticFunctionToolExecutor{Output: binding.Output},
