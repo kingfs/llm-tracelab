@@ -92,6 +92,14 @@ func (c *Client) ChatCompletion(ctx context.Context, chatReq runtime.ChatComplet
 		}
 	}
 
+	if chatReq.Stream {
+		chatResp, err := aggregateChatCompletionStream(httpResp.Body)
+		if err != nil {
+			return runtime.ChatCompletionResponse{}, err
+		}
+		return chatResp, nil
+	}
+
 	var chatResp runtime.ChatCompletionResponse
 	if err := json.NewDecoder(httpResp.Body).Decode(&chatResp); err != nil {
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("decode chat completion response JSON: %w", err)

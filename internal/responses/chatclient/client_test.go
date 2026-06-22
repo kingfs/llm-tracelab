@@ -131,6 +131,108 @@ func TestChatCompletionInvalidJSONReturnsDiagnosticError(t *testing.T) {
 	}
 }
 
+func TestChatCompletionStreamAggregatesSSEChunks(t *testing.T) {
+	var gotReq runtime.ChatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"id":"chatcmpl_stream","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello "},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_stream","object":"chat.completion.chunk","model":"gpt-4o","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":"stop"}]}`,
+			`data: {"id":"chatcmpl_stream","object":"chat.completion.chunk","model":"gpt-4o","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
+			`data: [DONE]`,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := client.ChatCompletion(context.Background(), runtime.ChatCompletionRequest{
+		Model:    "gpt-4o",
+		Messages: []runtime.ChatMessage{{Role: "user", Content: "hi"}},
+		Stream:   true,
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+
+	if !gotReq.Stream {
+		t.Fatal("request stream = false, want true")
+	}
+	if resp.ID != "chatcmpl_stream" || resp.Model != "gpt-4o" {
+		t.Fatalf("response identity = %q/%q, want stream id/model", resp.ID, resp.Model)
+	}
+	if len(resp.Choices) != 1 {
+		t.Fatalf("choices = %d, want 1", len(resp.Choices))
+	}
+	choice := resp.Choices[0]
+	if choice.Message.Role != "assistant" || choice.Message.Content != "Hello world" || choice.FinishReason != "stop" {
+		t.Fatalf("choice = %+v, want aggregated assistant text", choice)
+	}
+	if resp.Usage.TotalTokens != 7 {
+		t.Fatalf("usage = %+v, want total_tokens 7", resp.Usage)
+	}
+}
+
+func TestChatCompletionStreamAggregatesToolCallDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"id":"chatcmpl_tools","model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\""}}]},"finish_reason":null}]}`,
+			`data: {"id":"chatcmpl_tools","model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"Paris\"}"}}]},"finish_reason":"tool_calls"}]}`,
+			`data: [DONE]`,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	resp, err := client.ChatCompletion(context.Background(), runtime.ChatCompletionRequest{Model: "gpt-4o", Stream: true})
+	if err != nil {
+		t.Fatalf("ChatCompletion() error = %v", err)
+	}
+
+	if len(resp.Choices) != 1 || len(resp.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("choices = %+v, want one tool call", resp.Choices)
+	}
+	call := resp.Choices[0].Message.ToolCalls[0]
+	if call.ID != "call_1" || call.Type != "function" || call.Function.Name != "weather" || call.Function.Arguments != `{"city":"Paris"}` {
+		t.Fatalf("tool call = %+v, want aggregated function call", call)
+	}
+	if resp.Choices[0].FinishReason != "tool_calls" {
+		t.Fatalf("finish reason = %q, want tool_calls", resp.Choices[0].FinishReason)
+	}
+}
+
+func TestChatCompletionStreamInvalidJSONReturnsDiagnosticError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {bad json}\n"))
+	}))
+	defer server.Close()
+
+	client, err := New(Options{BaseURL: server.URL})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = client.ChatCompletion(context.Background(), runtime.ChatCompletionRequest{Model: "test", Stream: true})
+	if err == nil {
+		t.Fatal("ChatCompletion() error = nil, want stream decode error")
+	}
+	if !strings.Contains(err.Error(), "decode chat completion stream chunk JSON") {
+		t.Fatalf("error = %q, want stream decode diagnostic", err)
+	}
+}
+
 func TestChatCompletionTrimsBaseURLTrailingSlash(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

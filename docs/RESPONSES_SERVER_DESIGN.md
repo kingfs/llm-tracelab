@@ -19,7 +19,7 @@
 
 当前明确未完成：
 
-- 真实上游增量 streaming 与 cancel。当前 Stage 18A 已支持 `stream:true` 返回 Responses SSE envelope，但内部仍先执行现有非流式 runtime，再把完整 response 展开为 SSE events。
+- 真实上游增量 streaming 与 cancel。当前 Stage 18A 已支持 `stream:true` 返回 Responses SSE envelope，但内部仍先执行现有非流式 runtime，再把完整 response 展开为 SSE events。Stage 18B 已让直接 Chat Completions client 可以聚合 OpenAI-compatible SSE 为内部 `ChatCompletionResponse`，但 proxy adapter/recorder 尚未切到边接收边输出的真实流式链路。
 - 服务端任意 function tool 执行器。当前普通 `function` tool 已支持非流式 schema 转发、模型 `function_call` output、客户端 `function_call_output` continuation 和 requested/submitted execution events；hosted `web_search` 仍是唯一 server-side 自动执行 tool。
 - compact workflow。
 - Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 17B 已接入 `capabilities.tool_calling` 路由硬约束。Stage 18A 已接入 deferred Responses SSE envelope 和 stream started/completed events。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup，更完整的真实增量 streaming/cancel/compact events 尚未接入。
@@ -119,7 +119,7 @@ client
 3. Responses Runtime 读取 `previous_response_id`、conversation item 和 request input，构造当前 turn 的 model context。
 4. Runtime 将 Responses input、instructions、tools、tool choice、reasoning/metadata 等映射到 OpenAI-compatible Chat Completions 请求。
 5. TraceLab 调用上游 `POST /chat/completions`。这个外部 exchange 进入现有 Proxy Recording 能力，写为 `.http` V3 cassette。
-6. 当前 Runtime 输出 OpenAI Responses 兼容 response；`stream:true` 由 HTTP handler 以 deferred SSE envelope 输出，内部 model call 仍是非流式。
+6. 当前 Runtime 输出 OpenAI Responses 兼容 response；`stream:true` 由 HTTP handler 以 deferred SSE envelope 输出，内部 model call 仍是非流式。直接 Chat Completions client 已具备 OpenAI-compatible SSE 聚合能力，供后续把内部 model call 切到真实流式调用复用。
 7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Stage 10A 还会写入 `request_audits` 的 accepted/completed/failed/rejected 状态。Stage 11A 会为内部 Chat Completions cassette 写入最小 `upstream_exchanges` correlation。Stage 12A 会写入 request 与内部 model_call 的最小 `execution_events`。Stage 13A 提供核心 audit 查询服务、Monitor API 和 MCP 查询工具。Stage 14A 写入 hosted `web_search` tool_call events；Monitor UI 后续再接。
 
 关键边界：
@@ -330,7 +330,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - usage、tool call delta、final response event 顺序稳定。
 - cancel 不破坏已写 audit/cassette 关联。
 
-当前状态：Stage 18A 已让 `POST /v1/responses` 的 `stream:true` 返回 `text/event-stream`，事件覆盖 `response.created`、`response.in_progress`、message output text delta/done、function call arguments delta/done、output item done 和 `response.completed`，并写入 `response.stream` started/completed execution events。它是 deferred streaming：先通过现有非流式 runtime 得到完整 response，再展开为 SSE；真实上游 token streaming、client disconnect/cancel 传播和 hosted tool streaming 仍未完成。
+当前状态：Stage 18A 已让 `POST /v1/responses` 的 `stream:true` 返回 `text/event-stream`，事件覆盖 `response.created`、`response.in_progress`、message output text delta/done、function call arguments delta/done、output item done 和 `response.completed`，并写入 `response.stream` started/completed execution events。Stage 18B 已在 `internal/responses/chatclient` 增加 OpenAI-compatible Chat Completions SSE 聚合，能把文本 delta、function tool call delta 和 usage trailer 聚合为内部 `ChatCompletionResponse`。整体 server-mode 仍是 deferred streaming：先通过现有 runtime 得到完整 response，再展开为 SSE；proxy adapter/recorder 的真实上游 token streaming、client disconnect/cancel 传播和 hosted tool streaming 仍未完成。
 
 ### Stage 2 / Stage 6：Postgres-first Persistence/Audit（部分落地）
 
