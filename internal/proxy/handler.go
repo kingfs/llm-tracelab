@@ -382,6 +382,12 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 	var localResponses http.Handler
 	responsesPath := cfg.ResponsesServerPath()
 	if cfg.ResponsesServerEnabled() {
+		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
+		if st != nil {
+			if entClient := st.EntClient(); entClient != nil {
+				responseStore = responsesruntime.NewEntStore(entClient)
+			}
+		}
 		rt := responsesruntime.New(responsesruntime.Config{
 			DefaultModel: cfg.ResponsesDefaultModel(),
 			ForceStore:   cfg.ResponsesForceStore(),
@@ -389,7 +395,7 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			router:        rtr,
 			recorder:      rec,
 			routingPolicy: rtr.Policy(),
-		}, responsesruntime.NewMemoryStore())
+		}, responseStore)
 		localResponses = httpapi.NewHandler(rt, httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()))
 	}
 
