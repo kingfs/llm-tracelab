@@ -404,6 +404,7 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			WebSearchMaxResults:         cfg.WebSearchConfig().MaxResults,
 			AutoCompact:                 cfg.ResponsesAutoCompactEnabled(),
 			CompactHistoryItemThreshold: cfg.ResponsesCompactHistoryItemThreshold(),
+			ModelProfiles:               responsesRuntimeModelProfiles(cfg),
 		}
 		runtimeOptions := []responsesruntime.Option{}
 		if executionEventRecorder != nil {
@@ -451,6 +452,27 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		responsesPath:    responsesPath,
 		responsesHandler: localResponses,
 	}, nil
+}
+
+func responsesRuntimeModelProfiles(cfg *config.Config) []responsesruntime.ModelProfile {
+	if cfg == nil {
+		return nil
+	}
+	profiles := cfg.ResponsesModelProfiles()
+	out := make([]responsesruntime.ModelProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, responsesruntime.ModelProfile{
+			Name:          profile.Name,
+			Pattern:       profile.Pattern,
+			UpstreamModel: profile.UpstreamModel,
+			Budget: responsesruntime.ContextBudget{
+				ContextWindowTokens:         profile.ContextWindowTokens,
+				MaxOutputTokens:             profile.MaxOutputTokens,
+				CompactHistoryItemThreshold: profile.CompactHistoryItemThreshold,
+			},
+		})
+	}
+	return out
 }
 
 func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier) (*Handler, error) {

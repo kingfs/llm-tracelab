@@ -9,7 +9,7 @@
 
 当前已经落地的范围是可选的 `/v1/responses` 本地 server-mode，不改变默认 proxy 行为：
 
-- 配置：新增 `responses_server` 配置块，字段包括 `enabled`、`default_model`、`force_store`、`max_request_body_bytes`、`path`、`auto_compact` 和 `compact_history_item_threshold`。默认 `enabled: false`，默认 path 为 `/v1/responses`，自动 compact 默认关闭。
+- 配置：新增 `responses_server` 配置块，字段包括 `enabled`、`default_model`、`force_store`、`max_request_body_bytes`、`path`、`auto_compact`、`compact_history_item_threshold` 和 `model_profiles`。`model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和可选 `upstream_model`。默认 `enabled: false`，默认 path 为 `/v1/responses`，自动 compact 默认关闭。
 - server-mode path：当 `responses_server.enabled=true` 且请求路径等于配置的 Responses path 时，proxy handler 直接进入本地 Responses HTTP handler；非 Responses 请求仍走现有代理热路径。
 - Chat Completions adapter：本地 Responses runtime 会把非流式 Responses 请求映射为内部上游 `POST /v1/chat/completions` 调用，由现有 router 选择目标 OpenAI-compatible upstream。
 - cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；有 ent-backed audit store 时还会写一条 `upstream_exchanges`，把 response id、request audit、recorder request id、cassette path、route target、model、endpoint、status 和时间戳关联起来；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
@@ -21,7 +21,7 @@
 
 - 下游边转发 streaming。当前 Stage 18A 已支持 `stream:true` 返回 Responses SSE envelope，但输出仍先等待 runtime 得到完整 response，再展开为 SSE events。Stage 18B 已让直接 Chat Completions client 可以聚合 OpenAI-compatible SSE，并让 Responses server-mode 的内部 Chat Completions model call 在下游 `stream:true` 时请求和记录上游 SSE cassette；Stage 18C 已让 context cancellation 以 `cancelled` request/model_call audit 状态落库。proxy adapter/HTTP handler 尚未切到边接收上游边输出下游的真实流式链路。
 - 服务端任意 function tool 执行器。当前普通 `function` tool 已支持非流式 schema 转发、模型 `function_call` output、客户端 `function_call_output` continuation 和 requested/submitted execution events；hosted `web_search` 仍是唯一 server-side 自动执行 tool。
-- 自动 compact workflow。当前显式 `/v1/responses/compact` 首切已落地，并已有配置化 item-count 阈值自动触发；尚未按 model profile/context window/token budget 自动触发。
+- 自动 compact workflow。当前显式 `/v1/responses/compact` 首切已落地，并已有配置化 item-count 阈值自动触发；匹配 `responses_server.model_profiles` 时可用 profile 的 item-count 阈值覆盖全局阈值。`context_window_tokens`、`max_output_tokens` 和 `upstream_model` 仍是配置骨架，尚未实现 token estimator、完整 context window budgeting 或 upstream model rewrite。
 - Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 17B 已接入 `capabilities.tool_calling` 路由硬约束。Stage 18A 已接入 deferred Responses SSE envelope 和 stream started/completed events。Stage 19B 已接入 item-count 自动 compact trigger 和 `auto_triggered` execution event。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup，更完整的真实增量 streaming 和 model profile/context budgeting 尚未接入。
 - 完整 Postgres migration 生产化。当前已有 checked-in SQL，Postgres `db migrate up`/`auth migrate up` 会应用版本化 SQL，application store 已拆分 open-vs-migrate，Postgres migration 覆盖 `internal/store` SQLite application raw DDL 表集，并完成 migrated logs/observation/finding/analysis/system-event 路径的首轮 raw SQL 兼容；剩余缺口是 SQLite 应用迁移仍未版本化、Postgres auth rollback/独立 migration namespace 未完成、analytics/eval 等 raw SQL 兼容性仍需持续审计。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
@@ -170,7 +170,7 @@ providers:
 - `api_type`：provider 对当前 route 暴露的 API surface。当前接受 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`。默认值按协议族推断：OpenAI-compatible 为 `chat_completions`，Anthropic 为 `messages`，Google GenAI / Vertex 为 `gemini_generate_content`。
 - `mode`：TraceLab 对该 provider 的处理模式。当前接受空值、`proxy`、`record_only`、`server`、`responses_server`；空值保持历史兼容。
 - `capabilities`：当前代码支持 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize` 布尔能力，用于 routing 和 runtime plan，不应从 provider preset 中隐式猜测所有细节。
-- `model_profiles`：仍是后续字段，计划用于模型上下文窗口、输出上限、tool 能力、compact 阈值、上游模型名映射和兼容性参数。
+- `model_profiles`：provider/channel 级 profile 仍是后续字段，计划用于模型上下文窗口、输出上限、tool 能力、compact 阈值、上游模型名映射和兼容性参数。当前已先在 `responses_server.model_profiles` 中落地配置骨架和 item-count compact 阈值覆盖。
 
 配置原则：
 
@@ -179,7 +179,7 @@ providers:
 - 显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被内部 Chat Completions 选中。
 - 当请求体包含 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，decision trace 的候选项会标记 `unsupported_tools`。
 - `api_type: chat_completions` 不等于 `responses_native`。由 TraceLab server mode 补齐 Responses 语义。
-- 后续 `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源。
+- 后续 provider/channel `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源；当前 `responses_server.model_profiles` 只是本地 server-mode 的保守配置骨架。
 
 ## 存储策略
 
@@ -365,7 +365,7 @@ Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstre
 - compact 产出 summary/item，并保留原始 item lineage。
 - Codex 长会话可通过 audit 解释 compact 行为。
 
-当前状态：`tools.web_search` 配置、mock/SearXNG provider、非流式 hosted `web_search` tool loop 及其 started/completed/failed execution events 已落地。普通 function tool 的客户端执行回路和 requested/submitted audit events 已落地。Stage 19A 已接入显式 `/v1/responses/compact`：读取目标 response continuation history，调用上游 Chat Completions 生成 `summary` output，把 compact response 存入 runtime store，并写 `response.compact` started/completed/failed events；后续 continuation 会停在 `compact_request` boundary，并把 summary 注入 system message。Stage 19B 已接入 `responses_server.auto_compact` 和 `responses_server.compact_history_item_threshold`，create continuation 在 history item 数超过阈值时会先生成 compact response，并写 `response.compact` `auto_triggered` event。真实 streaming tool events、model profile 驱动的 context budgeting 仍未完成。
+当前状态：`tools.web_search` 配置、mock/SearXNG provider、非流式 hosted `web_search` tool loop 及其 started/completed/failed execution events 已落地。普通 function tool 的客户端执行回路和 requested/submitted audit events 已落地。Stage 19A 已接入显式 `/v1/responses/compact`：读取目标 response continuation history，调用上游 Chat Completions 生成 `summary` output，把 compact response 存入 runtime store，并写 `response.compact` started/completed/failed events；后续 continuation 会停在 `compact_request` boundary，并把 summary 注入 system message。Stage 19B 已接入 `responses_server.auto_compact` 和 `responses_server.compact_history_item_threshold`，create continuation 在 history item 数超过阈值时会先生成 compact response，并写 `response.compact` `auto_triggered` event。当前已新增 `responses_server.model_profiles` 骨架，匹配当前 model 时可用 profile 的 `compact_history_item_threshold` 覆盖全局 item-count 阈值；真实 streaming tool events、token estimator 和 model profile 驱动的完整 context budgeting 仍未完成。
 
 ### Stage 4：高级 routing 与多 provider（未完成）
 

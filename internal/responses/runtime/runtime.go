@@ -22,6 +22,7 @@ type Config struct {
 	WebSearchMaxResults         int
 	AutoCompact                 bool
 	CompactHistoryItemThreshold int
+	ModelProfiles               []ModelProfile
 }
 
 type Runtime struct {
@@ -81,7 +82,8 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	if err != nil {
 		return protocol.Response{}, err
 	}
-	if r.shouldAutoCompact(req, history) {
+	budget := r.cfg.ContextBudgetForModel(model).Budget
+	if r.shouldAutoCompact(req, budget, history) {
 		compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
 			ResponseID: req.PreviousResponseID,
 			Model:      model,
@@ -90,7 +92,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 					"compact": map[string]any{
 						"trigger":                "auto",
 						"history_items":          len(history),
-						"history_item_threshold": r.cfg.CompactHistoryItemThreshold,
+						"history_item_threshold": budget.CompactHistoryItemThreshold,
 					},
 				},
 			},
@@ -108,7 +110,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 				"target_response_id":     req.PreviousResponseID,
 				"compact_response_id":    compactResp.ID,
 				"history_items":          len(history),
-				"history_item_threshold": r.cfg.CompactHistoryItemThreshold,
+				"history_item_threshold": budget.CompactHistoryItemThreshold,
 			},
 		})
 		req.PreviousResponseID = compactResp.ID
@@ -283,11 +285,11 @@ func (r *Runtime) shouldStore(req protocol.CreateResponseRequest) bool {
 	return req.Store == nil || *req.Store
 }
 
-func (r *Runtime) shouldAutoCompact(req protocol.CreateResponseRequest, history []LedgerItem) bool {
+func (r *Runtime) shouldAutoCompact(req protocol.CreateResponseRequest, budget ContextBudget, history []LedgerItem) bool {
 	if !r.cfg.AutoCompact || req.PreviousResponseID == "" {
 		return false
 	}
-	threshold := r.cfg.CompactHistoryItemThreshold
+	threshold := budget.CompactHistoryItemThreshold
 	return threshold > 0 && len(history) > threshold
 }
 

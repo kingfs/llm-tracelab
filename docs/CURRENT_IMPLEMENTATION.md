@@ -37,7 +37,7 @@ Upstream 配置已经包含 `api_type`、`mode` 和基础 `capabilities`。`api_
 
 Hosted `web_search` 已有首切实现。配置 `tools.web_search.enabled=true` 后，可选择 `mock` 或 `searxng` provider；非流式 Responses runtime 会把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把结果注入下一轮 Chat Completions。默认关闭，不影响普通代理路径。Stage 14A 已为 hosted `web_search` 写入 `response.tool_call` execution events，覆盖 started/completed/failed，details 中包含 tool name、call id、query、iteration、max results 和 result/error 摘要。普通 `function` tool 不由 TraceLab 自动执行；runtime 会把 tool schema 转给上游 Chat Completions，把模型返回的 function call 保存为 Responses `function_call` output，客户端后续提交 `function_call_output` 时通过 `previous_response_id` 继续对话，并写 requested/submitted tool_call events。
 
-Compact workflow 已有首切实现。server-mode 会把配置 Responses path 下的子路径一起分流到本地 Responses handler；`POST /v1/responses/compact` 接收 `response_id`，读取目标 response 的 continuation history，调用上游 Chat Completions 生成 `summary` output，并把新的 compact response 存入 runtime store。compact response 的 input item 是 `compact_request`，后续 `previous_response_id` 指向该 compact response 时，history 会停在 compact boundary，并把 `summary` 作为 system message 注入下一轮模型上下文。配置 `responses_server.auto_compact=true` 且 `responses_server.compact_history_item_threshold>0` 后，create continuation 会在加载 history item 数超过阈值时先自动 compact，再把本次 response 接到 compact response 后面。当前自动 compact 仍是最小 item-count 策略，尚未接入 model profile/context window/token budget。
+Compact workflow 已有首切实现。server-mode 会把配置 Responses path 下的子路径一起分流到本地 Responses handler；`POST /v1/responses/compact` 接收 `response_id`，读取目标 response 的 continuation history，调用上游 Chat Completions 生成 `summary` output，并把新的 compact response 存入 runtime store。compact response 的 input item 是 `compact_request`，后续 `previous_response_id` 指向该 compact response 时，history 会停在 compact boundary，并把 `summary` 作为 system message 注入下一轮模型上下文。配置 `responses_server.auto_compact=true` 且有效 compact item 阈值大于 0 后，create continuation 会在加载 history item 数超过阈值时先自动 compact，再把本次 response 接到 compact response 后面。有效阈值默认来自 `responses_server.compact_history_item_threshold`，也可由匹配当前 model 的 `responses_server.model_profiles[].compact_history_item_threshold` 覆盖；profile 已预留 `context_window_tokens`、`max_output_tokens` 和 `upstream_model` 字段。当前自动 compact 仍只按 item-count 判定，不做 token estimator 或完整 context window budgeting。
 
 详细协议说明见 [协议参考](./protocol-reference/README.md)。
 
@@ -156,6 +156,6 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 - 让 replay 依赖网络访问。
 - 用 SQLite 替代 raw cassette 作为 replay 事实源。
 - 真实上游增量 Responses server-mode streaming 和 cancel。
-- 服务端任意 function tool 执行器、streaming tool events 和 model profile/context window/token budgeting。
+- 服务端任意 function tool 执行器、streaming tool events 和完整 model profile/context window/token budgeting；当前仅有 profile 配置骨架和 item-count compact 阈值覆盖。
 - 完整真实 stream/cancel/compact execution event 写入和完整 Postgres migration 生产化；当前仅覆盖 `request_audits`、内部 `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed、普通 function tool requested/submitted、deferred stream started/completed 最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event 路径的首轮 Postgres raw SQL 兼容。
 - provider auto-detect。

@@ -365,6 +365,9 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 0 {
 		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 0", got)
 	}
+	if got := cfg.ResponsesModelProfiles(); len(got) != 0 {
+		t.Fatalf("ResponsesModelProfiles() len = %d, want 0", len(got))
+	}
 }
 
 func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
@@ -377,6 +380,14 @@ responses_server:
   path: "/v1/responses"
   auto_compact: true
   compact_history_item_threshold: 12
+  model_profiles:
+    - name: "qwen3"
+      context_window_tokens: 32768
+      max_output_tokens: 4096
+      compact_history_item_threshold: 8
+      upstream_model: "qwen/qwen3"
+    - pattern: "gpt-4o*"
+      compact_history_item_threshold: 6
 `)
 
 	cfg, err := Load(path)
@@ -403,6 +414,16 @@ responses_server:
 	}
 	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 12 {
 		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 12", got)
+	}
+	profiles := cfg.ResponsesModelProfiles()
+	if len(profiles) != 2 {
+		t.Fatalf("ResponsesModelProfiles() len = %d, want 2", len(profiles))
+	}
+	if got := profiles[0]; got.Name != "qwen3" || got.ContextWindowTokens != 32768 || got.MaxOutputTokens != 4096 || got.CompactHistoryItemThreshold != 8 || got.UpstreamModel != "qwen/qwen3" {
+		t.Fatalf("first model profile = %+v", got)
+	}
+	if got := profiles[1]; got.Pattern != "gpt-4o*" || got.CompactHistoryItemThreshold != 6 {
+		t.Fatalf("second model profile = %+v", got)
 	}
 }
 
