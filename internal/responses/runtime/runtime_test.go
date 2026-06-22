@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,89 @@ type fakeChatClient struct {
 	streamResp         ChatCompletionResponse
 	streamResps        []ChatCompletionResponse
 	streamErr          error
+}
+
+type blockingFirstToolCallClient struct {
+	mu      sync.Mutex
+	reqs    []ChatCompletionRequest
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingFirstToolCallClient() *blockingFirstToolCallClient {
+	return &blockingFirstToolCallClient{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (f *blockingFirstToolCallClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
+	f.mu.Lock()
+	f.reqs = append(f.reqs, req)
+	index := len(f.reqs) - 1
+	f.mu.Unlock()
+
+	if index == 0 {
+		f.once.Do(func() {
+			close(f.started)
+		})
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return ChatCompletionResponse{}, ctx.Err()
+		}
+		return functionToolChatResponse("call_lookup", "lookup"), nil
+	}
+	return finalChatResponse("complete"), nil
+}
+
+func (f *blockingFirstToolCallClient) requests() []ChatCompletionRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ChatCompletionRequest, len(f.reqs))
+	copy(out, f.reqs)
+	return out
+}
+
+func functionToolChatResponse(callID, name string) ChatCompletionResponse {
+	return ChatCompletionResponse{
+		Choices: []ChatChoice{{
+			Message: ChatMessage{
+				ToolCalls: []ChatToolCall{{
+					ID:   callID,
+					Type: "function",
+					Function: ChatToolCallFunction{
+						Name:      name,
+						Arguments: `{"q":"codex"}`,
+					},
+				}},
+			},
+			FinishReason: "tool_calls",
+		}},
+		Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+	}
+}
+
+func finalChatResponse(content string) ChatCompletionResponse {
+	return ChatCompletionResponse{
+		Choices: []ChatChoice{{
+			Message:      ChatMessage{Content: content},
+			FinishReason: "stop",
+		}},
+		Usage: ChatUsage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+	}
+}
+
+func functionToolCreateRequest(input string) protocol.CreateResponseRequest {
+	return protocol.CreateResponseRequest{
+		Input: input,
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}
 }
 
 type fixedTokenEstimator struct {
@@ -1770,6 +1854,77 @@ func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) 
 	}
 	if events.events[1].Status != "submitted" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" {
 		t.Fatalf("submitted event mismatch: %#v", events.events[1])
+	}
+}
+
+func TestRuntimeFunctionToolExecutorRegistryReplaceAffectsNextCreate(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			functionToolChatResponse("call_lookup_1", "lookup"),
+			finalChatResponse("first complete"),
+			functionToolChatResponse("call_lookup_2", "lookup"),
+			finalChatResponse("second complete"),
+		},
+	}
+	rt := New(
+		Config{DefaultModel: "gpt-test"},
+		client,
+		NewMemoryStore(),
+		WithFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{
+			"lookup": {Executor: StaticFunctionToolExecutor{Output: "old"}},
+		})),
+	)
+
+	if _, err := rt.Create(context.Background(), functionToolCreateRequest("first")); err != nil {
+		t.Fatalf("first Create returned error: %v", err)
+	}
+	rt.ReplaceFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{
+		"lookup": {Executor: StaticFunctionToolExecutor{Output: "new"}},
+	}))
+	if _, err := rt.Create(context.Background(), functionToolCreateRequest("second")); err != nil {
+		t.Fatalf("second Create returned error: %v", err)
+	}
+
+	if len(client.reqs) != 4 {
+		t.Fatalf("chat calls = %d, want 4", len(client.reqs))
+	}
+	if got := client.reqs[1].Messages[2].Content; got != "old" {
+		t.Fatalf("first tool output = %q, want old", got)
+	}
+	if got := client.reqs[3].Messages[2].Content; got != "new" {
+		t.Fatalf("second tool output = %q, want new", got)
+	}
+}
+
+func TestRuntimeFunctionToolExecutorRegistrySnapshotPreservesInFlightCreate(t *testing.T) {
+	client := newBlockingFirstToolCallClient()
+	rt := New(
+		Config{DefaultModel: "gpt-test"},
+		client,
+		NewMemoryStore(),
+		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: "old"}),
+	)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := rt.Create(context.Background(), functionToolCreateRequest("lookup"))
+		errCh <- err
+	}()
+
+	<-client.started
+	rt.ReplaceFunctionToolExecutorRegistry(NewFunctionToolExecutorRegistry(map[string]FunctionToolExecutorRegistration{
+		"lookup": {Executor: StaticFunctionToolExecutor{Output: "new"}},
+	}))
+	close(client.release)
+
+	if err := <-errCh; err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	reqs := client.requests()
+	if len(reqs) != 2 {
+		t.Fatalf("chat calls = %d, want 2", len(reqs))
+	}
+	if got := reqs[1].Messages[2].Content; got != "old" {
+		t.Fatalf("in-flight tool output = %q, want old snapshot", got)
 	}
 }
 

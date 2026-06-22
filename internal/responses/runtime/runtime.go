@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/responses/audit"
@@ -30,13 +31,14 @@ type Config struct {
 }
 
 type Runtime struct {
-	cfg               Config
-	client            ChatCompletionsClient
-	store             Store
-	tokenEstimator    TokenEstimator
-	webSearchProvider websearch.Provider
-	functionExecutors map[string]configuredFunctionToolExecutor
-	events            audit.ExecutionEventRecorder
+	cfg                 Config
+	client              ChatCompletionsClient
+	store               Store
+	tokenEstimator      TokenEstimator
+	webSearchProvider   websearch.Provider
+	functionExecutorsMu sync.RWMutex
+	functionExecutors   *FunctionToolExecutorRegistry
+	events              audit.ExecutionEventRecorder
 }
 
 type Option func(*Runtime)
@@ -71,18 +73,74 @@ func WithFunctionToolExecutor(name string, executor FunctionToolExecutor) Option
 
 func WithFunctionToolExecutorPolicy(name string, executor FunctionToolExecutor, policy FunctionToolExecutorPolicy) Option {
 	return func(r *Runtime) {
-		name = normalizeFunctionToolName(name)
-		if name == "" || executor == nil {
-			return
-		}
-		if r.functionExecutors == nil {
-			r.functionExecutors = map[string]configuredFunctionToolExecutor{}
-		}
-		r.functionExecutors[name] = configuredFunctionToolExecutor{
-			executor: executor,
-			policy:   policy,
-		}
+		registry := r.ensureFunctionToolExecutorRegistry()
+		registry.Set(name, executor, policy)
 	}
+}
+
+func WithFunctionToolExecutorRegistry(registry *FunctionToolExecutorRegistry) Option {
+	return func(r *Runtime) {
+		r.ReplaceFunctionToolExecutorRegistry(registry)
+	}
+}
+
+func (r *Runtime) ReplaceFunctionToolExecutorRegistry(registry *FunctionToolExecutorRegistry) {
+	if r == nil {
+		return
+	}
+	if registry == nil {
+		registry = NewFunctionToolExecutorRegistry(nil)
+	}
+	r.functionExecutorsMu.Lock()
+	defer r.functionExecutorsMu.Unlock()
+	r.functionExecutors = registry
+}
+
+func (r *Runtime) ensureFunctionToolExecutorRegistry() *FunctionToolExecutorRegistry {
+	if r == nil {
+		return nil
+	}
+	r.functionExecutorsMu.Lock()
+	defer r.functionExecutorsMu.Unlock()
+	if r.functionExecutors == nil {
+		r.functionExecutors = NewFunctionToolExecutorRegistry(nil)
+	}
+	return r.functionExecutors
+}
+
+func (r *Runtime) functionToolExecutorSnapshot() map[string]configuredFunctionToolExecutor {
+	if r == nil {
+		return nil
+	}
+	r.functionExecutorsMu.RLock()
+	registry := r.functionExecutors
+	r.functionExecutorsMu.RUnlock()
+	if registry == nil {
+		return nil
+	}
+	return registry.configuredSnapshot()
+}
+
+func (r *Runtime) FunctionToolExecutorRegistry() *FunctionToolExecutorRegistry {
+	if r == nil {
+		return nil
+	}
+	r.functionExecutorsMu.RLock()
+	defer r.functionExecutorsMu.RUnlock()
+	return r.functionExecutors
+}
+
+func (r *Runtime) FunctionToolExecutorSnapshot() map[string]FunctionToolExecutorRegistration {
+	if r == nil {
+		return nil
+	}
+	r.functionExecutorsMu.RLock()
+	registry := r.functionExecutors
+	r.functionExecutorsMu.RUnlock()
+	if registry == nil {
+		return nil
+	}
+	return registry.Snapshot()
 }
 
 func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) *Runtime {
@@ -93,12 +151,16 @@ func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) 
 		cfg.MaxToolIterations = 4
 	}
 	rt := &Runtime{
-		cfg:            cfg,
-		client:         client,
-		store:          store,
-		tokenEstimator: NewAdapterBackedTokenEstimator(ChatTokenCounter{}),
+		cfg:               cfg,
+		client:            client,
+		store:             store,
+		tokenEstimator:    NewAdapterBackedTokenEstimator(ChatTokenCounter{}),
+		functionExecutors: NewFunctionToolExecutorRegistry(nil),
 	}
 	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
 		opt(rt)
 	}
 	return rt
@@ -174,7 +236,8 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		return protocol.Response{}, UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
-	resp, err := r.createWithToolLoop(ctx, req, model, chatReq)
+	functionExecutors := r.functionToolExecutorSnapshot()
+	resp, err := r.createWithToolLoop(ctx, req, model, chatReq, functionExecutors)
 	if err != nil {
 		return protocol.Response{}, err
 	}
@@ -276,6 +339,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	chatReq.Stream = true
+	functionExecutors := r.functionToolExecutorSnapshot()
 
 	responseID := newResponseID()
 	created := protocol.Response{
@@ -346,7 +410,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		if err := functionStream.argumentsDone(outputItems); err != nil {
 			return protocol.Response{}, err
 		}
-		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp)
+		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors)
 		if !hasToolCalls || !allExecutable {
 			output = append(output, outputItems...)
 			resp := responseFromOutputWithID(responseID, req, model, output, usage)
@@ -789,7 +853,7 @@ func (r *Runtime) webSearchReady() bool {
 	return r.cfg.WebSearchEnabled && r.webSearchProvider != nil
 }
 
-func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateResponseRequest, model string, chatReq ChatCompletionRequest) (protocol.Response, error) {
+func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateResponseRequest, model string, chatReq ChatCompletionRequest, functionExecutors map[string]configuredFunctionToolExecutor) (protocol.Response, error) {
 	var usage ChatUsage
 	output := []protocol.OutputItem{}
 	toolIterations := 0
@@ -801,7 +865,7 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		}
 		usage = addChatUsage(usage, chatResp.Usage)
 
-		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp)
+		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors)
 		if !hasToolCalls || !allExecutable {
 			chatResp.Usage = usage
 			outputItems := chatToOutputItems(chatResp)
@@ -1205,7 +1269,7 @@ type executableToolCall struct {
 	policy   FunctionToolExecutorPolicy
 }
 
-func (r *Runtime) executableToolCalls(chat ChatCompletionResponse) ([]executableToolCall, bool, bool) {
+func (r *Runtime) executableToolCalls(chat ChatCompletionResponse, functionExecutors map[string]configuredFunctionToolExecutor) ([]executableToolCall, bool, bool) {
 	if len(chat.Choices) == 0 {
 		return nil, false, false
 	}
@@ -1226,7 +1290,7 @@ func (r *Runtime) executableToolCalls(chat ChatCompletionResponse) ([]executable
 			query := webSearchQueryFromArguments(call.Function.Arguments)
 			out = append(out, executableToolCall{kind: executableToolKindWebSearch, call: call, query: query})
 		default:
-			configured := r.functionExecutors[normalizeFunctionToolName(call.Function.Name)]
+			configured := functionExecutors[normalizeFunctionToolName(call.Function.Name)]
 			if configured.executor == nil {
 				return nil, true, false
 			}
