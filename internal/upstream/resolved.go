@@ -17,6 +17,17 @@ const (
 	ProtocolFamilyGoogleGenAI       = "google_genai"
 	ProtocolFamilyVertexNative      = "vertex_native"
 
+	APITypeChatCompletions = "chat_completions"
+	APITypeResponses       = "responses"
+	APIModeProxy           = "proxy"
+	APIModeServer          = "server"
+
+	CapabilityResponses       = "responses"
+	CapabilityChatCompletions = "chat_completions"
+	CapabilityEmbeddings      = "embeddings"
+	CapabilityModels          = "models"
+	CapabilityTokenize        = "tokenize"
+
 	RoutingProfileOpenAIDefault     = "openai_default"
 	RoutingProfileAzureOpenAIV1     = "azure_openai_v1"
 	RoutingProfileAzureOpenAIDeploy = "azure_openai_deployment"
@@ -72,6 +83,9 @@ type ResolvedUpstream struct {
 	BaseURL        string
 	APIKey         string
 	ProviderPreset string
+	APIType        string
+	Mode           string
+	Capabilities   config.UpstreamCapabilitiesConfig
 	ProtocolFamily string
 	RoutingProfile string
 	APIVersion     string
@@ -102,6 +116,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		BaseURL:        strings.TrimRight(parsed.String(), "/"),
 		APIKey:         cfg.ApiKey,
 		ProviderPreset: normalizeSlug(cfg.ProviderPreset),
+		APIType:        normalizeSlug(cfg.APIType),
+		Mode:           normalizeSlug(cfg.Mode),
+		Capabilities:   cfg.Capabilities,
 		ProtocolFamily: normalizeSlug(cfg.ProtocolFamily),
 		RoutingProfile: normalizeSlug(cfg.RoutingProfile),
 		APIVersion:     strings.TrimSpace(cfg.APIVersion),
@@ -120,6 +137,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 
 	if resolved.ProtocolFamily == "" {
 		resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
+	}
+	if resolved.APIType == "" {
+		resolved.APIType = APITypeChatCompletions
 	}
 	if err := validateResolvedPreset(resolved); err != nil {
 		return ResolvedUpstream{}, err
@@ -414,6 +434,33 @@ func (u ResolvedUpstream) StartupDiagnostics() (StartupDiagnostics, error) {
 	}, nil
 }
 
+func (u ResolvedUpstream) Capability(name string) (bool, bool) {
+	switch normalizeSlug(name) {
+	case CapabilityResponses:
+		return capabilityValue(u.Capabilities.Responses)
+	case CapabilityChatCompletions:
+		return capabilityValue(u.Capabilities.ChatCompletions)
+	case CapabilityEmbeddings:
+		return capabilityValue(u.Capabilities.Embeddings)
+	case CapabilityModels:
+		return capabilityValue(u.Capabilities.Models)
+	case CapabilityTokenize:
+		return capabilityValue(u.Capabilities.Tokenize)
+	default:
+		return false, false
+	}
+}
+
+func (u ResolvedUpstream) NativeResponsesServerMode() bool {
+	enabled, configured := u.Capability(CapabilityResponses)
+	return u.APIType == APITypeResponses && u.Mode == APIModeServer && (!configured || enabled)
+}
+
+func (u ResolvedUpstream) ChatCompletionsServerMode() bool {
+	enabled, configured := u.Capability(CapabilityChatCompletions)
+	return u.APIType == APITypeChatCompletions && u.Mode == APIModeServer && (!configured || enabled)
+}
+
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	spec, ok := providerPresetRegistry[resolved.ProviderPreset]
 	if !ok {
@@ -509,6 +556,13 @@ func cloneStringMap(input map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
+}
+
+func capabilityValue(value *bool) (bool, bool) {
+	if value == nil {
+		return false, false
+	}
+	return *value, true
 }
 
 func validateOpenAIBasePath(resolved ResolvedUpstream) error {

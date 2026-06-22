@@ -63,17 +63,28 @@ type Config struct {
 }
 
 type UpstreamConfig struct {
-	BaseURL        string            `yaml:"base_url"`
-	ApiKey         string            `yaml:"api_key"`
-	ProviderPreset string            `yaml:"provider_preset"`
-	ProtocolFamily string            `yaml:"protocol_family"`
-	RoutingProfile string            `yaml:"routing_profile"`
-	APIVersion     string            `yaml:"api_version"`
-	Deployment     string            `yaml:"deployment"`
-	Project        string            `yaml:"project"`
-	Location       string            `yaml:"location"`
-	ModelResource  string            `yaml:"model_resource"`
-	Headers        map[string]string `yaml:"headers"`
+	BaseURL        string                     `yaml:"base_url"`
+	ApiKey         string                     `yaml:"api_key"`
+	ProviderPreset string                     `yaml:"provider_preset"`
+	APIType        string                     `yaml:"api_type"`
+	Mode           string                     `yaml:"mode"`
+	Capabilities   UpstreamCapabilitiesConfig `yaml:"capabilities"`
+	ProtocolFamily string                     `yaml:"protocol_family"`
+	RoutingProfile string                     `yaml:"routing_profile"`
+	APIVersion     string                     `yaml:"api_version"`
+	Deployment     string                     `yaml:"deployment"`
+	Project        string                     `yaml:"project"`
+	Location       string                     `yaml:"location"`
+	ModelResource  string                     `yaml:"model_resource"`
+	Headers        map[string]string          `yaml:"headers"`
+}
+
+type UpstreamCapabilitiesConfig struct {
+	Responses       *bool `yaml:"responses"`
+	ChatCompletions *bool `yaml:"chat_completions"`
+	Embeddings      *bool `yaml:"embeddings"`
+	Models          *bool `yaml:"models"`
+	Tokenize        *bool `yaml:"tokenize"`
 }
 
 type UpstreamTargetConfig struct {
@@ -223,6 +234,18 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Upstream.ProviderPreset = v
 		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
 			upstream.ProviderPreset = v
+		})
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_API_TYPE"); v != "" {
+		cfg.Upstream.APIType = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.APIType = v
+		})
+	}
+	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_MODE"); v != "" {
+		cfg.Upstream.Mode = v
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.Mode = v
 		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY"); v != "" {
