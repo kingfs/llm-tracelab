@@ -93,6 +93,18 @@ func (f EvalRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, err
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.EvalRunMutation", m)
 }
 
+// The ExecutionEventFunc type is an adapter to allow the use of ordinary
+// function as ExecutionEvent mutator.
+type ExecutionEventFunc func(context.Context, *dao.ExecutionEventMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ExecutionEventFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ExecutionEventMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ExecutionEventMutation", m)
+}
+
 // The ExperimentRunFunc type is an adapter to allow the use of ordinary
 // function as ExperimentRun mutator.
 type ExperimentRunFunc func(context.Context, *dao.ExperimentRunMutation) (dao.Value, error)
@@ -115,6 +127,18 @@ func (f ModelCatalogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ModelCatalogMutation", m)
+}
+
+// The RequestAuditFunc type is an adapter to allow the use of ordinary
+// function as RequestAudit mutator.
+type RequestAuditFunc func(context.Context, *dao.RequestAuditMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f RequestAuditFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.RequestAuditMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.RequestAuditMutation", m)
 }
 
 // The ResponseFunc type is an adapter to allow the use of ordinary
@@ -163,6 +187,18 @@ func (f TraceLogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, er
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.TraceLogMutation", m)
+}
+
+// The UpstreamExchangeFunc type is an adapter to allow the use of ordinary
+// function as UpstreamExchange mutator.
+type UpstreamExchangeFunc func(context.Context, *dao.UpstreamExchangeMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f UpstreamExchangeFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.UpstreamExchangeMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.UpstreamExchangeMutation", m)
 }
 
 // The UpstreamModelFunc type is an adapter to allow the use of ordinary

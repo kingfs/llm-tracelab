@@ -27,11 +27,17 @@ type DatasetExample func(*sql.Selector)
 // EvalRun is the predicate function for evalrun builders.
 type EvalRun func(*sql.Selector)
 
+// ExecutionEvent is the predicate function for executionevent builders.
+type ExecutionEvent func(*sql.Selector)
+
 // ExperimentRun is the predicate function for experimentrun builders.
 type ExperimentRun func(*sql.Selector)
 
 // ModelCatalog is the predicate function for modelcatalog builders.
 type ModelCatalog func(*sql.Selector)
+
+// RequestAudit is the predicate function for requestaudit builders.
+type RequestAudit func(*sql.Selector)
 
 // Response is the predicate function for response builders.
 type Response func(*sql.Selector)
@@ -44,6 +50,9 @@ type Score func(*sql.Selector)
 
 // TraceLog is the predicate function for tracelog builders.
 type TraceLog func(*sql.Selector)
+
+// UpstreamExchange is the predicate function for upstreamexchange builders.
+type UpstreamExchange func(*sql.Selector)
 
 // UpstreamModel is the predicate function for upstreammodel builders.
 type UpstreamModel func(*sql.Selector)

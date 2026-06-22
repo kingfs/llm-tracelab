@@ -15,13 +15,16 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
 	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
+	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/response"
 	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
@@ -272,6 +275,33 @@ func (f TraverseEvalRun) Traverse(ctx context.Context, q dao.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *dao.EvalRunQuery", q)
 }
 
+// The ExecutionEventFunc type is an adapter to allow the use of ordinary function as a Querier.
+type ExecutionEventFunc func(context.Context, *dao.ExecutionEventQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f ExecutionEventFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.ExecutionEventQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.ExecutionEventQuery", q)
+}
+
+// The TraverseExecutionEvent type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseExecutionEvent func(context.Context, *dao.ExecutionEventQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseExecutionEvent) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseExecutionEvent) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.ExecutionEventQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.ExecutionEventQuery", q)
+}
+
 // The ExperimentRunFunc type is an adapter to allow the use of ordinary function as a Querier.
 type ExperimentRunFunc func(context.Context, *dao.ExperimentRunQuery) (dao.Value, error)
 
@@ -324,6 +354,33 @@ func (f TraverseModelCatalog) Traverse(ctx context.Context, q dao.Query) error {
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *dao.ModelCatalogQuery", q)
+}
+
+// The RequestAuditFunc type is an adapter to allow the use of ordinary function as a Querier.
+type RequestAuditFunc func(context.Context, *dao.RequestAuditQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f RequestAuditFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.RequestAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.RequestAuditQuery", q)
+}
+
+// The TraverseRequestAudit type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseRequestAudit func(context.Context, *dao.RequestAuditQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseRequestAudit) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseRequestAudit) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.RequestAuditQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.RequestAuditQuery", q)
 }
 
 // The ResponseFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -434,6 +491,33 @@ func (f TraverseTraceLog) Traverse(ctx context.Context, q dao.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *dao.TraceLogQuery", q)
 }
 
+// The UpstreamExchangeFunc type is an adapter to allow the use of ordinary function as a Querier.
+type UpstreamExchangeFunc func(context.Context, *dao.UpstreamExchangeQuery) (dao.Value, error)
+
+// Query calls f(ctx, q).
+func (f UpstreamExchangeFunc) Query(ctx context.Context, q dao.Query) (dao.Value, error) {
+	if q, ok := q.(*dao.UpstreamExchangeQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *dao.UpstreamExchangeQuery", q)
+}
+
+// The TraverseUpstreamExchange type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUpstreamExchange func(context.Context, *dao.UpstreamExchangeQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUpstreamExchange) Intercept(next dao.Querier) dao.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUpstreamExchange) Traverse(ctx context.Context, q dao.Query) error {
+	if q, ok := q.(*dao.UpstreamExchangeQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *dao.UpstreamExchangeQuery", q)
+}
+
 // The UpstreamModelFunc type is an adapter to allow the use of ordinary function as a Querier.
 type UpstreamModelFunc func(context.Context, *dao.UpstreamModelQuery) (dao.Value, error)
 
@@ -532,10 +616,14 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.DatasetExampleQuery, predicate.DatasetExample, datasetexample.OrderOption]{typ: dao.TypeDatasetExample, tq: q}, nil
 	case *dao.EvalRunQuery:
 		return &query[*dao.EvalRunQuery, predicate.EvalRun, evalrun.OrderOption]{typ: dao.TypeEvalRun, tq: q}, nil
+	case *dao.ExecutionEventQuery:
+		return &query[*dao.ExecutionEventQuery, predicate.ExecutionEvent, executionevent.OrderOption]{typ: dao.TypeExecutionEvent, tq: q}, nil
 	case *dao.ExperimentRunQuery:
 		return &query[*dao.ExperimentRunQuery, predicate.ExperimentRun, experimentrun.OrderOption]{typ: dao.TypeExperimentRun, tq: q}, nil
 	case *dao.ModelCatalogQuery:
 		return &query[*dao.ModelCatalogQuery, predicate.ModelCatalog, modelcatalog.OrderOption]{typ: dao.TypeModelCatalog, tq: q}, nil
+	case *dao.RequestAuditQuery:
+		return &query[*dao.RequestAuditQuery, predicate.RequestAudit, requestaudit.OrderOption]{typ: dao.TypeRequestAudit, tq: q}, nil
 	case *dao.ResponseQuery:
 		return &query[*dao.ResponseQuery, predicate.Response, response.OrderOption]{typ: dao.TypeResponse, tq: q}, nil
 	case *dao.ResponseItemQuery:
@@ -544,6 +632,8 @@ func NewQuery(q dao.Query) (Query, error) {
 		return &query[*dao.ScoreQuery, predicate.Score, score.OrderOption]{typ: dao.TypeScore, tq: q}, nil
 	case *dao.TraceLogQuery:
 		return &query[*dao.TraceLogQuery, predicate.TraceLog, tracelog.OrderOption]{typ: dao.TypeTraceLog, tq: q}, nil
+	case *dao.UpstreamExchangeQuery:
+		return &query[*dao.UpstreamExchangeQuery, predicate.UpstreamExchange, upstreamexchange.OrderOption]{typ: dao.TypeUpstreamExchange, tq: q}, nil
 	case *dao.UpstreamModelQuery:
 		return &query[*dao.UpstreamModelQuery, predicate.UpstreamModel, upstreammodel.OrderOption]{typ: dao.TypeUpstreamModel, tq: q}, nil
 	case *dao.UpstreamTargetQuery:

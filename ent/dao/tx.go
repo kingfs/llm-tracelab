@@ -28,10 +28,14 @@ type Tx struct {
 	DatasetExample *DatasetExampleClient
 	// EvalRun is the client for interacting with the EvalRun builders.
 	EvalRun *EvalRunClient
+	// ExecutionEvent is the client for interacting with the ExecutionEvent builders.
+	ExecutionEvent *ExecutionEventClient
 	// ExperimentRun is the client for interacting with the ExperimentRun builders.
 	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
+	// RequestAudit is the client for interacting with the RequestAudit builders.
+	RequestAudit *RequestAuditClient
 	// Response is the client for interacting with the Response builders.
 	Response *ResponseClient
 	// ResponseItem is the client for interacting with the ResponseItem builders.
@@ -40,6 +44,8 @@ type Tx struct {
 	Score *ScoreClient
 	// TraceLog is the client for interacting with the TraceLog builders.
 	TraceLog *TraceLogClient
+	// UpstreamExchange is the client for interacting with the UpstreamExchange builders.
+	UpstreamExchange *UpstreamExchangeClient
 	// UpstreamModel is the client for interacting with the UpstreamModel builders.
 	UpstreamModel *UpstreamModelClient
 	// UpstreamTarget is the client for interacting with the UpstreamTarget builders.
@@ -184,12 +190,15 @@ func (tx *Tx) init() {
 	tx.Dataset = NewDatasetClient(tx.config)
 	tx.DatasetExample = NewDatasetExampleClient(tx.config)
 	tx.EvalRun = NewEvalRunClient(tx.config)
+	tx.ExecutionEvent = NewExecutionEventClient(tx.config)
 	tx.ExperimentRun = NewExperimentRunClient(tx.config)
 	tx.ModelCatalog = NewModelCatalogClient(tx.config)
+	tx.RequestAudit = NewRequestAuditClient(tx.config)
 	tx.Response = NewResponseClient(tx.config)
 	tx.ResponseItem = NewResponseItemClient(tx.config)
 	tx.Score = NewScoreClient(tx.config)
 	tx.TraceLog = NewTraceLogClient(tx.config)
+	tx.UpstreamExchange = NewUpstreamExchangeClient(tx.config)
 	tx.UpstreamModel = NewUpstreamModelClient(tx.config)
 	tx.UpstreamTarget = NewUpstreamTargetClient(tx.config)
 	tx.User = NewUserClient(tx.config)

@@ -59,7 +59,15 @@ V3 文件结构：
 
 SQLite 是 Monitor 列表、统计、过滤、分页、模型/渠道配置、系统事件、Observation IR、findings、分析任务和 eval 结果的结构化索引。
 
-Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这两张表，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。
+Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这两张表，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。Stage 9 已补齐 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；在 runtime 写入接入前，它们只是审计持久化边界，不是当前可查询能力。
+
+Responses audit schema 的职责边界如下：
+
+- `request_audits`：记录入站 Responses request envelope、client request id、redaction/body hash 等请求审计信息。
+- `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。
+- `upstream_exchanges`：关联 semantic response/request 与 `.http` cassette、trace id、route target。
+
+后续接入顺序建议先做 request accepted/completed 与 upstream exchange correlation，再补 tool events，最后处理 streaming/cancel/compact events。
 
 当前重要表包括：
 
@@ -145,5 +153,5 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 - 用 SQLite 替代 raw cassette 作为 replay 事实源。
 - Responses server-mode streaming。
 - 完整 Responses tool lifecycle、tool audit、streaming tool events 和 compact workflow。
-- request/tool audit 表和完整 Postgres migration 生产化。
+- Responses audit runtime 写入、语义查询和完整 Postgres migration 生产化；Stage 9 schema 骨架已覆盖 `request_audits`、`execution_events`、`upstream_exchanges`。
 - provider auto-detect。

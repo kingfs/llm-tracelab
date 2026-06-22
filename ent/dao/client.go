@@ -22,12 +22,15 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/response"
 	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
@@ -56,10 +59,14 @@ type Client struct {
 	DatasetExample *DatasetExampleClient
 	// EvalRun is the client for interacting with the EvalRun builders.
 	EvalRun *EvalRunClient
+	// ExecutionEvent is the client for interacting with the ExecutionEvent builders.
+	ExecutionEvent *ExecutionEventClient
 	// ExperimentRun is the client for interacting with the ExperimentRun builders.
 	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
+	// RequestAudit is the client for interacting with the RequestAudit builders.
+	RequestAudit *RequestAuditClient
 	// Response is the client for interacting with the Response builders.
 	Response *ResponseClient
 	// ResponseItem is the client for interacting with the ResponseItem builders.
@@ -68,6 +75,8 @@ type Client struct {
 	Score *ScoreClient
 	// TraceLog is the client for interacting with the TraceLog builders.
 	TraceLog *TraceLogClient
+	// UpstreamExchange is the client for interacting with the UpstreamExchange builders.
+	UpstreamExchange *UpstreamExchangeClient
 	// UpstreamModel is the client for interacting with the UpstreamModel builders.
 	UpstreamModel *UpstreamModelClient
 	// UpstreamTarget is the client for interacting with the UpstreamTarget builders.
@@ -92,12 +101,15 @@ func (c *Client) init() {
 	c.Dataset = NewDatasetClient(c.config)
 	c.DatasetExample = NewDatasetExampleClient(c.config)
 	c.EvalRun = NewEvalRunClient(c.config)
+	c.ExecutionEvent = NewExecutionEventClient(c.config)
 	c.ExperimentRun = NewExperimentRunClient(c.config)
 	c.ModelCatalog = NewModelCatalogClient(c.config)
+	c.RequestAudit = NewRequestAuditClient(c.config)
 	c.Response = NewResponseClient(c.config)
 	c.ResponseItem = NewResponseItemClient(c.config)
 	c.Score = NewScoreClient(c.config)
 	c.TraceLog = NewTraceLogClient(c.config)
+	c.UpstreamExchange = NewUpstreamExchangeClient(c.config)
 	c.UpstreamModel = NewUpstreamModelClient(c.config)
 	c.UpstreamTarget = NewUpstreamTargetClient(c.config)
 	c.User = NewUserClient(c.config)
@@ -193,24 +205,27 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:             ctx,
-		config:          cfg,
-		APIToken:        NewAPITokenClient(cfg),
-		ChannelConfig:   NewChannelConfigClient(cfg),
-		ChannelModel:    NewChannelModelClient(cfg),
-		ChannelProbeRun: NewChannelProbeRunClient(cfg),
-		Dataset:         NewDatasetClient(cfg),
-		DatasetExample:  NewDatasetExampleClient(cfg),
-		EvalRun:         NewEvalRunClient(cfg),
-		ExperimentRun:   NewExperimentRunClient(cfg),
-		ModelCatalog:    NewModelCatalogClient(cfg),
-		Response:        NewResponseClient(cfg),
-		ResponseItem:    NewResponseItemClient(cfg),
-		Score:           NewScoreClient(cfg),
-		TraceLog:        NewTraceLogClient(cfg),
-		UpstreamModel:   NewUpstreamModelClient(cfg),
-		UpstreamTarget:  NewUpstreamTargetClient(cfg),
-		User:            NewUserClient(cfg),
+		ctx:              ctx,
+		config:           cfg,
+		APIToken:         NewAPITokenClient(cfg),
+		ChannelConfig:    NewChannelConfigClient(cfg),
+		ChannelModel:     NewChannelModelClient(cfg),
+		ChannelProbeRun:  NewChannelProbeRunClient(cfg),
+		Dataset:          NewDatasetClient(cfg),
+		DatasetExample:   NewDatasetExampleClient(cfg),
+		EvalRun:          NewEvalRunClient(cfg),
+		ExecutionEvent:   NewExecutionEventClient(cfg),
+		ExperimentRun:    NewExperimentRunClient(cfg),
+		ModelCatalog:     NewModelCatalogClient(cfg),
+		RequestAudit:     NewRequestAuditClient(cfg),
+		Response:         NewResponseClient(cfg),
+		ResponseItem:     NewResponseItemClient(cfg),
+		Score:            NewScoreClient(cfg),
+		TraceLog:         NewTraceLogClient(cfg),
+		UpstreamExchange: NewUpstreamExchangeClient(cfg),
+		UpstreamModel:    NewUpstreamModelClient(cfg),
+		UpstreamTarget:   NewUpstreamTargetClient(cfg),
+		User:             NewUserClient(cfg),
 	}, nil
 }
 
@@ -228,24 +243,27 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:             ctx,
-		config:          cfg,
-		APIToken:        NewAPITokenClient(cfg),
-		ChannelConfig:   NewChannelConfigClient(cfg),
-		ChannelModel:    NewChannelModelClient(cfg),
-		ChannelProbeRun: NewChannelProbeRunClient(cfg),
-		Dataset:         NewDatasetClient(cfg),
-		DatasetExample:  NewDatasetExampleClient(cfg),
-		EvalRun:         NewEvalRunClient(cfg),
-		ExperimentRun:   NewExperimentRunClient(cfg),
-		ModelCatalog:    NewModelCatalogClient(cfg),
-		Response:        NewResponseClient(cfg),
-		ResponseItem:    NewResponseItemClient(cfg),
-		Score:           NewScoreClient(cfg),
-		TraceLog:        NewTraceLogClient(cfg),
-		UpstreamModel:   NewUpstreamModelClient(cfg),
-		UpstreamTarget:  NewUpstreamTargetClient(cfg),
-		User:            NewUserClient(cfg),
+		ctx:              ctx,
+		config:           cfg,
+		APIToken:         NewAPITokenClient(cfg),
+		ChannelConfig:    NewChannelConfigClient(cfg),
+		ChannelModel:     NewChannelModelClient(cfg),
+		ChannelProbeRun:  NewChannelProbeRunClient(cfg),
+		Dataset:          NewDatasetClient(cfg),
+		DatasetExample:   NewDatasetExampleClient(cfg),
+		EvalRun:          NewEvalRunClient(cfg),
+		ExecutionEvent:   NewExecutionEventClient(cfg),
+		ExperimentRun:    NewExperimentRunClient(cfg),
+		ModelCatalog:     NewModelCatalogClient(cfg),
+		RequestAudit:     NewRequestAuditClient(cfg),
+		Response:         NewResponseClient(cfg),
+		ResponseItem:     NewResponseItemClient(cfg),
+		Score:            NewScoreClient(cfg),
+		TraceLog:         NewTraceLogClient(cfg),
+		UpstreamExchange: NewUpstreamExchangeClient(cfg),
+		UpstreamModel:    NewUpstreamModelClient(cfg),
+		UpstreamTarget:   NewUpstreamTargetClient(cfg),
+		User:             NewUserClient(cfg),
 	}, nil
 }
 
@@ -276,8 +294,9 @@ func (c *Client) Close() error {
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
-		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Response,
-		c.ResponseItem, c.Score, c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.DatasetExample, c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog,
+		c.RequestAudit, c.Response, c.ResponseItem, c.Score, c.TraceLog,
+		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -288,8 +307,9 @@ func (c *Client) Use(hooks ...Hook) {
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
-		c.DatasetExample, c.EvalRun, c.ExperimentRun, c.ModelCatalog, c.Response,
-		c.ResponseItem, c.Score, c.TraceLog, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.DatasetExample, c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog,
+		c.RequestAudit, c.Response, c.ResponseItem, c.Score, c.TraceLog,
+		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -312,10 +332,14 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.DatasetExample.mutate(ctx, m)
 	case *EvalRunMutation:
 		return c.EvalRun.mutate(ctx, m)
+	case *ExecutionEventMutation:
+		return c.ExecutionEvent.mutate(ctx, m)
 	case *ExperimentRunMutation:
 		return c.ExperimentRun.mutate(ctx, m)
 	case *ModelCatalogMutation:
 		return c.ModelCatalog.mutate(ctx, m)
+	case *RequestAuditMutation:
+		return c.RequestAudit.mutate(ctx, m)
 	case *ResponseMutation:
 		return c.Response.mutate(ctx, m)
 	case *ResponseItemMutation:
@@ -324,6 +348,8 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.Score.mutate(ctx, m)
 	case *TraceLogMutation:
 		return c.TraceLog.mutate(ctx, m)
+	case *UpstreamExchangeMutation:
+		return c.UpstreamExchange.mutate(ctx, m)
 	case *UpstreamModelMutation:
 		return c.UpstreamModel.mutate(ctx, m)
 	case *UpstreamTargetMutation:
@@ -1285,6 +1311,139 @@ func (c *EvalRunClient) mutate(ctx context.Context, m *EvalRunMutation) (Value, 
 	}
 }
 
+// ExecutionEventClient is a client for the ExecutionEvent schema.
+type ExecutionEventClient struct {
+	config
+}
+
+// NewExecutionEventClient returns a client for the ExecutionEvent from the given config.
+func NewExecutionEventClient(c config) *ExecutionEventClient {
+	return &ExecutionEventClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `executionevent.Hooks(f(g(h())))`.
+func (c *ExecutionEventClient) Use(hooks ...Hook) {
+	c.hooks.ExecutionEvent = append(c.hooks.ExecutionEvent, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `executionevent.Intercept(f(g(h())))`.
+func (c *ExecutionEventClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ExecutionEvent = append(c.inters.ExecutionEvent, interceptors...)
+}
+
+// Create returns a builder for creating a ExecutionEvent entity.
+func (c *ExecutionEventClient) Create() *ExecutionEventCreate {
+	mutation := newExecutionEventMutation(c.config, OpCreate)
+	return &ExecutionEventCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ExecutionEvent entities.
+func (c *ExecutionEventClient) CreateBulk(builders ...*ExecutionEventCreate) *ExecutionEventCreateBulk {
+	return &ExecutionEventCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ExecutionEventClient) MapCreateBulk(slice any, setFunc func(*ExecutionEventCreate, int)) *ExecutionEventCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ExecutionEventCreateBulk{err: fmt.Errorf("calling to ExecutionEventClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ExecutionEventCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ExecutionEventCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ExecutionEvent.
+func (c *ExecutionEventClient) Update() *ExecutionEventUpdate {
+	mutation := newExecutionEventMutation(c.config, OpUpdate)
+	return &ExecutionEventUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ExecutionEventClient) UpdateOne(_m *ExecutionEvent) *ExecutionEventUpdateOne {
+	mutation := newExecutionEventMutation(c.config, OpUpdateOne, withExecutionEvent(_m))
+	return &ExecutionEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ExecutionEventClient) UpdateOneID(id string) *ExecutionEventUpdateOne {
+	mutation := newExecutionEventMutation(c.config, OpUpdateOne, withExecutionEventID(id))
+	return &ExecutionEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ExecutionEvent.
+func (c *ExecutionEventClient) Delete() *ExecutionEventDelete {
+	mutation := newExecutionEventMutation(c.config, OpDelete)
+	return &ExecutionEventDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ExecutionEventClient) DeleteOne(_m *ExecutionEvent) *ExecutionEventDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ExecutionEventClient) DeleteOneID(id string) *ExecutionEventDeleteOne {
+	builder := c.Delete().Where(executionevent.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ExecutionEventDeleteOne{builder}
+}
+
+// Query returns a query builder for ExecutionEvent.
+func (c *ExecutionEventClient) Query() *ExecutionEventQuery {
+	return &ExecutionEventQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeExecutionEvent},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ExecutionEvent entity by its id.
+func (c *ExecutionEventClient) Get(ctx context.Context, id string) (*ExecutionEvent, error) {
+	return c.Query().Where(executionevent.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ExecutionEventClient) GetX(ctx context.Context, id string) *ExecutionEvent {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ExecutionEventClient) Hooks() []Hook {
+	return c.hooks.ExecutionEvent
+}
+
+// Interceptors returns the client interceptors.
+func (c *ExecutionEventClient) Interceptors() []Interceptor {
+	return c.inters.ExecutionEvent
+}
+
+func (c *ExecutionEventClient) mutate(ctx context.Context, m *ExecutionEventMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ExecutionEventCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ExecutionEventUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ExecutionEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ExecutionEventDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ExecutionEvent mutation op: %q", m.Op())
+	}
+}
+
 // ExperimentRunClient is a client for the ExperimentRun schema.
 type ExperimentRunClient struct {
 	config
@@ -1548,6 +1707,139 @@ func (c *ModelCatalogClient) mutate(ctx context.Context, m *ModelCatalogMutation
 		return (&ModelCatalogDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown ModelCatalog mutation op: %q", m.Op())
+	}
+}
+
+// RequestAuditClient is a client for the RequestAudit schema.
+type RequestAuditClient struct {
+	config
+}
+
+// NewRequestAuditClient returns a client for the RequestAudit from the given config.
+func NewRequestAuditClient(c config) *RequestAuditClient {
+	return &RequestAuditClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `requestaudit.Hooks(f(g(h())))`.
+func (c *RequestAuditClient) Use(hooks ...Hook) {
+	c.hooks.RequestAudit = append(c.hooks.RequestAudit, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `requestaudit.Intercept(f(g(h())))`.
+func (c *RequestAuditClient) Intercept(interceptors ...Interceptor) {
+	c.inters.RequestAudit = append(c.inters.RequestAudit, interceptors...)
+}
+
+// Create returns a builder for creating a RequestAudit entity.
+func (c *RequestAuditClient) Create() *RequestAuditCreate {
+	mutation := newRequestAuditMutation(c.config, OpCreate)
+	return &RequestAuditCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of RequestAudit entities.
+func (c *RequestAuditClient) CreateBulk(builders ...*RequestAuditCreate) *RequestAuditCreateBulk {
+	return &RequestAuditCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *RequestAuditClient) MapCreateBulk(slice any, setFunc func(*RequestAuditCreate, int)) *RequestAuditCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &RequestAuditCreateBulk{err: fmt.Errorf("calling to RequestAuditClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*RequestAuditCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &RequestAuditCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for RequestAudit.
+func (c *RequestAuditClient) Update() *RequestAuditUpdate {
+	mutation := newRequestAuditMutation(c.config, OpUpdate)
+	return &RequestAuditUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *RequestAuditClient) UpdateOne(_m *RequestAudit) *RequestAuditUpdateOne {
+	mutation := newRequestAuditMutation(c.config, OpUpdateOne, withRequestAudit(_m))
+	return &RequestAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *RequestAuditClient) UpdateOneID(id string) *RequestAuditUpdateOne {
+	mutation := newRequestAuditMutation(c.config, OpUpdateOne, withRequestAuditID(id))
+	return &RequestAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for RequestAudit.
+func (c *RequestAuditClient) Delete() *RequestAuditDelete {
+	mutation := newRequestAuditMutation(c.config, OpDelete)
+	return &RequestAuditDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *RequestAuditClient) DeleteOne(_m *RequestAudit) *RequestAuditDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *RequestAuditClient) DeleteOneID(id string) *RequestAuditDeleteOne {
+	builder := c.Delete().Where(requestaudit.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &RequestAuditDeleteOne{builder}
+}
+
+// Query returns a query builder for RequestAudit.
+func (c *RequestAuditClient) Query() *RequestAuditQuery {
+	return &RequestAuditQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeRequestAudit},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a RequestAudit entity by its id.
+func (c *RequestAuditClient) Get(ctx context.Context, id string) (*RequestAudit, error) {
+	return c.Query().Where(requestaudit.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *RequestAuditClient) GetX(ctx context.Context, id string) *RequestAudit {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *RequestAuditClient) Hooks() []Hook {
+	return c.hooks.RequestAudit
+}
+
+// Interceptors returns the client interceptors.
+func (c *RequestAuditClient) Interceptors() []Interceptor {
+	return c.inters.RequestAudit
+}
+
+func (c *RequestAuditClient) mutate(ctx context.Context, m *RequestAuditMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&RequestAuditCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&RequestAuditUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&RequestAuditUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&RequestAuditDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown RequestAudit mutation op: %q", m.Op())
 	}
 }
 
@@ -2083,6 +2375,139 @@ func (c *TraceLogClient) mutate(ctx context.Context, m *TraceLogMutation) (Value
 	}
 }
 
+// UpstreamExchangeClient is a client for the UpstreamExchange schema.
+type UpstreamExchangeClient struct {
+	config
+}
+
+// NewUpstreamExchangeClient returns a client for the UpstreamExchange from the given config.
+func NewUpstreamExchangeClient(c config) *UpstreamExchangeClient {
+	return &UpstreamExchangeClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `upstreamexchange.Hooks(f(g(h())))`.
+func (c *UpstreamExchangeClient) Use(hooks ...Hook) {
+	c.hooks.UpstreamExchange = append(c.hooks.UpstreamExchange, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `upstreamexchange.Intercept(f(g(h())))`.
+func (c *UpstreamExchangeClient) Intercept(interceptors ...Interceptor) {
+	c.inters.UpstreamExchange = append(c.inters.UpstreamExchange, interceptors...)
+}
+
+// Create returns a builder for creating a UpstreamExchange entity.
+func (c *UpstreamExchangeClient) Create() *UpstreamExchangeCreate {
+	mutation := newUpstreamExchangeMutation(c.config, OpCreate)
+	return &UpstreamExchangeCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of UpstreamExchange entities.
+func (c *UpstreamExchangeClient) CreateBulk(builders ...*UpstreamExchangeCreate) *UpstreamExchangeCreateBulk {
+	return &UpstreamExchangeCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *UpstreamExchangeClient) MapCreateBulk(slice any, setFunc func(*UpstreamExchangeCreate, int)) *UpstreamExchangeCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &UpstreamExchangeCreateBulk{err: fmt.Errorf("calling to UpstreamExchangeClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*UpstreamExchangeCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &UpstreamExchangeCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for UpstreamExchange.
+func (c *UpstreamExchangeClient) Update() *UpstreamExchangeUpdate {
+	mutation := newUpstreamExchangeMutation(c.config, OpUpdate)
+	return &UpstreamExchangeUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *UpstreamExchangeClient) UpdateOne(_m *UpstreamExchange) *UpstreamExchangeUpdateOne {
+	mutation := newUpstreamExchangeMutation(c.config, OpUpdateOne, withUpstreamExchange(_m))
+	return &UpstreamExchangeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *UpstreamExchangeClient) UpdateOneID(id string) *UpstreamExchangeUpdateOne {
+	mutation := newUpstreamExchangeMutation(c.config, OpUpdateOne, withUpstreamExchangeID(id))
+	return &UpstreamExchangeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for UpstreamExchange.
+func (c *UpstreamExchangeClient) Delete() *UpstreamExchangeDelete {
+	mutation := newUpstreamExchangeMutation(c.config, OpDelete)
+	return &UpstreamExchangeDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *UpstreamExchangeClient) DeleteOne(_m *UpstreamExchange) *UpstreamExchangeDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *UpstreamExchangeClient) DeleteOneID(id string) *UpstreamExchangeDeleteOne {
+	builder := c.Delete().Where(upstreamexchange.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &UpstreamExchangeDeleteOne{builder}
+}
+
+// Query returns a query builder for UpstreamExchange.
+func (c *UpstreamExchangeClient) Query() *UpstreamExchangeQuery {
+	return &UpstreamExchangeQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUpstreamExchange},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a UpstreamExchange entity by its id.
+func (c *UpstreamExchangeClient) Get(ctx context.Context, id string) (*UpstreamExchange, error) {
+	return c.Query().Where(upstreamexchange.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *UpstreamExchangeClient) GetX(ctx context.Context, id string) *UpstreamExchange {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *UpstreamExchangeClient) Hooks() []Hook {
+	return c.hooks.UpstreamExchange
+}
+
+// Interceptors returns the client interceptors.
+func (c *UpstreamExchangeClient) Interceptors() []Interceptor {
+	return c.inters.UpstreamExchange
+}
+
+func (c *UpstreamExchangeClient) mutate(ctx context.Context, m *UpstreamExchangeMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&UpstreamExchangeCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&UpstreamExchangeUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&UpstreamExchangeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&UpstreamExchangeDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown UpstreamExchange mutation op: %q", m.Op())
+	}
+}
+
 // UpstreamModelClient is a client for the UpstreamModel schema.
 type UpstreamModelClient struct {
 	config
@@ -2505,13 +2930,15 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 type (
 	hooks struct {
 		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
-		EvalRun, ExperimentRun, ModelCatalog, Response, ResponseItem, Score, TraceLog,
-		UpstreamModel, UpstreamTarget, User []ent.Hook
+		EvalRun, ExecutionEvent, ExperimentRun, ModelCatalog, RequestAudit, Response,
+		ResponseItem, Score, TraceLog, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		User []ent.Hook
 	}
 	inters struct {
 		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
-		EvalRun, ExperimentRun, ModelCatalog, Response, ResponseItem, Score, TraceLog,
-		UpstreamModel, UpstreamTarget, User []ent.Interceptor
+		EvalRun, ExecutionEvent, ExperimentRun, ModelCatalog, RequestAudit, Response,
+		ResponseItem, Score, TraceLog, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		User []ent.Interceptor
 	}
 )
 

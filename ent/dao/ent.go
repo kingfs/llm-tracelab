@@ -19,12 +19,15 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/response"
 	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
@@ -88,22 +91,25 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			apitoken.Table:        apitoken.ValidColumn,
-			channelconfig.Table:   channelconfig.ValidColumn,
-			channelmodel.Table:    channelmodel.ValidColumn,
-			channelproberun.Table: channelproberun.ValidColumn,
-			dataset.Table:         dataset.ValidColumn,
-			datasetexample.Table:  datasetexample.ValidColumn,
-			evalrun.Table:         evalrun.ValidColumn,
-			experimentrun.Table:   experimentrun.ValidColumn,
-			modelcatalog.Table:    modelcatalog.ValidColumn,
-			response.Table:        response.ValidColumn,
-			responseitem.Table:    responseitem.ValidColumn,
-			score.Table:           score.ValidColumn,
-			tracelog.Table:        tracelog.ValidColumn,
-			upstreammodel.Table:   upstreammodel.ValidColumn,
-			upstreamtarget.Table:  upstreamtarget.ValidColumn,
-			user.Table:            user.ValidColumn,
+			apitoken.Table:         apitoken.ValidColumn,
+			channelconfig.Table:    channelconfig.ValidColumn,
+			channelmodel.Table:     channelmodel.ValidColumn,
+			channelproberun.Table:  channelproberun.ValidColumn,
+			dataset.Table:          dataset.ValidColumn,
+			datasetexample.Table:   datasetexample.ValidColumn,
+			evalrun.Table:          evalrun.ValidColumn,
+			executionevent.Table:   executionevent.ValidColumn,
+			experimentrun.Table:    experimentrun.ValidColumn,
+			modelcatalog.Table:     modelcatalog.ValidColumn,
+			requestaudit.Table:     requestaudit.ValidColumn,
+			response.Table:         response.ValidColumn,
+			responseitem.Table:     responseitem.ValidColumn,
+			score.Table:            score.ValidColumn,
+			tracelog.Table:         tracelog.ValidColumn,
+			upstreamexchange.Table: upstreamexchange.ValidColumn,
+			upstreammodel.Table:    upstreammodel.ValidColumn,
+			upstreamtarget.Table:   upstreamtarget.ValidColumn,
+			user.Table:             user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

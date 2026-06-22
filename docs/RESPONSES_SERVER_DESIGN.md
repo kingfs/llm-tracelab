@@ -22,7 +22,7 @@
 - streaming Responses server-mode。
 - 完整 tool call/tool result 生命周期和 tool audit。当前只支持非流式 hosted `web_search` 首切。
 - compact workflow。
-- request/tool audit 表，以及完整 execution event / upstream exchange 语义查询。
+- Stage 9 Responses audit schema 骨架已落地：`request_audits`、`execution_events`、`upstream_exchanges` 的 runtime 写入和语义查询尚未接入。
 - 完整 Postgres migration 生产化。
 - provider auto-detect；provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
@@ -114,13 +114,13 @@ client
 
 当 client 请求 `/v1/responses`，选中的 provider 是 OpenAI-compatible 且只暴露 `/chat/completions` 时：
 
-1. TraceLab HTTP server 接收 Responses 请求，进行鉴权和 body limit；独立 request audit 表仍未完成。
+1. TraceLab HTTP server 接收 Responses 请求，进行鉴权和 body limit；Stage 9 已补齐独立 `request_audits` schema 骨架，但当前 runtime 尚未写入。
 2. Gateway Routing 根据 requested model、provider 配置、capabilities、model profile 选择支持 `chat_completions` model client 的 route target。
 3. Responses Runtime 读取 `previous_response_id`、conversation item 和 request input，构造当前 turn 的 model context。
 4. Runtime 将 Responses input、instructions、tools、tool choice、reasoning/metadata 等映射到 OpenAI-compatible Chat Completions 请求。
 5. TraceLab 调用上游 `POST /chat/completions`。这个外部 exchange 进入现有 Proxy Recording 能力，写为 `.http` V3 cassette。
 6. 当前 Runtime 输出非流式 OpenAI Responses 兼容 response；streaming events 尚未支持。
-7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Conversation、ExecutionEvent、RequestAudit、UpstreamExchange 等完整审计表仍是目标设计。
+7. 当前 Persistence 写入 `responses` 和 `response_items` semantic state；Stage 9 已补齐 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，后续再接 runtime 写入和查询。
 
 关键边界：
 
@@ -192,7 +192,7 @@ providers:
 
 目标是 Postgres-first，但保留 SQLite fallback 和旧 replay 兼容。
 
-截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这两张表。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration、审计表和生产运维流程仍未完成。
+截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这两张表。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration、生产运维流程和 Responses audit runtime 写入仍未完成。Stage 9A 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；该骨架定义了可持久化的 audit surface，但还不是已可查询的 runtime 审计能力。
 
 Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 `db migrate up` 已拆出为应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持；它还不是基于 checked-in SQL 的版本化 Postgres migrator。`internal/auth/migrate.go` 的 embedded migrations 仍只支持 SQLite。Postgres auth migration 是后续独立缺口，不应阻塞把 Responses ent store 归入应用库迁移域。
 
@@ -203,9 +203,15 @@ Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库�
 - `conversations`：thread/session/conversation identity、client metadata、created/updated time。
 - `responses`：Responses API response id、status、model、route、usage、previous response link。
 - `items`：input/output message、tool call、tool result、reasoning、summary、compact item。
-- `execution_events`：runtime plan、model call start/end、tool start/end、compact decision、stream lifecycle、error。
-- `request_audits`：raw inbound request envelope、client request id、headers allowlist、body hash/preview、redaction metadata。
-- `upstream_exchanges`：semantic response/request 与 `.http` cassette path、trace id、route target 的关联。
+- `request_audits`：入站 Responses request envelope、client request id、headers allowlist、redaction metadata、body hash/preview，用于说明 client 请求进入 runtime 前后的审计边界。
+- `execution_events`：runtime plan、model call start/end、tool start/end、compact decision、stream lifecycle、cancel/error 等生命周期事件，用于解释一次 response 如何被编排出来。
+- `upstream_exchanges`：semantic response/request 与外部 `.http` cassette、trace id、route target 的关联，用于把 Responses runtime 状态和现有 recorder 事实源连接起来。
+
+Stage 9 audit 接入顺序建议：
+
+1. 先写入 request accepted/completed 事件，并建立 `upstream_exchanges` 与 response id、trace id、cassette path、route target 的 correlation。
+2. 再接 tool lifecycle events，包括 hosted tool start/end/error、redaction 和 tool result persistence。
+3. 最后补 streaming、cancel、compact 事件，因为这些事件对顺序、幂等和部分失败恢复要求更高。
 
 Postgres-first 的原因：
 
@@ -347,6 +353,8 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - 旧 `.http` replay 不连接 DB。
 
 当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径和应用库 `db migrate up` 初始化路径已落地；完整 Postgres migration 生产化、request audit、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
+
+Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，但它的边界应保持清晰：schema 骨架只定义可持久化的 audit surface，不等于 runtime 已写入、Monitor/MCP 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。runtime 接入顺序建议先完成 request accepted/completed 与 upstream exchange correlation，再补 tool events，最后处理 streaming/cancel/compact events。
 
 ### Stage 3：Hosted tools 与 compact（部分落地）
 

@@ -12,12 +12,15 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/response"
 	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
@@ -342,6 +345,28 @@ func init() {
 	evalrunDescID := evalrunFields[0].Descriptor()
 	// evalrun.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	evalrun.IDValidator = evalrunDescID.Validators[0].(func(string) error)
+	executioneventFields := schema.ExecutionEvent{}.Fields()
+	_ = executioneventFields
+	// executioneventDescEventType is the schema descriptor for event_type field.
+	executioneventDescEventType := executioneventFields[3].Descriptor()
+	// executionevent.EventTypeValidator is a validator for the "event_type" field. It is called by the builders before save.
+	executionevent.EventTypeValidator = executioneventDescEventType.Validators[0].(func(string) error)
+	// executioneventDescPhase is the schema descriptor for phase field.
+	executioneventDescPhase := executioneventFields[4].Descriptor()
+	// executionevent.DefaultPhase holds the default value on creation for the phase field.
+	executionevent.DefaultPhase = executioneventDescPhase.Default.(string)
+	// executioneventDescStatus is the schema descriptor for status field.
+	executioneventDescStatus := executioneventFields[5].Descriptor()
+	// executionevent.DefaultStatus holds the default value on creation for the status field.
+	executionevent.DefaultStatus = executioneventDescStatus.Default.(string)
+	// executioneventDescOccurredAt is the schema descriptor for occurred_at field.
+	executioneventDescOccurredAt := executioneventFields[8].Descriptor()
+	// executionevent.DefaultOccurredAt holds the default value on creation for the occurred_at field.
+	executionevent.DefaultOccurredAt = executioneventDescOccurredAt.Default.(func() time.Time)
+	// executioneventDescID is the schema descriptor for id field.
+	executioneventDescID := executioneventFields[0].Descriptor()
+	// executionevent.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	executionevent.IDValidator = executioneventDescID.Validators[0].(func(string) error)
 	experimentrunFields := schema.ExperimentRun{}.Fields()
 	_ = experimentrunFields
 	// experimentrunDescName is the schema descriptor for name field.
@@ -434,6 +459,28 @@ func init() {
 	modelcatalogDescID := modelcatalogFields[0].Descriptor()
 	// modelcatalog.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	modelcatalog.IDValidator = modelcatalogDescID.Validators[0].(func(string) error)
+	requestauditFields := schema.RequestAudit{}.Fields()
+	_ = requestauditFields
+	// requestauditDescMethod is the schema descriptor for method field.
+	requestauditDescMethod := requestauditFields[3].Descriptor()
+	// requestaudit.MethodValidator is a validator for the "method" field. It is called by the builders before save.
+	requestaudit.MethodValidator = requestauditDescMethod.Validators[0].(func(string) error)
+	// requestauditDescPath is the schema descriptor for path field.
+	requestauditDescPath := requestauditFields[4].Descriptor()
+	// requestaudit.PathValidator is a validator for the "path" field. It is called by the builders before save.
+	requestaudit.PathValidator = requestauditDescPath.Validators[0].(func(string) error)
+	// requestauditDescStatus is the schema descriptor for status field.
+	requestauditDescStatus := requestauditFields[10].Descriptor()
+	// requestaudit.DefaultStatus holds the default value on creation for the status field.
+	requestaudit.DefaultStatus = requestauditDescStatus.Default.(string)
+	// requestauditDescCreatedAt is the schema descriptor for created_at field.
+	requestauditDescCreatedAt := requestauditFields[12].Descriptor()
+	// requestaudit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	requestaudit.DefaultCreatedAt = requestauditDescCreatedAt.Default.(func() time.Time)
+	// requestauditDescID is the schema descriptor for id field.
+	requestauditDescID := requestauditFields[0].Descriptor()
+	// requestaudit.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	requestaudit.IDValidator = requestauditDescID.Validators[0].(func(string) error)
 	responseFields := schema.Response{}.Fields()
 	_ = responseFields
 	// responseDescConversationID is the schema descriptor for conversation_id field.
@@ -682,6 +729,12 @@ func init() {
 	tracelogDescID := tracelogFields[0].Descriptor()
 	// tracelog.IDValidator is a validator for the "id" field. It is called by the builders before save.
 	tracelog.IDValidator = tracelogDescID.Validators[0].(func(string) error)
+	upstreamexchangeFields := schema.UpstreamExchange{}.Fields()
+	_ = upstreamexchangeFields
+	// upstreamexchangeDescID is the schema descriptor for id field.
+	upstreamexchangeDescID := upstreamexchangeFields[0].Descriptor()
+	// upstreamexchange.IDValidator is a validator for the "id" field. It is called by the builders before save.
+	upstreamexchange.IDValidator = upstreamexchangeDescID.Validators[0].(func(string) error)
 	upstreammodelFields := schema.UpstreamModel{}.Fields()
 	_ = upstreammodelFields
 	// upstreammodelDescUpstreamID is the schema descriptor for upstream_id field.

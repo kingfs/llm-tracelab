@@ -57,7 +57,7 @@ func TestNewInitializesResponsesStateSchema(t *testing.T) {
 		t.Fatal("EntClient() is nil")
 	}
 
-	for _, table := range []string{"responses", "response_items"} {
+	for _, table := range []string{"responses", "response_items", "request_audits", "execution_events", "upstream_exchanges"} {
 		t.Run(table, func(t *testing.T) {
 			var name string
 			if err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {

@@ -249,6 +249,46 @@ var (
 			},
 		},
 	}
+	// ExecutionEventsColumns holds the columns for the "execution_events" table.
+	ExecutionEventsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "response_id", Type: field.TypeString, Nullable: true},
+		{Name: "conversation_id", Type: field.TypeString, Nullable: true},
+		{Name: "event_type", Type: field.TypeString},
+		{Name: "phase", Type: field.TypeString, Default: ""},
+		{Name: "status", Type: field.TypeString, Default: ""},
+		{Name: "message", Type: field.TypeString, Nullable: true},
+		{Name: "details_json", Type: field.TypeJSON, Nullable: true},
+		{Name: "occurred_at", Type: field.TypeTime},
+	}
+	// ExecutionEventsTable holds the schema information for the "execution_events" table.
+	ExecutionEventsTable = &schema.Table{
+		Name:       "execution_events",
+		Columns:    ExecutionEventsColumns,
+		PrimaryKey: []*schema.Column{ExecutionEventsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "executionevent_response_id_occurred_at",
+				Unique:  false,
+				Columns: []*schema.Column{ExecutionEventsColumns[1], ExecutionEventsColumns[8]},
+			},
+			{
+				Name:    "executionevent_conversation_id_occurred_at",
+				Unique:  false,
+				Columns: []*schema.Column{ExecutionEventsColumns[2], ExecutionEventsColumns[8]},
+			},
+			{
+				Name:    "executionevent_event_type_occurred_at",
+				Unique:  false,
+				Columns: []*schema.Column{ExecutionEventsColumns[3], ExecutionEventsColumns[8]},
+			},
+			{
+				Name:    "executionevent_phase_status_occurred_at",
+				Unique:  false,
+				Columns: []*schema.Column{ExecutionEventsColumns[4], ExecutionEventsColumns[5], ExecutionEventsColumns[8]},
+			},
+		},
+	}
 	// ExperimentRunsColumns holds the columns for the "experiment_runs" table.
 	ExperimentRunsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -296,6 +336,50 @@ var (
 		Name:       "model_catalog",
 		Columns:    ModelCatalogColumns,
 		PrimaryKey: []*schema.Column{ModelCatalogColumns[0]},
+	}
+	// RequestAuditsColumns holds the columns for the "request_audits" table.
+	RequestAuditsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "response_id", Type: field.TypeString, Nullable: true},
+		{Name: "conversation_id", Type: field.TypeString, Nullable: true},
+		{Name: "method", Type: field.TypeString},
+		{Name: "path", Type: field.TypeString},
+		{Name: "client_request_id", Type: field.TypeString, Nullable: true},
+		{Name: "header_json", Type: field.TypeJSON, Nullable: true},
+		{Name: "body_preview", Type: field.TypeString, Nullable: true},
+		{Name: "body_sha256", Type: field.TypeString, Nullable: true},
+		{Name: "redaction_json", Type: field.TypeJSON, Nullable: true},
+		{Name: "status", Type: field.TypeString, Default: ""},
+		{Name: "error_text", Type: field.TypeString, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// RequestAuditsTable holds the schema information for the "request_audits" table.
+	RequestAuditsTable = &schema.Table{
+		Name:       "request_audits",
+		Columns:    RequestAuditsColumns,
+		PrimaryKey: []*schema.Column{RequestAuditsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "requestaudit_response_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{RequestAuditsColumns[1], RequestAuditsColumns[12]},
+			},
+			{
+				Name:    "requestaudit_conversation_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{RequestAuditsColumns[2], RequestAuditsColumns[12]},
+			},
+			{
+				Name:    "requestaudit_client_request_id",
+				Unique:  false,
+				Columns: []*schema.Column{RequestAuditsColumns[5]},
+			},
+			{
+				Name:    "requestaudit_status_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{RequestAuditsColumns[10], RequestAuditsColumns[12]},
+			},
+		},
 	}
 	// ResponsesColumns holds the columns for the "responses" table.
 	ResponsesColumns = []*schema.Column{
@@ -476,6 +560,55 @@ var (
 			},
 		},
 	}
+	// UpstreamExchangesColumns holds the columns for the "upstream_exchanges" table.
+	UpstreamExchangesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "response_id", Type: field.TypeString, Nullable: true},
+		{Name: "request_audit_id", Type: field.TypeString, Nullable: true},
+		{Name: "trace_id", Type: field.TypeString, Nullable: true},
+		{Name: "cassette_path", Type: field.TypeString, Nullable: true},
+		{Name: "upstream_id", Type: field.TypeString, Nullable: true},
+		{Name: "route_target", Type: field.TypeString, Nullable: true},
+		{Name: "model", Type: field.TypeString, Nullable: true},
+		{Name: "endpoint", Type: field.TypeString, Nullable: true},
+		{Name: "status_code", Type: field.TypeInt, Nullable: true},
+		{Name: "started_at", Type: field.TypeTime, Nullable: true},
+		{Name: "completed_at", Type: field.TypeTime, Nullable: true},
+		{Name: "error_text", Type: field.TypeString, Nullable: true},
+	}
+	// UpstreamExchangesTable holds the schema information for the "upstream_exchanges" table.
+	UpstreamExchangesTable = &schema.Table{
+		Name:       "upstream_exchanges",
+		Columns:    UpstreamExchangesColumns,
+		PrimaryKey: []*schema.Column{UpstreamExchangesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "upstreamexchange_response_id_started_at",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamExchangesColumns[1], UpstreamExchangesColumns[10]},
+			},
+			{
+				Name:    "upstreamexchange_request_audit_id_started_at",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamExchangesColumns[2], UpstreamExchangesColumns[10]},
+			},
+			{
+				Name:    "upstreamexchange_trace_id",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamExchangesColumns[3]},
+			},
+			{
+				Name:    "upstreamexchange_upstream_id_started_at",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamExchangesColumns[5], UpstreamExchangesColumns[10]},
+			},
+			{
+				Name:    "upstreamexchange_status_code_started_at",
+				Unique:  false,
+				Columns: []*schema.Column{UpstreamExchangesColumns[9], UpstreamExchangesColumns[10]},
+			},
+		},
+	}
 	// UpstreamModelsColumns holds the columns for the "upstream_models" table.
 	UpstreamModelsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt, Increment: true},
@@ -549,12 +682,15 @@ var (
 		DatasetsTable,
 		DatasetExamplesTable,
 		EvalRunsTable,
+		ExecutionEventsTable,
 		ExperimentRunsTable,
 		ModelCatalogTable,
+		RequestAuditsTable,
 		ResponsesTable,
 		ResponseItemsTable,
 		ScoresTable,
 		LogsTable,
+		UpstreamExchangesTable,
 		UpstreamModelsTable,
 		UpstreamTargetsTable,
 		UsersTable,
@@ -590,6 +726,10 @@ func init() {
 		Table:          "eval_runs",
 		IncrementStart: func(i int) *int { return &i }(17179869184),
 	}
+	ExecutionEventsTable.Annotation = &entsql.Annotation{
+		Table:          "execution_events",
+		IncrementStart: func(i int) *int { return &i }(68719476736),
+	}
 	ExperimentRunsTable.Annotation = &entsql.Annotation{
 		Table:          "experiment_runs",
 		IncrementStart: func(i int) *int { return &i }(21474836480),
@@ -597,6 +737,10 @@ func init() {
 	ModelCatalogTable.Annotation = &entsql.Annotation{
 		Table:          "model_catalog",
 		IncrementStart: func(i int) *int { return &i }(55834574848),
+	}
+	RequestAuditsTable.Annotation = &entsql.Annotation{
+		Table:          "request_audits",
+		IncrementStart: func(i int) *int { return &i }(73014444032),
 	}
 	ResponsesTable.Annotation = &entsql.Annotation{
 		Table:          "responses",
@@ -613,6 +757,10 @@ func init() {
 	LogsTable.Annotation = &entsql.Annotation{
 		Table:          "logs",
 		IncrementStart: func(i int) *int { return &i }(30064771072),
+	}
+	UpstreamExchangesTable.Annotation = &entsql.Annotation{
+		Table:          "upstream_exchanges",
+		IncrementStart: func(i int) *int { return &i }(77309411328),
 	}
 	UpstreamModelsTable.Annotation = &entsql.Annotation{
 		Table:          "upstream_models",

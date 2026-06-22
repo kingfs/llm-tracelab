@@ -65,7 +65,15 @@ SQLite 当前负责：
 
 启动时 schema 升级必须兼容已有本地 DB。
 
-Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration、运维生产化和 request/tool audit 查询还不是当前基线能力。
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration、运维生产化和 Responses audit runtime 写入/查询还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；runtime 接入完成前，这些表不应被视为已可用审计能力。
+
+Stage 9 audit 表职责边界：
+
+- `request_audits`：入站 Responses request envelope、client request id、redaction/body hash。
+- `execution_events`：runtime plan、model/tool/compact/stream/error 生命周期。
+- `upstream_exchanges`：semantic response/request 与 `.http` cassette、trace id、route target 的关联。
+
+后续接入顺序建议先落 request accepted/completed 与 upstream exchange correlation，再补 tool events，最后补 streaming/cancel/compact events。
 
 ## Session 基线
 
@@ -162,7 +170,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 让测试依赖真实 provider。
 - Responses server-mode streaming。
 - 完整 Responses tool lifecycle、tool audit、streaming tool events 和 compact workflow。
-- request/tool audit 表和完整 Postgres migration 生产化。
+- Responses audit runtime 写入、语义查询和完整 Postgres migration 生产化；Stage 9 schema 骨架已覆盖 `request_audits`、`execution_events`、`upstream_exchanges`。
 - provider auto-detect。
 
 ## 推荐验证
