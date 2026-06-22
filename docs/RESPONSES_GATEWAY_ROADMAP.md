@@ -70,7 +70,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 优先切片：
 
 - `db migrate status` / dry-run 明确区分 application DB、auth DB、Postgres checked-in SQL 和 SQLite fallback。
-- 或为 SQLite fallback 增加非破坏性的 schema version/status marker。
+- 已为 SQLite fallback 增加非破坏性的 `app_schema_status` application schema marker；`db migrate status --check-db` 会只读报告 marker version 和核心应用表完整性，旧 SQLite DB 无 marker 仍兼容。
 
 验收：
 

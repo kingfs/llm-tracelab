@@ -535,7 +535,26 @@ func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
 func TestDBMigrateStatusCheckDBJSONReportsSQLiteFallback(t *testing.T) {
 	t.Parallel()
 
-	configPath := writeSQLiteDBMigrateConfig(t)
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Store.Close() error = %v", err)
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
 	cmd := newRootCommand()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
@@ -552,6 +571,9 @@ func TestDBMigrateStatusCheckDBJSONReportsSQLiteFallback(t *testing.T) {
 			DatabaseStatusAvailable bool   `json:"database_status_available"`
 			DatabaseStatusVersioned bool   `json:"database_status_versioned"`
 			DatabaseStatusDriver    string `json:"database_status_driver"`
+			SchemaMarker            string `json:"database_schema_marker"`
+			SchemaMarkerVersion     int    `json:"database_schema_marker_version"`
+			RequiredTablesPresent   bool   `json:"database_required_tables_present"`
 			DatabaseStatusMessage   string `json:"database_status_message"`
 		} `json:"result"`
 	}
@@ -561,10 +583,13 @@ func TestDBMigrateStatusCheckDBJSONReportsSQLiteFallback(t *testing.T) {
 	if !envelope.OK {
 		t.Fatalf("envelope ok = false: %+v", envelope)
 	}
-	if envelope.Result.StatusCheck != "database" || envelope.Result.DatabaseStatusAvailable || envelope.Result.DatabaseStatusVersioned || envelope.Result.DatabaseStatusDriver != "sqlite" {
+	if envelope.Result.StatusCheck != "database" || !envelope.Result.DatabaseStatusAvailable || envelope.Result.DatabaseStatusVersioned || envelope.Result.DatabaseStatusDriver != "sqlite" {
 		t.Fatalf("sqlite database status = %+v", envelope.Result)
 	}
-	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "sqlite application migration still uses store schema initialization") {
+	if envelope.Result.SchemaMarker != "app_schema_status" || envelope.Result.SchemaMarkerVersion != 1 || !envelope.Result.RequiredTablesPresent {
+		t.Fatalf("sqlite schema marker status = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "marker version 1") || !strings.Contains(envelope.Result.DatabaseStatusMessage, "sqlite application migration still uses store schema initialization") {
 		t.Fatalf("sqlite database status message = %q", envelope.Result.DatabaseStatusMessage)
 	}
 }

@@ -71,6 +71,24 @@ func TestNewInitializesResponsesStateSchema(t *testing.T) {
 	}
 }
 
+func TestNewInitializesSQLiteApplicationSchemaMarker(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	var version int
+	var mode string
+	var source string
+	if err := st.db.QueryRow(`SELECT version, mode, source FROM app_schema_status WHERE namespace = 'application'`).Scan(&version, &mode, &source); err != nil {
+		t.Fatalf("query app_schema_status error = %v", err)
+	}
+	if version != 1 || mode != "schema-init" || source != "internal/store raw DDL startup initialization" {
+		t.Fatalf("app schema marker = version %d mode %q source %q", version, mode, source)
+	}
+}
+
 func TestNewWithDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")

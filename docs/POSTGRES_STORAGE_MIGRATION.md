@@ -49,7 +49,10 @@ claim that Postgres persistence is fully production mature today.
   fallback, and auth migrations are explicitly marked out of scope for the
   `db migrate` command. `db migrate status --check-db` is an explicit opt-in
   database check: Postgres reads `schema_migrations` version/dirty state, while
-  SQLite reports the schema-init fallback without creating a version marker.
+  SQLite opens the application DB read-only and reports the lightweight
+  `app_schema_status` marker plus required application table presence when
+  available. Legacy SQLite DBs without the marker remain valid and are reported
+  as schema-init fallback.
 - `internal/store` has an initial Postgres raw SQL compatibility pass:
   store-owned `?` placeholders are rebound to `$n` for Postgres, transaction
   helpers use the same rebind path, `logs.is_stream` can round-trip as a
@@ -214,8 +217,11 @@ ownership visible without requiring a running external database.
 Stage 16H adds explicit status verification through `db migrate status
 --check-db`. This opt-in path reads Postgres `schema_migrations` and reports
 `database_migration_version` plus `database_migration_dirty` when present. For
-SQLite it reports the existing schema-init fallback without adding a version
-marker.
+SQLite it reports the existing schema-init fallback by checking the application
+DB read-only. Current SQLite startup initialization writes `app_schema_status`
+for the `application` namespace, and `--check-db` reports that marker version
+alongside required table completeness. Existing SQLite DBs without the marker
+are still treated as compatible legacy fallback DBs.
 
 Stage 16I routes Postgres auth migration `down` through the same shared
 versioned SQL rollback path in `internal/appdbmigrate`. This closes the
@@ -274,8 +280,9 @@ been committed or applied in a shared environment.
   namespace is still missing.
 - SQLite application migrations still use schema initialization rather than
   explicit versioned files. `db migrate status` reports this fallback, and
-  `db migrate status --check-db` makes it explicit without adding a SQLite
-  schema version marker or migrating old local databases.
+  `db migrate status --check-db` reports the lightweight `app_schema_status`
+  marker when present while continuing to accept legacy local databases without
+  that marker.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.

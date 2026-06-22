@@ -2788,6 +2788,13 @@ func (s *Store) initSchema() error {
 	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
+		`CREATE TABLE IF NOT EXISTS app_schema_status (
+			namespace TEXT PRIMARY KEY,
+			version INTEGER NOT NULL,
+			mode TEXT NOT NULL,
+			source TEXT NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
 		`CREATE TABLE IF NOT EXISTS logs (
 			path TEXT PRIMARY KEY,
 			trace_id TEXT NOT NULL DEFAULT '',
@@ -3311,6 +3318,15 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.backfillGrouping(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`INSERT INTO app_schema_status (namespace, version, mode, source, updated_at)
+		VALUES ('application', 1, 'schema-init', 'internal/store raw DDL startup initialization', CURRENT_TIMESTAMP)
+		ON CONFLICT(namespace) DO UPDATE SET
+			version = excluded.version,
+			mode = excluded.mode,
+			source = excluded.source,
+			updated_at = excluded.updated_at`); err != nil {
 		return err
 	}
 	return nil
