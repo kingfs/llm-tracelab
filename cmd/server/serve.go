@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,14 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+)
+
+var (
+	authMigrateDatabaseUp = auth.MigrateDatabaseUp
+	authOpenDatabase      = auth.OpenDatabase
+	authEnsureSchema      = func(st *auth.Store) error {
+		return st.EnsureSchema(context.Background())
+	}
 )
 
 func newServeCommand(runtime *cliRuntime) *cobra.Command {
@@ -214,13 +223,25 @@ func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store,
 }
 
 func openAuthStore(cfg *config.Config) (*auth.Store, error) {
-	if cfg.DatabaseAutoMigrate() {
-		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
-			return nil, fmt.Errorf("migrate database: %w", err)
+	return openAuthStoreWithAutoSchema(cfg)
+}
+
+func openAuthStoreWithAutoSchema(cfg *config.Config) (*auth.Store, error) {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	switch driver {
+	case "sqlite":
+		if cfg.DatabaseAutoMigrate() {
+			if err := authMigrateDatabaseUp(driver, cfg.DatabaseDSN(), 0); err != nil {
+				return nil, fmt.Errorf("migrate database: %w", err)
+			}
 		}
+	case "postgres":
+	default:
+		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
-	st, err := auth.OpenDatabase(
-		cfg.DatabaseDriver(),
+
+	st, err := authOpenDatabase(
+		driver,
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
@@ -228,7 +249,25 @@ func openAuthStore(cfg *config.Config) (*auth.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if driver == "postgres" && cfg.DatabaseAutoMigrate() {
+		if err := authEnsureSchema(st); err != nil {
+			_ = st.Close()
+			return nil, fmt.Errorf("ensure auth schema: %w", err)
+		}
+	}
 	return st, nil
+}
+
+func normalizeAuthStoreDriver(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	switch driver {
+	case "":
+		return "sqlite"
+	case "postgresql":
+		return "postgres"
+	default:
+		return driver
+	}
 }
 
 func validateServeConfig(cfg *config.Config) error {

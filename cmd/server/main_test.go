@@ -504,6 +504,86 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	}
 }
 
+func TestOpenAuthStoreAutoMigrateSQLiteCreatesAuthSchemaAndInitUser(t *testing.T) {
+	dir := t.TempDir()
+	autoMigrate := true
+	cfg := &config.Config{}
+	cfg.Trace.OutputDir = dir
+	cfg.Database.Driver = "sqlite"
+	cfg.Database.DSN = filepath.Join(dir, "control.sqlite3")
+	cfg.Database.AutoMigrate = &autoMigrate
+
+	st, err := openAuthStore(cfg)
+	if err != nil {
+		t.Fatalf("openAuthStore() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateUser(context.Background(), "admin", "correct horse battery staple"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if err := st.VerifyPassword(context.Background(), "admin", "correct horse battery staple"); err != nil {
+		t.Fatalf("VerifyPassword() error = %v", err)
+	}
+}
+
+func TestOpenAuthStoreAutoMigratePostgresUsesEnsureSchemaWithoutEmbeddedMigrator(t *testing.T) {
+	origMigrate := authMigrateDatabaseUp
+	origOpen := authOpenDatabase
+	origEnsure := authEnsureSchema
+	t.Cleanup(func() {
+		authMigrateDatabaseUp = origMigrate
+		authOpenDatabase = origOpen
+		authEnsureSchema = origEnsure
+	})
+
+	var migrated bool
+	var ensured bool
+	var openedDriver string
+	var openedDSN string
+	var openedMaxOpen int
+	var openedMaxIdle int
+	authMigrateDatabaseUp = func(driver string, dsn string, steps int) error {
+		migrated = true
+		return nil
+	}
+	authOpenDatabase = func(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*auth.Store, error) {
+		openedDriver = driver
+		openedDSN = dsn
+		openedMaxOpen = maxOpenConns
+		openedMaxIdle = maxIdleConns
+		return &auth.Store{}, nil
+	}
+	authEnsureSchema = func(st *auth.Store) error {
+		ensured = true
+		return nil
+	}
+
+	autoMigrate := true
+	cfg := &config.Config{}
+	cfg.Database.Driver = "postgresql"
+	cfg.Database.DSN = "postgres://user:pass@example.invalid/llm_tracelab?sslmode=disable"
+	cfg.Database.MaxOpenConns = 7
+	cfg.Database.MaxIdleConns = 3
+	cfg.Database.AutoMigrate = &autoMigrate
+
+	st, err := openAuthStore(cfg)
+	if err != nil {
+		t.Fatalf("openAuthStore() error = %v", err)
+	}
+	defer st.Close()
+
+	if migrated {
+		t.Fatalf("Postgres auto schema should not call embedded auth migrator")
+	}
+	if !ensured {
+		t.Fatalf("Postgres auto schema did not call EnsureSchema")
+	}
+	if openedDriver != "postgres" || openedDSN != cfg.Database.DSN || openedMaxOpen != 7 || openedMaxIdle != 3 {
+		t.Fatalf("OpenDatabase args = driver=%q dsn=%q maxOpen=%d maxIdle=%d", openedDriver, openedDSN, openedMaxOpen, openedMaxIdle)
+	}
+}
+
 func TestTopLevelMigrateAutoMigrateUsesApplicationDatabase(t *testing.T) {
 	t.Parallel()
 

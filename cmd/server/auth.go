@@ -357,18 +357,7 @@ func openAuthStoreForCommand(configPath string) (*config.Config, *auth.Store, in
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return nil, nil, 1
 	}
-	if cfg.DatabaseAutoMigrate() {
-		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
-			slog.Error("Database migration failed", "error", err)
-			return nil, nil, 1
-		}
-	}
-	st, err := auth.OpenDatabase(
-		cfg.DatabaseDriver(),
-		cfg.DatabaseDSN(),
-		cfg.DatabaseMaxOpenConns(),
-		cfg.DatabaseMaxIdleConns(),
-	)
+	st, err := openAuthStoreWithAutoSchema(cfg)
 	if err != nil {
 		slog.Error("Open auth store failed", "error", err)
 		return nil, nil, 1

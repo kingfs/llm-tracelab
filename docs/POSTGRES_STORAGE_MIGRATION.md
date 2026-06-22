@@ -14,6 +14,9 @@ claim that Postgres persistence is fully production mature today.
 - `internal/auth.OpenDatabase` also accepts `driver=postgres` and
   `driver=postgresql`, but auth schema management is not productionized for
   Postgres.
+- With `database.auto_migrate: true`, the auth store keeps SQLite on the
+  embedded migration path and uses ent `Schema.Create` for Postgres evaluation
+  databases.
 - `internal/store.Store.initSchema` uses `client.Schema.Create` for Postgres.
   This can create the current ent schema on an empty database, but it is not a
   substitute for versioned production migrations.
@@ -70,16 +73,17 @@ For Postgres evaluation:
 - `db migrate up` can initialize the current application schema using the ent
   `Schema.Create` path. Use this only for disposable evaluation databases or
   controlled trials where recreating the database is acceptable.
+- `database.auto_migrate: true` can initialize both the application schema and
+  the current auth schema through ent `Schema.Create` when using Postgres. This
+  is an evaluation convenience only.
 - Do not run `auth migrate` expecting Postgres migrations; it still uses the
   SQLite-only embedded migrator.
 - Do not treat `client.Schema.Create` as a production rollout mechanism. It may
   be useful for disposable evaluation databases, but it has no version history,
   downgrade path, reviewable SQL, or drift policy.
-- If `database.auto_migrate: true`, server startup currently fails before the
-  stores open because `openAuthStore` calls the SQLite-only auth migrator. This
-  failure is intentional and prevents silent partial migration.
 - If `database.auto_migrate: false`, the database schema must already exist.
-  Auth commands such as `auth init-user` also require auth tables to exist; the
+  Auth commands such as `auth init-user` also require auth tables to exist.
+  Checked-in versioned Postgres auth migrations are still incomplete, so the
   current Postgres auth path is not yet a documented production path.
 
 For production-like Postgres trials, use a fresh database, capture the exact
