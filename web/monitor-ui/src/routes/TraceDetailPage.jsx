@@ -77,6 +77,7 @@ export function TraceDetailPage() {
   const routingDecision = buildRoutingDecision(detail.data?.events || []);
   const selectedRouteIdentity = routingDecision.selectedRouteTargetID || selectedUpstreamID;
   const selectedChannelID = routingDecision.selectedChannelID || selectedUpstreamID;
+  const responsesAuditLink = buildResponsesAuditLink(detail.data);
 
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
@@ -247,6 +248,13 @@ export function TraceDetailPage() {
               <p className="eyebrow">Reading guide</p>
               <h2>Where to inspect this trace</h2>
             </div>
+            {responsesAuditLink ? (
+              <div className="panel-head-actions">
+                <Link className="ghost-button active" to={responsesAuditLink}>
+                  Responses audit
+                </Link>
+              </div>
+            ) : null}
           </div>
           <div className="trace-reading-grid">
             <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("conversation")}>
@@ -752,6 +760,41 @@ function AuditPanel({ findings, InlineTag, CodeBlock }) {
       )}
     </section>
   );
+}
+
+function buildResponsesAuditLink(trace) {
+  if (!trace) {
+    return "";
+  }
+  const responseID = firstAuditIdentifier(trace, "response_id");
+  const requestAuditID = firstAuditIdentifier(trace, "request_audit_id");
+  const params = new URLSearchParams();
+  if (responseID) {
+    params.set("response_id", responseID);
+  } else if (requestAuditID) {
+    params.set("request_audit_id", requestAuditID);
+  }
+  const query = params.toString();
+  return query ? `/audit?${query}` : "";
+}
+
+function firstAuditIdentifier(trace, key) {
+  const sources = [
+    trace,
+    trace.header?.meta,
+    trace.request_audit,
+    trace.responses_audit,
+    trace.audit,
+    ...(Array.isArray(trace.upstream_exchanges) ? trace.upstream_exchanges : []),
+    ...(Array.isArray(trace.events) ? trace.events : []),
+  ];
+  for (const source of sources) {
+    const value = typeof source?.[key] === "string" ? source[key].trim() : "";
+    if (value) {
+      return value;
+    }
+  }
+  return "";
 }
 
 function PerformancePanel({ performance }) {
