@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
@@ -48,6 +49,15 @@ func (f *fakeWebSearchProvider) Search(ctx context.Context, query websearch.Quer
 		return websearch.Result{}, f.err
 	}
 	return f.result, nil
+}
+
+type fakeExecutionEventRecorder struct {
+	events []audit.ExecutionEvent
+}
+
+func (f *fakeExecutionEventRecorder) RecordExecutionEvent(ctx context.Context, event audit.ExecutionEvent) error {
+	f.events = append(f.events, event)
+	return nil
 }
 
 func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) {
@@ -226,12 +236,13 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 			Snippet: "Record and replay LLM API traffic.",
 		}}},
 	}
+	events := &fakeExecutionEventRecorder{}
 	store := NewMemoryStore()
 	rt := New(Config{
 		DefaultModel:        "gpt-test",
 		WebSearchEnabled:    true,
 		WebSearchMaxResults: 2,
-	}, client, store, WithWebSearchProvider(provider))
+	}, client, store, WithWebSearchProvider(provider), WithExecutionEventRecorder(events))
 
 	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
 		Input:      "search it",
@@ -290,6 +301,18 @@ func TestRuntimeCreateExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if got := resp.Output[0].Action["query"]; got != "llm trace replay" {
 		t.Fatalf("web_search action query = %#v", got)
 	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want 2: %#v", len(events.events), events.events)
+	}
+	if events.events[0].EventType != "response.tool_call" || events.events[0].Phase != "tool_call" || events.events[0].Status != "started" {
+		t.Fatalf("started event mismatch: %#v", events.events[0])
+	}
+	if events.events[1].EventType != "response.tool_call" || events.events[1].Phase != "tool_call" || events.events[1].Status != "completed" {
+		t.Fatalf("completed event mismatch: %#v", events.events[1])
+	}
+	if events.events[1].DetailsJSON["call_id"] != "call_search" || events.events[1].DetailsJSON["query"] != "llm trace replay" || events.events[1].DetailsJSON["result_count"] != 1 {
+		t.Fatalf("completed event details mismatch: %#v", events.events[1].DetailsJSON)
+	}
 	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "Use cassettes for deterministic replay." {
 		t.Fatalf("unexpected final message: %#v", got)
 	}
@@ -344,5 +367,49 @@ func TestRuntimeCreateWebSearchMaxToolIterationsGuard(t *testing.T) {
 	}
 	if len(provider.queries) != 1 {
 		t.Fatalf("provider queries = %d, want 1", len(provider.queries))
+	}
+}
+
+func TestRuntimeCreateRecordsHostedWebSearchToolFailure(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{
+					ToolCalls: []ChatToolCall{{
+						ID:   "call_search",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "web_search",
+							Arguments: `{"query":"llm trace replay"}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+		},
+	}
+	providerErr := errors.New("search backend failed")
+	provider := &fakeWebSearchProvider{err: providerErr}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:     "gpt-test",
+		WebSearchEnabled: true,
+	}, client, NewMemoryStore(), WithWebSearchProvider(provider), WithExecutionEventRecorder(events))
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "search it",
+		Tools: []protocol.Tool{{Type: "web_search"}},
+	})
+	if !errors.Is(err, providerErr) {
+		t.Fatalf("Create error = %v, want provider error", err)
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want 2: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "started" || events.events[1].Status != "failed" || events.events[1].Message != "search backend failed" {
+		t.Fatalf("execution events mismatch: %#v", events.events)
+	}
+	if events.events[1].DetailsJSON["tool_name"] != "web_search" || events.events[1].DetailsJSON["call_id"] != "call_search" || events.events[1].DetailsJSON["error"] != "search backend failed" {
+		t.Fatalf("failed event details mismatch: %#v", events.events[1].DetailsJSON)
 	}
 }

@@ -1149,6 +1149,26 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 			t.Fatalf("recorded endpoint = %q, want /v1/chat/completions", entry.Header.Meta.Endpoint)
 		}
 	}
+
+	toolEvents, err := st.EntClient().ExecutionEvent.Query().
+		Where(
+			executionevent.EventTypeEQ("response.tool_call"),
+			executionevent.ResponseIDEQ(responsePayload.ID),
+		).
+		Order(executionevent.ByOccurredAt(), executionevent.ByID()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query tool execution events: %v", err)
+	}
+	if len(toolEvents) != 2 {
+		t.Fatalf("tool execution events len = %d, want 2: %+v", len(toolEvents), toolEvents)
+	}
+	if toolEvents[0].Status != "started" || toolEvents[1].Status != "completed" {
+		t.Fatalf("tool execution event statuses = %q/%q, want started/completed", toolEvents[0].Status, toolEvents[1].Status)
+	}
+	if toolEvents[1].DetailsJSON["tool_name"] != "web_search" || toolEvents[1].DetailsJSON["call_id"] != "call_search" || toolEvents[1].DetailsJSON["query"] != "llm-tracelab replay" {
+		t.Fatalf("completed tool event details = %#v", toolEvents[1].DetailsJSON)
+	}
 }
 
 func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerRestart(t *testing.T) {

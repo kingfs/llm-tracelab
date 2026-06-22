@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
@@ -25,6 +27,7 @@ type Runtime struct {
 	client            ChatCompletionsClient
 	store             Store
 	webSearchProvider websearch.Provider
+	events            audit.ExecutionEventRecorder
 }
 
 type Option func(*Runtime)
@@ -32,6 +35,12 @@ type Option func(*Runtime)
 func WithWebSearchProvider(provider websearch.Provider) Option {
 	return func(r *Runtime) {
 		r.webSearchProvider = provider
+	}
+}
+
+func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
+	return func(r *Runtime) {
+		r.events = recorder
 	}
 }
 
@@ -189,18 +198,58 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 
 		for _, call := range calls {
+			eventDetails := map[string]any{
+				"tool_name":   "web_search",
+				"call_id":     call.call.ID,
+				"query":       call.query,
+				"iteration":   toolIterations,
+				"max_results": r.cfg.WebSearchMaxResults,
+			}
+			r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+				EventType:   "response.tool_call",
+				Phase:       "tool_call",
+				Status:      "started",
+				DetailsJSON: eventDetails,
+			})
 			result, err := r.webSearchProvider.Search(ctx, websearch.Query{
 				Text:       call.query,
 				MaxResults: r.cfg.WebSearchMaxResults,
 			})
 			if err != nil {
+				r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+					EventType: "response.tool_call",
+					Phase:     "tool_call",
+					Status:    "failed",
+					Message:   err.Error(),
+					DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+						"error": err.Error(),
+					}),
+				})
 				return protocol.Response{}, err
 			}
 			output = append(output, webSearchCallOutput(call.call, call.query, result))
 			toolContent, err := webSearchToolMessageContent(call.query, result)
 			if err != nil {
+				r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+					EventType: "response.tool_call",
+					Phase:     "tool_call",
+					Status:    "failed",
+					Message:   err.Error(),
+					DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+						"error":        err.Error(),
+						"result_count": len(result.Results),
+					}),
+				})
 				return protocol.Response{}, err
 			}
+			r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+				EventType: "response.tool_call",
+				Phase:     "tool_call",
+				Status:    "completed",
+				DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+					"result_count": len(result.Results),
+				}),
+			})
 			chatReq.Messages = append(chatReq.Messages, ChatMessage{
 				Role:       "tool",
 				ToolCallID: call.call.ID,
@@ -208,6 +257,26 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 			})
 		}
 	}
+}
+
+func (r *Runtime) recordExecutionEvent(ctx context.Context, event audit.ExecutionEvent) {
+	if r == nil || r.events == nil {
+		return
+	}
+	if err := r.events.RecordExecutionEvent(ctx, event); err != nil {
+		slog.Error("Failed to record responses runtime execution event", "event_type", event.EventType, "status", event.Status, "err", err)
+	}
+}
+
+func mergeEventDetails(base map[string]any, extra map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(extra))
+	for key, value := range base {
+		out[key] = value
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
 }
 
 func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) ChatCompletionRequest {

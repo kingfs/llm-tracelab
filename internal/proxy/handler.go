@@ -404,6 +404,9 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			WebSearchMaxResults: cfg.WebSearchConfig().MaxResults,
 		}
 		runtimeOptions := []responsesruntime.Option{}
+		if executionEventRecorder != nil {
+			runtimeOptions = append(runtimeOptions, responsesruntime.WithExecutionEventRecorder(executionEventRecorder))
+		}
 		if cfg.WebSearchEnabled() {
 			webSearchConfig := cfg.WebSearchConfig()
 			if webSearchConfig.Provider == websearch.ProviderDisabled {
