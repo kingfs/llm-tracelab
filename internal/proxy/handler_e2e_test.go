@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -957,6 +958,42 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if exchange.ErrorText != "" {
 		t.Fatalf("upstream exchange error_text = %q, want empty", exchange.ErrorText)
+	}
+
+	events, err := st.EntClient().ExecutionEvent.Query().
+		Order(executionevent.ByOccurredAt()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query execution events: %v", err)
+	}
+	if len(events) != 4 {
+		t.Fatalf("execution events len = %d, want 4: %+v", len(events), events)
+	}
+	eventsByKey := map[string]int{}
+	for i, event := range events {
+		key := event.EventType + "/" + event.Phase + "/" + event.Status
+		eventsByKey[key] = i
+		if event.DetailsJSON["request_audit_id"] != audit.ID {
+			t.Fatalf("execution event[%d] request_audit_id = %#v, want %q", i, event.DetailsJSON["request_audit_id"], audit.ID)
+		}
+	}
+	for _, key := range []string{
+		"response.request/request/accepted",
+		"response.model_call/model_call/started",
+		"response.model_call/model_call/completed",
+		"response.request/request/completed",
+	} {
+		if _, ok := eventsByKey[key]; !ok {
+			t.Fatalf("missing execution event %q in %+v", key, events)
+		}
+	}
+	modelCompleted := events[eventsByKey["response.model_call/model_call/completed"]]
+	if modelCompleted.DetailsJSON["cassette_path"] != recordPath || modelCompleted.DetailsJSON["trace_id"] != parsed.Header.Meta.RequestID {
+		t.Fatalf("model call completed event details = %#v, want cassette_path=%q trace_id=%q", modelCompleted.DetailsJSON, recordPath, parsed.Header.Meta.RequestID)
+	}
+	requestCompleted := events[eventsByKey["response.request/request/completed"]]
+	if requestCompleted.ResponseID != responseID {
+		t.Fatalf("completed request event response_id = %q, want %q", requestCompleted.ResponseID, responseID)
 	}
 }
 

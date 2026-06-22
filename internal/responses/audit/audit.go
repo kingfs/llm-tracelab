@@ -22,6 +22,10 @@ type UpstreamExchangeRecorder interface {
 	RecordUpstreamExchange(ctx context.Context, entry UpstreamExchange) error
 }
 
+type ExecutionEventRecorder interface {
+	RecordExecutionEvent(ctx context.Context, event ExecutionEvent) error
+}
+
 type RequestEntry struct {
 	Method          string
 	Path            string
@@ -55,6 +59,17 @@ type UpstreamExchange struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 	ErrorText      string
+}
+
+type ExecutionEvent struct {
+	ResponseID     string
+	ConversationID string
+	EventType      string
+	Phase          string
+	Status         string
+	Message        string
+	DetailsJSON    map[string]any
+	OccurredAt     time.Time
 }
 
 func NewRequestEntry(r *http.Request, body []byte) RequestEntry {

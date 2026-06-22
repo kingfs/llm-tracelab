@@ -59,12 +59,12 @@ V3 文件结构：
 
 SQLite 是 Monitor 列表、统计、过滤、分页、模型/渠道配置、系统事件、Observation IR、findings、分析任务和 eval 结果的结构化索引。
 
-Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。Stage 10A 已让 server-mode `POST /v1/responses` 写入最小 `request_audits` inbound envelope 和 accepted/completed/failed/rejected 状态；Stage 11A 增加内部 `/v1/chat/completions` cassette 到 `request_audits` 的最小 `upstream_exchanges` 关联，并在 response 完成后回填 `response_id`。字段包括 response id、request audit id、recorder request id、cassette path、upstream id、route target、model、endpoint、status 和时间戳；`execution_events` 仍未写入。
+Responses server-mode 的 semantic state 使用 runtime store。当前装配优先使用 ent-backed store，表为 `responses` 和 `response_items`；SQLite raw DDL 已包含这些表以及 `request_audits`、`execution_events`、`upstream_exchanges`，本地 fallback 可以继续使用 SQLite。store 层也能打开 Postgres 并创建 ent client，但完整 Postgres migration 生产化和 Responses 审计查询仍未完成。Stage 10A 已让 server-mode `POST /v1/responses` 写入最小 `request_audits` inbound envelope 和 accepted/completed/failed/rejected 状态；Stage 11A 增加内部 `/v1/chat/completions` cassette 到 `request_audits` 的最小 `upstream_exchanges` 关联，并在 response 完成后回填 `response_id`。字段包括 response id、request audit id、recorder request id、cassette path、upstream id、route target、model、endpoint、status 和时间戳。Stage 12A 已开始写入最小 `execution_events`：Responses request accepted/completed/failed/rejected，以及内部 Chat Completions model_call started/completed/failed；tool、stream、cancel、compact 等更细粒度事件仍未接入。
 
 Responses audit schema 的职责边界如下：
 
 - `request_audits`：记录入站 Responses request envelope、client request id、headers allowlist、body hash/preview 和完成状态。当前只在 Responses server-mode 写入，不提供查询 API。
-- `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。
+- `execution_events`：记录 runtime plan、model/tool/compact/stream/error 生命周期事件。当前已写入 request 和内部 model_call 的最小生命周期事件，尚未覆盖 tool、stream、cancel、compact。
 - `upstream_exchanges`：关联 semantic response/request 与 `.http` cassette、trace id、route target。当前只覆盖 Responses server-mode 内部 Chat Completions 调用，并在 response 完成后回填 semantic `response_id`；`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
 
 后续接入顺序建议先补查询 API，再补 tool events，最后处理 streaming/cancel/compact events。
@@ -153,5 +153,5 @@ YAML `upstream` / `upstreams` 仍保留作为兼容启动输入。
 - 用 SQLite 替代 raw cassette 作为 replay 事实源。
 - Responses server-mode streaming。
 - 完整 Responses tool lifecycle、tool audit、streaming tool events 和 compact workflow。
-- Responses audit 语义查询、`execution_events` / `upstream_exchanges` runtime 写入和完整 Postgres migration 生产化；Stage 10A 仅覆盖 `request_audits` 最小 inbound 写入。
+- Responses audit 语义查询、完整 tool/stream/cancel/compact execution event 写入和完整 Postgres migration 生产化；当前仅覆盖 `request_audits`、内部 `upstream_exchanges` correlation，以及 request/model_call 最小 `execution_events`。
 - provider auto-detect。

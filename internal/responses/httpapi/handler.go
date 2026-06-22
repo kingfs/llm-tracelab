@@ -27,6 +27,7 @@ type Handler struct {
 	runtime      Runtime
 	maxBodyBytes int64
 	auditor      audit.RequestAuditor
+	events       audit.ExecutionEventRecorder
 }
 
 type Option func(*Handler)
@@ -42,6 +43,12 @@ func WithMaxBodyBytes(limit int64) Option {
 func WithRequestAuditor(auditor audit.RequestAuditor) Option {
 	return func(h *Handler) {
 		h.auditor = auditor
+	}
+}
+
+func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
+	return func(h *Handler) {
+		h.events = recorder
 	}
 }
 
@@ -99,9 +106,30 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 	}
 
 	auditID := h.auditAccepted(r, body)
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		EventType: "response.request",
+		Phase:     "request",
+		Status:    "accepted",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+			"method":           r.Method,
+			"path":             r.URL.Path,
+		},
+	})
 	if req.Stream {
+		message := "streaming responses are not supported by the local responses server"
 		h.auditRejected(r, auditID, "rejected", "streaming responses are not supported by the local responses server")
-		writeError(w, http.StatusBadRequest, "streaming responses are not supported by the local responses server", "invalid_request_error", "unsupported_stream")
+		h.recordExecutionEvent(r, audit.ExecutionEvent{
+			EventType: "response.request",
+			Phase:     "request",
+			Status:    "rejected",
+			Message:   message,
+			DetailsJSON: map[string]any{
+				"request_audit_id": auditID,
+				"reason":           "unsupported_stream",
+			},
+		})
+		writeError(w, http.StatusBadRequest, message, "invalid_request_error", "unsupported_stream")
 		return
 	}
 
@@ -109,10 +137,30 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.runtime.Create(ctx, req)
 	if err != nil {
 		h.auditRejected(r, auditID, "failed", err.Error())
+		h.recordExecutionEvent(r, audit.ExecutionEvent{
+			EventType: "response.request",
+			Phase:     "request",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: map[string]any{
+				"request_audit_id": auditID,
+			},
+		})
 		writeRuntimeError(w, err)
 		return
 	}
 	h.auditCompleted(r, auditID, resp)
+	completion := audit.CompletionFromResponse(resp)
+	h.recordExecutionEvent(r, audit.ExecutionEvent{
+		ResponseID:     completion.ResponseID,
+		ConversationID: completion.ConversationID,
+		EventType:      "response.request",
+		Phase:          "request",
+		Status:         "completed",
+		DetailsJSON: map[string]any{
+			"request_audit_id": auditID,
+		},
+	})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -143,6 +191,15 @@ func (h *Handler) auditRejected(r *http.Request, id string, status string, error
 	}
 	if err := h.auditor.Rejected(r.Context(), id, audit.Failure{Status: status, ErrorText: errorText}); err != nil {
 		slog.Error("Failed to reject responses request audit", "audit_id", id, "err", err)
+	}
+}
+
+func (h *Handler) recordExecutionEvent(r *http.Request, event audit.ExecutionEvent) {
+	if h.events == nil {
+		return
+	}
+	if err := h.events.RecordExecutionEvent(r.Context(), event); err != nil {
+		slog.Error("Failed to write responses execution event", "event_type", event.EventType, "status", event.Status, "err", err)
 	}
 }
 

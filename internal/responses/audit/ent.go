@@ -133,6 +133,37 @@ func (a *EntAuditor) RecordUpstreamExchange(ctx context.Context, entry UpstreamE
 	return create.Exec(ctx)
 }
 
+func (a *EntAuditor) RecordExecutionEvent(ctx context.Context, event ExecutionEvent) error {
+	if a == nil || a.client == nil {
+		return nil
+	}
+	occurredAt := event.OccurredAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	create := a.client.ExecutionEvent.Create().
+		SetID("exev_" + uuid.NewString()).
+		SetEventType(event.EventType).
+		SetDetailsJSON(nilToEmptyMap(event.DetailsJSON)).
+		SetOccurredAt(occurredAt)
+	if event.ResponseID != "" {
+		create.SetResponseID(event.ResponseID)
+	}
+	if event.ConversationID != "" {
+		create.SetConversationID(event.ConversationID)
+	}
+	if event.Phase != "" {
+		create.SetPhase(event.Phase)
+	}
+	if event.Status != "" {
+		create.SetStatus(event.Status)
+	}
+	if event.Message != "" {
+		create.SetMessage(event.Message)
+	}
+	return create.Exec(ctx)
+}
+
 func nilToEmptyMap(values map[string]any) map[string]any {
 	if values == nil {
 		return map[string]any{}

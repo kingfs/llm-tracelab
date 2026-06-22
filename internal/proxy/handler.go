@@ -387,12 +387,14 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
 		var requestAuditor responsesaudit.RequestAuditor
 		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder
+		var executionEventRecorder responsesaudit.ExecutionEventRecorder
 		if st != nil {
 			if entClient := st.EntClient(); entClient != nil {
 				responseStore = responsesruntime.NewEntStore(entClient)
 				entAuditor := responsesaudit.NewEntAuditor(entClient)
 				requestAuditor = entAuditor
 				upstreamExchangeRecorder = entAuditor
+				executionEventRecorder = entAuditor
 			}
 		}
 		runtimeConfig := responsesruntime.Config{
@@ -424,11 +426,13 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 			recorder:      rec,
 			routingPolicy: rtr.Policy(),
 			auditor:       upstreamExchangeRecorder,
+			events:        executionEventRecorder,
 		}, responseStore, runtimeOptions...)
 		localResponses = httpapi.NewHandler(
 			rt,
 			httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()),
 			httpapi.WithRequestAuditor(requestAuditor),
+			httpapi.WithExecutionEventRecorder(executionEventRecorder),
 		)
 	}
 

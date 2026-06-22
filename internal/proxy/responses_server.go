@@ -31,6 +31,7 @@ type responsesChatCompletionsAdapter struct {
 	routingPolicy string
 	httpClient    *http.Client
 	auditor       responsesaudit.UpstreamExchangeRecorder
+	events        responsesaudit.ExecutionEventRecorder
 }
 
 var _ runtime.ChatCompletionsClient = (*responsesChatCompletionsAdapter)(nil)
@@ -108,6 +109,11 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		},
 	})
 	logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
+	a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
+		EventType: "response.model_call",
+		Phase:     "model_call",
+		Status:    "started",
+	})
 
 	httpClient := a.httpClient
 	if httpClient == nil {
@@ -119,6 +125,12 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
+		a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
+			EventType: "response.model_call",
+			Phase:     "model_call",
+			Status:    "failed",
+			Message:   "send chat completion request: " + err.Error(),
+		})
 		a.recordUpstreamExchange(ctx, logInfo, start, time.Now(), 0)
 		a.router.Complete(selection, router.Outcome{
 			Success:    false,
@@ -137,6 +149,12 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 			slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 		}
+		a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
+			EventType: "response.model_call",
+			Phase:     "model_call",
+			Status:    "failed",
+			Message:   err.Error(),
+		})
 		a.recordUpstreamExchange(ctx, logInfo, start, time.Now(), httpResp.StatusCode)
 		a.router.Complete(selection, router.Outcome{
 			Success:    false,
@@ -169,6 +187,16 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 	if uErr := a.recorder.UpdateLogFile(logInfo); uErr != nil {
 		slog.Error("Failed to update responses chat completion log file", "path", logInfo.Path, "err", uErr)
 	}
+	modelCallStatus := "completed"
+	if responseErr != nil {
+		modelCallStatus = "failed"
+	}
+	a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
+		EventType: "response.model_call",
+		Phase:     "model_call",
+		Status:    modelCallStatus,
+		Message:   logInfo.Header.Meta.Error,
+	})
 	a.recordUpstreamExchange(ctx, logInfo, start, start.Add(duration), statusCode)
 
 	a.router.Complete(selection, router.Outcome{
@@ -182,6 +210,37 @@ func (a *responsesChatCompletionsAdapter) ChatCompletion(ctx context.Context, ch
 		return runtime.ChatCompletionResponse{}, responseErr
 	}
 	return chatResp, nil
+}
+
+func (a *responsesChatCompletionsAdapter) recordModelCallEvent(ctx context.Context, logInfo *recorder.LogInfo, event responsesaudit.ExecutionEvent) {
+	if a == nil || a.events == nil || logInfo == nil {
+		return
+	}
+	requestAuditID, ok := responsesaudit.RequestAuditIDFromContext(ctx)
+	if !ok {
+		return
+	}
+	details := map[string]any{
+		"request_audit_id": requestAuditID,
+		"trace_id":         logInfo.Header.Meta.RequestID,
+		"cassette_path":    logInfo.Path,
+		"upstream_id":      logInfo.Header.Meta.SelectedUpstreamID,
+		"route_target":     logInfo.Header.Meta.SelectedUpstreamBaseURL,
+		"model":            logInfo.Header.Meta.Model,
+		"endpoint":         logInfo.Header.Meta.Endpoint,
+	}
+	if logInfo.Header.Meta.StatusCode != 0 {
+		details["status_code"] = logInfo.Header.Meta.StatusCode
+	}
+	if event.DetailsJSON != nil {
+		for key, value := range event.DetailsJSON {
+			details[key] = value
+		}
+	}
+	event.DetailsJSON = details
+	if err := a.events.RecordExecutionEvent(ctx, event); err != nil {
+		slog.Error("Failed to record responses model call event", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
+	}
 }
 
 func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Context, logInfo *recorder.LogInfo, startedAt time.Time, completedAt time.Time, statusCode int) {

@@ -44,6 +44,7 @@ type fakeAuditor struct {
 	completed     audit.Completion
 	rejectedID    string
 	rejected      audit.Failure
+	events        []audit.ExecutionEvent
 }
 
 func (f *fakeAuditor) Accepted(ctx context.Context, entry audit.RequestEntry) (string, error) {
@@ -61,6 +62,11 @@ func (f *fakeAuditor) Completed(ctx context.Context, id string, result audit.Com
 func (f *fakeAuditor) Rejected(ctx context.Context, id string, failure audit.Failure) error {
 	f.rejectedID = id
 	f.rejected = failure
+	return nil
+}
+
+func (f *fakeAuditor) RecordExecutionEvent(ctx context.Context, event audit.ExecutionEvent) error {
+	f.events = append(f.events, event)
 	return nil
 }
 
@@ -119,7 +125,7 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	req.Header.Set("X-Codex-Window-Id", "window-1")
 
 	rec := httptest.NewRecorder()
-	NewHandler(rt, WithRequestAuditor(auditor)).ServeHTTP(rec, req)
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
@@ -149,6 +155,18 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	if auditor.rejectedID != "" {
 		t.Fatalf("unexpected rejected audit: id=%q failure=%#v", auditor.rejectedID, auditor.rejected)
 	}
+	if len(auditor.events) != 2 {
+		t.Fatalf("execution events = %d, want 2: %#v", len(auditor.events), auditor.events)
+	}
+	if auditor.events[0].EventType != "response.request" || auditor.events[0].Phase != "request" || auditor.events[0].Status != "accepted" {
+		t.Fatalf("accepted event mismatch: %#v", auditor.events[0])
+	}
+	if auditor.events[0].DetailsJSON["request_audit_id"] != "audit_1" {
+		t.Fatalf("accepted event details mismatch: %#v", auditor.events[0].DetailsJSON)
+	}
+	if auditor.events[1].EventType != "response.request" || auditor.events[1].Status != "completed" || auditor.events[1].ResponseID != "resp_1" || auditor.events[1].ConversationID != "thread_1" {
+		t.Fatalf("completed event mismatch: %#v", auditor.events[1])
+	}
 }
 
 func TestCreateResponseBadJSON(t *testing.T) {
@@ -175,7 +193,8 @@ func TestCreateResponseStreamUnsupported(t *testing.T) {
 	rt := &fakeRuntime{}
 	auditor := &fakeAuditor{}
 	rec := httptest.NewRecorder()
-	NewHandler(rt, WithRequestAuditor(auditor)).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
@@ -186,13 +205,16 @@ func TestCreateResponseStreamUnsupported(t *testing.T) {
 	if auditor.acceptedCalls != 1 || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "rejected" || auditor.rejected.ErrorText == "" {
 		t.Fatalf("rejected audit mismatch: calls=%d id=%q failure=%#v", auditor.acceptedCalls, auditor.rejectedID, auditor.rejected)
 	}
+	if len(auditor.events) != 2 || auditor.events[1].Status != "rejected" || auditor.events[1].Message == "" {
+		t.Fatalf("rejected events mismatch: %#v", auditor.events)
+	}
 	assertError(t, rec, "invalid_request_error", "unsupported_stream")
 }
 
 func TestCreateResponseRuntimeError(t *testing.T) {
 	auditor := &fakeAuditor{}
 	rec := httptest.NewRecorder()
-	NewHandler(&fakeRuntime{createErr: errors.New("upstream failed")}, WithRequestAuditor(auditor)).
+	NewHandler(&fakeRuntime{createErr: errors.New("upstream failed")}, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
 		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`)))
 
 	if rec.Code != http.StatusInternalServerError {
@@ -200,6 +222,9 @@ func TestCreateResponseRuntimeError(t *testing.T) {
 	}
 	if auditor.acceptedCalls != 1 || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "failed" || auditor.rejected.ErrorText != "upstream failed" {
 		t.Fatalf("failed audit mismatch: calls=%d id=%q failure=%#v", auditor.acceptedCalls, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 2 || auditor.events[1].Status != "failed" || auditor.events[1].Message != "upstream failed" {
+		t.Fatalf("failed events mismatch: %#v", auditor.events)
 	}
 	assertError(t, rec, "server_error", "server_error")
 }
