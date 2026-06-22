@@ -65,12 +65,12 @@ SQLite 当前负责：
 
 启动时 schema 升级必须兼容已有本地 DB。
 
-Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration、运维生产化和 Responses audit 查询还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，但 Monitor/MCP 查询与 `execution_events` 写入仍不是当前基线能力。
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration、运维生产化和 Responses audit 查询还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，但 Monitor/MCP 查询与完整 tool/stream/cancel/compact events 仍不是当前基线能力。
 
 Stage 9 audit 表职责边界：
 
 - `request_audits`：入站 Responses request envelope、client request id、redaction/body hash。
-- `execution_events`：runtime plan、model/tool/compact/stream/error 生命周期。
+- `execution_events`：runtime plan、model/tool/compact/stream/error 生命周期。当前只写入 request 与内部 model_call 的最小生命周期。
 - `upstream_exchanges`：semantic response/request 与 `.http` cassette、trace id、route target 的关联。
 
 后续接入顺序建议先补 Responses audit 查询 API，再补 tool events，最后补 streaming/cancel/compact events。
@@ -170,7 +170,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 让测试依赖真实 provider。
 - Responses server-mode streaming。
 - 完整 Responses tool lifecycle、tool audit、streaming tool events 和 compact workflow。
-- Responses audit 语义查询、`execution_events` runtime 写入和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入和内部 Chat Completions `upstream_exchanges` correlation。
+- Responses audit 语义查询、完整 tool/stream/cancel/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation，以及 request/model_call 最小 `execution_events`。
 - provider auto-detect。
 
 ## 推荐验证

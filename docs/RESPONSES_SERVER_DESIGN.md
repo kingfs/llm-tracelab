@@ -352,7 +352,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - SQLite fallback 仍能运行最小 server/test。
 - 旧 `.http` replay 不连接 DB。
 
-当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、应用库 `db migrate up` 初始化路径、最小 request audit 写入，以及内部 Chat Completions cassette 的最小 upstream exchange correlation 已落地；完整 Postgres migration 生产化、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
+当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径、应用库 `db migrate up` 初始化路径、最小 request audit 写入、内部 Chat Completions cassette 的最小 upstream exchange correlation，以及 request/model_call 最小 execution events 已落地；完整 Postgres migration 生产化、audit 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
 
 Stage 9 已在此基础上准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架，Stage 10A 接入 `request_audits` 的 inbound request accepted/completed/failed/rejected 写入，Stage 11A 接入内部 Chat Completions cassette 的最小 upstream exchange correlation 并回填 response id，Stage 12A 接入 request 与内部 model_call 的最小 execution events。它不等于 Monitor/MCP 已可查询，也不改变 `.http` cassette 作为 replay/detail 事实源的地位。后续 runtime 接入顺序建议先补查询 API，再补 tool events，最后处理 streaming/cancel/compact events。
 
