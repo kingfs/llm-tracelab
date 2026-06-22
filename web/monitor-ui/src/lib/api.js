@@ -53,6 +53,8 @@ export const apiPaths = {
   providerModelsBatch: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/models/batch`,
   providerModel: (providerID, model) => `/api/channels/${encodeURIComponent(providerID)}/models/${encodeURIComponent(model)}`,
   providerProbePreview: "/api/provider-probe",
+  providerSetupValidate: "/api/provider-setup/validate",
+  providerSetupApply: "/api/provider-setup/apply",
   providerPresets: "/api/provider-presets",
   localSecretKey: "/api/secrets/local-key",
   localSecretKeyExport: "/api/secrets/local-key?export=1",
