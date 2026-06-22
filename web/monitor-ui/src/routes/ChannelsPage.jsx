@@ -134,10 +134,34 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [detecting, setDetecting] = useState(false);
+  const [probeReport, setProbeReport] = useState(null);
   const [error, setError] = useState("");
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
   const updateForm = (key, value) => {
     setForm((current) => normalizePresetSelection({ ...current, [key]: value }, presetData, key));
+  };
+  const detectProvider = async () => {
+    setDetecting(true);
+    setError("");
+    try {
+      const report = await postJSON(apiPaths.providerProbePreview, providerProbePreviewPayload(form));
+      setProbeReport(report);
+      setAdvancedOpen(true);
+    } catch (err) {
+      if (err.payload?.status) {
+        setProbeReport(err.payload);
+      }
+      setError(err.message || "Unable to detect provider.");
+    } finally {
+      setDetecting(false);
+    }
+  };
+  const applyProbeSuggestions = () => {
+    setForm((current) => ({
+      ...current,
+      ...providerProbeSuggestionPayload(current, probeReport),
+    }));
   };
 
   const submit = async (event) => {
@@ -171,7 +195,11 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
           <label className="provider-form-wide">API key<input type="password" value={form.api_key} onChange={(event) => updateForm("api_key", event.target.value)} placeholder="sk-..." /></label>
           <label className="provider-form-check provider-form-wide"><input type="checkbox" checked={form.allow_unknown_models} onChange={(event) => updateForm("allow_unknown_models", event.target.checked)} /> Allow unknown models</label>
         </div>
-        <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
+        <div className="provider-form-actions">
+          <button className="ghost-button" type="button" onClick={detectProvider} disabled={detecting || !form.base_url.trim()}>{detecting ? "Detecting" : "Detect provider"}</button>
+          <button className="ghost-button" type="button" onClick={() => setAdvancedOpen((open) => !open)}>{advancedOpen ? "Hide advanced" : "Advanced options"}</button>
+        </div>
+        {probeReport ? <ProviderProbeSuggestionPanel report={probeReport} onApply={applyProbeSuggestions} /> : null}
         {advancedOpen ? (
           <div className="provider-form provider-form-modal">
             <ProviderAdvancedFields form={form} presetState={presetState} onChange={updateForm} includeHeaders={false} />
@@ -383,6 +411,34 @@ export function ProviderAdvancedFields({ form, presetState, onChange, includeHea
   );
 }
 
+function ProviderProbeSuggestionPanel({ report, onApply }) {
+  const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
+  const warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  return (
+    <div className="provider-probe-card">
+      <div className="provider-probe-card-head">
+        <div>
+          <p className="eyebrow">Provider detection</p>
+          <h3>Probe suggestions</h3>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone={report.status === "detected" ? "green" : report.status === "error" ? "danger" : "gold"}>{report.status || "unknown"}</InlineTag>
+          {report.confidence ? <InlineTag tone="accent">{Math.round(Number(report.confidence) * 100)}%</InlineTag> : null}
+        </div>
+      </div>
+      <div className="detail-meta-strip">
+        <Metric label="api type" value={report.suggested_api_type || "-"} />
+        <Metric label="protocol" value={report.suggested_protocol_family || "-"} />
+        <Metric label="capabilities" value={capabilities.length ? capabilities.join(", ") : "-"} />
+      </div>
+      {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
+      <div className="provider-form-actions">
+        <button className="ghost-button active" type="button" onClick={onApply} disabled={report.status !== "detected"}>Apply suggestions</button>
+      </div>
+    </div>
+  );
+}
+
 const API_TYPE_OPTIONS = [
   { value: "chat_completions", label: "Chat Completions" },
   { value: "responses", label: "Responses" },
@@ -489,6 +545,53 @@ function normalizeProviderPayload(form) {
     capacity_hint: Number(form.capacity_hint || 1),
     capabilities: normalizeCapabilities(form.capabilities),
   };
+}
+
+function providerProbePreviewPayload(form) {
+  return {
+    provider_id: form.name || form.provider_preset || "new-provider",
+    base_url: form.base_url,
+    api_key: form.api_key,
+    api_type: form.api_type,
+    protocol_family: form.protocol_family,
+  };
+}
+
+function providerProbeSuggestionPayload(form = {}, report = {}) {
+  const payload = {};
+  if (report.suggested_api_type) {
+    payload.api_type = report.suggested_api_type;
+  }
+  if (report.suggested_protocol_family) {
+    payload.protocol_family = report.suggested_protocol_family;
+  }
+  const capabilities = { ...(form.capabilities || {}) };
+  for (const capability of report.capabilities || []) {
+    switch (capability) {
+      case "responses":
+        capabilities.responses = true;
+        break;
+      case "chat_completions":
+        capabilities.chat_completions = true;
+        break;
+      case "tool_calling":
+        capabilities.tool_calling = true;
+        break;
+      case "models":
+        capabilities.models = true;
+        break;
+      case "embeddings":
+        capabilities.embeddings = true;
+        break;
+      case "tokenize":
+        capabilities.tokenize = true;
+        break;
+      default:
+        break;
+    }
+  }
+  payload.capabilities = normalizeCapabilities(capabilities);
+  return payload;
 }
 
 function normalizeCapabilities(value) {

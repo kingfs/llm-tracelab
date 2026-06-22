@@ -18,6 +18,12 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels") {
       return route.fulfill({ json: channelListPayload() });
     }
+    if (path === "/api/provider-probe" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_type).toBe("chat_completions");
+      return route.fulfill({ json: providerProbePreviewPayload() });
+    }
     if (path === "/api/provider-presets") {
       return route.fulfill({ json: providerPresetPayload() });
     }
@@ -123,7 +129,10 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "New provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
-  await page.getByRole("button", { name: "Advanced options" }).click();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
+  await page.getByRole("button", { name: "Detect provider" }).click();
+  await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
+  await page.getByRole("button", { name: "Apply suggestions" }).click();
   await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
   await expect(page.getByLabel("API mode")).toHaveValue("proxy");
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
@@ -580,6 +589,21 @@ function probeFailurePayload() {
     started_at: new Date().toISOString(),
     completed_at: new Date().toISOString(),
     duration_ms: 12,
+  };
+}
+
+function providerProbePreviewPayload() {
+  return {
+    provider_id: "OpenAI Primary",
+    base_url: "https://api.openai.example/v1",
+    specified_api_type: "chat_completions",
+    specified_protocol_family: "openai_compatible",
+    checked_endpoints: [],
+    status: "detected",
+    suggested_api_type: "chat_completions",
+    suggested_protocol_family: "openai_compatible",
+    capabilities: ["chat_completions", "models"],
+    confidence: 0.7,
   };
 }
 

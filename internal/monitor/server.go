@@ -918,6 +918,15 @@ type channelProbeRequest struct {
 	DetectProvider   *bool `json:"detect_provider"`
 }
 
+type providerProbeRequest struct {
+	ProviderID     string            `json:"provider_id"`
+	BaseURL        string            `json:"base_url"`
+	APIKey         string            `json:"api_key"`
+	Headers        map[string]string `json:"headers"`
+	APIType        string            `json:"api_type"`
+	ProtocolFamily string            `json:"protocol_family"`
+}
+
 type channelUpsertRequest struct {
 	ID                 string                             `json:"id"`
 	Name               string                             `json:"name"`
@@ -1083,6 +1092,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), opt.AuthVerifier))
@@ -1671,6 +1681,37 @@ func providerPresetAPIHandler() http.HandlerFunc {
 				ModelDiscovery: []string{"list_models", "disabled"},
 			},
 		})
+	}
+}
+
+func providerProbeAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req providerProbeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe payload"})
+			return
+		}
+		report, err := providerprobe.Probe(r.Context(), providerprobe.ProbeTarget{
+			ProviderID:              strings.TrimSpace(req.ProviderID),
+			BaseURL:                 strings.TrimSpace(req.BaseURL),
+			APIKey:                  strings.TrimSpace(req.APIKey),
+			Headers:                 req.Headers,
+			SpecifiedAPIType:        strings.TrimSpace(req.APIType),
+			SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+		}, nil)
+		if err != nil && report.Status == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		status := http.StatusOK
+		if err != nil {
+			status = http.StatusBadGateway
+		}
+		writeJSON(w, status, report)
 	}
 }
 

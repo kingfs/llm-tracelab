@@ -22,6 +22,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -1770,6 +1771,46 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if len(allModels) != 0 {
 		t.Fatalf("channel models after channel delete = %#v, want none", allModels)
+	}
+}
+
+func TestProviderProbePreviewAPI(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	body := strings.NewReader(`{
+		"provider_id":"new-provider",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"api_key":"sk-preview-secret",
+		"api_type":"chat_completions",
+		"protocol_family":"openai_compatible"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe", body)
+	rr := httptest.NewRecorder()
+	providerProbeAPIHandler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-preview-secret") {
+		t.Fatalf("probe response leaked api key: %s", rr.Body.String())
+	}
+	var report providerprobe.Report
+	if err := json.Unmarshal(rr.Body.Bytes(), &report); err != nil {
+		t.Fatalf("json.Unmarshal(report) error = %v", err)
+	}
+	if report.Status != "detected" || report.SuggestedAPIType != "chat_completions" || report.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("report = %+v", report)
 	}
 }
 
