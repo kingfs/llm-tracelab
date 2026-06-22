@@ -52,6 +52,8 @@ type Config struct {
 
 	ResponsesServer ResponsesServerConfig `yaml:"responses_server"`
 
+	Tools ToolsConfig `yaml:"tools"`
+
 	Debug struct {
 		OutputDir string `yaml:"output_dir"`
 		MaskKey   bool   `yaml:"mask_key"`
@@ -142,6 +144,19 @@ type ResponsesServerConfig struct {
 	ForceStore          bool   `yaml:"force_store"`
 	MaxRequestBodyBytes int64  `yaml:"max_request_body_bytes"`
 	Path                string `yaml:"path"`
+}
+
+type ToolsConfig struct {
+	WebSearch WebSearchToolConfig `yaml:"web_search"`
+}
+
+type WebSearchToolConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Provider   string `yaml:"provider"`
+	MaxResults int    `yaml:"max_results"`
+	BaseURL    string `yaml:"base_url"`
+	TimeoutMS  int    `yaml:"timeout_ms"`
+	UserAgent  string `yaml:"user_agent"`
 }
 
 func (c LimitConfig) LocalConcurrencyEnabled() bool {
@@ -332,6 +347,30 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_RESPONSES_PATH"); v != "" {
 		cfg.ResponsesServer.Path = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Tools.WebSearch.Enabled = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER"); v != "" {
+		cfg.Tools.WebSearch.Provider = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.Tools.WebSearch.MaxResults = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL"); v != "" {
+		cfg.Tools.WebSearch.BaseURL = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.Tools.WebSearch.TimeoutMS = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT"); v != "" {
+		cfg.Tools.WebSearch.UserAgent = v
 	}
 }
 
@@ -629,4 +668,28 @@ func (c Config) ResponsesServerPath() string {
 		return path
 	}
 	return "/v1/responses"
+}
+
+func (c Config) WebSearchEnabled() bool {
+	return c.WebSearchConfig().Enabled
+}
+
+func (c Config) WebSearchConfig() WebSearchToolConfig {
+	cfg := c.Tools.WebSearch
+	cfg.Provider = strings.TrimSpace(cfg.Provider)
+	if cfg.Provider == "" {
+		cfg.Provider = "disabled"
+	}
+	if cfg.MaxResults <= 0 {
+		cfg.MaxResults = 5
+	}
+	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
+	if cfg.TimeoutMS <= 0 {
+		cfg.TimeoutMS = 5000
+	}
+	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
+	if cfg.UserAgent == "" {
+		cfg.UserAgent = "llm-tracelab web_search"
+	}
+	return cfg
 }

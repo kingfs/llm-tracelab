@@ -417,6 +417,106 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestWebSearchConfigDisabledByDefault(t *testing.T) {
+	cfg := Config{}
+	webSearch := cfg.WebSearchConfig()
+
+	if cfg.WebSearchEnabled() {
+		t.Fatalf("WebSearchEnabled() = true, want false")
+	}
+	if webSearch.Enabled {
+		t.Fatalf("WebSearchConfig().Enabled = true, want false")
+	}
+	if webSearch.Provider != "disabled" {
+		t.Fatalf("WebSearchConfig().Provider = %q, want disabled", webSearch.Provider)
+	}
+	if webSearch.MaxResults != 5 {
+		t.Fatalf("WebSearchConfig().MaxResults = %d, want 5", webSearch.MaxResults)
+	}
+	if webSearch.BaseURL != "" {
+		t.Fatalf("WebSearchConfig().BaseURL = %q, want empty", webSearch.BaseURL)
+	}
+	if webSearch.TimeoutMS != 5000 {
+		t.Fatalf("WebSearchConfig().TimeoutMS = %d, want 5000", webSearch.TimeoutMS)
+	}
+	if webSearch.UserAgent != "llm-tracelab web_search" {
+		t.Fatalf("WebSearchConfig().UserAgent = %q, want default", webSearch.UserAgent)
+	}
+}
+
+func TestWebSearchEnvOverrides(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED", "true")
+	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER", "searxng")
+	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS", "3")
+	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL", "http://127.0.0.1:8888")
+	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS", "2500")
+	t.Setenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT", "llm-tracelab-test")
+
+	cfg := Config{}
+	cfg.Tools.WebSearch.Provider = "mock"
+	cfg.Tools.WebSearch.MaxResults = 2
+	cfg.Tools.WebSearch.TimeoutMS = 1000
+	applyEnvOverrides(&cfg)
+
+	webSearch := cfg.WebSearchConfig()
+	if !cfg.WebSearchEnabled() {
+		t.Fatalf("WebSearchEnabled() = false, want true")
+	}
+	if webSearch.Provider != "searxng" {
+		t.Fatalf("WebSearchConfig().Provider = %q, want searxng", webSearch.Provider)
+	}
+	if webSearch.MaxResults != 3 {
+		t.Fatalf("WebSearchConfig().MaxResults = %d, want 3", webSearch.MaxResults)
+	}
+	if webSearch.BaseURL != "http://127.0.0.1:8888" {
+		t.Fatalf("WebSearchConfig().BaseURL = %q", webSearch.BaseURL)
+	}
+	if webSearch.TimeoutMS != 2500 {
+		t.Fatalf("WebSearchConfig().TimeoutMS = %d, want 2500", webSearch.TimeoutMS)
+	}
+	if webSearch.UserAgent != "llm-tracelab-test" {
+		t.Fatalf("WebSearchConfig().UserAgent = %q", webSearch.UserAgent)
+	}
+}
+
+func TestLoadParsesWebSearchConfigFromYAML(t *testing.T) {
+	clearWebSearchEnv(t)
+	path := writeTempConfig(t, `
+tools:
+  web_search:
+    enabled: true
+    provider: "mock"
+    max_results: 2
+    base_url: "http://127.0.0.1:8888"
+    timeout_ms: 1500
+    user_agent: "yaml-agent"
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	webSearch := cfg.WebSearchConfig()
+	if !cfg.WebSearchEnabled() {
+		t.Fatalf("WebSearchEnabled() = false, want true")
+	}
+	if webSearch.Provider != "mock" {
+		t.Fatalf("WebSearchConfig().Provider = %q, want mock", webSearch.Provider)
+	}
+	if webSearch.MaxResults != 2 {
+		t.Fatalf("WebSearchConfig().MaxResults = %d, want 2", webSearch.MaxResults)
+	}
+	if webSearch.BaseURL != "http://127.0.0.1:8888" {
+		t.Fatalf("WebSearchConfig().BaseURL = %q", webSearch.BaseURL)
+	}
+	if webSearch.TimeoutMS != 1500 {
+		t.Fatalf("WebSearchConfig().TimeoutMS = %d, want 1500", webSearch.TimeoutMS)
+	}
+	if webSearch.UserAgent != "yaml-agent" {
+		t.Fatalf("WebSearchConfig().UserAgent = %q", webSearch.UserAgent)
+	}
+}
+
 func TestLimitScopeDefaults(t *testing.T) {
 	if got := (LimitConfig{}).ScopeOrDefault(); got != "global" {
 		t.Fatalf("ScopeOrDefault() = %q, want global", got)
@@ -451,4 +551,18 @@ func writeTempConfig(t *testing.T, content string) string {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	return path
+}
+
+func clearWebSearchEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED",
+		"LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER",
+		"LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS",
+		"LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL",
+		"LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS",
+		"LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT",
+	} {
+		t.Setenv(name, "")
+	}
 }
