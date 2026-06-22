@@ -95,12 +95,20 @@ func (db *rebindingDB) Exec(query string, args ...any) (sql.Result, error) {
 	return db.DB.Exec(db.rebind(query), args...)
 }
 
+func (db *rebindingDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return db.DB.ExecContext(ctx, db.rebind(query), args...)
+}
+
 func (db *rebindingDB) Query(query string, args ...any) (*sql.Rows, error) {
 	return db.DB.Query(db.rebind(query), args...)
 }
 
 func (db *rebindingDB) QueryRow(query string, args ...any) *sql.Row {
 	return db.DB.QueryRow(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return db.DB.QueryRowContext(ctx, db.rebind(query), args...)
 }
 
 func (db *rebindingDB) rebind(query string) string {
@@ -2784,7 +2792,16 @@ func (s *Store) execTx(tx *sql.Tx, query string, args ...any) (sql.Result, error
 
 func (s *Store) initSchema() error {
 	if s.driver == "postgres" {
-		return s.client.Schema.Create(context.Background())
+		if err := s.client.Schema.Create(context.Background()); err != nil {
+			return err
+		}
+		_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS "app_settings" (
+			"setting_key" character varying NOT NULL,
+			"value_json" character varying NOT NULL,
+			"updated_at" timestamptz NOT NULL,
+			PRIMARY KEY ("setting_key")
+		);`)
+		return err
 	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
@@ -2793,6 +2810,11 @@ func (s *Store) initSchema() error {
 			version INTEGER NOT NULL,
 			mode TEXT NOT NULL,
 			source TEXT NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS app_settings (
+			setting_key TEXT PRIMARY KEY,
+			value_json TEXT NOT NULL,
 			updated_at datetime NOT NULL
 		);`,
 		`CREATE TABLE IF NOT EXISTS logs (

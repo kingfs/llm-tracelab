@@ -1,4 +1,5 @@
-h1:jhe5d5gKygugLrOaJQS72WB6lmravu8C5aHNQpthx2c=
+h1:WswLhBtSbFZOSY5V97BoRjUWeemzH1iPnFqepoCVj7c=
 20260622122251_init_postgres_schema.up.sql h1:7lbLKcBmjAOx39ZaBSxhO1vStgVir8vtGkw0J8OFbaU=
 20260622130545_add_runtime_store_tables.up.sql h1:KMW/0oh0mGqxIeNgomZLBMusEM2GyIx4HGj+pI/Ni0w=
 20260622163432_add_channel_api_surface.up.sql h1:NLf8JWve8TTnzlswQtHlbyuRWeTnS/Wrg7STSN2hYFM=
+20260623090000_add_app_settings.up.sql h1:v3QJTkpMSdt38sJEZ00J8qDmRYkFOgzfKFfx4ZOWa2M=
