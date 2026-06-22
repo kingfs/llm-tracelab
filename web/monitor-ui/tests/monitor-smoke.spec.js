@@ -24,6 +24,20 @@ test.beforeEach(async ({ page }) => {
       expect(body.api_type).toBe("chat_completions");
       return route.fulfill({ json: providerProbePreviewPayload() });
     }
+    if (path === "/api/provider-setup/validate" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_key).toBe("sk-test-secret");
+      return route.fulfill({ json: providerSetupValidatePayload(body) });
+    }
+    if (path === "/api/provider-setup/apply" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_key).toBe("sk-test-secret");
+      expect(body.api_type).toBe("chat_completions");
+      expect(body.protocol_family).toBe("openai_compatible");
+      return route.fulfill({ json: channelDetailPayload() });
+    }
     if (path === "/api/provider-presets") {
       return route.fulfill({ json: providerPresetPayload() });
     }
@@ -129,7 +143,9 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "New provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
+  await page.getByLabel("API key").fill("sk-test-secret");
   await page.getByRole("button", { name: "Detect provider" }).click();
   await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
   await page.getByRole("button", { name: "Apply suggestions" }).click();
@@ -137,7 +153,19 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByLabel("API mode")).toHaveValue("proxy");
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await page.getByRole("button", { name: "Validate setup" }).click();
+  await expect(page.getByRole("heading", { name: "Ready to create" })).toBeVisible();
+  await expect(page.getByText("stored as sk-...cret")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v1/");
+  await expect(page.getByText("Validate setup before creating the provider.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
+  await page.getByRole("button", { name: "Validate setup" }).click();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await page.getByRole("button", { name: "Create provider" }).click();
+  await expect(page.getByRole("heading", { name: "Create provider" })).toBeHidden();
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
@@ -604,6 +632,33 @@ function providerProbePreviewPayload() {
     suggested_protocol_family: "openai_compatible",
     capabilities: ["chat_completions", "models"],
     confidence: 0.7,
+  };
+}
+
+function providerSetupValidatePayload(body) {
+  return {
+    normalized_config: {
+      name: body.name || "OpenAI Primary",
+      base_url: body.base_url,
+      provider_preset: body.provider_preset || "openai",
+      api_type: "chat_completions",
+      mode: body.mode || "proxy",
+      capabilities: { chat_completions: true, models: true },
+      protocol_family: "openai_compatible",
+      routing_profile: "openai_default",
+      enabled: true,
+      priority: body.priority ?? 100,
+      weight: body.weight ?? 1,
+      capacity_hint: body.capacity_hint ?? 1,
+      model_discovery: body.model_discovery || "list_models",
+      allow_unknown_models: Boolean(body.allow_unknown_models),
+    },
+    probe: providerProbePreviewPayload(),
+    secret: {
+      api_key_hint: "sk-...cret",
+      secret_storage_mode: "encrypted-local",
+      redaction_guarantee: "api_key is never echoed; secret headers are redacted",
+    },
   };
 }
 
