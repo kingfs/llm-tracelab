@@ -17,6 +17,29 @@ func TestMigrateUpSQLiteUsesStoreInit(t *testing.T) {
 	}
 }
 
+func TestCheckStatusSQLiteReportsSchemaInitFallback(t *testing.T) {
+	status, err := CheckStatus("sqlite", "ignored.sqlite3")
+	if err != nil {
+		t.Fatalf("CheckStatus(sqlite) error = %v", err)
+	}
+	if status.Driver != "sqlite" || status.Versioned || status.Available {
+		t.Fatalf("CheckStatus(sqlite) = %+v, want non-versioned unavailable fallback", status)
+	}
+	if !strings.Contains(status.Message, ErrSQLiteUsesStoreInit.Error()) {
+		t.Fatalf("CheckStatus(sqlite) message = %q, want fallback explanation", status.Message)
+	}
+}
+
+func TestCheckStatusPostgresRequiresDSN(t *testing.T) {
+	_, err := CheckStatus("postgres", "")
+	if err == nil {
+		t.Fatalf("CheckStatus(postgres empty dsn) error = nil")
+	}
+	if !strings.Contains(err.Error(), "postgres application database dsn is required") {
+		t.Fatalf("CheckStatus(postgres empty dsn) error = %q", err.Error())
+	}
+}
+
 func TestMigrateUpPostgresRequiresDSN(t *testing.T) {
 	err := MigrateUp("postgresql", "", 0)
 	if err == nil {

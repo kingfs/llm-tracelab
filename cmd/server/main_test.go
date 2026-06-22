@@ -521,6 +521,43 @@ func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
 	}
 }
 
+func TestDBMigrateStatusCheckDBJSONReportsSQLiteFallback(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeSQLiteDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "status", "--check-db"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			StatusCheck             string `json:"status_check"`
+			DatabaseStatusAvailable bool   `json:"database_status_available"`
+			DatabaseStatusVersioned bool   `json:"database_status_versioned"`
+			DatabaseStatusDriver    string `json:"database_status_driver"`
+			DatabaseStatusMessage   string `json:"database_status_message"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK {
+		t.Fatalf("envelope ok = false: %+v", envelope)
+	}
+	if envelope.Result.StatusCheck != "database" || envelope.Result.DatabaseStatusAvailable || envelope.Result.DatabaseStatusVersioned || envelope.Result.DatabaseStatusDriver != "sqlite" {
+		t.Fatalf("sqlite database status = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "sqlite application migration still uses store schema initialization") {
+		t.Fatalf("sqlite database status message = %q", envelope.Result.DatabaseStatusMessage)
+	}
+}
+
 func TestDBMigrateDownDryRunJSONCanPreviewUnsupportedRollback(t *testing.T) {
 	t.Parallel()
 

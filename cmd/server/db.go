@@ -27,6 +27,7 @@ type appDBMigrateOptions struct {
 	steps      int
 	all        bool
 	dryRun     bool
+	checkDB    bool
 	format     string
 	stdout     io.Writer
 }
@@ -103,6 +104,7 @@ func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, shor
 }
 
 func newAppDBMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
+	var checkDB bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show application database migration status",
@@ -112,12 +114,14 @@ func newAppDBMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
 				return runAppDBMigrateWithOptions(appDBMigrateOptions{
 					configPath: runtime.configPath(),
 					direction:  "status",
+					checkDB:    checkDB,
 					format:     runtime.outputFormat(),
 					stdout:     cmd.OutOrStdout(),
 				})
 			})
 		},
 	}
+	cmd.Flags().BoolVar(&checkDB, "check-db", false, "Read migration status from the configured database")
 	return cmd
 }
 
@@ -203,7 +207,13 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	result := appDBMigrationReport(cfg, opts.direction, opts.steps, opts.all, opts.dryRun, false)
+	result := appDBMigrationReport(cfg, opts.direction, opts.steps, opts.all, opts.dryRun, false, opts.checkDB)
+	if opts.direction == "status" && opts.checkDB {
+		if err := applyAppDBStatusCheck(cfg, result); err != nil {
+			slog.Error("Application database status check failed", "error", err)
+			return 1
+		}
+	}
 	if opts.dryRun {
 		return writeDryRunResult(opts.stdout, opts.format, "db.migrate."+opts.direction, result)
 	}
@@ -242,7 +252,7 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 	}
 }
 
-func appDBMigrationReport(cfg *config.Config, direction string, steps int, all bool, dryRun bool, mutated bool) map[string]any {
+func appDBMigrationReport(cfg *config.Config, direction string, steps int, all bool, dryRun bool, mutated bool, checkDB bool) map[string]any {
 	source := "sqlite-startup-schema-fallback"
 	sourcePath := "internal/store raw DDL startup initialization"
 	versioned := false
@@ -264,11 +274,36 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 		"migration_source":       source,
 		"migration_source_path":  sourcePath,
 		"schema_versioned":       versioned,
-		"status_check":           "configuration-only",
+		"status_check":           appDBStatusCheckMode(checkDB),
 		"rollback_supported":     false,
 		"auth_migration_scope":   "excluded",
 		"auth_migration_command": "auth migrate",
 	}
+}
+
+func appDBStatusCheckMode(checkDB bool) string {
+	if checkDB {
+		return "database"
+	}
+	return "configuration-only"
+}
+
+func applyAppDBStatusCheck(cfg *config.Config, result map[string]any) error {
+	status, err := appdbmigrate.CheckStatus(cfg.DatabaseDriver(), cfg.DatabaseDSN())
+	if err != nil {
+		return err
+	}
+	result["database_status_available"] = status.Available
+	result["database_status_versioned"] = status.Versioned
+	result["database_status_driver"] = status.Driver
+	if status.Available {
+		result["database_migration_version"] = status.Version
+		result["database_migration_dirty"] = status.Dirty
+	}
+	if status.Message != "" {
+		result["database_status_message"] = status.Message
+	}
+	return nil
 }
 
 func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
@@ -279,6 +314,19 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "migration_source: %s\n", result["migration_source"])
 	fmt.Fprintf(w, "migration_source_path: %s\n", result["migration_source_path"])
 	fmt.Fprintf(w, "schema_versioned: %v\n", result["schema_versioned"])
+	if result["status_check"] != nil {
+		fmt.Fprintf(w, "status_check: %s\n", result["status_check"])
+	}
+	if result["database_status_available"] != nil {
+		fmt.Fprintf(w, "database_status_available: %v\n", result["database_status_available"])
+	}
+	if result["database_migration_version"] != nil {
+		fmt.Fprintf(w, "database_migration_version: %v\n", result["database_migration_version"])
+		fmt.Fprintf(w, "database_migration_dirty: %v\n", result["database_migration_dirty"])
+	}
+	if result["database_status_message"] != nil {
+		fmt.Fprintf(w, "database_status_message: %s\n", result["database_status_message"])
+	}
 	fmt.Fprintf(w, "rollback_supported: %v\n", result["rollback_supported"])
 	fmt.Fprintf(w, "auth_migration_scope: %s (%s)\n", result["auth_migration_scope"], result["auth_migration_command"])
 }

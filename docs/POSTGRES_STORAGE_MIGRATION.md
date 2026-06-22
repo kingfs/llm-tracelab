@@ -46,7 +46,9 @@ claim that Postgres persistence is fully production mature today.
   application migration source without mutating the database: Postgres reports
   `ent/postgres-migrations` checked-in SQL, SQLite reports the startup schema
   fallback, and auth migrations are explicitly marked out of scope for the
-  `db migrate` command.
+  `db migrate` command. `db migrate status --check-db` is an explicit opt-in
+  database check: Postgres reads `schema_migrations` version/dirty state, while
+  SQLite reports the schema-init fallback without creating a version marker.
 - `internal/store` has an initial Postgres raw SQL compatibility pass:
   store-owned `?` placeholders are rebound to `$n` for Postgres, transaction
   helpers use the same rebind path, `logs.is_stream` can round-trip as a
@@ -208,6 +210,12 @@ command intentionally does not connect to Postgres or inspect
 `schema_migrations`; it makes the selected migration source and command
 ownership visible without requiring a running external database.
 
+Stage 16H adds explicit status verification through `db migrate status
+--check-db`. This opt-in path reads Postgres `schema_migrations` and reports
+`database_migration_version` plus `database_migration_dirty` when present. For
+SQLite it reports the existing schema-init fallback and keeps the application
+database free of a synthetic migration marker.
+
 SQLite compatibility:
 
 ```bash
@@ -259,8 +267,9 @@ been committed or applied in a shared environment.
   `ent/postgres-migrations` set, but `auth migrate down` and a separately owned
   auth migration namespace are still missing.
 - SQLite application migrations still use schema initialization rather than
-  explicit versioned files. `db migrate status` reports this fallback, but does
-  not add a SQLite schema version marker or migrate old local databases.
+  explicit versioned files. `db migrate status` reports this fallback, and
+  `db migrate status --check-db` makes it explicit without adding a SQLite
+  schema version marker or migrating old local databases.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.

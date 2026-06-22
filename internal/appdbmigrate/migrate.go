@@ -30,6 +30,63 @@ func MigrateUp(driver string, dsn string, steps int) error {
 
 var ErrSQLiteUsesStoreInit = errors.New("sqlite application migration still uses store schema initialization")
 
+type Status struct {
+	Driver    string
+	Versioned bool
+	Available bool
+	Version   uint
+	Dirty     bool
+	Message   string
+}
+
+func CheckStatus(driver string, dsn string) (Status, error) {
+	driver = normalizeDriver(driver)
+	status := Status{Driver: driver}
+	switch driver {
+	case "postgres":
+		status.Versioned = true
+		return checkPostgresStatus(dsn, status)
+	case "sqlite":
+		status.Message = ErrSQLiteUsesStoreInit.Error()
+		return status, nil
+	default:
+		return status, fmt.Errorf("application database driver %q is not supported by versioned migrations yet", driver)
+	}
+}
+
+func checkPostgresStatus(dsn string, status Status) (Status, error) {
+	if strings.TrimSpace(dsn) == "" {
+		return status, fmt.Errorf("postgres application database dsn is required")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return status, err
+	}
+	defer db.Close()
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+	)`).Scan(&exists); err != nil {
+		return status, err
+	}
+	if !exists {
+		status.Message = "schema_migrations table does not exist"
+		return status, nil
+	}
+	status.Available = true
+	if err := db.QueryRow(`SELECT version, dirty FROM schema_migrations LIMIT 1`).Scan(&status.Version, &status.Dirty); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			status.Available = false
+			status.Message = "schema_migrations table is empty"
+			return status, nil
+		}
+		return status, err
+	}
+	return status, nil
+}
+
 func migratePostgresUp(dsn string, steps int) error {
 	if strings.TrimSpace(dsn) == "" {
 		return fmt.Errorf("postgres application database dsn is required")
