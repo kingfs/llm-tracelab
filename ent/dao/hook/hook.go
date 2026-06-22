@@ -21,6 +21,30 @@ func (f APITokenFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, er
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.APITokenMutation", m)
 }
 
+// The AnalysisJobFunc type is an adapter to allow the use of ordinary
+// function as AnalysisJob mutator.
+type AnalysisJobFunc func(context.Context, *dao.AnalysisJobMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AnalysisJobFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.AnalysisJobMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.AnalysisJobMutation", m)
+}
+
+// The AnalysisRunFunc type is an adapter to allow the use of ordinary
+// function as AnalysisRun mutator.
+type AnalysisRunFunc func(context.Context, *dao.AnalysisRunMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AnalysisRunFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.AnalysisRunMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.AnalysisRunMutation", m)
+}
+
 // The ChannelConfigFunc type is an adapter to allow the use of ordinary
 // function as ChannelConfig mutator.
 type ChannelConfigFunc func(context.Context, *dao.ChannelConfigMutation) (dao.Value, error)
@@ -129,6 +153,30 @@ func (f ModelCatalogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ModelCatalogMutation", m)
 }
 
+// The ParseJobFunc type is an adapter to allow the use of ordinary
+// function as ParseJob mutator.
+type ParseJobFunc func(context.Context, *dao.ParseJobMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ParseJobFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ParseJobMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ParseJobMutation", m)
+}
+
+// The ParserVersionFunc type is an adapter to allow the use of ordinary
+// function as ParserVersion mutator.
+type ParserVersionFunc func(context.Context, *dao.ParserVersionMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f ParserVersionFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.ParserVersionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ParserVersionMutation", m)
+}
+
 // The RequestAuditFunc type is an adapter to allow the use of ordinary
 // function as RequestAudit mutator.
 type RequestAuditFunc func(context.Context, *dao.RequestAuditMutation) (dao.Value, error)
@@ -177,6 +225,42 @@ func (f ScoreFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.ScoreMutation", m)
 }
 
+// The SemanticNodeFunc type is an adapter to allow the use of ordinary
+// function as SemanticNode mutator.
+type SemanticNodeFunc func(context.Context, *dao.SemanticNodeMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SemanticNodeFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.SemanticNodeMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.SemanticNodeMutation", m)
+}
+
+// The SystemEventFunc type is an adapter to allow the use of ordinary
+// function as SystemEvent mutator.
+type SystemEventFunc func(context.Context, *dao.SystemEventMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f SystemEventFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.SystemEventMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.SystemEventMutation", m)
+}
+
+// The TraceFindingFunc type is an adapter to allow the use of ordinary
+// function as TraceFinding mutator.
+type TraceFindingFunc func(context.Context, *dao.TraceFindingMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TraceFindingFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.TraceFindingMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.TraceFindingMutation", m)
+}
+
 // The TraceLogFunc type is an adapter to allow the use of ordinary
 // function as TraceLog mutator.
 type TraceLogFunc func(context.Context, *dao.TraceLogMutation) (dao.Value, error)
@@ -187,6 +271,18 @@ func (f TraceLogFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, er
 		return f(ctx, mv)
 	}
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.TraceLogMutation", m)
+}
+
+// The TraceObservationFunc type is an adapter to allow the use of ordinary
+// function as TraceObservation mutator.
+type TraceObservationFunc func(context.Context, *dao.TraceObservationMutation) (dao.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TraceObservationFunc) Mutate(ctx context.Context, m dao.Mutation) (dao.Value, error) {
+	if mv, ok := m.(*dao.TraceObservationMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *dao.TraceObservationMutation", m)
 }
 
 // The UpstreamExchangeFunc type is an adapter to allow the use of ordinary

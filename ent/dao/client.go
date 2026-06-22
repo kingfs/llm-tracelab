@@ -15,6 +15,8 @@ import (
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"github.com/kingfs/llm-tracelab/ent/dao/analysisjob"
+	"github.com/kingfs/llm-tracelab/ent/dao/analysisrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
 	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
 	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
@@ -25,11 +27,17 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/parsejob"
+	"github.com/kingfs/llm-tracelab/ent/dao/parserversion"
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/response"
 	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
+	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
@@ -47,6 +55,10 @@ type Client struct {
 	Schema *migrate.Schema
 	// APIToken is the client for interacting with the APIToken builders.
 	APIToken *APITokenClient
+	// AnalysisJob is the client for interacting with the AnalysisJob builders.
+	AnalysisJob *AnalysisJobClient
+	// AnalysisRun is the client for interacting with the AnalysisRun builders.
+	AnalysisRun *AnalysisRunClient
 	// ChannelConfig is the client for interacting with the ChannelConfig builders.
 	ChannelConfig *ChannelConfigClient
 	// ChannelModel is the client for interacting with the ChannelModel builders.
@@ -65,6 +77,10 @@ type Client struct {
 	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
+	// ParseJob is the client for interacting with the ParseJob builders.
+	ParseJob *ParseJobClient
+	// ParserVersion is the client for interacting with the ParserVersion builders.
+	ParserVersion *ParserVersionClient
 	// RequestAudit is the client for interacting with the RequestAudit builders.
 	RequestAudit *RequestAuditClient
 	// Response is the client for interacting with the Response builders.
@@ -73,8 +89,16 @@ type Client struct {
 	ResponseItem *ResponseItemClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
+	// SemanticNode is the client for interacting with the SemanticNode builders.
+	SemanticNode *SemanticNodeClient
+	// SystemEvent is the client for interacting with the SystemEvent builders.
+	SystemEvent *SystemEventClient
+	// TraceFinding is the client for interacting with the TraceFinding builders.
+	TraceFinding *TraceFindingClient
 	// TraceLog is the client for interacting with the TraceLog builders.
 	TraceLog *TraceLogClient
+	// TraceObservation is the client for interacting with the TraceObservation builders.
+	TraceObservation *TraceObservationClient
 	// UpstreamExchange is the client for interacting with the UpstreamExchange builders.
 	UpstreamExchange *UpstreamExchangeClient
 	// UpstreamModel is the client for interacting with the UpstreamModel builders.
@@ -95,6 +119,8 @@ func NewClient(opts ...Option) *Client {
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
 	c.APIToken = NewAPITokenClient(c.config)
+	c.AnalysisJob = NewAnalysisJobClient(c.config)
+	c.AnalysisRun = NewAnalysisRunClient(c.config)
 	c.ChannelConfig = NewChannelConfigClient(c.config)
 	c.ChannelModel = NewChannelModelClient(c.config)
 	c.ChannelProbeRun = NewChannelProbeRunClient(c.config)
@@ -104,11 +130,17 @@ func (c *Client) init() {
 	c.ExecutionEvent = NewExecutionEventClient(c.config)
 	c.ExperimentRun = NewExperimentRunClient(c.config)
 	c.ModelCatalog = NewModelCatalogClient(c.config)
+	c.ParseJob = NewParseJobClient(c.config)
+	c.ParserVersion = NewParserVersionClient(c.config)
 	c.RequestAudit = NewRequestAuditClient(c.config)
 	c.Response = NewResponseClient(c.config)
 	c.ResponseItem = NewResponseItemClient(c.config)
 	c.Score = NewScoreClient(c.config)
+	c.SemanticNode = NewSemanticNodeClient(c.config)
+	c.SystemEvent = NewSystemEventClient(c.config)
+	c.TraceFinding = NewTraceFindingClient(c.config)
 	c.TraceLog = NewTraceLogClient(c.config)
+	c.TraceObservation = NewTraceObservationClient(c.config)
 	c.UpstreamExchange = NewUpstreamExchangeClient(c.config)
 	c.UpstreamModel = NewUpstreamModelClient(c.config)
 	c.UpstreamTarget = NewUpstreamTargetClient(c.config)
@@ -208,6 +240,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ctx:              ctx,
 		config:           cfg,
 		APIToken:         NewAPITokenClient(cfg),
+		AnalysisJob:      NewAnalysisJobClient(cfg),
+		AnalysisRun:      NewAnalysisRunClient(cfg),
 		ChannelConfig:    NewChannelConfigClient(cfg),
 		ChannelModel:     NewChannelModelClient(cfg),
 		ChannelProbeRun:  NewChannelProbeRunClient(cfg),
@@ -217,11 +251,17 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ExecutionEvent:   NewExecutionEventClient(cfg),
 		ExperimentRun:    NewExperimentRunClient(cfg),
 		ModelCatalog:     NewModelCatalogClient(cfg),
+		ParseJob:         NewParseJobClient(cfg),
+		ParserVersion:    NewParserVersionClient(cfg),
 		RequestAudit:     NewRequestAuditClient(cfg),
 		Response:         NewResponseClient(cfg),
 		ResponseItem:     NewResponseItemClient(cfg),
 		Score:            NewScoreClient(cfg),
+		SemanticNode:     NewSemanticNodeClient(cfg),
+		SystemEvent:      NewSystemEventClient(cfg),
+		TraceFinding:     NewTraceFindingClient(cfg),
 		TraceLog:         NewTraceLogClient(cfg),
+		TraceObservation: NewTraceObservationClient(cfg),
 		UpstreamExchange: NewUpstreamExchangeClient(cfg),
 		UpstreamModel:    NewUpstreamModelClient(cfg),
 		UpstreamTarget:   NewUpstreamTargetClient(cfg),
@@ -246,6 +286,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ctx:              ctx,
 		config:           cfg,
 		APIToken:         NewAPITokenClient(cfg),
+		AnalysisJob:      NewAnalysisJobClient(cfg),
+		AnalysisRun:      NewAnalysisRunClient(cfg),
 		ChannelConfig:    NewChannelConfigClient(cfg),
 		ChannelModel:     NewChannelModelClient(cfg),
 		ChannelProbeRun:  NewChannelProbeRunClient(cfg),
@@ -255,11 +297,17 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ExecutionEvent:   NewExecutionEventClient(cfg),
 		ExperimentRun:    NewExperimentRunClient(cfg),
 		ModelCatalog:     NewModelCatalogClient(cfg),
+		ParseJob:         NewParseJobClient(cfg),
+		ParserVersion:    NewParserVersionClient(cfg),
 		RequestAudit:     NewRequestAuditClient(cfg),
 		Response:         NewResponseClient(cfg),
 		ResponseItem:     NewResponseItemClient(cfg),
 		Score:            NewScoreClient(cfg),
+		SemanticNode:     NewSemanticNodeClient(cfg),
+		SystemEvent:      NewSystemEventClient(cfg),
+		TraceFinding:     NewTraceFindingClient(cfg),
 		TraceLog:         NewTraceLogClient(cfg),
+		TraceObservation: NewTraceObservationClient(cfg),
 		UpstreamExchange: NewUpstreamExchangeClient(cfg),
 		UpstreamModel:    NewUpstreamModelClient(cfg),
 		UpstreamTarget:   NewUpstreamTargetClient(cfg),
@@ -293,10 +341,12 @@ func (c *Client) Close() error {
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
-		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
-		c.DatasetExample, c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog,
-		c.RequestAudit, c.Response, c.ResponseItem, c.Score, c.TraceLog,
-		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
+		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
+		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
+		c.Response, c.ResponseItem, c.Score, c.SemanticNode, c.SystemEvent,
+		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
+		c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Use(hooks...)
 	}
@@ -306,10 +356,12 @@ func (c *Client) Use(hooks ...Hook) {
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
-		c.APIToken, c.ChannelConfig, c.ChannelModel, c.ChannelProbeRun, c.Dataset,
-		c.DatasetExample, c.EvalRun, c.ExecutionEvent, c.ExperimentRun, c.ModelCatalog,
-		c.RequestAudit, c.Response, c.ResponseItem, c.Score, c.TraceLog,
-		c.UpstreamExchange, c.UpstreamModel, c.UpstreamTarget, c.User,
+		c.APIToken, c.AnalysisJob, c.AnalysisRun, c.ChannelConfig, c.ChannelModel,
+		c.ChannelProbeRun, c.Dataset, c.DatasetExample, c.EvalRun, c.ExecutionEvent,
+		c.ExperimentRun, c.ModelCatalog, c.ParseJob, c.ParserVersion, c.RequestAudit,
+		c.Response, c.ResponseItem, c.Score, c.SemanticNode, c.SystemEvent,
+		c.TraceFinding, c.TraceLog, c.TraceObservation, c.UpstreamExchange,
+		c.UpstreamModel, c.UpstreamTarget, c.User,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -320,6 +372,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
 	case *APITokenMutation:
 		return c.APIToken.mutate(ctx, m)
+	case *AnalysisJobMutation:
+		return c.AnalysisJob.mutate(ctx, m)
+	case *AnalysisRunMutation:
+		return c.AnalysisRun.mutate(ctx, m)
 	case *ChannelConfigMutation:
 		return c.ChannelConfig.mutate(ctx, m)
 	case *ChannelModelMutation:
@@ -338,6 +394,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ExperimentRun.mutate(ctx, m)
 	case *ModelCatalogMutation:
 		return c.ModelCatalog.mutate(ctx, m)
+	case *ParseJobMutation:
+		return c.ParseJob.mutate(ctx, m)
+	case *ParserVersionMutation:
+		return c.ParserVersion.mutate(ctx, m)
 	case *RequestAuditMutation:
 		return c.RequestAudit.mutate(ctx, m)
 	case *ResponseMutation:
@@ -346,8 +406,16 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ResponseItem.mutate(ctx, m)
 	case *ScoreMutation:
 		return c.Score.mutate(ctx, m)
+	case *SemanticNodeMutation:
+		return c.SemanticNode.mutate(ctx, m)
+	case *SystemEventMutation:
+		return c.SystemEvent.mutate(ctx, m)
+	case *TraceFindingMutation:
+		return c.TraceFinding.mutate(ctx, m)
 	case *TraceLogMutation:
 		return c.TraceLog.mutate(ctx, m)
+	case *TraceObservationMutation:
+		return c.TraceObservation.mutate(ctx, m)
 	case *UpstreamExchangeMutation:
 		return c.UpstreamExchange.mutate(ctx, m)
 	case *UpstreamModelMutation:
@@ -510,6 +578,272 @@ func (c *APITokenClient) mutate(ctx context.Context, m *APITokenMutation) (Value
 		return (&APITokenDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown APIToken mutation op: %q", m.Op())
+	}
+}
+
+// AnalysisJobClient is a client for the AnalysisJob schema.
+type AnalysisJobClient struct {
+	config
+}
+
+// NewAnalysisJobClient returns a client for the AnalysisJob from the given config.
+func NewAnalysisJobClient(c config) *AnalysisJobClient {
+	return &AnalysisJobClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `analysisjob.Hooks(f(g(h())))`.
+func (c *AnalysisJobClient) Use(hooks ...Hook) {
+	c.hooks.AnalysisJob = append(c.hooks.AnalysisJob, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `analysisjob.Intercept(f(g(h())))`.
+func (c *AnalysisJobClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AnalysisJob = append(c.inters.AnalysisJob, interceptors...)
+}
+
+// Create returns a builder for creating a AnalysisJob entity.
+func (c *AnalysisJobClient) Create() *AnalysisJobCreate {
+	mutation := newAnalysisJobMutation(c.config, OpCreate)
+	return &AnalysisJobCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AnalysisJob entities.
+func (c *AnalysisJobClient) CreateBulk(builders ...*AnalysisJobCreate) *AnalysisJobCreateBulk {
+	return &AnalysisJobCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AnalysisJobClient) MapCreateBulk(slice any, setFunc func(*AnalysisJobCreate, int)) *AnalysisJobCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AnalysisJobCreateBulk{err: fmt.Errorf("calling to AnalysisJobClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AnalysisJobCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AnalysisJobCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AnalysisJob.
+func (c *AnalysisJobClient) Update() *AnalysisJobUpdate {
+	mutation := newAnalysisJobMutation(c.config, OpUpdate)
+	return &AnalysisJobUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AnalysisJobClient) UpdateOne(_m *AnalysisJob) *AnalysisJobUpdateOne {
+	mutation := newAnalysisJobMutation(c.config, OpUpdateOne, withAnalysisJob(_m))
+	return &AnalysisJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AnalysisJobClient) UpdateOneID(id int) *AnalysisJobUpdateOne {
+	mutation := newAnalysisJobMutation(c.config, OpUpdateOne, withAnalysisJobID(id))
+	return &AnalysisJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AnalysisJob.
+func (c *AnalysisJobClient) Delete() *AnalysisJobDelete {
+	mutation := newAnalysisJobMutation(c.config, OpDelete)
+	return &AnalysisJobDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AnalysisJobClient) DeleteOne(_m *AnalysisJob) *AnalysisJobDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AnalysisJobClient) DeleteOneID(id int) *AnalysisJobDeleteOne {
+	builder := c.Delete().Where(analysisjob.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AnalysisJobDeleteOne{builder}
+}
+
+// Query returns a query builder for AnalysisJob.
+func (c *AnalysisJobClient) Query() *AnalysisJobQuery {
+	return &AnalysisJobQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAnalysisJob},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AnalysisJob entity by its id.
+func (c *AnalysisJobClient) Get(ctx context.Context, id int) (*AnalysisJob, error) {
+	return c.Query().Where(analysisjob.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AnalysisJobClient) GetX(ctx context.Context, id int) *AnalysisJob {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AnalysisJobClient) Hooks() []Hook {
+	return c.hooks.AnalysisJob
+}
+
+// Interceptors returns the client interceptors.
+func (c *AnalysisJobClient) Interceptors() []Interceptor {
+	return c.inters.AnalysisJob
+}
+
+func (c *AnalysisJobClient) mutate(ctx context.Context, m *AnalysisJobMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AnalysisJobCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AnalysisJobUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AnalysisJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AnalysisJobDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown AnalysisJob mutation op: %q", m.Op())
+	}
+}
+
+// AnalysisRunClient is a client for the AnalysisRun schema.
+type AnalysisRunClient struct {
+	config
+}
+
+// NewAnalysisRunClient returns a client for the AnalysisRun from the given config.
+func NewAnalysisRunClient(c config) *AnalysisRunClient {
+	return &AnalysisRunClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `analysisrun.Hooks(f(g(h())))`.
+func (c *AnalysisRunClient) Use(hooks ...Hook) {
+	c.hooks.AnalysisRun = append(c.hooks.AnalysisRun, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `analysisrun.Intercept(f(g(h())))`.
+func (c *AnalysisRunClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AnalysisRun = append(c.inters.AnalysisRun, interceptors...)
+}
+
+// Create returns a builder for creating a AnalysisRun entity.
+func (c *AnalysisRunClient) Create() *AnalysisRunCreate {
+	mutation := newAnalysisRunMutation(c.config, OpCreate)
+	return &AnalysisRunCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AnalysisRun entities.
+func (c *AnalysisRunClient) CreateBulk(builders ...*AnalysisRunCreate) *AnalysisRunCreateBulk {
+	return &AnalysisRunCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AnalysisRunClient) MapCreateBulk(slice any, setFunc func(*AnalysisRunCreate, int)) *AnalysisRunCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AnalysisRunCreateBulk{err: fmt.Errorf("calling to AnalysisRunClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AnalysisRunCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AnalysisRunCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AnalysisRun.
+func (c *AnalysisRunClient) Update() *AnalysisRunUpdate {
+	mutation := newAnalysisRunMutation(c.config, OpUpdate)
+	return &AnalysisRunUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AnalysisRunClient) UpdateOne(_m *AnalysisRun) *AnalysisRunUpdateOne {
+	mutation := newAnalysisRunMutation(c.config, OpUpdateOne, withAnalysisRun(_m))
+	return &AnalysisRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AnalysisRunClient) UpdateOneID(id int) *AnalysisRunUpdateOne {
+	mutation := newAnalysisRunMutation(c.config, OpUpdateOne, withAnalysisRunID(id))
+	return &AnalysisRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AnalysisRun.
+func (c *AnalysisRunClient) Delete() *AnalysisRunDelete {
+	mutation := newAnalysisRunMutation(c.config, OpDelete)
+	return &AnalysisRunDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AnalysisRunClient) DeleteOne(_m *AnalysisRun) *AnalysisRunDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AnalysisRunClient) DeleteOneID(id int) *AnalysisRunDeleteOne {
+	builder := c.Delete().Where(analysisrun.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AnalysisRunDeleteOne{builder}
+}
+
+// Query returns a query builder for AnalysisRun.
+func (c *AnalysisRunClient) Query() *AnalysisRunQuery {
+	return &AnalysisRunQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAnalysisRun},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AnalysisRun entity by its id.
+func (c *AnalysisRunClient) Get(ctx context.Context, id int) (*AnalysisRun, error) {
+	return c.Query().Where(analysisrun.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AnalysisRunClient) GetX(ctx context.Context, id int) *AnalysisRun {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AnalysisRunClient) Hooks() []Hook {
+	return c.hooks.AnalysisRun
+}
+
+// Interceptors returns the client interceptors.
+func (c *AnalysisRunClient) Interceptors() []Interceptor {
+	return c.inters.AnalysisRun
+}
+
+func (c *AnalysisRunClient) mutate(ctx context.Context, m *AnalysisRunMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AnalysisRunCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AnalysisRunUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AnalysisRunUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AnalysisRunDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown AnalysisRun mutation op: %q", m.Op())
 	}
 }
 
@@ -1710,6 +2044,272 @@ func (c *ModelCatalogClient) mutate(ctx context.Context, m *ModelCatalogMutation
 	}
 }
 
+// ParseJobClient is a client for the ParseJob schema.
+type ParseJobClient struct {
+	config
+}
+
+// NewParseJobClient returns a client for the ParseJob from the given config.
+func NewParseJobClient(c config) *ParseJobClient {
+	return &ParseJobClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `parsejob.Hooks(f(g(h())))`.
+func (c *ParseJobClient) Use(hooks ...Hook) {
+	c.hooks.ParseJob = append(c.hooks.ParseJob, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `parsejob.Intercept(f(g(h())))`.
+func (c *ParseJobClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ParseJob = append(c.inters.ParseJob, interceptors...)
+}
+
+// Create returns a builder for creating a ParseJob entity.
+func (c *ParseJobClient) Create() *ParseJobCreate {
+	mutation := newParseJobMutation(c.config, OpCreate)
+	return &ParseJobCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ParseJob entities.
+func (c *ParseJobClient) CreateBulk(builders ...*ParseJobCreate) *ParseJobCreateBulk {
+	return &ParseJobCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ParseJobClient) MapCreateBulk(slice any, setFunc func(*ParseJobCreate, int)) *ParseJobCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ParseJobCreateBulk{err: fmt.Errorf("calling to ParseJobClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ParseJobCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ParseJobCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ParseJob.
+func (c *ParseJobClient) Update() *ParseJobUpdate {
+	mutation := newParseJobMutation(c.config, OpUpdate)
+	return &ParseJobUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ParseJobClient) UpdateOne(_m *ParseJob) *ParseJobUpdateOne {
+	mutation := newParseJobMutation(c.config, OpUpdateOne, withParseJob(_m))
+	return &ParseJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ParseJobClient) UpdateOneID(id int) *ParseJobUpdateOne {
+	mutation := newParseJobMutation(c.config, OpUpdateOne, withParseJobID(id))
+	return &ParseJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ParseJob.
+func (c *ParseJobClient) Delete() *ParseJobDelete {
+	mutation := newParseJobMutation(c.config, OpDelete)
+	return &ParseJobDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ParseJobClient) DeleteOne(_m *ParseJob) *ParseJobDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ParseJobClient) DeleteOneID(id int) *ParseJobDeleteOne {
+	builder := c.Delete().Where(parsejob.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ParseJobDeleteOne{builder}
+}
+
+// Query returns a query builder for ParseJob.
+func (c *ParseJobClient) Query() *ParseJobQuery {
+	return &ParseJobQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeParseJob},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ParseJob entity by its id.
+func (c *ParseJobClient) Get(ctx context.Context, id int) (*ParseJob, error) {
+	return c.Query().Where(parsejob.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ParseJobClient) GetX(ctx context.Context, id int) *ParseJob {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ParseJobClient) Hooks() []Hook {
+	return c.hooks.ParseJob
+}
+
+// Interceptors returns the client interceptors.
+func (c *ParseJobClient) Interceptors() []Interceptor {
+	return c.inters.ParseJob
+}
+
+func (c *ParseJobClient) mutate(ctx context.Context, m *ParseJobMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ParseJobCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ParseJobUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ParseJobUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ParseJobDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ParseJob mutation op: %q", m.Op())
+	}
+}
+
+// ParserVersionClient is a client for the ParserVersion schema.
+type ParserVersionClient struct {
+	config
+}
+
+// NewParserVersionClient returns a client for the ParserVersion from the given config.
+func NewParserVersionClient(c config) *ParserVersionClient {
+	return &ParserVersionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `parserversion.Hooks(f(g(h())))`.
+func (c *ParserVersionClient) Use(hooks ...Hook) {
+	c.hooks.ParserVersion = append(c.hooks.ParserVersion, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `parserversion.Intercept(f(g(h())))`.
+func (c *ParserVersionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.ParserVersion = append(c.inters.ParserVersion, interceptors...)
+}
+
+// Create returns a builder for creating a ParserVersion entity.
+func (c *ParserVersionClient) Create() *ParserVersionCreate {
+	mutation := newParserVersionMutation(c.config, OpCreate)
+	return &ParserVersionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of ParserVersion entities.
+func (c *ParserVersionClient) CreateBulk(builders ...*ParserVersionCreate) *ParserVersionCreateBulk {
+	return &ParserVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *ParserVersionClient) MapCreateBulk(slice any, setFunc func(*ParserVersionCreate, int)) *ParserVersionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &ParserVersionCreateBulk{err: fmt.Errorf("calling to ParserVersionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*ParserVersionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &ParserVersionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for ParserVersion.
+func (c *ParserVersionClient) Update() *ParserVersionUpdate {
+	mutation := newParserVersionMutation(c.config, OpUpdate)
+	return &ParserVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *ParserVersionClient) UpdateOne(_m *ParserVersion) *ParserVersionUpdateOne {
+	mutation := newParserVersionMutation(c.config, OpUpdateOne, withParserVersion(_m))
+	return &ParserVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *ParserVersionClient) UpdateOneID(id int) *ParserVersionUpdateOne {
+	mutation := newParserVersionMutation(c.config, OpUpdateOne, withParserVersionID(id))
+	return &ParserVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for ParserVersion.
+func (c *ParserVersionClient) Delete() *ParserVersionDelete {
+	mutation := newParserVersionMutation(c.config, OpDelete)
+	return &ParserVersionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *ParserVersionClient) DeleteOne(_m *ParserVersion) *ParserVersionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *ParserVersionClient) DeleteOneID(id int) *ParserVersionDeleteOne {
+	builder := c.Delete().Where(parserversion.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &ParserVersionDeleteOne{builder}
+}
+
+// Query returns a query builder for ParserVersion.
+func (c *ParserVersionClient) Query() *ParserVersionQuery {
+	return &ParserVersionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeParserVersion},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a ParserVersion entity by its id.
+func (c *ParserVersionClient) Get(ctx context.Context, id int) (*ParserVersion, error) {
+	return c.Query().Where(parserversion.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *ParserVersionClient) GetX(ctx context.Context, id int) *ParserVersion {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *ParserVersionClient) Hooks() []Hook {
+	return c.hooks.ParserVersion
+}
+
+// Interceptors returns the client interceptors.
+func (c *ParserVersionClient) Interceptors() []Interceptor {
+	return c.inters.ParserVersion
+}
+
+func (c *ParserVersionClient) mutate(ctx context.Context, m *ParserVersionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&ParserVersionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&ParserVersionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&ParserVersionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&ParserVersionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown ParserVersion mutation op: %q", m.Op())
+	}
+}
+
 // RequestAuditClient is a client for the RequestAudit schema.
 type RequestAuditClient struct {
 	config
@@ -2242,6 +2842,405 @@ func (c *ScoreClient) mutate(ctx context.Context, m *ScoreMutation) (Value, erro
 	}
 }
 
+// SemanticNodeClient is a client for the SemanticNode schema.
+type SemanticNodeClient struct {
+	config
+}
+
+// NewSemanticNodeClient returns a client for the SemanticNode from the given config.
+func NewSemanticNodeClient(c config) *SemanticNodeClient {
+	return &SemanticNodeClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `semanticnode.Hooks(f(g(h())))`.
+func (c *SemanticNodeClient) Use(hooks ...Hook) {
+	c.hooks.SemanticNode = append(c.hooks.SemanticNode, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `semanticnode.Intercept(f(g(h())))`.
+func (c *SemanticNodeClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SemanticNode = append(c.inters.SemanticNode, interceptors...)
+}
+
+// Create returns a builder for creating a SemanticNode entity.
+func (c *SemanticNodeClient) Create() *SemanticNodeCreate {
+	mutation := newSemanticNodeMutation(c.config, OpCreate)
+	return &SemanticNodeCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SemanticNode entities.
+func (c *SemanticNodeClient) CreateBulk(builders ...*SemanticNodeCreate) *SemanticNodeCreateBulk {
+	return &SemanticNodeCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SemanticNodeClient) MapCreateBulk(slice any, setFunc func(*SemanticNodeCreate, int)) *SemanticNodeCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SemanticNodeCreateBulk{err: fmt.Errorf("calling to SemanticNodeClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SemanticNodeCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SemanticNodeCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SemanticNode.
+func (c *SemanticNodeClient) Update() *SemanticNodeUpdate {
+	mutation := newSemanticNodeMutation(c.config, OpUpdate)
+	return &SemanticNodeUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SemanticNodeClient) UpdateOne(_m *SemanticNode) *SemanticNodeUpdateOne {
+	mutation := newSemanticNodeMutation(c.config, OpUpdateOne, withSemanticNode(_m))
+	return &SemanticNodeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SemanticNodeClient) UpdateOneID(id int) *SemanticNodeUpdateOne {
+	mutation := newSemanticNodeMutation(c.config, OpUpdateOne, withSemanticNodeID(id))
+	return &SemanticNodeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SemanticNode.
+func (c *SemanticNodeClient) Delete() *SemanticNodeDelete {
+	mutation := newSemanticNodeMutation(c.config, OpDelete)
+	return &SemanticNodeDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SemanticNodeClient) DeleteOne(_m *SemanticNode) *SemanticNodeDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SemanticNodeClient) DeleteOneID(id int) *SemanticNodeDeleteOne {
+	builder := c.Delete().Where(semanticnode.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SemanticNodeDeleteOne{builder}
+}
+
+// Query returns a query builder for SemanticNode.
+func (c *SemanticNodeClient) Query() *SemanticNodeQuery {
+	return &SemanticNodeQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSemanticNode},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SemanticNode entity by its id.
+func (c *SemanticNodeClient) Get(ctx context.Context, id int) (*SemanticNode, error) {
+	return c.Query().Where(semanticnode.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SemanticNodeClient) GetX(ctx context.Context, id int) *SemanticNode {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SemanticNodeClient) Hooks() []Hook {
+	return c.hooks.SemanticNode
+}
+
+// Interceptors returns the client interceptors.
+func (c *SemanticNodeClient) Interceptors() []Interceptor {
+	return c.inters.SemanticNode
+}
+
+func (c *SemanticNodeClient) mutate(ctx context.Context, m *SemanticNodeMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SemanticNodeCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SemanticNodeUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SemanticNodeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SemanticNodeDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown SemanticNode mutation op: %q", m.Op())
+	}
+}
+
+// SystemEventClient is a client for the SystemEvent schema.
+type SystemEventClient struct {
+	config
+}
+
+// NewSystemEventClient returns a client for the SystemEvent from the given config.
+func NewSystemEventClient(c config) *SystemEventClient {
+	return &SystemEventClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `systemevent.Hooks(f(g(h())))`.
+func (c *SystemEventClient) Use(hooks ...Hook) {
+	c.hooks.SystemEvent = append(c.hooks.SystemEvent, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `systemevent.Intercept(f(g(h())))`.
+func (c *SystemEventClient) Intercept(interceptors ...Interceptor) {
+	c.inters.SystemEvent = append(c.inters.SystemEvent, interceptors...)
+}
+
+// Create returns a builder for creating a SystemEvent entity.
+func (c *SystemEventClient) Create() *SystemEventCreate {
+	mutation := newSystemEventMutation(c.config, OpCreate)
+	return &SystemEventCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of SystemEvent entities.
+func (c *SystemEventClient) CreateBulk(builders ...*SystemEventCreate) *SystemEventCreateBulk {
+	return &SystemEventCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *SystemEventClient) MapCreateBulk(slice any, setFunc func(*SystemEventCreate, int)) *SystemEventCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &SystemEventCreateBulk{err: fmt.Errorf("calling to SystemEventClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*SystemEventCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &SystemEventCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for SystemEvent.
+func (c *SystemEventClient) Update() *SystemEventUpdate {
+	mutation := newSystemEventMutation(c.config, OpUpdate)
+	return &SystemEventUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *SystemEventClient) UpdateOne(_m *SystemEvent) *SystemEventUpdateOne {
+	mutation := newSystemEventMutation(c.config, OpUpdateOne, withSystemEvent(_m))
+	return &SystemEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *SystemEventClient) UpdateOneID(id string) *SystemEventUpdateOne {
+	mutation := newSystemEventMutation(c.config, OpUpdateOne, withSystemEventID(id))
+	return &SystemEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for SystemEvent.
+func (c *SystemEventClient) Delete() *SystemEventDelete {
+	mutation := newSystemEventMutation(c.config, OpDelete)
+	return &SystemEventDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *SystemEventClient) DeleteOne(_m *SystemEvent) *SystemEventDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *SystemEventClient) DeleteOneID(id string) *SystemEventDeleteOne {
+	builder := c.Delete().Where(systemevent.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &SystemEventDeleteOne{builder}
+}
+
+// Query returns a query builder for SystemEvent.
+func (c *SystemEventClient) Query() *SystemEventQuery {
+	return &SystemEventQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeSystemEvent},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a SystemEvent entity by its id.
+func (c *SystemEventClient) Get(ctx context.Context, id string) (*SystemEvent, error) {
+	return c.Query().Where(systemevent.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *SystemEventClient) GetX(ctx context.Context, id string) *SystemEvent {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *SystemEventClient) Hooks() []Hook {
+	return c.hooks.SystemEvent
+}
+
+// Interceptors returns the client interceptors.
+func (c *SystemEventClient) Interceptors() []Interceptor {
+	return c.inters.SystemEvent
+}
+
+func (c *SystemEventClient) mutate(ctx context.Context, m *SystemEventMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&SystemEventCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&SystemEventUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&SystemEventUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&SystemEventDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown SystemEvent mutation op: %q", m.Op())
+	}
+}
+
+// TraceFindingClient is a client for the TraceFinding schema.
+type TraceFindingClient struct {
+	config
+}
+
+// NewTraceFindingClient returns a client for the TraceFinding from the given config.
+func NewTraceFindingClient(c config) *TraceFindingClient {
+	return &TraceFindingClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `tracefinding.Hooks(f(g(h())))`.
+func (c *TraceFindingClient) Use(hooks ...Hook) {
+	c.hooks.TraceFinding = append(c.hooks.TraceFinding, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `tracefinding.Intercept(f(g(h())))`.
+func (c *TraceFindingClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TraceFinding = append(c.inters.TraceFinding, interceptors...)
+}
+
+// Create returns a builder for creating a TraceFinding entity.
+func (c *TraceFindingClient) Create() *TraceFindingCreate {
+	mutation := newTraceFindingMutation(c.config, OpCreate)
+	return &TraceFindingCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TraceFinding entities.
+func (c *TraceFindingClient) CreateBulk(builders ...*TraceFindingCreate) *TraceFindingCreateBulk {
+	return &TraceFindingCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TraceFindingClient) MapCreateBulk(slice any, setFunc func(*TraceFindingCreate, int)) *TraceFindingCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TraceFindingCreateBulk{err: fmt.Errorf("calling to TraceFindingClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TraceFindingCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TraceFindingCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TraceFinding.
+func (c *TraceFindingClient) Update() *TraceFindingUpdate {
+	mutation := newTraceFindingMutation(c.config, OpUpdate)
+	return &TraceFindingUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TraceFindingClient) UpdateOne(_m *TraceFinding) *TraceFindingUpdateOne {
+	mutation := newTraceFindingMutation(c.config, OpUpdateOne, withTraceFinding(_m))
+	return &TraceFindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TraceFindingClient) UpdateOneID(id int) *TraceFindingUpdateOne {
+	mutation := newTraceFindingMutation(c.config, OpUpdateOne, withTraceFindingID(id))
+	return &TraceFindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TraceFinding.
+func (c *TraceFindingClient) Delete() *TraceFindingDelete {
+	mutation := newTraceFindingMutation(c.config, OpDelete)
+	return &TraceFindingDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TraceFindingClient) DeleteOne(_m *TraceFinding) *TraceFindingDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TraceFindingClient) DeleteOneID(id int) *TraceFindingDeleteOne {
+	builder := c.Delete().Where(tracefinding.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TraceFindingDeleteOne{builder}
+}
+
+// Query returns a query builder for TraceFinding.
+func (c *TraceFindingClient) Query() *TraceFindingQuery {
+	return &TraceFindingQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTraceFinding},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TraceFinding entity by its id.
+func (c *TraceFindingClient) Get(ctx context.Context, id int) (*TraceFinding, error) {
+	return c.Query().Where(tracefinding.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TraceFindingClient) GetX(ctx context.Context, id int) *TraceFinding {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TraceFindingClient) Hooks() []Hook {
+	return c.hooks.TraceFinding
+}
+
+// Interceptors returns the client interceptors.
+func (c *TraceFindingClient) Interceptors() []Interceptor {
+	return c.inters.TraceFinding
+}
+
+func (c *TraceFindingClient) mutate(ctx context.Context, m *TraceFindingMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TraceFindingCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TraceFindingUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TraceFindingUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TraceFindingDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown TraceFinding mutation op: %q", m.Op())
+	}
+}
+
 // TraceLogClient is a client for the TraceLog schema.
 type TraceLogClient struct {
 	config
@@ -2372,6 +3371,139 @@ func (c *TraceLogClient) mutate(ctx context.Context, m *TraceLogMutation) (Value
 		return (&TraceLogDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("dao: unknown TraceLog mutation op: %q", m.Op())
+	}
+}
+
+// TraceObservationClient is a client for the TraceObservation schema.
+type TraceObservationClient struct {
+	config
+}
+
+// NewTraceObservationClient returns a client for the TraceObservation from the given config.
+func NewTraceObservationClient(c config) *TraceObservationClient {
+	return &TraceObservationClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `traceobservation.Hooks(f(g(h())))`.
+func (c *TraceObservationClient) Use(hooks ...Hook) {
+	c.hooks.TraceObservation = append(c.hooks.TraceObservation, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `traceobservation.Intercept(f(g(h())))`.
+func (c *TraceObservationClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TraceObservation = append(c.inters.TraceObservation, interceptors...)
+}
+
+// Create returns a builder for creating a TraceObservation entity.
+func (c *TraceObservationClient) Create() *TraceObservationCreate {
+	mutation := newTraceObservationMutation(c.config, OpCreate)
+	return &TraceObservationCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TraceObservation entities.
+func (c *TraceObservationClient) CreateBulk(builders ...*TraceObservationCreate) *TraceObservationCreateBulk {
+	return &TraceObservationCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TraceObservationClient) MapCreateBulk(slice any, setFunc func(*TraceObservationCreate, int)) *TraceObservationCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TraceObservationCreateBulk{err: fmt.Errorf("calling to TraceObservationClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TraceObservationCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TraceObservationCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TraceObservation.
+func (c *TraceObservationClient) Update() *TraceObservationUpdate {
+	mutation := newTraceObservationMutation(c.config, OpUpdate)
+	return &TraceObservationUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TraceObservationClient) UpdateOne(_m *TraceObservation) *TraceObservationUpdateOne {
+	mutation := newTraceObservationMutation(c.config, OpUpdateOne, withTraceObservation(_m))
+	return &TraceObservationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TraceObservationClient) UpdateOneID(id string) *TraceObservationUpdateOne {
+	mutation := newTraceObservationMutation(c.config, OpUpdateOne, withTraceObservationID(id))
+	return &TraceObservationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TraceObservation.
+func (c *TraceObservationClient) Delete() *TraceObservationDelete {
+	mutation := newTraceObservationMutation(c.config, OpDelete)
+	return &TraceObservationDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TraceObservationClient) DeleteOne(_m *TraceObservation) *TraceObservationDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TraceObservationClient) DeleteOneID(id string) *TraceObservationDeleteOne {
+	builder := c.Delete().Where(traceobservation.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TraceObservationDeleteOne{builder}
+}
+
+// Query returns a query builder for TraceObservation.
+func (c *TraceObservationClient) Query() *TraceObservationQuery {
+	return &TraceObservationQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTraceObservation},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TraceObservation entity by its id.
+func (c *TraceObservationClient) Get(ctx context.Context, id string) (*TraceObservation, error) {
+	return c.Query().Where(traceobservation.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TraceObservationClient) GetX(ctx context.Context, id string) *TraceObservation {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TraceObservationClient) Hooks() []Hook {
+	return c.hooks.TraceObservation
+}
+
+// Interceptors returns the client interceptors.
+func (c *TraceObservationClient) Interceptors() []Interceptor {
+	return c.inters.TraceObservation
+}
+
+func (c *TraceObservationClient) mutate(ctx context.Context, m *TraceObservationMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TraceObservationCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TraceObservationUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TraceObservationUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TraceObservationDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("dao: unknown TraceObservation mutation op: %q", m.Op())
 	}
 }
 
@@ -2929,15 +4061,19 @@ func (c *UserClient) mutate(ctx context.Context, m *UserMutation) (Value, error)
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
-		EvalRun, ExecutionEvent, ExperimentRun, ModelCatalog, RequestAudit, Response,
-		ResponseItem, Score, TraceLog, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
+		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
+		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
+		ResponseItem, Score, SemanticNode, SystemEvent, TraceFinding, TraceLog,
+		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
 		User []ent.Hook
 	}
 	inters struct {
-		APIToken, ChannelConfig, ChannelModel, ChannelProbeRun, Dataset, DatasetExample,
-		EvalRun, ExecutionEvent, ExperimentRun, ModelCatalog, RequestAudit, Response,
-		ResponseItem, Score, TraceLog, UpstreamExchange, UpstreamModel, UpstreamTarget,
+		APIToken, AnalysisJob, AnalysisRun, ChannelConfig, ChannelModel,
+		ChannelProbeRun, Dataset, DatasetExample, EvalRun, ExecutionEvent,
+		ExperimentRun, ModelCatalog, ParseJob, ParserVersion, RequestAudit, Response,
+		ResponseItem, Score, SemanticNode, SystemEvent, TraceFinding, TraceLog,
+		TraceObservation, UpstreamExchange, UpstreamModel, UpstreamTarget,
 		User []ent.Interceptor
 	}
 )

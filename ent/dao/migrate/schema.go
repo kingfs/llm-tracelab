@@ -48,6 +48,73 @@ var (
 			},
 		},
 	}
+	// AnalysisJobsColumns holds the columns for the "analysis_jobs" table.
+	AnalysisJobsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "job_type", Type: field.TypeString},
+		{Name: "target_type", Type: field.TypeString},
+		{Name: "target_id", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "steps_json", Type: field.TypeString, Default: "[]"},
+		{Name: "request_json", Type: field.TypeString, Default: "{}"},
+		{Name: "result_json", Type: field.TypeString, Default: "{}"},
+		{Name: "last_error", Type: field.TypeString, Default: ""},
+		{Name: "attempts", Type: field.TypeInt, Default: 0},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "started_at", Type: field.TypeTime, Nullable: true},
+		{Name: "finished_at", Type: field.TypeTime, Nullable: true},
+	}
+	// AnalysisJobsTable holds the schema information for the "analysis_jobs" table.
+	AnalysisJobsTable = &schema.Table{
+		Name:       "analysis_jobs",
+		Columns:    AnalysisJobsColumns,
+		PrimaryKey: []*schema.Column{AnalysisJobsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "analysisjob_status_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{AnalysisJobsColumns[4], AnalysisJobsColumns[11]},
+			},
+			{
+				Name:    "analysisjob_target_type_target_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AnalysisJobsColumns[2], AnalysisJobsColumns[3], AnalysisJobsColumns[10]},
+			},
+		},
+	}
+	// AnalysisRunsColumns holds the columns for the "analysis_runs" table.
+	AnalysisRunsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "trace_id", Type: field.TypeString, Default: ""},
+		{Name: "session_id", Type: field.TypeString, Default: ""},
+		{Name: "kind", Type: field.TypeString},
+		{Name: "analyzer", Type: field.TypeString},
+		{Name: "analyzer_version", Type: field.TypeString},
+		{Name: "model", Type: field.TypeString, Default: ""},
+		{Name: "input_ref", Type: field.TypeString, Default: ""},
+		{Name: "output_json", Type: field.TypeString, Default: "{}"},
+		{Name: "status", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// AnalysisRunsTable holds the schema information for the "analysis_runs" table.
+	AnalysisRunsTable = &schema.Table{
+		Name:       "analysis_runs",
+		Columns:    AnalysisRunsColumns,
+		PrimaryKey: []*schema.Column{AnalysisRunsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "analysisrun_session_id_kind_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AnalysisRunsColumns[2], AnalysisRunsColumns[3], AnalysisRunsColumns[10]},
+			},
+			{
+				Name:    "analysisrun_trace_id_kind_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{AnalysisRunsColumns[1], AnalysisRunsColumns[3], AnalysisRunsColumns[10]},
+			},
+		},
+	}
 	// ChannelConfigsColumns holds the columns for the "channel_configs" table.
 	ChannelConfigsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -343,6 +410,50 @@ var (
 		Columns:    ModelCatalogColumns,
 		PrimaryKey: []*schema.Column{ModelCatalogColumns[0]},
 	}
+	// ParseJobsColumns holds the columns for the "parse_jobs" table.
+	ParseJobsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "trace_id", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "attempts", Type: field.TypeInt, Default: 0},
+		{Name: "last_error", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// ParseJobsTable holds the schema information for the "parse_jobs" table.
+	ParseJobsTable = &schema.Table{
+		Name:       "parse_jobs",
+		Columns:    ParseJobsColumns,
+		PrimaryKey: []*schema.Column{ParseJobsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "parsejob_status_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{ParseJobsColumns[2], ParseJobsColumns[6]},
+			},
+		},
+	}
+	// ParserVersionsColumns holds the columns for the "parser_versions" table.
+	ParserVersionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "parser", Type: field.TypeString},
+		{Name: "version", Type: field.TypeString},
+		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// ParserVersionsTable holds the schema information for the "parser_versions" table.
+	ParserVersionsTable = &schema.Table{
+		Name:       "parser_versions",
+		Columns:    ParserVersionsColumns,
+		PrimaryKey: []*schema.Column{ParserVersionsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "parserversion_parser_version",
+				Unique:  true,
+				Columns: []*schema.Column{ParserVersionsColumns[1], ParserVersionsColumns[2]},
+			},
+		},
+	}
 	// RequestAuditsColumns holds the columns for the "request_audits" table.
 	RequestAuditsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeString},
@@ -496,6 +607,124 @@ var (
 			},
 		},
 	}
+	// SemanticNodesColumns holds the columns for the "semantic_nodes" table.
+	SemanticNodesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "trace_id", Type: field.TypeString},
+		{Name: "node_id", Type: field.TypeString},
+		{Name: "parent_node_id", Type: field.TypeString, Default: ""},
+		{Name: "provider_type", Type: field.TypeString, Default: ""},
+		{Name: "normalized_type", Type: field.TypeString, Default: ""},
+		{Name: "role", Type: field.TypeString, Default: ""},
+		{Name: "path", Type: field.TypeString, Default: ""},
+		{Name: "node_index", Type: field.TypeInt, Default: 0},
+		{Name: "depth", Type: field.TypeInt, Default: 0},
+		{Name: "text_preview", Type: field.TypeString, Default: ""},
+		{Name: "json", Type: field.TypeString, Default: ""},
+		{Name: "raw", Type: field.TypeString, Default: ""},
+		{Name: "raw_ref", Type: field.TypeString, Default: ""},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// SemanticNodesTable holds the schema information for the "semantic_nodes" table.
+	SemanticNodesTable = &schema.Table{
+		Name:       "semantic_nodes",
+		Columns:    SemanticNodesColumns,
+		PrimaryKey: []*schema.Column{SemanticNodesColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "semanticnode_trace_id_node_id",
+				Unique:  true,
+				Columns: []*schema.Column{SemanticNodesColumns[1], SemanticNodesColumns[2]},
+			},
+			{
+				Name:    "semanticnode_trace_id_depth_node_index",
+				Unique:  false,
+				Columns: []*schema.Column{SemanticNodesColumns[1], SemanticNodesColumns[9], SemanticNodesColumns[8]},
+			},
+		},
+	}
+	// SystemEventsColumns holds the columns for the "system_events" table.
+	SystemEventsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeString},
+		{Name: "fingerprint", Type: field.TypeString, Unique: true},
+		{Name: "source", Type: field.TypeString},
+		{Name: "category", Type: field.TypeString},
+		{Name: "severity", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "title", Type: field.TypeString, Default: ""},
+		{Name: "message", Type: field.TypeString, Default: ""},
+		{Name: "details_json", Type: field.TypeString, Default: "{}"},
+		{Name: "trace_id", Type: field.TypeString, Default: ""},
+		{Name: "session_id", Type: field.TypeString, Default: ""},
+		{Name: "job_id", Type: field.TypeString, Default: ""},
+		{Name: "upstream_id", Type: field.TypeString, Default: ""},
+		{Name: "model", Type: field.TypeString, Default: ""},
+		{Name: "occurrence_count", Type: field.TypeInt, Default: 1},
+		{Name: "first_seen_at", Type: field.TypeTime},
+		{Name: "last_seen_at", Type: field.TypeTime},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+		{Name: "read_at", Type: field.TypeTime, Nullable: true},
+		{Name: "resolved_at", Type: field.TypeTime, Nullable: true},
+	}
+	// SystemEventsTable holds the schema information for the "system_events" table.
+	SystemEventsTable = &schema.Table{
+		Name:       "system_events",
+		Columns:    SystemEventsColumns,
+		PrimaryKey: []*schema.Column{SystemEventsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "systemevent_status_last_seen_at",
+				Unique:  false,
+				Columns: []*schema.Column{SystemEventsColumns[5], SystemEventsColumns[16]},
+			},
+			{
+				Name:    "systemevent_source_category_last_seen_at",
+				Unique:  false,
+				Columns: []*schema.Column{SystemEventsColumns[2], SystemEventsColumns[3], SystemEventsColumns[16]},
+			},
+			{
+				Name:    "systemevent_trace_id_last_seen_at",
+				Unique:  false,
+				Columns: []*schema.Column{SystemEventsColumns[9], SystemEventsColumns[16]},
+			},
+		},
+	}
+	// TraceFindingsColumns holds the columns for the "trace_findings" table.
+	TraceFindingsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt, Increment: true},
+		{Name: "trace_id", Type: field.TypeString},
+		{Name: "finding_id", Type: field.TypeString},
+		{Name: "category", Type: field.TypeString},
+		{Name: "severity", Type: field.TypeString},
+		{Name: "confidence", Type: field.TypeFloat64, Default: 0},
+		{Name: "title", Type: field.TypeString, Default: ""},
+		{Name: "description", Type: field.TypeString, Default: ""},
+		{Name: "evidence_path", Type: field.TypeString, Default: ""},
+		{Name: "evidence_excerpt", Type: field.TypeString, Default: ""},
+		{Name: "node_id", Type: field.TypeString, Default: ""},
+		{Name: "detector", Type: field.TypeString},
+		{Name: "detector_version", Type: field.TypeString},
+		{Name: "created_at", Type: field.TypeTime},
+	}
+	// TraceFindingsTable holds the schema information for the "trace_findings" table.
+	TraceFindingsTable = &schema.Table{
+		Name:       "trace_findings",
+		Columns:    TraceFindingsColumns,
+		PrimaryKey: []*schema.Column{TraceFindingsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "tracefinding_trace_id_finding_id",
+				Unique:  true,
+				Columns: []*schema.Column{TraceFindingsColumns[1], TraceFindingsColumns[2]},
+			},
+			{
+				Name:    "tracefinding_trace_id_severity_category",
+				Unique:  false,
+				Columns: []*schema.Column{TraceFindingsColumns[1], TraceFindingsColumns[4], TraceFindingsColumns[3]},
+			},
+		},
+	}
 	// LogsColumns holds the columns for the "logs" table.
 	LogsColumns = []*schema.Column{
 		{Name: "path", Type: field.TypeString},
@@ -563,6 +792,33 @@ var (
 				Name:    "tracelog_request_id",
 				Unique:  false,
 				Columns: []*schema.Column{LogsColumns[5]},
+			},
+		},
+	}
+	// TraceObservationsColumns holds the columns for the "trace_observations" table.
+	TraceObservationsColumns = []*schema.Column{
+		{Name: "trace_id", Type: field.TypeString},
+		{Name: "parser", Type: field.TypeString},
+		{Name: "parser_version", Type: field.TypeString},
+		{Name: "status", Type: field.TypeString},
+		{Name: "provider", Type: field.TypeString, Default: ""},
+		{Name: "operation", Type: field.TypeString, Default: ""},
+		{Name: "model", Type: field.TypeString, Default: ""},
+		{Name: "summary_json", Type: field.TypeString, Default: "{}"},
+		{Name: "warnings_json", Type: field.TypeString, Default: "[]"},
+		{Name: "created_at", Type: field.TypeTime},
+		{Name: "updated_at", Type: field.TypeTime},
+	}
+	// TraceObservationsTable holds the schema information for the "trace_observations" table.
+	TraceObservationsTable = &schema.Table{
+		Name:       "trace_observations",
+		Columns:    TraceObservationsColumns,
+		PrimaryKey: []*schema.Column{TraceObservationsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "traceobservation_status_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{TraceObservationsColumns[3], TraceObservationsColumns[10]},
 			},
 		},
 	}
@@ -682,6 +938,8 @@ var (
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
 		APITokensTable,
+		AnalysisJobsTable,
+		AnalysisRunsTable,
 		ChannelConfigsTable,
 		ChannelModelsTable,
 		ChannelProbeRunsTable,
@@ -691,11 +949,17 @@ var (
 		ExecutionEventsTable,
 		ExperimentRunsTable,
 		ModelCatalogTable,
+		ParseJobsTable,
+		ParserVersionsTable,
 		RequestAuditsTable,
 		ResponsesTable,
 		ResponseItemsTable,
 		ScoresTable,
+		SemanticNodesTable,
+		SystemEventsTable,
+		TraceFindingsTable,
 		LogsTable,
+		TraceObservationsTable,
 		UpstreamExchangesTable,
 		UpstreamModelsTable,
 		UpstreamTargetsTable,
@@ -707,6 +971,14 @@ func init() {
 	APITokensTable.ForeignKeys[0].RefTable = UsersTable
 	APITokensTable.Annotation = &entsql.Annotation{
 		IncrementStart: func(i int) *int { return &i }(0),
+	}
+	AnalysisJobsTable.Annotation = &entsql.Annotation{
+		Table:          "analysis_jobs",
+		IncrementStart: func(i int) *int { return &i }(81604378624),
+	}
+	AnalysisRunsTable.Annotation = &entsql.Annotation{
+		Table:          "analysis_runs",
+		IncrementStart: func(i int) *int { return &i }(85899345920),
 	}
 	ChannelConfigsTable.Annotation = &entsql.Annotation{
 		Table:          "channel_configs",
@@ -744,6 +1016,14 @@ func init() {
 		Table:          "model_catalog",
 		IncrementStart: func(i int) *int { return &i }(55834574848),
 	}
+	ParseJobsTable.Annotation = &entsql.Annotation{
+		Table:          "parse_jobs",
+		IncrementStart: func(i int) *int { return &i }(90194313216),
+	}
+	ParserVersionsTable.Annotation = &entsql.Annotation{
+		Table:          "parser_versions",
+		IncrementStart: func(i int) *int { return &i }(94489280512),
+	}
 	RequestAuditsTable.Annotation = &entsql.Annotation{
 		Table:          "request_audits",
 		IncrementStart: func(i int) *int { return &i }(73014444032),
@@ -760,9 +1040,25 @@ func init() {
 		Table:          "scores",
 		IncrementStart: func(i int) *int { return &i }(25769803776),
 	}
+	SemanticNodesTable.Annotation = &entsql.Annotation{
+		Table:          "semantic_nodes",
+		IncrementStart: func(i int) *int { return &i }(98784247808),
+	}
+	SystemEventsTable.Annotation = &entsql.Annotation{
+		Table:          "system_events",
+		IncrementStart: func(i int) *int { return &i }(103079215104),
+	}
+	TraceFindingsTable.Annotation = &entsql.Annotation{
+		Table:          "trace_findings",
+		IncrementStart: func(i int) *int { return &i }(107374182400),
+	}
 	LogsTable.Annotation = &entsql.Annotation{
 		Table:          "logs",
 		IncrementStart: func(i int) *int { return &i }(30064771072),
+	}
+	TraceObservationsTable.Annotation = &entsql.Annotation{
+		Table:          "trace_observations",
+		IncrementStart: func(i int) *int { return &i }(111669149696),
 	}
 	UpstreamExchangesTable.Annotation = &entsql.Annotation{
 		Table:          "upstream_exchanges",

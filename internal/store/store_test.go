@@ -246,6 +246,110 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	if got.LogPath != recordPath || !got.Header.Layout.IsStream {
 		t.Fatalf("postgres log round trip mismatch: path=%q stream=%v", got.LogPath, got.Header.Layout.IsStream)
 	}
+
+	runID, err := st.SaveAnalysisRun(AnalysisRunRecord{
+		TraceID:         "trace_" + suffix,
+		Kind:            "postgres_smoke",
+		Analyzer:        "store_test",
+		AnalyzerVersion: "1",
+		InputRef:        "trace:" + suffix,
+		OutputJSON:      "{}",
+		Status:          "completed",
+	})
+	if err != nil {
+		t.Fatalf("SaveAnalysisRun(postgres) error = %v", err)
+	}
+	if runID == 0 {
+		t.Fatalf("SaveAnalysisRun(postgres) id = 0")
+	}
+	job, err := st.CreateAnalysisJob(AnalysisJobRecord{
+		JobType:     "postgres_smoke",
+		TargetType:  "trace",
+		TargetID:    "trace_" + suffix,
+		Status:      "queued",
+		StepsJSON:   "[]",
+		RequestJSON: "{}",
+		ResultJSON:  "{}",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysisJob(postgres) error = %v", err)
+	}
+	if job.ID == 0 {
+		t.Fatalf("CreateAnalysisJob(postgres) id = 0")
+	}
+
+	observationTraceID := "trace_observation_" + suffix
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       observationTraceID,
+		Provider:      "openai_compatible",
+		Operation:     "chat.completions",
+		Model:         "gpt-test",
+		Parser:        "postgres-smoke",
+		ParserVersion: "1",
+		Status:        observe.ParseStatusParsed,
+		Response: observe.ObservationResponse{
+			Nodes: []observe.SemanticNode{{
+				ID:             "node_" + suffix,
+				ProviderType:   "message",
+				NormalizedType: observe.NodeMessage,
+				Role:           "assistant",
+				Path:           "$.choices[0].message",
+				Text:           "hello postgres",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("SaveObservation(postgres) error = %v", err)
+	}
+	nodes, err := st.ListSemanticNodes(observationTraceID)
+	if err != nil {
+		t.Fatalf("ListSemanticNodes(postgres) error = %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Node.Text != "hello postgres" {
+		t.Fatalf("postgres semantic nodes = %+v, want one saved node", nodes)
+	}
+
+	if err := st.SaveFindings(observationTraceID, []observe.Finding{{
+		ID:              "finding_" + suffix,
+		Category:        "postgres_smoke",
+		Severity:        observe.SeverityMedium,
+		Confidence:      0.75,
+		Title:           "Postgres finding",
+		EvidencePath:    "trace#" + observationTraceID,
+		EvidenceExcerpt: "postgres finding evidence",
+		Detector:        "store_test",
+		DetectorVersion: "1",
+	}}); err != nil {
+		t.Fatalf("SaveFindings(postgres) error = %v", err)
+	}
+	findings, err := st.ListFindings(observationTraceID, FindingFilter{Category: "postgres_smoke"})
+	if err != nil {
+		t.Fatalf("ListFindings(postgres) error = %v", err)
+	}
+	if len(findings) != 1 || findings[0].Title != "Postgres finding" {
+		t.Fatalf("postgres findings = %+v, want one saved finding", findings)
+	}
+
+	event, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: "postgres_smoke_" + suffix,
+		Source:      "store_test",
+		Category:    "postgres_runtime",
+		Severity:    "info",
+		Status:      SystemEventStatusUnread,
+		Title:       "Postgres runtime smoke",
+		Message:     "runtime table coverage",
+		TraceID:     observationTraceID,
+		DetailsJSON: json.RawMessage(`{"postgres":true}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(postgres) error = %v", err)
+	}
+	events, err := st.ListSystemEvents(SystemEventFilter{Source: "store_test", Category: "postgres_runtime", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(postgres) error = %v", err)
+	}
+	if events.Total == 0 || len(events.Items) == 0 || events.Items[0].ID != event.ID {
+		t.Fatalf("postgres system events = %+v, want event %q", events, event.ID)
+	}
 }
 
 func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
