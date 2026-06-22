@@ -379,6 +379,149 @@ func TestAuthCreateTokenDryRunJSONDoesNotRequireDatabase(t *testing.T) {
 	}
 }
 
+func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "up", "--dry-run", "--step", "2"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun    bool   `json:"dry_run"`
+			Mutated   bool   `json:"mutated"`
+			Driver    string `json:"driver"`
+			DSN       string `json:"dsn"`
+			Direction string `json:"direction"`
+			Steps     int    `json:"steps"`
+			All       bool   `json:"all"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.up" {
+		t.Fatalf("envelope command = %+v, want db.migrate.up", envelope)
+	}
+	if !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "up" || envelope.Result.Steps != 2 || envelope.Result.All {
+		t.Fatalf("dry-run result = %+v", envelope.Result)
+	}
+	if strings.Contains(envelope.Result.DSN, "secret") || strings.Contains(envelope.Command, "auth") {
+		t.Fatalf("db migrate dry-run leaked auth namespace or secret: command=%q dsn=%q", envelope.Command, envelope.Result.DSN)
+	}
+}
+
+func TestDBMigrateDownDryRunJSONCanPreviewUnsupportedRollback(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "down", "--dry-run", "--step", "1", "--all"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun    bool   `json:"dry_run"`
+			Mutated   bool   `json:"mutated"`
+			Driver    string `json:"driver"`
+			Direction string `json:"direction"`
+			Steps     int    `json:"steps"`
+			All       bool   `json:"all"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.down" {
+		t.Fatalf("envelope command = %+v, want db.migrate.down", envelope)
+	}
+	if !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "down" || envelope.Result.Steps != 1 || !envelope.Result.All {
+		t.Fatalf("dry-run result = %+v", envelope.Result)
+	}
+}
+
+func TestDBMigrateDownWithoutDryRunIsUnsupported(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	if code := runAppDBMigrateWithOptions(appDBMigrateOptions{
+		configPath: writePostgresDBMigrateConfig(t),
+		direction:  "down",
+		format:     "json",
+		stdout:     &out,
+	}); code != 2 {
+		t.Fatalf("runAppDBMigrateWithOptions() = %d, want 2, output=%s", code, out.String())
+	}
+}
+
+func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "auth", "migrate", "up", "--dry-run", "--step", "1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun    bool   `json:"dry_run"`
+			Mutated   bool   `json:"mutated"`
+			Driver    string `json:"driver"`
+			Direction string `json:"direction"`
+			Steps     int    `json:"steps"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "auth.migrate.up" {
+		t.Fatalf("envelope command = %+v, want auth.migrate.up", envelope)
+	}
+	if !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "up" || envelope.Result.Steps != 1 {
+		t.Fatalf("auth dry-run result = %+v", envelope.Result)
+	}
+}
+
+func writePostgresDBMigrateConfig(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: postgres
+  dsn: "postgres://user:secret@127.0.0.1:15432/llm_tracelab?sslmode=disable"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	return configPath
+}
+
 func TestDBSecretStatusAndExportCommands(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")

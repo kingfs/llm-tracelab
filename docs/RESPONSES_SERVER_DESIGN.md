@@ -15,7 +15,7 @@
 - cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
 - ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
 - hosted web_search 首切：新增 `tools.web_search` 配置和 `internal/responses/tools/websearch` provider，支持 disabled/mock/SearXNG。开启后，非流式 Responses runtime 可把 `web_search` / `web_search_preview` 暴露为上游 Chat Completions function tool，执行 server-side search，并把 tool result 注入第二轮 Chat Completions。
-- SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client，Postgres 路径已具备打开和 ent schema 基础，但完整生产 migration、运维流程和审计查询仍未完成。
+- SQLite/Postgres 当前状态：SQLite raw DDL 已创建 `responses` / `response_items` 表并支持本地 fallback；store 层可打开 `database.driver=postgres` 并创建 ent client。`db migrate up` 已从 auth migrator 中拆出并归入应用库命令，但当前 Postgres 路径仍依赖 ent `Schema.Create` 这类非版本化建表能力；完整生产 migration、运维流程和审计查询仍未完成。详见 [Postgres Storage Migration](./POSTGRES_STORAGE_MIGRATION.md)。
 
 当前明确未完成：
 
@@ -194,6 +194,8 @@ providers:
 
 截至 2026-06-22，当前实现已有 ent-backed runtime store，覆盖 `responses` 和 `response_items` 两张表。serve 装配时，如果 trace store 提供 ent client，则 Responses runtime 使用 `runtime.NewEntStore`；否则退回 memory store。SQLite raw DDL 已包含这两张表。Postgres store 可以通过 `database.driver=postgres` 打开并创建 ent client，但完整 migration、审计表和生产运维流程仍未完成。
 
+Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库迁移命令，覆盖 trace index、channel/model/routing 数据、Responses state 和后续 audit 表，并同时支持 SQLite fallback 与 Postgres-first 部署；`auth migrate` 继续只负责 users/tokens 等认证 schema。当前 `db migrate up` 已拆出为应用库初始化路径，`db migrate down` 在非 dry-run 下明确不支持；它还不是基于 checked-in SQL 的版本化 Postgres migrator。`internal/auth/migrate.go` 的 embedded migrations 仍只支持 SQLite。Postgres auth migration 是后续独立缺口，不应阻塞把 Responses ent store 归入应用库迁移域。
+
 ### Postgres-first semantic store
 
 生产和长会话场景建议使用 Postgres 保存 Responses semantic state：
@@ -329,7 +331,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - usage、tool call delta、final response event 顺序稳定。
 - cancel 不破坏已写 audit/cassette 关联。
 
-### Stage 2：Postgres-first Persistence/Audit（部分落地）
+### Stage 2 / Stage 6：Postgres-first Persistence/Audit（部分落地）
 
 产物：
 
@@ -344,7 +346,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - SQLite fallback 仍能运行最小 server/test。
 - 旧 `.http` replay 不连接 DB。
 
-当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore` 和 Postgres 打开路径已落地；完整 Postgres migration 生产化、request audit、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。
+当前状态：ent schema、SQLite raw DDL、`runtime.NewEntStore`、Postgres 打开路径和应用库 `db migrate up` 初始化路径已落地；完整 Postgres migration 生产化、request audit、execution events、upstream exchange 查询和 Monitor/MCP semantic diagnostics 仍未完成。Stage 6A/6B 的边界是先冻结迁移职责并拆出应用库命令：Responses ent store 属于应用库；`auth migrate` 属于认证库迁移命令，当前 embedded migrations 只支持 SQLite，Postgres auth migration 另行处理。
 
 ### Stage 3：Hosted tools 与 compact（部分落地）
 

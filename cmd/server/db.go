@@ -20,6 +20,18 @@ type dbSecretOptions struct {
 	yes        bool
 }
 
+type appDBMigrateOptions struct {
+	configPath string
+	direction  string
+	steps      int
+	all        bool
+	dryRun     bool
+	format     string
+	stdout     io.Writer
+}
+
+const appDBMigrateDownUnsupportedMessage = "db migrate down is unsupported for ent auto migration; restore from backup or use a manual migration plan"
+
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "db",
@@ -39,10 +51,52 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 			return requireSubcommand(cmd)
 		},
 	}
-	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "up", "Apply application database migrations"))
-	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "down", "Roll back application database migrations"))
+	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "up", "Apply application database migrations"))
+	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "down", "Roll back application database migrations"))
 	cmd.AddCommand(migrateCmd)
 	cmd.AddCommand(newDBSecretCommand(runtime))
+	return cmd
+}
+
+func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, short string) *cobra.Command {
+	var steps int
+	var all bool
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   direction,
+		Short: short,
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := appDBMigrateOptions{
+				configPath: runtime.configPath(),
+				direction:  direction,
+				steps:      steps,
+				all:        all,
+				dryRun:     dryRun,
+				format:     runtime.outputFormat(),
+				stdout:     cmd.OutOrStdout(),
+			}
+			code := runAppDBMigrateWithOptions(opts)
+			if code == 0 {
+				return nil
+			}
+			if direction == "down" && !dryRun {
+				return cliExitError{
+					code:     exitCodeUsage,
+					category: errorCategoryUsage,
+					errCode:  "UNSUPPORTED_DB_MIGRATE_DOWN",
+					message:  appDBMigrateDownUnsupportedMessage,
+					field:    "direction",
+				}
+			}
+			return cliExitErrorFromCode(code)
+		},
+	}
+	cmd.Flags().IntVar(&steps, "step", 0, "Apply only N migration steps")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview migration without changing the database")
+	if direction == "down" {
+		cmd.Flags().BoolVar(&all, "all", false, "Roll back all migrations")
+	}
 	return cmd
 }
 
@@ -120,6 +174,58 @@ func newDBSecretRotateCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "Confirm rotation and local master key replacement")
 	return cmd
+}
+
+func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
+		return 1
+	}
+	result := map[string]any{
+		"dry_run":   opts.dryRun,
+		"mutated":   false,
+		"driver":    cfg.DatabaseDriver(),
+		"dsn":       config.RedactDSN(cfg.DatabaseDSN()),
+		"direction": opts.direction,
+		"steps":     opts.steps,
+		"all":       opts.all,
+	}
+	if opts.dryRun {
+		return writeDryRunResult(opts.stdout, opts.format, "db.migrate."+opts.direction, result)
+	}
+	switch opts.direction {
+	case "up":
+		st, err := store.NewWithDatabase(
+			cfg.TraceOutputDir(),
+			cfg.DatabaseDriver(),
+			cfg.DatabaseDSN(),
+			cfg.DatabaseMaxOpenConns(),
+			cfg.DatabaseMaxIdleConns(),
+		)
+		if err != nil {
+			slog.Error("Application database migration failed", "error", err)
+			return 1
+		}
+		defer st.Close()
+		result["mutated"] = true
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.up", result, func(w io.Writer) error {
+			fmt.Fprintf(w, "application database schema migration applied\n")
+			fmt.Fprintf(w, "driver: %s\n", cfg.DatabaseDriver())
+			fmt.Fprintf(w, "dsn: %s\n", config.RedactDSN(cfg.DatabaseDSN()))
+			return nil
+		}); err != nil {
+			slog.Error("Write db migrate result failed", "error", err)
+			return 1
+		}
+		return 0
+	case "down":
+		fmt.Fprintln(os.Stderr, appDBMigrateDownUnsupportedMessage)
+		return 2
+	default:
+		fmt.Fprintf(os.Stderr, "unknown db migrate direction %q\n", opts.direction)
+		return 2
+	}
 }
 
 func runDBSecretStatusWithOptions(opts dbSecretOptions) int {
