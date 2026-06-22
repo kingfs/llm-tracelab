@@ -3,9 +3,12 @@
 These fixtures document the first offline Codex/OpenAI SDK compatibility
 profile for llm-tracelab Responses server-mode.
 
-They are wired into focused offline Go tests under `internal/responses/httpapi`
-and `internal/responses/runtime`. The tests validate fixture schema/contract
-shape and a small runtime/parser alignment surface without depending on real
+They are wired into a focused offline fixture runner under
+`internal/responses/httpapi` and runtime alignment tests under
+`internal/responses/runtime`. The runner enumerates every current `.json` and
+`.ndjson` fixture in this directory, validates request/response/error/stream
+shape, and fails when the inventory changes without an explicit test update.
+Use `task test:codex-fixtures` to run the gate. It does not depend on real
 Codex, real model providers, wall clock time, or network access.
 
 Coverage:

@@ -6,22 +6,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/kingfs/llm-tracelab/internal/responses/codexfixtures"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 )
 
-func codexFixturePath(name string) string {
-	return filepath.Join("..", "..", "..", "tests", "fixtures", "codex", name)
-}
-
 func loadCodexFixture(t *testing.T, name string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(codexFixturePath(name))
+	data, err := codexfixtures.Load(name)
 	if err != nil {
 		t.Fatalf("read codex fixture %s: %v", name, err)
 	}
@@ -35,6 +30,31 @@ func decodeCodexFixture[T any](t *testing.T, name string) T {
 		t.Fatalf("decode codex fixture %s: %v", name, err)
 	}
 	return out
+}
+
+func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
+	if err := codexfixtures.ValidateAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := codexfixtures.Names()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"function_call_expected_response.json",
+		"function_call_output_continuation_request.json",
+		"function_call_request.json",
+		"ordinary_web_search_descriptor_request.json",
+		"stream_text_events.ndjson",
+		"stream_text_request.json",
+		"text_create_expected_response.json",
+		"text_create_request.json",
+		"unsupported_hosted_tool_expected_error.json",
+	}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("codex fixture inventory changed without runner update\nwant: %#v\n got: %#v", want, names)
+	}
 }
 
 func requireStoreTrue(t *testing.T, req protocol.CreateResponseRequest) {
@@ -234,12 +254,7 @@ func TestCodexStreamTextEventFixtureContract(t *testing.T) {
 }
 
 func TestCodexUnsupportedHostedToolExpectedErrorFixtureContract(t *testing.T) {
-	type fixture struct {
-		RequestExamples []protocol.CreateResponseRequest `json:"request_examples"`
-		ExpectedError   protocol.ErrorResponse           `json:"expected_error"`
-		Notes           []string                         `json:"notes"`
-	}
-	fx := decodeCodexFixture[fixture](t, "unsupported_hosted_tool_expected_error.json")
+	fx := decodeCodexFixture[codexfixtures.ExpectedErrorFixture](t, "unsupported_hosted_tool_expected_error.json")
 
 	wantTypes := []string{"mcp", "file_search", "code_interpreter"}
 	if len(fx.RequestExamples) != len(wantTypes) {
@@ -279,11 +294,11 @@ func TestCodexUnsupportedHostedToolExpectedErrorFixtureContract(t *testing.T) {
 }
 
 func TestCodexFixtureRequestsReachHTTPAPI(t *testing.T) {
-	for _, name := range []string{
-		"text_create_request.json",
-		"function_call_request.json",
-		"function_call_output_continuation_request.json",
-	} {
+	names, err := codexfixtures.RequestNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			rt := &fakeRuntime{
 				createResp: protocol.Response{
@@ -301,6 +316,9 @@ func TestCodexFixtureRequestsReachHTTPAPI(t *testing.T) {
 
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+			}
+			if rt.createReq.Stream && !strings.Contains(rec.Body.String(), `"type":"response.completed"`) {
+				t.Fatalf("stream body did not include response.completed: %s", rec.Body.String())
 			}
 			if rt.createReq.Model != "local-test-model" {
 				t.Fatalf("runtime request model = %q, want local-test-model", rt.createReq.Model)

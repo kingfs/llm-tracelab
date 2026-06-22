@@ -102,6 +102,11 @@ tasks:
     cmds:
       - go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest
 
+  test:codex-fixtures:
+    desc: Run offline Codex Responses fixture runner tests
+    cmds:
+      - env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1
+
   test:short:
     desc: Run short unit tests
     cmds:
