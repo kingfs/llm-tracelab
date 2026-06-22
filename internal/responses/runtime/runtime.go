@@ -33,12 +33,25 @@ type Runtime struct {
 	cfg               Config
 	client            ChatCompletionsClient
 	store             Store
+	tokenEstimator    TokenEstimator
 	webSearchProvider websearch.Provider
 	functionExecutors map[string]configuredFunctionToolExecutor
 	events            audit.ExecutionEventRecorder
 }
 
 type Option func(*Runtime)
+
+type TokenEstimator interface {
+	EstimateResponsePromptTokens(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) int
+}
+
+func WithTokenEstimator(estimator TokenEstimator) Option {
+	return func(r *Runtime) {
+		if estimator != nil {
+			r.tokenEstimator = estimator
+		}
+	}
+}
 
 func WithWebSearchProvider(provider websearch.Provider) Option {
 	return func(r *Runtime) {
@@ -80,9 +93,10 @@ func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) 
 		cfg.MaxToolIterations = 4
 	}
 	rt := &Runtime{
-		cfg:    cfg,
-		client: client,
-		store:  store,
+		cfg:            cfg,
+		client:         client,
+		store:          store,
+		tokenEstimator: conservativeTokenEstimator{},
 	}
 	for _, opt := range opts {
 		opt(rt)
@@ -716,7 +730,7 @@ func (r *Runtime) autoCompactDecision(req protocol.CreateResponseRequest, budget
 	if budget.ContextWindowTokens <= 0 {
 		return decision
 	}
-	estimatedInputTokens := estimateResponsePromptTokens(req, history, inputItems, webSearchReady)
+	estimatedInputTokens := r.tokenEstimator.EstimateResponsePromptTokens(req, history, inputItems, webSearchReady)
 	reservedOutputTokens := effectiveMaxOutputTokens(req, budget)
 	if estimatedInputTokens+reservedOutputTokens > budget.ContextWindowTokens {
 		decision.ShouldCompact = true
@@ -1033,7 +1047,9 @@ func chatCompletionRequest(req protocol.CreateResponseRequest, model string, his
 	}
 }
 
-func estimateResponsePromptTokens(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) int {
+type conservativeTokenEstimator struct{}
+
+func (conservativeTokenEstimator) EstimateResponsePromptTokens(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) int {
 	tools := responseToolsToChatTools(req.Tools, webSearchReady)
 	messages := responseInputToMessages(req, history, inputItems)
 	return estimateChatMessagesTokens(messages) + estimateChatToolsTokens(tools) + estimateJSONishTokens(req.ToolChoice) + 8
