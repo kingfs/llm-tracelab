@@ -19,8 +19,13 @@ const (
 
 	APITypeChatCompletions = "chat_completions"
 	APITypeResponses       = "responses"
+	APITypeResponsesNative = "responses_native"
+	APITypeMessages        = "messages"
+	APITypeGemini          = "gemini_generate_content"
 	APIModeProxy           = "proxy"
+	APIModeRecordOnly      = "record_only"
 	APIModeServer          = "server"
+	APIModeResponsesServer = "responses_server"
 
 	CapabilityResponses       = "responses"
 	CapabilityChatCompletions = "chat_completions"
@@ -139,7 +144,10 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
 	}
 	if resolved.APIType == "" {
-		resolved.APIType = APITypeChatCompletions
+		resolved.APIType = defaultAPITypeForProtocolFamily(resolved.ProtocolFamily)
+	}
+	if err := validateAPISurface(resolved); err != nil {
+		return ResolvedUpstream{}, err
 	}
 	if err := validateResolvedPreset(resolved); err != nil {
 		return ResolvedUpstream{}, err
@@ -453,12 +461,34 @@ func (u ResolvedUpstream) Capability(name string) (bool, bool) {
 
 func (u ResolvedUpstream) NativeResponsesServerMode() bool {
 	enabled, configured := u.Capability(CapabilityResponses)
-	return u.APIType == APITypeResponses && u.Mode == APIModeServer && (!configured || enabled)
+	return isResponsesAPIType(u.APIType) && isServerMode(u.Mode) && (!configured || enabled)
 }
 
 func (u ResolvedUpstream) ChatCompletionsServerMode() bool {
 	enabled, configured := u.Capability(CapabilityChatCompletions)
-	return u.APIType == APITypeChatCompletions && u.Mode == APIModeServer && (!configured || enabled)
+	return u.SupportsChatCompletionsAPI() && isServerMode(u.Mode) && (!configured || enabled)
+}
+
+func (u ResolvedUpstream) SupportsChatCompletionsAPI() bool {
+	enabled, configured := u.Capability(CapabilityChatCompletions)
+	if configured && !enabled {
+		return false
+	}
+	if u.APIType == APITypeChatCompletions {
+		return true
+	}
+	return configured && enabled
+}
+
+func (u ResolvedUpstream) SupportsResponsesAPI() bool {
+	enabled, configured := u.Capability(CapabilityResponses)
+	if configured && !enabled {
+		return false
+	}
+	if isResponsesAPIType(u.APIType) {
+		return true
+	}
+	return configured && enabled
 }
 
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
@@ -563,6 +593,49 @@ func capabilityValue(value *bool) (bool, bool) {
 		return false, false
 	}
 	return *value, true
+}
+
+func defaultAPITypeForProtocolFamily(protocolFamily string) string {
+	switch protocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		return APITypeMessages
+	case ProtocolFamilyGoogleGenAI, ProtocolFamilyVertexNative:
+		return APITypeGemini
+	default:
+		return APITypeChatCompletions
+	}
+}
+
+func validateAPISurface(resolved ResolvedUpstream) error {
+	switch resolved.APIType {
+	case APITypeChatCompletions, APITypeResponses, APITypeResponsesNative, APITypeMessages, APITypeGemini:
+	default:
+		return fmt.Errorf("unsupported upstream.api_type %q", resolved.APIType)
+	}
+	switch resolved.Mode {
+	case "", APIModeProxy, APIModeRecordOnly, APIModeServer, APIModeResponsesServer:
+	default:
+		return fmt.Errorf("unsupported upstream.mode %q", resolved.Mode)
+	}
+	switch resolved.ProtocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		if resolved.APIType != APITypeMessages {
+			return fmt.Errorf("upstream.api_type=%q is incompatible with protocol_family=%q", resolved.APIType, resolved.ProtocolFamily)
+		}
+	case ProtocolFamilyGoogleGenAI, ProtocolFamilyVertexNative:
+		if resolved.APIType != APITypeGemini {
+			return fmt.Errorf("upstream.api_type=%q is incompatible with protocol_family=%q", resolved.APIType, resolved.ProtocolFamily)
+		}
+	}
+	return nil
+}
+
+func isResponsesAPIType(apiType string) bool {
+	return apiType == APITypeResponses || apiType == APITypeResponsesNative
+}
+
+func isServerMode(mode string) bool {
+	return mode == APIModeServer || mode == APIModeResponsesServer
 }
 
 func validateOpenAIBasePath(resolved ResolvedUpstream) error {

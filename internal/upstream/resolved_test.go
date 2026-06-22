@@ -252,6 +252,51 @@ func TestResolveDefaultsAPISurface(t *testing.T) {
 	}
 }
 
+func TestResolveDefaultsAPISurfaceByProtocolFamily(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.UpstreamConfig
+		wantAPI string
+	}{
+		{
+			name: "anthropic_messages",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+			},
+			wantAPI: APITypeMessages,
+		},
+		{
+			name: "google_generate_content",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+			wantAPI: APITypeGemini,
+		},
+		{
+			name: "vertex_generate_content",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				ModelResource:  "publishers/google/models",
+			},
+			wantAPI: APITypeGemini,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := Resolve(tt.cfg)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if resolved.APIType != tt.wantAPI {
+				t.Fatalf("APIType = %q, want %q", resolved.APIType, tt.wantAPI)
+			}
+		})
+	}
+}
+
 func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -320,6 +365,31 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				BaseURL: "https://api.openai.com",
 			},
 			wantErr: `upstream.base_url must include the upstream API path prefix for protocol_family="openai_compatible" (examples: /v1, /api/v1, /openai, /openai/v1)`,
+		},
+		{
+			name: "unknown_api_type",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.openai.com/v1",
+				APIType: "not_real",
+			},
+			wantErr: `unsupported upstream.api_type "not_real"`,
+		},
+		{
+			name: "unknown_mode",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.openai.com/v1",
+				Mode:    "sidecar",
+			},
+			wantErr: `unsupported upstream.mode "sidecar"`,
+		},
+		{
+			name: "anthropic_api_type_mismatch",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+				APIType:        APITypeChatCompletions,
+			},
+			wantErr: `upstream.api_type="chat_completions" is incompatible with protocol_family="anthropic_messages"`,
 		},
 	}
 

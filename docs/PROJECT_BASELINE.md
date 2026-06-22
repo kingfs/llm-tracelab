@@ -33,7 +33,7 @@ TraceLab 当前提供：
 - 不在代理热路径中做跨协议请求转换。
 - OpenAI-compatible provider 只能声明兼容其实际支持的 endpoint。
 - Responses server-mode 默认关闭；关闭时 `/v1/responses` 仍按普通 OpenAI-compatible endpoint 代理透传。
-- 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现非流式 Responses 响应。
+- 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现非流式 Responses 响应；该内部调用会受 upstream `api_type` / capabilities 约束，不会选择显式关闭 Chat Completions 能力的 Responses-native target。
 - 开启 `tools.web_search.enabled=true` 后，非流式 Responses runtime 可执行 hosted `web_search` / `web_search_preview` 首切，provider 支持 `mock` 和 SearXNG；有 ent-backed audit store 时会写 hosted web_search `response.tool_call` started/completed/failed events。
 - 非 Responses 请求不进入 Responses runtime，继续走现有代理、路由、录制和解析路径。
 
@@ -65,7 +65,7 @@ SQLite 当前负责：
 
 启动时 schema 升级必须兼容已有本地 DB。
 
-Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration 和运维生产化还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Monitor UI 查询与完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
+Responses server-mode 当前优先使用 ent-backed runtime store。SQLite raw DDL 已包含 `responses` / `response_items`；store 层存在 Postgres 打开路径并能创建 ent client，但完整 Postgres migration 和运维生产化还不是当前基线能力。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，Stage 15A 已接入 upstream API surface 解析校验和 Chat Completions 路由约束。Monitor UI 查询与完整 function-tool/stream/cancel/compact events 仍不是当前基线能力。
 
 Stage 9 audit 表职责边界：
 

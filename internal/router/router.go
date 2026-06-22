@@ -1598,8 +1598,22 @@ func supportsPath(target *Target, rawPath string) bool {
 	if !supportsProtocolFamily(target.Upstream.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
 		return false
 	}
+	if !supportsAPISurface(target.Upstream, semantics.Endpoint) {
+		return false
+	}
 	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
 	return err == nil
+}
+
+func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string) bool {
+	switch llm.NormalizeEndpoint(endpoint) {
+	case "/v1/chat/completions":
+		return resolved.SupportsChatCompletionsAPI()
+	case "/v1/responses":
+		return resolved.SupportsResponsesAPI() || resolved.APIType == upstream.APITypeChatCompletions
+	default:
+		return true
+	}
 }
 
 func supportsProtocolFamily(protocolFamily string, provider string, endpoint string) bool {

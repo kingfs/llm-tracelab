@@ -47,6 +47,11 @@ upstreams:
       base_url: "https://api.openai.com/v1"
       api_key: "$env:LLM_API_KEY"
       provider_preset: "openai"
+      api_type: "chat_completions"
+      mode: "proxy"
+      capabilities:
+        chat_completions: true
+        responses: false
       protocol_family: ""
       routing_profile: ""
       api_version: ""

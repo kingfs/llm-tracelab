@@ -185,6 +185,71 @@ func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 	}
 }
 
+func TestRouterChatCompletionsRequiresChatCapableAPISurface(t *testing.T) {
+	chatDisabled := false
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "native-responses",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ChatCompletions: &chatDisabled,
+					},
+				},
+			},
+			{
+				ID:             "chat",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "chat" {
+		t.Fatalf("selected target = %q, want chat", selection.Target.ID)
+	}
+	if selection.Decision == nil || len(selection.Decision.Candidates) != 2 {
+		t.Fatalf("selection decision missing candidates: %+v", selection.Decision)
+	}
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID == "native-responses" && (candidate.SupportsPath || candidate.FilterReason != "unsupported_path") {
+			t.Fatalf("native responses candidate = %+v, want unsupported_path", candidate)
+		}
+	}
+}
+
 func TestRouterSelectReturnsStructuredNoSupportingTargetError(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
