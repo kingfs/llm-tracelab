@@ -385,7 +385,11 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		rt := responsesruntime.New(responsesruntime.Config{
 			DefaultModel: cfg.ResponsesDefaultModel(),
 			ForceStore:   cfg.ResponsesForceStore(),
-		}, &responsesChatCompletionsAdapter{router: rtr}, responsesruntime.NewMemoryStore())
+		}, &responsesChatCompletionsAdapter{
+			router:        rtr,
+			recorder:      rec,
+			routingPolicy: rtr.Policy(),
+		}, responsesruntime.NewMemoryStore())
 		localResponses = httpapi.NewHandler(rt, httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()))
 	}
 

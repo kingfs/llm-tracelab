@@ -842,6 +842,162 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	if !ok || firstMessage["role"] != "user" || firstMessage["content"] != "ping" {
 		t.Fatalf("first chat message = %#v, want user ping", messages[0])
 	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.URL != "/v1/chat/completions" || parsed.Header.Meta.Endpoint != "/v1/chat/completions" {
+		t.Fatalf("recorded path endpoint = %q/%q, want /v1/chat/completions", parsed.Header.Meta.URL, parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Meta.Operation != "chat.completions" {
+		t.Fatalf("recorded operation = %q, want chat.completions", parsed.Header.Meta.Operation)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "openai-chat" {
+		t.Fatalf("SelectedUpstreamID = %q, want openai-chat", parsed.Header.Meta.SelectedUpstreamID)
+	}
+	if parsed.Header.Meta.SelectedUpstreamBaseURL != upstreamServer.URL+"/v1" {
+		t.Fatalf("SelectedUpstreamBaseURL = %q, want %q", parsed.Header.Meta.SelectedUpstreamBaseURL, upstreamServer.URL+"/v1")
+	}
+	if parsed.Header.Meta.SelectedUpstreamProviderPreset != "openai" {
+		t.Fatalf("SelectedUpstreamProviderPreset = %q, want openai", parsed.Header.Meta.SelectedUpstreamProviderPreset)
+	}
+	if parsed.Header.Meta.Model != "gpt-5" {
+		t.Fatalf("recorded model = %q, want gpt-5", parsed.Header.Meta.Model)
+	}
+	if parsed.Header.Meta.StatusCode != http.StatusOK {
+		t.Fatalf("recorded status = %d, want 200", parsed.Header.Meta.StatusCode)
+	}
+	if parsed.Header.Layout.IsStream {
+		t.Fatalf("recorded IsStream = true, want false")
+	}
+	if parsed.Header.Usage.PromptTokens != 3 || parsed.Header.Usage.CompletionTokens != 2 || parsed.Header.Usage.TotalTokens != 5 {
+		t.Fatalf("recorded usage = %+v, want prompt=3 completion=2 total=5", parsed.Header.Usage)
+	}
+
+	entries, err := waitForRecentEntries(st, 1, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecentEntries() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+	}
+	if entries[0].Header.Meta.Endpoint != "/v1/chat/completions" {
+		t.Fatalf("indexed endpoint = %q, want /v1/chat/completions", entries[0].Header.Meta.Endpoint)
+	}
+}
+
+func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
+	tests := []struct {
+		name              string
+		firstStatus       int
+		firstBody         string
+		wantRecordedError string
+	}{
+		{
+			name:              "upstream_non_2xx",
+			firstStatus:       http.StatusBadGateway,
+			firstBody:         `{"error":{"message":"upstream unavailable"}}`,
+			wantRecordedError: "chat completion request failed: status 502",
+		},
+		{
+			name:              "invalid_json",
+			firstStatus:       http.StatusOK,
+			firstBody:         `{"id":`,
+			wantRecordedError: "decode chat completion response JSON",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/chat/completions" {
+					http.NotFound(w, r)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.firstStatus)
+				_, _ = io.WriteString(w, tt.firstBody)
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{
+				ResponsesServer: config.ResponsesServerConfig{
+					Enabled: true,
+				},
+				Upstreams: []config.UpstreamTargetConfig{
+					{
+						ID:             "openai-chat",
+						Enabled:        boolPtr(true),
+						Priority:       100,
+						ModelDiscovery: router.ModelDiscoveryStaticOnly,
+						StaticModels:   []string{"gpt-5"},
+						Upstream: config.UpstreamConfig{
+							BaseURL:        upstreamServer.URL + "/v1",
+							ApiKey:         "upstream-secret",
+							ProviderPreset: "openai",
+							APIType:        "chat_completions",
+							Mode:           "server",
+						},
+					},
+				},
+			}
+			cfg.Debug.OutputDir = outputDir
+			cfg.Debug.MaskKey = true
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"fail"}`))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := proxyServer.Client().Do(req)
+			if err != nil {
+				t.Fatalf("client.Do() error = %v", err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("first resp.StatusCode = %d, want 500; body=%s", resp.StatusCode, string(body))
+			}
+
+			entries, err := waitForRecentEntries(st, 1, time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecentEntries() error = %v", err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("ListRecent() len after failure = %d, want 1", len(entries))
+			}
+			parsed, err := waitForRecordedPrelude(entries[0].LogPath, time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecordedPrelude(%q) error = %v", entries[0].LogPath, err)
+			}
+			if parsed.Header.Meta.Endpoint != "/v1/chat/completions" {
+				t.Fatalf("recorded endpoint = %q, want /v1/chat/completions", parsed.Header.Meta.Endpoint)
+			}
+			if parsed.Header.Meta.StatusCode != tt.firstStatus {
+				t.Fatalf("recorded status = %d, want %d", parsed.Header.Meta.StatusCode, tt.firstStatus)
+			}
+			if !strings.Contains(parsed.Header.Meta.Error, tt.wantRecordedError) {
+				t.Fatalf("recorded error = %q, want contains %q", parsed.Header.Meta.Error, tt.wantRecordedError)
+			}
+
+		})
+	}
 }
 
 func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
@@ -918,6 +1074,17 @@ func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
 	}
 	if gotBody["input"] != "ping" {
 		t.Fatalf("upstream body input = %v, want ping; body=%+v", gotBody["input"], gotBody)
+	}
+
+	parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	if parsed.Header.Meta.URL != "/v1/responses" || parsed.Header.Meta.Endpoint != "/v1/responses" {
+		t.Fatalf("recorded path endpoint = %q/%q, want /v1/responses", parsed.Header.Meta.URL, parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "openai-responses" {
+		t.Fatalf("SelectedUpstreamID = %q, want openai-responses", parsed.Header.Meta.SelectedUpstreamID)
 	}
 }
 
