@@ -140,13 +140,23 @@ type LimitConfig struct {
 }
 
 type ResponsesServerConfig struct {
-	Enabled                     bool   `yaml:"enabled"`
-	DefaultModel                string `yaml:"default_model"`
-	ForceStore                  bool   `yaml:"force_store"`
-	MaxRequestBodyBytes         int64  `yaml:"max_request_body_bytes"`
-	Path                        string `yaml:"path"`
-	AutoCompact                 bool   `yaml:"auto_compact"`
+	Enabled                     bool                          `yaml:"enabled"`
+	DefaultModel                string                        `yaml:"default_model"`
+	ForceStore                  bool                          `yaml:"force_store"`
+	MaxRequestBodyBytes         int64                         `yaml:"max_request_body_bytes"`
+	Path                        string                        `yaml:"path"`
+	AutoCompact                 bool                          `yaml:"auto_compact"`
+	CompactHistoryItemThreshold int                           `yaml:"compact_history_item_threshold"`
+	ModelProfiles               []ResponsesModelProfileConfig `yaml:"model_profiles"`
+}
+
+type ResponsesModelProfileConfig struct {
+	Name                        string `yaml:"name"`
+	Pattern                     string `yaml:"pattern"`
+	ContextWindowTokens         int    `yaml:"context_window_tokens"`
+	MaxOutputTokens             int    `yaml:"max_output_tokens"`
 	CompactHistoryItemThreshold int    `yaml:"compact_history_item_threshold"`
+	UpstreamModel               string `yaml:"upstream_model"`
 }
 
 type ToolsConfig struct {
@@ -692,6 +702,17 @@ func (c Config) ResponsesCompactHistoryItemThreshold() int {
 		return c.ResponsesServer.CompactHistoryItemThreshold
 	}
 	return 0
+}
+
+func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
+	profiles := make([]ResponsesModelProfileConfig, 0, len(c.ResponsesServer.ModelProfiles))
+	for _, profile := range c.ResponsesServer.ModelProfiles {
+		profile.Name = strings.TrimSpace(profile.Name)
+		profile.Pattern = strings.TrimSpace(profile.Pattern)
+		profile.UpstreamModel = strings.TrimSpace(profile.UpstreamModel)
+		profiles = append(profiles, profile)
+	}
+	return profiles
 }
 
 func (c Config) WebSearchEnabled() bool {

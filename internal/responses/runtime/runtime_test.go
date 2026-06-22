@@ -354,6 +354,98 @@ func TestRuntimeCreateAutoCompactsWhenHistoryExceedsThreshold(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateAutoCompactUsesMatchedModelProfileThreshold(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_profile_target", "gpt-4o-mini")
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "Profile compact summary."},
+					FinishReason: "stop",
+				}},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "new answer"},
+					FinishReason: "stop",
+				}},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 10,
+		ModelProfiles: []ModelProfile{{
+			Pattern: "gpt-4o*",
+			Budget: ContextBudget{
+				ContextWindowTokens:         128000,
+				MaxOutputTokens:             4096,
+				CompactHistoryItemThreshold: 1,
+			},
+		}},
+	}, client, store, WithExecutionEventRecorder(events))
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-4o-mini",
+		PreviousResponseID: "resp_profile_target",
+		Input:              "new question",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat requests = %d, want compact + create", len(client.reqs))
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_profile_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil || got.DetailsJSON["history_item_threshold"] != 1 {
+		t.Fatalf("auto_triggered event = %#v, want profile threshold 1", got)
+	}
+}
+
+func TestRuntimeCreateAutoCompactFallsBackToGlobalThresholdWhenProfileDoesNotMatch(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_fallback_target", "gpt-test")
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "new answer"},
+				FinishReason: "stop",
+			}},
+		},
+	}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 10,
+		ModelProfiles: []ModelProfile{{
+			Name: "other-model",
+			Budget: ContextBudget{
+				CompactHistoryItemThreshold: 1,
+			},
+		}},
+	}, client, store)
+
+	resp, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_fallback_target",
+		Input:              "new question",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("chat requests = %d, want create only", len(client.reqs))
+	}
+	if resp.PreviousResponseID != "resp_fallback_target" {
+		t.Fatalf("response previous_response_id = %q, want original target", resp.PreviousResponseID)
+	}
+}
+
 func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{
@@ -707,4 +799,35 @@ func hasExecutionEvent(events []audit.ExecutionEvent, eventType string, status s
 		}
 	}
 	return false
+}
+
+func findExecutionEvent(events []audit.ExecutionEvent, eventType string, status string) *audit.ExecutionEvent {
+	for i := range events {
+		if events[i].EventType == eventType && events[i].Status == status {
+			return &events[i]
+		}
+	}
+	return nil
+}
+
+func seedResponseForAutoCompactTest(t *testing.T, store Store, id string, model string) {
+	t.Helper()
+	target := protocol.Response{
+		ID:        id,
+		Object:    "response",
+		Status:    "completed",
+		Model:     model,
+		CreatedAt: 100,
+		Output: []protocol.OutputItem{{
+			ID:      "msg_" + id,
+			Type:    "message",
+			Status:  "completed",
+			Role:    "assistant",
+			Content: []protocol.ContentPart{{Type: "output_text", Text: "old answer"}},
+		}},
+	}
+	inputs := []protocol.InputItem{messageInput("in_"+id, "old question")}
+	if err := store.Put(context.Background(), target, protocol.CreateResponseRequest{Input: "old question"}, inputs, target.Output); err != nil {
+		t.Fatalf("seed target response: %v", err)
+	}
 }
