@@ -17,6 +17,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -1280,6 +1281,33 @@ debug:
 		if !strings.Contains(output, want) {
 			t.Fatalf("log output = %q, want contain %q", output, want)
 		}
+	}
+}
+
+func TestValidateServeRouterConfigRequiresLocalResponsesServerBackend(t *testing.T) {
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "anthropic-messages",
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"claude-sonnet-4-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.anthropic.com/v1",
+					ProviderPreset: "anthropic",
+				},
+			},
+		},
+	}
+
+	err := validateServeRouterConfig(cfg, cfg)
+	if err == nil {
+		t.Fatal("validateServeRouterConfig() error = nil, want local Responses server backend validation error")
+	}
+	if !strings.Contains(err.Error(), router.LocalResponsesServerBackendRequiredError) {
+		t.Fatalf("validateServeRouterConfig() error = %q, want contain %q", err.Error(), router.LocalResponsesServerBackendRequiredError)
 	}
 }
 

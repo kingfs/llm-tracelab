@@ -389,6 +389,9 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	var localResponses http.Handler
 	responsesPath := cfg.ResponsesServerPath()
 	if cfg.ResponsesServerEnabled() {
+		if !rtr.HasLocalResponsesServerBackend() {
+			return nil, router.LocalResponsesServerBackendRequired()
+		}
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
 		var requestAuditor responsesaudit.RequestAuditor
 		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder

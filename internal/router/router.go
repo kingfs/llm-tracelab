@@ -240,6 +240,12 @@ const (
 	SelectionFailureUnknown            = "unknown"
 )
 
+const LocalResponsesServerBackendRequiredError = "responses_server.enabled requires at least one enabled OpenAI-compatible chat completions-compatible upstream for local Responses server mode"
+
+func LocalResponsesServerBackendRequired() error {
+	return errors.New(LocalResponsesServerBackendRequiredError)
+}
+
 func SelectionFailureReason(err error) string {
 	var selectionErr *SelectionError
 	if errors.As(err, &selectionErr) && strings.TrimSpace(selectionErr.Reason) != "" {
@@ -529,6 +535,54 @@ func (r *Router) Targets() []*Target {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return append([]*Target(nil), r.targets...)
+}
+
+func (r *Router) HasLocalResponsesServerBackend() bool {
+	if r == nil {
+		return false
+	}
+	for _, target := range r.Targets() {
+		if target == nil || !target.Enabled {
+			continue
+		}
+		if SupportsLocalResponsesServerBackend(target.Upstream) {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateLocalResponsesServerBackendConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return LocalResponsesServerBackendRequired()
+	}
+	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
+		return fmt.Errorf("config cannot define both upstream and upstreams")
+	}
+	for idx, targetCfg := range cfg.EffectiveUpstreams() {
+		enabled := true
+		if targetCfg.Enabled != nil {
+			enabled = *targetCfg.Enabled
+		}
+		if !enabled {
+			continue
+		}
+		resolved, err := upstream.Resolve(targetCfg.Upstream)
+		if err != nil {
+			return fmt.Errorf("resolve upstream target %q: %w", targetID(targetCfg, idx), err)
+		}
+		if SupportsLocalResponsesServerBackend(resolved) {
+			return nil
+		}
+	}
+	return LocalResponsesServerBackendRequired()
+}
+
+func SupportsLocalResponsesServerBackend(resolved upstream.ResolvedUpstream) bool {
+	if resolved.ProtocolFamily != upstream.ProtocolFamilyOpenAICompatible {
+		return false
+	}
+	return resolved.SupportsChatCompletionsAPI()
 }
 
 func (r *Router) Policy() string {
