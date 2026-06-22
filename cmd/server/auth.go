@@ -20,6 +20,7 @@ type authMigrateOptions struct {
 	steps      int
 	all        bool
 	dryRun     bool
+	checkDB    bool
 	format     string
 	stdout     io.Writer
 }
@@ -65,6 +66,7 @@ func newAuthCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "up", "Apply auth database migrations"))
 	migrateCmd.AddCommand(newAuthMigrateDirectionCommand(runtime, "down", "Roll back auth database migrations"))
+	migrateCmd.AddCommand(newAuthMigrateStatusCommand(runtime))
 	cmd.AddCommand(migrateCmd)
 	cmd.AddCommand(newAuthInitUserCommand(runtime))
 	cmd.AddCommand(newAuthResetPasswordCommand(runtime))
@@ -99,6 +101,28 @@ func newAuthMigrateDirectionCommand(runtime *cliRuntime, direction string, short
 	if direction == "down" {
 		cmd.Flags().BoolVar(&all, "all", false, "Roll back all migrations")
 	}
+	return cmd
+}
+
+func newAuthMigrateStatusCommand(runtime *cliRuntime) *cobra.Command {
+	var checkDB bool
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show auth database migration status",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runAuthMigrateWithOptions(authMigrateOptions{
+					configPath: runtime.configPath(),
+					direction:  "status",
+					checkDB:    checkDB,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+				})
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&checkDB, "check-db", false, "Read migration status from the configured database")
 	return cmd
 }
 
@@ -195,18 +219,35 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
+	result := authMigrationReport(cfg, opts.direction, opts.steps, opts.all, opts.dryRun, false, opts.checkDB)
+	if opts.direction == "status" && opts.checkDB {
+		if err := applyAuthStatusCheck(cfg, result); err != nil {
+			slog.Error("Auth database status check failed", "error", err)
+			return 1
+		}
+	}
 	if opts.dryRun {
-		return writeDryRunResult(opts.stdout, opts.format, "auth.migrate."+opts.direction, map[string]any{
-			"dry_run":   true,
-			"mutated":   false,
-			"driver":    cfg.DatabaseDriver(),
-			"dsn":       config.RedactDSN(cfg.DatabaseDSN()),
-			"direction": opts.direction,
-			"steps":     opts.steps,
-			"all":       opts.all,
-		})
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.migrate."+opts.direction, result, func(w io.Writer) error {
+			fmt.Fprintf(w, "dry-run auth.migrate.%s: no changes will be applied\n", opts.direction)
+			writeAuthMigrationReportText(w, result)
+			return nil
+		}); err != nil {
+			slog.Error("Write auth migrate dry-run result failed", "error", err)
+			return 1
+		}
+		return 0
 	}
 	switch opts.direction {
+	case "status":
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "auth.migrate.status", result, func(w io.Writer) error {
+			fmt.Fprintf(w, "auth database migration status\n")
+			writeAuthMigrationReportText(w, result)
+			return nil
+		}); err != nil {
+			slog.Error("Write auth migrate status result failed", "error", err)
+			return 1
+		}
+		return 0
 	case "up":
 		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), opts.steps); err != nil {
 			slog.Error("Auth migration failed", "error", err)
@@ -223,6 +264,104 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 	}
 	slog.Info("Database migration finished", "driver", cfg.DatabaseDriver(), "dsn", config.RedactDSN(cfg.DatabaseDSN()), "direction", opts.direction)
 	return 0
+}
+
+func authMigrationReport(cfg *config.Config, direction string, steps int, all bool, dryRun bool, mutated bool, checkDB bool) map[string]any {
+	source := "sqlite-embedded-sql"
+	sourcePath := "ent/migrations"
+	mode := "versioned-sql"
+	versioned := true
+	sharedApplicationNamespace := false
+	namespaceSplit := true
+	const namespaceNote = "postgres auth migrations currently share the application schema_migrations namespace; an independent auth namespace has not been split yet"
+	note := "sqlite auth migrations use the configured auth database path and embedded sqlite migration files"
+	if normalizeAuthStoreDriver(cfg.DatabaseDriver()) == "postgres" {
+		source = "postgres-checked-in-sql"
+		sourcePath = "ent/postgres-migrations"
+		sharedApplicationNamespace = true
+		namespaceSplit = false
+		note = namespaceNote
+	}
+	return map[string]any{
+		"dry_run":                               dryRun,
+		"mutated":                               mutated,
+		"driver":                                cfg.DatabaseDriver(),
+		"dsn":                                   config.RedactDSN(cfg.DatabaseDSN()),
+		"direction":                             direction,
+		"steps":                                 steps,
+		"all":                                   all,
+		"database_namespace":                    "auth",
+		"migration_mode":                        mode,
+		"migration_source":                      source,
+		"migration_source_path":                 sourcePath,
+		"schema_versioned":                      versioned,
+		"status_check":                          appDBStatusCheckMode(checkDB),
+		"rollback_supported":                    true,
+		"shared_application_namespace":          sharedApplicationNamespace,
+		"independent_auth_namespace":            namespaceSplit,
+		"auth_namespace_split":                  namespaceSplit,
+		"application_namespace_shared":          sharedApplicationNamespace,
+		"namespace_note":                        note,
+		"shared_migration_namespace_constraint": namespaceNote,
+	}
+}
+
+func applyAuthStatusCheck(cfg *config.Config, result map[string]any) error {
+	status, err := auth.CheckStatus(cfg.DatabaseDriver(), cfg.DatabaseDSN())
+	if err != nil {
+		return err
+	}
+	result["database_status_available"] = status.Available
+	result["database_status_versioned"] = status.Versioned
+	result["database_status_driver"] = status.Driver
+	if status.Available && status.Versioned {
+		result["database_migration_version"] = status.Version
+		result["database_migration_dirty"] = status.Dirty
+	}
+	if status.DatabasePath != "" {
+		result["database_path"] = status.DatabasePath
+	}
+	if status.SharedApplicationNamespace {
+		result["database_status_shared_application_namespace"] = status.SharedApplicationNamespace
+	}
+	if status.Message != "" {
+		result["database_status_message"] = status.Message
+	}
+	return nil
+}
+
+func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
+	fmt.Fprintf(w, "driver: %s\n", result["driver"])
+	fmt.Fprintf(w, "dsn: %s\n", result["dsn"])
+	fmt.Fprintf(w, "database_namespace: %s\n", result["database_namespace"])
+	fmt.Fprintf(w, "migration_mode: %s\n", result["migration_mode"])
+	fmt.Fprintf(w, "migration_source: %s\n", result["migration_source"])
+	fmt.Fprintf(w, "migration_source_path: %s\n", result["migration_source_path"])
+	fmt.Fprintf(w, "schema_versioned: %v\n", result["schema_versioned"])
+	fmt.Fprintf(w, "shared_application_namespace: %v\n", result["shared_application_namespace"])
+	fmt.Fprintf(w, "independent_auth_namespace: %v\n", result["independent_auth_namespace"])
+	fmt.Fprintf(w, "auth_namespace_split: %v\n", result["auth_namespace_split"])
+	if result["status_check"] != nil {
+		fmt.Fprintf(w, "status_check: %s\n", result["status_check"])
+	}
+	if result["database_status_available"] != nil {
+		fmt.Fprintf(w, "database_status_available: %v\n", result["database_status_available"])
+	}
+	if result["database_migration_version"] != nil {
+		fmt.Fprintf(w, "database_migration_version: %v\n", result["database_migration_version"])
+		fmt.Fprintf(w, "database_migration_dirty: %v\n", result["database_migration_dirty"])
+	}
+	if result["database_path"] != nil {
+		fmt.Fprintf(w, "database_path: %s\n", result["database_path"])
+	}
+	if result["database_status_shared_application_namespace"] != nil {
+		fmt.Fprintf(w, "database_status_shared_application_namespace: %v\n", result["database_status_shared_application_namespace"])
+	}
+	if result["database_status_message"] != nil {
+		fmt.Fprintf(w, "database_status_message: %s\n", result["database_status_message"])
+	}
+	fmt.Fprintf(w, "rollback_supported: %v\n", result["rollback_supported"])
+	fmt.Fprintf(w, "namespace_note: %s\n", result["namespace_note"])
 }
 
 func runAuthInitUserWithOptions(opts authUserOptions) int {

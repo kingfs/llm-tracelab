@@ -661,11 +661,20 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
-			DryRun    bool   `json:"dry_run"`
-			Mutated   bool   `json:"mutated"`
-			Driver    string `json:"driver"`
-			Direction string `json:"direction"`
-			Steps     int    `json:"steps"`
+			DryRun                     bool   `json:"dry_run"`
+			Mutated                    bool   `json:"mutated"`
+			Driver                     string `json:"driver"`
+			DSN                        string `json:"dsn"`
+			Direction                  string `json:"direction"`
+			Steps                      int    `json:"steps"`
+			Namespace                  string `json:"database_namespace"`
+			Mode                       string `json:"migration_mode"`
+			Source                     string `json:"migration_source"`
+			Path                       string `json:"migration_source_path"`
+			Versioned                  bool   `json:"schema_versioned"`
+			SharedApplicationNamespace bool   `json:"shared_application_namespace"`
+			IndependentAuthNamespace   bool   `json:"independent_auth_namespace"`
+			NamespaceNote              string `json:"namespace_note"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -676,6 +685,204 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	}
 	if !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "up" || envelope.Result.Steps != 1 {
 		t.Fatalf("auth dry-run result = %+v", envelope.Result)
+	}
+	if envelope.Result.Namespace != "auth" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || !envelope.Result.Versioned {
+		t.Fatalf("auth dry-run migration source = %+v", envelope.Result)
+	}
+	if !envelope.Result.SharedApplicationNamespace || envelope.Result.IndependentAuthNamespace || !strings.Contains(envelope.Result.NamespaceNote, "independent auth namespace has not been split yet") {
+		t.Fatalf("auth dry-run namespace semantics = %+v", envelope.Result)
+	}
+	if strings.Contains(envelope.Result.DSN, "secret") {
+		t.Fatalf("auth dry-run leaked secret in dsn: %q", envelope.Result.DSN)
+	}
+}
+
+func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "auth", "migrate", "status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun                     bool   `json:"dry_run"`
+			Mutated                    bool   `json:"mutated"`
+			Driver                     string `json:"driver"`
+			DSN                        string `json:"dsn"`
+			Direction                  string `json:"direction"`
+			Namespace                  string `json:"database_namespace"`
+			Mode                       string `json:"migration_mode"`
+			Source                     string `json:"migration_source"`
+			Path                       string `json:"migration_source_path"`
+			Versioned                  bool   `json:"schema_versioned"`
+			StatusCheck                string `json:"status_check"`
+			Rollback                   bool   `json:"rollback_supported"`
+			SharedApplicationNamespace bool   `json:"shared_application_namespace"`
+			ApplicationShared          bool   `json:"application_namespace_shared"`
+			IndependentAuthNamespace   bool   `json:"independent_auth_namespace"`
+			AuthNamespaceSplit         bool   `json:"auth_namespace_split"`
+			Constraint                 string `json:"shared_migration_namespace_constraint"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "auth.migrate.status" {
+		t.Fatalf("envelope command = %+v, want auth.migrate.status", envelope)
+	}
+	if envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "status" {
+		t.Fatalf("status result = %+v", envelope.Result)
+	}
+	if envelope.Result.Namespace != "auth" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || !envelope.Result.Versioned {
+		t.Fatalf("postgres auth status source = %+v", envelope.Result)
+	}
+	if envelope.Result.StatusCheck != "configuration-only" || !envelope.Result.Rollback || !envelope.Result.SharedApplicationNamespace || !envelope.Result.ApplicationShared || envelope.Result.IndependentAuthNamespace || envelope.Result.AuthNamespaceSplit {
+		t.Fatalf("postgres auth status scope = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.Constraint, "schema_migrations namespace") || !strings.Contains(envelope.Result.Constraint, "independent auth namespace has not been split yet") {
+		t.Fatalf("postgres auth status constraint = %q", envelope.Result.Constraint)
+	}
+	if strings.Contains(envelope.Result.DSN, "secret") {
+		t.Fatalf("auth migrate status leaked secret in dsn: %q", envelope.Result.DSN)
+	}
+}
+
+func TestAuthMigrateStatusTextReportsNamespaceAndRedactedDSN(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "auth", "migrate", "status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	output := out.String()
+	for _, want := range []string{
+		"auth database migration status",
+		"database_namespace: auth",
+		"migration_source_path: ent/postgres-migrations",
+		"shared_application_namespace: true",
+		"independent_auth_namespace: false",
+		"namespace_note: postgres auth migrations currently share",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("status text output = %q, want contain %q", output, want)
+		}
+	}
+	if strings.Contains(output, "secret") {
+		t.Fatalf("auth migrate status text leaked secret: %q", output)
+	}
+}
+
+func TestAuthMigrateStatusJSONReportsSQLiteSource(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeSQLiteDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "auth", "migrate", "status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Driver                     string `json:"driver"`
+			Namespace                  string `json:"database_namespace"`
+			Source                     string `json:"migration_source"`
+			Path                       string `json:"migration_source_path"`
+			Versioned                  bool   `json:"schema_versioned"`
+			SharedApplicationNamespace bool   `json:"shared_application_namespace"`
+			IndependentAuthNamespace   bool   `json:"independent_auth_namespace"`
+			NamespaceNote              string `json:"namespace_note"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK {
+		t.Fatalf("envelope ok = false: %+v", envelope)
+	}
+	if envelope.Result.Driver != "sqlite" || envelope.Result.Namespace != "auth" || envelope.Result.Source != "sqlite-embedded-sql" || envelope.Result.Path != "ent/migrations" || !envelope.Result.Versioned {
+		t.Fatalf("sqlite auth status source = %+v", envelope.Result)
+	}
+	if envelope.Result.SharedApplicationNamespace || !envelope.Result.IndependentAuthNamespace || !strings.Contains(envelope.Result.NamespaceNote, "configured auth database path") {
+		t.Fatalf("sqlite auth status namespace = %+v", envelope.Result)
+	}
+}
+
+func TestAuthMigrateStatusCheckDBJSONReportsSQLiteMigrationVersion(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "auth.sqlite3")
+	if err := auth.MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "auth", "migrate", "status", "--check-db"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			StatusCheck             string `json:"status_check"`
+			DatabaseStatusAvailable bool   `json:"database_status_available"`
+			DatabaseStatusVersioned bool   `json:"database_status_versioned"`
+			DatabaseStatusDriver    string `json:"database_status_driver"`
+			MigrationVersion        uint   `json:"database_migration_version"`
+			MigrationDirty          bool   `json:"database_migration_dirty"`
+			DatabasePath            string `json:"database_path"`
+			DatabaseStatusMessage   string `json:"database_status_message"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK {
+		t.Fatalf("envelope ok = false: %+v", envelope)
+	}
+	if envelope.Result.StatusCheck != "database" || !envelope.Result.DatabaseStatusAvailable || !envelope.Result.DatabaseStatusVersioned || envelope.Result.DatabaseStatusDriver != "sqlite" {
+		t.Fatalf("sqlite auth database status = %+v", envelope.Result)
+	}
+	if envelope.Result.MigrationVersion == 0 || envelope.Result.MigrationDirty || envelope.Result.DatabasePath != dbPath {
+		t.Fatalf("sqlite auth migration version = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "configured auth database path") {
+		t.Fatalf("sqlite auth database status message = %q", envelope.Result.DatabaseStatusMessage)
 	}
 }
 
