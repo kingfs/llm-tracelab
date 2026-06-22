@@ -706,6 +706,8 @@ type upstreamItem struct {
 	ModelDiscovery    string                `json:"model_discovery"`
 	BaseURL           string                `json:"base_url"`
 	ProviderPreset    string                `json:"provider_preset"`
+	APIType           string                `json:"api_type"`
+	Mode              string                `json:"mode,omitempty"`
 	ProtocolFamily    string                `json:"protocol_family"`
 	RoutingProfile    string                `json:"routing_profile"`
 	HealthState       string                `json:"health_state"`
@@ -2549,6 +2551,8 @@ func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.Upstr
 		ModelDiscovery:    snapshot.ModelDiscovery,
 		BaseURL:           snapshot.BaseURL,
 		ProviderPreset:    snapshot.ProviderPreset,
+		APIType:           snapshot.APIType,
+		Mode:              snapshot.Mode,
 		ProtocolFamily:    snapshot.ProtocolFamily,
 		RoutingProfile:    snapshot.RoutingProfile,
 		HealthState:       snapshot.HealthState,

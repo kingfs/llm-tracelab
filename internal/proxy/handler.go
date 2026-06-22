@@ -958,6 +958,7 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 		attrs := map[string]interface{}{
 			"id":              candidate.ID,
 			"provider_preset": candidate.ProviderPreset,
+			"api_type":        candidate.APIType,
 			"priority":        candidate.Priority,
 			"weight":          candidate.Weight,
 			"health_state":    candidate.HealthState,
@@ -967,6 +968,9 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 		}
 		if candidate.BaseURL != "" {
 			attrs["base_url"] = redaction.DisplayURL(candidate.BaseURL)
+		}
+		if candidate.Mode != "" {
+			attrs["mode"] = candidate.Mode
 		}
 		addCredentialAttrs(attrs, router.CredentialDecisionInfo{
 			RouteTargetID:  candidate.RouteTargetID,

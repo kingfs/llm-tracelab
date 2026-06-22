@@ -244,8 +244,20 @@ func TestRouterChatCompletionsRequiresChatCapableAPISurface(t *testing.T) {
 		t.Fatalf("selection decision missing candidates: %+v", selection.Decision)
 	}
 	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID == "chat" && candidate.APIType != "chat_completions" {
+			t.Fatalf("chat candidate APIType = %q, want chat_completions", candidate.APIType)
+		}
 		if candidate.ID == "native-responses" && (candidate.SupportsPath || candidate.FilterReason != "unsupported_path") {
 			t.Fatalf("native responses candidate = %+v, want unsupported_path", candidate)
+		}
+	}
+	snapshots := rtr.Snapshots()
+	if len(snapshots) != 2 {
+		t.Fatalf("len(snapshots) = %d, want 2", len(snapshots))
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.ID == "native-responses" && snapshot.APIType != "responses_native" {
+			t.Fatalf("native response snapshot APIType = %q, want responses_native", snapshot.APIType)
 		}
 	}
 }

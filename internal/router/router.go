@@ -184,6 +184,8 @@ type Snapshot struct {
 	ModelDiscovery    string    `json:"model_discovery"`
 	BaseURL           string    `json:"base_url"`
 	ProviderPreset    string    `json:"provider_preset"`
+	APIType           string    `json:"api_type"`
+	Mode              string    `json:"mode,omitempty"`
 	ProtocolFamily    string    `json:"protocol_family"`
 	RoutingProfile    string    `json:"routing_profile"`
 	HealthState       string    `json:"health_state"`
@@ -296,6 +298,8 @@ type CandidateDecision struct {
 	CredentialSelectable   *bool   `json:"credential_selectable,omitempty"`
 	CredentialFilterReason string  `json:"credential_filter_reason,omitempty"`
 	ProviderPreset         string  `json:"provider_preset,omitempty"`
+	APIType                string  `json:"api_type,omitempty"`
+	Mode                   string  `json:"mode,omitempty"`
 	BaseURL                string  `json:"base_url,omitempty"`
 	Priority               int     `json:"priority"`
 	Weight                 float64 `json:"weight"`
@@ -1212,6 +1216,8 @@ func (t *Target) snapshot() Snapshot {
 		ModelDiscovery:    t.ModelDiscovery,
 		BaseURL:           t.Upstream.BaseURL,
 		ProviderPreset:    t.Upstream.ProviderPreset,
+		APIType:           t.Upstream.APIType,
+		Mode:              t.Upstream.Mode,
 		ProtocolFamily:    t.Upstream.ProtocolFamily,
 		RoutingProfile:    t.Upstream.RoutingProfile,
 		HealthState:       health,
@@ -1274,6 +1280,8 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 		CredentialID:   t.CredentialID,
 		CredentialHint: t.CredentialHint,
 		ProviderPreset: t.Upstream.ProviderPreset,
+		APIType:        t.Upstream.APIType,
+		Mode:           t.Upstream.Mode,
 		BaseURL:        t.Upstream.BaseURL,
 		Priority:       t.Priority,
 		Weight:         t.Weight,

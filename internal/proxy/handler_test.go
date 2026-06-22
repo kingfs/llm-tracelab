@@ -96,6 +96,8 @@ func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	attrs := candidateEventAttributes([]router.CandidateDecision{{
 		ID:             "primary",
 		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+		Mode:           "responses_server",
 		BaseURL:        "https://user:secret@example.com/v1?api_key=abc&region=us",
 		SupportsPath:   true,
 		SupportsModel:  true,
@@ -110,6 +112,9 @@ func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	}
 	if !strings.Contains(baseURL, "api_key=REDACTED") || !strings.Contains(baseURL, "region=us") {
 		t.Fatalf("candidateEventAttributes base_url = %q, want redacted api_key and preserved region", baseURL)
+	}
+	if attrs[0]["api_type"] != "chat_completions" || attrs[0]["mode"] != "responses_server" {
+		t.Fatalf("candidateEventAttributes API surface attrs = %+v", attrs[0])
 	}
 }
 

@@ -1283,6 +1283,8 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        "https://api.openai.com/v1",
 					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "responses_server",
 				},
 			},
 		},
@@ -1317,6 +1319,9 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 	}
 	if payload.Items[0].HealthState != router.HealthHealthy {
 		t.Fatalf("HealthState = %q, want %q", payload.Items[0].HealthState, router.HealthHealthy)
+	}
+	if payload.Items[0].APIType != "chat_completions" || payload.Items[0].Mode != "responses_server" {
+		t.Fatalf("API surface = %q/%q, want chat_completions/responses_server", payload.Items[0].APIType, payload.Items[0].Mode)
 	}
 }
 
