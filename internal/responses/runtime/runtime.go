@@ -196,6 +196,9 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	webSearchReady := r.webSearchReady()
 	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
 	if compactDecision.ShouldCompact {
+		originalInputItemCount := rawInputItemCount(history) + len(inputItems)
+		retainedWindowStart := rawInputItemCount(history)
+		retainedWindowEnd := retainedWindowStart + len(inputItems)
 		compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
 			ResponseID: req.PreviousResponseID,
 			Model:      model,
@@ -216,6 +219,11 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		if err != nil {
 			return protocol.Response{}, err
 		}
+		compactedHistory, err := r.loadContinuationHistory(ctx, compactResp.ID)
+		if err != nil {
+			return protocol.Response{}, err
+		}
+		retainedInputItemCount := rawInputItemCount(compactedHistory) + len(inputItems)
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			ResponseID:     compactResp.ID,
 			ConversationID: audit.CodexConversationID(compactResp.Metadata),
@@ -223,21 +231,28 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 			Phase:          "compact",
 			Status:         "auto_triggered",
 			DetailsJSON: map[string]any{
-				"target_response_id":     req.PreviousResponseID,
-				"compact_response_id":    compactResp.ID,
-				"trigger":                compactDecision.Trigger,
-				"history_items":          len(history),
-				"history_item_threshold": budget.CompactHistoryItemThreshold,
-				"estimated_input_tokens": compactDecision.EstimatedInputTokens,
-				"context_window_tokens":  compactDecision.ContextWindowTokens,
-				"reserved_output_tokens": compactDecision.ReservedOutputTokens,
+				"target_response_id":            req.PreviousResponseID,
+				"compact_response_id":           compactResp.ID,
+				"trigger":                       compactDecision.Trigger,
+				"previous_response_id_present":  req.PreviousResponseID != "",
+				"compact_response_id_present":   compactResp.ID != "",
+				"original_input_item_count":     originalInputItemCount,
+				"retained_input_item_count":     retainedInputItemCount,
+				"dropped_input_item_count":      maxInt(0, originalInputItemCount-retainedInputItemCount),
+				"retained_window_start":         retainedWindowStart,
+				"retained_window_end":           retainedWindowEnd,
+				"history_items":                 len(history),
+				"history_item_threshold":        budget.CompactHistoryItemThreshold,
+				"history_item_threshold_source": compactHistoryThresholdSource(modelProfile, budget),
+				"estimated_input_tokens":        compactDecision.EstimatedInputTokens,
+				"context_window_tokens":         compactDecision.ContextWindowTokens,
+				"reserved_output_tokens":        compactDecision.ReservedOutputTokens,
+				"context_window_limit_source":   contextWindowLimitSource(modelProfile, budget),
+				"reserved_output_limit_source":  reservedOutputLimitSource(req, modelProfile, budget),
 			},
 		})
 		req.PreviousResponseID = compactResp.ID
-		history, err = r.loadContinuationHistory(ctx, req.PreviousResponseID)
-		if err != nil {
-			return protocol.Response{}, err
-		}
+		history = compactedHistory
 	}
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		err := UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
@@ -837,6 +852,57 @@ func (r *Runtime) autoCompactDecision(req protocol.CreateResponseRequest, budget
 		decision.ReservedOutputTokens = reservedOutputTokens
 	}
 	return decision
+}
+
+func rawInputItemCount(history []LedgerItem) int {
+	count := 0
+	for _, item := range history {
+		if item.Input == nil || item.Input.Type == "compact_request" {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+func compactHistoryThresholdSource(profile ResolvedModelProfile, budget ContextBudget) string {
+	if budget.CompactHistoryItemThreshold <= 0 {
+		return "unset"
+	}
+	if profile.Profile != nil && profile.Profile.Budget.CompactHistoryItemThreshold > 0 {
+		return "model_profile"
+	}
+	return "config"
+}
+
+func contextWindowLimitSource(profile ResolvedModelProfile, budget ContextBudget) string {
+	if budget.ContextWindowTokens <= 0 {
+		return "unset"
+	}
+	if profile.Profile != nil && profile.Profile.Budget.ContextWindowTokens > 0 {
+		return "model_profile"
+	}
+	return "unknown"
+}
+
+func reservedOutputLimitSource(req protocol.CreateResponseRequest, profile ResolvedModelProfile, budget ContextBudget) string {
+	if req.MaxOutputTokens > 0 {
+		return "request"
+	}
+	if budget.MaxOutputTokens <= 0 {
+		return "unset"
+	}
+	if profile.Profile != nil && profile.Profile.Budget.MaxOutputTokens > 0 {
+		return "model_profile"
+	}
+	return "unknown"
+}
+
+func maxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func effectiveMaxOutputTokens(req protocol.CreateResponseRequest, budget ContextBudget) int {

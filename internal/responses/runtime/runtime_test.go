@@ -1564,8 +1564,20 @@ func TestRuntimeCreateAutoCompactsWhenHistoryExceedsThreshold(t *testing.T) {
 	if len(client.reqs[1].Messages) < 2 || !strings.Contains(chatMessageContentText(client.reqs[1].Messages[0].Content), "Auto compact summary") {
 		t.Fatalf("post-compact chat messages = %#v, want compact summary in context", client.reqs[1].Messages)
 	}
-	if !hasExecutionEvent(events.events, "response.compact", "auto_triggered") {
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
 		t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
+	} else {
+		assertAutoCompactProvenance(t, got, autoCompactProvenanceWant{
+			trigger:                    "history_items",
+			originalInputItemCount:     2,
+			retainedInputItemCount:     1,
+			droppedInputItemCount:      1,
+			retainedWindowStart:        1,
+			retainedWindowEnd:          2,
+			historyItemThresholdSource: "config",
+			contextWindowLimitSource:   "unset",
+			reservedOutputLimitSource:  "unset",
+		})
 	}
 }
 
@@ -1619,6 +1631,8 @@ func TestRuntimeCreateAutoCompactUsesMatchedModelProfileThreshold(t *testing.T) 
 	}
 	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil || got.DetailsJSON["history_item_threshold"] != 1 {
 		t.Fatalf("auto_triggered event = %#v, want profile threshold 1", got)
+	} else if got.DetailsJSON["history_item_threshold_source"] != "model_profile" {
+		t.Fatalf("auto_triggered event = %#v, want model_profile threshold source", got)
 	}
 }
 
@@ -1674,6 +1688,18 @@ func TestRuntimeCreateAutoCompactsWhenEstimatedTokensExceedContextWindow(t *test
 		got.DetailsJSON["context_window_tokens"] != 10 ||
 		got.DetailsJSON["reserved_output_tokens"] != 8 {
 		t.Fatalf("auto_triggered event = %#v, want context_window token trigger", got)
+	} else {
+		assertAutoCompactProvenance(t, got, autoCompactProvenanceWant{
+			trigger:                    "context_window_tokens",
+			originalInputItemCount:     2,
+			retainedInputItemCount:     1,
+			droppedInputItemCount:      1,
+			retainedWindowStart:        1,
+			retainedWindowEnd:          2,
+			historyItemThresholdSource: "unset",
+			contextWindowLimitSource:   "model_profile",
+			reservedOutputLimitSource:  "model_profile",
+		})
 	}
 	if client.reqs[1].MaxTokens != 8 {
 		t.Fatalf("post-compact chat request max tokens = %d, want profile max 8", client.reqs[1].MaxTokens)
@@ -1736,6 +1762,18 @@ func TestRuntimeCreateAutoCompactUsesInjectedTokenEstimator(t *testing.T) {
 		got.DetailsJSON["context_window_tokens"] != 10 ||
 		got.DetailsJSON["reserved_output_tokens"] != 4 {
 		t.Fatalf("auto_triggered event = %#v, want injected estimator token trigger", got)
+	} else {
+		assertAutoCompactProvenance(t, got, autoCompactProvenanceWant{
+			trigger:                    "context_window_tokens",
+			originalInputItemCount:     2,
+			retainedInputItemCount:     1,
+			droppedInputItemCount:      1,
+			retainedWindowStart:        1,
+			retainedWindowEnd:          2,
+			historyItemThresholdSource: "unset",
+			contextWindowLimitSource:   "model_profile",
+			reservedOutputLimitSource:  "model_profile",
+		})
 	}
 }
 
@@ -2644,6 +2682,38 @@ func findExecutionEvent(events []audit.ExecutionEvent, eventType string, status 
 		}
 	}
 	return nil
+}
+
+type autoCompactProvenanceWant struct {
+	trigger                    string
+	originalInputItemCount     int
+	retainedInputItemCount     int
+	droppedInputItemCount      int
+	retainedWindowStart        int
+	retainedWindowEnd          int
+	historyItemThresholdSource string
+	contextWindowLimitSource   string
+	reservedOutputLimitSource  string
+}
+
+func assertAutoCompactProvenance(t *testing.T, event *audit.ExecutionEvent, want autoCompactProvenanceWant) {
+	t.Helper()
+	if event.DetailsJSON["trigger"] != want.trigger ||
+		event.DetailsJSON["previous_response_id_present"] != true ||
+		event.DetailsJSON["compact_response_id_present"] != true ||
+		event.DetailsJSON["original_input_item_count"] != want.originalInputItemCount ||
+		event.DetailsJSON["retained_input_item_count"] != want.retainedInputItemCount ||
+		event.DetailsJSON["dropped_input_item_count"] != want.droppedInputItemCount ||
+		event.DetailsJSON["retained_window_start"] != want.retainedWindowStart ||
+		event.DetailsJSON["retained_window_end"] != want.retainedWindowEnd ||
+		event.DetailsJSON["history_item_threshold_source"] != want.historyItemThresholdSource ||
+		event.DetailsJSON["context_window_limit_source"] != want.contextWindowLimitSource ||
+		event.DetailsJSON["reserved_output_limit_source"] != want.reservedOutputLimitSource {
+		t.Fatalf("auto_triggered provenance = %#v, want %#v", event.DetailsJSON, want)
+	}
+	if event.DetailsJSON["target_response_id"] == "" || event.DetailsJSON["compact_response_id"] == "" {
+		t.Fatalf("auto_triggered provenance missing compact ids: %#v", event.DetailsJSON)
+	}
 }
 
 func seedResponseForAutoCompactTest(t *testing.T, store Store, id string, model string) {

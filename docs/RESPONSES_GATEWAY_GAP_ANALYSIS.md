@@ -113,8 +113,8 @@
 
 ### Compact 与 context optimization
 
-- 已有：显式 compact API、item-count auto compact、基于 context window 的 token-budget auto compact、`/tokenize` counter provider 自动选择首切。
-- 缺口：auto compact stream 仍 fallback；summary provenance 和 retained item 窗口信息不如 responses-gateway compact v2 设计完整；完整 context optimization 未接入。
+- 已有：显式 compact API、item-count auto compact、基于 context window 的 token-budget auto compact、`/tokenize` counter provider 自动选择首切；auto compact 的 `response.compact` / `auto_triggered` execution event 已补 provenance 首切，包含触发原因、原始/保留/丢弃 input item 计数、保留半开窗口、previous/compact response ID 存在性，以及可可靠得出的 token/window/reserved-output limit 来源，不输出 raw prompt、raw summary 或 raw tool args。
+- 缺口：auto compact stream 仍 fallback；summary provenance 和 retained item 窗口信息仍只是排障首切，不是 responses-gateway compact v2 的完整 provenance/read model；完整 context optimization 未接入。
 - llm-tracelab 落点：`internal/responses/runtime/runtime.go`、`estimator.go`、`profile.go`、`internal/proxy/responses_tokenize_counter.go`。
 - responses-gateway 对照：`docs/functional-design.md` 的 Compact 章节。
 
