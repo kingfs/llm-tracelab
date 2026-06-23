@@ -66,27 +66,28 @@ type modelsCodexProviderConfig struct {
 }
 
 type modelsCodexDiagnostics struct {
-	MatchedProfile                    modelsCodexMatchedProfile `json:"matched_profile"`
-	RuntimeProfileSource              string                    `json:"runtime_profile_source"`
-	ProfilePrecedence                 []string                  `json:"profile_precedence"`
-	CatalogProfileRole                string                    `json:"catalog_profile_role"`
-	ProviderChannelProfileAdoption    string                    `json:"provider_channel_profile_adoption"`
-	ProfileConflictStrategy           string                    `json:"profile_conflict_strategy"`
-	ProfileAdoptionRequiredGates      []string                  `json:"profile_adoption_required_gates"`
-	CapabilitySource                  string                    `json:"capability_source"`
-	CompactLimitSource                string                    `json:"compact_limit_source"`
-	CompactLimitMarginTokens          int                       `json:"compact_limit_margin_tokens"`
-	CompactHistoryItemThreshold       int                       `json:"compact_history_item_threshold"`
-	CompactHistoryItemThresholdSource string                    `json:"compact_history_item_threshold_source"`
-	ResponsesServerEnabled            bool                      `json:"responses_server_enabled"`
-	DatabaseAvailable                 bool                      `json:"database_available"`
-	CatalogModelPresent               bool                      `json:"catalog_model_present"`
-	ChannelModelPresent               bool                      `json:"channel_model_present"`
-	ChannelModelCount                 int                       `json:"channel_model_count"`
-	CatalogSource                     string                    `json:"catalog_source"`
-	ChannelSource                     string                    `json:"channel_source"`
-	DriftWarnings                     []string                  `json:"drift_warnings,omitempty"`
-	CodexConfig                       modelsCodexLocalConfig    `json:"codex_config"`
+	MatchedProfile                    modelsCodexMatchedProfile   `json:"matched_profile"`
+	RuntimeProfileSource              string                      `json:"runtime_profile_source"`
+	ProfilePrecedence                 []string                    `json:"profile_precedence"`
+	CatalogProfileRole                string                      `json:"catalog_profile_role"`
+	ProviderChannelProfileAdoption    string                      `json:"provider_channel_profile_adoption"`
+	ProfileAdoptionReport             modelsProfileAdoptionReport `json:"profile_adoption_report"`
+	ProfileConflictStrategy           string                      `json:"profile_conflict_strategy"`
+	ProfileAdoptionRequiredGates      []string                    `json:"profile_adoption_required_gates"`
+	CapabilitySource                  string                      `json:"capability_source"`
+	CompactLimitSource                string                      `json:"compact_limit_source"`
+	CompactLimitMarginTokens          int                         `json:"compact_limit_margin_tokens"`
+	CompactHistoryItemThreshold       int                         `json:"compact_history_item_threshold"`
+	CompactHistoryItemThresholdSource string                      `json:"compact_history_item_threshold_source"`
+	ResponsesServerEnabled            bool                        `json:"responses_server_enabled"`
+	DatabaseAvailable                 bool                        `json:"database_available"`
+	CatalogModelPresent               bool                        `json:"catalog_model_present"`
+	ChannelModelPresent               bool                        `json:"channel_model_present"`
+	ChannelModelCount                 int                         `json:"channel_model_count"`
+	CatalogSource                     string                      `json:"catalog_source"`
+	ChannelSource                     string                      `json:"channel_source"`
+	DriftWarnings                     []string                    `json:"drift_warnings,omitempty"`
+	CodexConfig                       modelsCodexLocalConfig      `json:"codex_config"`
 }
 
 type modelsCodexMatchedProfile struct {
@@ -97,6 +98,55 @@ type modelsCodexMatchedProfile struct {
 	Name          string `json:"name,omitempty"`
 	Pattern       string `json:"pattern,omitempty"`
 	UpstreamModel string `json:"upstream_model,omitempty"`
+}
+
+type modelsProfileAdoptionReport struct {
+	Mode                  string                           `json:"mode"`
+	DryRun                bool                             `json:"dry_run"`
+	Mutates               bool                             `json:"mutates"`
+	Status                string                           `json:"status"`
+	RuntimeProfileSource  string                           `json:"runtime_profile_source"`
+	CandidateSource       string                           `json:"candidate_source"`
+	ExplicitConfigPresent bool                             `json:"explicit_config_present"`
+	CandidateCount        int                              `json:"candidate_count"`
+	ProposedChangeCount   int                              `json:"proposed_change_count"`
+	ConflictCount         int                              `json:"conflict_count"`
+	BlockedReasons        []string                         `json:"blocked_reasons,omitempty"`
+	Fields                []modelsProfileAdoptionFieldDiff `json:"fields,omitempty"`
+	Candidates            []modelsProfileAdoptionCandidate `json:"candidates,omitempty"`
+	Conflicts             []modelsProfileAdoptionConflict  `json:"conflicts,omitempty"`
+}
+
+type modelsProfileAdoptionFieldDiff struct {
+	Field           string `json:"field"`
+	RuntimeValue    int    `json:"runtime_value"`
+	CandidateValue  int    `json:"candidate_value"`
+	RuntimeSource   string `json:"runtime_source"`
+	CandidateSource string `json:"candidate_source"`
+	Status          string `json:"status"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type modelsProfileAdoptionCandidate struct {
+	ChannelID               string `json:"channel_id"`
+	Model                   string `json:"model"`
+	Source                  string `json:"source"`
+	Enabled                 bool   `json:"enabled"`
+	ContextWindowTokens     int    `json:"context_window_tokens,omitempty"`
+	SupportsResponses       string `json:"supports_responses"`
+	SupportsChatCompletions string `json:"supports_chat_completions"`
+	SupportsEmbeddings      string `json:"supports_embeddings"`
+	Eligible                bool   `json:"eligible"`
+	BlockedReason           string `json:"blocked_reason,omitempty"`
+}
+
+type modelsProfileAdoptionConflict struct {
+	Field           string `json:"field"`
+	RuntimeValue    int    `json:"runtime_value"`
+	CandidateValue  int    `json:"candidate_value"`
+	RuntimeSource   string `json:"runtime_source"`
+	CandidateSource string `json:"candidate_source"`
+	Strategy        string `json:"strategy"`
 }
 
 type modelsCodexLocalConfig struct {
@@ -221,6 +271,7 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 		ProfilePrecedence:                 []string{"responses_server.model_profiles", "zero_limits_when_unmatched"},
 		CatalogProfileRole:                "diagnostic_only",
 		ProviderChannelProfileAdoption:    "observe_only",
+		ProfileAdoptionReport:             buildModelsProfileAdoptionReport(match, catalogDiagnostics),
 		ProfileConflictStrategy:           "responses_server.model_profiles_wins",
 		ProfileAdoptionRequiredGates:      []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"},
 		CapabilitySource:                  "provider_upstream_capabilities",
@@ -266,6 +317,7 @@ type modelsCatalogDriftDiagnostics struct {
 	CatalogSource       string
 	ChannelSource       string
 	DriftWarnings       []string
+	ChannelModels       []store.ChannelModelRecord
 }
 
 func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, profileMatched bool) modelsCatalogDriftDiagnostics {
@@ -316,6 +368,7 @@ func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, pro
 		if strings.ToLower(strings.TrimSpace(channelModel.Model)) != model {
 			continue
 		}
+		diagnostics.ChannelModels = append(diagnostics.ChannelModels, channelModel)
 		diagnostics.ChannelModelCount++
 		diagnostics.ChannelModelPresent = true
 		diagnostics.ChannelSource = "channel_models"
@@ -355,6 +408,148 @@ func modelsCatalogDriftWarnings(model string, profileMatched bool, diagnostics m
 		warnings = append(warnings, fmt.Sprintf("model_catalog contains model %q, but channel_models has no entry for it", model))
 	}
 	return warnings
+}
+
+func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch, diagnostics modelsCatalogDriftDiagnostics) modelsProfileAdoptionReport {
+	report := modelsProfileAdoptionReport{
+		Mode:                  "observe_only",
+		DryRun:                true,
+		Mutates:               false,
+		Status:                "unavailable",
+		RuntimeProfileSource:  "responses_server.model_profiles",
+		CandidateSource:       diagnostics.ChannelSource,
+		ExplicitConfigPresent: match.Matched,
+		BlockedReasons:        []string{},
+	}
+	if !diagnostics.DatabaseAvailable {
+		report.BlockedReasons = append(report.BlockedReasons, "application_database_unavailable")
+		return report
+	}
+	report.Status = "no_candidate"
+	if len(diagnostics.ChannelModels) == 0 {
+		report.BlockedReasons = append(report.BlockedReasons, "channel_model_missing")
+		return report
+	}
+
+	for _, channelModel := range diagnostics.ChannelModels {
+		candidate := modelsProfileAdoptionCandidate{
+			ChannelID:               channelModel.ChannelID,
+			Model:                   channelModel.Model,
+			Source:                  channelModel.Source,
+			Enabled:                 channelModel.Enabled,
+			SupportsResponses:       triStateCapability(channelModel.SupportsResponses),
+			SupportsChatCompletions: triStateCapability(channelModel.SupportsChatCompletions),
+			SupportsEmbeddings:      triStateCapability(channelModel.SupportsEmbeddings),
+		}
+		if channelModel.ContextWindow != nil {
+			candidate.ContextWindowTokens = *channelModel.ContextWindow
+		}
+		candidate.Eligible, candidate.BlockedReason = modelsProfileAdoptionCandidateEligibility(channelModel)
+		report.Candidates = append(report.Candidates, candidate)
+		if candidate.Eligible {
+			report.CandidateCount++
+		}
+	}
+	if report.CandidateCount == 0 {
+		report.Status = "blocked"
+		report.BlockedReasons = append(report.BlockedReasons, "no_eligible_channel_profile_candidate")
+		return report
+	}
+
+	contextWindow, source, conflict := selectModelsProfileAdoptionContextWindowCandidate(report.Candidates)
+	if conflict {
+		report.Status = "conflict"
+		report.ConflictCount++
+		report.BlockedReasons = append(report.BlockedReasons, "conflicting_channel_context_window_candidates")
+		return report
+	}
+	if contextWindow <= 0 {
+		report.Status = "no_candidate"
+		report.BlockedReasons = append(report.BlockedReasons, "channel_context_window_missing")
+		return report
+	}
+
+	runtimeValue := 0
+	if match.Matched {
+		runtimeValue = match.Profile.ContextWindowTokens
+	}
+	field := modelsProfileAdoptionFieldDiff{
+		Field:           "context_window_tokens",
+		RuntimeValue:    runtimeValue,
+		CandidateValue:  contextWindow,
+		RuntimeSource:   match.Source,
+		CandidateSource: source,
+	}
+	if match.Matched {
+		if runtimeValue == contextWindow {
+			field.Status = "no_change"
+			report.Status = "no_change"
+		} else {
+			field.Status = "blocked_explicit_config"
+			field.Reason = "explicit responses_server.model_profiles entry wins in observe_only adoption"
+			report.Status = "blocked"
+			report.ConflictCount++
+			report.BlockedReasons = append(report.BlockedReasons, "explicit_runtime_profile_present")
+			report.Conflicts = append(report.Conflicts, modelsProfileAdoptionConflict{
+				Field:           field.Field,
+				RuntimeValue:    runtimeValue,
+				CandidateValue:  contextWindow,
+				RuntimeSource:   field.RuntimeSource,
+				CandidateSource: field.CandidateSource,
+				Strategy:        "responses_server.model_profiles_wins",
+			})
+		}
+	} else {
+		field.Status = "would_adopt_after_gates"
+		field.Reason = "candidate is reported for future adoption only; runtime profile remains unchanged"
+		report.Status = "would_change"
+		report.ProposedChangeCount = 1
+	}
+	report.Fields = append(report.Fields, field)
+	return report
+}
+
+func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRecord) (bool, string) {
+	if !channelModel.Enabled {
+		return false, "channel_model_disabled"
+	}
+	if channelModel.SupportsChatCompletions != nil && *channelModel.SupportsChatCompletions == 0 {
+		return false, "capability_false_chat_completions"
+	}
+	if channelModel.ContextWindow == nil || *channelModel.ContextWindow <= 0 {
+		return false, "context_window_missing"
+	}
+	return true, ""
+}
+
+func selectModelsProfileAdoptionContextWindowCandidate(candidates []modelsProfileAdoptionCandidate) (int, string, bool) {
+	value := 0
+	source := ""
+	for _, candidate := range candidates {
+		if !candidate.Eligible || candidate.ContextWindowTokens <= 0 {
+			continue
+		}
+		candidateSource := "channel_models." + candidate.ChannelID + ".context_window"
+		if value == 0 {
+			value = candidate.ContextWindowTokens
+			source = candidateSource
+			continue
+		}
+		if value != candidate.ContextWindowTokens {
+			return 0, "", true
+		}
+	}
+	return value, source, false
+}
+
+func triStateCapability(value *int) string {
+	if value == nil {
+		return "unknown"
+	}
+	if *value == 0 {
+		return "false"
+	}
+	return "true"
 }
 
 func diagnoseModelsCodexLocalConfig(path string, suggestion modelsCodexConfigResult) modelsCodexLocalConfig {
@@ -638,6 +833,15 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.ProviderChannelProfileAdoption,
 		result.Diagnostics.ProfileConflictStrategy,
 		strings.Join(result.Diagnostics.ProfileAdoptionRequiredGates, ","),
+	)
+	fmt.Fprintf(w, "# profile_adoption_report: mode=%s dry_run=%t mutates=%t status=%s proposed_changes=%d conflicts=%d blocked_reasons=%s\n",
+		result.Diagnostics.ProfileAdoptionReport.Mode,
+		result.Diagnostics.ProfileAdoptionReport.DryRun,
+		result.Diagnostics.ProfileAdoptionReport.Mutates,
+		result.Diagnostics.ProfileAdoptionReport.Status,
+		result.Diagnostics.ProfileAdoptionReport.ProposedChangeCount,
+		result.Diagnostics.ProfileAdoptionReport.ConflictCount,
+		strings.Join(result.Diagnostics.ProfileAdoptionReport.BlockedReasons, ","),
 	)
 	fmt.Fprintf(w, "# codex_config: status=%s present=%t readable=%t parsed=%t profile_present=%t provider_present=%t",
 		result.Diagnostics.CodexConfig.Status,

@@ -34,7 +34,7 @@
 - Provider `api_type` / `mode` / capabilities 路由约束，provider probe/report/apply 和 setup validate/apply 首切。
 - Codex fixture offline gate、Codex config suggestion、doctor/config inspect/audit operability 首切。
 - `models codex-config` 已输出 provider/profile source-boundary diagnostics：runtime profile 事实源为 `responses_server.model_profiles`，catalog/channel 当前为 drift-only，provider/upstream capability 驱动 routing/tokenize。
-- `models codex-config` 已输出 provider/channel profile adoption diagnostics：当前采纳阶段为 `observe_only`，冲突策略为 `responses_server.model_profiles_wins`，后续 catalog/channel profile 进入 runtime 前必须具备 schema migration、dry-run diff、conflict report、rollback plan 和 DSN-gated tests。
+- `models codex-config` 已输出 provider/channel profile adoption diagnostics：当前采纳阶段为 `observe_only`，冲突策略为 `responses_server.model_profiles_wins`，并已提供机器可读 `profile_adoption_report` dry-run/conflict report。该报告只读展示 channel profile candidate、字段级 diff、显式 runtime profile 保护和 capability false 阻断，不把 catalog/channel profile 接入 runtime；后续 catalog/channel profile 进入 runtime 前仍必须具备 schema migration、rollback plan 和 DSN-gated tests。
 
 这些能力说明项目已经从“只做代理”进入了“Responses semantic server + proxy/record/replay 并存”的阶段，但还不是完整 production-grade gateway。
 
@@ -85,7 +85,7 @@
 
 近期可并行切片：
 
-- `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；后续仍需实现 catalog/channel profile 进入 runtime 前的 migration/dry-run/conflict/rollback/test 闭环。
+- `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_adoption_report`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；当前 report 仅 observe-only dry-run，不覆盖显式配置或 capability false。后续仍需实现 catalog/channel profile 进入 runtime 前的 migration/rollback/test 闭环。
 - `provider/native-responses-mode-boundary`：写清并测试 native Responses target 在 proxy/server mode 下的 routing 行为。
 
 ## 停止发散规则
