@@ -3388,98 +3388,106 @@ func TestResponseToolsToChatToolsMapsHostedWebSearchWhenReady(t *testing.T) {
 }
 
 func TestRuntimeCreateRejectsForcedUnsupportedHostedTool(t *testing.T) {
-	client := &fakeChatClient{resp: finalChatResponse("should not be called")}
-	toolAudits := &fakeToolCallAuditRecorder{}
-	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(), WithToolCallAuditRecorder(toolAudits))
+	for _, toolType := range []string{"mcp", "file_search", "code_interpreter", "computer_use_preview"} {
+		t.Run(toolType, func(t *testing.T) {
+			client := &fakeChatClient{resp: finalChatResponse("should not be called")}
+			toolAudits := &fakeToolCallAuditRecorder{}
+			rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(), WithToolCallAuditRecorder(toolAudits))
 
-	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
-		Input:      "use workspace",
-		Tools:      []protocol.Tool{{Type: "mcp", ServerLabel: "workspace"}},
-		ToolChoice: map[string]any{"type": "mcp"},
-		Metadata: map[string]any{
-			"codex": map[string]any{"thread_id": "thread_non_stream"},
-		},
-	})
-	if err == nil {
-		t.Fatal("Create returned nil error, want unsupported hosted tool")
-	}
-	var unsupported UnsupportedHostedToolError
-	if !errors.As(err, &unsupported) || unsupported.Tool != "mcp" {
-		t.Fatalf("Create error = %T %v, want UnsupportedHostedToolError for mcp", err, err)
-	}
-	if len(client.reqs) != 0 {
-		t.Fatalf("chat requests = %d, want 0 for rejected hosted tool", len(client.reqs))
-	}
-	if len(toolAudits.entries) != 1 {
-		t.Fatalf("tool audits = %#v, want one rejected hosted tool audit", toolAudits.entries)
-	}
-	entry := toolAudits.entries[0]
-	if entry.ResponseID != "" || entry.ConversationID != "thread_non_stream" {
-		t.Fatalf("tool audit identity = %#v, want empty response and conversation", entry)
-	}
-	if entry.ToolType != "hosted" || entry.ToolName != "mcp" || entry.Executor != "hosted:mcp" {
-		t.Fatalf("tool audit tool fields = %#v, want hosted mcp", entry)
-	}
-	if entry.Status != "rejected" || entry.Phase != "tool_call" || entry.ErrorText != err.Error() {
-		t.Fatalf("tool audit status/error = %#v, want rejected tool_call with unsupported error", entry)
-	}
-	if entry.CreatedAt.IsZero() {
-		t.Fatalf("tool audit CreatedAt is zero: %#v", entry)
-	}
-	if entry.MetadataJSON["stream"] != false || entry.MetadataJSON["reason"] != unsupported.Reason || entry.MetadataJSON["forced_tool_choice"] != true {
-		t.Fatalf("tool audit metadata = %#v, want stream/reason/forced_tool_choice", entry.MetadataJSON)
-	}
-	if len(entry.InputJSON) != 0 || len(entry.OutputJSON) != 0 {
-		t.Fatalf("tool audit leaked payload summaries: input=%#v output=%#v", entry.InputJSON, entry.OutputJSON)
+			_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+				Input:      "use hosted tool",
+				Tools:      []protocol.Tool{{Type: toolType, ServerLabel: "workspace"}},
+				ToolChoice: map[string]any{"type": toolType},
+				Metadata: map[string]any{
+					"codex": map[string]any{"thread_id": "thread_non_stream_" + toolType},
+				},
+			})
+			if err == nil {
+				t.Fatal("Create returned nil error, want unsupported hosted tool")
+			}
+			var unsupported UnsupportedHostedToolError
+			if !errors.As(err, &unsupported) || unsupported.Tool != toolType {
+				t.Fatalf("Create error = %T %v, want UnsupportedHostedToolError for %s", err, err, toolType)
+			}
+			if len(client.reqs) != 0 {
+				t.Fatalf("chat requests = %d, want 0 for rejected hosted tool", len(client.reqs))
+			}
+			if len(toolAudits.entries) != 1 {
+				t.Fatalf("tool audits = %#v, want one rejected hosted tool audit", toolAudits.entries)
+			}
+			entry := toolAudits.entries[0]
+			if entry.ResponseID != "" || entry.ConversationID != "thread_non_stream_"+toolType {
+				t.Fatalf("tool audit identity = %#v, want empty response and conversation", entry)
+			}
+			if entry.ToolType != "hosted" || entry.ToolName != toolType || entry.Executor != "hosted:"+toolType {
+				t.Fatalf("tool audit tool fields = %#v, want hosted %s", entry, toolType)
+			}
+			if entry.Status != "rejected" || entry.Phase != "tool_call" || entry.ErrorText != err.Error() {
+				t.Fatalf("tool audit status/error = %#v, want rejected tool_call with unsupported error", entry)
+			}
+			if entry.CreatedAt.IsZero() {
+				t.Fatalf("tool audit CreatedAt is zero: %#v", entry)
+			}
+			if entry.MetadataJSON["stream"] != false || entry.MetadataJSON["reason"] != unsupported.Reason || entry.MetadataJSON["forced_tool_choice"] != true {
+				t.Fatalf("tool audit metadata = %#v, want stream/reason/forced_tool_choice", entry.MetadataJSON)
+			}
+			if len(entry.InputJSON) != 0 || len(entry.OutputJSON) != 0 {
+				t.Fatalf("tool audit leaked payload summaries: input=%#v output=%#v", entry.InputJSON, entry.OutputJSON)
+			}
+		})
 	}
 }
 
 func TestRuntimeCreateStreamRejectsForcedUnsupportedHostedTool(t *testing.T) {
-	client := &fakeChatClient{streamResp: finalChatResponse("should not be called")}
-	toolAudits := &fakeToolCallAuditRecorder{}
-	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(), WithToolCallAuditRecorder(toolAudits))
+	for _, toolType := range []string{"mcp", "file_search", "code_interpreter", "computer_use_preview"} {
+		t.Run(toolType, func(t *testing.T) {
+			client := &fakeChatClient{streamResp: finalChatResponse("should not be called")}
+			toolAudits := &fakeToolCallAuditRecorder{}
+			rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(), WithToolCallAuditRecorder(toolAudits))
 
-	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
-		Input:      "search files",
-		Tools:      []protocol.Tool{{Type: "file_search"}},
-		ToolChoice: map[string]any{"type": "file_search"},
-		Metadata: map[string]any{
-			"_gateway": map[string]any{
-				"codex": map[string]any{"thread_id": "thread_stream"},
-			},
-		},
-	}, &fakeResponseStreamSink{})
-	if err == nil {
-		t.Fatal("CreateStream returned nil error, want unsupported hosted tool")
-	}
-	var unsupported UnsupportedHostedToolError
-	if !errors.As(err, &unsupported) || unsupported.Tool != "file_search" {
-		t.Fatalf("CreateStream error = %T %v, want UnsupportedHostedToolError for file_search", err, err)
-	}
-	if len(client.streamReqs) != 0 {
-		t.Fatalf("stream chat requests = %d, want 0 for rejected hosted tool", len(client.streamReqs))
-	}
-	if len(toolAudits.entries) != 1 {
-		t.Fatalf("stream tool audits = %#v, want one rejected hosted tool audit", toolAudits.entries)
-	}
-	entry := toolAudits.entries[0]
-	if entry.ResponseID != "" || entry.ConversationID != "thread_stream" {
-		t.Fatalf("stream tool audit identity = %#v, want empty response and conversation", entry)
-	}
-	if entry.ToolType != "hosted" || entry.ToolName != "file_search" || entry.Executor != "hosted:file_search" {
-		t.Fatalf("stream tool audit tool fields = %#v, want hosted file_search", entry)
-	}
-	if entry.Status != "rejected" || entry.Phase != "tool_call" || entry.ErrorText != err.Error() {
-		t.Fatalf("stream tool audit status/error = %#v, want rejected tool_call with unsupported error", entry)
-	}
-	if entry.CreatedAt.IsZero() {
-		t.Fatalf("stream tool audit CreatedAt is zero: %#v", entry)
-	}
-	if entry.MetadataJSON["stream"] != true || entry.MetadataJSON["reason"] != unsupported.Reason || entry.MetadataJSON["forced_tool_choice"] != true {
-		t.Fatalf("stream tool audit metadata = %#v, want stream/reason/forced_tool_choice", entry.MetadataJSON)
-	}
-	if len(entry.InputJSON) != 0 || len(entry.OutputJSON) != 0 {
-		t.Fatalf("stream tool audit leaked payload summaries: input=%#v output=%#v", entry.InputJSON, entry.OutputJSON)
+			_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+				Input:      "use hosted tool",
+				Tools:      []protocol.Tool{{Type: toolType, ServerLabel: "workspace"}},
+				ToolChoice: map[string]any{"type": toolType},
+				Metadata: map[string]any{
+					"_gateway": map[string]any{
+						"codex": map[string]any{"thread_id": "thread_stream_" + toolType},
+					},
+				},
+			}, &fakeResponseStreamSink{})
+			if err == nil {
+				t.Fatal("CreateStream returned nil error, want unsupported hosted tool")
+			}
+			var unsupported UnsupportedHostedToolError
+			if !errors.As(err, &unsupported) || unsupported.Tool != toolType {
+				t.Fatalf("CreateStream error = %T %v, want UnsupportedHostedToolError for %s", err, err, toolType)
+			}
+			if len(client.streamReqs) != 0 {
+				t.Fatalf("stream chat requests = %d, want 0 for rejected hosted tool", len(client.streamReqs))
+			}
+			if len(toolAudits.entries) != 1 {
+				t.Fatalf("stream tool audits = %#v, want one rejected hosted tool audit", toolAudits.entries)
+			}
+			entry := toolAudits.entries[0]
+			if entry.ResponseID != "" || entry.ConversationID != "thread_stream_"+toolType {
+				t.Fatalf("stream tool audit identity = %#v, want empty response and conversation", entry)
+			}
+			if entry.ToolType != "hosted" || entry.ToolName != toolType || entry.Executor != "hosted:"+toolType {
+				t.Fatalf("stream tool audit tool fields = %#v, want hosted %s", entry, toolType)
+			}
+			if entry.Status != "rejected" || entry.Phase != "tool_call" || entry.ErrorText != err.Error() {
+				t.Fatalf("stream tool audit status/error = %#v, want rejected tool_call with unsupported error", entry)
+			}
+			if entry.CreatedAt.IsZero() {
+				t.Fatalf("stream tool audit CreatedAt is zero: %#v", entry)
+			}
+			if entry.MetadataJSON["stream"] != true || entry.MetadataJSON["reason"] != unsupported.Reason || entry.MetadataJSON["forced_tool_choice"] != true {
+				t.Fatalf("stream tool audit metadata = %#v, want stream/reason/forced_tool_choice", entry.MetadataJSON)
+			}
+			if len(entry.InputJSON) != 0 || len(entry.OutputJSON) != 0 {
+				t.Fatalf("stream tool audit leaked payload summaries: input=%#v output=%#v", entry.InputJSON, entry.OutputJSON)
+			}
+		})
 	}
 }
 
