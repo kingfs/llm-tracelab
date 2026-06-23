@@ -16,18 +16,19 @@ import (
 )
 
 type fakeChatClient struct {
-	reqs               []ChatCompletionRequest
-	req                ChatCompletionRequest
-	resps              []ChatCompletionResponse
-	resp               ChatCompletionResponse
-	errs               []error
-	err                error
-	streamReqs         []ChatCompletionRequest
-	streamEvents       []ChatStreamEvent
-	streamEventBatches [][]ChatStreamEvent
-	streamResp         ChatCompletionResponse
-	streamResps        []ChatCompletionResponse
-	streamErr          error
+	reqs                 []ChatCompletionRequest
+	req                  ChatCompletionRequest
+	resps                []ChatCompletionResponse
+	resp                 ChatCompletionResponse
+	errs                 []error
+	err                  error
+	streamReqs           []ChatCompletionRequest
+	streamEvents         []ChatStreamEvent
+	streamEventBatches   [][]ChatStreamEvent
+	streamResp           ChatCompletionResponse
+	streamResps          []ChatCompletionResponse
+	streamErr            error
+	streamErrAfterEvents error
 }
 
 type blockingFirstToolCallClient struct {
@@ -153,6 +154,9 @@ func (f *fakeChatClient) ChatCompletionStream(ctx context.Context, req ChatCompl
 		if err := handle(event); err != nil {
 			return ChatCompletionResponse{}, err
 		}
+	}
+	if f.streamErrAfterEvents != nil {
+		return ChatCompletionResponse{}, f.streamErrAfterEvents
 	}
 	if index < len(f.streamResps) {
 		return f.streamResps[index], nil
@@ -3034,6 +3038,74 @@ func TestRuntimeCreateStreamContinuesAfterClientSubmittedFunctionOutput(t *testi
 	}
 	if events.events[1].Status != "submitted" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" {
 		t.Fatalf("submitted event mismatch: %#v", events.events[1])
+	}
+}
+
+func TestRuntimeCreateStreamSubmittedFunctionOutputCancelAfterDeltaDoesNotStoreCompletedResponse(t *testing.T) {
+	client := &fakeChatClient{
+		resp: functionToolChatResponse("call_lookup", "lookup"),
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ContentDelta: "partial"},
+		},
+		streamErrAfterEvents: context.Canceled,
+	}
+	events := &fakeExecutionEventRecorder{}
+	store := NewMemoryStore()
+	rt := New(Config{DefaultModel: "gpt-test"}, client, store, WithExecutionEventRecorder(events))
+
+	first, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("first Create returned error: %v", err)
+	}
+	sink := &fakeResponseStreamSink{}
+	_, err = rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		PreviousResponseID: first.ID,
+		Input: []any{map[string]any{
+			"type":    "function_call_output",
+			"call_id": "call_lookup",
+			"name":    "lookup",
+			"output":  map[string]any{"ok": true, "value": "42"},
+			"status":  "completed",
+		}},
+		Stream: true,
+	}, sink)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateStream error = %v, want context canceled", err)
+	}
+	if len(client.reqs) != 1 || len(client.streamReqs) != 1 {
+		t.Fatalf("chat calls = nonstream:%d stream:%d, want 1/1", len(client.reqs), len(client.streamReqs))
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.output_text.delta",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(sink.created) != 1 || sink.created[0].ID == "" {
+		t.Fatalf("created event = %#v, want one response id", sink.created)
+	}
+	if len(sink.deltas) != 1 || sink.deltas[0].Delta != "partial" {
+		t.Fatalf("text deltas = %#v, want one partial delta", sink.deltas)
+	}
+	if len(sink.completed) != 0 {
+		t.Fatalf("completed events = %#v, want none after cancel", sink.completed)
+	}
+	if _, ok, err := store.Get(context.Background(), sink.created[0].ID); err != nil || ok {
+		t.Fatalf("partial streamed response stored ok=%v err=%v, want not stored", ok, err)
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want requested and submitted only: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "requested" || events.events[1].Status != "submitted" {
+		t.Fatalf("function lifecycle events mismatch: %#v", events.events)
 	}
 }
 

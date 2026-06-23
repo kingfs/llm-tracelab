@@ -50,7 +50,7 @@
 
 - Compact v2/context optimization：summary provenance、source/retained item refs、retention window、artifact-bearing item 策略和可查询 read model。
 - Auto compact streaming：简单文本 continuation、未注册普通 `function` tool arguments、同名 registered executor stream tool loop，以及 provider 就绪 hosted `web_search` / `web_search_preview` 且 `tool_choice` 为 nil/空/`none`/`auto` 的 tool loop，已能在自动 compact 后继续真实增量 streaming；未知/未实现 hosted 工具或非平凡 `tool_choice` 的 auto compact 组合仍显式 fallback 并可审计，后续需继续收敛复杂路径。
-- Stream/tool lifecycle：client-owned `function_call_output` 的非流式与流式 continuation、同轮多个 registered executor、同轮 registered function + hosted `web_search` mixed success、同轮 registered function 完成后 hosted `web_search` provider 失败的 completed/failed item 顺序、以及 auto compact 后 registered executor stream 失败的 failed item -> response.failed SSE/audit 对齐已有回归覆盖；仍需补复杂跨轮、auto compact 复杂工具组合、cancel/error 的稳定 event ordering 和 final response 对齐。
+- Stream/tool lifecycle：client-owned `function_call_output` 的非流式与流式 continuation、跨轮 `function_call_output` partial stream cancel 后不存 completed response、同轮多个 registered executor、同轮 registered function + hosted `web_search` mixed success、同轮 registered function 完成后 hosted `web_search` provider 失败的 completed/failed item 顺序、以及 auto compact 后 registered executor stream 失败的 failed item -> response.failed SSE/audit 对齐已有回归覆盖；仍需补更复杂跨轮/混合工具、auto compact 复杂工具组合、cancel/error 的稳定 event ordering 和 final response 对齐。
 - Tool ownership boundary：普通 `function` 默认 client-owned 的首切已有 regression test；server-side executor 必须显式 opt-in；MCP/file/code/computer-use 必须先有安全设计，不直接执行任意外部能力。
 
 近期可并行切片：
@@ -121,7 +121,7 @@
 
 必须完成：
 
-- 复核并补齐复杂 stream/tool lifecycle 的边界测试：跨轮 continuation、cancel/error event ordering、已输出 SSE 后的 `response.failed`、final response 存储和 audit 状态一致性。
+- 复核并补齐复杂 stream/tool lifecycle 的边界测试：跨轮 continuation、cancel/error event ordering、已输出 SSE 后的 `response.failed`、final response 存储和 audit 状态一致性；当前已补跨轮 `function_call_output` partial stream cancel 后不存 completed response 的 runtime 级覆盖。
 - 复核 auto compact 后工具组合：已支持的简单文本、普通 function arguments、registered executor 和平凡 hosted `web_search` 保持真实增量；未知/未实现 hosted tool 或非平凡 `tool_choice` 继续走稳定 deferred fallback。
 - 保持 MCP/file/code/computer-use 的 stable unsupported + audit contract，不在本阶段接真实执行器。
 
@@ -190,3 +190,4 @@
 - `rtk env -u GOROOT task build` 已通过。
 - `rtk env -u GOROOT task test:codex-fixtures` 已通过。
 - 本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，Postgres gated matrix 未在本轮本机执行；相关测试保持 DSN-gated。
+- Phase 1 Runtime 收口继续推进：新增跨轮 `function_call_output` streaming 在已输出 delta 后遇到 `context.Canceled` 时不发送 completed、不落 completed response 的 runtime 回归覆盖；`rtk env -u GOROOT go test ./internal/responses/runtime -count=1` 已通过。
