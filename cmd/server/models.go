@@ -27,6 +27,8 @@ const (
 	codexConfigStreamIdleTimeout = 120000
 )
 
+var modelsProfileAdoptionRequiredGates = []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"}
+
 type modelsCodexConfigOptions struct {
 	configPath      string
 	codexConfigPath string
@@ -108,13 +110,23 @@ type modelsProfileAdoptionReport struct {
 	RuntimeProfileSource  string                           `json:"runtime_profile_source"`
 	CandidateSource       string                           `json:"candidate_source"`
 	ExplicitConfigPresent bool                             `json:"explicit_config_present"`
+	AdoptionReady         bool                             `json:"adoption_ready"`
 	CandidateCount        int                              `json:"candidate_count"`
 	ProposedChangeCount   int                              `json:"proposed_change_count"`
 	ConflictCount         int                              `json:"conflict_count"`
+	BlockingGateCount     int                              `json:"blocking_gate_count"`
 	BlockedReasons        []string                         `json:"blocked_reasons,omitempty"`
+	RequiredGates         []modelsProfileAdoptionGate      `json:"required_gates"`
 	Fields                []modelsProfileAdoptionFieldDiff `json:"fields,omitempty"`
 	Candidates            []modelsProfileAdoptionCandidate `json:"candidates,omitempty"`
 	Conflicts             []modelsProfileAdoptionConflict  `json:"conflicts,omitempty"`
+}
+
+type modelsProfileAdoptionGate struct {
+	Gate     string `json:"gate"`
+	Status   string `json:"status"`
+	Blocking bool   `json:"blocking"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type modelsProfileAdoptionFieldDiff struct {
@@ -273,7 +285,7 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 		ProviderChannelProfileAdoption:    "observe_only",
 		ProfileAdoptionReport:             buildModelsProfileAdoptionReport(match, catalogDiagnostics),
 		ProfileConflictStrategy:           "responses_server.model_profiles_wins",
-		ProfileAdoptionRequiredGates:      []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"},
+		ProfileAdoptionRequiredGates:      modelsProfileAdoptionRequiredGates,
 		CapabilitySource:                  "provider_upstream_capabilities",
 		CompactLimitSource:                compactLimitSource,
 		CompactLimitMarginTokens:          contextWindow - autoCompactLimit,
@@ -421,6 +433,10 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 		ExplicitConfigPresent: match.Matched,
 		BlockedReasons:        []string{},
 	}
+	report.RequiredGates, report.BlockingGateCount = buildModelsProfileAdoptionRequiredGateStatuses()
+	if report.BlockingGateCount == 0 {
+		report.AdoptionReady = true
+	}
 	if !diagnostics.DatabaseAvailable {
 		report.BlockedReasons = append(report.BlockedReasons, "application_database_unavailable")
 		return report
@@ -507,6 +523,48 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 	}
 	report.Fields = append(report.Fields, field)
 	return report
+}
+
+func buildModelsProfileAdoptionRequiredGateStatuses() ([]modelsProfileAdoptionGate, int) {
+	gates := []modelsProfileAdoptionGate{
+		{
+			Gate:     "schema_migration",
+			Status:   "blocking_not_implemented",
+			Blocking: true,
+			Reason:   "catalog/channel profile fields are not covered by a runtime adoption schema migration",
+		},
+		{
+			Gate:     "dry_run_diff",
+			Status:   "implemented_observe_only",
+			Blocking: false,
+			Reason:   "profile_adoption_report reports candidate diffs without mutating runtime config",
+		},
+		{
+			Gate:     "conflict_report",
+			Status:   "implemented_observe_only",
+			Blocking: false,
+			Reason:   "profile_adoption_report reports explicit runtime profile conflicts and capability false blocks",
+		},
+		{
+			Gate:     "rollback_plan",
+			Status:   "blocking_not_implemented",
+			Blocking: true,
+			Reason:   "there is no rollback contract for catalog/channel profile adoption into runtime profiles",
+		},
+		{
+			Gate:     "dsn_gated_tests",
+			Status:   "blocking_not_implemented",
+			Blocking: true,
+			Reason:   "real database adoption tests are not yet covered by an opt-in DSN-gated suite",
+		},
+	}
+	blockingCount := 0
+	for _, gate := range gates {
+		if gate.Blocking {
+			blockingCount++
+		}
+	}
+	return gates, blockingCount
 }
 
 func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRecord) (bool, string) {
@@ -843,6 +901,11 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.ProfileAdoptionReport.ConflictCount,
 		strings.Join(result.Diagnostics.ProfileAdoptionReport.BlockedReasons, ","),
 	)
+	fmt.Fprintf(w, "# profile_adoption_gates: adoption_ready=%t blocking_gate_count=%d required_gate_statuses=%s\n",
+		result.Diagnostics.ProfileAdoptionReport.AdoptionReady,
+		result.Diagnostics.ProfileAdoptionReport.BlockingGateCount,
+		formatModelsProfileAdoptionGateStatuses(result.Diagnostics.ProfileAdoptionReport.RequiredGates),
+	)
 	fmt.Fprintf(w, "# codex_config: status=%s present=%t readable=%t parsed=%t profile_present=%t provider_present=%t",
 		result.Diagnostics.CodexConfig.Status,
 		result.Diagnostics.CodexConfig.Present,
@@ -857,6 +920,21 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w)
 	fmt.Fprint(w, result.TOML)
+}
+
+func formatModelsProfileAdoptionGateStatuses(gates []modelsProfileAdoptionGate) string {
+	if len(gates) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(gates))
+	for _, gate := range gates {
+		status := gate.Gate + ":" + gate.Status
+		if gate.Blocking {
+			status += ":blocking"
+		}
+		parts = append(parts, status)
+	}
+	return strings.Join(parts, ",")
 }
 
 func modelsCodexConfigTOML(result modelsCodexConfigResult) string {

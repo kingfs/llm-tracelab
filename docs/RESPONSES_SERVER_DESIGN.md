@@ -188,7 +188,7 @@ providers:
 - 显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 可以服务 native `/v1/responses` proxy pass-through，但不会被本地 Responses runtime 的内部 Chat Completions adapter 选中。
 - 当请求体包含 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，decision trace 的候选项会标记 `unsupported_tools`。
 - `api_type: chat_completions` 不等于 `responses_native`。由 TraceLab server mode 补齐 Responses 语义。
-- 后续 provider/channel `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源；当前 `responses_server.model_profiles` 是本地 server-mode 的 runtime profile source，匹配失败时按 zero limits 回落。`models codex-config` 会把这一优先级作为 `runtime_profile_source` / `profile_precedence` 输出，并把 catalog/channel 标成 `diagnostic_only`；同一 diagnostics 还会输出 `provider_channel_profile_adoption=observe_only`、`profile_conflict_strategy=responses_server.model_profiles_wins` 和后续采纳 required gates。
+- 后续 provider/channel `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源；当前 `responses_server.model_profiles` 是本地 server-mode 的 runtime profile source，匹配失败时按 zero limits 回落。`models codex-config` 会把这一优先级作为 `runtime_profile_source` / `profile_precedence` 输出，并把 catalog/channel 标成 `diagnostic_only`；同一 diagnostics 还会输出 `provider_channel_profile_adoption=observe_only`、`profile_conflict_strategy=responses_server.model_profiles_wins` 和后续采纳 required gates。当前 `profile_adoption_report` 内的 gate 状态明确 `schema_migration`、`rollback_plan`、`dsn_gated_tests` 仍是 blocking/not implemented，因此 catalog/channel profile 尚不能作为 runtime 事实源。
 
 ## 存储策略
 
