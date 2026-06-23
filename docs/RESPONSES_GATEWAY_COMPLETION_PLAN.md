@@ -59,14 +59,14 @@
 必须完成：
 
 - Postgres application migration 状态、down/dry-run、required table health 和 schema namespace 的生产说明继续保持机器可读。
-- SQLite fallback 策略定案：要么实现 versioned migration，要么明确长期只作为 startup schema fallback，并把 repair/upgrade 边界写入 docs/CLI。
-- Auth namespace 定案：当前 Postgres auth 复用 application migration namespace；如果要拆独立 namespace，需要迁移方案、dry-run/status、回滚边界和测试。
+- SQLite fallback 策略已定案：本 Storage 边界长期保留 `startup_schema_fallback` 作为 local-first fallback，不在本轮实现 application versioned migrator；`db migrate status --check-db` 只读解释 marker/required table 状态，不承担 destructive repair，生产级 versioned migration 走 Postgres。
+- Auth namespace 已定案：当前 Postgres auth 继续复用 application `schema_migrations` namespace；独立 auth namespace 不直接拆，必须先通过迁移设计、adoption/dry-run/status 字段、回滚边界和测试门禁。
 - 审计更深 raw SQL 兼容：analytics/eval/experiment/monitor 查询中仍依赖 SQLite 方言的路径要继续审计。
 
 近期可并行切片：
 
-- `storage/sqlite-policy-finalization`：将 SQLite fallback 的长期策略、operator advice 和 docs 收敛为明确决策。
-- `storage/auth-namespace-design`：产出独立 auth namespace 的迁移设计，只有设计和 dry-run/status 语义通过后再实施。
+- `storage/postgres-runtime-sql-coverage`：继续补 analytics/eval/experiment/monitor 查询的 Postgres DSN-gated 覆盖，默认测试保持离线。
+- `storage/auth-namespace-adoption-design`：在不改变当前 shared namespace 行为的前提下，设计独立 auth namespace 的 adoption、dry-run/status 和 rollback 语义；设计通过后再实施。
 
 ### Provider 主线
 
@@ -110,6 +110,6 @@
 下一阶段不再继续 doctor/audit/config inspect 小切片，优先启动两个正交任务：
 
 1. Runtime：compact v2 provenance/read model 设计与首切实现。
-2. Storage：SQLite fallback 与 auth namespace 的生产边界定案。
+2. Storage：基于已定案的 SQLite fallback/shared auth namespace 边界，继续做 Postgres runtime SQL 覆盖和 auth namespace adoption 设计。
 
 Provider 主线在上述两个任务启动后并行评审，避免 runtime/storage 事实源继续漂移。

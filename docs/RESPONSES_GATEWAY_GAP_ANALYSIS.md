@@ -128,7 +128,8 @@
 ### Migration 运维
 
 - 已有：Postgres application `db migrate up/status/down --dry-run`、auth migrate、SQLite status 解释、open-vs-migrate 分离；SQLite application report 已稳定输出 `sqlite_schema_strategy: startup_schema_fallback`、`sqlite_versioned_migration_status: not_implemented` 和 migration advice；`auth migrate status` / dry-run 已输出 auth required tables、table health、Postgres shared namespace strategy 和 independent auth namespace `not_implemented` 方案边界。
-- 缺口：SQLite 仍是 startup schema fallback，不是 versioned migration；`db migrate status --check-db` 对 SQLite 只读解释 marker/required table 状态，不承担 destructive repair；auth 仍共享 application schema namespace，独立 auth migration namespace 未完成且当前仅通过 status/dry-run 明确约束。
+- 定案边界：SQLite application DB 长期作为 local-first `startup_schema_fallback` 保留；本轮不实现 versioned SQLite migrator，`db migrate status --check-db` 只读解释 marker/required table 状态，不承担 destructive repair、文件创建或数据 rewrite。Postgres auth 继续共享 application `schema_migrations` namespace；独立 auth namespace 未实现，当前通过 status/dry-run 字段明确约束。
+- 缺口：Postgres runtime SQL 仍需继续扩大 analytics/eval/experiment/monitor 查询覆盖；独立 auth namespace 只有迁移门禁设计，尚未实现 adoption path、独立 migration source、双 namespace read-only status 和 auth-only rollback 语义。
 - llm-tracelab 落点：`cmd/server/db.go`、`cmd/server/auth.go`、`internal/appdbmigrate`、`internal/auth/migrate.go`。
 - responses-gateway 对照：`cmd/responses-gateway/migrate.go`、`ent/migrations`。
 
@@ -216,7 +217,8 @@
 6. 继续 migration 生产化。
    - 价值：减少 Postgres/SQLite/auth schema 运维歧义。
    - 模块：`internal/appdbmigrate`、`internal/auth/migrate.go`、`cmd/server/db.go`、`cmd/server/auth.go`。
-   - 验收：SQLite versioned migration 方案或明确继续 fallback；auth 独立 namespace 拆分方案落文档和 dry-run/status 状态，且 `auth migrate status --check-db` 能只读报告 auth-owned table presence。
+   - 当前验收已收敛：SQLite 明确继续 `startup_schema_fallback`，status/dry-run 输出稳定 advice，`--check-db` 只读；Postgres auth 明确 shared application namespace，`auth migrate status --check-db` 能只读报告 auth-owned table presence。
+   - 下一步验收：补 Postgres runtime SQL 覆盖；独立 auth namespace 进入 adoption design，必须先定义 dry-run/status 双 namespace 字段、shared deployment adoption、auth-only rollback 语义和测试门禁，再实施。
 
 ## 不建议直接搬运的点
 
