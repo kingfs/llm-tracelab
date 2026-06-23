@@ -1298,12 +1298,15 @@ func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
-			Driver    string `json:"driver"`
-			Mode      string `json:"migration_mode"`
-			Source    string `json:"migration_source"`
-			Path      string `json:"migration_source_path"`
-			Versioned bool   `json:"schema_versioned"`
-			Auth      string `json:"auth_migration_scope"`
+			Driver                         string `json:"driver"`
+			Mode                           string `json:"migration_mode"`
+			Source                         string `json:"migration_source"`
+			Path                           string `json:"migration_source_path"`
+			Versioned                      bool   `json:"schema_versioned"`
+			SQLiteSchemaStrategy           string `json:"sqlite_schema_strategy"`
+			SQLiteVersionedMigrationStatus string `json:"sqlite_versioned_migration_status"`
+			SQLiteMigrationAdvice          string `json:"sqlite_migration_advice"`
+			Auth                           string `json:"auth_migration_scope"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1314,6 +1317,70 @@ func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
 	}
 	if envelope.Result.Driver != "sqlite" || envelope.Result.Mode != "schema-init" || envelope.Result.Source != "sqlite-startup-schema-fallback" || envelope.Result.Path != "internal/store raw DDL startup initialization" || envelope.Result.Versioned || envelope.Result.Auth != "excluded" {
 		t.Fatalf("sqlite status source = %+v", envelope.Result)
+	}
+	if envelope.Result.SQLiteSchemaStrategy != "startup_schema_fallback" || envelope.Result.SQLiteVersionedMigrationStatus != "not_implemented" || !strings.Contains(envelope.Result.SQLiteMigrationAdvice, "startup schema fallback") {
+		t.Fatalf("sqlite migration plan fields = %+v", envelope.Result)
+	}
+}
+
+func TestDBMigrateUpDryRunJSONReportsSQLitePlan(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeSQLiteDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "up", "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun                         bool   `json:"dry_run"`
+			Driver                         string `json:"driver"`
+			SQLiteSchemaStrategy           string `json:"sqlite_schema_strategy"`
+			SQLiteVersionedMigrationStatus string `json:"sqlite_versioned_migration_status"`
+			SQLiteMigrationAdvice          string `json:"sqlite_migration_advice"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.up" || !envelope.Result.DryRun || envelope.Result.Driver != "sqlite" {
+		t.Fatalf("sqlite dry-run envelope = %+v", envelope)
+	}
+	if envelope.Result.SQLiteSchemaStrategy != "startup_schema_fallback" || envelope.Result.SQLiteVersionedMigrationStatus != "not_implemented" || !strings.Contains(envelope.Result.SQLiteMigrationAdvice, "versioned production migrations") {
+		t.Fatalf("sqlite dry-run migration plan fields = %+v", envelope.Result)
+	}
+}
+
+func TestDBMigrateUpDryRunTextReportsSQLitePlan(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeSQLiteDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "db", "migrate", "up", "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	output := out.String()
+	for _, want := range []string{
+		"dry-run db.migrate.up: no changes will be applied",
+		"sqlite_schema_strategy: startup_schema_fallback",
+		"sqlite_versioned_migration_status: not_implemented",
+		"sqlite_migration_advice: SQLite application DB uses startup schema fallback",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dry-run text output = %q, want contain %q", output, want)
+		}
 	}
 }
 
@@ -1360,6 +1427,7 @@ database:
 			SchemaMarkerVersion     int    `json:"database_schema_marker_version"`
 			RequiredTablesPresent   bool   `json:"database_required_tables_present"`
 			DatabaseStatusMessage   string `json:"database_status_message"`
+			DatabaseStatusAdvice    string `json:"database_status_advice"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1374,8 +1442,70 @@ database:
 	if envelope.Result.SchemaMarker != "app_schema_status" || envelope.Result.SchemaMarkerVersion != 1 || !envelope.Result.RequiredTablesPresent {
 		t.Fatalf("sqlite schema marker status = %+v", envelope.Result)
 	}
-	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "marker version 1") || !strings.Contains(envelope.Result.DatabaseStatusMessage, "sqlite application migration still uses store schema initialization") {
+	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "marker version 1") || !strings.Contains(envelope.Result.DatabaseStatusMessage, "startup schema fallback remains active") {
 		t.Fatalf("sqlite database status message = %q", envelope.Result.DatabaseStatusMessage)
+	}
+	if !strings.Contains(envelope.Result.DatabaseStatusAdvice, "startup schema fallback") || !strings.Contains(envelope.Result.DatabaseStatusAdvice, "Postgres") {
+		t.Fatalf("sqlite database status advice = %q", envelope.Result.DatabaseStatusAdvice)
+	}
+}
+
+func TestDBMigrateStatusCheckDBSQLiteMissingDBIsReadOnly(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "missing.sqlite3")
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+trace:
+  output_dir: "` + dir + `"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "status", "--check-db"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+	if _, err := os.Stat(dbPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sqlite check-db created or changed missing database state: stat err=%v", err)
+	}
+
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			StatusCheck             string   `json:"status_check"`
+			DatabaseStatusAvailable bool     `json:"database_status_available"`
+			DatabaseStatusVersioned bool     `json:"database_status_versioned"`
+			DatabaseStatusDriver    string   `json:"database_status_driver"`
+			RequiredTablesPresent   bool     `json:"database_required_tables_present"`
+			MissingTables           []string `json:"database_missing_tables"`
+			DatabaseStatusMessage   string   `json:"database_status_message"`
+			DatabaseStatusAdvice    string   `json:"database_status_advice"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Result.StatusCheck != "database" || envelope.Result.DatabaseStatusAvailable || envelope.Result.DatabaseStatusVersioned || envelope.Result.DatabaseStatusDriver != "sqlite" {
+		t.Fatalf("missing sqlite database status = %+v", envelope.Result)
+	}
+	if envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
+		t.Fatalf("missing sqlite required tables = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "did not create it") || !strings.Contains(envelope.Result.DatabaseStatusMessage, "startup schema fallback remains active") {
+		t.Fatalf("missing sqlite database status message = %q", envelope.Result.DatabaseStatusMessage)
+	}
+	if !strings.Contains(envelope.Result.DatabaseStatusAdvice, "startup schema fallback") {
+		t.Fatalf("missing sqlite database status advice = %q", envelope.Result.DatabaseStatusAdvice)
 	}
 }
 
