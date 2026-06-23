@@ -32,7 +32,7 @@ type appDBMigrateOptions struct {
 	stdout     io.Writer
 }
 
-const appDBMigrateDownUnsupportedMessage = "db migrate down is unsupported for ent auto migration; restore from backup or use a manual migration plan"
+const appDBMigrateDownUnsupportedMessage = "db migrate down is unsupported for the production Postgres migration contract; restore from backup or use a reviewed manual migration plan"
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
@@ -262,28 +262,44 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 	sourcePath := "internal/store raw DDL startup initialization"
 	versioned := false
 	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	productionReady := false
+	storageRole := appdbmigrate.SQLiteStorageRole
+	storageContract := appdbmigrate.SQLiteStorageContract
+	migrationAuthority := "internal/store raw DDL startup initialization"
+	schemaStrategy := appdbmigrate.SQLiteSchemaStrategy
 	if appDBMigrationMode(driver) == "versioned-sql" {
 		source = "postgres-checked-in-sql"
 		sourcePath = "ent/postgres-migrations"
 		versioned = true
+		productionReady = true
+		storageRole = "production"
+		storageContract = appdbmigrate.PostgresStorageContract
+		migrationAuthority = appdbmigrate.PostgresMigrationAuthority
+		schemaStrategy = appdbmigrate.PostgresSchemaStrategy
 	}
 	result := map[string]any{
-		"dry_run":                dryRun,
-		"mutated":                mutated,
-		"driver":                 cfg.DatabaseDriver(),
-		"dsn":                    config.RedactDSN(cfg.DatabaseDSN()),
-		"direction":              direction,
-		"steps":                  steps,
-		"all":                    all,
-		"database_namespace":     "application",
-		"migration_mode":         appDBMigrationMode(cfg.DatabaseDriver()),
-		"migration_source":       source,
-		"migration_source_path":  sourcePath,
-		"schema_versioned":       versioned,
-		"status_check":           appDBStatusCheckMode(checkDB),
-		"rollback_supported":     false,
-		"auth_migration_scope":   "excluded",
-		"auth_migration_command": "auth migrate",
+		"dry_run":                   dryRun,
+		"mutated":                   mutated,
+		"driver":                    cfg.DatabaseDriver(),
+		"dsn":                       config.RedactDSN(cfg.DatabaseDSN()),
+		"direction":                 direction,
+		"steps":                     steps,
+		"all":                       all,
+		"database_namespace":        "application",
+		"migration_mode":            appDBMigrationMode(cfg.DatabaseDriver()),
+		"migration_source":          source,
+		"migration_source_path":     sourcePath,
+		"migration_authority":       migrationAuthority,
+		"schema_strategy":           schemaStrategy,
+		"schema_versioned":          versioned,
+		"production_storage_driver": appdbmigrate.ProductionStorageDriver,
+		"production_ready":          productionReady,
+		"storage_role":              storageRole,
+		"storage_contract":          storageContract,
+		"status_check":              appDBStatusCheckMode(checkDB),
+		"rollback_supported":        false,
+		"auth_migration_scope":      "excluded",
+		"auth_migration_command":    "auth migrate",
 	}
 	if driver == "sqlite" {
 		result["sqlite_schema_strategy"] = appdbmigrate.SQLiteSchemaStrategy
@@ -308,6 +324,11 @@ func applyAppDBStatusCheck(cfg *config.Config, result map[string]any) error {
 	result["database_status_available"] = status.Available
 	result["database_status_versioned"] = status.Versioned
 	result["database_status_driver"] = status.Driver
+	result["database_status_production_ready"] = status.ProductionReady
+	result["database_status_storage_role"] = status.StorageRole
+	result["database_status_storage_contract"] = status.StorageContract
+	result["database_status_migration_authority"] = status.MigrationAuthority
+	result["database_status_schema_strategy"] = status.SchemaStrategy
 	if status.Driver == "sqlite" {
 		result["database_required_tables_present"] = status.RequiredTablesPresent
 	}
@@ -338,7 +359,13 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "migration_mode: %s\n", result["migration_mode"])
 	fmt.Fprintf(w, "migration_source: %s\n", result["migration_source"])
 	fmt.Fprintf(w, "migration_source_path: %s\n", result["migration_source_path"])
+	fmt.Fprintf(w, "migration_authority: %s\n", result["migration_authority"])
+	fmt.Fprintf(w, "schema_strategy: %s\n", result["schema_strategy"])
 	fmt.Fprintf(w, "schema_versioned: %v\n", result["schema_versioned"])
+	fmt.Fprintf(w, "production_storage_driver: %s\n", result["production_storage_driver"])
+	fmt.Fprintf(w, "production_ready: %v\n", result["production_ready"])
+	fmt.Fprintf(w, "storage_role: %s\n", result["storage_role"])
+	fmt.Fprintf(w, "storage_contract: %s\n", result["storage_contract"])
 	if result["sqlite_schema_strategy"] != nil {
 		fmt.Fprintf(w, "sqlite_schema_strategy: %s\n", result["sqlite_schema_strategy"])
 		fmt.Fprintf(w, "sqlite_versioned_migration_status: %s\n", result["sqlite_versioned_migration_status"])
@@ -349,6 +376,11 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	}
 	if result["database_status_available"] != nil {
 		fmt.Fprintf(w, "database_status_available: %v\n", result["database_status_available"])
+		fmt.Fprintf(w, "database_status_production_ready: %v\n", result["database_status_production_ready"])
+		fmt.Fprintf(w, "database_status_storage_role: %s\n", result["database_status_storage_role"])
+		fmt.Fprintf(w, "database_status_storage_contract: %s\n", result["database_status_storage_contract"])
+		fmt.Fprintf(w, "database_status_migration_authority: %s\n", result["database_status_migration_authority"])
+		fmt.Fprintf(w, "database_status_schema_strategy: %s\n", result["database_status_schema_strategy"])
 	}
 	if result["database_migration_version"] != nil {
 		fmt.Fprintf(w, "database_migration_version: %v\n", result["database_migration_version"])

@@ -1596,20 +1596,23 @@ func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
-			DryRun    bool   `json:"dry_run"`
-			Mutated   bool   `json:"mutated"`
-			Driver    string `json:"driver"`
-			DSN       string `json:"dsn"`
-			Direction string `json:"direction"`
-			Steps     int    `json:"steps"`
-			All       bool   `json:"all"`
-			Mode      string `json:"migration_mode"`
-			Source    string `json:"migration_source"`
-			Path      string `json:"migration_source_path"`
-			Namespace string `json:"database_namespace"`
-			Versioned bool   `json:"schema_versioned"`
-			Auth      string `json:"auth_migration_scope"`
-			Rollback  bool   `json:"rollback_supported"`
+			DryRun          bool   `json:"dry_run"`
+			Mutated         bool   `json:"mutated"`
+			Driver          string `json:"driver"`
+			DSN             string `json:"dsn"`
+			Direction       string `json:"direction"`
+			Steps           int    `json:"steps"`
+			All             bool   `json:"all"`
+			Mode            string `json:"migration_mode"`
+			Source          string `json:"migration_source"`
+			Path            string `json:"migration_source_path"`
+			Namespace       string `json:"database_namespace"`
+			Versioned       bool   `json:"schema_versioned"`
+			ProductionReady bool   `json:"production_ready"`
+			StorageRole     string `json:"storage_role"`
+			StorageContract string `json:"storage_contract"`
+			Auth            string `json:"auth_migration_scope"`
+			Rollback        bool   `json:"rollback_supported"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1626,6 +1629,9 @@ func TestDBMigrateUpDryRunJSONUsesApplicationNamespace(t *testing.T) {
 	}
 	if envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || envelope.Result.Namespace != "application" || !envelope.Result.Versioned || envelope.Result.Auth != "excluded" || envelope.Result.Rollback {
 		t.Fatalf("migration report = %+v", envelope.Result)
+	}
+	if !envelope.Result.ProductionReady || envelope.Result.StorageRole != "production" || envelope.Result.StorageContract != "postgres_versioned_migrations_are_the_production_storage_contract" {
+		t.Fatalf("production storage contract = %+v", envelope.Result)
 	}
 	if strings.Contains(envelope.Result.DSN, "secret") || strings.Contains(envelope.Command, "auth") {
 		t.Fatalf("db migrate dry-run leaked auth namespace or secret: command=%q dsn=%q", envelope.Command, envelope.Result.DSN)
@@ -1649,20 +1655,23 @@ func TestDBMigrateStatusJSONReportsPostgresApplicationSource(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
-			DryRun      bool   `json:"dry_run"`
-			Mutated     bool   `json:"mutated"`
-			Driver      string `json:"driver"`
-			DSN         string `json:"dsn"`
-			Direction   string `json:"direction"`
-			Namespace   string `json:"database_namespace"`
-			Mode        string `json:"migration_mode"`
-			Source      string `json:"migration_source"`
-			Path        string `json:"migration_source_path"`
-			Versioned   bool   `json:"schema_versioned"`
-			StatusCheck string `json:"status_check"`
-			Rollback    bool   `json:"rollback_supported"`
-			AuthScope   string `json:"auth_migration_scope"`
-			AuthCommand string `json:"auth_migration_command"`
+			DryRun          bool   `json:"dry_run"`
+			Mutated         bool   `json:"mutated"`
+			Driver          string `json:"driver"`
+			DSN             string `json:"dsn"`
+			Direction       string `json:"direction"`
+			Namespace       string `json:"database_namespace"`
+			Mode            string `json:"migration_mode"`
+			Source          string `json:"migration_source"`
+			Path            string `json:"migration_source_path"`
+			Versioned       bool   `json:"schema_versioned"`
+			ProductionReady bool   `json:"production_ready"`
+			StorageRole     string `json:"storage_role"`
+			StorageContract string `json:"storage_contract"`
+			StatusCheck     string `json:"status_check"`
+			Rollback        bool   `json:"rollback_supported"`
+			AuthScope       string `json:"auth_migration_scope"`
+			AuthCommand     string `json:"auth_migration_command"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1676,6 +1685,9 @@ func TestDBMigrateStatusJSONReportsPostgresApplicationSource(t *testing.T) {
 	}
 	if envelope.Result.Namespace != "application" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || !envelope.Result.Versioned {
 		t.Fatalf("postgres status source = %+v", envelope.Result)
+	}
+	if !envelope.Result.ProductionReady || envelope.Result.StorageRole != "production" || envelope.Result.StorageContract != "postgres_versioned_migrations_are_the_production_storage_contract" {
+		t.Fatalf("postgres status production contract = %+v", envelope.Result)
 	}
 	if envelope.Result.StatusCheck != "configuration-only" || envelope.Result.Rollback || envelope.Result.AuthScope != "excluded" || envelope.Result.AuthCommand != "auth migrate" {
 		t.Fatalf("postgres status scope = %+v", envelope.Result)
@@ -1707,6 +1719,9 @@ func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
 			Source                         string `json:"migration_source"`
 			Path                           string `json:"migration_source_path"`
 			Versioned                      bool   `json:"schema_versioned"`
+			ProductionReady                bool   `json:"production_ready"`
+			StorageRole                    string `json:"storage_role"`
+			StorageContract                string `json:"storage_contract"`
 			SQLiteSchemaStrategy           string `json:"sqlite_schema_strategy"`
 			SQLiteVersionedMigrationStatus string `json:"sqlite_versioned_migration_status"`
 			SQLiteMigrationAdvice          string `json:"sqlite_migration_advice"`
@@ -1721,6 +1736,9 @@ func TestDBMigrateStatusJSONReportsSQLiteFallbackSource(t *testing.T) {
 	}
 	if envelope.Result.Driver != "sqlite" || envelope.Result.Mode != "schema-init" || envelope.Result.Source != "sqlite-startup-schema-fallback" || envelope.Result.Path != "internal/store raw DDL startup initialization" || envelope.Result.Versioned || envelope.Result.Auth != "excluded" {
 		t.Fatalf("sqlite status source = %+v", envelope.Result)
+	}
+	if envelope.Result.ProductionReady || envelope.Result.StorageRole != "legacy_dev_test_compatibility" || envelope.Result.StorageContract != "sqlite_startup_schema_fallback_for_legacy_dev_test_only" {
+		t.Fatalf("sqlite storage contract = %+v", envelope.Result)
 	}
 	if envelope.Result.SQLiteSchemaStrategy != "startup_schema_fallback" || envelope.Result.SQLiteVersionedMigrationStatus != "not_implemented" || !strings.Contains(envelope.Result.SQLiteMigrationAdvice, "startup schema fallback") {
 		t.Fatalf("sqlite migration plan fields = %+v", envelope.Result)
@@ -1963,6 +1981,20 @@ func TestDBMigrateDownWithoutDryRunIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestAuthMigrateDownPostgresWithoutDryRunIsUnsupported(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	if code := runAuthMigrateWithOptions(authMigrateOptions{
+		configPath: writePostgresDBMigrateConfig(t),
+		direction:  "down",
+		format:     "json",
+		stdout:     &out,
+	}); code != 2 {
+		t.Fatalf("runAuthMigrateWithOptions() = %d, want 2, output=%s", code, out.String())
+	}
+}
+
 func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	t.Parallel()
 
@@ -1987,10 +2019,15 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 			Direction                  string   `json:"direction"`
 			Steps                      int      `json:"steps"`
 			Namespace                  string   `json:"database_namespace"`
+			EffectiveNamespace         string   `json:"effective_database_namespace"`
 			Mode                       string   `json:"migration_mode"`
 			Source                     string   `json:"migration_source"`
 			Path                       string   `json:"migration_source_path"`
+			SchemaAuthority            string   `json:"schema_authority"`
 			Versioned                  bool     `json:"schema_versioned"`
+			ProductionReady            bool     `json:"production_ready"`
+			StorageRole                string   `json:"storage_role"`
+			StorageContract            string   `json:"storage_contract"`
 			SharedApplicationNamespace bool     `json:"shared_application_namespace"`
 			IndependentAuthNamespace   bool     `json:"independent_auth_namespace"`
 			PostgresNamespaceStrategy  string   `json:"postgres_auth_namespace_strategy"`
@@ -2018,8 +2055,11 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	if !envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "up" || envelope.Result.Steps != 1 {
 		t.Fatalf("auth dry-run result = %+v", envelope.Result)
 	}
-	if envelope.Result.Namespace != "auth" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || !envelope.Result.Versioned {
+	if envelope.Result.Namespace != "auth" || envelope.Result.EffectiveNamespace != "application" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || envelope.Result.SchemaAuthority != "application_postgres_migration_set" || !envelope.Result.Versioned {
 		t.Fatalf("auth dry-run migration source = %+v", envelope.Result)
+	}
+	if !envelope.Result.ProductionReady || envelope.Result.StorageRole != "production" || envelope.Result.StorageContract != "postgres_application_schema_owns_auth_tables" {
+		t.Fatalf("auth dry-run production contract = %+v", envelope.Result)
 	}
 	if !envelope.Result.SharedApplicationNamespace || envelope.Result.IndependentAuthNamespace || !strings.Contains(envelope.Result.NamespaceNote, "independent auth namespace has not been split yet") {
 		t.Fatalf("auth dry-run namespace semantics = %+v", envelope.Result)
@@ -2030,7 +2070,7 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	if envelope.Result.AdoptionStatus != "design_required_not_implemented" || !strings.Contains(envelope.Result.AdoptionPlan, "initialize an independent auth namespace marker idempotently") {
 		t.Fatalf("auth dry-run adoption fields = %+v", envelope.Result)
 	}
-	if !strings.Contains(envelope.Result.DryRunSemantics, "report-only") || !strings.Contains(envelope.Result.StatusSemantics, "read-only") || envelope.Result.RollbackScope != "shared_application_migration_set" || !strings.Contains(envelope.Result.TestGate, "DSN-gated") {
+	if !strings.Contains(envelope.Result.DryRunSemantics, "report-only") || !strings.Contains(envelope.Result.StatusSemantics, "read-only") || envelope.Result.RollbackScope != "unsupported_from_auth_cli_shared_application_migration_set" || !strings.Contains(envelope.Result.TestGate, "DSN-gated") {
 		t.Fatalf("auth dry-run operator semantics = %+v", envelope.Result)
 	}
 	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || len(envelope.Result.TablesChecked) != 0 || envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
@@ -2064,10 +2104,15 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 			DSN                        string   `json:"dsn"`
 			Direction                  string   `json:"direction"`
 			Namespace                  string   `json:"database_namespace"`
+			EffectiveNamespace         string   `json:"effective_database_namespace"`
 			Mode                       string   `json:"migration_mode"`
 			Source                     string   `json:"migration_source"`
 			Path                       string   `json:"migration_source_path"`
+			SchemaAuthority            string   `json:"schema_authority"`
 			Versioned                  bool     `json:"schema_versioned"`
+			ProductionReady            bool     `json:"production_ready"`
+			StorageRole                string   `json:"storage_role"`
+			StorageContract            string   `json:"storage_contract"`
 			StatusCheck                string   `json:"status_check"`
 			Rollback                   bool     `json:"rollback_supported"`
 			SharedApplicationNamespace bool     `json:"shared_application_namespace"`
@@ -2099,10 +2144,13 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 	if envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "postgres" || envelope.Result.Direction != "status" {
 		t.Fatalf("status result = %+v", envelope.Result)
 	}
-	if envelope.Result.Namespace != "auth" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || !envelope.Result.Versioned {
+	if envelope.Result.Namespace != "auth" || envelope.Result.EffectiveNamespace != "application" || envelope.Result.Mode != "versioned-sql" || envelope.Result.Source != "postgres-checked-in-sql" || envelope.Result.Path != "ent/postgres-migrations" || envelope.Result.SchemaAuthority != "application_postgres_migration_set" || !envelope.Result.Versioned {
 		t.Fatalf("postgres auth status source = %+v", envelope.Result)
 	}
-	if envelope.Result.StatusCheck != "configuration-only" || !envelope.Result.Rollback || !envelope.Result.SharedApplicationNamespace || !envelope.Result.ApplicationShared || envelope.Result.IndependentAuthNamespace || envelope.Result.AuthNamespaceSplit {
+	if !envelope.Result.ProductionReady || envelope.Result.StorageRole != "production" || envelope.Result.StorageContract != "postgres_application_schema_owns_auth_tables" {
+		t.Fatalf("postgres auth production contract = %+v", envelope.Result)
+	}
+	if envelope.Result.StatusCheck != "configuration-only" || envelope.Result.Rollback || !envelope.Result.SharedApplicationNamespace || !envelope.Result.ApplicationShared || envelope.Result.IndependentAuthNamespace || envelope.Result.AuthNamespaceSplit {
 		t.Fatalf("postgres auth status scope = %+v", envelope.Result)
 	}
 	if !strings.Contains(envelope.Result.Constraint, "schema_migrations namespace") || !strings.Contains(envelope.Result.Constraint, "independent auth namespace has not been split yet") {
@@ -2114,7 +2162,7 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 	if envelope.Result.AdoptionStatus != "design_required_not_implemented" || !strings.Contains(envelope.Result.AdoptionPlan, "users/api_tokens") {
 		t.Fatalf("postgres auth adoption fields = %+v", envelope.Result)
 	}
-	if !strings.Contains(envelope.Result.DryRunSemantics, "must not create") || !strings.Contains(envelope.Result.StatusSemantics, "shared application namespace state") || envelope.Result.RollbackScope != "shared_application_migration_set" || !strings.Contains(envelope.Result.TestGate, "offline") {
+	if !strings.Contains(envelope.Result.DryRunSemantics, "must not create") || !strings.Contains(envelope.Result.StatusSemantics, "shared application namespace state") || envelope.Result.RollbackScope != "unsupported_from_auth_cli_shared_application_migration_set" || !strings.Contains(envelope.Result.TestGate, "offline") {
 		t.Fatalf("postgres auth operator semantics = %+v", envelope.Result)
 	}
 	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || len(envelope.Result.TablesChecked) != 0 || envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
@@ -2142,17 +2190,21 @@ func TestAuthMigrateStatusTextReportsNamespaceAndRedactedDSN(t *testing.T) {
 	for _, want := range []string{
 		"auth database migration status",
 		"database_namespace: auth",
+		"effective_database_namespace: application",
 		"migration_source_path: ent/postgres-migrations",
+		"schema_authority: application_postgres_migration_set",
+		"production_ready: true",
+		"storage_contract: postgres_application_schema_owns_auth_tables",
 		"shared_application_namespace: true",
 		"independent_auth_namespace: false",
 		"postgres_auth_namespace_strategy: shared_application_schema_migrations",
 		"independent_auth_namespace_status: not_implemented",
 		"auth_namespace_adoption_status: design_required_not_implemented",
-		"auth_namespace_rollback_scope: shared_application_migration_set",
+		"auth_namespace_rollback_scope: unsupported_from_auth_cli_shared_application_migration_set",
 		"auth_namespace_test_gate: default tests stay offline",
 		"auth_required_tables: users,api_tokens",
 		"auth_required_tables_present: false",
-		"namespace_note: postgres auth migrations currently share",
+		"namespace_note: postgres auth tables are owned by the application schema_migrations namespace",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("status text output = %q, want contain %q", output, want)

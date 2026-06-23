@@ -22,7 +22,8 @@ raw `.http` cassette 是：
 - raw protocol 详情源。
 - Observation IR / findings / usage repair 的重建来源。
 
-SQLite 是：
+Application DB 是结构化查询源。生产部署必须使用 Postgres；SQLite 只保留为
+legacy/dev/test 兼容 fallback。
 
 - 列表、聚合、过滤、分页的查询源。
 - auth、channel/model 配置、system events、analysis jobs、Observation IR、findings、eval 的结构化源。
@@ -49,7 +50,15 @@ SQLite 是：
 3. 保持 `.http` 人类可读。
 4. 保持旧 cassette 可读，除非明确做 breaking migration。
 
-## SQLite 升级
+## Storage 升级
+
+Postgres 是生产迁移主路径：
+
+- `db migrate up` 使用 checked-in `ent/postgres-migrations`。
+- `db migrate down` 不作为 CLI 生产回滚路径；需要 backup restore 或审阅过的手工迁移计划。
+- auth 表当前由 application Postgres migration set 拥有；`auth migrate down` 不得回滚共享 application schema。
+
+SQLite schema 只能按兼容 fallback 演进。
 
 schema 演进必须 additive。
 
@@ -61,7 +70,7 @@ schema 演进必须 additive。
 
 ## Channel 与模型配置
 
-长期配置源是 SQLite：
+长期配置源是 application DB；生产为 Postgres，SQLite 仅用于 legacy/dev/test：
 
 - `channel_configs`
 - `channel_models`

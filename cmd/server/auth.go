@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/spf13/cobra"
@@ -255,6 +257,10 @@ func runAuthMigrateWithOptions(opts authMigrateOptions) int {
 		}
 	case "down":
 		if err := auth.MigrateDatabaseDown(cfg.DatabaseDriver(), cfg.DatabaseDSN(), opts.steps, opts.all); err != nil {
+			if errors.Is(err, auth.ErrPostgresAuthRollbackUnsupported) {
+				fmt.Fprintln(os.Stderr, err.Error())
+				return 2
+			}
 			slog.Error("Auth migration failed", "error", err)
 			return 1
 		}
@@ -273,6 +279,11 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 	versioned := true
 	sharedApplicationNamespace := false
 	namespaceSplit := true
+	productionReady := false
+	storageRole := appdbmigrate.SQLiteStorageRole
+	storageContract := "sqlite_auth_migrations_for_legacy_dev_test"
+	effectiveNamespace := "auth"
+	schemaAuthority := "sqlite_auth_embedded_migrations"
 	postgresAuthNamespaceStrategy := "not_applicable"
 	independentAuthNamespaceStatus := "implemented"
 	independentAuthNamespacePlan := "sqlite auth migrations already use the configured auth database migration namespace"
@@ -281,23 +292,32 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 	authNamespaceDryRunSemantics := "report configured auth migration source and planned operation without mutating the database"
 	authNamespaceStatusSemantics := "read the configured sqlite auth migration namespace when --check-db is requested"
 	authNamespaceRollbackScope := "auth_database_migration_set"
+	rollbackSupported := true
 	authNamespaceTestGate := "default offline sqlite tests; no external database required"
-	const namespaceNote = "postgres auth migrations currently share the application schema_migrations namespace; an independent auth namespace has not been split yet"
+	authMigrationCommandRole := "manage sqlite auth-owned migrations"
+	const namespaceNote = "postgres auth tables are owned by the application schema_migrations namespace; an independent auth namespace has not been split yet"
 	note := "sqlite auth migrations use the configured auth database path and embedded sqlite migration files"
 	if normalizeAuthStoreDriver(cfg.DatabaseDriver()) == "postgres" {
 		source = "postgres-checked-in-sql"
 		sourcePath = "ent/postgres-migrations"
+		productionReady = true
+		storageRole = "production"
+		storageContract = "postgres_application_schema_owns_auth_tables"
+		effectiveNamespace = "application"
+		schemaAuthority = "application_postgres_migration_set"
 		sharedApplicationNamespace = true
 		namespaceSplit = false
 		postgresAuthNamespaceStrategy = "shared_application_schema_migrations"
 		independentAuthNamespaceStatus = "not_implemented"
-		independentAuthNamespacePlan = "split auth-owned Postgres migrations into a separately versioned auth namespace before changing command ownership or rollback semantics"
+		independentAuthNamespacePlan = "optional future work: split auth-owned Postgres migrations into a separately versioned auth namespace only after an explicit idempotent adoption design"
 		authNamespaceAdoptionStatus = "design_required_not_implemented"
 		authNamespaceAdoptionPlan = "future adoption must verify users/api_tokens under the shared application schema_migrations namespace, initialize an independent auth namespace marker idempotently, and avoid dropping or rolling back application tables"
 		authNamespaceDryRunSemantics = "report-only; future adoption dry-run must not create an auth namespace marker, mutate auth tables, or change shared schema_migrations"
-		authNamespaceStatusSemantics = "read-only; during transition status must report shared application namespace state, independent auth namespace marker state, and auth-owned table health"
-		authNamespaceRollbackScope = "shared_application_migration_set"
+		authNamespaceStatusSemantics = "read-only; status reports shared application namespace state and auth-owned table health"
+		authNamespaceRollbackScope = "unsupported_from_auth_cli_shared_application_migration_set"
+		rollbackSupported = false
 		authNamespaceTestGate = "default tests stay offline; Postgres adoption/status checks must be DSN-gated"
+		authMigrationCommandRole = "apply_or_verify_application_postgres_migration_set_for_auth_tables"
 		note = namespaceNote
 	}
 	return map[string]any{
@@ -309,16 +329,23 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 		"steps":                                 steps,
 		"all":                                   all,
 		"database_namespace":                    "auth",
+		"effective_database_namespace":          effectiveNamespace,
 		"migration_mode":                        mode,
 		"migration_source":                      source,
 		"migration_source_path":                 sourcePath,
+		"schema_authority":                      schemaAuthority,
 		"schema_versioned":                      versioned,
+		"production_storage_driver":             appdbmigrate.ProductionStorageDriver,
+		"production_ready":                      productionReady,
+		"storage_role":                          storageRole,
+		"storage_contract":                      storageContract,
 		"status_check":                          appDBStatusCheckMode(checkDB),
-		"rollback_supported":                    true,
+		"rollback_supported":                    rollbackSupported,
 		"shared_application_namespace":          sharedApplicationNamespace,
 		"independent_auth_namespace":            namespaceSplit,
 		"auth_namespace_split":                  namespaceSplit,
 		"application_namespace_shared":          sharedApplicationNamespace,
+		"auth_migration_command_role":           authMigrationCommandRole,
 		"postgres_auth_namespace_strategy":      postgresAuthNamespaceStrategy,
 		"independent_auth_namespace_status":     independentAuthNamespaceStatus,
 		"independent_auth_namespace_plan":       independentAuthNamespacePlan,
@@ -345,6 +372,15 @@ func applyAuthStatusCheck(cfg *config.Config, result map[string]any) error {
 	result["database_status_available"] = status.Available
 	result["database_status_versioned"] = status.Versioned
 	result["database_status_driver"] = status.Driver
+	result["database_status_production_ready"] = status.ProductionReady
+	result["database_status_effective_namespace"] = status.EffectiveDatabaseNamespace
+	result["database_status_schema_authority"] = status.SchemaAuthority
+	result["database_status_storage_contract"] = status.StorageContract
+	result["database_status_storage_role"] = status.StorageRole
+	result["database_status_namespace_mode"] = status.NamespaceMode
+	result["database_status_rollback_supported"] = status.RollbackSupported
+	result["database_status_rollback_scope"] = status.RollbackScope
+	result["database_status_operator_advice"] = status.OperatorAdvice
 	if status.Available && status.Versioned {
 		result["database_migration_version"] = status.Version
 		result["database_migration_dirty"] = status.Dirty
@@ -369,10 +405,16 @@ func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "driver: %s\n", result["driver"])
 	fmt.Fprintf(w, "dsn: %s\n", result["dsn"])
 	fmt.Fprintf(w, "database_namespace: %s\n", result["database_namespace"])
+	fmt.Fprintf(w, "effective_database_namespace: %s\n", result["effective_database_namespace"])
 	fmt.Fprintf(w, "migration_mode: %s\n", result["migration_mode"])
 	fmt.Fprintf(w, "migration_source: %s\n", result["migration_source"])
 	fmt.Fprintf(w, "migration_source_path: %s\n", result["migration_source_path"])
+	fmt.Fprintf(w, "schema_authority: %s\n", result["schema_authority"])
 	fmt.Fprintf(w, "schema_versioned: %v\n", result["schema_versioned"])
+	fmt.Fprintf(w, "production_storage_driver: %s\n", result["production_storage_driver"])
+	fmt.Fprintf(w, "production_ready: %v\n", result["production_ready"])
+	fmt.Fprintf(w, "storage_role: %s\n", result["storage_role"])
+	fmt.Fprintf(w, "storage_contract: %s\n", result["storage_contract"])
 	fmt.Fprintf(w, "shared_application_namespace: %v\n", result["shared_application_namespace"])
 	fmt.Fprintf(w, "independent_auth_namespace: %v\n", result["independent_auth_namespace"])
 	fmt.Fprintf(w, "auth_namespace_split: %v\n", result["auth_namespace_split"])
@@ -385,6 +427,7 @@ func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "auth_namespace_status_semantics: %s\n", result["auth_namespace_status_semantics"])
 	fmt.Fprintf(w, "auth_namespace_rollback_scope: %s\n", result["auth_namespace_rollback_scope"])
 	fmt.Fprintf(w, "auth_namespace_test_gate: %s\n", result["auth_namespace_test_gate"])
+	fmt.Fprintf(w, "auth_migration_command_role: %s\n", result["auth_migration_command_role"])
 	fmt.Fprintf(w, "auth_required_tables: %s\n", strings.Join(stringSliceResult(result["auth_required_tables"]), ","))
 	fmt.Fprintf(w, "auth_tables_checked: %s\n", strings.Join(stringSliceResult(result["auth_tables_checked"]), ","))
 	fmt.Fprintf(w, "auth_required_tables_present: %v\n", result["auth_required_tables_present"])
@@ -394,6 +437,15 @@ func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
 	}
 	if result["database_status_available"] != nil {
 		fmt.Fprintf(w, "database_status_available: %v\n", result["database_status_available"])
+		fmt.Fprintf(w, "database_status_production_ready: %v\n", result["database_status_production_ready"])
+		fmt.Fprintf(w, "database_status_effective_namespace: %s\n", result["database_status_effective_namespace"])
+		fmt.Fprintf(w, "database_status_schema_authority: %s\n", result["database_status_schema_authority"])
+		fmt.Fprintf(w, "database_status_storage_contract: %s\n", result["database_status_storage_contract"])
+		fmt.Fprintf(w, "database_status_storage_role: %s\n", result["database_status_storage_role"])
+		fmt.Fprintf(w, "database_status_namespace_mode: %s\n", result["database_status_namespace_mode"])
+		fmt.Fprintf(w, "database_status_rollback_supported: %v\n", result["database_status_rollback_supported"])
+		fmt.Fprintf(w, "database_status_rollback_scope: %s\n", result["database_status_rollback_scope"])
+		fmt.Fprintf(w, "database_status_operator_advice: %s\n", result["database_status_operator_advice"])
 	}
 	if result["database_migration_version"] != nil {
 		fmt.Fprintf(w, "database_migration_version: %v\n", result["database_migration_version"])

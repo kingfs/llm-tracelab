@@ -31,9 +31,14 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 		OK     bool `json:"ok"`
 		Result struct {
 			Database struct {
-				Driver      string `json:"driver"`
-				DSN         string `json:"dsn"`
-				AutoMigrate bool   `json:"auto_migrate"`
+				Driver                  string `json:"driver"`
+				DSN                     string `json:"dsn"`
+				AutoMigrate             bool   `json:"auto_migrate"`
+				MigrationMode           string `json:"migration_mode"`
+				ProductionStorageDriver string `json:"production_storage_driver"`
+				ProductionReady         bool   `json:"production_ready"`
+				StorageRole             string `json:"storage_role"`
+				StorageContract         string `json:"storage_contract"`
 			} `json:"database"`
 			ResponsesServer struct {
 				Path string `json:"path"`
@@ -76,6 +81,9 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	}
 	if envelope.Result.Database.Driver != "sqlite" || envelope.Result.Database.DSN != "llm_tracelab.sqlite3" || !envelope.Result.Database.AutoMigrate {
 		t.Fatalf("database result = %+v", envelope.Result.Database)
+	}
+	if envelope.Result.Database.MigrationMode != "schema-init" || envelope.Result.Database.ProductionStorageDriver != "postgres" || envelope.Result.Database.ProductionReady || envelope.Result.Database.StorageRole != "legacy_dev_test_compatibility" || envelope.Result.Database.StorageContract != "sqlite_startup_schema_fallback_for_legacy_dev_test_only" {
+		t.Fatalf("database storage contract = %+v", envelope.Result.Database)
 	}
 	if envelope.Result.ResponsesServer.Path != "/v1/responses" {
 		t.Fatalf("responses path = %q", envelope.Result.ResponsesServer.Path)
