@@ -1912,9 +1912,90 @@ func TestRuntimeCreateAutoCompactFallsBackToGlobalThresholdWhenProfileDoesNotMat
 	}
 }
 
-func TestRuntimeCreateStreamAutoCompactRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+func TestRuntimeCreateStreamAutoCompactsSimpleTextBeforeStreaming(t *testing.T) {
 	store := NewMemoryStore()
 	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_target", "gpt-test")
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "Stream compact summary."},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16},
+		},
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ContentDelta: "new "},
+			{ChoiceIndex: 0, ContentDelta: "streamed answer"},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "new streamed answer"},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 6, CompletionTokens: 3, TotalTokens: 9},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+	}, client, store, WithExecutionEventRecorder(events))
+	sink := &fakeResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_stream_compact_target",
+		Input:              "new question",
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("non-stream chat requests = %d, want compact request before streaming", len(client.reqs))
+	}
+	if len(client.streamReqs) != 1 || !client.streamReqs[0].Stream {
+		t.Fatalf("stream chat requests = %#v, want one streaming request after compact", client.streamReqs)
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_stream_compact_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	if len(client.streamReqs[0].Messages) < 2 || !strings.Contains(chatMessageContentText(client.streamReqs[0].Messages[0].Content), "Stream compact summary") {
+		t.Fatalf("post-compact stream messages = %#v, want compact summary in context", client.streamReqs[0].Messages)
+	}
+	if len(sink.events) != 4 || sink.events[0] != "response.created" || sink.events[1] != "response.output_text.delta" || sink.events[3] != "response.completed" {
+		t.Fatalf("stream events = %#v, want created/deltas/completed after compact", sink.events)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].Delta != "new " || sink.deltas[1].Delta != "streamed answer" {
+		t.Fatalf("deltas = %#v, want streamed text chunks", sink.deltas)
+	}
+	compactResp, ok, err := store.Get(context.Background(), resp.PreviousResponseID)
+	if err != nil || !ok {
+		t.Fatalf("compact response lookup ok=%v err=%v", ok, err)
+	}
+	if compactResp.PreviousResponseID != "resp_stream_compact_target" || compactResp.Output[0].Type != "summary" {
+		t.Fatalf("compact response = %#v, want summary linked to target", compactResp)
+	}
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
+		t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
+	} else {
+		assertAutoCompactProvenance(t, got, autoCompactProvenanceWant{
+			trigger:                    "history_items",
+			originalInputItemCount:     2,
+			retainedInputItemCount:     1,
+			droppedInputItemCount:      1,
+			retainedWindowStart:        1,
+			retainedWindowEnd:          2,
+			historyItemThresholdSource: "config",
+			contextWindowLimitSource:   "unset",
+			reservedOutputLimitSource:  "unset",
+		})
+	}
+}
+
+func TestRuntimeCreateStreamAutoCompactWithToolsRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_tool_target", "gpt-test")
 	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
 	rt := New(Config{
 		DefaultModel:                "fallback-model",
@@ -1925,14 +2006,19 @@ func TestRuntimeCreateStreamAutoCompactRequiresDeferredFallbackBeforeWriting(t *
 
 	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
 		Model:              "gpt-test",
-		PreviousResponseID: "resp_stream_compact_target",
+		PreviousResponseID: "resp_stream_compact_tool_target",
 		Input:              "new question",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
 	}, sink)
 	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
 		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
 	}
-	if !strings.Contains(err.Error(), "auto compact requires deferred stream") {
-		t.Fatalf("CreateStream() error = %q, want auto compact fallback reason", err.Error())
+	if !strings.Contains(err.Error(), "auto compact tool combination requires deferred stream") {
+		t.Fatalf("CreateStream() error = %q, want auto compact tool fallback reason", err.Error())
 	}
 	if len(client.streamReqs) != 0 || len(client.reqs) != 0 {
 		t.Fatalf("chat requests = stream:%d nonstream:%d, want none before deferred fallback", len(client.streamReqs), len(client.reqs))

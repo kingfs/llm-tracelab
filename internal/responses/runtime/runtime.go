@@ -194,67 +194,9 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
 	webSearchReady := r.webSearchReady()
-	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
-	if compactDecision.ShouldCompact {
-		originalInputItemCount := rawInputItemCount(history) + len(inputItems)
-		retainedWindowStart := rawInputItemCount(history)
-		retainedWindowEnd := retainedWindowStart + len(inputItems)
-		compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
-			ResponseID: req.PreviousResponseID,
-			Model:      model,
-			Metadata: map[string]any{
-				"_gateway": map[string]any{
-					"compact": map[string]any{
-						"trigger":                "auto",
-						"trigger_reason":         compactDecision.Trigger,
-						"history_items":          len(history),
-						"history_item_threshold": budget.CompactHistoryItemThreshold,
-						"estimated_input_tokens": compactDecision.EstimatedInputTokens,
-						"context_window_tokens":  compactDecision.ContextWindowTokens,
-						"reserved_output_tokens": compactDecision.ReservedOutputTokens,
-					},
-				},
-			},
-		})
-		if err != nil {
-			return protocol.Response{}, err
-		}
-		compactedHistory, err := r.loadContinuationHistory(ctx, compactResp.ID)
-		if err != nil {
-			return protocol.Response{}, err
-		}
-		retainedInputItemCount := rawInputItemCount(compactedHistory) + len(inputItems)
-		compactProvenance, compactProvenanceOK := compactProvenanceFromMetadata(compactResp.Metadata)
-		eventDetails := mergeMetadata(compactProvenanceEventDetails(compactProvenance, compactProvenanceOK), map[string]any{
-			"target_response_id":            req.PreviousResponseID,
-			"compact_response_id":           compactResp.ID,
-			"trigger":                       compactDecision.Trigger,
-			"previous_response_id_present":  req.PreviousResponseID != "",
-			"compact_response_id_present":   compactResp.ID != "",
-			"original_input_item_count":     originalInputItemCount,
-			"retained_input_item_count":     retainedInputItemCount,
-			"dropped_input_item_count":      maxInt(0, originalInputItemCount-retainedInputItemCount),
-			"retained_window_start":         retainedWindowStart,
-			"retained_window_end":           retainedWindowEnd,
-			"history_items":                 len(history),
-			"history_item_threshold":        budget.CompactHistoryItemThreshold,
-			"history_item_threshold_source": compactHistoryThresholdSource(modelProfile, budget),
-			"estimated_input_tokens":        compactDecision.EstimatedInputTokens,
-			"context_window_tokens":         compactDecision.ContextWindowTokens,
-			"reserved_output_tokens":        compactDecision.ReservedOutputTokens,
-			"context_window_limit_source":   contextWindowLimitSource(modelProfile, budget),
-			"reserved_output_limit_source":  reservedOutputLimitSource(req, modelProfile, budget),
-		})
-		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
-			ResponseID:     compactResp.ID,
-			ConversationID: audit.CodexConversationID(compactResp.Metadata),
-			EventType:      "response.compact",
-			Phase:          "compact",
-			Status:         "auto_triggered",
-			DetailsJSON:    eventDetails,
-		})
-		req.PreviousResponseID = compactResp.ID
-		history = compactedHistory
+	req, history, err = r.applyAutoCompact(ctx, req, model, modelProfile, budget, history, inputItems, webSearchReady)
+	if err != nil {
+		return protocol.Response{}, err
 	}
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		err := UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
@@ -372,8 +314,15 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !incrementalStreamSupportsTools(req.Tools, webSearchReady) {
 		return protocol.Response{}, fmt.Errorf("%w: tool combination requires deferred stream", ErrIncrementalStreamUnsupported)
 	}
-	if r.autoCompactDecision(req, budget, history, inputItems, webSearchReady).ShouldCompact {
-		return protocol.Response{}, fmt.Errorf("%w: auto compact requires deferred stream", ErrIncrementalStreamUnsupported)
+	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
+	if compactDecision.ShouldCompact {
+		if !autoCompactIncrementalStreamEligible(req) {
+			return protocol.Response{}, fmt.Errorf("%w: auto compact tool combination requires deferred stream", ErrIncrementalStreamUnsupported)
+		}
+		req, history, err = r.applyAutoCompactDecision(ctx, req, model, modelProfile, budget, history, inputItems, compactDecision)
+		if err != nil {
+			return protocol.Response{}, err
+		}
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	chatReq.Stream = true
@@ -856,6 +805,92 @@ func (r *Runtime) autoCompactDecision(req protocol.CreateResponseRequest, budget
 		decision.ReservedOutputTokens = reservedOutputTokens
 	}
 	return decision
+}
+
+func (r *Runtime) applyAutoCompact(ctx context.Context, req protocol.CreateResponseRequest, model string, modelProfile ResolvedModelProfile, budget ContextBudget, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool) (protocol.CreateResponseRequest, []LedgerItem, error) {
+	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
+	if !compactDecision.ShouldCompact {
+		return req, history, nil
+	}
+	return r.applyAutoCompactDecision(ctx, req, model, modelProfile, budget, history, inputItems, compactDecision)
+}
+
+func (r *Runtime) applyAutoCompactDecision(ctx context.Context, req protocol.CreateResponseRequest, model string, modelProfile ResolvedModelProfile, budget ContextBudget, history []LedgerItem, inputItems []protocol.InputItem, compactDecision autoCompactDecision) (protocol.CreateResponseRequest, []LedgerItem, error) {
+	originalPreviousResponseID := req.PreviousResponseID
+	originalInputItemCount := rawInputItemCount(history) + len(inputItems)
+	retainedWindowStart := rawInputItemCount(history)
+	retainedWindowEnd := retainedWindowStart + len(inputItems)
+	compactResp, err := r.Compact(ctx, protocol.CompactResponseRequest{
+		ResponseID: req.PreviousResponseID,
+		Model:      model,
+		Metadata: map[string]any{
+			"_gateway": map[string]any{
+				"compact": map[string]any{
+					"trigger":                "auto",
+					"trigger_reason":         compactDecision.Trigger,
+					"history_items":          len(history),
+					"history_item_threshold": budget.CompactHistoryItemThreshold,
+					"estimated_input_tokens": compactDecision.EstimatedInputTokens,
+					"context_window_tokens":  compactDecision.ContextWindowTokens,
+					"reserved_output_tokens": compactDecision.ReservedOutputTokens,
+				},
+			},
+		},
+	})
+	if err != nil {
+		return protocol.CreateResponseRequest{}, nil, err
+	}
+	compactedHistory, err := r.loadContinuationHistory(ctx, compactResp.ID)
+	if err != nil {
+		return protocol.CreateResponseRequest{}, nil, err
+	}
+	retainedInputItemCount := rawInputItemCount(compactedHistory) + len(inputItems)
+	compactProvenance, compactProvenanceOK := compactProvenanceFromMetadata(compactResp.Metadata)
+	eventDetails := mergeMetadata(compactProvenanceEventDetails(compactProvenance, compactProvenanceOK), map[string]any{
+		"target_response_id":            originalPreviousResponseID,
+		"compact_response_id":           compactResp.ID,
+		"trigger":                       compactDecision.Trigger,
+		"previous_response_id_present":  originalPreviousResponseID != "",
+		"compact_response_id_present":   compactResp.ID != "",
+		"original_input_item_count":     originalInputItemCount,
+		"retained_input_item_count":     retainedInputItemCount,
+		"dropped_input_item_count":      maxInt(0, originalInputItemCount-retainedInputItemCount),
+		"retained_window_start":         retainedWindowStart,
+		"retained_window_end":           retainedWindowEnd,
+		"history_items":                 len(history),
+		"history_item_threshold":        budget.CompactHistoryItemThreshold,
+		"history_item_threshold_source": compactHistoryThresholdSource(modelProfile, budget),
+		"estimated_input_tokens":        compactDecision.EstimatedInputTokens,
+		"context_window_tokens":         compactDecision.ContextWindowTokens,
+		"reserved_output_tokens":        compactDecision.ReservedOutputTokens,
+		"context_window_limit_source":   contextWindowLimitSource(modelProfile, budget),
+		"reserved_output_limit_source":  reservedOutputLimitSource(req, modelProfile, budget),
+	})
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		ResponseID:     compactResp.ID,
+		ConversationID: audit.CodexConversationID(compactResp.Metadata),
+		EventType:      "response.compact",
+		Phase:          "compact",
+		Status:         "auto_triggered",
+		DetailsJSON:    eventDetails,
+	})
+	req.PreviousResponseID = compactResp.ID
+	return req, compactedHistory, nil
+}
+
+func autoCompactIncrementalStreamEligible(req protocol.CreateResponseRequest) bool {
+	if len(req.Tools) != 0 {
+		return false
+	}
+	switch choice := req.ToolChoice.(type) {
+	case nil:
+		return true
+	case string:
+		choice = strings.TrimSpace(choice)
+		return choice == "" || choice == "none" || choice == "auto"
+	default:
+		return false
+	}
 }
 
 func rawInputItemCount(history []LedgerItem) int {
