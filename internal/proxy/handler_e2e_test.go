@@ -2325,6 +2325,105 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 	}
 }
 
+func TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries(t *testing.T) {
+	newStore := func(t *testing.T, recordsByChannel map[string][]store.ChannelModelRecord) *store.Store {
+		t.Helper()
+		st, err := store.New(t.TempDir())
+		if err != nil {
+			t.Fatalf("store.New() error = %v", err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		for channelID, records := range recordsByChannel {
+			if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+				ID:             channelID,
+				Name:           channelID,
+				BaseURL:        "https://api.openai.example/v1",
+				HeadersJSON:    "{}",
+				Enabled:        true,
+				Priority:       10,
+				Weight:         1,
+				CapacityHint:   1,
+				ModelDiscovery: "manual",
+			}); err != nil {
+				t.Fatalf("UpsertChannelConfig(%s) error = %v", channelID, err)
+			}
+			if err := st.ReplaceChannelModels(channelID, records); err != nil {
+				t.Fatalf("ReplaceChannelModels(%s) error = %v", channelID, err)
+			}
+		}
+		return st
+	}
+	adoptedRecord := func(upstreamModel string, contextWindow int, maxOutputTokens int) store.ChannelModelRecord {
+		supportsChat := 1
+		return store.ChannelModelRecord{
+			Model:                   "gpt-5",
+			DisplayName:             "GPT-5",
+			Source:                  "manual",
+			Enabled:                 true,
+			SupportsChatCompletions: &supportsChat,
+			ContextWindow:           &contextWindow,
+			MaxOutputTokens:         &maxOutputTokens,
+			UpstreamModel:           upstreamModel,
+			ProfileSource:           "test",
+			ProfileAdoptionStatus:   "adopted",
+		}
+	}
+
+	t.Run("default disabled ignores adopted channel profiles", func(t *testing.T) {
+		st := newStore(t, map[string][]store.ChannelModelRecord{
+			"openai-chat": {adoptedRecord("provider/private-gpt-5", 128000, 777)},
+		})
+		profiles, err := responsesRuntimeModelProfiles(&config.Config{}, st)
+		if err != nil {
+			t.Fatalf("responsesRuntimeModelProfiles() error = %v", err)
+		}
+		if len(profiles) != 0 {
+			t.Fatalf("profiles = %+v, want no adopted profiles when config flag is disabled", profiles)
+		}
+	})
+
+	t.Run("explicit yaml profile wins over adopted channel profile", func(t *testing.T) {
+		st := newStore(t, map[string][]store.ChannelModelRecord{
+			"openai-chat": {adoptedRecord("provider/private-gpt-5", 128000, 777)},
+		})
+		cfg := &config.Config{}
+		cfg.ResponsesServer.AdoptChannelModelProfiles = true
+		cfg.ResponsesServer.ModelProfiles = []config.ResponsesModelProfileConfig{
+			{
+				Name:            "gpt-5",
+				UpstreamModel:   "yaml/gpt-5",
+				MaxOutputTokens: 99,
+			},
+		}
+		profiles, err := responsesRuntimeModelProfiles(cfg, st)
+		if err != nil {
+			t.Fatalf("responsesRuntimeModelProfiles() error = %v", err)
+		}
+		if len(profiles) != 1 {
+			t.Fatalf("profiles = %+v, want only explicit yaml profile", profiles)
+		}
+		if profiles[0].UpstreamModel != "yaml/gpt-5" || profiles[0].Budget.MaxOutputTokens != 99 {
+			t.Fatalf("profile = %+v, want yaml profile to win", profiles[0])
+		}
+	})
+
+	t.Run("conflicting adopted channel profiles are skipped", func(t *testing.T) {
+		st := newStore(t, map[string][]store.ChannelModelRecord{
+			"openai-chat-a": {adoptedRecord("provider/a-gpt-5", 128000, 777)},
+			"openai-chat-b": {adoptedRecord("provider/b-gpt-5", 64000, 512)},
+		})
+		cfg := &config.Config{}
+		cfg.ResponsesServer.AdoptChannelModelProfiles = true
+		profiles, err := responsesRuntimeModelProfiles(cfg, st)
+		if err != nil {
+			t.Fatalf("responsesRuntimeModelProfiles() error = %v", err)
+		}
+		if len(profiles) != 0 {
+			t.Fatalf("profiles = %+v, want conflicting adopted profile skipped", profiles)
+		}
+	})
+}
+
 func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
