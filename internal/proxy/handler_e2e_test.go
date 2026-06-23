@@ -2456,94 +2456,111 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 }
 
 func TestHandlerResponsesServerModeDisabledProxiesResponsesPath(t *testing.T) {
-	outputDir := t.TempDir()
-	st, err := store.New(outputDir)
-	if err != nil {
-		t.Fatalf("store.New() error = %v", err)
+	tests := []struct {
+		name string
+		mode string
+	}{
+		{name: "default_mode", mode: ""},
+		{name: "proxy_mode", mode: "proxy"},
+		{name: "record_only_mode", mode: "record_only"},
 	}
-	defer st.Close()
 
-	var gotPath string
-	var gotAuth string
-	var gotBody map[string]any
-	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotAuth = r.Header.Get("Authorization")
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Errorf("decode upstream request body: %v", err)
-			http.Error(w, "bad request", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":"resp_upstream","object":"response","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
-	}))
-	defer upstreamServer.Close()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
 
-	cfg := &config.Config{
-		Upstreams: []config.UpstreamTargetConfig{
-			{
-				ID:             "openai-responses",
-				Enabled:        boolPtr(true),
-				Priority:       100,
-				ModelDiscovery: router.ModelDiscoveryStaticOnly,
-				StaticModels:   []string{"gpt-5"},
-				Upstream: config.UpstreamConfig{
-					BaseURL:        upstreamServer.URL + "/v1",
-					ApiKey:         "upstream-secret",
-					ProviderPreset: "openai",
-					APIType:        "responses_native",
-					Capabilities: config.UpstreamCapabilitiesConfig{
-						ChatCompletions: boolPtr(false),
+			var gotPath string
+			var gotAuth string
+			var gotBody map[string]any
+			upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath = r.URL.Path
+				gotAuth = r.Header.Get("Authorization")
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Errorf("decode upstream request body: %v", err)
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_upstream","object":"response","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			}))
+			defer upstreamServer.Close()
+
+			cfg := &config.Config{
+				Upstreams: []config.UpstreamTargetConfig{
+					{
+						ID:             "openai-responses",
+						Enabled:        boolPtr(true),
+						Priority:       100,
+						ModelDiscovery: router.ModelDiscoveryStaticOnly,
+						StaticModels:   []string{"gpt-5"},
+						Upstream: config.UpstreamConfig{
+							BaseURL:        upstreamServer.URL + "/v1",
+							ApiKey:         "upstream-secret",
+							ProviderPreset: "openai",
+							APIType:        "responses_native",
+							Mode:           tt.mode,
+							Capabilities: config.UpstreamCapabilitiesConfig{
+								ChatCompletions: boolPtr(false),
+							},
+						},
 					},
 				},
-			},
-		},
-	}
-	cfg.Debug.OutputDir = outputDir
-	cfg.Debug.MaskKey = true
+			}
+			cfg.Debug.OutputDir = outputDir
+			cfg.Debug.MaskKey = true
 
-	handler, err := NewHandler(cfg, st)
-	if err != nil {
-		t.Fatalf("NewHandler() error = %v", err)
-	}
-	proxyServer := httptest.NewServer(handler)
-	defer proxyServer.Close()
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
 
-	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
-	if err != nil {
-		t.Fatalf("http.NewRequest() error = %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
+			req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 
-	resp, err := proxyServer.Client().Do(req)
-	if err != nil {
-		t.Fatalf("client.Do() error = %v", err)
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+			resp, err := proxyServer.Client().Do(req)
+			if err != nil {
+				t.Fatalf("client.Do() error = %v", err)
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
-	}
-	if gotPath != "/v1/responses" {
-		t.Fatalf("upstream path = %q, want /v1/responses", gotPath)
-	}
-	if gotAuth != "Bearer upstream-secret" {
-		t.Fatalf("Authorization = %q, want Bearer upstream-secret", gotAuth)
-	}
-	if gotBody["input"] != "ping" {
-		t.Fatalf("upstream body input = %v, want ping; body=%+v", gotBody["input"], gotBody)
-	}
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+			}
+			if gotPath != "/v1/responses" {
+				t.Fatalf("upstream path = %q, want /v1/responses", gotPath)
+			}
+			if gotAuth != "Bearer upstream-secret" {
+				t.Fatalf("Authorization = %q, want Bearer upstream-secret", gotAuth)
+			}
+			if gotBody["input"] != "ping" {
+				t.Fatalf("upstream body input = %v, want ping; body=%+v", gotBody["input"], gotBody)
+			}
 
-	parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
-	if err != nil {
-		t.Fatalf("waitForRecordedPrelude() error = %v", err)
-	}
-	if parsed.Header.Meta.URL != "/v1/responses" || parsed.Header.Meta.Endpoint != "/v1/responses" {
-		t.Fatalf("recorded path endpoint = %q/%q, want /v1/responses", parsed.Header.Meta.URL, parsed.Header.Meta.Endpoint)
-	}
-	if parsed.Header.Meta.SelectedUpstreamID != "openai-responses" {
-		t.Fatalf("SelectedUpstreamID = %q, want openai-responses", parsed.Header.Meta.SelectedUpstreamID)
+			parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecordedPrelude() error = %v", err)
+			}
+			if parsed.Header.Meta.URL != "/v1/responses" || parsed.Header.Meta.Endpoint != "/v1/responses" {
+				t.Fatalf("recorded path endpoint = %q/%q, want /v1/responses", parsed.Header.Meta.URL, parsed.Header.Meta.Endpoint)
+			}
+			if parsed.Header.Meta.Operation != "responses" {
+				t.Fatalf("recorded operation = %q, want responses", parsed.Header.Meta.Operation)
+			}
+			if parsed.Header.Meta.SelectedUpstreamID != "openai-responses" {
+				t.Fatalf("SelectedUpstreamID = %q, want openai-responses", parsed.Header.Meta.SelectedUpstreamID)
+			}
+		})
 	}
 }
 
