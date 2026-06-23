@@ -2666,15 +2666,6 @@ func TestRuntimeCreateRecordsHostedWebSearchToolFailure(t *testing.T) {
 	}
 }
 
-func hasExecutionEvent(events []audit.ExecutionEvent, eventType string, status string) bool {
-	for _, event := range events {
-		if event.EventType == eventType && event.Status == status {
-			return true
-		}
-	}
-	return false
-}
-
 func findExecutionEvent(events []audit.ExecutionEvent, eventType string, status string) *audit.ExecutionEvent {
 	for i := range events {
 		if events[i].EventType == eventType && events[i].Status == status {
