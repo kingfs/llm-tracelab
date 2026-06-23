@@ -36,6 +36,35 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 ## 阶段计划
 
+### 2026-06-23 推进批次：Responses gateway operability
+
+目标：在不破坏现有 proxy/record/replay 主线的前提下，把 `responses-gateway` 已验证的运维诊断、Codex 兼容和 audit CLI 能力继续吸收到 TraceLab。该批次优先补“生产可解释性”，不把普通代理热路径改造成跨协议转换网关。
+
+已完成切片：
+
+- Codex fixture 离线 gate：`task test:codex-fixtures` 覆盖最小 JSON/NDJSON contract、HTTP handler reachability 和 runtime/parser 对齐。
+- `models codex-config <model>`：输出 Codex TOML 建议、model profile/catalog/channel drift diagnostics，并在显式 `--codex-config <path>` 时只读检查本地 Codex TOML drift。
+- `doctor` Responses server diagnostics：已覆盖 backend API surface、HTTP guard、default model、store readiness、model profile numeric relationships、catalog/channel drift、显式 `--codex-config <path>` 本地 TOML drift。
+- `audit query`：已有 response/request/client-request/conversation selector、顶层 diagnostics、`--list` summary，以及 `--status` list 过滤；输出仍避免 raw body/header/tool payload。
+
+当前并行推进切片：
+
+- `doctor` store/backend 深度健康：在默认离线模式下解释 required table set、migration mode 和 `force_store` 风险；在显式 `--check-db` 时只读确认 Responses semantic/audit 关键表完整性。
+- `audit query --list --operation`：在不大改 schema 的前提下，从 request audit method/path 派生 operation 维度，补 create/compact/input_items 过滤或明确不可可靠派生的 schema 边界。
+
+后续依赖顺序：
+
+1. 先完成 operability 小切片，保证 `doctor` / `config inspect` / `audit query` 能解释当前 server-mode 生产状态。
+2. 再推进 migration 生产化：SQLite 是否进入 versioned migration、auth 是否拆独立 namespace，必须先有文档化方案和 dry-run/status 语义。
+3. 再推进更重的 runtime 能力：完整 context optimization、复杂 stream tool lifecycle、未来 MCP/file/code/computer-use 执行器。执行器必须先走安全边界设计，不直接把任意工具执行接入 runtime。
+
+验收门禁：
+
+- 每个 worker 使用独立 worktree/branch，负责人 review 后 `--no-ff` 合入主分支并清理 worktree/branch。
+- 新诊断默认离线、默认脱敏；只有显式 flag 才连接 DB 或读取用户本地配置。
+- 测试不能依赖外部网络或真实 Postgres；Postgres 路径只能走 env-gated tests 或 mock/SQLite-compatible coverage。
+- 每个阶段合入后至少跑对应 targeted tests、`rtk git diff --check` 和 `rtk env -u GOROOT task check:quick`。
+
 ### Stage 20：Runtime Streaming 首切（已落地）
 
 目标：让 Responses server-mode 在 `stream:true` 时从内部 Chat Completions SSE 增量生成下游 Responses SSE delta，同时完成后仍存完整 response。
