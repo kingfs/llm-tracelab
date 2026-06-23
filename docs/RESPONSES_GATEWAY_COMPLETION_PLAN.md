@@ -71,7 +71,7 @@
 
 近期可并行切片：
 
-- `storage/postgres-runtime-sql-coverage`：继续补 analytics/eval/experiment/monitor 查询的 Postgres DSN-gated 覆盖，默认测试保持离线；已覆盖 session list/detail、overview summary 的 provider aggregation 和 stream-count 布尔聚合、upstream/routing analytics、model catalog/detail analytics，以及 channel usage summary/trends/model usage/recent failures。
+- `storage/postgres-runtime-sql-coverage`：继续对新增或更深 analytics 查询补 Postgres DSN-gated 覆盖，默认测试保持离线；已覆盖 session list/detail、overview summary 的 provider aggregation 和 stream-count 布尔聚合、overview finding/analysis/observation 子面板、upstream/routing analytics、model catalog/detail analytics、channel usage summary/trends/model usage/recent failures，以及 eval dataset/list/detail/example/run/score 和 experiment read model 代表路径。
 - `storage/auth-namespace-adoption-design`：已收敛为文档与 operator 输出合同，不改变当前 shared namespace 行为；后续实施任务必须按 adoption、dry-run/status、rollback 和测试门禁逐项落地。
 
 ### Provider 主线

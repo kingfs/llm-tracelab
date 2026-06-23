@@ -785,6 +785,15 @@ func analysisRunListContains(runs []AnalysisRunRecord, id int64) bool {
 	return false
 }
 
+func findDataset(datasets []DatasetRecord, id string) (DatasetRecord, bool) {
+	for _, dataset := range datasets {
+		if dataset.ID == id {
+			return dataset, true
+		}
+	}
+	return DatasetRecord{}, false
+}
+
 func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
 	if dsn == "" {
@@ -864,12 +873,29 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 		t.Fatalf("CreateDataset(postgres) error = %v", err)
 	}
 	datasetID = dataset.ID
+	gotDataset, err := st.GetDataset(dataset.ID)
+	if err != nil {
+		t.Fatalf("GetDataset(postgres) error = %v", err)
+	}
+	if gotDataset.ID != dataset.ID || gotDataset.Name != dataset.Name || gotDataset.ExampleCount != 0 {
+		t.Fatalf("GetDataset(postgres) = %#v, want created dataset with zero examples", gotDataset)
+	}
+
 	added, skipped, err := st.AppendDatasetExamples(dataset.ID, []string{entry.ID}, "postgres_eval_smoke", requestID, "dsn-gated")
 	if err != nil {
 		t.Fatalf("AppendDatasetExamples(postgres) error = %v", err)
 	}
 	if added != 1 || skipped != 0 {
 		t.Fatalf("AppendDatasetExamples(postgres) added/skipped = %d/%d, want 1/0", added, skipped)
+	}
+
+	datasets, err := st.ListDatasets()
+	if err != nil {
+		t.Fatalf("ListDatasets(postgres) error = %v", err)
+	}
+	listedDataset, ok := findDataset(datasets, dataset.ID)
+	if !ok || listedDataset.ExampleCount != 1 {
+		t.Fatalf("ListDatasets(postgres) = %#v, want dataset %q with one example", datasets, dataset.ID)
 	}
 
 	examples, err := st.GetDatasetExamples(dataset.ID)

@@ -319,16 +319,21 @@ The production route should be additive and reviewable:
    no-change behavior, core store runtime paths, and a small Responses
    persistence round trip. These now exist under
    `LLM_TRACELAB_TEST_POSTGRES_DSN`, including an ent-backed Responses runtime
-   store round trip and a representative eval dataset/run/score round trip
-   through checked-in Postgres migrations. A representative monitor runtime SQL
-   test also covers session list/detail and overview summary aggregation.
+   store round trip, representative eval dataset list/detail/example/run/score
+   round trips, and representative experiment run read models through checked-in
+   Postgres migrations. Representative monitor runtime SQL tests also cover
+   session list/detail, overview summary aggregation, overview finding/analysis/
+   observation subpanels, upstream/routing analytics, model catalog/detail
+   analytics, and channel usage analytics.
 6. Audit raw SQL in `internal/store` for placeholder syntax, SQLite functions,
    partial index behavior, time encoding, and transaction assumptions before
    declaring Postgres runtime support complete. The first pass covers
    placeholder rebinding and migrated logs/observation/finding/analysis/system
-   event paths plus representative eval dataset/run/score and monitor
-   session/overview aggregation paths; deeper analytics queries and broader
-   eval/experiment query coverage still need real Postgres tests.
+   event paths plus representative eval dataset list/detail/example/run/score,
+   experiment, monitor
+   session/overview, upstream/routing, model catalog/detail, and channel usage
+   paths; deeper analytics queries still need ongoing Postgres audit as new
+   query surfaces are added.
 7. Define a separate SQLite-to-Postgres data migration/export plan for existing
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
@@ -503,7 +508,8 @@ been committed or applied in a shared environment.
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.
 - Existing raw SQL paths may still contain SQLite-specific assumptions beyond
-  placeholder rebinding and the covered monitor session/overview path,
-  especially deeper analytics queries and broader eval/experiment query paths
-  not yet exercised by Postgres integration tests.
+  placeholder rebinding and the currently covered monitor/session/overview,
+  upstream/routing, model catalog/detail, channel usage, eval, and experiment
+  representative paths. New or deeper analytics query surfaces should continue
+  to add DSN-gated Postgres coverage.
 - There is no automatic SQLite-to-Postgres data migration.
