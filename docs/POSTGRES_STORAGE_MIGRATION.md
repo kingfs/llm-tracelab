@@ -113,6 +113,21 @@ For SQLite/local development:
 - `database.auto_migrate: true` remains appropriate for local startup because
   the embedded migrator is SQLite-only.
 - Existing `.http` cassette replay remains independent of the database.
+- Treat SQLite as the long-term local-first fallback for this storage line, not
+  as a production versioned migration target. The application schema is still
+  initialized through startup raw DDL, and `db migrate status` exposes
+  `sqlite_schema_strategy: startup_schema_fallback` plus
+  `sqlite_versioned_migration_status: not_implemented`.
+- `db migrate status --check-db` is read-only for SQLite. It can explain the
+  `app_schema_status` marker and required-table presence, but it does not
+  create missing files, repair destructive drift, rebuild cassettes, or rewrite
+  user data. Operators should back up the SQLite DB and `.http` directory
+  before any manual repair.
+- A future SQLite versioned migrator would be a separate compatibility project:
+  it must adopt legacy startup-schema databases without data loss, preserve
+  replay, support offline tests, and document rollback/repair behavior before
+  replacing the current fallback. Until then, Postgres is the only versioned
+  migration path for production-like deployments.
 
 For Postgres evaluation:
 
@@ -138,6 +153,11 @@ For Postgres evaluation:
   Auth commands such as `auth init-user` also require auth tables to exist.
   Postgres auth `up` and `down` are versioned through the shared migration set,
   but a separately owned auth migration namespace is still incomplete.
+- Treat the current Postgres auth namespace as shared with the application
+  namespace. `auth migrate status` and dry-run output intentionally report
+  `postgres_auth_namespace_strategy: shared_application_schema_migrations` and
+  `independent_auth_namespace_status: not_implemented`; those fields are the
+  operator contract until an independent auth namespace is implemented.
 
 For production-like Postgres trials, run `db migrate up` against a fresh
 database first, capture the exact llm-tracelab build and migration version, and
@@ -146,6 +166,44 @@ construction. Treat the shared application/auth migration namespace as a known
 operational constraint until auth migrations are split or formally documented as
 part of the application schema.
 
+## Finalized Storage Boundary
+
+The Storage line is now defined by two explicit decisions:
+
+1. SQLite application storage remains a startup-schema fallback for local-first
+   use, tests, and replay-compatible development. It is not being promoted to a
+   versioned application migrator in this line. Completion means the fallback is
+   visible, read-only status checks are non-destructive, legacy DBs remain
+   compatible, and operator advice clearly says to use Postgres for versioned
+   production migrations.
+2. Postgres auth storage remains in the shared application
+   `schema_migrations` namespace for the current productionization boundary.
+   The code and CLI must not imply that a separate auth namespace exists. The
+   next step is design-gated migration work, not an opportunistic namespace
+   split.
+
+An independent Postgres auth namespace can only be implemented behind these
+phase gates:
+
+- Add a separate checked-in auth migration source and namespace marker, with
+  dry-run/status fields that show source path, namespace, migration version,
+  dirty state, shared-vs-independent mode, and auth-owned table health.
+- Provide an adoption path for existing deployments where `users` and
+  `api_tokens` were created by the shared application migration. Adoption must
+  be idempotent and must not roll back or drop application tables.
+- Keep `auth migrate status --check-db` read-only and able to report both the
+  legacy shared namespace and the new independent namespace during transition.
+- Make rollback semantics explicit: shared namespace rollback remains an
+  application-wide operation; independent auth rollback must only affect
+  auth-owned migrations.
+- Cover the transition with offline SQLite tests and DSN-gated Postgres tests.
+  Default tests must not require a real Postgres server.
+
+Until those gates are met, production operators should run `db migrate up` as
+the canonical Postgres schema setup step and use `auth migrate status
+--check-db` only to verify auth-owned table presence and the shared namespace
+state.
+
 ## Stage 6 Target
 
 Stage 6 should make the application database Postgres-first without removing
@@ -153,15 +211,17 @@ SQLite fallback or breaking replay:
 
 - Add a real application migrator behind `db migrate`. Postgres `up` is now
   wired to checked-in SQL; SQLite remains on the schema initialization path.
-- Support both SQLite and Postgres application migrations from explicit,
-  versioned files.
+- Support Postgres application migrations from explicit, versioned files.
+  SQLite versioned application migrations are intentionally deferred; the
+  accepted SQLite target is documented startup-schema fallback with read-only
+  status reporting.
 - Keep Responses state (`responses`, `response_items`) in the application
   migration domain.
 - Add future application tables for request audit, execution events, and
   upstream exchange correlation to the application migration domain.
 - Keep `auth migrate` scoped to users/tokens at the command level. Its
   Postgres `up` path currently reuses the shared checked-in ent/Postgres SQL;
-  a separate auth migration namespace remains a follow-up.
+  a separate auth migration namespace remains a design-gated follow-up.
 - Preserve `.http` cassette compatibility: `pkg/replay` must not require
   Postgres or any semantic database.
 
@@ -170,7 +230,9 @@ SQLite fallback or breaking replay:
 The production route should be additive and reviewable:
 
 1. Define separate migration directories or dialect-aware generation for
-   application SQLite and application Postgres migrations.
+   application Postgres migrations. SQLite application storage remains on the
+   startup-schema fallback unless a future compatibility project explicitly
+   introduces versioned SQLite adoption.
 2. Generate Postgres SQL from ent schema changes, review it, and check it in
    as versioned migration files. Do not depend on runtime `Schema.Create` for
    production.
