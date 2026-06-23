@@ -2609,7 +2609,9 @@ func TestAuditToolCallsCommandListsRecordsWithoutPayloadsByDefault(t *testing.T)
 		"--format", "json",
 		"audit", "tool-calls",
 		"--response-id", "resp_tca_cli",
+		"--tool-type", "function",
 		"--tool-name", "lookup",
+		"--executor", "function_executor:lookup",
 		"--status", "completed",
 		"--limit", "10",
 	})
@@ -2622,7 +2624,9 @@ func TestAuditToolCallsCommandListsRecordsWithoutPayloadsByDefault(t *testing.T)
 		Result  struct {
 			Query struct {
 				ResponseID      string `json:"response_id"`
+				ToolType        string `json:"tool_type"`
 				ToolName        string `json:"tool_name"`
+				Executor        string `json:"executor"`
 				Status          string `json:"status"`
 				IncludePayloads bool   `json:"include_payloads"`
 			} `json:"query"`
@@ -2650,7 +2654,7 @@ func TestAuditToolCallsCommandListsRecordsWithoutPayloadsByDefault(t *testing.T)
 	if !envelope.OK || envelope.Command != "audit.tool_calls" {
 		t.Fatalf("envelope = %+v, want ok audit.tool_calls", envelope)
 	}
-	if envelope.Result.Query.ResponseID != "resp_tca_cli" || envelope.Result.Query.ToolName != "lookup" || envelope.Result.Query.Status != "completed" || envelope.Result.Query.IncludePayloads {
+	if envelope.Result.Query.ResponseID != "resp_tca_cli" || envelope.Result.Query.ToolType != "function" || envelope.Result.Query.ToolName != "lookup" || envelope.Result.Query.Executor != "function_executor:lookup" || envelope.Result.Query.Status != "completed" || envelope.Result.Query.IncludePayloads {
 		t.Fatalf("query = %+v, want lookup completed without payloads", envelope.Result.Query)
 	}
 	if envelope.Result.Count != 1 || len(envelope.Result.ToolCallAudits) != 1 {
@@ -2669,72 +2673,57 @@ func TestAuditToolCallsCommandListsRecordsWithoutPayloadsByDefault(t *testing.T)
 	if strings.Contains(out.String(), secretMarker) {
 		t.Fatalf("audit tool-calls leaked payload by default: %s", out.String())
 	}
+
+	out.Reset()
+	cmd = newRootCommand()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "text",
+		"audit", "tool-calls",
+		"--response-id", "resp_tca_cli",
+		"--tool-type", "function",
+		"--executor", "function_executor:lookup",
+		"--latest-by-call",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute(latest-by-call) error = %v", err)
+	}
+	text := out.String()
+	for _, want := range []string{"tool_call_lifecycles: 1", "call_id=call_lookup_cli", "tool_type=function", "executor=function_executor:lookup", "latest_status=completed", "events=1"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("latest-by-call text = %q, want contain %q", text, want)
+		}
+	}
+	if strings.Contains(text, secretMarker) {
+		t.Fatalf("audit tool-calls latest-by-call leaked payload: %s", text)
+	}
 }
 
-func TestAuditToolCallsCommandCanIncludePayloads(t *testing.T) {
+func TestAuditToolCallsCommandRejectsIncludePayloads(t *testing.T) {
 	t.Parallel()
-
-	dir := t.TempDir()
-	configPath := writeResponsesAuditCLIConfig(t, dir)
-	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
-	if err != nil {
-		t.Fatalf("store.NewWithDatabase() error = %v", err)
-	}
-	auditor := responsesaudit.NewEntAuditor(st.EntClient())
-	const secretMarker = "SECRET_TOOL_CALL_AUDIT_INCLUDED"
-	if _, err := auditor.RecordToolCallAudit(context.Background(), responsesaudit.ToolCallAudit{
-		ID:           "tcaud_payload_cli",
-		ResponseID:   "resp_payload_cli",
-		CallID:       "call_payload_cli",
-		ToolType:     "function",
-		ToolName:     "lookup",
-		Status:       "completed",
-		InputJSON:    map[string]any{"q": secretMarker},
-		OutputJSON:   map[string]any{"answer": secretMarker},
-		MetadataJSON: map[string]any{"note": secretMarker},
-		CreatedAt:    time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC),
-	}); err != nil {
-		t.Fatalf("RecordToolCallAudit() error = %v", err)
-	}
-	if err := st.Close(); err != nil {
-		t.Fatalf("store.Close() error = %v", err)
-	}
 
 	cmd := newRootCommand()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{
-		"-c", configPath,
 		"--format", "json",
 		"audit", "tool-call-audits",
 		"--call-id", "call_payload_cli",
 		"--include-payloads",
 	})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error = %v", err)
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("Execute() error = nil, want usage error")
 	}
-	var envelope struct {
-		Result struct {
-			Query struct {
-				IncludePayloads bool `json:"include_payloads"`
-			} `json:"query"`
-			ToolCallAudits []struct {
-				InputJSON    map[string]any `json:"input_json"`
-				OutputJSON   map[string]any `json:"output_json"`
-				MetadataJSON map[string]any `json:"metadata_json"`
-			} `json:"tool_call_audits"`
-		} `json:"result"`
+	var exit cliExitError
+	if !errors.As(err, &exit) || exit.code != exitCodeUsage {
+		t.Fatalf("Execute() error = %v, want usage cliExitError", err)
 	}
-	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
-	}
-	if !envelope.Result.Query.IncludePayloads || len(envelope.Result.ToolCallAudits) != 1 {
-		t.Fatalf("envelope = %+v, want one record with payloads", envelope)
-	}
-	record := envelope.Result.ToolCallAudits[0]
-	if record.InputJSON["q"] != secretMarker || record.OutputJSON["answer"] != secretMarker || record.MetadataJSON["note"] != secretMarker {
-		t.Fatalf("payloads = input:%v output:%v metadata:%v, want marker values", record.InputJSON, record.OutputJSON, record.MetadataJSON)
+	if !strings.Contains(err.Error(), "include-payloads") {
+		t.Fatalf("error = %q, want include-payloads usage message", err.Error())
 	}
 }
 

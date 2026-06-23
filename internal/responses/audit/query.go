@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ const (
 
 var requestAuditStatusValues = []string{"accepted", "completed", "failed", "rejected", "cancelled"}
 var requestAuditOperationValues = []string{"create", "compact", "input_items"}
+var toolCallAuditStatusValues = []string{"started", "completed", "failed", "rejected"}
 
 type QueryService struct {
 	client *dao.Client
@@ -58,7 +60,9 @@ type ListToolCallAuditsParams struct {
 	RequestAuditID string
 	ConversationID string
 	CallID         string
+	ToolType       string
 	ToolName       string
+	Executor       string
 	Status         string
 	Limit          int
 }
@@ -160,6 +164,22 @@ type ToolCallAuditView struct {
 	CreatedAt      time.Time
 }
 
+type ToolCallLifecycleSummaryView struct {
+	CallID         string
+	ToolType       string
+	ToolName       string
+	Executor       string
+	StatusesSeen   []string
+	LatestStatus   string
+	EventCount     int
+	StartedAt      time.Time
+	CompletedAt    time.Time
+	LatestEventAt  time.Time
+	RequestAuditID string
+	ResponseID     string
+	ConversationID string
+}
+
 type PendingToolCallDiagnostic struct {
 	CallID       string
 	ToolName     string
@@ -254,8 +274,14 @@ func (s *QueryService) ListToolCallAudits(ctx context.Context, params ListToolCa
 	if params.CallID != "" {
 		query.Where(toolcallaudit.CallIDEQ(params.CallID))
 	}
+	if params.ToolType != "" {
+		query.Where(toolcallaudit.ToolTypeEQ(params.ToolType))
+	}
 	if params.ToolName != "" {
 		query.Where(toolcallaudit.ToolNameEQ(params.ToolName))
+	}
+	if params.Executor != "" {
+		query.Where(toolcallaudit.ExecutorEQ(params.Executor))
 	}
 	if params.Status != "" {
 		query.Where(toolcallaudit.StatusEQ(params.Status))
@@ -268,6 +294,83 @@ func (s *QueryService) ListToolCallAudits(ctx context.Context, params ListToolCa
 	for _, record := range records {
 		out = append(out, toolCallAuditView(record))
 	}
+	return out, nil
+}
+
+func (s *QueryService) ListToolCallLifecycleSummaries(ctx context.Context, params ListToolCallAuditsParams) ([]ToolCallLifecycleSummaryView, error) {
+	records, err := s.ListToolCallAudits(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return []ToolCallLifecycleSummaryView{}, nil
+	}
+	indexByKey := map[string]int{}
+	statusSeen := []map[string]struct{}{}
+	out := []ToolCallLifecycleSummaryView{}
+	for _, record := range records {
+		key := record.CallID
+		if key == "" {
+			key = "audit:" + record.ID
+		}
+		idx, ok := indexByKey[key]
+		if !ok {
+			indexByKey[key] = len(out)
+			statusSeen = append(statusSeen, map[string]struct{}{})
+			out = append(out, ToolCallLifecycleSummaryView{
+				CallID:         record.CallID,
+				ToolType:       record.ToolType,
+				ToolName:       record.ToolName,
+				Executor:       record.Executor,
+				RequestAuditID: record.RequestAuditID,
+				ResponseID:     record.ResponseID,
+				ConversationID: record.ConversationID,
+			})
+			idx = len(out) - 1
+		}
+		summary := &out[idx]
+		if summary.ToolType == "" {
+			summary.ToolType = record.ToolType
+		}
+		if summary.ToolName == "" {
+			summary.ToolName = record.ToolName
+		}
+		if summary.Executor == "" {
+			summary.Executor = record.Executor
+		}
+		if summary.RequestAuditID == "" {
+			summary.RequestAuditID = record.RequestAuditID
+		}
+		if summary.ResponseID == "" {
+			summary.ResponseID = record.ResponseID
+		}
+		if summary.ConversationID == "" {
+			summary.ConversationID = record.ConversationID
+		}
+		if record.Status != "" {
+			if _, exists := statusSeen[idx][record.Status]; !exists {
+				statusSeen[idx][record.Status] = struct{}{}
+				summary.StatusesSeen = append(summary.StatusesSeen, record.Status)
+			}
+			summary.LatestStatus = record.Status
+		}
+		if !record.StartedAt.IsZero() && (summary.StartedAt.IsZero() || record.StartedAt.Before(summary.StartedAt)) {
+			summary.StartedAt = record.StartedAt
+		}
+		if !record.CompletedAt.IsZero() && record.CompletedAt.After(summary.CompletedAt) {
+			summary.CompletedAt = record.CompletedAt
+		}
+		if record.CreatedAt.After(summary.LatestEventAt) {
+			summary.LatestEventAt = record.CreatedAt
+		}
+		summary.EventCount++
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].LatestEventAt.Equal(out[j].LatestEventAt) {
+			return out[i].LatestEventAt.After(out[j].LatestEventAt)
+		}
+		return out[i].CallID > out[j].CallID
+	})
 	return out, nil
 }
 
@@ -492,6 +595,10 @@ func RequestAuditOperationValues() []string {
 	return append([]string(nil), requestAuditOperationValues...)
 }
 
+func ToolCallAuditStatusValues() []string {
+	return append([]string(nil), toolCallAuditStatusValues...)
+}
+
 func NormalizeRequestAuditStatus(status string) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(status))
 	if normalized == "" {
@@ -512,6 +619,19 @@ func NormalizeRequestAuditOperation(operation string) (string, bool) {
 	}
 	normalized = strings.ReplaceAll(normalized, "-", "_")
 	for _, allowed := range requestAuditOperationValues {
+		if normalized == allowed {
+			return normalized, true
+		}
+	}
+	return "", false
+}
+
+func NormalizeToolCallAuditStatus(status string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if normalized == "" {
+		return "", true
+	}
+	for _, allowed := range toolCallAuditStatusValues {
 		if normalized == allowed {
 			return normalized, true
 		}
