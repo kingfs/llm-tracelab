@@ -131,7 +131,7 @@ Fixture:
 | MCP hosted tool runtime | 稳定拒绝并审计 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | file search hosted runtime | 稳定拒绝并审计 | 无 vector store/retrieval/citation runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | code interpreter hosted runtime | 稳定拒绝并审计 | 无 sandboxed code runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
-| Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议；本地 SQLite app DB 可用时还会只读检查 `model_catalog` / `channel_models` drift。 |
+| Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议；本地 SQLite app DB 可用时还会只读检查 `model_catalog` / `channel_models` drift；显式传入 `--codex-config <path>` 时会只读检查本地 Codex TOML drift。 |
 | Codex fixture runner | 已支持离线 gate | `task test:codex-fixtures` 运行 focused 离线 Go tests，枚举并校验当前 fixture inventory、JSON/NDJSON 结构、HTTP handler reachability 和最小 runtime/parser 对齐；不是完整真实 Codex/e2e runner。 |
 
 ## 配置建议
@@ -180,7 +180,7 @@ tools:
 
 `llm-tracelab models codex-config <model>` 是离线配置建议生成器，不会探测上游
 provider、运行真实 Codex 或读取真实 API key。命令支持全局
-`--format text|json`：
+`--format text|json`，并支持可选 `--codex-config <path>`：
 
 - JSON 输出使用稳定 envelope，`command` 为 `models.codex_config`。
 - `result.profile` 包含 `model_provider`、`model`、`model_context_window` 和
@@ -191,12 +191,23 @@ provider、运行真实 Codex 或读取真实 API key。命令支持全局
 - `result.diagnostics` 标注 matched profile、compact token limit 来源、
   item-count compact threshold 来源、Responses server 是否启用，以及本地 SQLite
   app DB 可用时的 `model_catalog` / `channel_models` 命中和 drift warnings。
+- 未传 `--codex-config` 时，`result.diagnostics.codex_config.status` 为
+  `not_configured`，命令不会读取用户机器上的真实 Codex 配置文件。
+- 传入 `--codex-config <path>` 时，命令只读解析该 TOML，检查
+  `[profiles.<model>]` 和 `[model_providers.llm-tracelab]` 是否存在，并对比
+  `model_provider`、`model`、`model_context_window`、
+  `model_auto_compact_token_limit`、provider `base_url`、`wire_api` 和 `env_key`。
+  JSON diagnostics 会输出 path、present/readable/parsed、profile/provider
+  present、字段级 expected/actual/matched 状态和 drift warnings；text 输出会给出
+  简洁 `codex_config` summary。
 - `result.warnings` 会提示 `responses_server.enabled=false`、未匹配 profile、
   profile 缺少 `context_window_tokens` 或 path 无法按 Codex `wire_api=responses`
   习惯推导；当 profile 命中但 catalog/channel 缺少该 model，或 catalog 与
-  channel 只有一侧存在该 model 时，也会输出 drift warning。
+  channel 只有一侧存在该 model，或显式传入的 Codex TOML 存在 drift 时，也会输出
+  drift warning。
 - text 输出包含可复制 TOML 片段，使用 `env_key = "LLM_TRACELAB_API_KEY"` 占位，
-  不输出配置文件中的真实 upstream API key、header secret 或数据库 DSN。
+  不输出配置文件中的真实 upstream API key、header secret、数据库 DSN 或 TOML 中的
+  API key/token；`base_url` actual 值会先脱敏再输出。
 
 Profile 匹配顺序固定为：先按 `responses_server.model_profiles[].name` exact
 匹配，再按 `pattern` wildcard 匹配。无匹配时命令仍成功，模型上下文窗口和 Codex
@@ -209,6 +220,11 @@ store，并以 `AutoMigrate:false` 只读查询当前模型是否存在于 `mode
 `channel_models`。DB 不存在、`:memory:`、非 SQLite 或打开失败时，命令保持原离线
 行为并把 catalog/channel source 标记为 `unavailable`；不会连接 Postgres，也不会输出
 DSN 或 secret。
+
+本地 Codex TOML drift 诊断只在显式传入 `--codex-config` 时执行。文件不存在、
+不可读或 TOML 解析失败时命令仍成功，`diagnostics.codex_config.status` 分别标记
+`missing`、`unreadable` 或 `parse_error`，并通过 warnings 说明问题；不会 panic，
+也不会回显完整文件内容或 parser 上下文。
 
 ## 排障入口
 
