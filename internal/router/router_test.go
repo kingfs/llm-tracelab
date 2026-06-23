@@ -262,6 +262,81 @@ func TestRouterChatCompletionsRequiresChatCapableAPISurface(t *testing.T) {
 	}
 }
 
+func TestRouterResponsesEndpointAllowsNativeResponsesTarget(t *testing.T) {
+	chatDisabled := false
+	responsesEnabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "native-responses",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Mode:           "proxy",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       &responsesEnabled,
+						ChatCompletions: &chatDisabled,
+					},
+				},
+			},
+			{
+				ID:             "chat",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "native-responses" {
+		t.Fatalf("selected target = %q, want native-responses", selection.Target.ID)
+	}
+	if selection.Target.Upstream.APIType != "responses_native" {
+		t.Fatalf("selected APIType = %q, want responses_native", selection.Target.Upstream.APIType)
+	}
+	if selection.Decision == nil || len(selection.Decision.Candidates) != 2 {
+		t.Fatalf("selection decision missing candidates: %+v", selection.Decision)
+	}
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID == "native-responses" && (!candidate.SupportsPath || candidate.FilterReason != "") {
+			t.Fatalf("native responses candidate = %+v, want selectable for /v1/responses", candidate)
+		}
+		if candidate.ID == "chat" && !candidate.SupportsPath {
+			t.Fatalf("chat completions candidate = %+v, want compatible fallback for /v1/responses", candidate)
+		}
+	}
+}
+
 func TestRouterSelectFiltersTargetsWithoutToolCallingCapability(t *testing.T) {
 	toolCallingDisabled := false
 	cfg := &config.Config{

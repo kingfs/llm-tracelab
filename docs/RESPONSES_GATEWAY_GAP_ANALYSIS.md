@@ -88,6 +88,7 @@
 - 已吸收并扩展：provider probe、probe-report、probe-apply、Monitor provider setup validate/apply、startup in-memory fill。
 - llm-tracelab 落点：`cmd/server/provider.go`、`cmd/server/provider_startup_probe.go`、`internal/providerprobe`、`internal/monitor`。
 - responses-gateway 对照：`cmd/responses-gateway/doctor.go` 只探测 vLLM `/models`，范围更窄。
+- Native Responses boundary 首切已覆盖：`/v1/responses` proxy/record-only 路径可选择 `responses_native` target 透传并录制；local Responses server-mode 的内部 `/v1/chat/completions` 调用只选择 Chat Completions-compatible target，显式 `responses_native` 且 `capabilities.chat_completions=false` 的 target 不会被误用为 chat backend。
 
 ### Doctor 启动前诊断首切
 

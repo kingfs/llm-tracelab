@@ -33,6 +33,7 @@
 - ent-backed Responses store、SQLite fallback raw DDL、Postgres checked-in application migrations、open-vs-migrate 分离。
 - `request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 CLI/Monitor/MCP 查询首切。
 - Provider `api_type` / `mode` / capabilities 路由约束，provider probe/report/apply 和 setup validate/apply 首切。
+- Native Responses provider mode boundary 首切：server-mode 的内部 Chat Completions backend 只选择 Chat Completions-compatible target，不会把 `responses_native` 且 `capabilities.chat_completions=false` 的 target 当作 `/v1/chat/completions` backend；server-mode 关闭时 `/v1/responses` 仍可选择 native Responses target 透传并录制。
 - Codex fixture offline gate、Codex config suggestion、doctor/config inspect/audit operability 首切。
 - `models codex-config` 已输出 provider/profile source-boundary diagnostics：runtime profile 事实源为 `responses_server.model_profiles`，catalog/channel 当前为 drift-only，provider/upstream capability 驱动 routing/tokenize。
 - `models codex-config` 已输出 provider/channel profile adoption diagnostics：当前采纳阶段为 `observe_only`，冲突策略为 `responses_server.model_profiles_wins`，并已提供机器可读 `profile_adoption_report` dry-run/conflict/gate report。该报告只读展示 channel profile candidate、字段级 diff、显式 runtime profile 保护和 capability false 阻断，不把 catalog/channel profile 接入 runtime；报告内 `adoption_ready=false`，`rollback_plan` 已收敛为 mutation-free 机器可读 rollback contract，`schema_migration` 与 `dsn_gated_tests` 仍明确标记为 `blocking_not_implemented`，避免误读为已经可采纳。
@@ -82,12 +83,12 @@
 - Provider API surface/capability registry 成为 routing、doctor、setup、models/codex-config 的共同事实来源。
 - Probe/setup/apply 形成闭环：只填缺失字段，不覆盖显式配置或 capability false，不回显 secret。
 - Model profile 与 provider/channel/model catalog 的关系明确：context window、max output、tool capability、upstream model rewrite、tokenize capability 的来源可解释。
-- Native Responses provider 的模式边界明确：默认 proxy/record-only 路径可以把 `/v1/responses` 原样转发并录制到 native Responses upstream；`responses_server.enabled=true` 时，配置的 Responses path 由本地 semantic runtime 接管，runtime 内部模型调用仍只选择 Chat Completions-compatible target，不能把显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 provider 当作 `/v1/chat/completions` upstream 使用。
+- Native Responses provider 的模式边界已完成首切：默认 proxy/record-only 路径可以把 `/v1/responses` 原样转发并录制到 native Responses upstream；`responses_server.enabled=true` 时，配置的 Responses path 由本地 semantic runtime 接管，runtime 内部模型调用仍只选择 Chat Completions-compatible target，不能把显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 provider 当作 `/v1/chat/completions` upstream 使用。
 
 近期可并行切片：
 
 - `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_adoption_report`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；当前 report 仅 observe-only dry-run，不覆盖显式配置或 capability false，并在 report 内把 rollback plan 固化为 mutation-free contract，schema migration 与 DSN-gated tests 仍是 blocking gates。后续仍需实现 catalog/channel profile 进入 runtime 前的 migration/test 闭环。
-- `provider/native-responses-mode-boundary`：写清并测试 native Responses target 在 proxy/server mode 下的 routing 行为。
+- `provider/native-responses-mode-boundary`：已补 router/proxy e2e 契约，覆盖 native Responses target 在 proxy/server mode 下的 routing 行为；后续 provider 主线聚焦 profile adoption migration/test 闭环。
 
 ## 停止发散规则
 
