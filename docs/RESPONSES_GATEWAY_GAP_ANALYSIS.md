@@ -129,7 +129,7 @@
 
 - 已有：Postgres application `db migrate up/status/down --dry-run`、auth migrate、SQLite status 解释、open-vs-migrate 分离；SQLite application report 已稳定输出 `sqlite_schema_strategy: startup_schema_fallback`、`sqlite_versioned_migration_status: not_implemented` 和 migration advice；`auth migrate status` / dry-run 已输出 auth required tables、table health、Postgres shared namespace strategy 和 independent auth namespace `not_implemented` 方案边界。
 - 定案边界：SQLite application DB 长期作为 local-first `startup_schema_fallback` 保留；本轮不实现 versioned SQLite migrator，`db migrate status --check-db` 只读解释 marker/required table 状态，不承担 destructive repair、文件创建或数据 rewrite。Postgres auth 继续共享 application `schema_migrations` namespace；独立 auth namespace 未实现，当前通过 status/dry-run 字段明确约束。
-- 缺口：Postgres runtime SQL 仍需继续扩大其余 analytics/eval/experiment/monitor 查询覆盖；当前已补 session/overview、upstream/routing analytics 和 model catalog/detail analytics 的 DSN-gated 覆盖。独立 auth namespace 只有迁移门禁设计，尚未实现 adoption path、独立 migration source、双 namespace read-only status 和 auth-only rollback 语义。
+- 缺口：Postgres runtime SQL 仍需继续扩大其余 analytics/eval/experiment/monitor 查询覆盖；当前已补 session/overview、upstream/routing analytics、model catalog/detail analytics 和 channel usage analytics 的 DSN-gated 覆盖。独立 auth namespace 只有迁移门禁设计，尚未实现 adoption path、独立 migration source、双 namespace read-only status 和 auth-only rollback 语义。
 - llm-tracelab 落点：`cmd/server/db.go`、`cmd/server/auth.go`、`internal/appdbmigrate`、`internal/auth/migrate.go`。
 - responses-gateway 对照：`cmd/responses-gateway/migrate.go`、`ent/migrations`。
 
