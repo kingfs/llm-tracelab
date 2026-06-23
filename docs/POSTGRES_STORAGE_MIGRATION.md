@@ -77,7 +77,9 @@ claim that Postgres persistence is fully production mature today.
   paths are covered by `LLM_TRACELAB_TEST_POSTGRES_DSN` integration tests. A
   representative eval path now also round-trips dataset examples, eval runs,
   score writes, finalize, and score queries against the checked-in Postgres
-  migration.
+  migration. A representative Monitor/session path now covers Postgres
+  compatible session provider aggregation, boolean stream counts, and overview
+  summary stream/session counts.
 - `db migrate down` is intentionally unsupported outside `--dry-run`; ent auto
   migration does not provide a safe rollback plan.
 - The Responses runtime has ent-backed persistence for `responses` and
@@ -245,14 +247,15 @@ The production route should be additive and reviewable:
    persistence round trip. These now exist under
    `LLM_TRACELAB_TEST_POSTGRES_DSN`, including an ent-backed Responses runtime
    store round trip and a representative eval dataset/run/score round trip
-   through checked-in Postgres migrations.
+   through checked-in Postgres migrations. A representative monitor runtime SQL
+   test also covers session list/detail and overview summary aggregation.
 6. Audit raw SQL in `internal/store` for placeholder syntax, SQLite functions,
    partial index behavior, time encoding, and transaction assumptions before
    declaring Postgres runtime support complete. The first pass covers
    placeholder rebinding and migrated logs/observation/finding/analysis/system
-   event paths plus a representative eval dataset/run/score path; deeper
-   analytics queries and broader eval/experiment query coverage still need real
-   Postgres tests.
+   event paths plus representative eval dataset/run/score and monitor
+   session/overview aggregation paths; deeper analytics queries and broader
+   eval/experiment query coverage still need real Postgres tests.
 7. Define a separate SQLite-to-Postgres data migration/export plan for existing
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
@@ -278,6 +281,12 @@ store with `AutoMigrate:false`.
 Stage 16D adds the first runtime SQL compatibility pass: store raw SQL can
 rebind positional placeholders for Postgres, transaction helpers share the same
 path, and `logs.is_stream` supports Postgres boolean round trips.
+
+Stage 16D follow-up coverage fixes the representative Monitor session raw SQL
+path: SQLite `GROUP_CONCAT` session provider aggregation now has a Postgres
+`string_agg` equivalent, and session/overview stream counts use a
+dialect-appropriate boolean expression. The coverage is DSN-gated by
+`LLM_TRACELAB_TEST_POSTGRES_DSN` and skips by default.
 
 Stage 16E promotes the remaining `internal/store` application raw DDL tables
 into ent/Postgres migrations: trace observations, semantic nodes, trace
@@ -411,6 +420,7 @@ been committed or applied in a shared environment.
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.
 - Existing raw SQL paths may still contain SQLite-specific assumptions beyond
-  placeholder rebinding, especially deeper analytics queries and broader
-  eval/experiment query paths not yet exercised by Postgres integration tests.
+  placeholder rebinding and the covered monitor session/overview path,
+  especially deeper analytics queries and broader eval/experiment query paths
+  not yet exercised by Postgres integration tests.
 - There is no automatic SQLite-to-Postgres data migration.

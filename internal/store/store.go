@@ -2003,6 +2003,20 @@ func classifyUpstreamFailure(statusCode int, errorText string) string {
 	}
 }
 
+func (s *Store) boolCountCaseSQL(column string) string {
+	if s != nil && s.driver == "postgres" {
+		return "CASE WHEN " + column + " THEN 1 ELSE 0 END"
+	}
+	return "CASE WHEN " + column + " = 1 THEN 1 ELSE 0 END"
+}
+
+func (s *Store) sessionProvidersAggregateSQL() string {
+	if s != nil && s.driver == "postgres" {
+		return "COALESCE(string_agg(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END, ','), '')"
+	}
+	return "COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '')"
+}
+
 func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, []any) {
 	var (
 		clauses []string
@@ -5685,7 +5699,7 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
-			COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '') AS providers,
+			` + s.sessionProvidersAggregateSQL() + ` AS providers,
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
 			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
@@ -5694,7 +5708,7 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
-			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
+			COALESCE(SUM(` + s.boolCountCaseSQL("s.is_stream") + `), 0) AS stream_count
 		FROM logs s
 		WHERE ` + sessionWhere + `
 		GROUP BY s.session_id
@@ -5743,7 +5757,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
-			COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '') AS providers,
+			`+s.sessionProvidersAggregateSQL()+` AS providers,
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
 			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
@@ -5752,7 +5766,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
-			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
+			COALESCE(SUM(`+s.boolCountCaseSQL("s.is_stream")+`), 0) AS stream_count
 		FROM logs s
 		WHERE s.session_id = ?
 		GROUP BY s.session_id
@@ -5902,7 +5916,7 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 			COALESCE(SUM(total_tokens), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms END), 0) AS avg_ttft,
 			COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS avg_duration,
-			COALESCE(SUM(CASE WHEN is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count,
+			COALESCE(SUM(` + s.boolCountCaseSQL("is_stream") + `), 0) AS stream_count,
 			COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS session_count
 		FROM logs
 		WHERE ` + whereSQL
