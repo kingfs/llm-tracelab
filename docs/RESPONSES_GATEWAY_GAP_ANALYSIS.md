@@ -127,8 +127,8 @@
 
 ### Migration 运维
 
-- 已有：Postgres application `db migrate up/status/down --dry-run`、auth migrate、SQLite status 解释、open-vs-migrate 分离；SQLite application report 已稳定输出 `sqlite_schema_strategy: startup_schema_fallback`、`sqlite_versioned_migration_status: not_implemented` 和 migration advice。
-- 缺口：SQLite 仍是 startup schema fallback，不是 versioned migration；`db migrate status --check-db` 对 SQLite 只读解释 marker/required table 状态，不承担 destructive repair；auth 仍共享 application schema namespace，独立 auth migration namespace 未完成。
+- 已有：Postgres application `db migrate up/status/down --dry-run`、auth migrate、SQLite status 解释、open-vs-migrate 分离；SQLite application report 已稳定输出 `sqlite_schema_strategy: startup_schema_fallback`、`sqlite_versioned_migration_status: not_implemented` 和 migration advice；`auth migrate status` / dry-run 已输出 auth required tables、table health、Postgres shared namespace strategy 和 independent auth namespace `not_implemented` 方案边界。
+- 缺口：SQLite 仍是 startup schema fallback，不是 versioned migration；`db migrate status --check-db` 对 SQLite 只读解释 marker/required table 状态，不承担 destructive repair；auth 仍共享 application schema namespace，独立 auth migration namespace 未完成且当前仅通过 status/dry-run 明确约束。
 - llm-tracelab 落点：`cmd/server/db.go`、`cmd/server/auth.go`、`internal/appdbmigrate`、`internal/auth/migrate.go`。
 - responses-gateway 对照：`cmd/responses-gateway/migrate.go`、`ent/migrations`。
 
@@ -216,7 +216,7 @@
 6. 继续 migration 生产化。
    - 价值：减少 Postgres/SQLite/auth schema 运维歧义。
    - 模块：`internal/appdbmigrate`、`internal/auth/migrate.go`、`cmd/server/db.go`、`cmd/server/auth.go`。
-   - 验收：SQLite versioned migration 方案或明确继续 fallback；auth 独立 namespace 拆分方案落文档和 dry-run 状态。
+   - 验收：SQLite versioned migration 方案或明确继续 fallback；auth 独立 namespace 拆分方案落文档和 dry-run/status 状态，且 `auth migrate status --check-db` 能只读报告 auth-owned table presence。
 
 ## 不建议直接搬运的点
 
