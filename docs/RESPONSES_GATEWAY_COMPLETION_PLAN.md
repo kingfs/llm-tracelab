@@ -87,7 +87,7 @@
 
 近期可并行切片：
 
-- `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_adoption_report`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；当前 report 仅 observe-only dry-run，不覆盖显式配置或 capability false，并在 report 内把 rollback plan 固化为 mutation-free contract。schema migration 与 runtime opt-in assembly 已落地，`responses_server.adopt_channel_model_profiles` 默认关闭；后续 provider 主线应聚焦 profile adoption 的管理面、冲突可视化、回滚/禁用工作流和更广 Postgres 覆盖，而不是继续把 schema migration 当作阻塞项。
+- `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_adoption_report`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；当前 report 仅 observe-only dry-run，不覆盖显式配置或 capability false，并在 report 内把 rollback plan 固化为 mutation-free contract。schema migration 与 runtime opt-in assembly 已落地，`responses_server.adopt_channel_model_profiles` 默认关闭；runtime opt-in 边界已覆盖 YAML 优先、冲突跳过和 `supports_chat_completions=false` 阻断；后续 provider 主线应聚焦 profile adoption 的管理面、冲突可视化、回滚/禁用工作流和更广 Postgres 覆盖，而不是继续把 schema migration 当作阻塞项。
 - `provider/native-responses-mode-boundary`：已补 router/proxy e2e 契约，覆盖 native Responses target 在 proxy/server mode 下的 routing 行为；后续 provider 主线聚焦 profile adoption migration/test 闭环。
 
 ## 停止发散规则
@@ -193,3 +193,4 @@
 - Phase 1 Runtime 收口继续推进：新增跨轮 `function_call_output` streaming 在已输出 delta 后遇到 `context.Canceled` 时不发送 completed、不落 completed response 的 runtime 回归覆盖；`rtk env -u GOROOT go test ./internal/responses/runtime -count=1` 已通过。
 - Phase 1 Runtime 收口继续推进：新增 proxy/server-mode e2e 覆盖 auto compact + forced hosted `web_search` 非平凡 `tool_choice` 的 incremental fallback，验证 deferred SSE、auto compact、hosted tool loop、fallback event 和 upstream exchange 均关联同一 request audit；`rtk env -u GOROOT go test ./internal/proxy -count=1` 已通过。
 - Phase 2 Storage/Postgres 收口继续推进：`TestPostgresStoreRuntimeSQLIntegration` 追加 core `Stats`、`ListPage` 和 `ListTraceIDs` 覆盖，验证 monitor list/aggregate 基础入口在 Postgres migration 后可读；本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，该路径保持 DSN-gated skip，`rtk env -u GOROOT go test ./internal/store -count=1` 已通过默认离线矩阵。
+- Phase 3 Provider/Profile 收口继续推进：`TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries` 追加 runtime opt-in 对 `supports_chat_completions=false` adopted channel profile 的阻断覆盖，和 `models codex-config` capability false 报告保持一致；`rtk env -u GOROOT go test ./internal/proxy -run TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries -count=1` 已通过。

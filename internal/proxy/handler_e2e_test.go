@@ -2382,6 +2382,35 @@ func TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries(t *testing.T) {
 		}
 	})
 
+	t.Run("chat completion capability false blocks runtime adoption", func(t *testing.T) {
+		chatUnsupported := 0
+		contextWindow := 128000
+		maxOutputTokens := 777
+		st := newStore(t, map[string][]store.ChannelModelRecord{
+			"responses-native-only": {{
+				Model:                   "gpt-5",
+				DisplayName:             "GPT-5 Native",
+				Source:                  "probe",
+				Enabled:                 true,
+				SupportsChatCompletions: &chatUnsupported,
+				ContextWindow:           &contextWindow,
+				MaxOutputTokens:         &maxOutputTokens,
+				UpstreamModel:           "provider/responses-native-gpt-5",
+				ProfileSource:           "test",
+				ProfileAdoptionStatus:   "adopted",
+			}},
+		})
+		cfg := &config.Config{}
+		cfg.ResponsesServer.AdoptChannelModelProfiles = true
+		profiles, err := responsesRuntimeModelProfiles(cfg, st)
+		if err != nil {
+			t.Fatalf("responsesRuntimeModelProfiles() error = %v", err)
+		}
+		if len(profiles) != 0 {
+			t.Fatalf("profiles = %+v, want capability false adopted profile skipped", profiles)
+		}
+	})
+
 	t.Run("explicit yaml profile wins over adopted channel profile", func(t *testing.T) {
 		st := newStore(t, map[string][]store.ChannelModelRecord{
 			"openai-chat": {adoptedRecord("provider/private-gpt-5", 128000, 777)},
