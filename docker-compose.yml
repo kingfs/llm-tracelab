@@ -13,21 +13,74 @@ services:
         https_proxy: ${DOCKER_BUILD_https_proxy:-${https_proxy:-}}
         no_proxy: ${DOCKER_BUILD_no_proxy:-${no_proxy:-}}
     image: llm-tracelab:local
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
+      LLM_TRACELAB_CONFIG: /app/config/config.yaml
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
-      LLM_TRACELAB_DATABASE_DRIVER: ${LLM_TRACELAB_DATABASE_DRIVER:-sqlite}
-      LLM_TRACELAB_DATABASE_DSN: ${LLM_TRACELAB_DATABASE_DSN:-}
+      LLM_TRACELAB_DATABASE_DRIVER: postgres
+      LLM_TRACELAB_DATABASE_DSN: ${LLM_TRACELAB_DATABASE_DSN:-postgres://llm_tracelab:llm_tracelab@postgres:5432/llm_tracelab?sslmode=disable}
+      LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS: ${LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS:-16}
+      LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS: ${LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS:-8}
+      LLM_TRACELAB_DATABASE_AUTO_MIGRATE: ${LLM_TRACELAB_DATABASE_AUTO_MIGRATE:-true}
       LLM_TRACELAB_SERVER_PORT: ${LLM_TRACELAB_SERVER_PORT:-8080}
       LLM_TRACELAB_MONITOR_PORT: ${LLM_TRACELAB_MONITOR_PORT:-8081}
       LLM_TRACELAB_MCP_ENABLED: ${LLM_TRACELAB_MCP_ENABLED:-true}
-      LLM_TRACELAB_UPSTREAM_BASE_URL: ${LLM_TRACELAB_UPSTREAM_BASE_URL:-https://api.openai.com/v1}
-      LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY:-}
-      LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET: ${LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET:-openai}
+      LLM_TRACELAB_RESPONSES_ENABLED: ${LLM_TRACELAB_RESPONSES_ENABLED:-true}
+      LLM_TRACELAB_RESPONSES_FORCE_STORE: ${LLM_TRACELAB_RESPONSES_FORCE_STORE:-true}
+      LLM_TRACELAB_RESPONSES_DEFAULT_MODEL: ${LLM_TRACELAB_RESPONSES_DEFAULT_MODEL:-gpt-4o-mini}
+      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL: ${LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL:-http://host.docker.internal:8000/v1}
+      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY: ${LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY:-local-vllm-placeholder}
+      LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED: ${LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED:-false}
+      LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER: ${LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER:-searxng}
+      LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL: ${LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL:-http://searxng:8080}
+      LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS: ${LLM_TRACELAB_TOOLS_WEB_SEARCH_MAX_RESULTS:-5}
     ports:
-      - "8080:8080"
-      - "8081:8081"
+      - "${LLM_TRACELAB_SERVER_PORT:-8080}:8080"
+      - "${LLM_TRACELAB_MONITOR_PORT:-8081}:8081"
     volumes:
       - ./config/config.yaml:/app/config/config.yaml:ro
-      - ./docker-data:/app/data
-    command: ["serve", "-c", "/app/config/config.yaml"]
+      - llm-tracelab-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - sh
+      - -c
+      - |
+        /app/bin/llm-tracelab -c /app/config/config.yaml db migrate up
+        exec /app/bin/llm-tracelab -c /app/config/config.yaml serve
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-llm_tracelab}
+      POSTGRES_USER: ${POSTGRES_USER:-llm_tracelab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llm_tracelab}
+    ports:
+      - "${LLM_TRACELAB_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles:
+      - search
+    environment:
+      BASE_URL: ${SEARXNG_BASE_URL:-http://localhost:8088/}
+      INSTANCE_NAME: ${SEARXNG_INSTANCE_NAME:-llm-tracelab-searxng}
+    ports:
+      - "${SEARXNG_PORT:-8088}:8080"
+    volumes:
+      - searxng-data:/etc/searxng
+
+volumes:
+  llm-tracelab-data:
+  postgres-data:
+  searxng-data:

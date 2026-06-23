@@ -8,10 +8,10 @@
 
 TraceLab 当前提供：
 
-- 本地 LLM API 代理。
+- Postgres-first LLM gateway。
 - 原始 HTTP cassette 录制。
 - cassette replay。
-- SQLite 元数据索引。
+- Postgres 生产 metadata / audit / Responses state；SQLite 本地 fallback。
 - 多上游和模型/渠道管理。
 - 可选 Responses server-mode。
 - Monitor Web。
@@ -51,9 +51,11 @@ TraceLab 当前提供：
 - `pkg/replay` 是硬要求，测试 replay 不访问上游网络。
 - Responses server-mode 内部调用上游 Chat Completions 时，该上游 HTTP exchange 也写入 `.http` cassette；Responses semantic state 不替代 raw cassette。
 
-## SQLite 基线
+## 存储基线
 
-SQLite 当前负责：
+Postgres 是生产结构化状态主路径，当前负责用户、token、trace index、session、upstream/channel/model、system events、Observation IR、findings、analysis、eval、Responses semantic state 和 audit 表。SQLite 保留为本地开发、离线测试和既有本地 DB 兼容的 startup-schema fallback。
+
+SQLite fallback 覆盖：
 
 - trace 列表、过滤、分页和统计。
 - session 聚合。
@@ -67,7 +69,7 @@ SQLite 当前负责：
 - eval、dataset、score、experiment。
 - Responses semantic state fallback 表：`responses`、`response_items`。
 
-启动时 schema 升级必须兼容已有本地 DB。
+启动时 schema 升级必须兼容已有本地 DB；生产 versioned migration 主路径是 Postgres checked-in SQL。
 
 Responses server-mode 当前优先使用 ent-backed runtime store。Postgres 是生产存储、迁移和运维主路径：`db migrate up` 通过 `internal/appdbmigrate` 和 `golang-migrate` 应用 checked-in `ent/postgres-migrations` SQL，`config inspect`、`db migrate status` 和 `doctor` 均输出 `production_storage_driver=postgres`、`production_ready`、`storage_role` 和 `storage_contract`。SQLite raw DDL 仍包含 Responses/audit/settings 表，但仅作为 legacy/dev/test `startup_schema_fallback` 兼容路径；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 和 required table 状态，不创建缺失文件。Postgres auth 表当前由 application migration set 拥有：`auth migrate up` 复用 checked-in Postgres SQL，`auth migrate down` 已阻止，status/dry-run 报告 `effective_database_namespace=application`、`schema_authority=application_postgres_migration_set`、`storage_contract=postgres_application_schema_owns_auth_tables`、`postgres_auth_namespace_strategy=shared_application_schema_migrations`、`independent_auth_namespace_status=not_implemented` 和 `auth_namespace_rollback_scope=unsupported_from_auth_cli_shared_application_migration_set`。Postgres 真实检查和代表 runtime SQL 路径继续由 `LLM_TRACELAB_TEST_POSTGRES_DSN` 门控；默认测试保持离线。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，`tool_call_audits` 已承接 hosted web_search、configured function executor lifecycle 和强制 unsupported hosted tool rejected lifecycle，并通过 CLI/Monitor/MCP 查询。
 
@@ -103,7 +105,7 @@ Monitor 和 MCP 都可查询 session 列表和详情。
 
 - legacy `upstream`。
 - 多 `upstreams`。
-- SQLite 中的 `channel_configs` / `channel_models`。
+- 应用数据库中的 `channel_configs` / `channel_models`，生产使用 Postgres，本地 fallback 可使用 SQLite。
 - YAML 首次 bootstrap。
 - Monitor Web 管理 channel/model。
 - model discovery / probe。
@@ -112,7 +114,7 @@ Monitor 和 MCP 都可查询 session 列表和详情。
 - selected route 记录。
 - 健康状态、重试和 sticky routing 事件。
 
-长期配置以 SQLite channel/model 记录为准。
+长期配置以应用数据库 channel/model 记录为准。
 
 ## Monitor 基线
 
@@ -161,7 +163,7 @@ MCP 当前是 streamable HTTP。
 - findings 查询。
 - 受控 reanalysis。
 
-MCP 不替代 replay、Monitor 或 SQLite 事实源。
+MCP 不替代 replay、Monitor 或应用数据库事实源。
 
 ## Observation 与 Reanalysis 基线
 
@@ -183,7 +185,7 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 让测试依赖真实 provider。
 - auto compact 后未知/未实现 hosted 工具、非平凡 `tool_choice` 或更复杂混合工具等复杂场景的真实增量 Responses server-mode streaming；内部 Chat Completions upstream cancel 传播已落地，auto compact 后简单文本 continuation、未注册普通 function arguments、同名 registered executor stream tool loop、provider 就绪 hosted `web_search` / `web_search_preview` 平凡 `tool_choice` tool loop、普通 function、已注册 server-side executor 和 provider 就绪 hosted `web_search` 已有 stream tool loop 首切。
 - 外部 executor root/container 级沙箱、更完整的跨轮/cancel lifecycle events、未来真实 MCP/file/code/computer-use 执行 lifecycle 和完整 model profile/context optimization；当前已有默认关闭的 YAML `static_response` / `external_command` executor 首切、`external_command` opt-in working directory/absolute command/allowed_command_dirs/reject_root 轻量进程隔离首切、Monitor 配置摘要 API、validate-only、安全 overlay 持久化到 `app_settings`、runtime executor registry 热更新和 Audit 页面状态/enable 控件、profile max output/token-budget auto compact estimator adapter 扩展边界、provider `/tokenize` 自动选择首切、默认保守计数 fallback、普通 function call argument streaming 首切、已注册 executor 与 hosted `web_search` 的 stream tool loop 首切、同轮多个已注册 executor call 顺序覆盖、同轮 registered function + hosted web_search mixed success 覆盖、同轮 registered function 完成后 hosted web_search provider 失败的 completed/failed item 顺序覆盖、started 态 `response.output_item.added`、成功/失败态 `response.output_item.done` tool item、已写出 SSE 后的最小 `response.failed` 事件、带 `stream=true` 的 tool_call started/completed/failed events，以及 unsupported hosted tool rejected audit。
-- 完整真实 stream/compact execution events 和完整 Postgres migration 生产化；当前仅覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed/cancelled、普通 function tool requested/submitted、incremental stream fallback、deferred/incremental stream started/completed、stream tool loop `stream=true` 标记等最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event、eval dataset list/detail/example/run/score、experiment read model、monitor core list/aggregate、session/overview、upstream/routing、model catalog/detail 和 channel usage analytics 代表路径的 Postgres raw SQL 兼容；新增或更深 analytics 查询和独立 auth migration namespace 仍未完成。SQLite application versioned migration 不是当前生产边界，SQLite 保留为 startup-schema fallback。
+- 完整真实 stream/compact execution events 和所有未来 analytics 查询的 Postgres 兼容审计；当前已覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed/cancelled、普通 function tool requested/submitted、incremental stream fallback、deferred/incremental stream started/completed、stream tool loop `stream=true` 标记等最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event、eval dataset list/detail/example/run/score、experiment read model、monitor core list/aggregate、session/overview、upstream/routing、model catalog/detail 和 channel usage analytics 代表路径的 Postgres raw SQL 兼容；新增或更深 analytics 查询和独立 auth migration namespace 仍未完成。SQLite application versioned migration 不是当前生产边界，SQLite 保留为 startup-schema fallback。
 - provider probe 的完整配置/Monitor 工作流；当前已有手动 `provider probe` / `doctor --probe-providers` 诊断建议、只读 `provider probe-report` / Monitor `/api/provider-probe/report` 批量报告入口、默认关闭的启动时保守补全首切、`config inspect` sources 摘要，以及 Monitor provider create preview/detail report 展示、provider setup validate/apply 首切、create dialog 状态编排首切、显式 Apply suggestions 首切、Providers 列表页 Batch probe and apply 首切和 CLI `provider probe-apply` 首切；尚未完成更完整的批量 provider onboarding、自动修复策略和跨协议消息转换。
 
 ## 推荐验证

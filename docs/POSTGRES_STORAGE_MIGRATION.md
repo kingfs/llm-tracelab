@@ -122,6 +122,15 @@ application database schema and does not run the auth migrator.
 
 ## Production Deployment Guidance
 
+The checked-in production packaging now treats Postgres as the default
+deployment database. The default `docker-compose.yml` starts `llm-tracelab`
+with a Postgres service and runs `db migrate up` before `serve`; the tracked
+`config/config.yaml` expects `database.driver: postgres`,
+`database.dsn: $env:LLM_TRACELAB_DATABASE_DSN`,
+`responses_server.enabled: true`, and an OpenAI-compatible/vLLM upstream. See
+[Production Deployment](./PRODUCTION_DEPLOYMENT.md) for the operator entry
+point and the optional SearXNG profile.
+
 For SQLite/local development:
 
 - Keep `database.driver` empty or set it to `sqlite`.
