@@ -36,6 +36,9 @@ func TestCheckStatusSQLiteReportsSchemaInitFallback(t *testing.T) {
 	if !strings.Contains(status.Message, "database file does not exist") || !strings.Contains(status.Message, ErrSQLiteUsesStoreInit.Error()) {
 		t.Fatalf("CheckStatus(sqlite) message = %q, want fallback explanation", status.Message)
 	}
+	if status.Advice != SQLiteMigrationAdvice {
+		t.Fatalf("CheckStatus(sqlite) advice = %q, want SQLiteMigrationAdvice", status.Advice)
+	}
 }
 
 func TestCheckStatusSQLiteReportsApplicationSchemaMarker(t *testing.T) {
@@ -107,8 +110,39 @@ func TestCheckStatusSQLiteReportsLegacySchemaWithoutMarker(t *testing.T) {
 	if !status.Available || !status.RequiredTablesPresent || status.SchemaMarker != "" || status.SchemaMarkerVersion != 0 {
 		t.Fatalf("legacy sqlite status = %+v, want available schema without marker", status)
 	}
-	if !strings.Contains(status.Message, "marker missing for legacy database") {
+	if !strings.Contains(status.Message, "app_schema_status marker is missing") || !strings.Contains(status.Message, "compatible legacy startup-schema database") {
 		t.Fatalf("legacy sqlite message = %q", status.Message)
+	}
+	if status.Advice != SQLiteMigrationAdvice {
+		t.Fatalf("legacy sqlite advice = %q", status.Advice)
+	}
+}
+
+func TestCheckStatusSQLiteReportsMissingRequiredTablesAdvice(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "trace_index.sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open(sqlite) error = %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE logs (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create partial sqlite schema error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus(sqlite) error = %v", err)
+	}
+	if status.Available || status.RequiredTablesPresent || len(status.MissingTables) == 0 {
+		t.Fatalf("partial sqlite status = %+v, want unavailable with missing tables", status)
+	}
+	if !strings.Contains(status.Message, "required tables are incomplete") || !strings.Contains(status.Message, "startup schema fallback must initialize or repair") {
+		t.Fatalf("partial sqlite message = %q", status.Message)
+	}
+	if status.Advice != SQLiteMigrationAdvice {
+		t.Fatalf("partial sqlite advice = %q", status.Advice)
 	}
 }
 

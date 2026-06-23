@@ -215,6 +215,11 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 		}
 	}
 	if opts.dryRun {
+		if opts.format != "json" {
+			fmt.Fprintf(stdoutOrDefault(opts.stdout), "dry-run db.migrate.%s: no changes will be applied\n", opts.direction)
+			writeAppDBMigrationReportText(stdoutOrDefault(opts.stdout), result)
+			return 0
+		}
 		return writeDryRunResult(opts.stdout, opts.format, "db.migrate."+opts.direction, result)
 	}
 	switch opts.direction {
@@ -256,12 +261,13 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 	source := "sqlite-startup-schema-fallback"
 	sourcePath := "internal/store raw DDL startup initialization"
 	versioned := false
-	if appDBMigrationMode(cfg.DatabaseDriver()) == "versioned-sql" {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	if appDBMigrationMode(driver) == "versioned-sql" {
 		source = "postgres-checked-in-sql"
 		sourcePath = "ent/postgres-migrations"
 		versioned = true
 	}
-	return map[string]any{
+	result := map[string]any{
 		"dry_run":                dryRun,
 		"mutated":                mutated,
 		"driver":                 cfg.DatabaseDriver(),
@@ -279,6 +285,12 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 		"auth_migration_scope":   "excluded",
 		"auth_migration_command": "auth migrate",
 	}
+	if driver == "sqlite" {
+		result["sqlite_schema_strategy"] = appdbmigrate.SQLiteSchemaStrategy
+		result["sqlite_versioned_migration_status"] = appdbmigrate.SQLiteVersionedMigrationStatus
+		result["sqlite_migration_advice"] = appdbmigrate.SQLiteMigrationAdvice
+	}
+	return result
 }
 
 func appDBStatusCheckMode(checkDB bool) string {
@@ -313,6 +325,9 @@ func applyAppDBStatusCheck(cfg *config.Config, result map[string]any) error {
 	if status.Message != "" {
 		result["database_status_message"] = status.Message
 	}
+	if status.Advice != "" {
+		result["database_status_advice"] = status.Advice
+	}
 	return nil
 }
 
@@ -324,6 +339,11 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "migration_source: %s\n", result["migration_source"])
 	fmt.Fprintf(w, "migration_source_path: %s\n", result["migration_source_path"])
 	fmt.Fprintf(w, "schema_versioned: %v\n", result["schema_versioned"])
+	if result["sqlite_schema_strategy"] != nil {
+		fmt.Fprintf(w, "sqlite_schema_strategy: %s\n", result["sqlite_schema_strategy"])
+		fmt.Fprintf(w, "sqlite_versioned_migration_status: %s\n", result["sqlite_versioned_migration_status"])
+		fmt.Fprintf(w, "sqlite_migration_advice: %s\n", result["sqlite_migration_advice"])
+	}
 	if result["status_check"] != nil {
 		fmt.Fprintf(w, "status_check: %s\n", result["status_check"])
 	}
@@ -346,6 +366,9 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	}
 	if result["database_status_message"] != nil {
 		fmt.Fprintf(w, "database_status_message: %s\n", result["database_status_message"])
+	}
+	if result["database_status_advice"] != nil {
+		fmt.Fprintf(w, "database_status_advice: %s\n", result["database_status_advice"])
 	}
 	fmt.Fprintf(w, "rollback_supported: %v\n", result["rollback_supported"])
 	fmt.Fprintf(w, "auth_migration_scope: %s (%s)\n", result["auth_migration_scope"], result["auth_migration_command"])

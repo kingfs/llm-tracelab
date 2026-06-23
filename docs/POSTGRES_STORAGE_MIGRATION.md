@@ -55,13 +55,16 @@ claim that Postgres persistence is fully production mature today.
 - `db migrate status` and `db migrate up/down --dry-run` report the configured
   application migration source without mutating the database: Postgres reports
   `ent/postgres-migrations` checked-in SQL, SQLite reports the startup schema
-  fallback, and auth migrations are explicitly marked out of scope for the
-  `db migrate` command. `db migrate status --check-db` is an explicit opt-in
-  database check: Postgres reads `schema_migrations` version/dirty state, while
-  SQLite opens the application DB read-only and reports the lightweight
-  `app_schema_status` marker plus required application table presence when
-  available. Legacy SQLite DBs without the marker remain valid and are reported
-  as schema-init fallback.
+  fallback with `sqlite_schema_strategy: startup_schema_fallback`,
+  `sqlite_versioned_migration_status: not_implemented`, and operational advice
+  to use Postgres for versioned production migrations. Auth migrations are
+  explicitly marked out of scope for the `db migrate` command. `db migrate
+  status --check-db` is an explicit opt-in database check: Postgres reads
+  `schema_migrations` version/dirty state, while SQLite opens the application DB
+  read-only and reports the lightweight `app_schema_status` marker plus
+  required application table presence when available. Missing SQLite DB files
+  are not created by status checks. Legacy SQLite DBs without the marker remain
+  valid and are reported as compatible startup-schema fallback.
 - `internal/store` has an initial Postgres raw SQL compatibility pass:
   store-owned `?` placeholders are rebound to `$n` for Postgres, transaction
   helpers use the same rebind path, `logs.is_stream` can round-trip as a
@@ -238,6 +241,15 @@ for the `application` namespace, and `--check-db` reports that marker version
 alongside required table completeness. Existing SQLite DBs without the marker
 are still treated as compatible legacy fallback DBs.
 
+Stage 22 tightens the SQLite application migration boundary without adding a
+versioned SQLite migrator. `db migrate status` and `db migrate up --dry-run`
+now expose stable SQLite fields in both JSON and text output:
+`sqlite_schema_strategy: startup_schema_fallback`,
+`sqlite_versioned_migration_status: not_implemented`, and
+`sqlite_migration_advice`. `db migrate status --check-db` remains read-only for
+SQLite, does not create a missing DB file, and adds `database_status_advice`
+when marker or required-table checks need operator interpretation.
+
 Stage 16I routes Postgres auth migration `down` through the same shared
 versioned SQL rollback path in `internal/appdbmigrate`. This closes the
 previous Postgres auth rollback command gap, while preserving the explicit
@@ -315,10 +327,11 @@ been committed or applied in a shared environment.
   `ent/postgres-migrations` set, but a separately owned auth migration
   namespace is still missing.
 - SQLite application migrations still use schema initialization rather than
-  explicit versioned files. `db migrate status` reports this fallback, and
-  `db migrate status --check-db` reports the lightweight `app_schema_status`
-  marker when present while continuing to accept legacy local databases without
-  that marker.
+  explicit versioned files. `db migrate status` and dry-run output report
+  `sqlite_schema_strategy: startup_schema_fallback` and
+  `sqlite_versioned_migration_status: not_implemented`; `db migrate status
+  --check-db` reports the lightweight `app_schema_status` marker when present
+  while continuing to accept legacy local databases without that marker.
 - Request audit, execution events, upstream exchange correlation, Monitor API,
   MCP semantic diagnostics, and Monitor UI trace lookup have a minimal
   Responses path.

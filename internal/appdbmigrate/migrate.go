@@ -21,6 +21,9 @@ import (
 const postgresMigrationRoot = "postgres-migrations"
 const sqliteApplicationSchemaMarker = "app_schema_status"
 const sqliteApplicationSchemaNamespace = "application"
+const SQLiteSchemaStrategy = "startup_schema_fallback"
+const SQLiteVersionedMigrationStatus = "not_implemented"
+const SQLiteMigrationAdvice = "SQLite application DB uses startup schema fallback; run startup or db migrate up for idempotent schema initialization, and use Postgres for versioned production migrations."
 
 var sqliteApplicationRequiredTables = []string{
 	"logs",
@@ -44,7 +47,7 @@ func MigrateUp(driver string, dsn string, steps int) error {
 	}
 }
 
-var ErrSQLiteUsesStoreInit = errors.New("sqlite application migration still uses store schema initialization")
+var ErrSQLiteUsesStoreInit = errors.New("sqlite application versioned migration is not implemented; startup schema fallback remains active")
 
 func MigrateDown(driver string, dsn string, steps int, all bool) error {
 	driver = normalizeDriver(driver)
@@ -69,6 +72,7 @@ type Status struct {
 	RequiredTablesPresent bool
 	MissingTables         []string
 	Message               string
+	Advice                string
 }
 
 func CheckStatus(driver string, dsn string) (Status, error) {
@@ -79,6 +83,7 @@ func CheckStatus(driver string, dsn string) (Status, error) {
 		status.Versioned = true
 		return checkPostgresStatus(dsn, status)
 	case "sqlite":
+		status.Advice = SQLiteMigrationAdvice
 		return checkSQLiteStatus(dsn, status)
 	default:
 		return status, fmt.Errorf("application database driver %q is not supported by versioned migrations yet", driver)
@@ -88,16 +93,16 @@ func CheckStatus(driver string, dsn string) (Status, error) {
 func checkSQLiteStatus(dsn string, status Status) (Status, error) {
 	dbPath := config.SQLitePathFromDSN(dsn)
 	if strings.TrimSpace(dbPath) == "" {
-		status.Message = "sqlite application database path is empty; " + ErrSQLiteUsesStoreInit.Error()
+		status.Message = "sqlite application database path is empty; read-only status check skipped; " + ErrSQLiteUsesStoreInit.Error()
 		return status, nil
 	}
 	if dbPath == ":memory:" {
-		status.Message = "sqlite in-memory database status is not inspectable; " + ErrSQLiteUsesStoreInit.Error()
+		status.Message = "sqlite in-memory database status is not inspectable with --check-db; " + ErrSQLiteUsesStoreInit.Error()
 		return status, nil
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			status.Message = "sqlite application database file does not exist; " + ErrSQLiteUsesStoreInit.Error()
+			status.Message = "sqlite application database file does not exist; --check-db is read-only and did not create it; " + ErrSQLiteUsesStoreInit.Error()
 			return status, nil
 		}
 		return status, err
@@ -127,9 +132,9 @@ func checkSQLiteStatus(dsn string, status Status) (Status, error) {
 	}
 	if !markerExists {
 		if status.RequiredTablesPresent {
-			status.Message = "sqlite application schema tables are present; marker missing for legacy database; " + ErrSQLiteUsesStoreInit.Error()
+			status.Message = "sqlite application required tables are present; app_schema_status marker is missing, so this is treated as a compatible legacy startup-schema database; " + ErrSQLiteUsesStoreInit.Error()
 		} else {
-			status.Message = "sqlite application schema marker is missing and required tables are incomplete; " + ErrSQLiteUsesStoreInit.Error()
+			status.Message = "sqlite application app_schema_status marker is missing and required tables are incomplete; startup schema fallback must initialize or repair the local database before production-like use; " + ErrSQLiteUsesStoreInit.Error()
 		}
 		return status, nil
 	}
@@ -137,7 +142,7 @@ func checkSQLiteStatus(dsn string, status Status) (Status, error) {
 	status.SchemaMarker = sqliteApplicationSchemaMarker
 	if err := db.QueryRow(`SELECT version FROM app_schema_status WHERE namespace = ?`, sqliteApplicationSchemaNamespace).Scan(&status.SchemaMarkerVersion); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			status.Message = "sqlite application schema marker table exists but application row is missing; " + ErrSQLiteUsesStoreInit.Error()
+			status.Message = "sqlite application schema marker table exists but application row is missing; startup schema fallback should rewrite the marker on next schema initialization; " + ErrSQLiteUsesStoreInit.Error()
 			return status, nil
 		}
 		return status, err
