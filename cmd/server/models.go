@@ -70,6 +70,9 @@ type modelsCodexDiagnostics struct {
 	RuntimeProfileSource              string                    `json:"runtime_profile_source"`
 	ProfilePrecedence                 []string                  `json:"profile_precedence"`
 	CatalogProfileRole                string                    `json:"catalog_profile_role"`
+	ProviderChannelProfileAdoption    string                    `json:"provider_channel_profile_adoption"`
+	ProfileConflictStrategy           string                    `json:"profile_conflict_strategy"`
+	ProfileAdoptionRequiredGates      []string                  `json:"profile_adoption_required_gates"`
 	CapabilitySource                  string                    `json:"capability_source"`
 	CompactLimitSource                string                    `json:"compact_limit_source"`
 	CompactLimitMarginTokens          int                       `json:"compact_limit_margin_tokens"`
@@ -217,6 +220,9 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 		RuntimeProfileSource:              "responses_server.model_profiles",
 		ProfilePrecedence:                 []string{"responses_server.model_profiles", "zero_limits_when_unmatched"},
 		CatalogProfileRole:                "diagnostic_only",
+		ProviderChannelProfileAdoption:    "observe_only",
+		ProfileConflictStrategy:           "responses_server.model_profiles_wins",
+		ProfileAdoptionRequiredGates:      []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"},
 		CapabilitySource:                  "provider_upstream_capabilities",
 		CompactLimitSource:                compactLimitSource,
 		CompactLimitMarginTokens:          contextWindow - autoCompactLimit,
@@ -627,6 +633,11 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.CatalogProfileRole,
 		result.Diagnostics.CapabilitySource,
 		strings.Join(result.Diagnostics.ProfilePrecedence, ","),
+	)
+	fmt.Fprintf(w, "# profile_adoption: provider_channel_profile_adoption=%s conflict_strategy=%s required_gates=%s\n",
+		result.Diagnostics.ProviderChannelProfileAdoption,
+		result.Diagnostics.ProfileConflictStrategy,
+		strings.Join(result.Diagnostics.ProfileAdoptionRequiredGates, ","),
 	)
 	fmt.Fprintf(w, "# codex_config: status=%s present=%t readable=%t parsed=%t profile_present=%t provider_present=%t",
 		result.Diagnostics.CodexConfig.Status,

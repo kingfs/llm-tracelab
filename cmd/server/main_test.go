@@ -607,6 +607,9 @@ upstreams:
 				RuntimeProfileSource              string   `json:"runtime_profile_source"`
 				ProfilePrecedence                 []string `json:"profile_precedence"`
 				CatalogProfileRole                string   `json:"catalog_profile_role"`
+				ProviderChannelProfileAdoption    string   `json:"provider_channel_profile_adoption"`
+				ProfileConflictStrategy           string   `json:"profile_conflict_strategy"`
+				ProfileAdoptionRequiredGates      []string `json:"profile_adoption_required_gates"`
 				CapabilitySource                  string   `json:"capability_source"`
 				CompactLimitSource                string   `json:"compact_limit_source"`
 				CompactLimitMarginTokens          int      `json:"compact_limit_margin_tokens"`
@@ -639,6 +642,9 @@ upstreams:
 	if envelope.Result.Diagnostics.RuntimeProfileSource != "responses_server.model_profiles" ||
 		!reflect.DeepEqual(envelope.Result.Diagnostics.ProfilePrecedence, []string{"responses_server.model_profiles", "zero_limits_when_unmatched"}) ||
 		envelope.Result.Diagnostics.CatalogProfileRole != "diagnostic_only" ||
+		envelope.Result.Diagnostics.ProviderChannelProfileAdoption != "observe_only" ||
+		envelope.Result.Diagnostics.ProfileConflictStrategy != "responses_server.model_profiles_wins" ||
+		!reflect.DeepEqual(envelope.Result.Diagnostics.ProfileAdoptionRequiredGates, []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"}) ||
 		envelope.Result.Diagnostics.CapabilitySource != "provider_upstream_capabilities" {
 		t.Fatalf("source diagnostics = %+v", envelope.Result.Diagnostics)
 	}
@@ -692,6 +698,7 @@ upstream:
 	}
 	for _, want := range []string{
 		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
+		`# profile_adoption: provider_channel_profile_adoption=observe_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -1092,18 +1099,21 @@ type modelsCodexConfigEnvelopeForTest struct {
 	Command string `json:"command"`
 	Result  struct {
 		Diagnostics struct {
-			RuntimeProfileSource string   `json:"runtime_profile_source"`
-			ProfilePrecedence    []string `json:"profile_precedence"`
-			CatalogProfileRole   string   `json:"catalog_profile_role"`
-			CapabilitySource     string   `json:"capability_source"`
-			DatabaseAvailable    bool     `json:"database_available"`
-			CatalogModelPresent  bool     `json:"catalog_model_present"`
-			ChannelModelPresent  bool     `json:"channel_model_present"`
-			ChannelModelCount    int      `json:"channel_model_count"`
-			CatalogSource        string   `json:"catalog_source"`
-			ChannelSource        string   `json:"channel_source"`
-			DriftWarnings        []string `json:"drift_warnings"`
-			CodexConfig          struct {
+			RuntimeProfileSource           string   `json:"runtime_profile_source"`
+			ProfilePrecedence              []string `json:"profile_precedence"`
+			CatalogProfileRole             string   `json:"catalog_profile_role"`
+			ProviderChannelProfileAdoption string   `json:"provider_channel_profile_adoption"`
+			ProfileConflictStrategy        string   `json:"profile_conflict_strategy"`
+			ProfileAdoptionRequiredGates   []string `json:"profile_adoption_required_gates"`
+			CapabilitySource               string   `json:"capability_source"`
+			DatabaseAvailable              bool     `json:"database_available"`
+			CatalogModelPresent            bool     `json:"catalog_model_present"`
+			ChannelModelPresent            bool     `json:"channel_model_present"`
+			ChannelModelCount              int      `json:"channel_model_count"`
+			CatalogSource                  string   `json:"catalog_source"`
+			ChannelSource                  string   `json:"channel_source"`
+			DriftWarnings                  []string `json:"drift_warnings"`
+			CodexConfig                    struct {
 				Path            string `json:"path"`
 				Status          string `json:"status"`
 				Present         bool   `json:"present"`
