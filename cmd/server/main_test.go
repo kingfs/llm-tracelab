@@ -699,6 +699,7 @@ upstream:
 	for _, want := range []string{
 		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
 		`# profile_adoption: provider_channel_profile_adoption=observe_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
+		`# profile_adoption_gates: adoption_ready=false blocking_gate_count=3 required_gate_statuses=schema_migration:blocking_not_implemented:blocking,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:blocking_not_implemented:blocking,dsn_gated_tests:blocking_not_implemented:blocking`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -976,6 +977,7 @@ responses_server:
 	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "blocked" {
 		t.Fatalf("profile adoption report = %+v, want blocked observe-only dry-run", report)
 	}
+	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
 	if !report.ExplicitConfigPresent || report.CandidateCount != 1 || report.ProposedChangeCount != 0 || report.ConflictCount != 1 {
 		t.Fatalf("profile adoption counters = %+v", report)
 	}
@@ -1032,6 +1034,7 @@ responses_server:
 	if report.Status != "would_change" || report.ProposedChangeCount != 1 || report.ConflictCount != 0 || report.ExplicitConfigPresent {
 		t.Fatalf("profile adoption report = %+v, want would_change without explicit profile", report)
 	}
+	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
 	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != 4096 || report.Fields[0].Status != "would_adopt_after_gates" {
 		t.Fatalf("field diff = %+v", report.Fields)
 	}
@@ -1081,6 +1084,7 @@ responses_server:
 	if report.Status != "blocked" || report.CandidateCount != 0 || report.ProposedChangeCount != 0 {
 		t.Fatalf("profile adoption report = %+v, want capability false blocked", report)
 	}
+	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
 	if !containsStringFragment(report.BlockedReasons, "no_eligible_channel_profile_candidate") {
 		t.Fatalf("blocked reasons = %+v", report.BlockedReasons)
 	}
@@ -1281,11 +1285,19 @@ type modelsCodexConfigEnvelopeForTest struct {
 				RuntimeProfileSource  string   `json:"runtime_profile_source"`
 				CandidateSource       string   `json:"candidate_source"`
 				ExplicitConfigPresent bool     `json:"explicit_config_present"`
+				AdoptionReady         bool     `json:"adoption_ready"`
 				CandidateCount        int      `json:"candidate_count"`
 				ProposedChangeCount   int      `json:"proposed_change_count"`
 				ConflictCount         int      `json:"conflict_count"`
+				BlockingGateCount     int      `json:"blocking_gate_count"`
 				BlockedReasons        []string `json:"blocked_reasons"`
-				Fields                []struct {
+				RequiredGates         []struct {
+					Gate     string `json:"gate"`
+					Status   string `json:"status"`
+					Blocking bool   `json:"blocking"`
+					Reason   string `json:"reason"`
+				} `json:"required_gates"`
+				Fields []struct {
 					Field           string `json:"field"`
 					RuntimeValue    int    `json:"runtime_value"`
 					CandidateValue  int    `json:"candidate_value"`
@@ -1370,6 +1382,45 @@ func executeModelsCodexConfigJSONForTest(t *testing.T, configPath string, model 
 		t.Fatalf("envelope = %+v", envelope)
 	}
 	return envelope
+}
+
+func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool, blockingGateCount int, gates []struct {
+	Gate     string `json:"gate"`
+	Status   string `json:"status"`
+	Blocking bool   `json:"blocking"`
+	Reason   string `json:"reason"`
+}) {
+	t.Helper()
+	if adoptionReady {
+		t.Fatalf("adoption_ready = true, want false while schema/rollback/test gates are blocking")
+	}
+	if blockingGateCount != 3 {
+		t.Fatalf("blocking_gate_count = %d, want 3", blockingGateCount)
+	}
+	got := map[string]struct {
+		Status   string
+		Blocking bool
+		Reason   string
+	}{}
+	for _, gate := range gates {
+		got[gate.Gate] = struct {
+			Status   string
+			Blocking bool
+			Reason   string
+		}{Status: gate.Status, Blocking: gate.Blocking, Reason: gate.Reason}
+	}
+	for _, gate := range []string{"schema_migration", "rollback_plan", "dsn_gated_tests"} {
+		status, ok := got[gate]
+		if !ok || status.Status != "blocking_not_implemented" || !status.Blocking || status.Reason == "" {
+			t.Fatalf("gate %s = %+v, want blocking_not_implemented with reason; all gates=%+v", gate, status, gates)
+		}
+	}
+	for _, gate := range []string{"dry_run_diff", "conflict_report"} {
+		status, ok := got[gate]
+		if !ok || status.Status != "implemented_observe_only" || status.Blocking || status.Reason == "" {
+			t.Fatalf("gate %s = %+v, want implemented_observe_only non-blocking with reason; all gates=%+v", gate, status, gates)
+		}
+	}
 }
 
 func TestRootCommandRegistersModelsCodexConfig(t *testing.T) {
