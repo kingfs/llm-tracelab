@@ -136,7 +136,7 @@ TraceLab 不为每个 provider 写一套独立集成，而是把上游解析成�
 llm-tracelab --config config.yaml provider probe --id openai-local --format json
 ```
 
-当前 probe 会检查 OpenAI-compatible `/v1/models`、`/v1/chat/completions`、`/v1/responses`，Anthropic `/v1/messages` / `/v1/models`，以及 Gemini `/v1beta/models`。输出包含建议的 `api_type`、`protocol_family`、capability signals、confidence 和 warnings。
+当前 probe 会检查 OpenAI-compatible `/v1/models`、`/v1/chat/completions`、`/v1/responses`，Anthropic `/v1/messages` / `/v1/models`，以及 Gemini `/v1beta/models`。输出包含建议的 `api_type`、`protocol_family`、capability signals、confidence 和 warnings。probe endpoint、setup/apply capability 写入和 routing API surface 判断共用 `internal/upstream` 的 provider capability registry/helper，避免各控制面维护不同事实源。
 
 `provider probe-report` 是面向 YAML upstream 的只读批量报告；`provider probe-apply` 是面向 managed channels 的写入口，会打开 application store，对已有 channel 运行同类 probe 并只填补缺失的 `api_type`、`protocol_family` 和未设置 capability：
 

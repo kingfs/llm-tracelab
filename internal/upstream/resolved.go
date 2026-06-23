@@ -33,6 +33,8 @@ const (
 	CapabilityEmbeddings      = "embeddings"
 	CapabilityModels          = "models"
 	CapabilityTokenize        = "tokenize"
+	CapabilityMessages        = "messages"
+	CapabilityGenerateContent = "gemini_generate_content"
 
 	RoutingProfileOpenAIDefault     = "openai_default"
 	RoutingProfileAzureOpenAIV1     = "azure_openai_v1"
@@ -500,6 +502,17 @@ func (u ResolvedUpstream) SupportsToolCalling() bool {
 		return enabled
 	}
 	return true
+}
+
+func (u ResolvedUpstream) SupportsEndpoint(endpoint string) bool {
+	switch llm.NormalizeEndpoint(endpoint) {
+	case "/v1/chat/completions":
+		return u.SupportsChatCompletionsAPI()
+	case "/v1/responses":
+		return u.SupportsResponsesAPI() || u.APIType == APITypeChatCompletions
+	default:
+		return true
+	}
 }
 
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {

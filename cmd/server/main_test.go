@@ -643,8 +643,8 @@ upstreams:
 	}
 	if envelope.Result.Diagnostics.RuntimeProfileSource != "responses_server.model_profiles" ||
 		!reflect.DeepEqual(envelope.Result.Diagnostics.ProfilePrecedence, []string{"responses_server.model_profiles", "zero_limits_when_unmatched"}) ||
-		envelope.Result.Diagnostics.CatalogProfileRole != "diagnostic_only" ||
-		envelope.Result.Diagnostics.ProviderChannelProfileAdoption != "observe_only" ||
+		envelope.Result.Diagnostics.CatalogProfileRole != "available_for_runtime_opt_in" ||
+		envelope.Result.Diagnostics.ProviderChannelProfileAdoption != "report_only" ||
 		envelope.Result.Diagnostics.ProfileConflictStrategy != "responses_server.model_profiles_wins" ||
 		!reflect.DeepEqual(envelope.Result.Diagnostics.ProfileAdoptionRequiredGates, []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"}) ||
 		envelope.Result.Diagnostics.CapabilitySource != "provider_upstream_capabilities" {
@@ -699,9 +699,9 @@ upstream:
 		t.Fatalf("models codex-config text leaked env secret: %s", output)
 	}
 	for _, want := range []string{
-		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
-		`# profile_adoption: provider_channel_profile_adoption=observe_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
-		`# profile_adoption_gates: adoption_ready=true blocking_gate_count=0 required_gate_statuses=schema_migration:implemented_runtime_opt_in,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:implemented_contract,dsn_gated_tests:implemented_observe_only`,
+		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=available_for_runtime_opt_in capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
+		`# profile_adoption: provider_channel_profile_adoption=report_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
+		`# profile_adoption_gates: adoption_ready=true blocking_gate_count=0 required_gate_statuses=schema_migration:implemented_runtime_opt_in,dry_run_diff:implemented_contract,conflict_report:implemented_contract,rollback_plan:implemented_contract,dsn_gated_tests:implemented_contract`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -976,15 +976,15 @@ responses_server:
 	}
 
 	report := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5").Result.Diagnostics.ProfileAdoptionReport
-	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "blocked" {
-		t.Fatalf("profile adoption report = %+v, want blocked observe-only dry-run", report)
+	if report.Mode != "report_only" || !report.DryRun || report.Mutates || report.Status != "blocked" {
+		t.Fatalf("profile adoption report = %+v, want blocked report-only dry-run", report)
 	}
 	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
 	if report.RollbackContract.Status != "implemented_contract" ||
-		report.RollbackContract.MutationMode != "observe_only_no_mutation" ||
+		report.RollbackContract.MutationMode != "runtime_opt_in_no_persistent_mutation" ||
 		report.RollbackContract.RuntimeProfileSource != "responses_server.model_profiles" ||
 		report.RollbackContract.Strategy == "" ||
-		report.RollbackContract.RollbackScope != "remove_or_disable_adopted_profile_records_only" ||
+		report.RollbackContract.RollbackScope != "disable responses_server.adopt_channel_model_profiles or remove adopted channel model profile markers" ||
 		!containsStringFragment(report.RollbackContract.RequiredArtifacts, "adopted_profile_source_marker") {
 		t.Fatalf("rollback contract = %+v, want mutation-free implemented contract", report.RollbackContract)
 	}
@@ -1008,6 +1008,16 @@ func TestModelsCodexConfigCommandReportsProfileAdoptionWouldChangeWithoutChangin
 	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
 	if err != nil {
 		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.example/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
 	}
 	contextWindow := 4096
 	supportsChat := 1
@@ -1045,7 +1055,7 @@ responses_server:
 		t.Fatalf("profile adoption report = %+v, want would_change without explicit profile", report)
 	}
 	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
-	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != 4096 || report.Fields[0].Status != "would_adopt_after_gates" {
+	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != 4096 || report.Fields[0].Status != "would_adopt_with_runtime_opt_in" {
 		t.Fatalf("field diff = %+v", report.Fields)
 	}
 	if len(report.Candidates) != 1 || !report.Candidates[0].Eligible || report.Candidates[0].SupportsChatCompletions != "true" {
@@ -1053,6 +1063,77 @@ responses_server:
 	}
 	if len(envelope.Result.Warnings) == 0 || !containsStringFragment(envelope.Result.Warnings, "no responses_server.model_profiles entry matched model") {
 		t.Fatalf("warnings = %+v, want unmatched runtime profile warning", envelope.Result.Warnings)
+	}
+}
+
+func TestModelsCodexConfigCommandAdoptsChannelProfileWhenRuntimeOptInEnabled(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.example/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	contextWindow := 8192
+	supportsChat := 1
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow, ProfileAdoptionStatus: "adopted"},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+  adopt_channel_model_profiles: true
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5")
+	if envelope.Result.Profile.ModelContextWindow != contextWindow || envelope.Result.Profile.ModelAutoCompactTokenLimit != 6553 {
+		t.Fatalf("profile = %+v, want adopted channel context window", envelope.Result.Profile)
+	}
+	diagnostics := envelope.Result.Diagnostics
+	if diagnostics.RuntimeProfileSource != "channel_models.profile_adoption" ||
+		!reflect.DeepEqual(diagnostics.ProfilePrecedence, []string{"responses_server.model_profiles", "channel_models.profile_adoption", "zero_limits_when_unmatched"}) ||
+		diagnostics.CatalogProfileRole != "runtime_opt_in_source" ||
+		diagnostics.ProviderChannelProfileAdoption != "runtime_opt_in" {
+		t.Fatalf("source diagnostics = %+v", diagnostics)
+	}
+	if !diagnostics.MatchedProfile.Matched || diagnostics.MatchedProfile.Kind != "channel_model_profile" || diagnostics.MatchedProfile.Source != "channel_models.openai-primary.context_window" {
+		t.Fatalf("matched profile = %+v", diagnostics.MatchedProfile)
+	}
+	report := diagnostics.ProfileAdoptionReport
+	if report.Mode != "runtime_opt_in" || report.DryRun || report.Mutates || report.Status != "adopted_runtime" || report.AppliedChangeCount != 1 || report.ProposedChangeCount != 0 {
+		t.Fatalf("profile adoption report = %+v, want runtime opt-in adopted", report)
+	}
+	if len(report.Fields) != 1 || report.Fields[0].Status != "adopted_by_runtime_opt_in" || report.Fields[0].CandidateValue != contextWindow {
+		t.Fatalf("field diff = %+v", report.Fields)
+	}
+	if containsStringFragment(envelope.Result.Warnings, "no responses_server.model_profiles entry matched model") {
+		t.Fatalf("warnings = %+v, want no unmatched-profile warning after runtime adoption", envelope.Result.Warnings)
 	}
 }
 
@@ -1129,14 +1210,14 @@ responses_server:
 		t.Fatalf("sources = %q/%q, want model_catalog/channel_models", diagnostics.CatalogSource, diagnostics.ChannelSource)
 	}
 	report := diagnostics.ProfileAdoptionReport
-	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "would_change" || !report.AdoptionReady {
-		t.Fatalf("profile adoption report = %+v, want observe-only would_change without mutation", report)
+	if report.Mode != "report_only" || !report.DryRun || report.Mutates || report.Status != "would_change" || !report.AdoptionReady {
+		t.Fatalf("profile adoption report = %+v, want report-only would_change without mutation", report)
 	}
 	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
 	if report.CandidateCount != 1 || report.ProposedChangeCount != 1 || report.ConflictCount != 0 || report.ExplicitConfigPresent {
 		t.Fatalf("profile adoption counters = %+v", report)
 	}
-	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != contextWindow || report.Fields[0].Status != "would_adopt_after_gates" {
+	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != contextWindow || report.Fields[0].Status != "would_adopt_with_runtime_opt_in" {
 		t.Fatalf("field diff = %+v", report.Fields)
 	}
 	if len(report.Candidates) != 1 || report.Candidates[0].ChannelID != channelID || report.Candidates[0].Model != model || !report.Candidates[0].Eligible || report.Candidates[0].ContextWindowTokens != contextWindow || report.Candidates[0].SupportsChatCompletions != "true" {
@@ -1153,6 +1234,16 @@ func TestModelsCodexConfigCommandReportsProfileAdoptionCapabilityFalseBlocked(t 
 	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
 	if err != nil {
 		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "native-responses",
+		Name:           "Native Responses",
+		BaseURL:        "https://api.openai.example/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
 	}
 	contextWindow := 4096
 	supportsChat := 0
@@ -1373,7 +1464,17 @@ type modelsCodexConfigEnvelopeForTest struct {
 	OK      bool   `json:"ok"`
 	Command string `json:"command"`
 	Result  struct {
+		Profile struct {
+			ModelContextWindow         int `json:"model_context_window"`
+			ModelAutoCompactTokenLimit int `json:"model_auto_compact_token_limit"`
+		} `json:"profile"`
 		Diagnostics struct {
+			MatchedProfile struct {
+				Matched bool   `json:"matched"`
+				Index   int    `json:"index"`
+				Kind    string `json:"kind"`
+				Source  string `json:"source"`
+			} `json:"matched_profile"`
 			RuntimeProfileSource           string   `json:"runtime_profile_source"`
 			ProfilePrecedence              []string `json:"profile_precedence"`
 			CatalogProfileRole             string   `json:"catalog_profile_role"`
@@ -1399,6 +1500,7 @@ type modelsCodexConfigEnvelopeForTest struct {
 				AdoptionReady         bool     `json:"adoption_ready"`
 				CandidateCount        int      `json:"candidate_count"`
 				ProposedChangeCount   int      `json:"proposed_change_count"`
+				AppliedChangeCount    int      `json:"applied_change_count"`
 				ConflictCount         int      `json:"conflict_count"`
 				BlockingGateCount     int      `json:"blocking_gate_count"`
 				BlockedReasons        []string `json:"blocked_reasons"`
@@ -1419,6 +1521,7 @@ type modelsCodexConfigEnvelopeForTest struct {
 				} `json:"fields"`
 				Candidates []struct {
 					ChannelID               string `json:"channel_id"`
+					ChannelEnabled          bool   `json:"channel_enabled"`
 					Model                   string `json:"model"`
 					Source                  string `json:"source"`
 					Enabled                 bool   `json:"enabled"`
@@ -1525,13 +1628,13 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 		t.Fatalf("schema_migration gate = %+v, want implemented_runtime_opt_in non-blocking with reason; all gates=%+v", status, gates)
 	}
 	status, ok = got["dsn_gated_tests"]
-	if !ok || status.Status != "implemented_observe_only" || status.Blocking || status.Reason == "" {
-		t.Fatalf("dsn_gated_tests gate = %+v, want implemented_observe_only non-blocking with reason; all gates=%+v", status, gates)
+	if !ok || status.Status != "implemented_contract" || status.Blocking || status.Reason == "" {
+		t.Fatalf("dsn_gated_tests gate = %+v, want implemented_contract non-blocking with reason; all gates=%+v", status, gates)
 	}
 	for _, gate := range []string{"dry_run_diff", "conflict_report"} {
 		status, ok := got[gate]
-		if !ok || status.Status != "implemented_observe_only" || status.Blocking || status.Reason == "" {
-			t.Fatalf("gate %s = %+v, want implemented_observe_only non-blocking with reason; all gates=%+v", gate, status, gates)
+		if !ok || status.Status != "implemented_contract" || status.Blocking || status.Reason == "" {
+			t.Fatalf("gate %s = %+v, want implemented_contract non-blocking with reason; all gates=%+v", gate, status, gates)
 		}
 	}
 	if status, ok := got["rollback_plan"]; !ok || status.Status != "implemented_contract" || status.Blocking || status.Reason == "" {

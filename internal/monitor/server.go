@@ -2292,30 +2292,9 @@ func mergeProviderSetupSuggestions(req channelUpsertRequest, report providerprob
 		out.Capabilities = &config.UpstreamCapabilitiesConfig{}
 	}
 	for _, capability := range report.Capabilities {
-		switch capability {
-		case upstream.CapabilityResponses:
-			setBoolIfNil(&out.Capabilities.Responses, true)
-		case upstream.CapabilityChatCompletions:
-			setBoolIfNil(&out.Capabilities.ChatCompletions, true)
-		case upstream.CapabilityToolCalling:
-			setBoolIfNil(&out.Capabilities.ToolCalling, true)
-		case upstream.CapabilityModels:
-			setBoolIfNil(&out.Capabilities.Models, true)
-		case upstream.CapabilityEmbeddings:
-			setBoolIfNil(&out.Capabilities.Embeddings, true)
-		case upstream.CapabilityTokenize:
-			setBoolIfNil(&out.Capabilities.Tokenize, true)
-		}
+		upstream.SetCapabilityIfUnset(out.Capabilities, capability, true)
 	}
 	return out
-}
-
-func setBoolIfNil(target **bool, value bool) {
-	if target == nil || *target != nil {
-		return
-	}
-	next := value
-	*target = &next
 }
 
 func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecord, req channelUpsertRequest) channelItem {

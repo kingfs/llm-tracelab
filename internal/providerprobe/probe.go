@@ -24,8 +24,8 @@ const (
 	EndpointStatusMissing = "missing"
 	EndpointStatusError   = "error"
 
-	CapabilityMessages              = "messages"
-	CapabilityGeminiGenerateContent = "gemini_generate_content"
+	CapabilityMessages              = upstream.CapabilityMessages
+	CapabilityGeminiGenerateContent = upstream.CapabilityGenerateContent
 )
 
 type ProbeTarget struct {
@@ -76,85 +76,6 @@ type EndpointProbe struct {
 	Capabilities   []string `json:"capabilities,omitempty"`
 }
 
-type probeSpec struct {
-	id             string
-	method         string
-	path           string
-	protocolFamily string
-	capability     string
-	weight         float64
-	auth           authStyle
-	body           string
-}
-
-type authStyle string
-
-const (
-	authOpenAI    authStyle = "openai"
-	authAnthropic authStyle = "anthropic"
-	authGemini    authStyle = "gemini"
-)
-
-var defaultProbeSpecs = []probeSpec{
-	{
-		id:             "openai_models",
-		method:         http.MethodGet,
-		path:           "/v1/models",
-		protocolFamily: upstream.ProtocolFamilyOpenAICompatible,
-		capability:     upstream.CapabilityModels,
-		weight:         1,
-		auth:           authOpenAI,
-	},
-	{
-		id:             "openai_chat_completions",
-		method:         http.MethodPost,
-		path:           "/v1/chat/completions",
-		protocolFamily: upstream.ProtocolFamilyOpenAICompatible,
-		capability:     upstream.CapabilityChatCompletions,
-		weight:         3,
-		auth:           authOpenAI,
-		body:           "{}",
-	},
-	{
-		id:             "openai_responses",
-		method:         http.MethodPost,
-		path:           "/v1/responses",
-		protocolFamily: upstream.ProtocolFamilyOpenAICompatible,
-		capability:     upstream.CapabilityResponses,
-		weight:         4,
-		auth:           authOpenAI,
-		body:           "{}",
-	},
-	{
-		id:             "anthropic_messages",
-		method:         http.MethodPost,
-		path:           "/v1/messages",
-		protocolFamily: upstream.ProtocolFamilyAnthropicMessages,
-		capability:     CapabilityMessages,
-		weight:         4,
-		auth:           authAnthropic,
-		body:           "{}",
-	},
-	{
-		id:             "anthropic_models",
-		method:         http.MethodGet,
-		path:           "/v1/models",
-		protocolFamily: upstream.ProtocolFamilyAnthropicMessages,
-		capability:     upstream.CapabilityModels,
-		weight:         1,
-		auth:           authAnthropic,
-	},
-	{
-		id:             "gemini_models",
-		method:         http.MethodGet,
-		path:           "/v1beta/models",
-		protocolFamily: upstream.ProtocolFamilyGoogleGenAI,
-		capability:     upstream.CapabilityModels,
-		weight:         4,
-		auth:           authGemini,
-	},
-}
-
 func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report, error) {
 	report := Report{
 		TargetSource:            normalize(target.TargetSource),
@@ -177,7 +98,7 @@ func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report
 	scores := map[string]float64{}
 	capabilities := map[string]struct{}{}
 	var firstProbeError string
-	for _, spec := range defaultProbeSpecs {
+	for _, spec := range upstream.ProviderProbeSpecs() {
 		probe := runEndpointProbe(ctx, target, spec, client)
 		report.CheckedEndpoints = append(report.CheckedEndpoints, probe)
 		if probe.Error != "" && firstProbeError == "" {
@@ -186,9 +107,9 @@ func Probe(ctx context.Context, target ProbeTarget, client *http.Client) (Report
 		if !probe.Exists {
 			continue
 		}
-		scores[spec.protocolFamily] += spec.weight
-		if spec.capability != "" {
-			capabilities[spec.capability] = struct{}{}
+		scores[spec.ProtocolFamily] += spec.Weight
+		if spec.Capability != "" {
+			capabilities[spec.Capability] = struct{}{}
 		}
 	}
 
@@ -218,18 +139,18 @@ func ProbeBatch(ctx context.Context, targets []ProbeTarget, client *http.Client)
 	return BatchReport{Reports: reports}
 }
 
-func runEndpointProbe(ctx context.Context, target ProbeTarget, spec probeSpec, client *http.Client) EndpointProbe {
-	targetURL, err := buildProbeURL(target.BaseURL, spec.path)
+func runEndpointProbe(ctx context.Context, target ProbeTarget, spec upstream.ProviderProbeSpec, client *http.Client) EndpointProbe {
+	targetURL, err := buildProbeURL(target.BaseURL, spec.Path)
 	probe := EndpointProbe{
-		ID:             spec.id,
-		Method:         spec.method,
-		Path:           spec.path,
+		ID:             spec.ID,
+		Method:         spec.Method,
+		Path:           spec.Path,
 		URL:            targetURL,
-		ProtocolFamily: spec.protocolFamily,
+		ProtocolFamily: spec.ProtocolFamily,
 		Status:         EndpointStatusError,
 	}
-	if spec.capability != "" {
-		probe.Capabilities = []string{spec.capability}
+	if spec.Capability != "" {
+		probe.Capabilities = []string{spec.Capability}
 	}
 	if err != nil {
 		probe.Error = err.Error()
@@ -237,19 +158,19 @@ func runEndpointProbe(ctx context.Context, target ProbeTarget, spec probeSpec, c
 	}
 
 	var body io.Reader
-	if spec.body != "" {
-		body = bytes.NewBufferString(spec.body)
+	if spec.Body != "" {
+		body = bytes.NewBufferString(spec.Body)
 	}
-	req, err := http.NewRequestWithContext(ctx, spec.method, targetURL, body)
+	req, err := http.NewRequestWithContext(ctx, spec.Method, targetURL, body)
 	if err != nil {
 		probe.Error = err.Error()
 		return probe
 	}
 	req.Header.Set("Accept", "application/json")
-	if spec.body != "" {
+	if spec.Body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	applyProbeAuth(req.Header, target, spec.auth)
+	applyProbeAuth(req.Header, target, spec.Auth)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -285,34 +206,11 @@ func buildSuggestion(scores map[string]float64, capabilities map[string]struct{}
 
 	out := CapabilitySuggestion{
 		SuggestedProtocolFamily: bestFamily,
-		Capabilities:            sortedCapabilities(capabilities),
+		Capabilities:            upstream.AppendImpliedCapabilities(bestFamily, sortedCapabilities(capabilities)),
 	}
-	switch bestFamily {
-	case upstream.ProtocolFamilyAnthropicMessages:
-		out.SuggestedAPIType = upstream.APITypeMessages
-	case upstream.ProtocolFamilyGoogleGenAI:
-		out.SuggestedAPIType = upstream.APITypeGemini
-		out.Capabilities = appendCapability(out.Capabilities, CapabilityGeminiGenerateContent)
-	case upstream.ProtocolFamilyOpenAICompatible:
-		if _, ok := capabilities[upstream.CapabilityResponses]; ok {
-			out.SuggestedAPIType = upstream.APITypeResponses
-		} else {
-			out.SuggestedAPIType = upstream.APITypeChatCompletions
-		}
-	}
+	out.SuggestedAPIType = upstream.SuggestedAPIType(bestFamily, out.Capabilities)
 	out.Confidence = confidenceForScore(bestScore)
 	return out
-}
-
-func appendCapability(capabilities []string, capability string) []string {
-	for _, existing := range capabilities {
-		if existing == capability {
-			return capabilities
-		}
-	}
-	capabilities = append(capabilities, capability)
-	sort.Strings(capabilities)
-	return capabilities
 }
 
 func specifiedMismatchWarnings(report Report) []string {
@@ -420,16 +318,16 @@ func cleanPath(value string) string {
 	return cleaned
 }
 
-func applyProbeAuth(header http.Header, target ProbeTarget, auth authStyle) {
+func applyProbeAuth(header http.Header, target ProbeTarget, auth string) {
 	apiKey := strings.TrimSpace(target.APIKey)
 	if apiKey != "" {
 		switch auth {
-		case authAnthropic:
+		case upstream.ProbeAuthAnthropic:
 			header.Set("x-api-key", apiKey)
 			if header.Get("anthropic-version") == "" {
 				header.Set("anthropic-version", upstream.DefaultAnthropicAPIVersion)
 			}
-		case authGemini:
+		case upstream.ProbeAuthGemini:
 			header.Set("x-goog-api-key", apiKey)
 		default:
 			header.Set("Authorization", "Bearer "+apiKey)

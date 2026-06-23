@@ -79,36 +79,25 @@ func applyStartupProviderProbeReport(upstreamCfg *config.UpstreamConfig, provide
 
 func applyStartupProviderProbeCapabilities(capabilities *config.UpstreamCapabilitiesConfig, providerID string, suggested []string) {
 	for _, capability := range suggested {
-		switch capability {
-		case upstream.CapabilityResponses:
-			fillStartupProviderProbeCapability(&capabilities.Responses, providerID, capability)
-		case upstream.CapabilityChatCompletions:
-			fillStartupProviderProbeCapability(&capabilities.ChatCompletions, providerID, capability)
-		case upstream.CapabilityModels:
-			fillStartupProviderProbeCapability(&capabilities.Models, providerID, capability)
-		case upstream.CapabilityEmbeddings:
-			fillStartupProviderProbeCapability(&capabilities.Embeddings, providerID, capability)
-		case upstream.CapabilityTokenize:
-			fillStartupProviderProbeCapability(&capabilities.Tokenize, providerID, capability)
+		if upstream.SetCapabilityIfUnset(capabilities, capability, true) {
+			continue
 		}
-	}
-}
-
-func fillStartupProviderProbeCapability(slot **bool, providerID string, capability string) {
-	if slot == nil {
-		return
-	}
-	if *slot != nil {
-		if !**slot {
+		if explicitlyDisabledCapability(capabilities, capability) {
 			slog.Warn("Startup provider probe found capability disabled by explicit config",
 				"provider_id", providerID,
 				"capability", capability,
 			)
 		}
-		return
 	}
-	enabled := true
-	*slot = &enabled
+}
+
+func explicitlyDisabledCapability(capabilities *config.UpstreamCapabilitiesConfig, capability string) bool {
+	if capabilities == nil {
+		return false
+	}
+	resolved := upstream.ResolvedUpstream{Capabilities: *capabilities}
+	enabled, configured := resolved.Capability(capability)
+	return configured && !enabled
 }
 
 func normalizeProbeConfigValue(value string) string {

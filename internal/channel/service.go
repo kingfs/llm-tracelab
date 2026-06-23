@@ -385,30 +385,9 @@ func applyProviderProbeSuggestions(channel store.ChannelConfigRecord, report pro
 		return store.ChannelConfigRecord{}, nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
 	}
 	for _, capability := range report.Capabilities {
-		switch capability {
-		case upstream.CapabilityResponses:
-			if setCapabilityIfUnset(&capabilities.Responses) {
-				fields = append(fields, "capabilities.responses")
-			}
-		case upstream.CapabilityChatCompletions:
-			if setCapabilityIfUnset(&capabilities.ChatCompletions) {
-				fields = append(fields, "capabilities.chat_completions")
-			}
-		case upstream.CapabilityToolCalling:
-			if setCapabilityIfUnset(&capabilities.ToolCalling) {
-				fields = append(fields, "capabilities.tool_calling")
-			}
-		case upstream.CapabilityModels:
-			if setCapabilityIfUnset(&capabilities.Models) {
-				fields = append(fields, "capabilities.models")
-			}
-		case upstream.CapabilityEmbeddings:
-			if setCapabilityIfUnset(&capabilities.Embeddings) {
-				fields = append(fields, "capabilities.embeddings")
-			}
-		case upstream.CapabilityTokenize:
-			if setCapabilityIfUnset(&capabilities.Tokenize) {
-				fields = append(fields, "capabilities.tokenize")
+		if upstream.SetCapabilityIfUnset(&capabilities, capability, true) {
+			if field := upstream.CapabilityFieldName(capability); field != "" {
+				fields = append(fields, field)
 			}
 		}
 	}
@@ -421,15 +400,6 @@ func applyProviderProbeSuggestions(channel store.ChannelConfigRecord, report pro
 	}
 	updated.CapabilitiesJSON = capabilitiesJSON
 	return updated, fields, nil
-}
-
-func setCapabilityIfUnset(target **bool) bool {
-	if target == nil || *target != nil {
-		return false
-	}
-	value := true
-	*target = &value
-	return true
 }
 
 func (s *Service) Probe(channelID string) (ProbeResult, error) {
