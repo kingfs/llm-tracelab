@@ -919,6 +919,176 @@ responses_server:
 	}
 }
 
+func TestModelsCodexConfigCommandReportsProfileAdoptionConflictDryRun(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.example/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		Priority:       10,
+		Weight:         1,
+		CapacityHint:   1,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	contextWindow := 160
+	supportsChat := 1
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if err := st.UpsertModelCatalog(store.ModelCatalogRecord{Model: "gpt-5", DisplayName: "GPT-5"}); err != nil {
+		t.Fatalf("UpsertModelCatalog() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	report := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5").Result.Diagnostics.ProfileAdoptionReport
+	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "blocked" {
+		t.Fatalf("profile adoption report = %+v, want blocked observe-only dry-run", report)
+	}
+	if !report.ExplicitConfigPresent || report.CandidateCount != 1 || report.ProposedChangeCount != 0 || report.ConflictCount != 1 {
+		t.Fatalf("profile adoption counters = %+v", report)
+	}
+	if !containsStringFragment(report.BlockedReasons, "explicit_runtime_profile_present") {
+		t.Fatalf("blocked reasons = %+v, want explicit runtime profile protection", report.BlockedReasons)
+	}
+	if len(report.Fields) != 1 || report.Fields[0].Field != "context_window_tokens" || report.Fields[0].RuntimeValue != 200 || report.Fields[0].CandidateValue != 160 || report.Fields[0].Status != "blocked_explicit_config" {
+		t.Fatalf("field diff = %+v", report.Fields)
+	}
+	if len(report.Conflicts) != 1 || report.Conflicts[0].Strategy != "responses_server.model_profiles_wins" {
+		t.Fatalf("conflicts = %+v", report.Conflicts)
+	}
+}
+
+func TestModelsCodexConfigCommandReportsProfileAdoptionWouldChangeWithoutChangingRuntimeProfile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	contextWindow := 4096
+	supportsChat := 1
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "other-model"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5")
+	report := envelope.Result.Diagnostics.ProfileAdoptionReport
+	if report.Status != "would_change" || report.ProposedChangeCount != 1 || report.ConflictCount != 0 || report.ExplicitConfigPresent {
+		t.Fatalf("profile adoption report = %+v, want would_change without explicit profile", report)
+	}
+	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != 4096 || report.Fields[0].Status != "would_adopt_after_gates" {
+		t.Fatalf("field diff = %+v", report.Fields)
+	}
+	if len(report.Candidates) != 1 || !report.Candidates[0].Eligible || report.Candidates[0].SupportsChatCompletions != "true" {
+		t.Fatalf("candidates = %+v", report.Candidates)
+	}
+	if len(envelope.Result.Warnings) == 0 || !containsStringFragment(envelope.Result.Warnings, "no responses_server.model_profiles entry matched model") {
+		t.Fatalf("warnings = %+v, want unmatched runtime profile warning", envelope.Result.Warnings)
+	}
+}
+
+func TestModelsCodexConfigCommandReportsProfileAdoptionCapabilityFalseBlocked(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	contextWindow := 4096
+	supportsChat := 0
+	if err := st.ReplaceChannelModels("native-responses", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "probe", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+  dsn: "` + dbPath + `"
+trace:
+  output_dir: "` + dir + `"
+responses_server:
+  enabled: true
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	report := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5").Result.Diagnostics.ProfileAdoptionReport
+	if report.Status != "blocked" || report.CandidateCount != 0 || report.ProposedChangeCount != 0 {
+		t.Fatalf("profile adoption report = %+v, want capability false blocked", report)
+	}
+	if !containsStringFragment(report.BlockedReasons, "no_eligible_channel_profile_candidate") {
+		t.Fatalf("blocked reasons = %+v", report.BlockedReasons)
+	}
+	if len(report.Candidates) != 1 || report.Candidates[0].Eligible || report.Candidates[0].SupportsChatCompletions != "false" || report.Candidates[0].BlockedReason != "capability_false_chat_completions" {
+		t.Fatalf("candidates = %+v", report.Candidates)
+	}
+}
+
 func TestModelsCodexConfigCommandSkipsLocalCodexConfigWithoutFlag(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
@@ -1103,17 +1273,59 @@ type modelsCodexConfigEnvelopeForTest struct {
 			ProfilePrecedence              []string `json:"profile_precedence"`
 			CatalogProfileRole             string   `json:"catalog_profile_role"`
 			ProviderChannelProfileAdoption string   `json:"provider_channel_profile_adoption"`
-			ProfileConflictStrategy        string   `json:"profile_conflict_strategy"`
-			ProfileAdoptionRequiredGates   []string `json:"profile_adoption_required_gates"`
-			CapabilitySource               string   `json:"capability_source"`
-			DatabaseAvailable              bool     `json:"database_available"`
-			CatalogModelPresent            bool     `json:"catalog_model_present"`
-			ChannelModelPresent            bool     `json:"channel_model_present"`
-			ChannelModelCount              int      `json:"channel_model_count"`
-			CatalogSource                  string   `json:"catalog_source"`
-			ChannelSource                  string   `json:"channel_source"`
-			DriftWarnings                  []string `json:"drift_warnings"`
-			CodexConfig                    struct {
+			ProfileAdoptionReport          struct {
+				Mode                  string   `json:"mode"`
+				DryRun                bool     `json:"dry_run"`
+				Mutates               bool     `json:"mutates"`
+				Status                string   `json:"status"`
+				RuntimeProfileSource  string   `json:"runtime_profile_source"`
+				CandidateSource       string   `json:"candidate_source"`
+				ExplicitConfigPresent bool     `json:"explicit_config_present"`
+				CandidateCount        int      `json:"candidate_count"`
+				ProposedChangeCount   int      `json:"proposed_change_count"`
+				ConflictCount         int      `json:"conflict_count"`
+				BlockedReasons        []string `json:"blocked_reasons"`
+				Fields                []struct {
+					Field           string `json:"field"`
+					RuntimeValue    int    `json:"runtime_value"`
+					CandidateValue  int    `json:"candidate_value"`
+					RuntimeSource   string `json:"runtime_source"`
+					CandidateSource string `json:"candidate_source"`
+					Status          string `json:"status"`
+					Reason          string `json:"reason"`
+				} `json:"fields"`
+				Candidates []struct {
+					ChannelID               string `json:"channel_id"`
+					Model                   string `json:"model"`
+					Source                  string `json:"source"`
+					Enabled                 bool   `json:"enabled"`
+					ContextWindowTokens     int    `json:"context_window_tokens"`
+					SupportsResponses       string `json:"supports_responses"`
+					SupportsChatCompletions string `json:"supports_chat_completions"`
+					SupportsEmbeddings      string `json:"supports_embeddings"`
+					Eligible                bool   `json:"eligible"`
+					BlockedReason           string `json:"blocked_reason"`
+				} `json:"candidates"`
+				Conflicts []struct {
+					Field           string `json:"field"`
+					RuntimeValue    int    `json:"runtime_value"`
+					CandidateValue  int    `json:"candidate_value"`
+					RuntimeSource   string `json:"runtime_source"`
+					CandidateSource string `json:"candidate_source"`
+					Strategy        string `json:"strategy"`
+				} `json:"conflicts"`
+			} `json:"profile_adoption_report"`
+			ProfileConflictStrategy      string   `json:"profile_conflict_strategy"`
+			ProfileAdoptionRequiredGates []string `json:"profile_adoption_required_gates"`
+			CapabilitySource             string   `json:"capability_source"`
+			DatabaseAvailable            bool     `json:"database_available"`
+			CatalogModelPresent          bool     `json:"catalog_model_present"`
+			ChannelModelPresent          bool     `json:"channel_model_present"`
+			ChannelModelCount            int      `json:"channel_model_count"`
+			CatalogSource                string   `json:"catalog_source"`
+			ChannelSource                string   `json:"channel_source"`
+			DriftWarnings                []string `json:"drift_warnings"`
+			CodexConfig                  struct {
 				Path            string `json:"path"`
 				Status          string `json:"status"`
 				Present         bool   `json:"present"`
