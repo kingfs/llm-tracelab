@@ -2031,6 +2031,56 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestListAdoptedChannelModelProfilesSkipsChatCompletionFalse(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(ChannelConfigRecord{
+		ID:             "openai-compatible",
+		Name:           "OpenAI Compatible",
+		BaseURL:        "https://api.example.com/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	supportsChat := 1
+	chatUnsupported := 0
+	if err := st.ReplaceChannelModels("openai-compatible", []ChannelModelRecord{
+		{
+			Model:                   "gpt-5",
+			Source:                  "manual",
+			Enabled:                 true,
+			SupportsChatCompletions: &supportsChat,
+			UpstreamModel:           "provider/gpt-5",
+			ProfileAdoptionStatus:   "adopted",
+		},
+		{
+			Model:                   "responses-native-only",
+			Source:                  "probe",
+			Enabled:                 true,
+			SupportsChatCompletions: &chatUnsupported,
+			UpstreamModel:           "provider/responses-native-only",
+			ProfileAdoptionStatus:   "adopted",
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	adoptedProfiles, err := st.ListAdoptedChannelModelProfiles()
+	if err != nil {
+		t.Fatalf("ListAdoptedChannelModelProfiles() error = %v", err)
+	}
+	if len(adoptedProfiles) != 1 || adoptedProfiles[0].Model != "gpt-5" {
+		t.Fatalf("adoptedProfiles = %#v, want only chat-completions-compatible gpt-5", adoptedProfiles)
+	}
+}
+
 func TestSecretStatusAndExportLocalSecretKey(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
