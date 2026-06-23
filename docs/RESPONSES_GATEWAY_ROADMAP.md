@@ -102,12 +102,14 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - `db migrate status` / dry-run 明确区分 application DB、auth DB、Postgres checked-in SQL 和 SQLite fallback。
 - `auth migrate status` / dry-run 明确报告 auth migration source、scope、namespace，以及 Postgres 当前复用 application `schema_migrations` / `ent/postgres-migrations` 的 shared namespace 约束。
 - 已为 SQLite fallback 增加非破坏性的 `app_schema_status` application schema marker；`db migrate status --check-db` 会只读报告 marker version 和核心应用表完整性，旧 SQLite DB 无 marker 仍兼容。
+- 当前推进重点是先把 status/dry-run 语义做成稳定、机器可读、脱敏的 operability surface：SQLite application 仍继续 startup schema fallback，但要明确 `versioned migration not implemented` 与后续方案；Postgres auth 仍共享 application migration namespace，但要明确 shared namespace、auth-owned table health 和独立 namespace 的后续拆分状态。
 
 验收：
 
 - 不依赖真实 Postgres 服务。
 - 不破坏旧 SQLite DB 启动。
-- 文档列清仍未完成的 auth namespace 与 SQLite versioned migration 缺口。
+- `db migrate status` / `auth migrate status` 的 JSON 和 text 都能让 operator/agent 判断当前 DB 是否可用、缺哪些表、是否只是 SQLite fallback、是否处于 shared auth namespace。
+- 文档列清仍未完成的 auth namespace 与 SQLite versioned migration 缺口；除非有完整迁移方案和兼容测试，否则不把 SQLite fallback 伪装成 versioned migration。
 
 ### Stage 23：Provider Detection 与 Capability Registry（诊断首切已落地）
 
