@@ -604,11 +604,15 @@ upstreams:
 					Kind    string `json:"kind"`
 					Source  string `json:"source"`
 				} `json:"matched_profile"`
-				CompactLimitSource                string `json:"compact_limit_source"`
-				CompactLimitMarginTokens          int    `json:"compact_limit_margin_tokens"`
-				CompactHistoryItemThreshold       int    `json:"compact_history_item_threshold"`
-				CompactHistoryItemThresholdSource string `json:"compact_history_item_threshold_source"`
-				ResponsesServerEnabled            bool   `json:"responses_server_enabled"`
+				RuntimeProfileSource              string   `json:"runtime_profile_source"`
+				ProfilePrecedence                 []string `json:"profile_precedence"`
+				CatalogProfileRole                string   `json:"catalog_profile_role"`
+				CapabilitySource                  string   `json:"capability_source"`
+				CompactLimitSource                string   `json:"compact_limit_source"`
+				CompactLimitMarginTokens          int      `json:"compact_limit_margin_tokens"`
+				CompactHistoryItemThreshold       int      `json:"compact_history_item_threshold"`
+				CompactHistoryItemThresholdSource string   `json:"compact_history_item_threshold_source"`
+				ResponsesServerEnabled            bool     `json:"responses_server_enabled"`
 			} `json:"diagnostics"`
 			TOML     string   `json:"toml"`
 			Warnings []string `json:"warnings"`
@@ -631,6 +635,12 @@ upstreams:
 	}
 	if !envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Kind != "exact" || envelope.Result.Diagnostics.MatchedProfile.Index != 1 || envelope.Result.Diagnostics.MatchedProfile.Source != "responses_server.model_profiles[1].name" {
 		t.Fatalf("matched profile = %+v", envelope.Result.Diagnostics.MatchedProfile)
+	}
+	if envelope.Result.Diagnostics.RuntimeProfileSource != "responses_server.model_profiles" ||
+		!reflect.DeepEqual(envelope.Result.Diagnostics.ProfilePrecedence, []string{"responses_server.model_profiles", "zero_limits_when_unmatched"}) ||
+		envelope.Result.Diagnostics.CatalogProfileRole != "diagnostic_only" ||
+		envelope.Result.Diagnostics.CapabilitySource != "provider_upstream_capabilities" {
+		t.Fatalf("source diagnostics = %+v", envelope.Result.Diagnostics)
 	}
 	if envelope.Result.Diagnostics.CompactLimitSource != "responses_server.model_profiles[1].name.context_window_tokens_80_percent" || envelope.Result.Diagnostics.CompactLimitMarginTokens != 40 {
 		t.Fatalf("compact limit diagnostics = %+v", envelope.Result.Diagnostics)
@@ -681,6 +691,7 @@ upstream:
 		t.Fatalf("models codex-config text leaked env secret: %s", output)
 	}
 	for _, want := range []string{
+		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -1081,14 +1092,18 @@ type modelsCodexConfigEnvelopeForTest struct {
 	Command string `json:"command"`
 	Result  struct {
 		Diagnostics struct {
-			DatabaseAvailable   bool     `json:"database_available"`
-			CatalogModelPresent bool     `json:"catalog_model_present"`
-			ChannelModelPresent bool     `json:"channel_model_present"`
-			ChannelModelCount   int      `json:"channel_model_count"`
-			CatalogSource       string   `json:"catalog_source"`
-			ChannelSource       string   `json:"channel_source"`
-			DriftWarnings       []string `json:"drift_warnings"`
-			CodexConfig         struct {
+			RuntimeProfileSource string   `json:"runtime_profile_source"`
+			ProfilePrecedence    []string `json:"profile_precedence"`
+			CatalogProfileRole   string   `json:"catalog_profile_role"`
+			CapabilitySource     string   `json:"capability_source"`
+			DatabaseAvailable    bool     `json:"database_available"`
+			CatalogModelPresent  bool     `json:"catalog_model_present"`
+			ChannelModelPresent  bool     `json:"channel_model_present"`
+			ChannelModelCount    int      `json:"channel_model_count"`
+			CatalogSource        string   `json:"catalog_source"`
+			ChannelSource        string   `json:"channel_source"`
+			DriftWarnings        []string `json:"drift_warnings"`
+			CodexConfig          struct {
 				Path            string `json:"path"`
 				Status          string `json:"status"`
 				Present         bool   `json:"present"`

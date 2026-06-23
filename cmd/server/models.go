@@ -67,6 +67,10 @@ type modelsCodexProviderConfig struct {
 
 type modelsCodexDiagnostics struct {
 	MatchedProfile                    modelsCodexMatchedProfile `json:"matched_profile"`
+	RuntimeProfileSource              string                    `json:"runtime_profile_source"`
+	ProfilePrecedence                 []string                  `json:"profile_precedence"`
+	CatalogProfileRole                string                    `json:"catalog_profile_role"`
+	CapabilitySource                  string                    `json:"capability_source"`
 	CompactLimitSource                string                    `json:"compact_limit_source"`
 	CompactLimitMarginTokens          int                       `json:"compact_limit_margin_tokens"`
 	CompactHistoryItemThreshold       int                       `json:"compact_history_item_threshold"`
@@ -210,6 +214,10 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 			Pattern:       profile.Pattern,
 			UpstreamModel: profile.UpstreamModel,
 		},
+		RuntimeProfileSource:              "responses_server.model_profiles",
+		ProfilePrecedence:                 []string{"responses_server.model_profiles", "zero_limits_when_unmatched"},
+		CatalogProfileRole:                "diagnostic_only",
+		CapabilitySource:                  "provider_upstream_capabilities",
 		CompactLimitSource:                compactLimitSource,
 		CompactLimitMarginTokens:          contextWindow - autoCompactLimit,
 		CompactHistoryItemThreshold:       historyThreshold,
@@ -613,6 +621,12 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.ChannelModelCount,
 		result.Diagnostics.CatalogSource,
 		result.Diagnostics.ChannelSource,
+	)
+	fmt.Fprintf(w, "# profile_sources: runtime_profile_source=%s catalog_profile_role=%s capability_source=%s precedence=%s\n",
+		result.Diagnostics.RuntimeProfileSource,
+		result.Diagnostics.CatalogProfileRole,
+		result.Diagnostics.CapabilitySource,
+		strings.Join(result.Diagnostics.ProfilePrecedence, ","),
 	)
 	fmt.Fprintf(w, "# codex_config: status=%s present=%t readable=%t parsed=%t profile_present=%t provider_present=%t",
 		result.Diagnostics.CodexConfig.Status,

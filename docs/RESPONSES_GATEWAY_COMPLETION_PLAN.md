@@ -31,6 +31,7 @@
 - `request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 CLI/Monitor/MCP 查询首切。
 - Provider `api_type` / `mode` / capabilities 路由约束，provider probe/report/apply 和 setup validate/apply 首切。
 - Codex fixture offline gate、Codex config suggestion、doctor/config inspect/audit operability 首切。
+- `models codex-config` 已输出 provider/profile source-boundary diagnostics：runtime profile 事实源为 `responses_server.model_profiles`，catalog/channel 当前为 drift-only，provider/upstream capability 驱动 routing/tokenize。
 
 这些能力说明项目已经从“只做代理”进入了“Responses semantic server + proxy/record/replay 并存”的阶段，但还不是完整 production-grade gateway。
 
@@ -81,7 +82,7 @@
 
 近期可并行切片：
 
-- `provider/profile-source-unification`：明确 `responses_server.model_profiles`、channel catalog 和 provider capability 的优先级，并补诊断输出。
+- `provider/profile-source-unification`：已完成 source-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role` 和 `capability_source`；后续仍需实现 catalog/channel profile 进入 runtime 前的迁移、优先级和冲突处理。
 - `provider/native-responses-mode-boundary`：写清并测试 native Responses target 在 proxy/server mode 下的 routing 行为。
 
 ## 停止发散规则
