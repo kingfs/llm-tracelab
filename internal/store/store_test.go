@@ -702,6 +702,150 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	source := "postgres_system_event_test"
+	parserFingerprint := "postgres:system_event:parser:" + suffix
+	routerFingerprint := "postgres:system_event:router:" + suffix
+	t.Cleanup(func() {
+		if _, err := st.db.Exec(`DELETE FROM system_events WHERE fingerprint = ? OR fingerprint = ?`, parserFingerprint, routerFingerprint); err != nil {
+			t.Logf("cleanup postgres system events error = %v", err)
+		}
+	})
+
+	since := time.Now().UTC().Add(-time.Second)
+	parserEvent, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: parserFingerprint,
+		Source:      source,
+		Category:    "parse_failure",
+		Severity:    "error",
+		Title:       "Postgres parse failure",
+		Message:     "bad json in trace " + suffix,
+		TraceID:     "trace-postgres-system-event-" + suffix,
+		SessionID:   "session-postgres-system-event-" + suffix,
+		Model:       "gpt-postgres-system-event",
+		DetailsJSON: json.RawMessage(`{"postgres":true,"path":"parser"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(parser postgres) error = %v", err)
+	}
+	routerEvent, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: routerFingerprint,
+		Source:      source,
+		Category:    "routing_failure",
+		Severity:    "warning",
+		Title:       "Postgres routing failure",
+		Message:     "all targets open",
+		UpstreamID:  "upstream-postgres-system-event-" + suffix,
+		Model:       "gpt-postgres-system-event",
+		DetailsJSON: json.RawMessage(`{"postgres":true,"path":"router"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(router postgres) error = %v", err)
+	}
+	if err := st.ResolveSystemEvent(routerEvent.ID); err != nil {
+		t.Fatalf("ResolveSystemEvent(postgres) error = %v", err)
+	}
+
+	page, err := st.ListSystemEvents(SystemEventFilter{
+		Status:   SystemEventStatusUnread,
+		Source:   source,
+		Category: "parse_failure",
+		Query:    "trace-postgres-system-event",
+		Since:    since,
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(postgres) error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != parserEvent.ID {
+		t.Fatalf("ListSystemEvents(postgres) = %+v, want parser event %q", page, parserEvent.ID)
+	}
+
+	summary, err := st.SystemEventSummary(since)
+	if err != nil {
+		t.Fatalf("SystemEventSummary(postgres) error = %v", err)
+	}
+	if summary.Total < 2 || summary.Unread < 1 || summary.Error < 1 || summary.Warning != 0 {
+		t.Fatalf("SystemEventSummary(postgres) = %+v, want parser unread error and resolved warning excluded from unread warnings", summary)
+	}
+	foundSource := false
+	for _, item := range summary.BySource {
+		if item.Label == source && item.Count >= 2 {
+			foundSource = true
+			break
+		}
+	}
+	foundCategory := false
+	for _, item := range summary.ByCategory {
+		if item.Label == "parse_failure" && item.Count >= 1 {
+			foundCategory = true
+			break
+		}
+	}
+	if !foundSource || !foundCategory {
+		t.Fatalf("SystemEventSummary(postgres) by-source=%+v by-category=%+v, want inserted source/category", summary.BySource, summary.ByCategory)
+	}
+
+	count, err := st.MarkAllSystemEventsRead(SystemEventFilter{
+		Status:   SystemEventStatusUnread,
+		Source:   source,
+		Category: "parse_failure",
+		Since:    since,
+	})
+	if err != nil {
+		t.Fatalf("MarkAllSystemEventsRead(postgres) error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("MarkAllSystemEventsRead(postgres) count = %d, want 1", count)
+	}
+	afterRead, err := st.GetSystemEvent(parserEvent.ID)
+	if err != nil {
+		t.Fatalf("GetSystemEvent(postgres after read) error = %v", err)
+	}
+	if afterRead.Status != SystemEventStatusRead || afterRead.ReadAt.IsZero() {
+		t.Fatalf("GetSystemEvent(postgres after read) = %+v, want read status/read_at", afterRead)
+	}
+
+	if err := st.IgnoreSystemEvent(afterRead.ID); err != nil {
+		t.Fatalf("IgnoreSystemEvent(postgres) error = %v", err)
+	}
+	ignored, err := st.UpsertSystemEvent(SystemEvent{
+		Fingerprint: parserFingerprint,
+		Source:      source,
+		Category:    "parse_failure",
+		Severity:    "critical",
+		Title:       "Ignored Postgres parse failure repeated",
+		Message:     "still ignored",
+	})
+	if err != nil {
+		t.Fatalf("UpsertSystemEvent(ignored postgres) error = %v", err)
+	}
+	if ignored.Status != SystemEventStatusIgnored || ignored.OccurrenceCount != 2 || ignored.ReadAt.IsZero() {
+		t.Fatalf("UpsertSystemEvent(ignored postgres) = %+v, want ignored duplicate with read_at retained", ignored)
+	}
+}
+
 func TestPostgresSessionAndOverviewRuntimeSQLRoundTrip(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
 	if dsn == "" {
