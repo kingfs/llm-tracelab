@@ -82,9 +82,12 @@ claim that Postgres persistence is fully production mature today.
   paths are covered by `LLM_TRACELAB_TEST_POSTGRES_DSN` integration tests. A
   representative eval path now also round-trips dataset examples, eval runs,
   score writes, finalize, and score queries against the checked-in Postgres
-  migration. A representative Monitor/session path now covers Postgres
-  compatible session provider aggregation, boolean stream counts, and overview
-  summary stream/session counts.
+  migration. Representative Monitor/session/analytics paths now cover Postgres
+  compatible session provider aggregation, boolean stream counts, overview
+  summary stream/session counts, overview finding categories, high-risk
+  findings, analysis summaries, observation summaries, recent parse failures,
+  upstream/routing analytics, model catalog/detail analytics, and channel usage
+  summary/trends/model usage/recent failures.
 - `db migrate down` is intentionally unsupported outside `--dry-run`; ent auto
   migration does not provide a safe rollback plan.
 - The Responses runtime has ent-backed persistence for `responses` and

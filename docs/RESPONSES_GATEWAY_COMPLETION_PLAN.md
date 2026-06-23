@@ -181,3 +181,12 @@
 - `README.md`、`README_EN.md`、`docs/CURRENT_IMPLEMENTATION.md`、`docs/PROJECT_BASELINE.md`、`docs/RESPONSES_SERVER_DESIGN.md` 和本计划文档一致。
 - 未实现的 MCP/file/code/computer-use 真实执行器仍明确拒绝并审计，不伪造执行结果。
 - `.http` cassette replay 和普通 proxy 热路径通过最终测试。
+
+执行记录（2026-06-23）：
+
+- `rtk env -u GOROOT go test ./internal/responses/runtime ./internal/responses/httpapi ./internal/proxy -count=1` 已通过。
+- `rtk env -u GOROOT task check:quick` 已通过。
+- `rtk env -u GOROOT task test` 已通过。
+- `rtk env -u GOROOT task build` 已通过。
+- `rtk env -u GOROOT task test:codex-fixtures` 已通过。
+- 本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，Postgres gated matrix 未在本轮本机执行；相关测试保持 DSN-gated。
