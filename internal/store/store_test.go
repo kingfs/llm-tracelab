@@ -1732,7 +1732,7 @@ func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 			args  []any
 		}{
 			{query: `DELETE FROM logs WHERE request_id IN (?, ?, ?, ?, ?)`, args: []any{requestIDs[0], requestIDs[1], requestIDs[2], requestIDs[3], requestIDs[4]}},
-			{query: `DELETE FROM channel_models WHERE upstream_id IN (?, ?)`, args: []any{openAIChannelID, openRouterChannelID}},
+			{query: `DELETE FROM channel_models WHERE channel_id IN (?, ?)`, args: []any{openAIChannelID, openRouterChannelID}},
 			{query: `DELETE FROM channel_configs WHERE id IN (?, ?)`, args: []any{openAIChannelID, openRouterChannelID}},
 		} {
 			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
@@ -1872,7 +1872,7 @@ func TestPostgresChannelAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 				filepath.Join(dir, logNames[3]),
 				filepath.Join(dir, logNames[4]),
 			}},
-			{query: `DELETE FROM channel_models WHERE upstream_id = ?`, args: []any{channelID}},
+			{query: `DELETE FROM channel_models WHERE channel_id = ?`, args: []any{channelID}},
 			{query: `DELETE FROM channel_configs WHERE id = ?`, args: []any{channelID}},
 		} {
 			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
@@ -1951,8 +1951,8 @@ func TestPostgresChannelAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetChannelRecentFailures(postgres) error = %v", err)
 	}
-	if len(failures) != 1 || failures[0].Model != disabledModel || failures[0].StatusCode != http.StatusBadGateway || failures[0].Reason != "upstream_5xx" {
-		t.Fatalf("channel recent failures = %#v, want one disabled-model upstream_5xx failure", failures)
+	if len(failures) != 1 || failures[0].Model != disabledModel || failures[0].StatusCode != http.StatusBadGateway || failures[0].Reason != "upstream_error" {
+		t.Fatalf("channel recent failures = %#v, want one disabled-model upstream_error failure", failures)
 	}
 }
 

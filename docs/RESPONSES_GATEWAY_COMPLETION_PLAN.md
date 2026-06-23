@@ -189,8 +189,8 @@
 - `rtk env -u GOROOT task test` 已通过。
 - `rtk env -u GOROOT task build` 已通过。
 - `rtk env -u GOROOT task test:codex-fixtures` 已通过。
-- 本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，Postgres gated matrix 未在本轮本机执行；相关测试保持 DSN-gated。
+- 临时 Postgres 17 容器上已执行 `LLM_TRACELAB_TEST_POSTGRES_DSN=... rtk env -u GOROOT go test -p 1 ./internal/store ./internal/responses/runtime ./internal/appdbmigrate ./internal/auth ./cmd/server -count=1` 并通过；真实 DSN-gated 矩阵仍保持默认跳过，不影响离线测试。
 - Phase 1 Runtime 收口继续推进：新增跨轮 `function_call_output` streaming 在已输出 delta 后遇到 `context.Canceled` 时不发送 completed、不落 completed response 的 runtime 回归覆盖；`rtk env -u GOROOT go test ./internal/responses/runtime -count=1` 已通过。
 - Phase 1 Runtime 收口继续推进：新增 proxy/server-mode e2e 覆盖 auto compact + forced hosted `web_search` 非平凡 `tool_choice` 的 incremental fallback，验证 deferred SSE、auto compact、hosted tool loop、fallback event 和 upstream exchange 均关联同一 request audit；`rtk env -u GOROOT go test ./internal/proxy -count=1` 已通过。
-- Phase 2 Storage/Postgres 收口继续推进：`TestPostgresStoreRuntimeSQLIntegration` 追加 core `Stats`、`ListPage` 和 `ListTraceIDs` 覆盖，验证 monitor list/aggregate 基础入口在 Postgres migration 后可读；本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，该路径保持 DSN-gated skip，`rtk env -u GOROOT go test ./internal/store -count=1` 已通过默认离线矩阵。
+- Phase 2 Storage/Postgres 收口继续推进：`TestPostgresStoreRuntimeSQLIntegration` 追加 core `Stats`、`ListPage` 和 `ListTraceIDs` 覆盖，验证 monitor list/aggregate 基础入口在 Postgres migration 后可读；真实 Postgres 矩阵暴露并已修复 analytics/read-model 查询中 `COALESCE(MAX(recorded_at), '')` 对 Postgres `timestamptz` 不兼容的问题，改为 nullable time 扫描；同时修正 channel model cleanup 列名和 Overview observation failed 计数语义。`rtk env -u GOROOT go test ./internal/store -count=1` 与上述 DSN-gated 矩阵均已通过。
 - Phase 3 Provider/Profile 收口继续推进：`TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries` 追加 runtime opt-in 对 `supports_chat_completions=false` adopted channel profile 的阻断覆盖，和 `models codex-config` capability false 报告保持一致；`rtk env -u GOROOT go test ./internal/proxy -run TestResponsesRuntimeModelProfilesChannelAdoptionBoundaries -count=1` 已通过。

@@ -1662,15 +1662,13 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	}
 
 	referenceTime := time.Now().UTC()
-	var latestRecordedAt string
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
+	var latestRecordedAt any
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
 		return RoutingFailureAnalytics{}, err
 	}
-	if strings.TrimSpace(latestRecordedAt) != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return RoutingFailureAnalytics{}, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return RoutingFailureAnalytics{}, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
@@ -1795,22 +1793,20 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	}
 
 	timelineArgs := append([]any{upstreamID}, whereArgs...)
-	var latestRecordedAt string
+	var latestRecordedAt any
 	err = s.db.QueryRow(`
-		SELECT COALESCE(MAX(recorded_at), '')
-		FROM logs
-		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL,
+			SELECT MAX(recorded_at)
+			FROM logs
+			WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL,
 		timelineArgs...,
 	).Scan(&latestRecordedAt)
 	if err != nil {
 		return UpstreamDetail{}, err
 	}
 	referenceTime := time.Now().UTC()
-	if latestRecordedAt != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return UpstreamDetail{}, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return UpstreamDetail{}, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
@@ -2150,11 +2146,11 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 		args = append(args, since.UTC().Format(timeLayout))
 	}
 	var (
-		record       UsageSummaryRecord
-		avgTTFT      float64
-		avgDuration  float64
-		successRate  float64
-		lastSeenText string
+		record        UsageSummaryRecord
+		avgTTFT       float64
+		avgDuration   float64
+		successRate   float64
+		lastSeenValue any
 	)
 	if err := s.db.QueryRow(`
 		SELECT
@@ -2169,7 +2165,7 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 			COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
 			COALESCE(AVG(ttft_ms), 0) AS avg_ttft,
 			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
-			COALESCE(MAX(recorded_at), '') AS last_seen
+				MAX(recorded_at) AS last_seen
 		FROM logs
 		WHERE `+where, args...).Scan(
 		&record.RequestCount,
@@ -2183,18 +2179,16 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 		&record.CachedTokens,
 		&avgTTFT,
 		&avgDuration,
-		&lastSeenText,
+		&lastSeenValue,
 	); err != nil {
 		return UsageSummaryRecord{}, err
 	}
 	record.SuccessRate = successRate
 	record.AvgTTFT = int(math.Round(avgTTFT))
 	record.AvgDurationMs = int64(math.Round(avgDuration))
-	if strings.TrimSpace(lastSeenText) != "" {
-		lastSeen, err := timeParse(lastSeenText)
-		if err != nil {
-			return UsageSummaryRecord{}, err
-		}
+	if lastSeen, err := timeParseNullableValue(lastSeenValue); err != nil {
+		return UsageSummaryRecord{}, err
+	} else if !lastSeen.IsZero() {
 		record.LastSeen = lastSeen
 	}
 	return record, nil
@@ -2213,15 +2207,13 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	}
 	args := append([]any(nil), baseArgs...)
 	referenceTime := time.Now().UTC()
-	var latestRecordedAt string
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
+	var latestRecordedAt any
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(latestRecordedAt) != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return nil, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return nil, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime.UTC()
 	}
 	if !since.IsZero() {
@@ -6055,15 +6047,13 @@ func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []a
 
 func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, error) {
 	referenceTime := time.Now().UTC()
-	var latestRecordedAt string
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+	var latestRecordedAt any
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(latestRecordedAt) != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return nil, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return nil, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.UTC().Truncate(opts.BucketSize).Add(-time.Duration(opts.BucketCount-1) * opts.BucketSize)
@@ -6336,10 +6326,19 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 	if err := s.db.QueryRow(`
 		SELECT
 			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed,
-			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
+			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed
 		FROM trace_observations
-	`).Scan(&summary.TotalObservations, &summary.Parsed, &summary.Failed); err != nil {
+	`).Scan(&summary.TotalObservations, &summary.Parsed); err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	if err := s.db.QueryRow(`
+		SELECT COUNT(DISTINCT trace_id)
+		FROM (
+			SELECT trace_id FROM trace_observations WHERE status IN ('failed', 'parse_failed', 'analysis_failed')
+			UNION
+			SELECT trace_id FROM parse_jobs WHERE status = 'failed'
+		) AS failed_traces
+	`).Scan(&summary.Failed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE trace_id NOT IN (SELECT trace_id FROM trace_observations)`).Scan(&summary.Unparsed); err != nil {
