@@ -2057,6 +2057,7 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 		"audit", "query",
 		"--conversation-id", "conv_list",
 		"--client-request-id", "client_list",
+		"--status", "failed",
 		"--list",
 		"--limit", "10",
 	})
@@ -2070,6 +2071,7 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 			Query struct {
 				ConversationID  string `json:"conversation_id"`
 				ClientRequestID string `json:"client_request_id"`
+				Status          string `json:"status"`
 				List            bool   `json:"list"`
 			} `json:"query"`
 			Found         bool `json:"found"`
@@ -2094,20 +2096,40 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 	if envelope.Result.Query.ConversationID != "conv_list" || envelope.Result.Query.ClientRequestID != "client_list" {
 		t.Fatalf("query = %+v, want conv/client selectors", envelope.Result.Query)
 	}
-	if envelope.Result.Count != 2 || len(envelope.Result.RequestAudits) != 2 {
-		t.Fatalf("request_audits = %+v count=%d, want two", envelope.Result.RequestAudits, envelope.Result.Count)
+	if envelope.Result.Query.Status != "failed" {
+		t.Fatalf("query status = %q, want failed", envelope.Result.Query.Status)
+	}
+	if envelope.Result.Count != 1 || len(envelope.Result.RequestAudits) != 1 {
+		t.Fatalf("request_audits = %+v count=%d, want one failed audit", envelope.Result.RequestAudits, envelope.Result.Count)
 	}
 	if envelope.Result.RequestAudits[0].ID != "reqaudit_list_new" || envelope.Result.RequestAudits[0].ResponseID != "resp_list_new" || envelope.Result.RequestAudits[0].Status != "failed" {
 		t.Fatalf("first request audit = %+v, want latest failed summary", envelope.Result.RequestAudits[0])
-	}
-	if envelope.Result.RequestAudits[1].ID != "reqaudit_list_old" || envelope.Result.RequestAudits[1].ResponseID != "resp_list_old" {
-		t.Fatalf("second request audit = %+v, want older summary", envelope.Result.RequestAudits[1])
 	}
 	if envelope.Result.RequestAudits[0].BodyPreview != "" || envelope.Result.RequestAudits[0].HeaderJSON != nil {
 		t.Fatalf("summary leaked body/header fields: %+v", envelope.Result.RequestAudits[0])
 	}
 	if strings.Contains(out.String(), secretMarker) || strings.Contains(out.String(), "body_preview") || strings.Contains(out.String(), "header_json") {
 		t.Fatalf("audit query list leaked sensitive fields: %s", out.String())
+	}
+}
+
+func TestAuditQueryCommandRejectsInvalidListStatus(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := runAuditQueryWithOptions(auditQueryOptions{
+		stdout: &out,
+		list:   true,
+		status: "raw_payload",
+	})
+	if err == nil {
+		t.Fatal("runAuditQueryWithOptions() error = nil, want invalid status error")
+	}
+	if !strings.Contains(err.Error(), "--status must be one of: accepted, completed, failed, rejected, cancelled") {
+		t.Fatalf("error = %v, want allowed status message", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty output for validation error", out.String())
 	}
 }
 

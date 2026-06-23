@@ -484,6 +484,44 @@ func TestQueryServiceListRequestAuditsLimitAndEmptyResults(t *testing.T) {
 	}
 }
 
+func TestQueryServiceListRequestAuditsFiltersByStatus(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 22, 11, 15, 0, 0, time.UTC)
+
+	for _, seed := range []requestAuditSeed{
+		{id: "audit_completed", responseID: "resp_status_1", conversationID: "conv_status", method: "POST", path: "/v1/responses", status: "completed", createdAt: base},
+		{id: "audit_failed_old", responseID: "resp_status_2", conversationID: "conv_status", method: "POST", path: "/v1/responses", status: "failed", createdAt: base.Add(time.Second)},
+		{id: "audit_failed_new", responseID: "resp_status_3", conversationID: "conv_status", method: "POST", path: "/v1/responses", status: "failed", createdAt: base.Add(2 * time.Second)},
+		{id: "audit_failed_other", responseID: "resp_status_4", conversationID: "conv_other", method: "POST", path: "/v1/responses", status: "failed", createdAt: base.Add(3 * time.Second)},
+	} {
+		mustCreateRequestAudit(t, client, seed)
+	}
+
+	audits, err := NewQueryService(client).ListRequestAudits(ctx, ListRequestAuditsParams{
+		ConversationID: "conv_status",
+		Status:         "failed",
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("ListRequestAudits(status) error = %v", err)
+	}
+	if got := requestAuditIDs(audits); !reflect.DeepEqual(got, []string{"audit_failed_new", "audit_failed_old"}) {
+		t.Fatalf("ListRequestAudits(status) ids = %v, want failed audits in latest order", got)
+	}
+
+	empty, err := NewQueryService(client).ListRequestAudits(ctx, ListRequestAuditsParams{
+		ConversationID: "conv_status",
+		Status:         "cancelled",
+	})
+	if err != nil {
+		t.Fatalf("ListRequestAudits(cancelled) error = %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("ListRequestAudits(cancelled) len = %d, want 0", len(empty))
+	}
+}
+
 func openAuditTestClient(t *testing.T) *dao.Client {
 	t.Helper()
 	db, err := stdsql.Open("sqlite", filepath.Join(t.TempDir(), "audit.sqlite")+"?_fk=1")
