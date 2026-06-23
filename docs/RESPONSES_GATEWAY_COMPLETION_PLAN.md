@@ -111,11 +111,73 @@
 - 至少运行相关 targeted tests、`rtk git diff --check`，阶段收束时运行 `rtk env -u GOROOT task check:quick`。
 - 合入后同步 `CURRENT_IMPLEMENTATION.md`、`PROJECT_BASELINE.md` 和相关设计/路线文档。
 
-## 下一阶段建议
+## 主线收尾计划
 
-下一阶段不再继续 doctor/audit/config inspect 小切片，优先启动两个正交任务：
+后续只围绕 Runtime、Storage 和 Provider 三条主线收口。目标是尽快完成可交付主线功能，然后进入最终测试冻结；不再把 doctor、Monitor、Codex TOML 或 config inspect 小增强作为独立任务。
 
-1. Runtime：compact v2 provenance/read model 设计与首切实现。
-2. Storage：基于已定案的 SQLite fallback/shared auth namespace 边界，继续做 Postgres runtime SQL 覆盖和 auth namespace adoption 设计。
+### Phase 1：Runtime 最终收口
 
-Provider 主线在上述两个任务启动后并行评审，避免 runtime/storage 事实源继续漂移。
+目标：证明 Responses server-mode 在核心路径上稳定，复杂路径要么真实增量执行，要么在写出 SSE/调用上游前稳定 fallback 并可审计。
+
+必须完成：
+
+- 复核并补齐复杂 stream/tool lifecycle 的边界测试：跨轮 continuation、cancel/error event ordering、已输出 SSE 后的 `response.failed`、final response 存储和 audit 状态一致性。
+- 复核 auto compact 后工具组合：已支持的简单文本、普通 function arguments、registered executor 和平凡 hosted `web_search` 保持真实增量；未知/未实现 hosted tool 或非平凡 `tool_choice` 继续走稳定 deferred fallback。
+- 保持 MCP/file/code/computer-use 的 stable unsupported + audit contract，不在本阶段接真实执行器。
+
+验收：
+
+- `rtk env -u GOROOT go test ./internal/responses/runtime ./internal/responses/httpapi ./internal/proxy -count=1`
+- `rtk git diff --check`
+- 不改变非 Responses proxy 热路径和 `.http` V2/V3 replay 兼容。
+
+### Phase 2：Storage/Postgres 生产路径收口
+
+目标：把 Postgres-first 路径稳定为生产部署主路径，同时明确 SQLite 只作为 local-first fallback。
+
+必须完成：
+
+- 扩大 Postgres DSN-gated 覆盖到剩余高风险 raw SQL：analytics、eval、experiment、Monitor 聚合查询中的代表路径。
+- 冻结本轮 auth namespace 策略：Postgres auth 继续共享 application `schema_migrations` namespace；独立 auth namespace 作为后续大任务，不作为本轮主线阻塞。
+- 跑 migration up/status/down dry-run 和 required table health 的最终验证矩阵。
+
+验收：
+
+- 默认测试不依赖真实 Postgres。
+- `LLM_TRACELAB_TEST_POSTGRES_DSN` 显式设置时，Postgres gated tests 覆盖 migration、Responses semantic state、audit/tool audit、provider/channel profile adoption、Monitor/eval/analytics 代表查询。
+- `docs/CURRENT_IMPLEMENTATION.md`、`docs/PROJECT_BASELINE.md` 和 `docs/POSTGRES_STORAGE_MIGRATION.md` 一致说明 SQLite fallback 与 Postgres production migration 分工。
+
+### Phase 3：Provider/Profile 收口
+
+目标：让 provider onboarding 和 model profile 事实源足够支撑 Responses server-mode，不继续扩成完整网关控制台。
+
+必须完成：
+
+- 保持 `responses_server.model_profiles` 默认优先；`responses_server.adopt_channel_model_profiles=true` 只显式 opt-in adopted channel model profile。
+- 保持 provider probe/setup/apply 的保守策略：只填缺失字段，不覆盖显式 `api_type`、`protocol_family` 或 capability false，不回显 secret。
+- 将 profile adoption 的状态解释、冲突跳过、禁用/回滚边界固化在 CLI/文档/测试中；复杂管理 UI 延后。
+
+验收：
+
+- `models codex-config`、doctor drift、runtime opt-in 三者对 profile source/adoption 的表述一致。
+- adopted profile、YAML 优先、冲突跳过、capability false 阻断均有测试。
+- native Responses pass-through 与 local Responses semantic server-mode 的边界不回退。
+
+### Phase 4：最终测试冻结
+
+目标：停止新增功能，只修阻塞问题，形成最终交付证据。
+
+必须运行：
+
+- `rtk env -u GOROOT task check:quick`
+- `rtk env -u GOROOT task test`
+- `rtk env -u GOROOT task build`
+- `rtk env -u GOROOT task test:codex-fixtures`
+- 如本机提供 DSN：`LLM_TRACELAB_TEST_POSTGRES_DSN=...` 的 Postgres gated test matrix
+
+最终冻结条件：
+
+- 工作区干净。
+- `README.md`、`README_EN.md`、`docs/CURRENT_IMPLEMENTATION.md`、`docs/PROJECT_BASELINE.md`、`docs/RESPONSES_SERVER_DESIGN.md` 和本计划文档一致。
+- 未实现的 MCP/file/code/computer-use 真实执行器仍明确拒绝并审计，不伪造执行结果。
+- `.http` cassette replay 和普通 proxy 热路径通过最终测试。
