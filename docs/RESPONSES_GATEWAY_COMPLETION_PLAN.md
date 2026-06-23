@@ -71,7 +71,7 @@
 
 近期可并行切片：
 
-- `storage/postgres-runtime-sql-coverage`：继续对新增或更深 analytics 查询补 Postgres DSN-gated 覆盖，默认测试保持离线；已覆盖 session list/detail、overview summary 的 provider aggregation 和 stream-count 布尔聚合、overview finding/analysis/observation 子面板、upstream/routing analytics、model catalog/detail analytics、channel usage summary/trends/model usage/recent failures，以及 eval dataset/list/detail/example/run/score 和 experiment read model 代表路径。
+- `storage/postgres-runtime-sql-coverage`：继续对新增或更深 analytics 查询补 Postgres DSN-gated 覆盖，默认测试保持离线；已覆盖 core Stats/ListPage/ListTraceIDs monitor list 基础入口、session list/detail、overview summary 的 provider aggregation 和 stream-count 布尔聚合、overview finding/analysis/observation 子面板、upstream/routing analytics、model catalog/detail analytics、channel usage summary/trends/model usage/recent failures，以及 eval dataset/list/detail/example/run/score 和 experiment read model 代表路径。
 - `storage/auth-namespace-adoption-design`：已收敛为文档与 operator 输出合同，不改变当前 shared namespace 行为；后续实施任务必须按 adoption、dry-run/status、rollback 和测试门禁逐项落地。
 
 ### Provider 主线
@@ -192,3 +192,4 @@
 - 本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，Postgres gated matrix 未在本轮本机执行；相关测试保持 DSN-gated。
 - Phase 1 Runtime 收口继续推进：新增跨轮 `function_call_output` streaming 在已输出 delta 后遇到 `context.Canceled` 时不发送 completed、不落 completed response 的 runtime 回归覆盖；`rtk env -u GOROOT go test ./internal/responses/runtime -count=1` 已通过。
 - Phase 1 Runtime 收口继续推进：新增 proxy/server-mode e2e 覆盖 auto compact + forced hosted `web_search` 非平凡 `tool_choice` 的 incremental fallback，验证 deferred SSE、auto compact、hosted tool loop、fallback event 和 upstream exchange 均关联同一 request audit；`rtk env -u GOROOT go test ./internal/proxy -count=1` 已通过。
+- Phase 2 Storage/Postgres 收口继续推进：`TestPostgresStoreRuntimeSQLIntegration` 追加 core `Stats`、`ListPage` 和 `ListTraceIDs` 覆盖，验证 monitor list/aggregate 基础入口在 Postgres migration 后可读；本机未设置 `LLM_TRACELAB_TEST_POSTGRES_DSN`，该路径保持 DSN-gated skip，`rtk env -u GOROOT go test ./internal/store -count=1` 已通过默认离线矩阵。

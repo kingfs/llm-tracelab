@@ -427,6 +427,10 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	header.Meta.URL = "https://api.openai.com/v1/chat/completions"
 	header.Meta.Method = http.MethodPost
 	header.Meta.StatusCode = http.StatusOK
+	header.Meta.Model = "gpt-postgres-runtime-" + suffix
+	header.Meta.Provider = "openai_compatible"
+	header.Meta.Operation = "chat.completions"
+	header.Meta.Endpoint = "/v1/chat/completions"
 	header.Layout.IsStream = true
 	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
 		t.Fatalf("UpsertLogWithGrouping(postgres) error = %v", err)
@@ -437,6 +441,48 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	}
 	if got.LogPath != recordPath || !got.Header.Layout.IsStream {
 		t.Fatalf("postgres log round trip mismatch: path=%q stream=%v", got.LogPath, got.Header.Layout.IsStream)
+	}
+	stats, err := st.Stats()
+	if err != nil {
+		t.Fatalf("Stats(postgres) error = %v", err)
+	}
+	if stats.TotalRequest == 0 || stats.SuccessRequest == 0 {
+		t.Fatalf("Stats(postgres) = %+v, want successful smoke request included", stats)
+	}
+	page, err := st.ListPage(1, 10, ListFilter{
+		Provider:          "openai_compatible",
+		Endpoint:          "chat/completions",
+		ObservationStatus: "unparsed",
+		Model:             "gpt-postgres-runtime-" + suffix,
+		Query:             "openai",
+		MissingUsage:      true,
+	})
+	if err != nil {
+		t.Fatalf("ListPage(postgres) error = %v", err)
+	}
+	if page.Total == 0 || len(page.Items) == 0 {
+		t.Fatalf("ListPage(postgres) = %+v, want smoke trace", page)
+	}
+	foundSmokeTrace := false
+	for _, item := range page.Items {
+		if item.Header.Meta.RequestID == requestID && item.Observation.Status == "unparsed" {
+			foundSmokeTrace = true
+		}
+	}
+	if !foundSmokeTrace {
+		t.Fatalf("ListPage(postgres) items = %+v, want request %q with unparsed observation metadata", page.Items, requestID)
+	}
+	traceIDs, err := st.ListTraceIDs(ListFilter{
+		Endpoint:     "chat/completions",
+		MissingUsage: true,
+		Model:        "gpt-postgres-runtime-" + suffix,
+		Query:        "openai",
+	}, 10)
+	if err != nil {
+		t.Fatalf("ListTraceIDs(postgres) error = %v", err)
+	}
+	if len(traceIDs) == 0 || traceIDs[0] != got.ID {
+		t.Fatalf("ListTraceIDs(postgres) = %+v, want smoke trace %q", traceIDs, got.ID)
 	}
 
 	runID, err := st.SaveAnalysisRun(AnalysisRunRecord{

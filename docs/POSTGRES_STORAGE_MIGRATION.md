@@ -82,7 +82,8 @@ claim that Postgres persistence is fully production mature today.
   paths are covered by `LLM_TRACELAB_TEST_POSTGRES_DSN` integration tests. A
   representative eval path now also round-trips dataset examples, eval runs,
   score writes, finalize, and score queries against the checked-in Postgres
-  migration. Representative Monitor/session/analytics paths now cover Postgres
+  migration. Representative Monitor/session/analytics paths now cover core
+  Stats/ListPage/ListTraceIDs list and aggregate entry points, Postgres
   compatible session provider aggregation, boolean stream counts, overview
   summary stream/session counts, overview finding categories, high-risk
   findings, analysis summaries, observation summaries, recent parse failures,
@@ -322,7 +323,8 @@ The production route should be additive and reviewable:
    store round trip, representative eval dataset list/detail/example/run/score
    round trips, and representative experiment run read models through checked-in
    Postgres migrations. Representative monitor runtime SQL tests also cover
-   session list/detail, overview summary aggregation, overview finding/analysis/
+   core Stats/ListPage/ListTraceIDs list and aggregate entry points, session
+   list/detail, overview summary aggregation, overview finding/analysis/
    observation subpanels, upstream/routing analytics, model catalog/detail
    analytics, and channel usage analytics.
 6. Audit raw SQL in `internal/store` for placeholder syntax, SQLite functions,
@@ -330,10 +332,10 @@ The production route should be additive and reviewable:
    declaring Postgres runtime support complete. The first pass covers
    placeholder rebinding and migrated logs/observation/finding/analysis/system
    event paths plus representative eval dataset list/detail/example/run/score,
-   experiment, monitor
-   session/overview, upstream/routing, model catalog/detail, and channel usage
-   paths; deeper analytics queries still need ongoing Postgres audit as new
-   query surfaces are added.
+   experiment, monitor core list/aggregate, session/overview,
+   upstream/routing, model catalog/detail, and channel usage paths; deeper
+   analytics queries still need ongoing Postgres audit as new query surfaces are
+   added.
 7. Define a separate SQLite-to-Postgres data migration/export plan for existing
    installations. This should be explicit operator tooling, not an implicit
    startup side effect.
