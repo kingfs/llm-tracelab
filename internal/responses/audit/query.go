@@ -22,6 +22,8 @@ const (
 	MaxAuditQueryLimit     = 500
 )
 
+var requestAuditStatusValues = []string{"accepted", "completed", "failed", "rejected", "cancelled"}
+
 type QueryService struct {
 	client *dao.Client
 }
@@ -35,6 +37,7 @@ type ListRequestAuditsParams struct {
 	RequestAuditID  string
 	ClientRequestID string
 	ConversationID  string
+	Status          string
 	Limit           int
 }
 
@@ -210,6 +213,9 @@ func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequest
 	}
 	if params.ConversationID != "" {
 		query.Where(requestaudit.ConversationIDEQ(params.ConversationID))
+	}
+	if params.Status != "" {
+		query.Where(requestaudit.StatusEQ(params.Status))
 	}
 	records, err := query.All(ctx)
 	if err != nil {
@@ -469,6 +475,23 @@ func NormalizeAuditQueryLimit(limit int) int {
 		return MaxAuditQueryLimit
 	}
 	return limit
+}
+
+func RequestAuditStatusValues() []string {
+	return append([]string(nil), requestAuditStatusValues...)
+}
+
+func NormalizeRequestAuditStatus(status string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if normalized == "" {
+		return "", true
+	}
+	for _, allowed := range requestAuditStatusValues {
+		if normalized == allowed {
+			return normalized, true
+		}
+	}
+	return "", false
 }
 
 func requestAuditView(record *dao.RequestAudit) RequestAuditView {
