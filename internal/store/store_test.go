@@ -920,6 +920,133 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPostgresExperimentRunReadModelsRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	var datasetID, baselineEvalRunID, candidateEvalRunID, experimentRunID string
+	t.Cleanup(func() {
+		for _, cleanup := range []struct {
+			query string
+			args  []any
+		}{
+			{query: `DELETE FROM experiment_runs WHERE id = ? OR baseline_eval_run_id = ? OR candidate_eval_run_id = ?`, args: []any{experimentRunID, baselineEvalRunID, candidateEvalRunID}},
+			{query: `DELETE FROM eval_runs WHERE id = ? OR id = ? OR dataset_id = ?`, args: []any{baselineEvalRunID, candidateEvalRunID, datasetID}},
+			{query: `DELETE FROM datasets WHERE id = ?`, args: []any{datasetID}},
+		} {
+			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
+				t.Logf("cleanup %q error = %v", cleanup.query, err)
+			}
+		}
+	})
+
+	dataset, err := st.CreateDataset("postgres-experiment-"+suffix, "postgres experiment read model smoke")
+	if err != nil {
+		t.Fatalf("CreateDataset(postgres) error = %v", err)
+	}
+	datasetID = dataset.ID
+
+	baselineRun, err := st.CreateEvalRun(dataset.ID, "dataset", dataset.ID, "postgres_baseline_v1", 3)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(baseline postgres) error = %v", err)
+	}
+	baselineEvalRunID = baselineRun.ID
+	if err := st.FinalizeEvalRun(baselineRun.ID, 3, 2, 1); err != nil {
+		t.Fatalf("FinalizeEvalRun(baseline postgres) error = %v", err)
+	}
+
+	candidateRun, err := st.CreateEvalRun(dataset.ID, "dataset", dataset.ID, "postgres_candidate_v1", 3)
+	if err != nil {
+		t.Fatalf("CreateEvalRun(candidate postgres) error = %v", err)
+	}
+	candidateEvalRunID = candidateRun.ID
+	if err := st.FinalizeEvalRun(candidateRun.ID, 3, 3, 0); err != nil {
+		t.Fatalf("FinalizeEvalRun(candidate postgres) error = %v", err)
+	}
+
+	experiment, err := st.CreateExperimentRun(ExperimentRunRecord{
+		Name:                "postgres-baseline-vs-candidate-" + suffix,
+		Description:         "postgres experiment read model round trip",
+		BaselineEvalRunID:   baselineRun.ID,
+		CandidateEvalRunID:  candidateRun.ID,
+		BaselineScoreCount:  3,
+		CandidateScoreCount: 3,
+		BaselinePassRate:    66.67,
+		CandidatePassRate:   100,
+		PassRateDelta:       33.33,
+		MatchedScoreCount:   3,
+		ImprovementCount:    1,
+		RegressionCount:     0,
+	})
+	if err != nil {
+		t.Fatalf("CreateExperimentRun(postgres) error = %v", err)
+	}
+	experimentRunID = experiment.ID
+
+	got, err := st.GetExperimentRun(experiment.ID)
+	if err != nil {
+		t.Fatalf("GetExperimentRun(postgres) error = %v", err)
+	}
+	if got.ID != experiment.ID || got.Name != experiment.Name || got.Description != experiment.Description {
+		t.Fatalf("GetExperimentRun(postgres) = %#v, want id/name/description from created experiment %#v", got, experiment)
+	}
+	if got.BaselineEvalRunID != baselineRun.ID || got.CandidateEvalRunID != candidateRun.ID {
+		t.Fatalf("GetExperimentRun(postgres) = %#v, want eval runs %q and %q", got, baselineRun.ID, candidateRun.ID)
+	}
+	if got.BaselineScoreCount != 3 || got.CandidateScoreCount != 3 || got.MatchedScoreCount != 3 {
+		t.Fatalf("GetExperimentRun(postgres) = %#v, want score counts 3/3 matched 3", got)
+	}
+	if got.ImprovementCount != 1 || got.RegressionCount != 0 {
+		t.Fatalf("GetExperimentRun(postgres) = %#v, want improvement/regression 1/0", got)
+	}
+	if got.BaselinePassRate != 66.67 || got.CandidatePassRate != 100 || got.PassRateDelta != 33.33 {
+		t.Fatalf("GetExperimentRun(postgres) = %#v, want pass rates 66.67/100 delta 33.33", got)
+	}
+	if got.CreatedAt.IsZero() {
+		t.Fatalf("GetExperimentRun(postgres) CreatedAt is zero: %#v", got)
+	}
+
+	runs, err := st.ListExperimentRuns(50)
+	if err != nil {
+		t.Fatalf("ListExperimentRuns(postgres) error = %v", err)
+	}
+	var listed ExperimentRunRecord
+	found := false
+	for _, candidate := range runs {
+		if candidate.ID == experiment.ID {
+			listed = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("ListExperimentRuns(postgres) missing experiment %q in %#v", experiment.ID, runs)
+	}
+	if listed.Name != experiment.Name || listed.BaselineEvalRunID != baselineRun.ID || listed.CandidateEvalRunID != candidateRun.ID {
+		t.Fatalf("ListExperimentRuns(postgres) entry = %#v, want created experiment %#v", listed, experiment)
+	}
+	if listed.ImprovementCount != 1 || listed.RegressionCount != 0 || listed.PassRateDelta != 33.33 {
+		t.Fatalf("ListExperimentRuns(postgres) entry = %#v, want improvement/regression/delta 1/0/33.33", listed)
+	}
+}
+
 func TestPostgresAnalysisJobReadModelsRoundTrip(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
 	if dsn == "" {
