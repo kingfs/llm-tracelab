@@ -36,7 +36,7 @@
 - Native Responses provider mode boundary 首切：server-mode 的内部 Chat Completions backend 只选择 Chat Completions-compatible target，不会把 `responses_native` 且 `capabilities.chat_completions=false` 的 target 当作 `/v1/chat/completions` backend；server-mode 关闭时 `/v1/responses` 仍可选择 native Responses target 透传并录制。
 - Codex fixture offline gate、Codex config suggestion、doctor/config inspect/audit operability 首切。
 - `models codex-config` 已输出 provider/profile source-boundary diagnostics：runtime profile 事实源为 `responses_server.model_profiles`，catalog/channel 当前为 drift-only，provider/upstream capability 驱动 routing/tokenize。
-- `models codex-config` 已输出 provider/channel profile adoption diagnostics：当前采纳阶段为 `observe_only`，冲突策略为 `responses_server.model_profiles_wins`，并已提供机器可读 `profile_adoption_report` dry-run/conflict/gate report。该报告只读展示 channel profile candidate、字段级 diff、显式 runtime profile 保护和 capability false 阻断，不把 catalog/channel profile 接入 runtime；报告内 `adoption_ready=false`，`rollback_plan` 已收敛为 mutation-free 机器可读 rollback contract，`dsn_gated_tests` 已通过显式 `--check-db` 的 Postgres observe-only 覆盖降为非阻塞，`schema_migration` 仍明确标记为 `blocking_not_implemented`，避免误读为已经可采纳。
+- `models codex-config` 已输出 provider/channel profile adoption diagnostics：CLI 采纳报告仍是 `observe_only` / dry-run / `mutates=false`，冲突策略为 `responses_server.model_profiles_wins`，并已提供机器可读 `profile_adoption_report` dry-run/conflict/gate report。schema/runtime integration 已进入 opt-in 状态：`channel_models` 具备 profile adoption 字段，SQLite startup schema 与 Postgres migration 均已覆盖，`responses_server.adopt_channel_model_profiles=true` 时 runtime 可读取 `profile_adoption_status=adopted` 且支持 Chat Completions 的 channel model profile。显式 `responses_server.model_profiles` 仍最高优先级，冲突 adopted profile 会保守跳过；报告内 `adoption_ready=true`、`blocking_gate_count=0`，但默认配置仍不自动采纳，也不由 `models codex-config` 修改数据。
 
 这些能力说明项目已经从“只做代理”进入了“Responses semantic server + proxy/record/replay 并存”的阶段，但还不是完整 production-grade gateway。
 
@@ -87,7 +87,7 @@
 
 近期可并行切片：
 
-- `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_adoption_report`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；当前 report 仅 observe-only dry-run，不覆盖显式配置或 capability false，并在 report 内把 rollback plan 固化为 mutation-free contract，DSN-gated observe-only coverage 已落地，schema migration 仍是 blocking gate。后续仍需实现 catalog/channel profile 进入 runtime 前的 migration/runtime integration 闭环。
+- `provider/profile-source-unification`：已完成 source-boundary 和 adoption-boundary 首切，`models codex-config` 会输出 `runtime_profile_source`、`profile_precedence`、`catalog_profile_role`、`capability_source`、`provider_channel_profile_adoption`、`profile_adoption_report`、`profile_conflict_strategy` 和 `profile_adoption_required_gates`；当前 report 仅 observe-only dry-run，不覆盖显式配置或 capability false，并在 report 内把 rollback plan 固化为 mutation-free contract。schema migration 与 runtime opt-in assembly 已落地，`responses_server.adopt_channel_model_profiles` 默认关闭；后续 provider 主线应聚焦 profile adoption 的管理面、冲突可视化、回滚/禁用工作流和更广 Postgres 覆盖，而不是继续把 schema migration 当作阻塞项。
 - `provider/native-responses-mode-boundary`：已补 router/proxy e2e 契约，覆盖 native Responses target 在 proxy/server mode 下的 routing 行为；后续 provider 主线聚焦 profile adoption migration/test 闭环。
 
 ## 停止发散规则

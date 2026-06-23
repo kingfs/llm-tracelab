@@ -407,6 +407,10 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 				toolCallAuditRecorder = entAuditor
 			}
 		}
+		modelProfiles, err := responsesRuntimeModelProfiles(cfg, st)
+		if err != nil {
+			return nil, err
+		}
 		runtimeConfig := responsesruntime.Config{
 			DefaultModel:                cfg.ResponsesDefaultModel(),
 			ForceStore:                  cfg.ResponsesForceStore(),
@@ -414,7 +418,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			WebSearchMaxResults:         cfg.WebSearchConfig().MaxResults,
 			AutoCompact:                 cfg.ResponsesAutoCompactEnabled(),
 			CompactHistoryItemThreshold: cfg.ResponsesCompactHistoryItemThreshold(),
-			ModelProfiles:               responsesRuntimeModelProfiles(cfg),
+			ModelProfiles:               modelProfiles,
 		}
 		runtimeOptions := []responsesruntime.Option{}
 		if executionEventRecorder != nil {
@@ -481,9 +485,9 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	}, nil
 }
 
-func responsesRuntimeModelProfiles(cfg *config.Config) []responsesruntime.ModelProfile {
+func responsesRuntimeModelProfiles(cfg *config.Config, st *store.Store) ([]responsesruntime.ModelProfile, error) {
 	if cfg == nil {
-		return nil
+		return nil, nil
 	}
 	profiles := cfg.ResponsesModelProfiles()
 	out := make([]responsesruntime.ModelProfile, 0, len(profiles))
@@ -499,7 +503,69 @@ func responsesRuntimeModelProfiles(cfg *config.Config) []responsesruntime.ModelP
 			},
 		})
 	}
-	return out
+	if !cfg.ResponsesAdoptChannelModelProfilesEnabled() || st == nil {
+		return out, nil
+	}
+	adopted, err := st.ListAdoptedChannelModelProfiles()
+	if err != nil {
+		return nil, fmt.Errorf("load adopted channel model profiles: %w", err)
+	}
+	byModel := map[string]responsesruntime.ModelProfile{}
+	conflicted := map[string]struct{}{}
+	for _, record := range adopted {
+		model := strings.TrimSpace(record.Model)
+		if model == "" || cfg.MatchResponsesModelProfile(model).Matched {
+			continue
+		}
+		profile := channelModelRuntimeProfile(record)
+		if existing, ok := byModel[model]; ok {
+			if !sameRuntimeModelProfile(existing, profile) {
+				delete(byModel, model)
+				conflicted[model] = struct{}{}
+			}
+			continue
+		}
+		if _, conflict := conflicted[model]; conflict {
+			continue
+		}
+		byModel[model] = profile
+	}
+	for _, record := range adopted {
+		model := strings.TrimSpace(record.Model)
+		profile, ok := byModel[model]
+		if !ok {
+			continue
+		}
+		out = append(out, profile)
+		delete(byModel, model)
+	}
+	return out, nil
+}
+
+func channelModelRuntimeProfile(record store.ChannelModelRecord) responsesruntime.ModelProfile {
+	profile := responsesruntime.ModelProfile{
+		Name:          strings.TrimSpace(record.Model),
+		UpstreamModel: strings.TrimSpace(record.UpstreamModel),
+	}
+	if record.ContextWindow != nil {
+		profile.Budget.ContextWindowTokens = *record.ContextWindow
+	}
+	if record.MaxOutputTokens != nil {
+		profile.Budget.MaxOutputTokens = *record.MaxOutputTokens
+	}
+	if record.CompactHistoryItemThreshold != nil {
+		profile.Budget.CompactHistoryItemThreshold = *record.CompactHistoryItemThreshold
+	}
+	return profile
+}
+
+func sameRuntimeModelProfile(left responsesruntime.ModelProfile, right responsesruntime.ModelProfile) bool {
+	return left.Name == right.Name &&
+		left.Pattern == right.Pattern &&
+		left.UpstreamModel == right.UpstreamModel &&
+		left.Budget.ContextWindowTokens == right.Budget.ContextWindowTokens &&
+		left.Budget.MaxOutputTokens == right.Budget.MaxOutputTokens &&
+		left.Budget.CompactHistoryItemThreshold == right.Budget.CompactHistoryItemThreshold
 }
 
 func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier, managers ...*functionexec.Manager) (*Handler, error) {

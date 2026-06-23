@@ -1939,8 +1939,24 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 		t.Fatalf("reopened secrets = api_key %q headers %q", string(reopenedRecord.APIKeyCiphertext), reopenedRecord.HeadersJSON)
 	}
 
+	contextWindow := 128000
+	maxOutputTokens := 4096
+	compactThreshold := 7
+	supportsChat := 1
 	if err := st.ReplaceChannelModels("openai-primary", []ChannelModelRecord{
-		{Model: "GPT-5", DisplayName: "GPT-5", Source: "manual", Enabled: true},
+		{
+			Model:                       "GPT-5",
+			DisplayName:                 "GPT-5",
+			Source:                      "manual",
+			Enabled:                     true,
+			SupportsChatCompletions:     &supportsChat,
+			ContextWindow:               &contextWindow,
+			MaxOutputTokens:             &maxOutputTokens,
+			CompactHistoryItemThreshold: &compactThreshold,
+			UpstreamModel:               "provider/gpt-5",
+			ProfileSource:               "probe",
+			ProfileAdoptionStatus:       "adopted",
+		},
 		{Model: "gpt-4.1", Source: "manual", Enabled: false},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
@@ -1952,6 +1968,23 @@ func TestChannelConfigAndModelsRoundTrip(t *testing.T) {
 	}
 	if len(models) != 2 {
 		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+	if models[1].Model != "gpt-5" ||
+		models[1].ContextWindow == nil || *models[1].ContextWindow != contextWindow ||
+		models[1].MaxOutputTokens == nil || *models[1].MaxOutputTokens != maxOutputTokens ||
+		models[1].CompactHistoryItemThreshold == nil || *models[1].CompactHistoryItemThreshold != compactThreshold ||
+		models[1].UpstreamModel != "provider/gpt-5" ||
+		models[1].ProfileSource != "probe" ||
+		models[1].ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("profile fields = %#v, want adopted profile round trip", models[1])
+	}
+
+	adoptedProfiles, err := st.ListAdoptedChannelModelProfiles()
+	if err != nil {
+		t.Fatalf("ListAdoptedChannelModelProfiles() error = %v", err)
+	}
+	if len(adoptedProfiles) != 1 || adoptedProfiles[0].Model != "gpt-5" || adoptedProfiles[0].UpstreamModel != "provider/gpt-5" {
+		t.Fatalf("adoptedProfiles = %#v, want gpt-5 adopted profile", adoptedProfiles)
 	}
 
 	enabledModels, err := st.ListChannelModels("openai-primary", true)

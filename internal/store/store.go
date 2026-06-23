@@ -299,21 +299,26 @@ type ChannelConfigRecord struct {
 }
 
 type ChannelModelRecord struct {
-	ChannelID               string
-	Model                   string
-	DisplayName             string
-	Source                  string
-	Enabled                 bool
-	SupportsResponses       *int
-	SupportsChatCompletions *int
-	SupportsEmbeddings      *int
-	ContextWindow           *int
-	InputModalitiesJSON     string
-	OutputModalitiesJSON    string
-	RawModelJSON            string
-	FirstSeenAt             time.Time
-	LastSeenAt              time.Time
-	LastProbeAt             time.Time
+	ChannelID                   string
+	Model                       string
+	DisplayName                 string
+	Source                      string
+	Enabled                     bool
+	SupportsResponses           *int
+	SupportsChatCompletions     *int
+	SupportsEmbeddings          *int
+	ContextWindow               *int
+	MaxOutputTokens             *int
+	CompactHistoryItemThreshold *int
+	UpstreamModel               string
+	ProfileSource               string
+	ProfileAdoptionStatus       string
+	InputModalitiesJSON         string
+	OutputModalitiesJSON        string
+	RawModelJSON                string
+	FirstSeenAt                 time.Time
+	LastSeenAt                  time.Time
+	LastProbeAt                 time.Time
 }
 
 type ModelCatalogRecord struct {
@@ -962,6 +967,44 @@ func (s *Store) ListChannelModels(channelID string, enabledOnly bool) ([]Channel
 	return out, nil
 }
 
+func (s *Store) ListAdoptedChannelModelProfiles() ([]ChannelModelRecord, error) {
+	channelRows, err := s.client.ChannelConfig.Query().
+		Where(channelconfig.EnabledEQ(true)).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	enabledChannels := make(map[string]struct{}, len(channelRows))
+	for _, row := range channelRows {
+		enabledChannels[row.ID] = struct{}{}
+	}
+	if len(enabledChannels) == 0 {
+		return nil, nil
+	}
+
+	rows, err := s.client.ChannelModel.Query().
+		Where(
+			channelmodel.EnabledEQ(true),
+			channelmodel.ProfileAdoptionStatusEQ("adopted"),
+		).
+		Order(channelmodel.ByModel(), channelmodel.ByChannelID()).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChannelModelRecord, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := enabledChannels[row.ChannelID]; !ok {
+			continue
+		}
+		if row.SupportsChatCompletions != nil && *row.SupportsChatCompletions == 0 {
+			continue
+		}
+		out = append(out, channelModelRecordFromEnt(row))
+	}
+	return out, nil
+}
+
 func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRecord) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
@@ -1004,6 +1047,11 @@ func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRec
 			SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
 			SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
 			SetNillableContextWindow(record.ContextWindow).
+			SetNillableMaxOutputTokens(record.MaxOutputTokens).
+			SetNillableCompactHistoryItemThreshold(record.CompactHistoryItemThreshold).
+			SetUpstreamModel(strings.TrimSpace(record.UpstreamModel)).
+			SetProfileSource(strings.TrimSpace(record.ProfileSource)).
+			SetProfileAdoptionStatus(strings.TrimSpace(record.ProfileAdoptionStatus)).
 			SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 			SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 			SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
@@ -1055,6 +1103,11 @@ func (s *Store) UpsertChannelModel(channelID string, record ChannelModelRecord) 
 		SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
 		SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
 		SetNillableContextWindow(record.ContextWindow).
+		SetNillableMaxOutputTokens(record.MaxOutputTokens).
+		SetNillableCompactHistoryItemThreshold(record.CompactHistoryItemThreshold).
+		SetUpstreamModel(strings.TrimSpace(record.UpstreamModel)).
+		SetProfileSource(strings.TrimSpace(record.ProfileSource)).
+		SetProfileAdoptionStatus(strings.TrimSpace(record.ProfileAdoptionStatus)).
 		SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 		SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 		SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
@@ -2955,6 +3008,11 @@ func (s *Store) initSchema() error {
 			supports_chat_completions INTEGER NULL,
 			supports_embeddings INTEGER NULL,
 			context_window INTEGER NULL,
+			max_output_tokens INTEGER NULL,
+			compact_history_item_threshold INTEGER NULL,
+			upstream_model TEXT NOT NULL DEFAULT '',
+			profile_source TEXT NOT NULL DEFAULT '',
+			profile_adoption_status TEXT NOT NULL DEFAULT '',
 			input_modalities_json TEXT NOT NULL DEFAULT '[]',
 			output_modalities_json TEXT NOT NULL DEFAULT '[]',
 			raw_model_json TEXT NOT NULL DEFAULT '{}',
@@ -3367,6 +3425,21 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("channel_configs", "capabilities_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "max_output_tokens", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "compact_history_item_threshold", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "upstream_model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "profile_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "profile_adoption_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := s.backfillTraceIDs(); err != nil {
@@ -6436,16 +6509,19 @@ func (s *Store) channelConfigRecordFromEnt(row *dao.ChannelConfig) (ChannelConfi
 
 func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 	record := ChannelModelRecord{
-		ChannelID:            row.ChannelID,
-		Model:                row.Model,
-		DisplayName:          row.DisplayName,
-		Source:               row.Source,
-		Enabled:              row.Enabled,
-		InputModalitiesJSON:  row.InputModalitiesJSON,
-		OutputModalitiesJSON: row.OutputModalitiesJSON,
-		RawModelJSON:         row.RawModelJSON,
-		FirstSeenAt:          row.FirstSeenAt,
-		LastSeenAt:           row.LastSeenAt,
+		ChannelID:             row.ChannelID,
+		Model:                 row.Model,
+		DisplayName:           row.DisplayName,
+		Source:                row.Source,
+		Enabled:               row.Enabled,
+		UpstreamModel:         row.UpstreamModel,
+		ProfileSource:         row.ProfileSource,
+		ProfileAdoptionStatus: row.ProfileAdoptionStatus,
+		InputModalitiesJSON:   row.InputModalitiesJSON,
+		OutputModalitiesJSON:  row.OutputModalitiesJSON,
+		RawModelJSON:          row.RawModelJSON,
+		FirstSeenAt:           row.FirstSeenAt,
+		LastSeenAt:            row.LastSeenAt,
 	}
 	if row.SupportsResponses != nil {
 		value := *row.SupportsResponses
@@ -6462,6 +6538,14 @@ func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 	if row.ContextWindow != nil {
 		value := *row.ContextWindow
 		record.ContextWindow = &value
+	}
+	if row.MaxOutputTokens != nil {
+		value := *row.MaxOutputTokens
+		record.MaxOutputTokens = &value
+	}
+	if row.CompactHistoryItemThreshold != nil {
+		value := *row.CompactHistoryItemThreshold
+		record.CompactHistoryItemThreshold = &value
 	}
 	if row.LastProbeAt != nil {
 		record.LastProbeAt = *row.LastProbeAt

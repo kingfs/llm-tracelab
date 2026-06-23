@@ -290,24 +290,36 @@ func init() {
 	channelmodelDescEnabled := channelmodelFields[4].Descriptor()
 	// channelmodel.DefaultEnabled holds the default value on creation for the enabled field.
 	channelmodel.DefaultEnabled = channelmodelDescEnabled.Default.(bool)
+	// channelmodelDescUpstreamModel is the schema descriptor for upstream_model field.
+	channelmodelDescUpstreamModel := channelmodelFields[11].Descriptor()
+	// channelmodel.DefaultUpstreamModel holds the default value on creation for the upstream_model field.
+	channelmodel.DefaultUpstreamModel = channelmodelDescUpstreamModel.Default.(string)
+	// channelmodelDescProfileSource is the schema descriptor for profile_source field.
+	channelmodelDescProfileSource := channelmodelFields[12].Descriptor()
+	// channelmodel.DefaultProfileSource holds the default value on creation for the profile_source field.
+	channelmodel.DefaultProfileSource = channelmodelDescProfileSource.Default.(string)
+	// channelmodelDescProfileAdoptionStatus is the schema descriptor for profile_adoption_status field.
+	channelmodelDescProfileAdoptionStatus := channelmodelFields[13].Descriptor()
+	// channelmodel.DefaultProfileAdoptionStatus holds the default value on creation for the profile_adoption_status field.
+	channelmodel.DefaultProfileAdoptionStatus = channelmodelDescProfileAdoptionStatus.Default.(string)
 	// channelmodelDescInputModalitiesJSON is the schema descriptor for input_modalities_json field.
-	channelmodelDescInputModalitiesJSON := channelmodelFields[9].Descriptor()
+	channelmodelDescInputModalitiesJSON := channelmodelFields[14].Descriptor()
 	// channelmodel.DefaultInputModalitiesJSON holds the default value on creation for the input_modalities_json field.
 	channelmodel.DefaultInputModalitiesJSON = channelmodelDescInputModalitiesJSON.Default.(string)
 	// channelmodelDescOutputModalitiesJSON is the schema descriptor for output_modalities_json field.
-	channelmodelDescOutputModalitiesJSON := channelmodelFields[10].Descriptor()
+	channelmodelDescOutputModalitiesJSON := channelmodelFields[15].Descriptor()
 	// channelmodel.DefaultOutputModalitiesJSON holds the default value on creation for the output_modalities_json field.
 	channelmodel.DefaultOutputModalitiesJSON = channelmodelDescOutputModalitiesJSON.Default.(string)
 	// channelmodelDescRawModelJSON is the schema descriptor for raw_model_json field.
-	channelmodelDescRawModelJSON := channelmodelFields[11].Descriptor()
+	channelmodelDescRawModelJSON := channelmodelFields[16].Descriptor()
 	// channelmodel.DefaultRawModelJSON holds the default value on creation for the raw_model_json field.
 	channelmodel.DefaultRawModelJSON = channelmodelDescRawModelJSON.Default.(string)
 	// channelmodelDescFirstSeenAt is the schema descriptor for first_seen_at field.
-	channelmodelDescFirstSeenAt := channelmodelFields[12].Descriptor()
+	channelmodelDescFirstSeenAt := channelmodelFields[17].Descriptor()
 	// channelmodel.DefaultFirstSeenAt holds the default value on creation for the first_seen_at field.
 	channelmodel.DefaultFirstSeenAt = channelmodelDescFirstSeenAt.Default.(func() time.Time)
 	// channelmodelDescLastSeenAt is the schema descriptor for last_seen_at field.
-	channelmodelDescLastSeenAt := channelmodelFields[13].Descriptor()
+	channelmodelDescLastSeenAt := channelmodelFields[18].Descriptor()
 	// channelmodel.DefaultLastSeenAt holds the default value on creation for the last_seen_at field.
 	channelmodel.DefaultLastSeenAt = channelmodelDescLastSeenAt.Default.(func() time.Time)
 	channelproberunFields := schema.ChannelProbeRun{}.Fields()

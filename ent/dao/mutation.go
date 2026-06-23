@@ -4746,32 +4746,39 @@ func (m *ChannelConfigMutation) ResetEdge(name string) error {
 // ChannelModelMutation represents an operation that mutates the ChannelModel nodes in the graph.
 type ChannelModelMutation struct {
 	config
-	op                           Op
-	typ                          string
-	id                           *int
-	channel_id                   *string
-	model                        *string
-	display_name                 *string
-	source                       *string
-	enabled                      *bool
-	supports_responses           *int
-	addsupports_responses        *int
-	supports_chat_completions    *int
-	addsupports_chat_completions *int
-	supports_embeddings          *int
-	addsupports_embeddings       *int
-	context_window               *int
-	addcontext_window            *int
-	input_modalities_json        *string
-	output_modalities_json       *string
-	raw_model_json               *string
-	first_seen_at                *time.Time
-	last_seen_at                 *time.Time
-	last_probe_at                *time.Time
-	clearedFields                map[string]struct{}
-	done                         bool
-	oldValue                     func(context.Context) (*ChannelModel, error)
-	predicates                   []predicate.ChannelModel
+	op                                Op
+	typ                               string
+	id                                *int
+	channel_id                        *string
+	model                             *string
+	display_name                      *string
+	source                            *string
+	enabled                           *bool
+	supports_responses                *int
+	addsupports_responses             *int
+	supports_chat_completions         *int
+	addsupports_chat_completions      *int
+	supports_embeddings               *int
+	addsupports_embeddings            *int
+	context_window                    *int
+	addcontext_window                 *int
+	max_output_tokens                 *int
+	addmax_output_tokens              *int
+	compact_history_item_threshold    *int
+	addcompact_history_item_threshold *int
+	upstream_model                    *string
+	profile_source                    *string
+	profile_adoption_status           *string
+	input_modalities_json             *string
+	output_modalities_json            *string
+	raw_model_json                    *string
+	first_seen_at                     *time.Time
+	last_seen_at                      *time.Time
+	last_probe_at                     *time.Time
+	clearedFields                     map[string]struct{}
+	done                              bool
+	oldValue                          func(context.Context) (*ChannelModel, error)
+	predicates                        []predicate.ChannelModel
 }
 
 var _ ent.Mutation = (*ChannelModelMutation)(nil)
@@ -5332,6 +5339,254 @@ func (m *ChannelModelMutation) ResetContextWindow() {
 	delete(m.clearedFields, channelmodel.FieldContextWindow)
 }
 
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (m *ChannelModelMutation) SetMaxOutputTokens(i int) {
+	m.max_output_tokens = &i
+	m.addmax_output_tokens = nil
+}
+
+// MaxOutputTokens returns the value of the "max_output_tokens" field in the mutation.
+func (m *ChannelModelMutation) MaxOutputTokens() (r int, exists bool) {
+	v := m.max_output_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxOutputTokens returns the old "max_output_tokens" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldMaxOutputTokens(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxOutputTokens is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxOutputTokens requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxOutputTokens: %w", err)
+	}
+	return oldValue.MaxOutputTokens, nil
+}
+
+// AddMaxOutputTokens adds i to the "max_output_tokens" field.
+func (m *ChannelModelMutation) AddMaxOutputTokens(i int) {
+	if m.addmax_output_tokens != nil {
+		*m.addmax_output_tokens += i
+	} else {
+		m.addmax_output_tokens = &i
+	}
+}
+
+// AddedMaxOutputTokens returns the value that was added to the "max_output_tokens" field in this mutation.
+func (m *ChannelModelMutation) AddedMaxOutputTokens() (r int, exists bool) {
+	v := m.addmax_output_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (m *ChannelModelMutation) ClearMaxOutputTokens() {
+	m.max_output_tokens = nil
+	m.addmax_output_tokens = nil
+	m.clearedFields[channelmodel.FieldMaxOutputTokens] = struct{}{}
+}
+
+// MaxOutputTokensCleared returns if the "max_output_tokens" field was cleared in this mutation.
+func (m *ChannelModelMutation) MaxOutputTokensCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldMaxOutputTokens]
+	return ok
+}
+
+// ResetMaxOutputTokens resets all changes to the "max_output_tokens" field.
+func (m *ChannelModelMutation) ResetMaxOutputTokens() {
+	m.max_output_tokens = nil
+	m.addmax_output_tokens = nil
+	delete(m.clearedFields, channelmodel.FieldMaxOutputTokens)
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (m *ChannelModelMutation) SetCompactHistoryItemThreshold(i int) {
+	m.compact_history_item_threshold = &i
+	m.addcompact_history_item_threshold = nil
+}
+
+// CompactHistoryItemThreshold returns the value of the "compact_history_item_threshold" field in the mutation.
+func (m *ChannelModelMutation) CompactHistoryItemThreshold() (r int, exists bool) {
+	v := m.compact_history_item_threshold
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCompactHistoryItemThreshold returns the old "compact_history_item_threshold" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldCompactHistoryItemThreshold(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCompactHistoryItemThreshold is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCompactHistoryItemThreshold requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCompactHistoryItemThreshold: %w", err)
+	}
+	return oldValue.CompactHistoryItemThreshold, nil
+}
+
+// AddCompactHistoryItemThreshold adds i to the "compact_history_item_threshold" field.
+func (m *ChannelModelMutation) AddCompactHistoryItemThreshold(i int) {
+	if m.addcompact_history_item_threshold != nil {
+		*m.addcompact_history_item_threshold += i
+	} else {
+		m.addcompact_history_item_threshold = &i
+	}
+}
+
+// AddedCompactHistoryItemThreshold returns the value that was added to the "compact_history_item_threshold" field in this mutation.
+func (m *ChannelModelMutation) AddedCompactHistoryItemThreshold() (r int, exists bool) {
+	v := m.addcompact_history_item_threshold
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearCompactHistoryItemThreshold clears the value of the "compact_history_item_threshold" field.
+func (m *ChannelModelMutation) ClearCompactHistoryItemThreshold() {
+	m.compact_history_item_threshold = nil
+	m.addcompact_history_item_threshold = nil
+	m.clearedFields[channelmodel.FieldCompactHistoryItemThreshold] = struct{}{}
+}
+
+// CompactHistoryItemThresholdCleared returns if the "compact_history_item_threshold" field was cleared in this mutation.
+func (m *ChannelModelMutation) CompactHistoryItemThresholdCleared() bool {
+	_, ok := m.clearedFields[channelmodel.FieldCompactHistoryItemThreshold]
+	return ok
+}
+
+// ResetCompactHistoryItemThreshold resets all changes to the "compact_history_item_threshold" field.
+func (m *ChannelModelMutation) ResetCompactHistoryItemThreshold() {
+	m.compact_history_item_threshold = nil
+	m.addcompact_history_item_threshold = nil
+	delete(m.clearedFields, channelmodel.FieldCompactHistoryItemThreshold)
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (m *ChannelModelMutation) SetUpstreamModel(s string) {
+	m.upstream_model = &s
+}
+
+// UpstreamModel returns the value of the "upstream_model" field in the mutation.
+func (m *ChannelModelMutation) UpstreamModel() (r string, exists bool) {
+	v := m.upstream_model
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpstreamModel returns the old "upstream_model" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldUpstreamModel(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpstreamModel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpstreamModel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpstreamModel: %w", err)
+	}
+	return oldValue.UpstreamModel, nil
+}
+
+// ResetUpstreamModel resets all changes to the "upstream_model" field.
+func (m *ChannelModelMutation) ResetUpstreamModel() {
+	m.upstream_model = nil
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (m *ChannelModelMutation) SetProfileSource(s string) {
+	m.profile_source = &s
+}
+
+// ProfileSource returns the value of the "profile_source" field in the mutation.
+func (m *ChannelModelMutation) ProfileSource() (r string, exists bool) {
+	v := m.profile_source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProfileSource returns the old "profile_source" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldProfileSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProfileSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProfileSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProfileSource: %w", err)
+	}
+	return oldValue.ProfileSource, nil
+}
+
+// ResetProfileSource resets all changes to the "profile_source" field.
+func (m *ChannelModelMutation) ResetProfileSource() {
+	m.profile_source = nil
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (m *ChannelModelMutation) SetProfileAdoptionStatus(s string) {
+	m.profile_adoption_status = &s
+}
+
+// ProfileAdoptionStatus returns the value of the "profile_adoption_status" field in the mutation.
+func (m *ChannelModelMutation) ProfileAdoptionStatus() (r string, exists bool) {
+	v := m.profile_adoption_status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProfileAdoptionStatus returns the old "profile_adoption_status" field's value of the ChannelModel entity.
+// If the ChannelModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ChannelModelMutation) OldProfileAdoptionStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProfileAdoptionStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProfileAdoptionStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProfileAdoptionStatus: %w", err)
+	}
+	return oldValue.ProfileAdoptionStatus, nil
+}
+
+// ResetProfileAdoptionStatus resets all changes to the "profile_adoption_status" field.
+func (m *ChannelModelMutation) ResetProfileAdoptionStatus() {
+	m.profile_adoption_status = nil
+}
+
 // SetInputModalitiesJSON sets the "input_modalities_json" field.
 func (m *ChannelModelMutation) SetInputModalitiesJSON(s string) {
 	m.input_modalities_json = &s
@@ -5595,7 +5850,7 @@ func (m *ChannelModelMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *ChannelModelMutation) Fields() []string {
-	fields := make([]string, 0, 15)
+	fields := make([]string, 0, 20)
 	if m.channel_id != nil {
 		fields = append(fields, channelmodel.FieldChannelID)
 	}
@@ -5622,6 +5877,21 @@ func (m *ChannelModelMutation) Fields() []string {
 	}
 	if m.context_window != nil {
 		fields = append(fields, channelmodel.FieldContextWindow)
+	}
+	if m.max_output_tokens != nil {
+		fields = append(fields, channelmodel.FieldMaxOutputTokens)
+	}
+	if m.compact_history_item_threshold != nil {
+		fields = append(fields, channelmodel.FieldCompactHistoryItemThreshold)
+	}
+	if m.upstream_model != nil {
+		fields = append(fields, channelmodel.FieldUpstreamModel)
+	}
+	if m.profile_source != nil {
+		fields = append(fields, channelmodel.FieldProfileSource)
+	}
+	if m.profile_adoption_status != nil {
+		fields = append(fields, channelmodel.FieldProfileAdoptionStatus)
 	}
 	if m.input_modalities_json != nil {
 		fields = append(fields, channelmodel.FieldInputModalitiesJSON)
@@ -5667,6 +5937,16 @@ func (m *ChannelModelMutation) Field(name string) (ent.Value, bool) {
 		return m.SupportsEmbeddings()
 	case channelmodel.FieldContextWindow:
 		return m.ContextWindow()
+	case channelmodel.FieldMaxOutputTokens:
+		return m.MaxOutputTokens()
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		return m.CompactHistoryItemThreshold()
+	case channelmodel.FieldUpstreamModel:
+		return m.UpstreamModel()
+	case channelmodel.FieldProfileSource:
+		return m.ProfileSource()
+	case channelmodel.FieldProfileAdoptionStatus:
+		return m.ProfileAdoptionStatus()
 	case channelmodel.FieldInputModalitiesJSON:
 		return m.InputModalitiesJSON()
 	case channelmodel.FieldOutputModalitiesJSON:
@@ -5706,6 +5986,16 @@ func (m *ChannelModelMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldSupportsEmbeddings(ctx)
 	case channelmodel.FieldContextWindow:
 		return m.OldContextWindow(ctx)
+	case channelmodel.FieldMaxOutputTokens:
+		return m.OldMaxOutputTokens(ctx)
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		return m.OldCompactHistoryItemThreshold(ctx)
+	case channelmodel.FieldUpstreamModel:
+		return m.OldUpstreamModel(ctx)
+	case channelmodel.FieldProfileSource:
+		return m.OldProfileSource(ctx)
+	case channelmodel.FieldProfileAdoptionStatus:
+		return m.OldProfileAdoptionStatus(ctx)
 	case channelmodel.FieldInputModalitiesJSON:
 		return m.OldInputModalitiesJSON(ctx)
 	case channelmodel.FieldOutputModalitiesJSON:
@@ -5790,6 +6080,41 @@ func (m *ChannelModelMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetContextWindow(v)
 		return nil
+	case channelmodel.FieldMaxOutputTokens:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxOutputTokens(v)
+		return nil
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCompactHistoryItemThreshold(v)
+		return nil
+	case channelmodel.FieldUpstreamModel:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpstreamModel(v)
+		return nil
+	case channelmodel.FieldProfileSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProfileSource(v)
+		return nil
+	case channelmodel.FieldProfileAdoptionStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProfileAdoptionStatus(v)
+		return nil
 	case channelmodel.FieldInputModalitiesJSON:
 		v, ok := value.(string)
 		if !ok {
@@ -5852,6 +6177,12 @@ func (m *ChannelModelMutation) AddedFields() []string {
 	if m.addcontext_window != nil {
 		fields = append(fields, channelmodel.FieldContextWindow)
 	}
+	if m.addmax_output_tokens != nil {
+		fields = append(fields, channelmodel.FieldMaxOutputTokens)
+	}
+	if m.addcompact_history_item_threshold != nil {
+		fields = append(fields, channelmodel.FieldCompactHistoryItemThreshold)
+	}
 	return fields
 }
 
@@ -5868,6 +6199,10 @@ func (m *ChannelModelMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedSupportsEmbeddings()
 	case channelmodel.FieldContextWindow:
 		return m.AddedContextWindow()
+	case channelmodel.FieldMaxOutputTokens:
+		return m.AddedMaxOutputTokens()
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		return m.AddedCompactHistoryItemThreshold()
 	}
 	return nil, false
 }
@@ -5905,6 +6240,20 @@ func (m *ChannelModelMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddContextWindow(v)
 		return nil
+	case channelmodel.FieldMaxOutputTokens:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxOutputTokens(v)
+		return nil
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddCompactHistoryItemThreshold(v)
+		return nil
 	}
 	return fmt.Errorf("unknown ChannelModel numeric field %s", name)
 }
@@ -5924,6 +6273,12 @@ func (m *ChannelModelMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(channelmodel.FieldContextWindow) {
 		fields = append(fields, channelmodel.FieldContextWindow)
+	}
+	if m.FieldCleared(channelmodel.FieldMaxOutputTokens) {
+		fields = append(fields, channelmodel.FieldMaxOutputTokens)
+	}
+	if m.FieldCleared(channelmodel.FieldCompactHistoryItemThreshold) {
+		fields = append(fields, channelmodel.FieldCompactHistoryItemThreshold)
 	}
 	if m.FieldCleared(channelmodel.FieldLastProbeAt) {
 		fields = append(fields, channelmodel.FieldLastProbeAt)
@@ -5953,6 +6308,12 @@ func (m *ChannelModelMutation) ClearField(name string) error {
 		return nil
 	case channelmodel.FieldContextWindow:
 		m.ClearContextWindow()
+		return nil
+	case channelmodel.FieldMaxOutputTokens:
+		m.ClearMaxOutputTokens()
+		return nil
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		m.ClearCompactHistoryItemThreshold()
 		return nil
 	case channelmodel.FieldLastProbeAt:
 		m.ClearLastProbeAt()
@@ -5991,6 +6352,21 @@ func (m *ChannelModelMutation) ResetField(name string) error {
 		return nil
 	case channelmodel.FieldContextWindow:
 		m.ResetContextWindow()
+		return nil
+	case channelmodel.FieldMaxOutputTokens:
+		m.ResetMaxOutputTokens()
+		return nil
+	case channelmodel.FieldCompactHistoryItemThreshold:
+		m.ResetCompactHistoryItemThreshold()
+		return nil
+	case channelmodel.FieldUpstreamModel:
+		m.ResetUpstreamModel()
+		return nil
+	case channelmodel.FieldProfileSource:
+		m.ResetProfileSource()
+		return nil
+	case channelmodel.FieldProfileAdoptionStatus:
+		m.ResetProfileAdoptionStatus()
 		return nil
 	case channelmodel.FieldInputModalitiesJSON:
 		m.ResetInputModalitiesJSON()

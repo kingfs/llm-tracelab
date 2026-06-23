@@ -165,21 +165,26 @@ var schemaGraph = func() *sqlgraph.Schema {
 		},
 		Type: "ChannelModel",
 		Fields: map[string]*sqlgraph.FieldSpec{
-			channelmodel.FieldChannelID:               {Type: field.TypeString, Column: channelmodel.FieldChannelID},
-			channelmodel.FieldModel:                   {Type: field.TypeString, Column: channelmodel.FieldModel},
-			channelmodel.FieldDisplayName:             {Type: field.TypeString, Column: channelmodel.FieldDisplayName},
-			channelmodel.FieldSource:                  {Type: field.TypeString, Column: channelmodel.FieldSource},
-			channelmodel.FieldEnabled:                 {Type: field.TypeBool, Column: channelmodel.FieldEnabled},
-			channelmodel.FieldSupportsResponses:       {Type: field.TypeInt, Column: channelmodel.FieldSupportsResponses},
-			channelmodel.FieldSupportsChatCompletions: {Type: field.TypeInt, Column: channelmodel.FieldSupportsChatCompletions},
-			channelmodel.FieldSupportsEmbeddings:      {Type: field.TypeInt, Column: channelmodel.FieldSupportsEmbeddings},
-			channelmodel.FieldContextWindow:           {Type: field.TypeInt, Column: channelmodel.FieldContextWindow},
-			channelmodel.FieldInputModalitiesJSON:     {Type: field.TypeString, Column: channelmodel.FieldInputModalitiesJSON},
-			channelmodel.FieldOutputModalitiesJSON:    {Type: field.TypeString, Column: channelmodel.FieldOutputModalitiesJSON},
-			channelmodel.FieldRawModelJSON:            {Type: field.TypeString, Column: channelmodel.FieldRawModelJSON},
-			channelmodel.FieldFirstSeenAt:             {Type: field.TypeTime, Column: channelmodel.FieldFirstSeenAt},
-			channelmodel.FieldLastSeenAt:              {Type: field.TypeTime, Column: channelmodel.FieldLastSeenAt},
-			channelmodel.FieldLastProbeAt:             {Type: field.TypeTime, Column: channelmodel.FieldLastProbeAt},
+			channelmodel.FieldChannelID:                   {Type: field.TypeString, Column: channelmodel.FieldChannelID},
+			channelmodel.FieldModel:                       {Type: field.TypeString, Column: channelmodel.FieldModel},
+			channelmodel.FieldDisplayName:                 {Type: field.TypeString, Column: channelmodel.FieldDisplayName},
+			channelmodel.FieldSource:                      {Type: field.TypeString, Column: channelmodel.FieldSource},
+			channelmodel.FieldEnabled:                     {Type: field.TypeBool, Column: channelmodel.FieldEnabled},
+			channelmodel.FieldSupportsResponses:           {Type: field.TypeInt, Column: channelmodel.FieldSupportsResponses},
+			channelmodel.FieldSupportsChatCompletions:     {Type: field.TypeInt, Column: channelmodel.FieldSupportsChatCompletions},
+			channelmodel.FieldSupportsEmbeddings:          {Type: field.TypeInt, Column: channelmodel.FieldSupportsEmbeddings},
+			channelmodel.FieldContextWindow:               {Type: field.TypeInt, Column: channelmodel.FieldContextWindow},
+			channelmodel.FieldMaxOutputTokens:             {Type: field.TypeInt, Column: channelmodel.FieldMaxOutputTokens},
+			channelmodel.FieldCompactHistoryItemThreshold: {Type: field.TypeInt, Column: channelmodel.FieldCompactHistoryItemThreshold},
+			channelmodel.FieldUpstreamModel:               {Type: field.TypeString, Column: channelmodel.FieldUpstreamModel},
+			channelmodel.FieldProfileSource:               {Type: field.TypeString, Column: channelmodel.FieldProfileSource},
+			channelmodel.FieldProfileAdoptionStatus:       {Type: field.TypeString, Column: channelmodel.FieldProfileAdoptionStatus},
+			channelmodel.FieldInputModalitiesJSON:         {Type: field.TypeString, Column: channelmodel.FieldInputModalitiesJSON},
+			channelmodel.FieldOutputModalitiesJSON:        {Type: field.TypeString, Column: channelmodel.FieldOutputModalitiesJSON},
+			channelmodel.FieldRawModelJSON:                {Type: field.TypeString, Column: channelmodel.FieldRawModelJSON},
+			channelmodel.FieldFirstSeenAt:                 {Type: field.TypeTime, Column: channelmodel.FieldFirstSeenAt},
+			channelmodel.FieldLastSeenAt:                  {Type: field.TypeTime, Column: channelmodel.FieldLastSeenAt},
+			channelmodel.FieldLastProbeAt:                 {Type: field.TypeTime, Column: channelmodel.FieldLastProbeAt},
 		},
 	}
 	graph.Nodes[5] = &sqlgraph.Node{
@@ -1329,6 +1334,31 @@ func (f *ChannelModelFilter) WhereSupportsEmbeddings(p entql.IntP) {
 // WhereContextWindow applies the entql int predicate on the context_window field.
 func (f *ChannelModelFilter) WhereContextWindow(p entql.IntP) {
 	f.Where(p.Field(channelmodel.FieldContextWindow))
+}
+
+// WhereMaxOutputTokens applies the entql int predicate on the max_output_tokens field.
+func (f *ChannelModelFilter) WhereMaxOutputTokens(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldMaxOutputTokens))
+}
+
+// WhereCompactHistoryItemThreshold applies the entql int predicate on the compact_history_item_threshold field.
+func (f *ChannelModelFilter) WhereCompactHistoryItemThreshold(p entql.IntP) {
+	f.Where(p.Field(channelmodel.FieldCompactHistoryItemThreshold))
+}
+
+// WhereUpstreamModel applies the entql string predicate on the upstream_model field.
+func (f *ChannelModelFilter) WhereUpstreamModel(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldUpstreamModel))
+}
+
+// WhereProfileSource applies the entql string predicate on the profile_source field.
+func (f *ChannelModelFilter) WhereProfileSource(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldProfileSource))
+}
+
+// WhereProfileAdoptionStatus applies the entql string predicate on the profile_adoption_status field.
+func (f *ChannelModelFilter) WhereProfileAdoptionStatus(p entql.StringP) {
+	f.Where(p.Field(channelmodel.FieldProfileAdoptionStatus))
 }
 
 // WhereInputModalitiesJSON applies the entql string predicate on the input_modalities_json field.

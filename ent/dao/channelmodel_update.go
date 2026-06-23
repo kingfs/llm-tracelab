@@ -208,6 +208,102 @@ func (_u *ChannelModelUpdate) ClearContextWindow() *ChannelModelUpdate {
 	return _u
 }
 
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (_u *ChannelModelUpdate) SetMaxOutputTokens(v int) *ChannelModelUpdate {
+	_u.mutation.ResetMaxOutputTokens()
+	_u.mutation.SetMaxOutputTokens(v)
+	return _u
+}
+
+// SetNillableMaxOutputTokens sets the "max_output_tokens" field if the given value is not nil.
+func (_u *ChannelModelUpdate) SetNillableMaxOutputTokens(v *int) *ChannelModelUpdate {
+	if v != nil {
+		_u.SetMaxOutputTokens(*v)
+	}
+	return _u
+}
+
+// AddMaxOutputTokens adds value to the "max_output_tokens" field.
+func (_u *ChannelModelUpdate) AddMaxOutputTokens(v int) *ChannelModelUpdate {
+	_u.mutation.AddMaxOutputTokens(v)
+	return _u
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (_u *ChannelModelUpdate) ClearMaxOutputTokens() *ChannelModelUpdate {
+	_u.mutation.ClearMaxOutputTokens()
+	return _u
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (_u *ChannelModelUpdate) SetCompactHistoryItemThreshold(v int) *ChannelModelUpdate {
+	_u.mutation.ResetCompactHistoryItemThreshold()
+	_u.mutation.SetCompactHistoryItemThreshold(v)
+	return _u
+}
+
+// SetNillableCompactHistoryItemThreshold sets the "compact_history_item_threshold" field if the given value is not nil.
+func (_u *ChannelModelUpdate) SetNillableCompactHistoryItemThreshold(v *int) *ChannelModelUpdate {
+	if v != nil {
+		_u.SetCompactHistoryItemThreshold(*v)
+	}
+	return _u
+}
+
+// AddCompactHistoryItemThreshold adds value to the "compact_history_item_threshold" field.
+func (_u *ChannelModelUpdate) AddCompactHistoryItemThreshold(v int) *ChannelModelUpdate {
+	_u.mutation.AddCompactHistoryItemThreshold(v)
+	return _u
+}
+
+// ClearCompactHistoryItemThreshold clears the value of the "compact_history_item_threshold" field.
+func (_u *ChannelModelUpdate) ClearCompactHistoryItemThreshold() *ChannelModelUpdate {
+	_u.mutation.ClearCompactHistoryItemThreshold()
+	return _u
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (_u *ChannelModelUpdate) SetUpstreamModel(v string) *ChannelModelUpdate {
+	_u.mutation.SetUpstreamModel(v)
+	return _u
+}
+
+// SetNillableUpstreamModel sets the "upstream_model" field if the given value is not nil.
+func (_u *ChannelModelUpdate) SetNillableUpstreamModel(v *string) *ChannelModelUpdate {
+	if v != nil {
+		_u.SetUpstreamModel(*v)
+	}
+	return _u
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (_u *ChannelModelUpdate) SetProfileSource(v string) *ChannelModelUpdate {
+	_u.mutation.SetProfileSource(v)
+	return _u
+}
+
+// SetNillableProfileSource sets the "profile_source" field if the given value is not nil.
+func (_u *ChannelModelUpdate) SetNillableProfileSource(v *string) *ChannelModelUpdate {
+	if v != nil {
+		_u.SetProfileSource(*v)
+	}
+	return _u
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (_u *ChannelModelUpdate) SetProfileAdoptionStatus(v string) *ChannelModelUpdate {
+	_u.mutation.SetProfileAdoptionStatus(v)
+	return _u
+}
+
+// SetNillableProfileAdoptionStatus sets the "profile_adoption_status" field if the given value is not nil.
+func (_u *ChannelModelUpdate) SetNillableProfileAdoptionStatus(v *string) *ChannelModelUpdate {
+	if v != nil {
+		_u.SetProfileAdoptionStatus(*v)
+	}
+	return _u
+}
+
 // SetInputModalitiesJSON sets the "input_modalities_json" field.
 func (_u *ChannelModelUpdate) SetInputModalitiesJSON(v string) *ChannelModelUpdate {
 	_u.mutation.SetInputModalitiesJSON(v)
@@ -413,6 +509,33 @@ func (_u *ChannelModelUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if _u.mutation.ContextWindowCleared() {
 		_spec.ClearField(channelmodel.FieldContextWindow, field.TypeInt)
+	}
+	if value, ok := _u.mutation.MaxOutputTokens(); ok {
+		_spec.SetField(channelmodel.FieldMaxOutputTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxOutputTokens(); ok {
+		_spec.AddField(channelmodel.FieldMaxOutputTokens, field.TypeInt, value)
+	}
+	if _u.mutation.MaxOutputTokensCleared() {
+		_spec.ClearField(channelmodel.FieldMaxOutputTokens, field.TypeInt)
+	}
+	if value, ok := _u.mutation.CompactHistoryItemThreshold(); ok {
+		_spec.SetField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCompactHistoryItemThreshold(); ok {
+		_spec.AddField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt, value)
+	}
+	if _u.mutation.CompactHistoryItemThresholdCleared() {
+		_spec.ClearField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt)
+	}
+	if value, ok := _u.mutation.UpstreamModel(); ok {
+		_spec.SetField(channelmodel.FieldUpstreamModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProfileSource(); ok {
+		_spec.SetField(channelmodel.FieldProfileSource, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProfileAdoptionStatus(); ok {
+		_spec.SetField(channelmodel.FieldProfileAdoptionStatus, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.InputModalitiesJSON(); ok {
 		_spec.SetField(channelmodel.FieldInputModalitiesJSON, field.TypeString, value)
@@ -634,6 +757,102 @@ func (_u *ChannelModelUpdateOne) AddContextWindow(v int) *ChannelModelUpdateOne 
 // ClearContextWindow clears the value of the "context_window" field.
 func (_u *ChannelModelUpdateOne) ClearContextWindow() *ChannelModelUpdateOne {
 	_u.mutation.ClearContextWindow()
+	return _u
+}
+
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (_u *ChannelModelUpdateOne) SetMaxOutputTokens(v int) *ChannelModelUpdateOne {
+	_u.mutation.ResetMaxOutputTokens()
+	_u.mutation.SetMaxOutputTokens(v)
+	return _u
+}
+
+// SetNillableMaxOutputTokens sets the "max_output_tokens" field if the given value is not nil.
+func (_u *ChannelModelUpdateOne) SetNillableMaxOutputTokens(v *int) *ChannelModelUpdateOne {
+	if v != nil {
+		_u.SetMaxOutputTokens(*v)
+	}
+	return _u
+}
+
+// AddMaxOutputTokens adds value to the "max_output_tokens" field.
+func (_u *ChannelModelUpdateOne) AddMaxOutputTokens(v int) *ChannelModelUpdateOne {
+	_u.mutation.AddMaxOutputTokens(v)
+	return _u
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (_u *ChannelModelUpdateOne) ClearMaxOutputTokens() *ChannelModelUpdateOne {
+	_u.mutation.ClearMaxOutputTokens()
+	return _u
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (_u *ChannelModelUpdateOne) SetCompactHistoryItemThreshold(v int) *ChannelModelUpdateOne {
+	_u.mutation.ResetCompactHistoryItemThreshold()
+	_u.mutation.SetCompactHistoryItemThreshold(v)
+	return _u
+}
+
+// SetNillableCompactHistoryItemThreshold sets the "compact_history_item_threshold" field if the given value is not nil.
+func (_u *ChannelModelUpdateOne) SetNillableCompactHistoryItemThreshold(v *int) *ChannelModelUpdateOne {
+	if v != nil {
+		_u.SetCompactHistoryItemThreshold(*v)
+	}
+	return _u
+}
+
+// AddCompactHistoryItemThreshold adds value to the "compact_history_item_threshold" field.
+func (_u *ChannelModelUpdateOne) AddCompactHistoryItemThreshold(v int) *ChannelModelUpdateOne {
+	_u.mutation.AddCompactHistoryItemThreshold(v)
+	return _u
+}
+
+// ClearCompactHistoryItemThreshold clears the value of the "compact_history_item_threshold" field.
+func (_u *ChannelModelUpdateOne) ClearCompactHistoryItemThreshold() *ChannelModelUpdateOne {
+	_u.mutation.ClearCompactHistoryItemThreshold()
+	return _u
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (_u *ChannelModelUpdateOne) SetUpstreamModel(v string) *ChannelModelUpdateOne {
+	_u.mutation.SetUpstreamModel(v)
+	return _u
+}
+
+// SetNillableUpstreamModel sets the "upstream_model" field if the given value is not nil.
+func (_u *ChannelModelUpdateOne) SetNillableUpstreamModel(v *string) *ChannelModelUpdateOne {
+	if v != nil {
+		_u.SetUpstreamModel(*v)
+	}
+	return _u
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (_u *ChannelModelUpdateOne) SetProfileSource(v string) *ChannelModelUpdateOne {
+	_u.mutation.SetProfileSource(v)
+	return _u
+}
+
+// SetNillableProfileSource sets the "profile_source" field if the given value is not nil.
+func (_u *ChannelModelUpdateOne) SetNillableProfileSource(v *string) *ChannelModelUpdateOne {
+	if v != nil {
+		_u.SetProfileSource(*v)
+	}
+	return _u
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (_u *ChannelModelUpdateOne) SetProfileAdoptionStatus(v string) *ChannelModelUpdateOne {
+	_u.mutation.SetProfileAdoptionStatus(v)
+	return _u
+}
+
+// SetNillableProfileAdoptionStatus sets the "profile_adoption_status" field if the given value is not nil.
+func (_u *ChannelModelUpdateOne) SetNillableProfileAdoptionStatus(v *string) *ChannelModelUpdateOne {
+	if v != nil {
+		_u.SetProfileAdoptionStatus(*v)
+	}
 	return _u
 }
 
@@ -872,6 +1091,33 @@ func (_u *ChannelModelUpdateOne) sqlSave(ctx context.Context) (_node *ChannelMod
 	}
 	if _u.mutation.ContextWindowCleared() {
 		_spec.ClearField(channelmodel.FieldContextWindow, field.TypeInt)
+	}
+	if value, ok := _u.mutation.MaxOutputTokens(); ok {
+		_spec.SetField(channelmodel.FieldMaxOutputTokens, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedMaxOutputTokens(); ok {
+		_spec.AddField(channelmodel.FieldMaxOutputTokens, field.TypeInt, value)
+	}
+	if _u.mutation.MaxOutputTokensCleared() {
+		_spec.ClearField(channelmodel.FieldMaxOutputTokens, field.TypeInt)
+	}
+	if value, ok := _u.mutation.CompactHistoryItemThreshold(); ok {
+		_spec.SetField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedCompactHistoryItemThreshold(); ok {
+		_spec.AddField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt, value)
+	}
+	if _u.mutation.CompactHistoryItemThresholdCleared() {
+		_spec.ClearField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt)
+	}
+	if value, ok := _u.mutation.UpstreamModel(); ok {
+		_spec.SetField(channelmodel.FieldUpstreamModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProfileSource(); ok {
+		_spec.SetField(channelmodel.FieldProfileSource, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ProfileAdoptionStatus(); ok {
+		_spec.SetField(channelmodel.FieldProfileAdoptionStatus, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.InputModalitiesJSON(); ok {
 		_spec.SetField(channelmodel.FieldInputModalitiesJSON, field.TypeString, value)

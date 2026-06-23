@@ -153,16 +153,21 @@ type modelsProfileAdoptionFieldDiff struct {
 }
 
 type modelsProfileAdoptionCandidate struct {
-	ChannelID               string `json:"channel_id"`
-	Model                   string `json:"model"`
-	Source                  string `json:"source"`
-	Enabled                 bool   `json:"enabled"`
-	ContextWindowTokens     int    `json:"context_window_tokens,omitempty"`
-	SupportsResponses       string `json:"supports_responses"`
-	SupportsChatCompletions string `json:"supports_chat_completions"`
-	SupportsEmbeddings      string `json:"supports_embeddings"`
-	Eligible                bool   `json:"eligible"`
-	BlockedReason           string `json:"blocked_reason,omitempty"`
+	ChannelID                   string `json:"channel_id"`
+	Model                       string `json:"model"`
+	Source                      string `json:"source"`
+	Enabled                     bool   `json:"enabled"`
+	ContextWindowTokens         int    `json:"context_window_tokens,omitempty"`
+	MaxOutputTokens             int    `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold int    `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string `json:"upstream_model,omitempty"`
+	ProfileSource               string `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string `json:"profile_adoption_status,omitempty"`
+	SupportsResponses           string `json:"supports_responses"`
+	SupportsChatCompletions     string `json:"supports_chat_completions"`
+	SupportsEmbeddings          string `json:"supports_embeddings"`
+	Eligible                    bool   `json:"eligible"`
+	BlockedReason               string `json:"blocked_reason,omitempty"`
 }
 
 type modelsProfileAdoptionConflict struct {
@@ -475,12 +480,21 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 			Model:                   channelModel.Model,
 			Source:                  channelModel.Source,
 			Enabled:                 channelModel.Enabled,
+			UpstreamModel:           channelModel.UpstreamModel,
+			ProfileSource:           channelModel.ProfileSource,
+			ProfileAdoptionStatus:   channelModel.ProfileAdoptionStatus,
 			SupportsResponses:       triStateCapability(channelModel.SupportsResponses),
 			SupportsChatCompletions: triStateCapability(channelModel.SupportsChatCompletions),
 			SupportsEmbeddings:      triStateCapability(channelModel.SupportsEmbeddings),
 		}
 		if channelModel.ContextWindow != nil {
 			candidate.ContextWindowTokens = *channelModel.ContextWindow
+		}
+		if channelModel.MaxOutputTokens != nil {
+			candidate.MaxOutputTokens = *channelModel.MaxOutputTokens
+		}
+		if channelModel.CompactHistoryItemThreshold != nil {
+			candidate.CompactHistoryItemThreshold = *channelModel.CompactHistoryItemThreshold
 		}
 		candidate.Eligible, candidate.BlockedReason = modelsProfileAdoptionCandidateEligibility(channelModel)
 		report.Candidates = append(report.Candidates, candidate)
@@ -551,9 +565,9 @@ func buildModelsProfileAdoptionRequiredGateStatuses() ([]modelsProfileAdoptionGa
 	gates := []modelsProfileAdoptionGate{
 		{
 			Gate:     "schema_migration",
-			Status:   "blocking_not_implemented",
-			Blocking: true,
-			Reason:   "catalog/channel profile fields are not covered by a runtime adoption schema migration",
+			Status:   "implemented_runtime_opt_in",
+			Blocking: false,
+			Reason:   "channel profile adoption fields are covered by SQLite startup schema, Postgres migrations, and runtime opt-in assembly",
 		},
 		{
 			Gate:     "dry_run_diff",
@@ -622,6 +636,9 @@ func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRe
 	}
 	if channelModel.SupportsChatCompletions != nil && *channelModel.SupportsChatCompletions == 0 {
 		return false, "capability_false_chat_completions"
+	}
+	if strings.TrimSpace(channelModel.ProfileAdoptionStatus) != "adopted" {
+		return false, "profile_not_adopted"
 	}
 	if channelModel.ContextWindow == nil || *channelModel.ContextWindow <= 0 {
 		return false, "context_window_missing"

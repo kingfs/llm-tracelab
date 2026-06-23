@@ -155,6 +155,7 @@ type ResponsesServerConfig struct {
 	AutoCompact                 bool                            `yaml:"auto_compact"`
 	CompactHistoryItemThreshold int                             `yaml:"compact_history_item_threshold"`
 	ModelProfiles               []ResponsesModelProfileConfig   `yaml:"model_profiles"`
+	AdoptChannelModelProfiles   bool                            `yaml:"adopt_channel_model_profiles"`
 	FunctionExecutors           ResponsesFunctionExecutorConfig `yaml:"function_executors"`
 }
 
@@ -831,6 +832,10 @@ func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
 		profiles = append(profiles, profile)
 	}
 	return profiles
+}
+
+func (c Config) ResponsesAdoptChannelModelProfilesEnabled() bool {
+	return c.ResponsesServer.AdoptChannelModelProfiles
 }
 
 func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMatch {

@@ -701,7 +701,7 @@ upstream:
 	for _, want := range []string{
 		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
 		`# profile_adoption: provider_channel_profile_adoption=observe_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
-		`# profile_adoption_gates: adoption_ready=false blocking_gate_count=1 required_gate_statuses=schema_migration:blocking_not_implemented:blocking,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:implemented_contract,dsn_gated_tests:implemented_observe_only`,
+		`# profile_adoption_gates: adoption_ready=true blocking_gate_count=0 required_gate_statuses=schema_migration:implemented_runtime_opt_in,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:implemented_contract,dsn_gated_tests:implemented_observe_only`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -945,7 +945,7 @@ func TestModelsCodexConfigCommandReportsProfileAdoptionConflictDryRun(t *testing
 	contextWindow := 160
 	supportsChat := 1
 	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
-		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow, ProfileAdoptionStatus: "adopted"},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
 	}
@@ -1012,7 +1012,7 @@ func TestModelsCodexConfigCommandReportsProfileAdoptionWouldChangeWithoutChangin
 	contextWindow := 4096
 	supportsChat := 1
 	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
-		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+		{Model: "gpt-5", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow, ProfileAdoptionStatus: "adopted"},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
 	}
@@ -1088,7 +1088,7 @@ func TestModelsCodexConfigCommandReportsPostgresProfileAdoptionWithCheckDB(t *te
 	contextWindow := 8192
 	supportsChat := 1
 	if err := st.ReplaceChannelModels(channelID, []store.ChannelModelRecord{
-		{Model: model, DisplayName: "Postgres Profile Adoption Model", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+		{Model: model, DisplayName: "Postgres Profile Adoption Model", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow, ProfileAdoptionStatus: "adopted"},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels(postgres) error = %v", err)
 	}
@@ -1129,7 +1129,7 @@ responses_server:
 		t.Fatalf("sources = %q/%q, want model_catalog/channel_models", diagnostics.CatalogSource, diagnostics.ChannelSource)
 	}
 	report := diagnostics.ProfileAdoptionReport
-	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "would_change" || report.AdoptionReady {
+	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "would_change" || !report.AdoptionReady {
 		t.Fatalf("profile adoption report = %+v, want observe-only would_change without mutation", report)
 	}
 	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
@@ -1157,7 +1157,7 @@ func TestModelsCodexConfigCommandReportsProfileAdoptionCapabilityFalseBlocked(t 
 	contextWindow := 4096
 	supportsChat := 0
 	if err := st.ReplaceChannelModels("native-responses", []store.ChannelModelRecord{
-		{Model: "gpt-5", Source: "probe", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+		{Model: "gpt-5", Source: "probe", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow, ProfileAdoptionStatus: "adopted"},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
 	}
@@ -1502,11 +1502,11 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 	Reason   string `json:"reason"`
 }) {
 	t.Helper()
-	if adoptionReady {
-		t.Fatalf("adoption_ready = true, want false while schema/test gates are blocking")
+	if !adoptionReady {
+		t.Fatalf("adoption_ready = false, want true after schema/runtime opt-in gate implementation")
 	}
-	if blockingGateCount != 1 {
-		t.Fatalf("blocking_gate_count = %d, want 1", blockingGateCount)
+	if blockingGateCount != 0 {
+		t.Fatalf("blocking_gate_count = %d, want 0", blockingGateCount)
 	}
 	got := map[string]struct {
 		Status   string
@@ -1521,8 +1521,8 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 		}{Status: gate.Status, Blocking: gate.Blocking, Reason: gate.Reason}
 	}
 	status, ok := got["schema_migration"]
-	if !ok || status.Status != "blocking_not_implemented" || !status.Blocking || status.Reason == "" {
-		t.Fatalf("schema_migration gate = %+v, want blocking_not_implemented with reason; all gates=%+v", status, gates)
+	if !ok || status.Status != "implemented_runtime_opt_in" || status.Blocking || status.Reason == "" {
+		t.Fatalf("schema_migration gate = %+v, want implemented_runtime_opt_in non-blocking with reason; all gates=%+v", status, gates)
 	}
 	status, ok = got["dsn_gated_tests"]
 	if !ok || status.Status != "implemented_observe_only" || status.Blocking || status.Reason == "" {

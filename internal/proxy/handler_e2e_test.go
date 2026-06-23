@@ -2214,6 +2214,117 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 	}
 }
 
+func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-chat",
+		Name:           "OpenAI Chat",
+		BaseURL:        "https://api.openai.example/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		Priority:       10,
+		Weight:         1,
+		CapacityHint:   1,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	contextWindow := 128000
+	maxOutputTokens := 777
+	compactThreshold := 3
+	supportsChat := 1
+	if err := st.ReplaceChannelModels("openai-chat", []store.ChannelModelRecord{
+		{
+			Model:                       "gpt-5",
+			DisplayName:                 "GPT-5",
+			Source:                      "manual",
+			Enabled:                     true,
+			SupportsChatCompletions:     &supportsChat,
+			ContextWindow:               &contextWindow,
+			MaxOutputTokens:             &maxOutputTokens,
+			CompactHistoryItemThreshold: &compactThreshold,
+			UpstreamModel:               "provider/private-gpt-5",
+			ProfileSource:               "test",
+			ProfileAdoptionStatus:       "adopted",
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	var chatBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&chatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_profile","model":"provider/private-gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"profile adopted"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled:                   true,
+			AdoptChannelModelProfiles: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	resp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":"profile"}`))
+	if err != nil {
+		t.Fatalf("response request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, want 200; body=%s", resp.StatusCode, string(body))
+	}
+	if chatBody == nil {
+		t.Fatalf("upstream chat body was not captured")
+	}
+	if chatBody["model"] != "provider/private-gpt-5" {
+		t.Fatalf("chat model = %#v, want adopted upstream model", chatBody["model"])
+	}
+	if got := int(chatBody["max_tokens"].(float64)); got != maxOutputTokens {
+		t.Fatalf("max_tokens = %d, want adopted max output %d", got, maxOutputTokens)
+	}
+}
+
 func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

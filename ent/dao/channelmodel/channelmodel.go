@@ -31,6 +31,16 @@ const (
 	FieldSupportsEmbeddings = "supports_embeddings"
 	// FieldContextWindow holds the string denoting the context_window field in the database.
 	FieldContextWindow = "context_window"
+	// FieldMaxOutputTokens holds the string denoting the max_output_tokens field in the database.
+	FieldMaxOutputTokens = "max_output_tokens"
+	// FieldCompactHistoryItemThreshold holds the string denoting the compact_history_item_threshold field in the database.
+	FieldCompactHistoryItemThreshold = "compact_history_item_threshold"
+	// FieldUpstreamModel holds the string denoting the upstream_model field in the database.
+	FieldUpstreamModel = "upstream_model"
+	// FieldProfileSource holds the string denoting the profile_source field in the database.
+	FieldProfileSource = "profile_source"
+	// FieldProfileAdoptionStatus holds the string denoting the profile_adoption_status field in the database.
+	FieldProfileAdoptionStatus = "profile_adoption_status"
 	// FieldInputModalitiesJSON holds the string denoting the input_modalities_json field in the database.
 	FieldInputModalitiesJSON = "input_modalities_json"
 	// FieldOutputModalitiesJSON holds the string denoting the output_modalities_json field in the database.
@@ -59,6 +69,11 @@ var Columns = []string{
 	FieldSupportsChatCompletions,
 	FieldSupportsEmbeddings,
 	FieldContextWindow,
+	FieldMaxOutputTokens,
+	FieldCompactHistoryItemThreshold,
+	FieldUpstreamModel,
+	FieldProfileSource,
+	FieldProfileAdoptionStatus,
 	FieldInputModalitiesJSON,
 	FieldOutputModalitiesJSON,
 	FieldRawModelJSON,
@@ -88,6 +103,12 @@ var (
 	DefaultSource string
 	// DefaultEnabled holds the default value on creation for the "enabled" field.
 	DefaultEnabled bool
+	// DefaultUpstreamModel holds the default value on creation for the "upstream_model" field.
+	DefaultUpstreamModel string
+	// DefaultProfileSource holds the default value on creation for the "profile_source" field.
+	DefaultProfileSource string
+	// DefaultProfileAdoptionStatus holds the default value on creation for the "profile_adoption_status" field.
+	DefaultProfileAdoptionStatus string
 	// DefaultInputModalitiesJSON holds the default value on creation for the "input_modalities_json" field.
 	DefaultInputModalitiesJSON string
 	// DefaultOutputModalitiesJSON holds the default value on creation for the "output_modalities_json" field.
@@ -151,6 +172,31 @@ func BySupportsEmbeddings(opts ...sql.OrderTermOption) OrderOption {
 // ByContextWindow orders the results by the context_window field.
 func ByContextWindow(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldContextWindow, opts...).ToFunc()
+}
+
+// ByMaxOutputTokens orders the results by the max_output_tokens field.
+func ByMaxOutputTokens(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMaxOutputTokens, opts...).ToFunc()
+}
+
+// ByCompactHistoryItemThreshold orders the results by the compact_history_item_threshold field.
+func ByCompactHistoryItemThreshold(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCompactHistoryItemThreshold, opts...).ToFunc()
+}
+
+// ByUpstreamModel orders the results by the upstream_model field.
+func ByUpstreamModel(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUpstreamModel, opts...).ToFunc()
+}
+
+// ByProfileSource orders the results by the profile_source field.
+func ByProfileSource(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProfileSource, opts...).ToFunc()
+}
+
+// ByProfileAdoptionStatus orders the results by the profile_adoption_status field.
+func ByProfileAdoptionStatus(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProfileAdoptionStatus, opts...).ToFunc()
 }
 
 // ByInputModalitiesJSON orders the results by the input_modalities_json field.

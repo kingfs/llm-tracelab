@@ -132,6 +132,76 @@ func (_c *ChannelModelCreate) SetNillableContextWindow(v *int) *ChannelModelCrea
 	return _c
 }
 
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (_c *ChannelModelCreate) SetMaxOutputTokens(v int) *ChannelModelCreate {
+	_c.mutation.SetMaxOutputTokens(v)
+	return _c
+}
+
+// SetNillableMaxOutputTokens sets the "max_output_tokens" field if the given value is not nil.
+func (_c *ChannelModelCreate) SetNillableMaxOutputTokens(v *int) *ChannelModelCreate {
+	if v != nil {
+		_c.SetMaxOutputTokens(*v)
+	}
+	return _c
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (_c *ChannelModelCreate) SetCompactHistoryItemThreshold(v int) *ChannelModelCreate {
+	_c.mutation.SetCompactHistoryItemThreshold(v)
+	return _c
+}
+
+// SetNillableCompactHistoryItemThreshold sets the "compact_history_item_threshold" field if the given value is not nil.
+func (_c *ChannelModelCreate) SetNillableCompactHistoryItemThreshold(v *int) *ChannelModelCreate {
+	if v != nil {
+		_c.SetCompactHistoryItemThreshold(*v)
+	}
+	return _c
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (_c *ChannelModelCreate) SetUpstreamModel(v string) *ChannelModelCreate {
+	_c.mutation.SetUpstreamModel(v)
+	return _c
+}
+
+// SetNillableUpstreamModel sets the "upstream_model" field if the given value is not nil.
+func (_c *ChannelModelCreate) SetNillableUpstreamModel(v *string) *ChannelModelCreate {
+	if v != nil {
+		_c.SetUpstreamModel(*v)
+	}
+	return _c
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (_c *ChannelModelCreate) SetProfileSource(v string) *ChannelModelCreate {
+	_c.mutation.SetProfileSource(v)
+	return _c
+}
+
+// SetNillableProfileSource sets the "profile_source" field if the given value is not nil.
+func (_c *ChannelModelCreate) SetNillableProfileSource(v *string) *ChannelModelCreate {
+	if v != nil {
+		_c.SetProfileSource(*v)
+	}
+	return _c
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (_c *ChannelModelCreate) SetProfileAdoptionStatus(v string) *ChannelModelCreate {
+	_c.mutation.SetProfileAdoptionStatus(v)
+	return _c
+}
+
+// SetNillableProfileAdoptionStatus sets the "profile_adoption_status" field if the given value is not nil.
+func (_c *ChannelModelCreate) SetNillableProfileAdoptionStatus(v *string) *ChannelModelCreate {
+	if v != nil {
+		_c.SetProfileAdoptionStatus(*v)
+	}
+	return _c
+}
+
 // SetInputModalitiesJSON sets the "input_modalities_json" field.
 func (_c *ChannelModelCreate) SetInputModalitiesJSON(v string) *ChannelModelCreate {
 	_c.mutation.SetInputModalitiesJSON(v)
@@ -263,6 +333,18 @@ func (_c *ChannelModelCreate) defaults() {
 		v := channelmodel.DefaultEnabled
 		_c.mutation.SetEnabled(v)
 	}
+	if _, ok := _c.mutation.UpstreamModel(); !ok {
+		v := channelmodel.DefaultUpstreamModel
+		_c.mutation.SetUpstreamModel(v)
+	}
+	if _, ok := _c.mutation.ProfileSource(); !ok {
+		v := channelmodel.DefaultProfileSource
+		_c.mutation.SetProfileSource(v)
+	}
+	if _, ok := _c.mutation.ProfileAdoptionStatus(); !ok {
+		v := channelmodel.DefaultProfileAdoptionStatus
+		_c.mutation.SetProfileAdoptionStatus(v)
+	}
 	if _, ok := _c.mutation.InputModalitiesJSON(); !ok {
 		v := channelmodel.DefaultInputModalitiesJSON
 		_c.mutation.SetInputModalitiesJSON(v)
@@ -311,6 +393,15 @@ func (_c *ChannelModelCreate) check() error {
 	}
 	if _, ok := _c.mutation.Enabled(); !ok {
 		return &ValidationError{Name: "enabled", err: errors.New(`dao: missing required field "ChannelModel.enabled"`)}
+	}
+	if _, ok := _c.mutation.UpstreamModel(); !ok {
+		return &ValidationError{Name: "upstream_model", err: errors.New(`dao: missing required field "ChannelModel.upstream_model"`)}
+	}
+	if _, ok := _c.mutation.ProfileSource(); !ok {
+		return &ValidationError{Name: "profile_source", err: errors.New(`dao: missing required field "ChannelModel.profile_source"`)}
+	}
+	if _, ok := _c.mutation.ProfileAdoptionStatus(); !ok {
+		return &ValidationError{Name: "profile_adoption_status", err: errors.New(`dao: missing required field "ChannelModel.profile_adoption_status"`)}
 	}
 	if _, ok := _c.mutation.InputModalitiesJSON(); !ok {
 		return &ValidationError{Name: "input_modalities_json", err: errors.New(`dao: missing required field "ChannelModel.input_modalities_json"`)}
@@ -390,6 +481,26 @@ func (_c *ChannelModelCreate) createSpec() (*ChannelModel, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.ContextWindow(); ok {
 		_spec.SetField(channelmodel.FieldContextWindow, field.TypeInt, value)
 		_node.ContextWindow = &value
+	}
+	if value, ok := _c.mutation.MaxOutputTokens(); ok {
+		_spec.SetField(channelmodel.FieldMaxOutputTokens, field.TypeInt, value)
+		_node.MaxOutputTokens = &value
+	}
+	if value, ok := _c.mutation.CompactHistoryItemThreshold(); ok {
+		_spec.SetField(channelmodel.FieldCompactHistoryItemThreshold, field.TypeInt, value)
+		_node.CompactHistoryItemThreshold = &value
+	}
+	if value, ok := _c.mutation.UpstreamModel(); ok {
+		_spec.SetField(channelmodel.FieldUpstreamModel, field.TypeString, value)
+		_node.UpstreamModel = value
+	}
+	if value, ok := _c.mutation.ProfileSource(); ok {
+		_spec.SetField(channelmodel.FieldProfileSource, field.TypeString, value)
+		_node.ProfileSource = value
+	}
+	if value, ok := _c.mutation.ProfileAdoptionStatus(); ok {
+		_spec.SetField(channelmodel.FieldProfileAdoptionStatus, field.TypeString, value)
+		_node.ProfileAdoptionStatus = value
 	}
 	if value, ok := _c.mutation.InputModalitiesJSON(); ok {
 		_spec.SetField(channelmodel.FieldInputModalitiesJSON, field.TypeString, value)
@@ -620,6 +731,90 @@ func (u *ChannelModelUpsert) AddContextWindow(v int) *ChannelModelUpsert {
 // ClearContextWindow clears the value of the "context_window" field.
 func (u *ChannelModelUpsert) ClearContextWindow() *ChannelModelUpsert {
 	u.SetNull(channelmodel.FieldContextWindow)
+	return u
+}
+
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (u *ChannelModelUpsert) SetMaxOutputTokens(v int) *ChannelModelUpsert {
+	u.Set(channelmodel.FieldMaxOutputTokens, v)
+	return u
+}
+
+// UpdateMaxOutputTokens sets the "max_output_tokens" field to the value that was provided on create.
+func (u *ChannelModelUpsert) UpdateMaxOutputTokens() *ChannelModelUpsert {
+	u.SetExcluded(channelmodel.FieldMaxOutputTokens)
+	return u
+}
+
+// AddMaxOutputTokens adds v to the "max_output_tokens" field.
+func (u *ChannelModelUpsert) AddMaxOutputTokens(v int) *ChannelModelUpsert {
+	u.Add(channelmodel.FieldMaxOutputTokens, v)
+	return u
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (u *ChannelModelUpsert) ClearMaxOutputTokens() *ChannelModelUpsert {
+	u.SetNull(channelmodel.FieldMaxOutputTokens)
+	return u
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsert) SetCompactHistoryItemThreshold(v int) *ChannelModelUpsert {
+	u.Set(channelmodel.FieldCompactHistoryItemThreshold, v)
+	return u
+}
+
+// UpdateCompactHistoryItemThreshold sets the "compact_history_item_threshold" field to the value that was provided on create.
+func (u *ChannelModelUpsert) UpdateCompactHistoryItemThreshold() *ChannelModelUpsert {
+	u.SetExcluded(channelmodel.FieldCompactHistoryItemThreshold)
+	return u
+}
+
+// AddCompactHistoryItemThreshold adds v to the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsert) AddCompactHistoryItemThreshold(v int) *ChannelModelUpsert {
+	u.Add(channelmodel.FieldCompactHistoryItemThreshold, v)
+	return u
+}
+
+// ClearCompactHistoryItemThreshold clears the value of the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsert) ClearCompactHistoryItemThreshold() *ChannelModelUpsert {
+	u.SetNull(channelmodel.FieldCompactHistoryItemThreshold)
+	return u
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (u *ChannelModelUpsert) SetUpstreamModel(v string) *ChannelModelUpsert {
+	u.Set(channelmodel.FieldUpstreamModel, v)
+	return u
+}
+
+// UpdateUpstreamModel sets the "upstream_model" field to the value that was provided on create.
+func (u *ChannelModelUpsert) UpdateUpstreamModel() *ChannelModelUpsert {
+	u.SetExcluded(channelmodel.FieldUpstreamModel)
+	return u
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (u *ChannelModelUpsert) SetProfileSource(v string) *ChannelModelUpsert {
+	u.Set(channelmodel.FieldProfileSource, v)
+	return u
+}
+
+// UpdateProfileSource sets the "profile_source" field to the value that was provided on create.
+func (u *ChannelModelUpsert) UpdateProfileSource() *ChannelModelUpsert {
+	u.SetExcluded(channelmodel.FieldProfileSource)
+	return u
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (u *ChannelModelUpsert) SetProfileAdoptionStatus(v string) *ChannelModelUpsert {
+	u.Set(channelmodel.FieldProfileAdoptionStatus, v)
+	return u
+}
+
+// UpdateProfileAdoptionStatus sets the "profile_adoption_status" field to the value that was provided on create.
+func (u *ChannelModelUpsert) UpdateProfileAdoptionStatus() *ChannelModelUpsert {
+	u.SetExcluded(channelmodel.FieldProfileAdoptionStatus)
 	return u
 }
 
@@ -920,6 +1115,104 @@ func (u *ChannelModelUpsertOne) UpdateContextWindow() *ChannelModelUpsertOne {
 func (u *ChannelModelUpsertOne) ClearContextWindow() *ChannelModelUpsertOne {
 	return u.Update(func(s *ChannelModelUpsert) {
 		s.ClearContextWindow()
+	})
+}
+
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (u *ChannelModelUpsertOne) SetMaxOutputTokens(v int) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetMaxOutputTokens(v)
+	})
+}
+
+// AddMaxOutputTokens adds v to the "max_output_tokens" field.
+func (u *ChannelModelUpsertOne) AddMaxOutputTokens(v int) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.AddMaxOutputTokens(v)
+	})
+}
+
+// UpdateMaxOutputTokens sets the "max_output_tokens" field to the value that was provided on create.
+func (u *ChannelModelUpsertOne) UpdateMaxOutputTokens() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateMaxOutputTokens()
+	})
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (u *ChannelModelUpsertOne) ClearMaxOutputTokens() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.ClearMaxOutputTokens()
+	})
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsertOne) SetCompactHistoryItemThreshold(v int) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetCompactHistoryItemThreshold(v)
+	})
+}
+
+// AddCompactHistoryItemThreshold adds v to the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsertOne) AddCompactHistoryItemThreshold(v int) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.AddCompactHistoryItemThreshold(v)
+	})
+}
+
+// UpdateCompactHistoryItemThreshold sets the "compact_history_item_threshold" field to the value that was provided on create.
+func (u *ChannelModelUpsertOne) UpdateCompactHistoryItemThreshold() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateCompactHistoryItemThreshold()
+	})
+}
+
+// ClearCompactHistoryItemThreshold clears the value of the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsertOne) ClearCompactHistoryItemThreshold() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.ClearCompactHistoryItemThreshold()
+	})
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (u *ChannelModelUpsertOne) SetUpstreamModel(v string) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetUpstreamModel(v)
+	})
+}
+
+// UpdateUpstreamModel sets the "upstream_model" field to the value that was provided on create.
+func (u *ChannelModelUpsertOne) UpdateUpstreamModel() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateUpstreamModel()
+	})
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (u *ChannelModelUpsertOne) SetProfileSource(v string) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetProfileSource(v)
+	})
+}
+
+// UpdateProfileSource sets the "profile_source" field to the value that was provided on create.
+func (u *ChannelModelUpsertOne) UpdateProfileSource() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateProfileSource()
+	})
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (u *ChannelModelUpsertOne) SetProfileAdoptionStatus(v string) *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetProfileAdoptionStatus(v)
+	})
+}
+
+// UpdateProfileAdoptionStatus sets the "profile_adoption_status" field to the value that was provided on create.
+func (u *ChannelModelUpsertOne) UpdateProfileAdoptionStatus() *ChannelModelUpsertOne {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateProfileAdoptionStatus()
 	})
 }
 
@@ -1397,6 +1690,104 @@ func (u *ChannelModelUpsertBulk) UpdateContextWindow() *ChannelModelUpsertBulk {
 func (u *ChannelModelUpsertBulk) ClearContextWindow() *ChannelModelUpsertBulk {
 	return u.Update(func(s *ChannelModelUpsert) {
 		s.ClearContextWindow()
+	})
+}
+
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (u *ChannelModelUpsertBulk) SetMaxOutputTokens(v int) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetMaxOutputTokens(v)
+	})
+}
+
+// AddMaxOutputTokens adds v to the "max_output_tokens" field.
+func (u *ChannelModelUpsertBulk) AddMaxOutputTokens(v int) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.AddMaxOutputTokens(v)
+	})
+}
+
+// UpdateMaxOutputTokens sets the "max_output_tokens" field to the value that was provided on create.
+func (u *ChannelModelUpsertBulk) UpdateMaxOutputTokens() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateMaxOutputTokens()
+	})
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (u *ChannelModelUpsertBulk) ClearMaxOutputTokens() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.ClearMaxOutputTokens()
+	})
+}
+
+// SetCompactHistoryItemThreshold sets the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsertBulk) SetCompactHistoryItemThreshold(v int) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetCompactHistoryItemThreshold(v)
+	})
+}
+
+// AddCompactHistoryItemThreshold adds v to the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsertBulk) AddCompactHistoryItemThreshold(v int) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.AddCompactHistoryItemThreshold(v)
+	})
+}
+
+// UpdateCompactHistoryItemThreshold sets the "compact_history_item_threshold" field to the value that was provided on create.
+func (u *ChannelModelUpsertBulk) UpdateCompactHistoryItemThreshold() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateCompactHistoryItemThreshold()
+	})
+}
+
+// ClearCompactHistoryItemThreshold clears the value of the "compact_history_item_threshold" field.
+func (u *ChannelModelUpsertBulk) ClearCompactHistoryItemThreshold() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.ClearCompactHistoryItemThreshold()
+	})
+}
+
+// SetUpstreamModel sets the "upstream_model" field.
+func (u *ChannelModelUpsertBulk) SetUpstreamModel(v string) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetUpstreamModel(v)
+	})
+}
+
+// UpdateUpstreamModel sets the "upstream_model" field to the value that was provided on create.
+func (u *ChannelModelUpsertBulk) UpdateUpstreamModel() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateUpstreamModel()
+	})
+}
+
+// SetProfileSource sets the "profile_source" field.
+func (u *ChannelModelUpsertBulk) SetProfileSource(v string) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetProfileSource(v)
+	})
+}
+
+// UpdateProfileSource sets the "profile_source" field to the value that was provided on create.
+func (u *ChannelModelUpsertBulk) UpdateProfileSource() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateProfileSource()
+	})
+}
+
+// SetProfileAdoptionStatus sets the "profile_adoption_status" field.
+func (u *ChannelModelUpsertBulk) SetProfileAdoptionStatus(v string) *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.SetProfileAdoptionStatus(v)
+	})
+}
+
+// UpdateProfileAdoptionStatus sets the "profile_adoption_status" field to the value that was provided on create.
+func (u *ChannelModelUpsertBulk) UpdateProfileAdoptionStatus() *ChannelModelUpsertBulk {
+	return u.Update(func(s *ChannelModelUpsert) {
+		s.UpdateProfileAdoptionStatus()
 	})
 }
 
