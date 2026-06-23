@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -387,6 +388,61 @@ func TestMigrateDatabaseUpAcceptsRelativeSQLitePath(t *testing.T) {
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("database file stat error = %v", err)
+	}
+}
+
+func TestCheckStatusSQLiteReportsAuthTablesPresent(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus() error = %v", err)
+	}
+	if !status.Available || !status.Versioned || status.Version == 0 || status.Dirty {
+		t.Fatalf("migration status = %+v", status)
+	}
+	if !status.RequiredTablesPresent || len(status.MissingTables) != 0 {
+		t.Fatalf("auth table status = present %v missing %v", status.RequiredTablesPresent, status.MissingTables)
+	}
+	if strings.Join(status.RequiredTables, ",") != "users,api_tokens" || strings.Join(status.TablesChecked, ",") != "users,api_tokens" {
+		t.Fatalf("auth tables checked = required %v checked %v", status.RequiredTables, status.TablesChecked)
+	}
+}
+
+func TestCheckStatusSQLiteReportsMissingAuthTables(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE api_tokens`); err != nil {
+		_ = db.Close()
+		t.Fatalf("DROP TABLE api_tokens error = %v", err)
+	}
+	_ = db.Close()
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus() error = %v", err)
+	}
+	if !status.Available || status.Version == 0 {
+		t.Fatalf("migration status = %+v", status)
+	}
+	if status.RequiredTablesPresent || strings.Join(status.MissingTables, ",") != "api_tokens" {
+		t.Fatalf("missing auth tables = present %v missing %v", status.RequiredTablesPresent, status.MissingTables)
+	}
+	if strings.Join(status.TablesChecked, ",") != "users,api_tokens" {
+		t.Fatalf("auth tables checked = %v", status.TablesChecked)
 	}
 }
 

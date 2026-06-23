@@ -43,10 +43,15 @@ claim that Postgres persistence is fully production mature today.
   migration namespace.
 - `auth migrate status` and `auth migrate up/down --dry-run` report auth
   migration source, namespace, scope, and whether Postgres is using the shared
-  application migration namespace. `auth migrate status --check-db` is an
-  explicit opt-in read-only check: Postgres reads the shared
-  `schema_migrations` state, while SQLite reads the configured auth migration
-  table.
+  application migration namespace. The machine-readable report also includes
+  the auth-owned required table set (`users`, `api_tokens`), table check
+  results, `postgres_auth_namespace_strategy:
+  shared_application_schema_migrations`, and
+  `independent_auth_namespace_status: not_implemented` for Postgres.
+  `auth migrate status --check-db` is an explicit opt-in read-only check:
+  Postgres reads the shared `schema_migrations` state and checks the auth-owned
+  tables in the current schema, while SQLite reads the configured auth migration
+  table and checks the same auth-owned tables.
 - `cmd/server/db.go` now has an application-owned `db migrate` command.
   Postgres `db migrate up` applies checked-in SQL from
   `ent/postgres-migrations` through `internal/appdbmigrate` and
@@ -245,11 +250,15 @@ warning that auth and application schemas still share one migration namespace.
 
 Stage 16J adds auth migration status reporting. `auth migrate status` and
 `auth migrate up/down --dry-run` now include namespace, source, scope, rollback
-support, and shared application namespace fields. `auth migrate status
---check-db` reads Postgres `schema_migrations` through the shared application
-migration path and reads SQLite auth migration status through the configured
-auth database. This improves operator visibility but deliberately does not
-create an independent Postgres auth migration namespace.
+support, shared application namespace fields, auth-owned table health fields,
+and an explicit independent namespace plan. `auth migrate status --check-db`
+reads Postgres `schema_migrations` through the shared application migration
+path and reads SQLite auth migration status through the configured auth
+database; both dialects check the required auth tables (`users`, `api_tokens`)
+read-only. This improves operator visibility but deliberately does not create an
+independent Postgres auth migration namespace; Postgres remains
+`shared_application_schema_migrations` with independent auth namespace
+`not_implemented`.
 
 Stage 16K adds the durable hosted tool audit read model. `tool_call_audits` is
 defined in ent, generated into `ent/dao/**`, included in SQLite startup schema
@@ -313,7 +322,11 @@ been committed or applied in a shared environment.
 
 - Postgres auth migration `up` and `down` are versioned through the shared
   `ent/postgres-migrations` set, but a separately owned auth migration
-  namespace is still missing.
+  namespace is still missing. Current status/dry-run output documents this as
+  `postgres_auth_namespace_strategy: shared_application_schema_migrations` and
+  `independent_auth_namespace_status: not_implemented`; the split requires a
+  separately versioned auth migration directory/table plan before command
+  ownership or rollback semantics change.
 - SQLite application migrations still use schema initialization rather than
   explicit versioned files. `db migrate status` reports this fallback, and
   `db migrate status --check-db` reports the lightweight `app_schema_status`

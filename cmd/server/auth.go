@@ -273,6 +273,9 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 	versioned := true
 	sharedApplicationNamespace := false
 	namespaceSplit := true
+	postgresAuthNamespaceStrategy := "not_applicable"
+	independentAuthNamespaceStatus := "implemented"
+	independentAuthNamespacePlan := "sqlite auth migrations already use the configured auth database migration namespace"
 	const namespaceNote = "postgres auth migrations currently share the application schema_migrations namespace; an independent auth namespace has not been split yet"
 	note := "sqlite auth migrations use the configured auth database path and embedded sqlite migration files"
 	if normalizeAuthStoreDriver(cfg.DatabaseDriver()) == "postgres" {
@@ -280,6 +283,9 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 		sourcePath = "ent/postgres-migrations"
 		sharedApplicationNamespace = true
 		namespaceSplit = false
+		postgresAuthNamespaceStrategy = "shared_application_schema_migrations"
+		independentAuthNamespaceStatus = "not_implemented"
+		independentAuthNamespacePlan = "split auth-owned Postgres migrations into a separately versioned auth namespace before changing command ownership or rollback semantics"
 		note = namespaceNote
 	}
 	return map[string]any{
@@ -301,6 +307,13 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 		"independent_auth_namespace":            namespaceSplit,
 		"auth_namespace_split":                  namespaceSplit,
 		"application_namespace_shared":          sharedApplicationNamespace,
+		"postgres_auth_namespace_strategy":      postgresAuthNamespaceStrategy,
+		"independent_auth_namespace_status":     independentAuthNamespaceStatus,
+		"independent_auth_namespace_plan":       independentAuthNamespacePlan,
+		"auth_required_tables":                  auth.RequiredTables(),
+		"auth_tables_checked":                   []string{},
+		"auth_required_tables_present":          false,
+		"auth_missing_tables":                   []string{},
 		"namespace_note":                        note,
 		"shared_migration_namespace_constraint": namespaceNote,
 	}
@@ -324,6 +337,10 @@ func applyAuthStatusCheck(cfg *config.Config, result map[string]any) error {
 	if status.SharedApplicationNamespace {
 		result["database_status_shared_application_namespace"] = status.SharedApplicationNamespace
 	}
+	result["auth_required_tables"] = status.RequiredTables
+	result["auth_tables_checked"] = status.TablesChecked
+	result["auth_required_tables_present"] = status.RequiredTablesPresent
+	result["auth_missing_tables"] = status.MissingTables
 	if status.Message != "" {
 		result["database_status_message"] = status.Message
 	}
@@ -341,6 +358,13 @@ func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "shared_application_namespace: %v\n", result["shared_application_namespace"])
 	fmt.Fprintf(w, "independent_auth_namespace: %v\n", result["independent_auth_namespace"])
 	fmt.Fprintf(w, "auth_namespace_split: %v\n", result["auth_namespace_split"])
+	fmt.Fprintf(w, "postgres_auth_namespace_strategy: %s\n", result["postgres_auth_namespace_strategy"])
+	fmt.Fprintf(w, "independent_auth_namespace_status: %s\n", result["independent_auth_namespace_status"])
+	fmt.Fprintf(w, "independent_auth_namespace_plan: %s\n", result["independent_auth_namespace_plan"])
+	fmt.Fprintf(w, "auth_required_tables: %s\n", strings.Join(stringSliceResult(result["auth_required_tables"]), ","))
+	fmt.Fprintf(w, "auth_tables_checked: %s\n", strings.Join(stringSliceResult(result["auth_tables_checked"]), ","))
+	fmt.Fprintf(w, "auth_required_tables_present: %v\n", result["auth_required_tables_present"])
+	fmt.Fprintf(w, "auth_missing_tables: %s\n", strings.Join(stringSliceResult(result["auth_missing_tables"]), ","))
 	if result["status_check"] != nil {
 		fmt.Fprintf(w, "status_check: %s\n", result["status_check"])
 	}
@@ -362,6 +386,23 @@ func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
 	}
 	fmt.Fprintf(w, "rollback_supported: %v\n", result["rollback_supported"])
 	fmt.Fprintf(w, "namespace_note: %s\n", result["namespace_note"])
+}
+
+func stringSliceResult(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func runAuthInitUserWithOptions(opts authUserOptions) int {

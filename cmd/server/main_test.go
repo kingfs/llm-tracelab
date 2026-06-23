@@ -1446,20 +1446,27 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
-			DryRun                     bool   `json:"dry_run"`
-			Mutated                    bool   `json:"mutated"`
-			Driver                     string `json:"driver"`
-			DSN                        string `json:"dsn"`
-			Direction                  string `json:"direction"`
-			Steps                      int    `json:"steps"`
-			Namespace                  string `json:"database_namespace"`
-			Mode                       string `json:"migration_mode"`
-			Source                     string `json:"migration_source"`
-			Path                       string `json:"migration_source_path"`
-			Versioned                  bool   `json:"schema_versioned"`
-			SharedApplicationNamespace bool   `json:"shared_application_namespace"`
-			IndependentAuthNamespace   bool   `json:"independent_auth_namespace"`
-			NamespaceNote              string `json:"namespace_note"`
+			DryRun                     bool     `json:"dry_run"`
+			Mutated                    bool     `json:"mutated"`
+			Driver                     string   `json:"driver"`
+			DSN                        string   `json:"dsn"`
+			Direction                  string   `json:"direction"`
+			Steps                      int      `json:"steps"`
+			Namespace                  string   `json:"database_namespace"`
+			Mode                       string   `json:"migration_mode"`
+			Source                     string   `json:"migration_source"`
+			Path                       string   `json:"migration_source_path"`
+			Versioned                  bool     `json:"schema_versioned"`
+			SharedApplicationNamespace bool     `json:"shared_application_namespace"`
+			IndependentAuthNamespace   bool     `json:"independent_auth_namespace"`
+			PostgresNamespaceStrategy  string   `json:"postgres_auth_namespace_strategy"`
+			IndependentNamespaceStatus string   `json:"independent_auth_namespace_status"`
+			IndependentNamespacePlan   string   `json:"independent_auth_namespace_plan"`
+			RequiredTables             []string `json:"auth_required_tables"`
+			TablesChecked              []string `json:"auth_tables_checked"`
+			RequiredTablesPresent      bool     `json:"auth_required_tables_present"`
+			MissingTables              []string `json:"auth_missing_tables"`
+			NamespaceNote              string   `json:"namespace_note"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1476,6 +1483,12 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	}
 	if !envelope.Result.SharedApplicationNamespace || envelope.Result.IndependentAuthNamespace || !strings.Contains(envelope.Result.NamespaceNote, "independent auth namespace has not been split yet") {
 		t.Fatalf("auth dry-run namespace semantics = %+v", envelope.Result)
+	}
+	if envelope.Result.PostgresNamespaceStrategy != "shared_application_schema_migrations" || envelope.Result.IndependentNamespaceStatus != "not_implemented" || !strings.Contains(envelope.Result.IndependentNamespacePlan, "separately versioned auth namespace") {
+		t.Fatalf("auth dry-run independent namespace fields = %+v", envelope.Result)
+	}
+	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || len(envelope.Result.TablesChecked) != 0 || envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
+		t.Fatalf("auth dry-run table health fields = %+v", envelope.Result)
 	}
 	if strings.Contains(envelope.Result.DSN, "secret") {
 		t.Fatalf("auth dry-run leaked secret in dsn: %q", envelope.Result.DSN)
@@ -1499,23 +1512,30 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 		OK      bool   `json:"ok"`
 		Command string `json:"command"`
 		Result  struct {
-			DryRun                     bool   `json:"dry_run"`
-			Mutated                    bool   `json:"mutated"`
-			Driver                     string `json:"driver"`
-			DSN                        string `json:"dsn"`
-			Direction                  string `json:"direction"`
-			Namespace                  string `json:"database_namespace"`
-			Mode                       string `json:"migration_mode"`
-			Source                     string `json:"migration_source"`
-			Path                       string `json:"migration_source_path"`
-			Versioned                  bool   `json:"schema_versioned"`
-			StatusCheck                string `json:"status_check"`
-			Rollback                   bool   `json:"rollback_supported"`
-			SharedApplicationNamespace bool   `json:"shared_application_namespace"`
-			ApplicationShared          bool   `json:"application_namespace_shared"`
-			IndependentAuthNamespace   bool   `json:"independent_auth_namespace"`
-			AuthNamespaceSplit         bool   `json:"auth_namespace_split"`
-			Constraint                 string `json:"shared_migration_namespace_constraint"`
+			DryRun                     bool     `json:"dry_run"`
+			Mutated                    bool     `json:"mutated"`
+			Driver                     string   `json:"driver"`
+			DSN                        string   `json:"dsn"`
+			Direction                  string   `json:"direction"`
+			Namespace                  string   `json:"database_namespace"`
+			Mode                       string   `json:"migration_mode"`
+			Source                     string   `json:"migration_source"`
+			Path                       string   `json:"migration_source_path"`
+			Versioned                  bool     `json:"schema_versioned"`
+			StatusCheck                string   `json:"status_check"`
+			Rollback                   bool     `json:"rollback_supported"`
+			SharedApplicationNamespace bool     `json:"shared_application_namespace"`
+			ApplicationShared          bool     `json:"application_namespace_shared"`
+			IndependentAuthNamespace   bool     `json:"independent_auth_namespace"`
+			AuthNamespaceSplit         bool     `json:"auth_namespace_split"`
+			PostgresNamespaceStrategy  string   `json:"postgres_auth_namespace_strategy"`
+			IndependentNamespaceStatus string   `json:"independent_auth_namespace_status"`
+			IndependentNamespacePlan   string   `json:"independent_auth_namespace_plan"`
+			RequiredTables             []string `json:"auth_required_tables"`
+			TablesChecked              []string `json:"auth_tables_checked"`
+			RequiredTablesPresent      bool     `json:"auth_required_tables_present"`
+			MissingTables              []string `json:"auth_missing_tables"`
+			Constraint                 string   `json:"shared_migration_namespace_constraint"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1535,6 +1555,12 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 	}
 	if !strings.Contains(envelope.Result.Constraint, "schema_migrations namespace") || !strings.Contains(envelope.Result.Constraint, "independent auth namespace has not been split yet") {
 		t.Fatalf("postgres auth status constraint = %q", envelope.Result.Constraint)
+	}
+	if envelope.Result.PostgresNamespaceStrategy != "shared_application_schema_migrations" || envelope.Result.IndependentNamespaceStatus != "not_implemented" || !strings.Contains(envelope.Result.IndependentNamespacePlan, "separately versioned auth namespace") {
+		t.Fatalf("postgres auth independent namespace fields = %+v", envelope.Result)
+	}
+	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || len(envelope.Result.TablesChecked) != 0 || envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
+		t.Fatalf("postgres auth table health fields = %+v", envelope.Result)
 	}
 	if strings.Contains(envelope.Result.DSN, "secret") {
 		t.Fatalf("auth migrate status leaked secret in dsn: %q", envelope.Result.DSN)
@@ -1561,6 +1587,10 @@ func TestAuthMigrateStatusTextReportsNamespaceAndRedactedDSN(t *testing.T) {
 		"migration_source_path: ent/postgres-migrations",
 		"shared_application_namespace: true",
 		"independent_auth_namespace: false",
+		"postgres_auth_namespace_strategy: shared_application_schema_migrations",
+		"independent_auth_namespace_status: not_implemented",
+		"auth_required_tables: users,api_tokens",
+		"auth_required_tables_present: false",
 		"namespace_note: postgres auth migrations currently share",
 	} {
 		if !strings.Contains(output, want) {
@@ -1588,14 +1618,15 @@ func TestAuthMigrateStatusJSONReportsSQLiteSource(t *testing.T) {
 	var envelope struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			Driver                     string `json:"driver"`
-			Namespace                  string `json:"database_namespace"`
-			Source                     string `json:"migration_source"`
-			Path                       string `json:"migration_source_path"`
-			Versioned                  bool   `json:"schema_versioned"`
-			SharedApplicationNamespace bool   `json:"shared_application_namespace"`
-			IndependentAuthNamespace   bool   `json:"independent_auth_namespace"`
-			NamespaceNote              string `json:"namespace_note"`
+			Driver                     string   `json:"driver"`
+			Namespace                  string   `json:"database_namespace"`
+			Source                     string   `json:"migration_source"`
+			Path                       string   `json:"migration_source_path"`
+			Versioned                  bool     `json:"schema_versioned"`
+			SharedApplicationNamespace bool     `json:"shared_application_namespace"`
+			IndependentAuthNamespace   bool     `json:"independent_auth_namespace"`
+			RequiredTables             []string `json:"auth_required_tables"`
+			NamespaceNote              string   `json:"namespace_note"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1609,6 +1640,9 @@ func TestAuthMigrateStatusJSONReportsSQLiteSource(t *testing.T) {
 	}
 	if envelope.Result.SharedApplicationNamespace || !envelope.Result.IndependentAuthNamespace || !strings.Contains(envelope.Result.NamespaceNote, "configured auth database path") {
 		t.Fatalf("sqlite auth status namespace = %+v", envelope.Result)
+	}
+	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" {
+		t.Fatalf("sqlite auth required tables = %v", envelope.Result.RequiredTables)
 	}
 }
 
@@ -1644,14 +1678,18 @@ database:
 	var envelope struct {
 		OK     bool `json:"ok"`
 		Result struct {
-			StatusCheck             string `json:"status_check"`
-			DatabaseStatusAvailable bool   `json:"database_status_available"`
-			DatabaseStatusVersioned bool   `json:"database_status_versioned"`
-			DatabaseStatusDriver    string `json:"database_status_driver"`
-			MigrationVersion        uint   `json:"database_migration_version"`
-			MigrationDirty          bool   `json:"database_migration_dirty"`
-			DatabasePath            string `json:"database_path"`
-			DatabaseStatusMessage   string `json:"database_status_message"`
+			StatusCheck             string   `json:"status_check"`
+			DatabaseStatusAvailable bool     `json:"database_status_available"`
+			DatabaseStatusVersioned bool     `json:"database_status_versioned"`
+			DatabaseStatusDriver    string   `json:"database_status_driver"`
+			MigrationVersion        uint     `json:"database_migration_version"`
+			MigrationDirty          bool     `json:"database_migration_dirty"`
+			DatabasePath            string   `json:"database_path"`
+			RequiredTables          []string `json:"auth_required_tables"`
+			TablesChecked           []string `json:"auth_tables_checked"`
+			RequiredTablesPresent   bool     `json:"auth_required_tables_present"`
+			MissingTables           []string `json:"auth_missing_tables"`
+			DatabaseStatusMessage   string   `json:"database_status_message"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1665,6 +1703,9 @@ database:
 	}
 	if envelope.Result.MigrationVersion == 0 || envelope.Result.MigrationDirty || envelope.Result.DatabasePath != dbPath {
 		t.Fatalf("sqlite auth migration version = %+v", envelope.Result)
+	}
+	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || strings.Join(envelope.Result.TablesChecked, ",") != "users,api_tokens" || !envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
+		t.Fatalf("sqlite auth table health = %+v", envelope.Result)
 	}
 	if !strings.Contains(envelope.Result.DatabaseStatusMessage, "configured auth database path") {
 		t.Fatalf("sqlite auth database status message = %q", envelope.Result.DatabaseStatusMessage)

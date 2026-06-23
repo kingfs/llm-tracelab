@@ -23,6 +23,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var authRequiredTables = []string{
+	"users",
+	"api_tokens",
+}
+
+func RequiredTables() []string {
+	return cloneStrings(authRequiredTables)
+}
+
 func MigrateUp(dbPath string, steps int) error {
 	return MigrateDatabaseUp("sqlite", dbPath, steps)
 }
@@ -220,12 +229,22 @@ type MigrationStatus struct {
 	Dirty                      bool
 	DatabasePath               string
 	SharedApplicationNamespace bool
+	RequiredTables             []string
+	TablesChecked              []string
+	RequiredTablesPresent      bool
+	MissingTables              []string
 	Message                    string
 }
 
 func CheckStatus(driver string, dsn string) (MigrationStatus, error) {
 	driver = normalizeDriver(driver)
-	status := MigrationStatus{Driver: driver, Versioned: true}
+	status := MigrationStatus{
+		Driver:         driver,
+		Versioned:      true,
+		RequiredTables: cloneStrings(authRequiredTables),
+		TablesChecked:  []string{},
+		MissingTables:  []string{},
+	}
 	switch driver {
 	case "postgres":
 		appStatus, err := appdbmigrate.CheckStatus(driver, dsn)
@@ -239,6 +258,9 @@ func CheckStatus(driver string, dsn string) (MigrationStatus, error) {
 		status.Message = appStatus.Message
 		if status.Message == "" {
 			status.Message = "postgres auth migrations currently share the application schema_migrations namespace"
+		}
+		if err := checkPostgresAuthTables(dsn, &status); err != nil {
+			return status, err
 		}
 		return status, nil
 	case "sqlite":
@@ -272,6 +294,9 @@ func checkSQLiteMigrationStatus(dsn string, status MigrationStatus) (MigrationSt
 		return status, err
 	}
 	defer db.Close()
+	if err := checkSQLiteAuthTables(db, &status); err != nil {
+		return status, err
+	}
 	exists, err := tableExists(db, "schema_migrations")
 	if err != nil {
 		return status, err
@@ -291,6 +316,60 @@ func checkSQLiteMigrationStatus(dsn string, status MigrationStatus) (MigrationSt
 	}
 	status.Message = "sqlite auth migration status read from configured auth database path"
 	return status, nil
+}
+
+func checkSQLiteAuthTables(db *sql.DB, status *MigrationStatus) error {
+	status.TablesChecked = cloneStrings(status.RequiredTables)
+	for _, table := range status.RequiredTables {
+		exists, err := tableExists(db, table)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			status.MissingTables = append(status.MissingTables, table)
+		}
+	}
+	status.RequiredTablesPresent = len(status.MissingTables) == 0
+	return nil
+}
+
+func checkPostgresAuthTables(dsn string, status *MigrationStatus) error {
+	if strings.TrimSpace(dsn) == "" {
+		return fmt.Errorf("postgres auth database dsn is required")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	status.TablesChecked = cloneStrings(status.RequiredTables)
+	for _, table := range status.RequiredTables {
+		exists, err := postgresTableExists(db, table)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			status.MissingTables = append(status.MissingTables, table)
+		}
+	}
+	status.RequiredTablesPresent = len(status.MissingTables) == 0
+	return nil
+}
+
+func postgresTableExists(db *sql.DB, table string) (bool, error) {
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = $1
+	)`, table).Scan(&exists)
+	return exists, err
+}
+
+func cloneStrings(values []string) []string {
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
 }
 
 func sqliteReadOnlyDSN(dbPath string) string {
