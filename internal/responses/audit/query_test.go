@@ -442,6 +442,102 @@ func TestQueryServiceDerivesRequestAuditDiagnostics(t *testing.T) {
 	}
 }
 
+func TestQueryServiceListCompactProvenanceReturnsSafeRefs(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 23, 15, 0, 0, 0, time.UTC)
+	const secretMarker = "SECRET_COMPACT_READ_MODEL"
+
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "compact_event",
+		requestAuditID: "audit_compact",
+		responseID:     "resp_compact",
+		conversationID: "conv_compact",
+		eventType:      "response.compact",
+		phase:          "compact",
+		status:         "completed",
+		detailsJSON: map[string]any{
+			"metadata_compact_provenance":    true,
+			"metadata_compact_provenance_id": "resp_compact",
+			"provenance_version":             "compact_v2_provenance_first_cut",
+			"target_response_id":             "resp_source",
+			"compact_response_id":            "resp_compact",
+			"trigger":                        "auto",
+			"trigger_reason":                 "token_budget",
+			"auto_triggered":                 true,
+			"summary":                        "raw summary " + secretMarker,
+			"arguments":                      `{"secret":"` + secretMarker + `"}`,
+			"tool_output":                    "raw output " + secretMarker,
+			"source_item_refs": []any{
+				map[string]any{"index": 0, "kind": "input", "id": "msg_1", "type": "message", "role": "user", "content": secretMarker},
+				map[string]any{"index": 1, "kind": "output", "id": "fc_1", "type": "function_call", "status": "completed", "call_id": "call_1", "name": "lookup", "arguments": secretMarker},
+			},
+			"retained_item_refs": []any{
+				map[string]any{"index": 0, "kind": "input", "id": "compact_resp_source", "type": "compact_request"},
+				map[string]any{"index": 1, "kind": "output", "id": "summary_1", "type": "summary", "status": "completed", "content": secretMarker},
+			},
+			"summary_item_ids": []any{"summary_1"},
+			"retained_window":  map[string]any{"start": 2, "end": 2, "mode": "summary_boundary", "raw": secretMarker},
+			"budget": map[string]any{
+				"estimated_input_tokens": 101,
+				"context_window_tokens":  128,
+				"raw_prompt":             secretMarker,
+			},
+			"provenance_redaction_policy": "ids_types_status_only",
+		},
+		occurredAt: base,
+	})
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "compact_ignored",
+		requestAuditID: "audit_compact",
+		responseID:     "resp_compact",
+		eventType:      "response.compact",
+		status:         "model_call_started",
+		detailsJSON:    map[string]any{"target_response_id": "resp_source"},
+		occurredAt:     base.Add(time.Second),
+	})
+
+	records, err := NewQueryService(client).ListCompactProvenance(ctx, ListCompactProvenanceParams{
+		ResponseID: "resp_compact",
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListCompactProvenance() error = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("ListCompactProvenance() len = %d, want 1: %+v", len(records), records)
+	}
+	record := records[0]
+	if record.EventID != "compact_event" || record.SourceResponseID != "resp_source" || record.CompactResponseID != "resp_compact" {
+		t.Fatalf("compact provenance identity = %+v, want source/compact ids", record)
+	}
+	if record.Version != "compact_v2_provenance_first_cut" || record.Trigger != "auto" || record.TriggerReason != "token_budget" || !record.Auto {
+		t.Fatalf("compact provenance trigger/version = %+v, want auto token budget", record)
+	}
+	if len(record.SourceItemRefs) != 2 || record.SourceItemRefs[1].CallID != "call_1" || record.SourceItemRefs[1].Name != "lookup" {
+		t.Fatalf("source refs = %+v, want safe function ref", record.SourceItemRefs)
+	}
+	if len(record.RetainedItemRefs) != 2 || record.RetainedItemRefs[1].ID != "summary_1" {
+		t.Fatalf("retained refs = %+v, want summary ref", record.RetainedItemRefs)
+	}
+	if !reflect.DeepEqual(record.SummaryItemIDs, []string{"summary_1"}) {
+		t.Fatalf("summary ids = %v, want summary_1", record.SummaryItemIDs)
+	}
+	if record.RetainedWindow.Start != 2 || record.RetainedWindow.End != 2 || record.RetainedWindow.Mode != "summary_boundary" {
+		t.Fatalf("retained window = %+v, want summary boundary", record.RetainedWindow)
+	}
+	if compactInt(record.Budget["estimated_input_tokens"]) != 101 || compactInt(record.Budget["context_window_tokens"]) != 128 || record.Budget["raw_prompt"] != nil {
+		t.Fatalf("budget = %#v, want whitelisted budget without raw prompt", record.Budget)
+	}
+	payload, err := json.Marshal(records)
+	if err != nil {
+		t.Fatalf("json.Marshal(compact provenance) error = %v", err)
+	}
+	if strings.Contains(string(payload), secretMarker) {
+		t.Fatalf("compact provenance read model leaked secret marker: %s", payload)
+	}
+}
+
 func TestQueryServiceListRequestAuditsLimitAndEmptyResults(t *testing.T) {
 	ctx := context.Background()
 	client := openAuditTestClient(t)

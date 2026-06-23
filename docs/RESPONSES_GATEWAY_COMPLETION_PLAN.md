@@ -25,6 +25,7 @@
 - Responses server-mode over Chat Completions upstream 首切。
 - `previous_response_id` continuation、Responses runtime store、`/v1/responses/:id/input_items`。
 - 显式 `/v1/responses/compact`、item-count auto compact、context-window token-budget auto compact 和 auto compact provenance 首切。
+- Compact v2 provenance event-derived read model 首切：manual/auto compact events 引用 source/retained item refs、summary item ids、retained window 和 budget 白名单字段，`QueryService.ListCompactProvenance` 可查询且不输出 raw prompt/summary/tool args/tool output。
 - Chat Completions SSE cassette 记录与聚合，Responses streaming 覆盖简单文本、function arguments、registered executor 和 hosted `web_search` 的首切路径。
 - Runtime incremental stream fallback contract 首切：auto compact 和不支持的工具组合会在写出任何 SSE 或调用上游前返回可识别 fallback error，并带 deferred fallback reason，HTTP handler 可安全转入 deferred envelope 并写 fallback audit event。
 - Tool ownership boundary 首切：普通 `function` 默认 client-owned；即使 registry 中存在其它 executor，未注册同名 executor 的 function call 也只返回给客户端，不触发 server-side execution。

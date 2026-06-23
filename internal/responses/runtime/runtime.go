@@ -789,16 +789,17 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 	}, inputItems, outputItems); err != nil {
 		return protocol.Response{}, err
 	}
+	compactProvenance, compactProvenanceOK := compactProvenanceFromMetadata(metadata)
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		ResponseID:     resp.ID,
 		ConversationID: audit.CodexConversationID(resp.Metadata),
 		EventType:      "response.compact",
 		Phase:          "compact",
 		Status:         "completed",
-		DetailsJSON: map[string]any{
+		DetailsJSON: mergeMetadata(compactProvenanceEventDetails(compactProvenance, compactProvenanceOK), map[string]any{
 			"target_response_id": req.ResponseID,
 			"summary_chars":      len(summary),
-		},
+		}),
 	})
 	return resp, nil
 }
@@ -1631,6 +1632,12 @@ func compactProvenanceEventDetails(provenance map[string]any, ok bool) map[strin
 	}
 	details := map[string]any{
 		"provenance_version":             provenance["version"],
+		"source_response_id":             provenance["source_response_id"],
+		"compact_response_id":            provenance["compact_response_id"],
+		"trigger":                        provenance["trigger"],
+		"trigger_reason":                 provenance["trigger_reason"],
+		"auto":                           provenance["auto"],
+		"manual":                         provenance["manual"],
 		"source_item_refs":               provenance["source_item_refs"],
 		"retained_item_refs":             provenance["retained_item_refs"],
 		"summary_item_ids":               provenance["summary_item_ids"],

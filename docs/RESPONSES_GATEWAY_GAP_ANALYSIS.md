@@ -113,8 +113,8 @@
 
 ### Compact 与 context optimization
 
-- 已有：显式 compact API、item-count auto compact、基于 context window 的 token-budget auto compact、`/tokenize` counter provider 自动选择首切；compact v2 provenance 首切已把安全 lineage/read-model metadata 写入 compact response 的 `metadata._gateway.compact`，包含 source/compact response id、source item/window 计数、只含 id/type/status/role/call_id/name 的 source/retained item refs、retained summary boundary、summary item ids、budget/trigger 信息和 auto/manual 标记。auto compact 的 `response.compact` / `auto_triggered` execution event 会引用/摘要该 metadata provenance；这些路径不输出 raw prompt、raw summary、raw tool args 或 tool output。
-- 缺口：auto compact stream 仍 fallback；compact provenance 当前仍以内嵌 response metadata 作为最小 read model，尚无独立 schema/query API；artifact-bearing item 策略和完整 context optimization 未接入。
+- 已有：显式 compact API、item-count auto compact、基于 context window 的 token-budget auto compact、`/tokenize` counter provider 自动选择首切；compact v2 provenance 首切已把安全 lineage/read-model metadata 写入 compact response 的 `metadata._gateway.compact`，包含 source/compact response id、source item/window 计数、只含 id/type/status/role/call_id/name 的 source/retained item refs、retained summary boundary、summary item ids、budget/trigger 信息和 auto/manual 标记。manual compact completed event 和 auto compact 的 `response.compact` / `auto_triggered` execution event 会引用/摘要该 metadata provenance；`internal/responses/audit.QueryService.ListCompactProvenance` 已提供 event-derived 安全 read model，可查询 source/retained refs、summary item ids、retained window 和 budget 白名单字段。这些路径不输出 raw prompt、raw summary、raw tool args 或 tool output。
+- 缺口：auto compact stream 仍 fallback；compact provenance 当前仍以内嵌 response metadata 和 execution events 派生 read model 为主，尚无独立 schema、HTTP/CLI 查询 surface；artifact-bearing item 策略和完整 context optimization 未接入。
 - llm-tracelab 落点：`internal/responses/runtime/runtime.go`、`estimator.go`、`profile.go`、`internal/proxy/responses_tokenize_counter.go`。
 - responses-gateway 对照：`docs/functional-design.md` 的 Compact 章节。
 
