@@ -57,6 +57,28 @@ func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.
 	if err := sink.ResponseCreated(created); err != nil {
 		return protocol.Response{}, err
 	}
+	if progressSink, ok := sink.(runtime.ResponseInProgressStreamSink); ok {
+		if err := progressSink.ResponseInProgress(created); err != nil {
+			return protocol.Response{}, err
+		}
+	}
+	if len(f.streamDeltas) > 0 && len(f.streamResp.Output) > 0 {
+		item := f.streamResp.Output[0]
+		part := protocol.ContentPart{Type: "output_text"}
+		if itemSink, ok := sink.(runtime.OutputItemAddedStreamSink); ok {
+			startedItem := item
+			startedItem.Status = "in_progress"
+			startedItem.Content = []protocol.ContentPart{part}
+			if err := itemSink.OutputItemAdded(runtime.ResponseOutputItemAdded{OutputIndex: 0, Item: startedItem}); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+		if contentSink, ok := sink.(runtime.ContentPartStreamSink); ok {
+			if err := contentSink.ContentPartAdded(runtime.ResponseContentPartAdded{OutputIndex: 0, ItemID: item.ID, ContentIndex: 0, Part: part}); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+	}
 	for _, delta := range f.streamDeltas {
 		if err := sink.OutputTextDelta(runtime.ResponseTextDelta{
 			OutputIndex:  0,
@@ -65,6 +87,29 @@ func (f *fakeIncrementalRuntime) CreateStream(ctx context.Context, req protocol.
 			Delta:        delta,
 		}); err != nil {
 			return protocol.Response{}, err
+		}
+	}
+	if len(f.streamDeltas) > 0 && len(f.streamResp.Output) > 0 {
+		item := f.streamResp.Output[0]
+		text := ""
+		if len(item.Content) > 0 {
+			text = item.Content[0].Text
+		}
+		if textDoneSink, ok := sink.(runtime.OutputTextDoneStreamSink); ok {
+			if err := textDoneSink.OutputTextDone(runtime.ResponseTextDone{OutputIndex: 0, ItemID: item.ID, ContentIndex: 0, Text: text}); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+		if contentSink, ok := sink.(runtime.ContentPartStreamSink); ok {
+			part := protocol.ContentPart{Type: "output_text", Text: text}
+			if err := contentSink.ContentPartDone(runtime.ResponseContentPartDone{OutputIndex: 0, ItemID: item.ID, ContentIndex: 0, Part: part}); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+		if itemSink, ok := sink.(runtime.OutputItemStreamSink); ok {
+			if err := itemSink.OutputItemDone(runtime.ResponseOutputItemDone{OutputIndex: 0, Item: item}); err != nil {
+				return protocol.Response{}, err
+			}
 		}
 	}
 	if functionSink, ok := sink.(runtime.FunctionCallArgumentStreamSink); ok {
@@ -515,13 +560,26 @@ func TestCreateResponseStreamUsesIncrementalRuntimeDeltas(t *testing.T) {
 		t.Fatalf("fallback Create unexpectedly called: %#v", rt.createReq)
 	}
 	body := rec.Body.String()
-	for _, event := range []string{"response.created", "response.output_text.delta", "response.completed"} {
+	for _, event := range []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.content_part.done",
+		"response.output_item.done",
+		"response.completed",
+	} {
 		if !strings.Contains(body, "event: "+event+"\n") {
 			t.Fatalf("incremental stream missing event %q:\n%s", event, body)
 		}
 	}
 	if !strings.Contains(body, `"delta":"Hello "`) || !strings.Contains(body, `"delta":"world"`) {
 		t.Fatalf("incremental stream missing separate deltas:\n%s", body)
+	}
+	if !strings.Contains(body, `"text":"Hello world"`) || !strings.Contains(body, `"status":"in_progress"`) {
+		t.Fatalf("incremental stream missing text lifecycle payloads:\n%s", body)
 	}
 	if auditor.acceptedCalls != 1 || auditor.completedID != "audit_1" || auditor.rejectedID != "" {
 		t.Fatalf("stream audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)

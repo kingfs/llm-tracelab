@@ -228,9 +228,22 @@ type ResponseStreamSink interface {
 	ResponseCompleted(resp protocol.Response) error
 }
 
+type ResponseInProgressStreamSink interface {
+	ResponseInProgress(resp protocol.Response) error
+}
+
 type FunctionCallArgumentStreamSink interface {
 	FunctionCallArgumentsDelta(delta ResponseFunctionCallArgumentsDelta) error
 	FunctionCallArgumentsDone(done ResponseFunctionCallArgumentsDone) error
+}
+
+type ContentPartStreamSink interface {
+	ContentPartAdded(added ResponseContentPartAdded) error
+	ContentPartDone(done ResponseContentPartDone) error
+}
+
+type OutputTextDoneStreamSink interface {
+	OutputTextDone(done ResponseTextDone) error
 }
 
 type OutputItemStreamSink interface {
@@ -246,6 +259,27 @@ type ResponseTextDelta struct {
 	ItemID       string
 	ContentIndex int
 	Delta        string
+}
+
+type ResponseTextDone struct {
+	OutputIndex  int
+	ItemID       string
+	ContentIndex int
+	Text         string
+}
+
+type ResponseContentPartAdded struct {
+	OutputIndex  int
+	ItemID       string
+	ContentIndex int
+	Part         protocol.ContentPart
+}
+
+type ResponseContentPartDone struct {
+	OutputIndex  int
+	ItemID       string
+	ContentIndex int
+	Part         protocol.ContentPart
 }
 
 type ResponseFunctionCallArgumentsDelta struct {
@@ -346,6 +380,20 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		createdSent = true
 		return sink.ResponseCreated(created)
 	}
+	inProgressSent := false
+	sendInProgress := func() error {
+		if err := sendCreated(); err != nil {
+			return err
+		}
+		if inProgressSent {
+			return nil
+		}
+		inProgressSent = true
+		if progressSink, ok := sink.(ResponseInProgressStreamSink); ok {
+			return progressSink.ResponseInProgress(created)
+		}
+		return nil
+	}
 
 	var usage ChatUsage
 	output := []protocol.OutputItem{}
@@ -354,20 +402,16 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		messageID := "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		outputOffset := len(output)
 		functionStream := newFunctionCallStreamState(sink, outputOffset)
+		textStream := newMessageTextStreamState(sink, outputOffset, messageID)
 		chatResp, err := streamer.ChatCompletionStream(ctx, chatReq, func(event ChatStreamEvent) error {
 			if event.ChoiceIndex != 0 {
 				return nil
 			}
 			if event.ContentDelta != "" {
-				if err := sendCreated(); err != nil {
+				if err := sendInProgress(); err != nil {
 					return err
 				}
-				if err := sink.OutputTextDelta(ResponseTextDelta{
-					OutputIndex:  outputOffset,
-					ItemID:       messageID,
-					ContentIndex: 0,
-					Delta:        event.ContentDelta,
-				}); err != nil {
+				if err := textStream.delta(event.ContentDelta); err != nil {
 					return err
 				}
 			}
@@ -376,7 +420,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 				if toolDelta.ArgumentsDelta == "" {
 					continue
 				}
-				if err := sendCreated(); err != nil {
+				if err := sendInProgress(); err != nil {
 					return err
 				}
 				if err := functionStream.argumentsDelta(toolDelta); err != nil {
@@ -389,12 +433,15 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 			return protocol.Response{}, err
 		}
 		usage = addChatUsage(usage, chatResp.Usage)
-		if err := sendCreated(); err != nil {
+		if err := sendInProgress(); err != nil {
 			return protocol.Response{}, err
 		}
 		outputItems := chatToOutputItemsWithMessageID(chatResp, messageID)
 		r.recordRequestedFunctionCalls(ctx, outputItems)
 		if err := functionStream.argumentsDone(outputItems); err != nil {
+			return protocol.Response{}, err
+		}
+		if err := textStream.done(outputItems); err != nil {
 			return protocol.Response{}, err
 		}
 		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors)
@@ -425,7 +472,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		chatReq.Messages = append(chatReq.Messages, assistantMessage)
 		for _, call := range calls {
 			outputIndex := len(output)
-			if err := sendCreated(); err != nil {
+			if err := sendInProgress(); err != nil {
 				return protocol.Response{}, err
 			}
 			if err := streamOutputItemAdded(sink, outputIndex, startedToolOutputItem(call)); err != nil {
@@ -473,6 +520,155 @@ func streamOutputItemDone(sink ResponseStreamSink, outputIndex int, item protoco
 		OutputIndex: outputIndex,
 		Item:        item,
 	})
+}
+
+type messageTextStreamState struct {
+	sink         ResponseStreamSink
+	itemSink     OutputItemAddedStreamSink
+	contentSink  ContentPartStreamSink
+	textDoneSink OutputTextDoneStreamSink
+	outputSink   OutputItemStreamSink
+	outputIndex  int
+	itemID       string
+	text         strings.Builder
+	started      bool
+	doneSent     bool
+}
+
+func newMessageTextStreamState(sink ResponseStreamSink, outputIndex int, itemID string) *messageTextStreamState {
+	out := &messageTextStreamState{
+		sink:        sink,
+		outputIndex: outputIndex,
+		itemID:      itemID,
+	}
+	richTextLifecycle := false
+	if contentSink, ok := sink.(ContentPartStreamSink); ok {
+		out.contentSink = contentSink
+		richTextLifecycle = true
+	}
+	if textDoneSink, ok := sink.(OutputTextDoneStreamSink); ok {
+		out.textDoneSink = textDoneSink
+		richTextLifecycle = true
+	}
+	if itemSink, ok := sink.(OutputItemAddedStreamSink); ok && richTextLifecycle {
+		out.itemSink = itemSink
+	}
+	if outputSink, ok := sink.(OutputItemStreamSink); ok && richTextLifecycle {
+		out.outputSink = outputSink
+	}
+	return out
+}
+
+func (s *messageTextStreamState) delta(delta string) error {
+	if s == nil || delta == "" {
+		return nil
+	}
+	if err := s.start(); err != nil {
+		return err
+	}
+	s.text.WriteString(delta)
+	return s.sink.OutputTextDelta(ResponseTextDelta{
+		OutputIndex:  s.outputIndex,
+		ItemID:       s.itemID,
+		ContentIndex: 0,
+		Delta:        delta,
+	})
+}
+
+func (s *messageTextStreamState) done(outputItems []protocol.OutputItem) error {
+	if s == nil || s.doneSent {
+		return nil
+	}
+	item, ok := firstMessageOutputItem(outputItems, s.itemID)
+	if !ok {
+		return nil
+	}
+	text := contentPartsText(item.Content)
+	if !s.started && text != "" {
+		if err := s.delta(text); err != nil {
+			return err
+		}
+	}
+	if !s.started {
+		return nil
+	}
+	s.doneSent = true
+	part := protocol.ContentPart{Type: "output_text", Text: text}
+	if s.textDoneSink != nil {
+		if err := s.textDoneSink.OutputTextDone(ResponseTextDone{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Text:         text,
+		}); err != nil {
+			return err
+		}
+	}
+	if s.contentSink != nil {
+		if err := s.contentSink.ContentPartDone(ResponseContentPartDone{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Part:         part,
+		}); err != nil {
+			return err
+		}
+	}
+	if s.outputSink != nil {
+		if err := s.outputSink.OutputItemDone(ResponseOutputItemDone{
+			OutputIndex: s.outputIndex,
+			Item:        item,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *messageTextStreamState) start() error {
+	if s.started {
+		return nil
+	}
+	s.started = true
+	part := protocol.ContentPart{Type: "output_text"}
+	if s.itemSink != nil {
+		if err := s.itemSink.OutputItemAdded(ResponseOutputItemAdded{
+			OutputIndex: s.outputIndex,
+			Item: protocol.OutputItem{
+				ID:      s.itemID,
+				Type:    "message",
+				Status:  "in_progress",
+				Role:    "assistant",
+				Content: []protocol.ContentPart{part},
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	if s.contentSink != nil {
+		if err := s.contentSink.ContentPartAdded(ResponseContentPartAdded{
+			OutputIndex:  s.outputIndex,
+			ItemID:       s.itemID,
+			ContentIndex: 0,
+			Part:         part,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func firstMessageOutputItem(outputItems []protocol.OutputItem, fallbackID string) (protocol.OutputItem, bool) {
+	for _, item := range outputItems {
+		if item.Type != "message" {
+			continue
+		}
+		if item.ID == "" {
+			item.ID = fallbackID
+		}
+		return item, true
+	}
+	return protocol.OutputItem{}, false
 }
 
 func startedToolOutputItem(call executableToolCall) protocol.OutputItem {

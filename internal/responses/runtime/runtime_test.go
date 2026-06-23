@@ -176,15 +176,47 @@ type fakeResponseStreamSink struct {
 	err           error
 }
 
+type richTextResponseStreamSink struct {
+	fakeResponseStreamSink
+	inProgress []protocol.Response
+	textDone   []ResponseTextDone
+	partAdded  []ResponseContentPartAdded
+	partDone   []ResponseContentPartDone
+}
+
 func (f *fakeResponseStreamSink) ResponseCreated(resp protocol.Response) error {
 	f.created = append(f.created, resp)
 	f.events = append(f.events, "response.created")
 	return f.err
 }
 
+func (f *richTextResponseStreamSink) ResponseInProgress(resp protocol.Response) error {
+	f.inProgress = append(f.inProgress, resp)
+	f.events = append(f.events, "response.in_progress")
+	return f.err
+}
+
 func (f *fakeResponseStreamSink) OutputTextDelta(delta ResponseTextDelta) error {
 	f.deltas = append(f.deltas, delta)
 	f.events = append(f.events, "response.output_text.delta")
+	return f.err
+}
+
+func (f *richTextResponseStreamSink) OutputTextDone(done ResponseTextDone) error {
+	f.textDone = append(f.textDone, done)
+	f.events = append(f.events, "response.output_text.done")
+	return f.err
+}
+
+func (f *richTextResponseStreamSink) ContentPartAdded(added ResponseContentPartAdded) error {
+	f.partAdded = append(f.partAdded, added)
+	f.events = append(f.events, "response.content_part.added")
+	return f.err
+}
+
+func (f *richTextResponseStreamSink) ContentPartDone(done ResponseContentPartDone) error {
+	f.partDone = append(f.partDone, done)
+	f.events = append(f.events, "response.content_part.done")
 	return f.err
 }
 
@@ -585,6 +617,66 @@ func TestRuntimeCreateStreamEmitsDeltasAndStoresFinalResponse(t *testing.T) {
 	}
 	if len(stored.Output) != 1 || stored.Output[0].Content[0].Text != "Hello world" {
 		t.Fatalf("stored output = %#v, want full response text", stored.Output)
+	}
+}
+
+func TestRuntimeCreateStreamEmitsRichTextLifecycleWhenSinkSupportsIt(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ContentDelta: "Hello "},
+			{ChoiceIndex: 0, ContentDelta: "world"},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "Hello world"},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 3, CompletionTokens: 2, TotalTokens: 5},
+		},
+	}
+	rt := New(Config{DefaultModel: "fallback-model"}, client, NewMemoryStore())
+	sink := &richTextResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "hello",
+		Stream: true,
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+
+	wantEvents := []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.content_part.done",
+		"response.output_item.done",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(sink.inProgress) != 1 || sink.inProgress[0].ID != resp.ID || sink.inProgress[0].Status != "in_progress" {
+		t.Fatalf("in_progress events = %#v, want response %q", sink.inProgress, resp.ID)
+	}
+	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.ID != resp.Output[0].ID || sink.outputAdded[0].Item.Status != "in_progress" {
+		t.Fatalf("output item added = %#v, want in-progress message item", sink.outputAdded)
+	}
+	if len(sink.partAdded) != 1 || sink.partAdded[0].ItemID != resp.Output[0].ID || sink.partAdded[0].Part.Type != "output_text" {
+		t.Fatalf("content part added = %#v, want output_text part", sink.partAdded)
+	}
+	if len(sink.textDone) != 1 || sink.textDone[0].Text != "Hello world" || sink.textDone[0].ItemID != resp.Output[0].ID {
+		t.Fatalf("text done = %#v, want full text", sink.textDone)
+	}
+	if len(sink.partDone) != 1 || sink.partDone[0].Part.Text != "Hello world" {
+		t.Fatalf("content part done = %#v, want full text part", sink.partDone)
+	}
+	if len(sink.outputDone) != 1 || !reflect.DeepEqual(sink.outputDone[0].Item, resp.Output[0]) {
+		t.Fatalf("output item done = %#v, want final message item %#v", sink.outputDone, resp.Output[0])
 	}
 }
 
