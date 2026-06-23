@@ -565,6 +565,105 @@ func TestQueryServiceListRequestAuditsFiltersByOperation(t *testing.T) {
 	}
 }
 
+func TestQueryServiceListToolCallLifecycleSummariesFiltersWithoutPayloads(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
+	const secretMarker = "SECRET_TOOL_LIFECYCLE_QUERY"
+
+	auditor := NewEntAuditor(client)
+	for _, entry := range []ToolCallAudit{
+		{
+			ID:             "tool_audit_started",
+			ResponseID:     "resp_tool_query",
+			RequestAuditID: "audit_tool_query",
+			ConversationID: "conv_tool_query",
+			CallID:         "call_lookup",
+			ToolType:       "function",
+			ToolName:       "lookup",
+			Executor:       "function_executor:lookup",
+			Status:         "started",
+			Phase:          "tool_call",
+			InputJSON:      map[string]any{"argument": secretMarker},
+			CreatedAt:      base,
+			StartedAt:      base,
+		},
+		{
+			ID:             "tool_audit_completed",
+			ResponseID:     "resp_tool_query",
+			RequestAuditID: "audit_tool_query",
+			ConversationID: "conv_tool_query",
+			CallID:         "call_lookup",
+			ToolType:       "function",
+			ToolName:       "lookup",
+			Executor:       "function_executor:lookup",
+			Status:         "completed",
+			Phase:          "tool_call",
+			OutputJSON:     map[string]any{"result": secretMarker},
+			CreatedAt:      base.Add(time.Second),
+			CompletedAt:    base.Add(time.Second),
+		},
+		{
+			ID:             "tool_audit_rejected",
+			ResponseID:     "resp_tool_query",
+			RequestAuditID: "audit_tool_query",
+			ConversationID: "conv_tool_query",
+			CallID:         "call_file",
+			ToolType:       "hosted",
+			ToolName:       "file_search",
+			Executor:       "unsupported_hosted_tool",
+			Status:         "rejected",
+			Phase:          "tool_call",
+			ErrorText:      "rejected " + secretMarker,
+			CreatedAt:      base.Add(2 * time.Second),
+		},
+	} {
+		if _, err := auditor.RecordToolCallAudit(ctx, entry); err != nil {
+			t.Fatalf("RecordToolCallAudit(%s) error = %v", entry.ID, err)
+		}
+	}
+
+	service := NewQueryService(client)
+	records, err := service.ListToolCallAudits(ctx, ListToolCallAuditsParams{
+		ResponseID: "resp_tool_query",
+		ToolType:   "hosted",
+		Executor:   "unsupported_hosted_tool",
+		Status:     "rejected",
+	})
+	if err != nil {
+		t.Fatalf("ListToolCallAudits() error = %v", err)
+	}
+	if len(records) != 1 || records[0].CallID != "call_file" || records[0].ToolName != "file_search" {
+		t.Fatalf("ListToolCallAudits filters = %+v, want hosted rejected file_search", records)
+	}
+
+	summaries, err := service.ListToolCallLifecycleSummaries(ctx, ListToolCallAuditsParams{
+		ResponseID: "resp_tool_query",
+		ToolType:   "function",
+		Executor:   "function_executor:lookup",
+	})
+	if err != nil {
+		t.Fatalf("ListToolCallLifecycleSummaries() error = %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summaries len = %d, want 1: %+v", len(summaries), summaries)
+	}
+	summary := summaries[0]
+	if summary.CallID != "call_lookup" || summary.ToolType != "function" || summary.Executor != "function_executor:lookup" {
+		t.Fatalf("summary identity = %+v, want function lookup", summary)
+	}
+	if !reflect.DeepEqual(summary.StatusesSeen, []string{"started", "completed"}) || summary.LatestStatus != "completed" || summary.EventCount != 2 {
+		t.Fatalf("summary lifecycle = %+v, want started/completed latest completed with two events", summary)
+	}
+	payload, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("json.Marshal(summary) error = %v", err)
+	}
+	if strings.Contains(string(payload), secretMarker) {
+		t.Fatalf("lifecycle summary leaked secret marker: %s", payload)
+	}
+}
+
 func openAuditTestClient(t *testing.T) *dao.Client {
 	t.Helper()
 	db, err := stdsql.Open("sqlite", filepath.Join(t.TempDir(), "audit.sqlite")+"?_fk=1")
