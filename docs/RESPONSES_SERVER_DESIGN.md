@@ -178,7 +178,7 @@ providers:
 - `mode`：TraceLab 对该 provider 的处理模式。当前接受空值、`proxy`、`record_only`、`server`、`responses_server`；空值保持历史兼容。
 - `capabilities`：当前代码支持 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize` 布尔能力，用于 routing 和 runtime plan，不应从 provider preset 中隐式猜测所有细节。
 - `model_profiles`：provider/channel 级 profile 仍是后续字段，计划用于模型上下文窗口、输出上限、tool 能力、compact 阈值、上游模型名映射和兼容性参数。当前 runtime/profile 事实源仍是 `responses_server.model_profiles`；model catalog 与 `channel_models` 只参与 drift 诊断，不覆盖 runtime budget/profile。
-- `provider/channel profile adoption`：当前阶段是 `observe_only`。后续把 provider/channel profile 纳入 runtime 前，必须先具备 schema migration、dry-run diff、conflict report、rollback plan 和 DSN-gated tests；过渡期冲突策略固定为 `responses_server.model_profiles_wins`。
+- `provider/channel profile adoption`：当前阶段是 `observe_only`。后续把 provider/channel profile 纳入 runtime 前，必须先具备 schema migration、dry-run diff、conflict report、rollback plan 和 DSN-gated tests；当前 dry-run/conflict/rollback/DSN-gated observe-only coverage 已落地，schema migration 仍是阻塞门；过渡期冲突策略固定为 `responses_server.model_profiles_wins`。
 - `provider probe`：手动诊断命令，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals。`doctor` 默认保持离线，但显式 `--probe-providers` 会复用同一套 provider probe 执行受控网络探测并输出脱敏摘要。默认启动不会执行 probe；显式配置 `provider_probe.startup_fill=true` 后，serve 启动只在内存中填补 YAML upstream 缺失字段，不写回配置，也不覆盖显式配置。Monitor/provider setup 已有 `POST /api/provider-setup/validate`、`POST /api/provider-setup/apply` 和 create dialog 状态编排首切；Providers 列表页与 CLI `provider probe-apply` 已能对 managed channels 执行保守批量补全，只填缺失 API surface 和未设置 capability，不覆盖显式配置或 capability false。更完整 provider onboarding 和自动修复策略仍是后续工作。
 
 配置原则：
@@ -188,7 +188,7 @@ providers:
 - 显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 可以服务 native `/v1/responses` proxy pass-through，但不会被本地 Responses runtime 的内部 Chat Completions adapter 选中。
 - 当请求体包含 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，decision trace 的候选项会标记 `unsupported_tools`。
 - `api_type: chat_completions` 不等于 `responses_native`。由 TraceLab server mode 补齐 Responses 语义。
-- 后续 provider/channel `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源；当前 `responses_server.model_profiles` 是本地 server-mode 的 runtime profile source，匹配失败时按 zero limits 回落。`models codex-config` 会把这一优先级作为 `runtime_profile_source` / `profile_precedence` 输出，并把 catalog/channel 标成 `diagnostic_only`；同一 diagnostics 还会输出 `provider_channel_profile_adoption=observe_only`、`profile_conflict_strategy=responses_server.model_profiles_wins` 和后续采纳 required gates。当前 `profile_adoption_report` 内的 gate 状态明确 `schema_migration`、`rollback_plan`、`dsn_gated_tests` 仍是 blocking/not implemented，因此 catalog/channel profile 尚不能作为 runtime 事实源。
+- 后续 provider/channel `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源；当前 `responses_server.model_profiles` 是本地 server-mode 的 runtime profile source，匹配失败时按 zero limits 回落。`models codex-config` 会把这一优先级作为 `runtime_profile_source` / `profile_precedence` 输出，并把 catalog/channel 标成 `diagnostic_only`；同一 diagnostics 还会输出 `provider_channel_profile_adoption=observe_only`、`profile_conflict_strategy=responses_server.model_profiles_wins` 和后续采纳 required gates。当前 `profile_adoption_report` 内 `dry_run_diff`、`conflict_report`、`rollback_plan` 和 `dsn_gated_tests` 已是非阻塞 observe-only/contract 状态，`schema_migration` 仍是 blocking/not implemented，因此 catalog/channel profile 尚不能作为 runtime 事实源。
 
 ## 存储策略
 

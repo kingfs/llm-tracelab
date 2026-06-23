@@ -798,7 +798,7 @@ func checkDoctorResponsesModelCatalogDrift(cfg *appconfig.Config) doctorCheck {
 	}
 
 	match := cfg.MatchResponsesModelProfile(model)
-	diagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched)
+	diagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched, false)
 	detail["matched_profile"] = modelsCodexMatchedProfile{
 		Matched:       match.Matched,
 		Index:         match.Index,
@@ -831,7 +831,7 @@ func checkDoctorResponsesModelCatalogDrift(cfg *appconfig.Config) doctorCheck {
 
 func checkDoctorResponsesCodexConfigDrift(cfg *appconfig.Config, codexConfigPath string) doctorCheck {
 	model := cfg.ResponsesDefaultModel()
-	result := buildModelsCodexConfigResult(cfg, model, codexConfigPath)
+	result := buildModelsCodexConfigResult(cfg, model, codexConfigPath, false)
 	diagnostics := result.Diagnostics.CodexConfig
 	detail := doctorCodexConfigDriftDetail(cfg, result, diagnostics, strings.TrimSpace(codexConfigPath) != "")
 

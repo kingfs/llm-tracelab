@@ -32,6 +32,7 @@ var modelsProfileAdoptionRequiredGates = []string{"schema_migration", "dry_run_d
 type modelsCodexConfigOptions struct {
 	configPath      string
 	codexConfigPath string
+	checkDB         bool
 	format          string
 	stdout          io.Writer
 	model           string
@@ -211,6 +212,7 @@ func newModelsCommand(runtime *cliRuntime) *cobra.Command {
 
 func newModelsCodexConfigCommand(runtime *cliRuntime) *cobra.Command {
 	var codexConfigPath string
+	var checkDB bool
 	cmd := &cobra.Command{
 		Use:   "codex-config <model>",
 		Short: "Generate a Codex profile TOML suggestion from local Responses model profiles",
@@ -220,6 +222,7 @@ func newModelsCodexConfigCommand(runtime *cliRuntime) *cobra.Command {
 				return runModelsCodexConfigWithOptions(modelsCodexConfigOptions{
 					configPath:      runtime.configPath(),
 					codexConfigPath: codexConfigPath,
+					checkDB:         checkDB,
 					format:          runtime.outputFormat(),
 					stdout:          cmd.OutOrStdout(),
 					model:           args[0],
@@ -228,6 +231,7 @@ func newModelsCodexConfigCommand(runtime *cliRuntime) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&codexConfigPath, "codex-config", "", "Path to a local Codex TOML config file to diagnose for drift")
+	cmd.Flags().BoolVar(&checkDB, "check-db", false, "Read model catalog and channel profile diagnostics from the configured database, including Postgres")
 	return cmd
 }
 
@@ -237,7 +241,7 @@ func runModelsCodexConfigWithOptions(opts modelsCodexConfigOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	result := buildModelsCodexConfigResult(cfg, opts.model, opts.codexConfigPath)
+	result := buildModelsCodexConfigResult(cfg, opts.model, opts.codexConfigPath, opts.checkDB)
 	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, codexConfigCommand, result, func(w io.Writer) error {
 		writeModelsCodexConfigText(w, result)
 		return nil
@@ -248,7 +252,7 @@ func runModelsCodexConfigWithOptions(opts modelsCodexConfigOptions) int {
 	return 0
 }
 
-func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConfigPath string) modelsCodexConfigResult {
+func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConfigPath string, checkDB bool) modelsCodexConfigResult {
 	if cfg == nil {
 		cfg = &appconfig.Config{}
 	}
@@ -278,7 +282,7 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 	provider, providerWarnings := buildModelsCodexProviderConfig(cfg)
 	warnings = append(warnings, providerWarnings...)
 	historyThreshold, historyThresholdSource := codexCompactHistoryItemThreshold(cfg, match)
-	catalogDiagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched)
+	catalogDiagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched, checkDB)
 	warnings = append(warnings, catalogDiagnostics.DriftWarnings...)
 	codexConfigDiagnostics := modelsCodexLocalConfig{Status: "not_configured", DriftWarnings: []string{}}
 	diagnostics := modelsCodexDiagnostics{
@@ -344,19 +348,24 @@ type modelsCatalogDriftDiagnostics struct {
 	ChannelModels       []store.ChannelModelRecord
 }
 
-func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, profileMatched bool) modelsCatalogDriftDiagnostics {
+func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, profileMatched bool, checkDB bool) modelsCatalogDriftDiagnostics {
 	diagnostics := modelsCatalogDriftDiagnostics{
 		CatalogSource: "unavailable",
 		ChannelSource: "unavailable",
 	}
-	if cfg == nil || cfg.DatabaseDriver() != "sqlite" {
+	if cfg == nil {
 		return diagnostics
 	}
-	dbPath := cfg.DatabasePath()
-	if strings.TrimSpace(dbPath) == "" || dbPath == ":memory:" {
-		return diagnostics
-	}
-	if _, err := os.Stat(dbPath); err != nil {
+	driver := cfg.DatabaseDriver()
+	if driver == "sqlite" {
+		dbPath := cfg.DatabasePath()
+		if strings.TrimSpace(dbPath) == "" || dbPath == ":memory:" {
+			return diagnostics
+		}
+		if _, err := os.Stat(dbPath); err != nil {
+			return diagnostics
+		}
+	} else if !checkDB {
 		return diagnostics
 	}
 	outputDir := cfg.TraceOutputDir()
@@ -366,7 +375,7 @@ func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, pro
 
 	st, err := store.NewWithDatabaseOptions(
 		outputDir,
-		cfg.DatabaseDriver(),
+		driver,
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
@@ -566,9 +575,9 @@ func buildModelsProfileAdoptionRequiredGateStatuses() ([]modelsProfileAdoptionGa
 		},
 		{
 			Gate:     "dsn_gated_tests",
-			Status:   "blocking_not_implemented",
-			Blocking: true,
-			Reason:   "real database adoption tests are not yet covered by an opt-in DSN-gated suite",
+			Status:   "implemented_observe_only",
+			Blocking: false,
+			Reason:   "observe-only catalog/channel profile adoption report is covered by opt-in DSN-gated tests",
 		},
 	}
 	blockingCount := 0

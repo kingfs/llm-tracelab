@@ -12,10 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -699,7 +701,7 @@ upstream:
 	for _, want := range []string{
 		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
 		`# profile_adoption: provider_channel_profile_adoption=observe_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
-		`# profile_adoption_gates: adoption_ready=false blocking_gate_count=2 required_gate_statuses=schema_migration:blocking_not_implemented:blocking,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:implemented_contract,dsn_gated_tests:blocking_not_implemented:blocking`,
+		`# profile_adoption_gates: adoption_ready=false blocking_gate_count=1 required_gate_statuses=schema_migration:blocking_not_implemented:blocking,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:implemented_contract,dsn_gated_tests:implemented_observe_only`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -1050,6 +1052,97 @@ responses_server:
 		t.Fatalf("candidates = %+v", report.Candidates)
 	}
 	if len(envelope.Result.Warnings) == 0 || !containsStringFragment(envelope.Result.Warnings, "no responses_server.model_profiles entry matched model") {
+		t.Fatalf("warnings = %+v, want unmatched runtime profile warning", envelope.Result.Warnings)
+	}
+}
+
+func TestModelsCodexConfigCommandReportsPostgresProfileAdoptionWithCheckDB(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := store.NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, store.DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	channelID := "postgres-profile-adoption"
+	model := "gpt-5-postgres-profile-adoption"
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             channelID,
+		Name:           "Postgres Profile Adoption",
+		BaseURL:        "https://api.openai.example/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		Priority:       10,
+		Weight:         1,
+		CapacityHint:   1,
+		ModelDiscovery: "manual",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig(postgres) error = %v", err)
+	}
+	contextWindow := 8192
+	supportsChat := 1
+	if err := st.ReplaceChannelModels(channelID, []store.ChannelModelRecord{
+		{Model: model, DisplayName: "Postgres Profile Adoption Model", Source: "manual", Enabled: true, SupportsChatCompletions: &supportsChat, ContextWindow: &contextWindow},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels(postgres) error = %v", err)
+	}
+	if err := st.UpsertModelCatalog(store.ModelCatalogRecord{Model: model, DisplayName: "Postgres Profile Adoption Model"}); err != nil {
+		t.Fatalf("UpsertModelCatalog(postgres) error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close(postgres) error = %v", err)
+	}
+
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+database:
+  driver: postgres
+  dsn: ` + strconv.Quote(dsn) + `
+trace:
+  output_dir: ` + strconv.Quote(dir) + `
+responses_server:
+  enabled: true
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	offlineEnvelope := executeModelsCodexConfigJSONForTest(t, configPath, model)
+	if offlineEnvelope.Result.Diagnostics.DatabaseAvailable || offlineEnvelope.Result.Diagnostics.CatalogSource != "unavailable" || offlineEnvelope.Result.Diagnostics.ChannelSource != "unavailable" {
+		t.Fatalf("offline diagnostics = %+v, want Postgres skipped without --check-db", offlineEnvelope.Result.Diagnostics)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, model, "--check-db")
+	diagnostics := envelope.Result.Diagnostics
+	if !diagnostics.DatabaseAvailable || !diagnostics.CatalogModelPresent || !diagnostics.ChannelModelPresent || diagnostics.ChannelModelCount != 1 {
+		t.Fatalf("diagnostics = %+v, want Postgres catalog and channel profile hit", diagnostics)
+	}
+	if diagnostics.CatalogSource != "model_catalog" || diagnostics.ChannelSource != "channel_models" {
+		t.Fatalf("sources = %q/%q, want model_catalog/channel_models", diagnostics.CatalogSource, diagnostics.ChannelSource)
+	}
+	report := diagnostics.ProfileAdoptionReport
+	if report.Mode != "observe_only" || !report.DryRun || report.Mutates || report.Status != "would_change" || report.AdoptionReady {
+		t.Fatalf("profile adoption report = %+v, want observe-only would_change without mutation", report)
+	}
+	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
+	if report.CandidateCount != 1 || report.ProposedChangeCount != 1 || report.ConflictCount != 0 || report.ExplicitConfigPresent {
+		t.Fatalf("profile adoption counters = %+v", report)
+	}
+	if len(report.Fields) != 1 || report.Fields[0].RuntimeValue != 0 || report.Fields[0].CandidateValue != contextWindow || report.Fields[0].Status != "would_adopt_after_gates" {
+		t.Fatalf("field diff = %+v", report.Fields)
+	}
+	if len(report.Candidates) != 1 || report.Candidates[0].ChannelID != channelID || report.Candidates[0].Model != model || !report.Candidates[0].Eligible || report.Candidates[0].ContextWindowTokens != contextWindow || report.Candidates[0].SupportsChatCompletions != "true" {
+		t.Fatalf("candidates = %+v", report.Candidates)
+	}
+	if !containsStringFragment(envelope.Result.Warnings, "no responses_server.model_profiles entry matched model") {
 		t.Fatalf("warnings = %+v, want unmatched runtime profile warning", envelope.Result.Warnings)
 	}
 }
@@ -1412,8 +1505,8 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 	if adoptionReady {
 		t.Fatalf("adoption_ready = true, want false while schema/test gates are blocking")
 	}
-	if blockingGateCount != 2 {
-		t.Fatalf("blocking_gate_count = %d, want 2", blockingGateCount)
+	if blockingGateCount != 1 {
+		t.Fatalf("blocking_gate_count = %d, want 1", blockingGateCount)
 	}
 	got := map[string]struct {
 		Status   string
@@ -1427,11 +1520,13 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 			Reason   string
 		}{Status: gate.Status, Blocking: gate.Blocking, Reason: gate.Reason}
 	}
-	for _, gate := range []string{"schema_migration", "dsn_gated_tests"} {
-		status, ok := got[gate]
-		if !ok || status.Status != "blocking_not_implemented" || !status.Blocking || status.Reason == "" {
-			t.Fatalf("gate %s = %+v, want blocking_not_implemented with reason; all gates=%+v", gate, status, gates)
-		}
+	status, ok := got["schema_migration"]
+	if !ok || status.Status != "blocking_not_implemented" || !status.Blocking || status.Reason == "" {
+		t.Fatalf("schema_migration gate = %+v, want blocking_not_implemented with reason; all gates=%+v", status, gates)
+	}
+	status, ok = got["dsn_gated_tests"]
+	if !ok || status.Status != "implemented_observe_only" || status.Blocking || status.Reason == "" {
+		t.Fatalf("dsn_gated_tests gate = %+v, want implemented_observe_only non-blocking with reason; all gates=%+v", status, gates)
 	}
 	for _, gate := range []string{"dry_run_diff", "conflict_report"} {
 		status, ok := got[gate]
