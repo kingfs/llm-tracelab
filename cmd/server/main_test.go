@@ -2058,6 +2058,7 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 		"--conversation-id", "conv_list",
 		"--client-request-id", "client_list",
 		"--status", "failed",
+		"--operation", "create",
 		"--list",
 		"--limit", "10",
 	})
@@ -2072,6 +2073,7 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 				ConversationID  string `json:"conversation_id"`
 				ClientRequestID string `json:"client_request_id"`
 				Status          string `json:"status"`
+				Operation       string `json:"operation"`
 				List            bool   `json:"list"`
 			} `json:"query"`
 			Found         bool `json:"found"`
@@ -2082,6 +2084,7 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 				ConversationID  string         `json:"conversation_id"`
 				ClientRequestID string         `json:"client_request_id"`
 				Status          string         `json:"status"`
+				Operation       string         `json:"operation"`
 				BodyPreview     string         `json:"body_preview"`
 				HeaderJSON      map[string]any `json:"header_json"`
 			} `json:"request_audits"`
@@ -2099,10 +2102,13 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 	if envelope.Result.Query.Status != "failed" {
 		t.Fatalf("query status = %q, want failed", envelope.Result.Query.Status)
 	}
+	if envelope.Result.Query.Operation != "create" {
+		t.Fatalf("query operation = %q, want create", envelope.Result.Query.Operation)
+	}
 	if envelope.Result.Count != 1 || len(envelope.Result.RequestAudits) != 1 {
 		t.Fatalf("request_audits = %+v count=%d, want one failed audit", envelope.Result.RequestAudits, envelope.Result.Count)
 	}
-	if envelope.Result.RequestAudits[0].ID != "reqaudit_list_new" || envelope.Result.RequestAudits[0].ResponseID != "resp_list_new" || envelope.Result.RequestAudits[0].Status != "failed" {
+	if envelope.Result.RequestAudits[0].ID != "reqaudit_list_new" || envelope.Result.RequestAudits[0].ResponseID != "resp_list_new" || envelope.Result.RequestAudits[0].Status != "failed" || envelope.Result.RequestAudits[0].Operation != "create" {
 		t.Fatalf("first request audit = %+v, want latest failed summary", envelope.Result.RequestAudits[0])
 	}
 	if envelope.Result.RequestAudits[0].BodyPreview != "" || envelope.Result.RequestAudits[0].HeaderJSON != nil {
@@ -2110,6 +2116,67 @@ func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
 	}
 	if strings.Contains(out.String(), secretMarker) || strings.Contains(out.String(), "body_preview") || strings.Contains(out.String(), "header_json") {
 		t.Fatalf("audit query list leaked sensitive fields: %s", out.String())
+	}
+}
+
+func TestAuditQueryCommandListsRequestAuditSummariesTextByOperation(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	base := time.Date(2026, 6, 22, 12, 45, 0, 0, time.UTC)
+	for _, seed := range []struct {
+		id     string
+		method string
+		path   string
+	}{
+		{id: "reqaudit_text_create", method: "POST", path: "/v1/responses"},
+		{id: "reqaudit_text_compact", method: "POST", path: "/v1/responses/compact"},
+		{id: "reqaudit_text_items", method: "GET", path: "/v1/responses/resp_text/input_items"},
+	} {
+		if err := st.EntClient().RequestAudit.Create().
+			SetID(seed.id).
+			SetResponseID(seed.id + "_resp").
+			SetConversationID("conv_text_ops").
+			SetMethod(seed.method).
+			SetPath(seed.path).
+			SetHeaderJSON(map[string]any{"authorization": "Bearer text-secret"}).
+			SetBodyPreview(`{"secret":"text-secret"}`).
+			SetBodySha256("sha-text").
+			SetStatus("completed").
+			SetCreatedAt(base).
+			Exec(context.Background()); err != nil {
+			t.Fatalf("create request audit %s: %v", seed.id, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"audit", "query",
+		"--conversation-id", "conv_text_ops",
+		"--operation", "compact",
+		"--list",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	output := out.String()
+	if !strings.Contains(output, "request_audits: 1") || !strings.Contains(output, "- reqaudit_text_compact") || !strings.Contains(output, "operation=compact") {
+		t.Fatalf("audit query text output = %q, want one compact summary", output)
+	}
+	if strings.Contains(output, "reqaudit_text_create") || strings.Contains(output, "reqaudit_text_items") || strings.Contains(output, "text-secret") {
+		t.Fatalf("audit query text output leaked unfiltered or sensitive data: %s", output)
 	}
 }
 
@@ -2127,6 +2194,47 @@ func TestAuditQueryCommandRejectsInvalidListStatus(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--status must be one of: accepted, completed, failed, rejected, cancelled") {
 		t.Fatalf("error = %v, want allowed status message", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty output for validation error", out.String())
+	}
+}
+
+func TestAuditQueryCommandRejectsInvalidOperation(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := runAuditQueryWithOptions(auditQueryOptions{
+		stdout:    &out,
+		list:      true,
+		operation: "raw_payload",
+	})
+	if err == nil {
+		t.Fatal("runAuditQueryWithOptions() error = nil, want invalid operation error")
+	}
+	if !strings.Contains(err.Error(), "--operation must be one of: create, compact, input_items") {
+		t.Fatalf("error = %v, want allowed operation message", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty output for validation error", out.String())
+	}
+}
+
+func TestAuditQueryCommandRejectsOperationWithoutList(t *testing.T) {
+	t.Parallel()
+
+	var out bytes.Buffer
+	err := runAuditQueryWithOptions(auditQueryOptions{
+		stdout:       &out,
+		responseID:   "resp_1",
+		operation:    "create",
+		includeTools: true,
+	})
+	if err == nil {
+		t.Fatal("runAuditQueryWithOptions() error = nil, want operation without list error")
+	}
+	if !strings.Contains(err.Error(), "--operation can only be used with --list") {
+		t.Fatalf("error = %v, want operation/list message", err)
 	}
 	if out.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty output for validation error", out.String())

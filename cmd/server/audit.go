@@ -24,6 +24,7 @@ type auditQueryOptions struct {
 	clientRequestID  string
 	conversationID   string
 	status           string
+	operation        string
 	includeEvents    bool
 	includeExchanges bool
 	includeTools     bool
@@ -69,6 +70,7 @@ type auditQuerySelector struct {
 	ClientRequestID  string `json:"client_request_id,omitempty"`
 	ConversationID   string `json:"conversation_id,omitempty"`
 	Status           string `json:"status,omitempty"`
+	Operation        string `json:"operation,omitempty"`
 	IncludeEvents    bool   `json:"include_events"`
 	IncludeExchanges bool   `json:"include_exchanges"`
 	IncludeTools     bool   `json:"include_tools"`
@@ -93,6 +95,7 @@ type auditRequestAuditView struct {
 	ConversationID  string         `json:"conversation_id,omitempty"`
 	Method          string         `json:"method"`
 	Path            string         `json:"path"`
+	Operation       string         `json:"operation,omitempty"`
 	ClientRequestID string         `json:"client_request_id,omitempty"`
 	HeaderJSON      map[string]any `json:"header_json,omitempty"`
 	BodyPreview     string         `json:"body_preview,omitempty"`
@@ -109,6 +112,7 @@ type auditRequestAuditSummary struct {
 	ConversationID  string    `json:"conversation_id,omitempty"`
 	ClientRequestID string    `json:"client_request_id,omitempty"`
 	Status          string    `json:"status,omitempty"`
+	Operation       string    `json:"operation,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -267,6 +271,7 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&opts.clientRequestID, "client-request-id", "", "Client request id to query")
 	cmd.Flags().StringVar(&opts.conversationID, "conversation-id", "", "Conversation id to query")
 	cmd.Flags().StringVar(&opts.status, "status", "", "Request audit status to filter with --list; one of: "+strings.Join(responsesaudit.RequestAuditStatusValues(), ", "))
+	cmd.Flags().StringVar(&opts.operation, "operation", "", "Responses operation to filter with --list; one of: "+strings.Join(responsesaudit.RequestAuditOperationValues(), ", "))
 	cmd.Flags().BoolVar(&opts.includeEvents, "include-events", false, "Include execution events in the output")
 	cmd.Flags().BoolVar(&opts.includeExchanges, "include-exchanges", false, "Include upstream exchanges in the output")
 	cmd.Flags().BoolVar(&opts.includeTools, "include-tools", false, "Include derived tool-call diagnostics in the output")
@@ -314,8 +319,15 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 	if status != "" && !opts.list {
 		return cliUsageError("--status can only be used with --list", "status")
 	}
-	if responseID == "" && requestAuditID == "" && clientRequestID == "" && conversationID == "" && (!opts.list || status == "") {
-		return cliUsageError("--response-id, --request-audit-id, --client-request-id, or --conversation-id is required; --list may also use --status", "response-id")
+	operation, ok := responsesaudit.NormalizeRequestAuditOperation(opts.operation)
+	if !ok {
+		return cliUsageError(fmt.Sprintf("--operation must be one of: %s", strings.Join(responsesaudit.RequestAuditOperationValues(), ", ")), "operation")
+	}
+	if operation != "" && !opts.list {
+		return cliUsageError("--operation can only be used with --list", "operation")
+	}
+	if responseID == "" && requestAuditID == "" && clientRequestID == "" && conversationID == "" && (!opts.list || status == "" && operation == "") {
+		return cliUsageError("--response-id, --request-audit-id, --client-request-id, or --conversation-id is required; --list may also use --status or --operation", "response-id")
 	}
 	if opts.limit < 0 {
 		return cliUsageError("--limit must be greater than or equal to 0", "limit")
@@ -352,6 +364,7 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 			ClientRequestID:  clientRequestID,
 			ConversationID:   conversationID,
 			Status:           status,
+			Operation:        operation,
 			IncludeEvents:    opts.includeEvents,
 			IncludeExchanges: opts.includeExchanges,
 			IncludeTools:     opts.includeTools,
@@ -369,6 +382,7 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 			ClientRequestID: clientRequestID,
 			ConversationID:  conversationID,
 			Status:          status,
+			Operation:       operation,
 			Limit:           opts.limit,
 		})
 		if err != nil {
@@ -544,6 +558,7 @@ func auditRequestAuditFromAudit(audit responsesaudit.RequestAuditView) *auditReq
 		ConversationID:  audit.ConversationID,
 		Method:          audit.Method,
 		Path:            audit.Path,
+		Operation:       audit.Operation,
 		ClientRequestID: audit.ClientRequestID,
 		HeaderJSON:      redactAuditHeaderJSON(audit.HeaderJSON),
 		BodyPreview:     audit.BodyPreview,
@@ -562,6 +577,7 @@ func auditRequestAuditSummaryFromAudit(audit responsesaudit.RequestAuditView) au
 		ConversationID:  audit.ConversationID,
 		ClientRequestID: audit.ClientRequestID,
 		Status:          audit.Status,
+		Operation:       audit.Operation,
 		CreatedAt:       audit.CreatedAt,
 	}
 }
@@ -755,6 +771,9 @@ func writeAuditQueryText(w io.Writer, result auditQueryResult) {
 			if audit.Status != "" {
 				fmt.Fprintf(w, " status=%s", audit.Status)
 			}
+			if audit.Operation != "" {
+				fmt.Fprintf(w, " operation=%s", audit.Operation)
+			}
 			if !audit.CreatedAt.IsZero() {
 				fmt.Fprintf(w, " created_at=%s", audit.CreatedAt.Format(time.RFC3339))
 			}
@@ -772,6 +791,9 @@ func writeAuditQueryText(w io.Writer, result auditQueryResult) {
 	fmt.Fprintf(w, "status: %s\n", audit.Status)
 	fmt.Fprintf(w, "method: %s\n", audit.Method)
 	fmt.Fprintf(w, "path: %s\n", audit.Path)
+	if audit.Operation != "" {
+		fmt.Fprintf(w, "operation: %s\n", audit.Operation)
+	}
 	if audit.ClientRequestID != "" {
 		fmt.Fprintf(w, "client_request_id: %s\n", audit.ClientRequestID)
 	}

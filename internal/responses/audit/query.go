@@ -12,6 +12,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/predicate"
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
@@ -23,6 +24,7 @@ const (
 )
 
 var requestAuditStatusValues = []string{"accepted", "completed", "failed", "rejected", "cancelled"}
+var requestAuditOperationValues = []string{"create", "compact", "input_items"}
 
 type QueryService struct {
 	client *dao.Client
@@ -38,6 +40,7 @@ type ListRequestAuditsParams struct {
 	ClientRequestID string
 	ConversationID  string
 	Status          string
+	Operation       string
 	Limit           int
 }
 
@@ -71,6 +74,7 @@ type RequestAuditView struct {
 	ConversationID  string
 	Method          string
 	Path            string
+	Operation       string
 	ClientRequestID string
 	HeaderJSON      map[string]any
 	BodyPreview     string
@@ -216,6 +220,9 @@ func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequest
 	}
 	if params.Status != "" {
 		query.Where(requestaudit.StatusEQ(params.Status))
+	}
+	if params.Operation != "" {
+		query.Where(requestAuditOperationPredicate(params.Operation))
 	}
 	records, err := query.All(ctx)
 	if err != nil {
@@ -481,6 +488,10 @@ func RequestAuditStatusValues() []string {
 	return append([]string(nil), requestAuditStatusValues...)
 }
 
+func RequestAuditOperationValues() []string {
+	return append([]string(nil), requestAuditOperationValues...)
+}
+
 func NormalizeRequestAuditStatus(status string) (string, bool) {
 	normalized := strings.ToLower(strings.TrimSpace(status))
 	if normalized == "" {
@@ -494,6 +505,48 @@ func NormalizeRequestAuditStatus(status string) (string, bool) {
 	return "", false
 }
 
+func NormalizeRequestAuditOperation(operation string) (string, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(operation))
+	if normalized == "" {
+		return "", true
+	}
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	for _, allowed := range requestAuditOperationValues {
+		if normalized == allowed {
+			return normalized, true
+		}
+	}
+	return "", false
+}
+
+func RequestAuditOperation(method, path string) string {
+	method = strings.ToUpper(strings.TrimSpace(method))
+	path = strings.TrimSpace(path)
+	switch {
+	case method == "POST" && path == "/v1/responses":
+		return "create"
+	case method == "POST" && path == "/v1/responses/compact":
+		return "compact"
+	case method == "GET" && strings.HasPrefix(path, "/v1/responses/") && strings.HasSuffix(path, "/input_items"):
+		return "input_items"
+	default:
+		return ""
+	}
+}
+
+func requestAuditOperationPredicate(operation string) predicate.RequestAudit {
+	switch operation {
+	case "create":
+		return requestaudit.And(requestaudit.MethodEQ("POST"), requestaudit.PathEQ("/v1/responses"))
+	case "compact":
+		return requestaudit.And(requestaudit.MethodEQ("POST"), requestaudit.PathEQ("/v1/responses/compact"))
+	case "input_items":
+		return requestaudit.And(requestaudit.MethodEQ("GET"), requestaudit.PathHasPrefix("/v1/responses/"), requestaudit.PathHasSuffix("/input_items"))
+	default:
+		return requestaudit.IDEQ("__llm_tracelab_no_such_request_audit_operation__")
+	}
+}
+
 func requestAuditView(record *dao.RequestAudit) RequestAuditView {
 	if record == nil {
 		return RequestAuditView{}
@@ -504,6 +557,7 @@ func requestAuditView(record *dao.RequestAudit) RequestAuditView {
 		ConversationID:  record.ConversationID,
 		Method:          record.Method,
 		Path:            record.Path,
+		Operation:       RequestAuditOperation(record.Method, record.Path),
 		ClientRequestID: record.ClientRequestID,
 		HeaderJSON:      cloneMap(record.HeaderJSON),
 		BodyPreview:     record.BodyPreview,

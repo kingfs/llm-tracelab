@@ -522,6 +522,49 @@ func TestQueryServiceListRequestAuditsFiltersByStatus(t *testing.T) {
 	}
 }
 
+func TestQueryServiceListRequestAuditsFiltersByOperation(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 22, 11, 25, 0, 0, time.UTC)
+
+	for _, seed := range []requestAuditSeed{
+		{id: "audit_create", responseID: "resp_create", conversationID: "conv_ops", method: "POST", path: "/v1/responses", status: "completed", createdAt: base},
+		{id: "audit_compact", responseID: "resp_compact", conversationID: "conv_ops", method: "POST", path: "/v1/responses/compact", status: "completed", createdAt: base.Add(time.Second)},
+		{id: "audit_input_items", responseID: "resp_items", conversationID: "conv_ops", method: "GET", path: "/v1/responses/resp_items/input_items", status: "completed", createdAt: base.Add(2 * time.Second)},
+		{id: "audit_wrong_method", responseID: "resp_wrong", conversationID: "conv_ops", method: "POST", path: "/v1/responses/resp_wrong/input_items", status: "completed", createdAt: base.Add(3 * time.Second)},
+	} {
+		mustCreateRequestAudit(t, client, seed)
+	}
+
+	service := NewQueryService(client)
+	for _, tt := range []struct {
+		name      string
+		operation string
+		wantIDs   []string
+	}{
+		{name: "create", operation: "create", wantIDs: []string{"audit_create"}},
+		{name: "compact", operation: "compact", wantIDs: []string{"audit_compact"}},
+		{name: "input items", operation: "input_items", wantIDs: []string{"audit_input_items"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			audits, err := service.ListRequestAudits(ctx, ListRequestAuditsParams{
+				ConversationID: "conv_ops",
+				Operation:      tt.operation,
+				Limit:          10,
+			})
+			if err != nil {
+				t.Fatalf("ListRequestAudits(operation=%s) error = %v", tt.operation, err)
+			}
+			if got := requestAuditIDs(audits); !reflect.DeepEqual(got, tt.wantIDs) {
+				t.Fatalf("ListRequestAudits(operation=%s) ids = %v, want %v", tt.operation, got, tt.wantIDs)
+			}
+			if len(audits) != 1 || audits[0].Operation != tt.operation {
+				t.Fatalf("ListRequestAudits(operation=%s) view = %+v, want derived operation", tt.operation, audits)
+			}
+		})
+	}
+}
+
 func openAuditTestClient(t *testing.T) *dao.Client {
 	t.Helper()
 	db, err := stdsql.Open("sqlite", filepath.Join(t.TempDir(), "audit.sqlite")+"?_fk=1")
