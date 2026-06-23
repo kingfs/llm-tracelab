@@ -7,14 +7,17 @@ import (
 	"time"
 
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type responsesAuditTraceOutput struct {
 	Query             responsesAuditTraceQuery      `json:"query"`
 	RequestAudit      *responsesRequestAuditView    `json:"request_audit,omitempty"`
+	FinalResponse     *responsesFinalResponseView   `json:"final_response,omitempty"`
 	Events            []responsesExecutionEventView `json:"events"`
 	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
+	RawCassettes      []responsesRawCassetteView    `json:"raw_cassettes"`
 }
 
 type responsesAuditToolCallsOutput struct {
@@ -83,6 +86,30 @@ type responsesUpstreamExchange struct {
 	ErrorText      string    `json:"error_text,omitempty"`
 }
 
+type responsesFinalResponseView struct {
+	ResponseID      string    `json:"response_id,omitempty"`
+	RequestAuditID  string    `json:"request_audit_id,omitempty"`
+	ConversationID  string    `json:"conversation_id,omitempty"`
+	ClientRequestID string    `json:"client_request_id,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	ErrorText       string    `json:"error_text,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	StatusCode      int       `json:"status_code,omitempty"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+}
+
+type responsesRawCassetteView struct {
+	ExchangeID   string                         `json:"exchange_id,omitempty"`
+	TraceID      string                         `json:"trace_id,omitempty"`
+	CassettePath string                         `json:"cassette_path,omitempty"`
+	ReadError    string                         `json:"read_error,omitempty"`
+	Header       recordfile.RecordHeader        `json:"header,omitempty"`
+	Events       []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request      recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response     recordfile.HTTPResponseSummary `json:"response,omitempty"`
+}
+
 type responsesToolCallAuditView struct {
 	ID              string                        `json:"id"`
 	ResponseID      string                        `json:"response_id,omitempty"`
@@ -130,12 +157,14 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 		},
 		Events:            []responsesExecutionEventView{},
 		UpstreamExchanges: []responsesUpstreamExchange{},
+		RawCassettes:      []responsesRawCassetteView{},
 	}
 	if !found {
 		return nil, out, nil
 	}
 
 	out.RequestAudit = responsesRequestAuditFromAudit(trace.RequestAudit)
+	out.FinalResponse = responsesFinalResponseFromAudit(trace.FinalResponse)
 	out.Query.ResponseID = trace.RequestAudit.ResponseID
 	out.Query.RequestAuditID = trace.RequestAudit.ID
 	for _, event := range trace.ExecutionEvents {
@@ -143,6 +172,9 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 	}
 	for _, exchange := range trace.UpstreamExchanges {
 		out.UpstreamExchanges = append(out.UpstreamExchanges, responsesUpstreamExchangeFromAudit(exchange))
+	}
+	for _, cassette := range trace.RawCassettes {
+		out.RawCassettes = append(out.RawCassettes, responsesRawCassetteFromAudit(cassette))
 	}
 	return nil, out, nil
 }
@@ -260,5 +292,36 @@ func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchange
 		StartedAt:      exchange.StartedAt,
 		CompletedAt:    exchange.CompletedAt,
 		ErrorText:      exchange.ErrorText,
+	}
+}
+
+func responsesFinalResponseFromAudit(response responsesaudit.FinalResponseView) *responsesFinalResponseView {
+	if response.ResponseID == "" && response.RequestAuditID == "" && response.Status == "" {
+		return nil
+	}
+	return &responsesFinalResponseView{
+		ResponseID:      response.ResponseID,
+		RequestAuditID:  response.RequestAuditID,
+		ConversationID:  response.ConversationID,
+		ClientRequestID: response.ClientRequestID,
+		Status:          response.Status,
+		ErrorText:       response.ErrorText,
+		Model:           response.Model,
+		Endpoint:        response.Endpoint,
+		StatusCode:      response.StatusCode,
+		CompletedAt:     response.CompletedAt,
+	}
+}
+
+func responsesRawCassetteFromAudit(cassette responsesaudit.RawCassetteView) responsesRawCassetteView {
+	return responsesRawCassetteView{
+		ExchangeID:   cassette.ExchangeID,
+		TraceID:      cassette.TraceID,
+		CassettePath: cassette.CassettePath,
+		ReadError:    cassette.ReadError,
+		Header:       cassette.Header,
+		Events:       append([]recordfile.RecordEvent(nil), cassette.Events...),
+		Request:      cassette.Request,
+		Response:     cassette.Response,
 	}
 }

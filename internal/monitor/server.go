@@ -212,8 +212,10 @@ type systemEventView struct {
 type responsesAuditTraceResponse struct {
 	Query             responsesAuditTraceQuery      `json:"query"`
 	RequestAudit      *responsesRequestAuditView    `json:"request_audit,omitempty"`
+	FinalResponse     *responsesFinalResponseView   `json:"final_response,omitempty"`
 	Events            []responsesExecutionEventView `json:"events"`
 	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
+	RawCassettes      []responsesRawCassetteView    `json:"raw_cassettes"`
 }
 
 type responsesToolCallAuditListResponse struct {
@@ -280,6 +282,30 @@ type responsesUpstreamExchange struct {
 	StartedAt      time.Time `json:"started_at,omitempty"`
 	CompletedAt    time.Time `json:"completed_at,omitempty"`
 	ErrorText      string    `json:"error_text,omitempty"`
+}
+
+type responsesFinalResponseView struct {
+	ResponseID      string    `json:"response_id,omitempty"`
+	RequestAuditID  string    `json:"request_audit_id,omitempty"`
+	ConversationID  string    `json:"conversation_id,omitempty"`
+	ClientRequestID string    `json:"client_request_id,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	ErrorText       string    `json:"error_text,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	StatusCode      int       `json:"status_code,omitempty"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+}
+
+type responsesRawCassetteView struct {
+	ExchangeID   string                         `json:"exchange_id,omitempty"`
+	TraceID      string                         `json:"trace_id,omitempty"`
+	CassettePath string                         `json:"cassette_path,omitempty"`
+	ReadError    string                         `json:"read_error,omitempty"`
+	Header       recordHeaderView               `json:"header,omitempty"`
+	Events       []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request      recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response     recordfile.HTTPResponseSummary `json:"response,omitempty"`
 }
 
 type responsesToolCallAuditView struct {
@@ -5032,14 +5058,19 @@ func responsesAuditTraceFromAudit(trace responsesaudit.RequestAuditTrace, respon
 			RequestAuditID: firstNonEmpty(requestAuditID, trace.RequestAudit.ID),
 		},
 		RequestAudit:      responsesRequestAuditFromAudit(trace.RequestAudit),
+		FinalResponse:     responsesFinalResponseFromAudit(trace.FinalResponse),
 		Events:            make([]responsesExecutionEventView, 0, len(trace.ExecutionEvents)),
 		UpstreamExchanges: make([]responsesUpstreamExchange, 0, len(trace.UpstreamExchanges)),
+		RawCassettes:      make([]responsesRawCassetteView, 0, len(trace.RawCassettes)),
 	}
 	for _, event := range trace.ExecutionEvents {
 		out.Events = append(out.Events, responsesExecutionEventFromAudit(event))
 	}
 	for _, exchange := range trace.UpstreamExchanges {
 		out.UpstreamExchanges = append(out.UpstreamExchanges, responsesUpstreamExchangeFromAudit(exchange))
+	}
+	for _, cassette := range trace.RawCassettes {
+		out.RawCassettes = append(out.RawCassettes, responsesRawCassetteFromAudit(cassette))
 	}
 	return out
 }
@@ -5091,6 +5122,42 @@ func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchange
 		StartedAt:      exchange.StartedAt,
 		CompletedAt:    exchange.CompletedAt,
 		ErrorText:      exchange.ErrorText,
+	}
+}
+
+func responsesFinalResponseFromAudit(response responsesaudit.FinalResponseView) *responsesFinalResponseView {
+	if response.ResponseID == "" && response.RequestAuditID == "" && response.Status == "" {
+		return nil
+	}
+	return &responsesFinalResponseView{
+		ResponseID:      response.ResponseID,
+		RequestAuditID:  response.RequestAuditID,
+		ConversationID:  response.ConversationID,
+		ClientRequestID: response.ClientRequestID,
+		Status:          response.Status,
+		ErrorText:       response.ErrorText,
+		Model:           response.Model,
+		Endpoint:        response.Endpoint,
+		StatusCode:      response.StatusCode,
+		CompletedAt:     response.CompletedAt,
+	}
+}
+
+func responsesRawCassetteFromAudit(cassette responsesaudit.RawCassetteView) responsesRawCassetteView {
+	return responsesRawCassetteView{
+		ExchangeID:   cassette.ExchangeID,
+		TraceID:      cassette.TraceID,
+		CassettePath: cassette.CassettePath,
+		ReadError:    cassette.ReadError,
+		Header: recordHeaderView{
+			Version: cassette.Header.Version,
+			Meta:    cassette.Header.Meta,
+			Layout:  cassette.Header.Layout,
+			Usage:   cassette.Header.Usage,
+		},
+		Events:   append([]recordfile.RecordEvent(nil), cassette.Events...),
+		Request:  cassette.Request,
+		Response: cassette.Response,
 	}
 }
 

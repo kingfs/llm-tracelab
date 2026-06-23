@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/redaction"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -167,6 +168,8 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		Version: "LLM_PROXY_V3",
 		Meta: MetaData{
 			RequestID:                      fmt.Sprintf("%d", now.UnixNano()),
+			RequestAuditID:                 requestAuditIDFromRequest(req),
+			ClientRequestID:                req.Header.Get("X-Client-Request-Id"),
 			Time:                           now,
 			Model:                          modelName,
 			Provider:                       semantics.Provider,
@@ -194,6 +197,14 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		Path:   logPath,
 		Header: header,
 	}, nil
+}
+
+func requestAuditIDFromRequest(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	id, _ := responsesaudit.RequestAuditIDFromContext(req.Context())
+	return id
 }
 
 func (r *Recorder) UpdateLogFile(info *LogInfo) error {

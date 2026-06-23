@@ -422,6 +422,25 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if got := auditExchanges[0].(map[string]any)["trace_id"].(string); got != credentialEntry.ID {
 		t.Fatalf("responses_audit_trace exchange trace_id = %q, want %q", got, credentialEntry.ID)
 	}
+	finalResponse := auditPayload["final_response"].(map[string]any)
+	if got := finalResponse["response_id"].(string); got != "resp-mcp-1" {
+		t.Fatalf("responses_audit_trace final response_id = %q, want resp-mcp-1", got)
+	}
+	if got := finalResponse["client_request_id"].(string); got != "client-mcp-1" {
+		t.Fatalf("responses_audit_trace final client_request_id = %q, want client-mcp-1", got)
+	}
+	rawCassettes := auditPayload["raw_cassettes"].([]any)
+	if len(rawCassettes) != 1 {
+		t.Fatalf("len(responses_audit_trace.raw_cassettes) = %d, want 1", len(rawCassettes))
+	}
+	rawCassette := rawCassettes[0].(map[string]any)
+	if got := rawCassette["trace_id"].(string); got != credentialEntry.ID {
+		t.Fatalf("responses_audit_trace raw cassette trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+	rawResponse := rawCassette["response"].(map[string]any)
+	if got, want := int(rawResponse["status_code"].(float64)), credentialEntry.Header.Meta.StatusCode; got != want {
+		t.Fatalf("responses_audit_trace raw cassette status_code = %d, want %d", got, want)
+	}
 
 	responsesAuditByRequest, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "responses_audit_trace",

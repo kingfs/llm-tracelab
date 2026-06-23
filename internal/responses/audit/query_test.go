@@ -4,6 +4,7 @@ import (
 	"context"
 	stdsql "database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 	"github.com/kingfs/llm-tracelab/ent/dao"
 	"github.com/kingfs/llm-tracelab/ent/dao/enttest"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 	_ "modernc.org/sqlite"
 )
 
@@ -115,6 +117,82 @@ func TestQueryServiceGetRequestAuditTrace(t *testing.T) {
 	}
 	if got := upstreamExchangeIDs(trace.UpstreamExchanges); !reflect.DeepEqual(got, []string{"upex_response", "upex_request"}) {
 		t.Fatalf("UpstreamExchanges ids = %v, want chronological exchanges", got)
+	}
+}
+
+func TestQueryServiceGetRequestAuditTraceIncludesFinalResponseAndRawCassette(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 22, 10, 15, 0, 0, time.UTC)
+	cassettePath := writeAuditCassette(t, "trace-cassette-1", "reqaudit-cassette-1", "resp-cassette-1")
+
+	mustCreateRequestAudit(t, client, requestAuditSeed{
+		id:              "reqaudit-cassette-1",
+		responseID:      "resp-cassette-1",
+		conversationID:  "thread-cassette-1",
+		method:          "POST",
+		path:            "/v1/responses",
+		clientRequestID: "client-cassette-1",
+		status:          "completed",
+		createdAt:       base,
+	})
+	mustCreateExecutionEvent(t, client, executionEventSeed{
+		id:             "event-cassette-completed",
+		requestAuditID: "reqaudit-cassette-1",
+		responseID:     "resp-cassette-1",
+		conversationID: "thread-cassette-1",
+		eventType:      "response.request",
+		phase:          "request",
+		status:         "completed",
+		occurredAt:     base.Add(150 * time.Millisecond),
+	})
+	mustCreateUpstreamExchange(t, client, upstreamExchangeSeed{
+		id:             "upex-cassette-1",
+		responseID:     "resp-cassette-1",
+		requestAuditID: "reqaudit-cassette-1",
+		traceID:        "trace-cassette-1",
+		upstreamID:     "openai-primary",
+		model:          "gpt-5",
+		endpoint:       "/v1/chat/completions",
+		statusCode:     200,
+		startedAt:      base.Add(10 * time.Millisecond),
+		completedAt:    base.Add(120 * time.Millisecond),
+		cassettePath:   cassettePath,
+	})
+
+	trace, found, err := NewQueryService(client).GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		RequestAuditID:        "reqaudit-cassette-1",
+		UpstreamExchangeLimit: 10,
+		EventLimit:            10,
+		CassetteBodyLimit:     64,
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace() error = %v", err)
+	}
+	if !found {
+		t.Fatalf("GetRequestAuditTrace() found = false, want true")
+	}
+	if trace.FinalResponse.ResponseID != "resp-cassette-1" || trace.FinalResponse.ConversationID != "thread-cassette-1" || trace.FinalResponse.ClientRequestID != "client-cassette-1" {
+		t.Fatalf("FinalResponse = %+v, want response/conversation/client correlation", trace.FinalResponse)
+	}
+	if trace.FinalResponse.StatusCode != 200 || trace.FinalResponse.Model != "gpt-5" {
+		t.Fatalf("FinalResponse upstream fields = %+v, want status/model", trace.FinalResponse)
+	}
+	if len(trace.RawCassettes) != 1 {
+		t.Fatalf("len(RawCassettes) = %d, want 1", len(trace.RawCassettes))
+	}
+	cassette := trace.RawCassettes[0]
+	if cassette.TraceID != "trace-cassette-1" || cassette.ExchangeID != "upex-cassette-1" || cassette.ReadError != "" {
+		t.Fatalf("RawCassette identity = %+v, want linked cassette without read error", cassette)
+	}
+	if cassette.Header.Meta.RequestAuditID != "reqaudit-cassette-1" || cassette.Header.Meta.ResponseID != "resp-cassette-1" {
+		t.Fatalf("RawCassette header meta = %+v, want audit/response correlation", cassette.Header.Meta)
+	}
+	if cassette.Request.Method != "POST" || !strings.Contains(cassette.Response.Body, `"id":"resp-cassette-1"`) {
+		t.Fatalf("RawCassette exchange = request=%+v response=%+v", cassette.Request, cassette.Response)
+	}
+	if got := cassette.Request.Header["Authorization"]; !reflect.DeepEqual(got, []string{"<redacted>"}) {
+		t.Fatalf("RawCassette Authorization header = %#v, want redacted", got)
 	}
 }
 
@@ -866,6 +944,8 @@ type upstreamExchangeSeed struct {
 	id             string
 	responseID     string
 	requestAuditID string
+	traceID        string
+	cassettePath   string
 	upstreamID     string
 	model          string
 	endpoint       string
@@ -882,6 +962,12 @@ func mustCreateUpstreamExchange(t *testing.T, client *dao.Client, seed upstreamE
 	}
 	if seed.requestAuditID != "" {
 		create.SetRequestAuditID(seed.requestAuditID)
+	}
+	if seed.traceID != "" {
+		create.SetTraceID(seed.traceID)
+	}
+	if seed.cassettePath != "" {
+		create.SetCassettePath(seed.cassettePath)
 	}
 	if seed.upstreamID != "" {
 		create.SetUpstreamID(seed.upstreamID)
@@ -904,6 +990,54 @@ func mustCreateUpstreamExchange(t *testing.T, client *dao.Client, seed upstreamE
 	if err := create.Exec(context.Background()); err != nil {
 		t.Fatalf("create upstream exchange %s: %v", seed.id, err)
 	}
+}
+
+func writeAuditCassette(t *testing.T, traceID string, requestAuditID string, responseID string) string {
+	t.Helper()
+	requestBody := `{"model":"gpt-5","input":"hello"}`
+	responseBody := `{"id":"` + responseID + `","output_text":"hello"}`
+	requestHeader := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\nAuthorization: Bearer cassette-secret\r\n\r\n"
+	responseHeader := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:       traceID,
+			RequestAuditID:  requestAuditID,
+			ResponseID:      responseID,
+			ConversationID:  "thread-cassette-1",
+			ClientRequestID: "client-cassette-1",
+			Time:            time.Date(2026, 6, 22, 10, 15, 0, 0, time.UTC),
+			Model:           "gpt-5",
+			Provider:        "openai_compatible",
+			Operation:       "chat_completions",
+			Endpoint:        "/v1/chat/completions",
+			URL:             "/v1/chat/completions",
+			Method:          "POST",
+			StatusCode:      200,
+		},
+		Layout: recordfile.LayoutInfo{
+			ReqHeaderLen: int64(len(requestHeader)),
+			ReqBodyLen:   int64(len(requestBody)),
+			ResHeaderLen: int64(len(responseHeader)),
+			ResBodyLen:   int64(len(responseBody)),
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	content := append([]byte{}, prelude...)
+	content = append(content, []byte(requestHeader)...)
+	content = append(content, []byte(requestBody)...)
+	content = append(content, '\n')
+	content = append(content, []byte(responseHeader)...)
+	content = append(content, []byte(responseBody)...)
+
+	path := filepath.Join(t.TempDir(), traceID+".http")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return path
 }
 
 func requestAuditIDs(audits []RequestAuditView) []string {
