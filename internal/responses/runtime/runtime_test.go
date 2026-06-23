@@ -1465,6 +1465,30 @@ func TestRuntimeCompactStoresSummaryBoundaryForContinuation(t *testing.T) {
 	if compactResp.Usage.TotalTokens != 40 {
 		t.Fatalf("compact usage = %#v, want chat usage", compactResp.Usage)
 	}
+	assertCompactV2Provenance(t, compactResp.Metadata, compactV2ProvenanceWant{
+		sourceResponseID:      "resp_target",
+		compactResponseID:     compactResp.ID,
+		trigger:               "manual",
+		sourceItemCount:       2,
+		sourceInputItemCount:  1,
+		sourceOutputItemCount: 1,
+		retainedItemCount:     2,
+		summaryItemID:         compactResp.Output[0].ID,
+	})
+	storedCompact, ok, err := store.Get(context.Background(), compactResp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored compact lookup ok=%v err=%v", ok, err)
+	}
+	assertCompactV2Provenance(t, storedCompact.Metadata, compactV2ProvenanceWant{
+		sourceResponseID:      "resp_target",
+		compactResponseID:     compactResp.ID,
+		trigger:               "manual",
+		sourceItemCount:       2,
+		sourceInputItemCount:  1,
+		sourceOutputItemCount: 1,
+		retainedItemCount:     2,
+		summaryItemID:         compactResp.Output[0].ID,
+	})
 	inputs, ok, err := store.InputItems(context.Background(), compactResp.ID)
 	if err != nil || !ok {
 		t.Fatalf("compact input lookup ok=%v err=%v", ok, err)
@@ -1561,6 +1585,17 @@ func TestRuntimeCreateAutoCompactsWhenHistoryExceedsThreshold(t *testing.T) {
 	if compactResp.PreviousResponseID != "resp_auto_target" || compactResp.Output[0].Type != "summary" {
 		t.Fatalf("compact response = %#v, want summary linked to target", compactResp)
 	}
+	assertCompactV2Provenance(t, compactResp.Metadata, compactV2ProvenanceWant{
+		sourceResponseID:      "resp_auto_target",
+		compactResponseID:     compactResp.ID,
+		trigger:               "auto",
+		triggerReason:         "history_items",
+		sourceItemCount:       2,
+		sourceInputItemCount:  1,
+		sourceOutputItemCount: 1,
+		retainedItemCount:     2,
+		summaryItemID:         compactResp.Output[0].ID,
+	})
 	if len(client.reqs[1].Messages) < 2 || !strings.Contains(chatMessageContentText(client.reqs[1].Messages[0].Content), "Auto compact summary") {
 		t.Fatalf("post-compact chat messages = %#v, want compact summary in context", client.reqs[1].Messages)
 	}
@@ -2675,6 +2710,68 @@ func findExecutionEvent(events []audit.ExecutionEvent, eventType string, status 
 	return nil
 }
 
+type compactV2ProvenanceWant struct {
+	sourceResponseID      string
+	compactResponseID     string
+	trigger               string
+	triggerReason         string
+	sourceItemCount       int
+	sourceInputItemCount  int
+	sourceOutputItemCount int
+	retainedItemCount     int
+	summaryItemID         string
+}
+
+func assertCompactV2Provenance(t *testing.T, metadata map[string]any, want compactV2ProvenanceWant) map[string]any {
+	t.Helper()
+	gateway, ok := stringAnyMap(metadata["_gateway"])
+	if !ok {
+		t.Fatalf("metadata missing _gateway: %#v", metadata)
+	}
+	compact, ok := stringAnyMap(gateway["compact"])
+	if !ok {
+		t.Fatalf("metadata missing _gateway.compact: %#v", metadata)
+	}
+	if compact["version"] != "compact_v2_provenance_first_cut" ||
+		compact["source_response_id"] != want.sourceResponseID ||
+		compact["compact_response_id"] != want.compactResponseID ||
+		compact["trigger"] != want.trigger ||
+		compact["source_item_count"] != want.sourceItemCount ||
+		compact["source_input_item_count"] != want.sourceInputItemCount ||
+		compact["source_output_item_count"] != want.sourceOutputItemCount ||
+		compact["retained_item_count"] != want.retainedItemCount ||
+		compact["provenance_redaction_policy"] != "ids_types_status_only" {
+		t.Fatalf("compact provenance = %#v, want %#v", compact, want)
+	}
+	if want.triggerReason != "" && compact["trigger_reason"] != want.triggerReason {
+		t.Fatalf("compact trigger reason = %#v, want %q", compact["trigger_reason"], want.triggerReason)
+	}
+	summaryIDs, ok := compact["summary_item_ids"].([]string)
+	if !ok || len(summaryIDs) != 1 || summaryIDs[0] != want.summaryItemID {
+		t.Fatalf("summary_item_ids = %#v, want %q", compact["summary_item_ids"], want.summaryItemID)
+	}
+	sourceRefs, ok := compact["source_item_refs"].([]map[string]any)
+	if !ok || len(sourceRefs) != want.sourceItemCount {
+		t.Fatalf("source_item_refs = %#v, want len %d", compact["source_item_refs"], want.sourceItemCount)
+	}
+	retainedRefs, ok := compact["retained_item_refs"].([]map[string]any)
+	if !ok || len(retainedRefs) != want.retainedItemCount {
+		t.Fatalf("retained_item_refs = %#v, want len %d", compact["retained_item_refs"], want.retainedItemCount)
+	}
+	for _, ref := range append(sourceRefs, retainedRefs...) {
+		if _, ok := ref["content"]; ok {
+			t.Fatalf("compact provenance leaked content in ref: %#v", ref)
+		}
+		if _, ok := ref["arguments"]; ok {
+			t.Fatalf("compact provenance leaked arguments in ref: %#v", ref)
+		}
+		if _, ok := ref["output"]; ok {
+			t.Fatalf("compact provenance leaked output in ref: %#v", ref)
+		}
+	}
+	return compact
+}
+
 type autoCompactProvenanceWant struct {
 	trigger                    string
 	originalInputItemCount     int
@@ -2704,6 +2801,11 @@ func assertAutoCompactProvenance(t *testing.T, event *audit.ExecutionEvent, want
 	}
 	if event.DetailsJSON["target_response_id"] == "" || event.DetailsJSON["compact_response_id"] == "" {
 		t.Fatalf("auto_triggered provenance missing compact ids: %#v", event.DetailsJSON)
+	}
+	if event.DetailsJSON["metadata_compact_provenance"] != true ||
+		event.DetailsJSON["metadata_compact_provenance_id"] != event.DetailsJSON["compact_response_id"] ||
+		event.DetailsJSON["provenance_version"] != "compact_v2_provenance_first_cut" {
+		t.Fatalf("auto_triggered event missing metadata provenance reference: %#v", event.DetailsJSON)
 	}
 }
 

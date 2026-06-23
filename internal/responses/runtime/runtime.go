@@ -224,32 +224,34 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 			return protocol.Response{}, err
 		}
 		retainedInputItemCount := rawInputItemCount(compactedHistory) + len(inputItems)
+		compactProvenance, compactProvenanceOK := compactProvenanceFromMetadata(compactResp.Metadata)
+		eventDetails := mergeMetadata(compactProvenanceEventDetails(compactProvenance, compactProvenanceOK), map[string]any{
+			"target_response_id":            req.PreviousResponseID,
+			"compact_response_id":           compactResp.ID,
+			"trigger":                       compactDecision.Trigger,
+			"previous_response_id_present":  req.PreviousResponseID != "",
+			"compact_response_id_present":   compactResp.ID != "",
+			"original_input_item_count":     originalInputItemCount,
+			"retained_input_item_count":     retainedInputItemCount,
+			"dropped_input_item_count":      maxInt(0, originalInputItemCount-retainedInputItemCount),
+			"retained_window_start":         retainedWindowStart,
+			"retained_window_end":           retainedWindowEnd,
+			"history_items":                 len(history),
+			"history_item_threshold":        budget.CompactHistoryItemThreshold,
+			"history_item_threshold_source": compactHistoryThresholdSource(modelProfile, budget),
+			"estimated_input_tokens":        compactDecision.EstimatedInputTokens,
+			"context_window_tokens":         compactDecision.ContextWindowTokens,
+			"reserved_output_tokens":        compactDecision.ReservedOutputTokens,
+			"context_window_limit_source":   contextWindowLimitSource(modelProfile, budget),
+			"reserved_output_limit_source":  reservedOutputLimitSource(req, modelProfile, budget),
+		})
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			ResponseID:     compactResp.ID,
 			ConversationID: audit.CodexConversationID(compactResp.Metadata),
 			EventType:      "response.compact",
 			Phase:          "compact",
 			Status:         "auto_triggered",
-			DetailsJSON: map[string]any{
-				"target_response_id":            req.PreviousResponseID,
-				"compact_response_id":           compactResp.ID,
-				"trigger":                       compactDecision.Trigger,
-				"previous_response_id_present":  req.PreviousResponseID != "",
-				"compact_response_id_present":   compactResp.ID != "",
-				"original_input_item_count":     originalInputItemCount,
-				"retained_input_item_count":     retainedInputItemCount,
-				"dropped_input_item_count":      maxInt(0, originalInputItemCount-retainedInputItemCount),
-				"retained_window_start":         retainedWindowStart,
-				"retained_window_end":           retainedWindowEnd,
-				"history_items":                 len(history),
-				"history_item_threshold":        budget.CompactHistoryItemThreshold,
-				"history_item_threshold_source": compactHistoryThresholdSource(modelProfile, budget),
-				"estimated_input_tokens":        compactDecision.EstimatedInputTokens,
-				"context_window_tokens":         compactDecision.ContextWindowTokens,
-				"reserved_output_tokens":        compactDecision.ReservedOutputTokens,
-				"context_window_limit_source":   contextWindowLimitSource(modelProfile, budget),
-				"reserved_output_limit_source":  reservedOutputLimitSource(req, modelProfile, budget),
-			},
+			DetailsJSON:    eventDetails,
 		})
 		req.PreviousResponseID = compactResp.ID
 		history = compactedHistory
@@ -749,7 +751,6 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 	if summary == "" {
 		summary = "No summary was produced."
 	}
-	metadata := compactResponseMetadata(target.Metadata, req.Metadata, req.ResponseID)
 	inputItems := []protocol.InputItem{{
 		ID:   "compact_" + req.ResponseID,
 		Type: "compact_request",
@@ -763,8 +764,10 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 		Status:  "completed",
 		Content: []protocol.ContentPart{{Type: "summary_text", Text: summary}},
 	}}
+	respID := newResponseID()
+	metadata := compactResponseMetadata(target.Metadata, req.Metadata, req.ResponseID, respID, history, inputItems, outputItems)
 	resp := protocol.Response{
-		ID:                 newResponseID(),
+		ID:                 respID,
 		Object:             "response",
 		CreatedAt:          time.Now().Unix(),
 		Status:             "completed",
@@ -1462,15 +1465,186 @@ func compactSummaryText(chat ChatCompletionResponse) string {
 	return strings.TrimSpace(chatMessageContentText(chat.Choices[0].Message.Content))
 }
 
-func compactResponseMetadata(target map[string]any, request map[string]any, targetResponseID string) map[string]any {
+func compactResponseMetadata(target map[string]any, request map[string]any, targetResponseID string, compactResponseID string, sourceItems []LedgerItem, retainedInputs []protocol.InputItem, summaryOutputs []protocol.OutputItem) map[string]any {
 	metadata := mergeMetadata(target, request)
+	requestCompact, _ := compactProvenanceFromMetadata(request)
+	provenance := compactV2Provenance(targetResponseID, compactResponseID, sourceItems, retainedInputs, summaryOutputs, requestCompact)
 	return mergeMetadata(metadata, map[string]any{
 		"_gateway": map[string]any{
-			"compact": map[string]any{
-				"source_response_id": targetResponseID,
-			},
+			"compact": provenance,
 		},
 	})
+}
+
+func compactV2Provenance(sourceResponseID string, compactResponseID string, sourceItems []LedgerItem, retainedInputs []protocol.InputItem, summaryOutputs []protocol.OutputItem, requestCompact map[string]any) map[string]any {
+	sourceRefs := compactSourceItemRefs(sourceItems)
+	retainedRefs := compactRetainedItemRefs(retainedInputs, summaryOutputs)
+	summaryIDs := compactSummaryItemIDs(summaryOutputs)
+	sourceInputCount := rawInputItemCount(sourceItems)
+	sourceOutputCount := maxInt(0, len(sourceItems)-sourceInputCount)
+	provenance := map[string]any{
+		"version":                     "compact_v2_provenance_first_cut",
+		"source_response_id":          sourceResponseID,
+		"compact_response_id":         compactResponseID,
+		"source_item_count":           len(sourceItems),
+		"source_input_item_count":     sourceInputCount,
+		"source_output_item_count":    sourceOutputCount,
+		"source_item_refs":            sourceRefs,
+		"retained_item_refs":          retainedRefs,
+		"retained_window":             map[string]any{"start": len(sourceRefs), "end": len(sourceRefs), "mode": "summary_boundary"},
+		"retained_item_count":         len(retainedRefs),
+		"retained_input_item_count":   len(retainedInputs),
+		"retained_output_item_count":  len(summaryOutputs),
+		"dropped_item_count":          len(sourceItems),
+		"dropped_input_item_count":    sourceInputCount,
+		"dropped_output_item_count":   sourceOutputCount,
+		"summary_item_ids":            summaryIDs,
+		"manual":                      true,
+		"auto":                        false,
+		"trigger":                     "manual",
+		"trigger_reason":              "manual_request",
+		"provenance_redaction_policy": "ids_types_status_only",
+	}
+	if requestCompact != nil {
+		mergeInto(provenance, requestCompact)
+	}
+	if trigger, _ := provenance["trigger"].(string); trigger == "auto" {
+		provenance["auto"] = true
+		provenance["manual"] = false
+	}
+	if _, ok := provenance["budget"]; !ok {
+		provenance["budget"] = compactBudgetFromFlatFields(provenance)
+	}
+	return provenance
+}
+
+func compactSourceItemRefs(items []LedgerItem) []map[string]any {
+	refs := make([]map[string]any, 0, len(items))
+	for index, item := range items {
+		ref := map[string]any{"index": index}
+		if item.Input != nil {
+			ref["kind"] = "input"
+			addCompactInputRefFields(ref, *item.Input)
+			refs = append(refs, ref)
+			continue
+		}
+		if item.Output != nil {
+			ref["kind"] = "output"
+			addCompactOutputRefFields(ref, *item.Output)
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+func compactRetainedItemRefs(inputs []protocol.InputItem, outputs []protocol.OutputItem) []map[string]any {
+	refs := make([]map[string]any, 0, len(inputs)+len(outputs))
+	for index, item := range inputs {
+		ref := map[string]any{"index": index, "kind": "input"}
+		addCompactInputRefFields(ref, item)
+		refs = append(refs, ref)
+	}
+	for index, item := range outputs {
+		ref := map[string]any{"index": len(inputs) + index, "kind": "output"}
+		addCompactOutputRefFields(ref, item)
+		refs = append(refs, ref)
+	}
+	return refs
+}
+
+func addCompactInputRefFields(ref map[string]any, item protocol.InputItem) {
+	ref["type"] = item.Type
+	if item.ID != "" {
+		ref["id"] = item.ID
+	}
+	if item.Role != "" {
+		ref["role"] = item.Role
+	}
+	if item.CallID != "" {
+		ref["call_id"] = item.CallID
+	}
+	if item.Name != "" {
+		ref["name"] = item.Name
+	}
+}
+
+func addCompactOutputRefFields(ref map[string]any, item protocol.OutputItem) {
+	ref["type"] = item.Type
+	if item.ID != "" {
+		ref["id"] = item.ID
+	}
+	if item.Status != "" {
+		ref["status"] = item.Status
+	}
+	if item.Role != "" {
+		ref["role"] = item.Role
+	}
+	if item.CallID != "" {
+		ref["call_id"] = item.CallID
+	}
+	if item.Name != "" {
+		ref["name"] = item.Name
+	}
+}
+
+func compactSummaryItemIDs(outputs []protocol.OutputItem) []string {
+	ids := make([]string, 0, len(outputs))
+	for _, item := range outputs {
+		if item.Type == "summary" && item.ID != "" {
+			ids = append(ids, item.ID)
+		}
+	}
+	return ids
+}
+
+func compactProvenanceFromMetadata(metadata map[string]any) (map[string]any, bool) {
+	gateway, ok := stringAnyMap(metadata["_gateway"])
+	if !ok {
+		return nil, false
+	}
+	compact, ok := stringAnyMap(gateway["compact"])
+	return compact, ok
+}
+
+func compactBudgetFromFlatFields(provenance map[string]any) map[string]any {
+	budget := map[string]any{}
+	for _, key := range []string{
+		"history_items",
+		"history_item_threshold",
+		"estimated_input_tokens",
+		"context_window_tokens",
+		"reserved_output_tokens",
+		"history_item_threshold_source",
+		"context_window_limit_source",
+		"reserved_output_limit_source",
+	} {
+		if value, ok := provenance[key]; ok {
+			budget[key] = value
+		}
+	}
+	return budget
+}
+
+func compactProvenanceEventDetails(provenance map[string]any, ok bool) map[string]any {
+	if !ok {
+		return nil
+	}
+	details := map[string]any{
+		"provenance_version":             provenance["version"],
+		"source_item_refs":               provenance["source_item_refs"],
+		"retained_item_refs":             provenance["retained_item_refs"],
+		"summary_item_ids":               provenance["summary_item_ids"],
+		"provenance_redaction_policy":    provenance["provenance_redaction_policy"],
+		"metadata_compact_provenance":    true,
+		"metadata_compact_provenance_id": provenance["compact_response_id"],
+	}
+	if retainedWindow, ok := provenance["retained_window"]; ok {
+		details["retained_window"] = retainedWindow
+	}
+	if budget, ok := provenance["budget"]; ok {
+		details["budget"] = budget
+	}
+	return details
 }
 
 func responseInputToMessages(req protocol.CreateResponseRequest, history []LedgerItem, inputItems []protocol.InputItem) []ChatMessage {
