@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	pathpkg "path"
 	"strconv"
 	"strings"
 	"time"
@@ -158,6 +159,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorManagementConsistency(cfg))
 	result.Checks = append(result.Checks, checkDoctorDatabaseMigration(cfg, opts.checkDB))
 	result.Checks = append(result.Checks, checkDoctorResponsesServerBackend(cfg))
+	result.Checks = append(result.Checks, checkDoctorResponsesHTTPGuard(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesDefaultModel(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesStoreReadiness(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelProfiles(cfg))
@@ -279,6 +281,209 @@ func checkDoctorResponsesServerBackend(cfg *appconfig.Config) doctorCheck {
 		Message: "responses server backend is valid",
 		Detail:  map[string]any{"router_config_source": "config-file-only"},
 	}
+}
+
+func checkDoctorResponsesHTTPGuard(cfg *appconfig.Config) doctorCheck {
+	effectivePath := cfg.ResponsesServerPath()
+	normalizedPath, pathErr := normalizeDoctorResponsesPath(effectivePath)
+	detail := map[string]any{
+		"enabled":                    cfg.ResponsesServerEnabled(),
+		"responses_path":             effectivePath,
+		"responses_path_configured":  strings.TrimSpace(cfg.ResponsesServer.Path) != "",
+		"normalized_path":            normalizedPath,
+		"max_request_body_bytes":     cfg.ResponsesMaxRequestBodyBytes(),
+		"max_body_configured":        cfg.ResponsesServer.MaxRequestBodyBytes > 0,
+		"force_store":                cfg.ResponsesForceStore(),
+		"auth":                       doctorResponsesHTTPGuardAuthDetail(cfg),
+		"management":                 doctorResponsesHTTPGuardManagementDetail(cfg, normalizedPath),
+		"server_port":                strings.TrimSpace(cfg.Server.Port),
+		"monitor_port":               strings.TrimSpace(cfg.Monitor.Port),
+		"proxy_server":               "server.port",
+		"management_server":          "monitor.port",
+		"request_body_guard_source":  "internal/responses/httpapi.WithMaxBodyBytes",
+		"entrypoint_normalizer":      "internal/proxy.normalizeClientEntrypoint",
+		"auth_database_status_check": "not_opened",
+	}
+	if !cfg.ResponsesServerEnabled() {
+		detail["skipped_reason"] = "responses_server.enabled is false"
+		return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
+	}
+	if pathErr != nil {
+		detail["error"] = pathErr.Error()
+		return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusFail, Message: "responses server path is invalid", Detail: detail}
+	}
+	if normalizedPath == "/" {
+		detail["error"] = "responses_server.path must not be / because it captures every proxy request"
+		return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusFail, Message: "responses server path captures every request", Detail: detail}
+	}
+
+	var warnings []string
+	var failures []string
+	if cfg.ResponsesMaxRequestBodyBytes() < 1024 {
+		warnings = append(warnings, "responses_server.max_request_body_bytes is below 1024 bytes and may reject normal JSON requests")
+	}
+	if canonical := canonicalDoctorClientEntrypoint(normalizedPath); canonical != normalizedPath {
+		detail["client_entrypoint_canonical_path"] = canonical
+		warnings = append(warnings, "responses_server.path is rewritten by the proxy entrypoint normalizer before local responses routing")
+	}
+	management := doctorResponsesHTTPGuardManagement(cfg, normalizedPath)
+	detail["management"] = management.detail
+	failures = append(failures, management.failures...)
+	warnings = append(warnings, management.warnings...)
+
+	authDetail := doctorResponsesHTTPGuardAuthDetail(cfg)
+	detail["auth"] = authDetail
+	if supported, _ := authDetail["auth_store_driver_supported"].(bool); !supported {
+		warnings = append(warnings, "auth verifier will not become effective because serve cannot open an auth store for the configured database driver")
+	}
+
+	if len(failures) > 0 {
+		detail["failures"] = failures
+		if len(warnings) > 0 {
+			detail["warnings"] = warnings
+		}
+		return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusFail, Message: "responses server HTTP guard has startup conflicts", Detail: detail}
+	}
+	if len(warnings) > 0 {
+		detail["warnings"] = warnings
+		return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusWarn, Message: "responses server HTTP guard has offline warnings", Detail: detail}
+	}
+	return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusPass, Message: "responses server HTTP guard configuration is ready", Detail: detail}
+}
+
+func normalizeDoctorResponsesPath(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("responses_server.path must not be empty")
+	}
+	if !strings.HasPrefix(raw, "/") {
+		return "", fmt.Errorf("responses_server.path must be an absolute HTTP path starting with /")
+	}
+	normalized := pathpkg.Clean(raw)
+	if normalized == "." {
+		normalized = "/"
+	}
+	if !strings.HasPrefix(normalized, "/") {
+		normalized = "/" + normalized
+	}
+	if normalized != "/" {
+		normalized = strings.TrimRight(normalized, "/")
+	}
+	return normalized, nil
+}
+
+func canonicalDoctorClientEntrypoint(path string) string {
+	switch path {
+	case "/responses":
+		return "/v1/responses"
+	case "/v1/tokenize":
+		return "/tokenize"
+	case "/v1/detokenize":
+		return "/detokenize"
+	case "/anthropic/messages", "/anthropic/v1/messages":
+		return "/v1/messages"
+	case "/anthropic/messages/count_tokens", "/anthropic/v1/messages/count_tokens":
+		return "/v1/messages/count_tokens"
+	default:
+		return path
+	}
+}
+
+func doctorResponsesHTTPGuardAuthDetail(cfg *appconfig.Config) map[string]any {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	supported := driver == "sqlite" || driver == "postgres"
+	databasePathSource := "default"
+	if strings.TrimSpace(cfg.Auth.DatabasePath) != "" {
+		databasePathSource = "auth.database_path"
+	} else if strings.TrimSpace(cfg.Database.DSN) != "" {
+		databasePathSource = "database.dsn"
+	}
+	return map[string]any{
+		"token_auth_config_flag":       "not_configurable",
+		"api_auth_config_flag":         "not_configurable",
+		"proxy_auth_required":          true,
+		"management_auth_required":     strings.TrimSpace(cfg.Monitor.Port) != "",
+		"mcp_auth_required":            cfg.MCP.Enabled && strings.TrimSpace(cfg.Monitor.Port) != "",
+		"verifier_source":              "auth store opened by serve",
+		"verifier_status_check":        "configuration-only",
+		"auth_store_driver":            driver,
+		"auth_store_driver_supported":  supported,
+		"auth_database_path_source":    databasePathSource,
+		"auth_database_opened":         false,
+		"auth_database_opened_reason":  "doctor does not open auth database",
+		"auth_migration_check_command": "auth migrate status",
+	}
+}
+
+type doctorResponsesHTTPGuardManagementReport struct {
+	detail   map[string]any
+	warnings []string
+	failures []string
+}
+
+func doctorResponsesHTTPGuardManagementDetail(cfg *appconfig.Config, normalizedPath string) map[string]any {
+	return doctorResponsesHTTPGuardManagement(cfg, normalizedPath).detail
+}
+
+func doctorResponsesHTTPGuardManagement(cfg *appconfig.Config, normalizedPath string) doctorResponsesHTTPGuardManagementReport {
+	serverPort := strings.TrimSpace(cfg.Server.Port)
+	monitorPort := strings.TrimSpace(cfg.Monitor.Port)
+	monitorEnabled := monitorPort != ""
+	samePort := monitorEnabled && serverPort != "" && serverPort == monitorPort
+	mcpPath := ""
+	mcpPathOverlap := false
+	if cfg.MCP.Enabled {
+		if normalized, err := normalizeMCPPath(cfg.MCP.Path); err == nil {
+			mcpPath = normalized
+			mcpPathOverlap = httpPathsOverlap(normalizedPath, mcpPath)
+		} else {
+			mcpPath = strings.TrimSpace(cfg.MCP.Path)
+		}
+	}
+	monitorPathOverlap := monitorEnabled && httpPathsOverlap(normalizedPath, "/api")
+	detail := map[string]any{
+		"server_port":                  serverPort,
+		"monitor_port":                 monitorPort,
+		"monitor_enabled":              monitorEnabled,
+		"same_port":                    samePort,
+		"mcp_enabled":                  cfg.MCP.Enabled,
+		"mcp_path":                     mcpPath,
+		"mcp_path_overlap":             mcpPathOverlap,
+		"monitor_api_prefix":           "/api",
+		"monitor_api_overlap":          monitorPathOverlap,
+		"serve_boundary":               "proxy and management use separate http.Server instances",
+		"runtime_conflict_possible":    samePort && (mcpPathOverlap || monitorPathOverlap),
+		"management_path_check_scope":  "mcp path and monitor /api prefix",
+		"management_root_app_handler":  monitorEnabled,
+		"management_root_overlap_note": "ignored unless responses_server.path is /, which is checked separately",
+	}
+	var report doctorResponsesHTTPGuardManagementReport
+	report.detail = detail
+	if samePort {
+		report.failures = append(report.failures, "server.port and monitor.port are the same; serve starts proxy and management as separate HTTP servers")
+	}
+	if samePort && mcpPathOverlap {
+		report.failures = append(report.failures, "responses_server.path overlaps mcp.path on the same server/monitor port")
+	}
+	if samePort && monitorPathOverlap {
+		report.failures = append(report.failures, "responses_server.path overlaps monitor /api management routes on the same server/monitor port")
+	}
+	return report
+}
+
+func httpPathsOverlap(a string, b string) bool {
+	a = strings.TrimRight(a, "/")
+	b = strings.TrimRight(b, "/")
+	if a == "" {
+		a = "/"
+	}
+	if b == "" {
+		b = "/"
+	}
+	if a == "/" || b == "/" {
+		return true
+	}
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
 }
 
 func checkDoctorResponsesDefaultModel(cfg *appconfig.Config) doctorCheck {

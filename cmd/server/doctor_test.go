@@ -187,6 +187,197 @@ upstream:
 	}
 }
 
+func TestDoctorResponsesHTTPGuardDisabledPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: false
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.http_guard")
+	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.enabled is false" {
+		t.Fatalf("responses_server.http_guard = %+v, want disabled pass", check)
+	}
+}
+
+func TestDoctorResponsesHTTPGuardInvalidPathFails(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  path: v1/responses
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.http_guard")
+	if check.Status != doctorStatusFail {
+		t.Fatalf("responses_server.http_guard = %+v, want fail", check)
+	}
+	if check.Detail["responses_path"] != "v1/responses" {
+		t.Fatalf("responses_path = %#v, want raw invalid path", check.Detail["responses_path"])
+	}
+}
+
+func TestDoctorResponsesHTTPGuardTinyBodyWarns(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  max_request_body_bytes: 16
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.http_guard")
+	if check.Status != doctorStatusWarn {
+		t.Fatalf("responses_server.http_guard = %+v, want warn", check)
+	}
+	if got := int64(check.Detail["max_request_body_bytes"].(float64)); got != 16 {
+		t.Fatalf("max_request_body_bytes = %d, want 16", got)
+	}
+	if !doctorDetailStringSliceContains(check.Detail, "warnings", "below 1024 bytes") {
+		t.Fatalf("warnings = %#v, want tiny body warning", check.Detail["warnings"])
+	}
+}
+
+func TestDoctorResponsesHTTPGuardNormalConfigPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+monitor:
+  port: "9090"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  path: /v1/responses
+  max_request_body_bytes: 1048576
+  force_store: true
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.http_guard")
+	if check.Status != doctorStatusPass {
+		t.Fatalf("responses_server.http_guard = %+v, want pass", check)
+	}
+	if check.Detail["responses_path"] != "/v1/responses" || check.Detail["normalized_path"] != "/v1/responses" || check.Detail["force_store"] != true {
+		t.Fatalf("responses_server.http_guard detail = %+v, want path/force_store detail", check.Detail)
+	}
+	authDetail, ok := check.Detail["auth"].(map[string]any)
+	if !ok || authDetail["proxy_auth_required"] != true || authDetail["verifier_status_check"] != "configuration-only" {
+		t.Fatalf("auth detail = %#v, want conservative auth status", check.Detail["auth"])
+	}
+	managementDetail, ok := check.Detail["management"].(map[string]any)
+	if !ok || managementDetail["same_port"] != false || managementDetail["runtime_conflict_possible"] != false {
+		t.Fatalf("management detail = %#v, want separate-port no conflict", check.Detail["management"])
+	}
+}
+
+func TestDoctorResponsesHTTPGuardMCPPathConflictFails(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+monitor:
+  port: "8080"
+mcp:
+  enabled: true
+  path: /v1/responses
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  path: /v1/responses
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.http_guard")
+	if check.Status != doctorStatusFail {
+		t.Fatalf("responses_server.http_guard = %+v, want fail", check)
+	}
+	managementDetail, ok := check.Detail["management"].(map[string]any)
+	if !ok || managementDetail["mcp_path_overlap"] != true || managementDetail["runtime_conflict_possible"] != true {
+		t.Fatalf("management detail = %#v, want mcp path conflict", check.Detail["management"])
+	}
+}
+
 func TestDoctorResponsesModelCatalogDriftDisabledPasses(t *testing.T) {
 	t.Parallel()
 
@@ -474,6 +665,8 @@ func TestDoctorJSONDoesNotLeakSecrets(t *testing.T) {
 	configPath := writeDoctorTestConfig(t, `
 server:
   port: "8080"
+auth:
+  database_path: /tmp/doctor-auth-path-secret.sqlite3
 database:
   driver: postgres
   dsn: postgres://app:doctor-db-secret@example.com:5432/traces?sslmode=disable&api_key=doctor-db-query-secret
@@ -508,6 +701,7 @@ upstreams:
 		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
 	}
 	for _, secret := range []string{
+		"doctor-auth-path-secret",
 		"doctor-db-secret",
 		"doctor-db-query-secret",
 		"doctor-search-secret",
