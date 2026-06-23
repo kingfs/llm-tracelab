@@ -699,7 +699,7 @@ upstream:
 	for _, want := range []string{
 		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=diagnostic_only capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
 		`# profile_adoption: provider_channel_profile_adoption=observe_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
-		`# profile_adoption_gates: adoption_ready=false blocking_gate_count=3 required_gate_statuses=schema_migration:blocking_not_implemented:blocking,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:blocking_not_implemented:blocking,dsn_gated_tests:blocking_not_implemented:blocking`,
+		`# profile_adoption_gates: adoption_ready=false blocking_gate_count=2 required_gate_statuses=schema_migration:blocking_not_implemented:blocking,dry_run_diff:implemented_observe_only,conflict_report:implemented_observe_only,rollback_plan:implemented_contract,dsn_gated_tests:blocking_not_implemented:blocking`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
@@ -978,6 +978,14 @@ responses_server:
 		t.Fatalf("profile adoption report = %+v, want blocked observe-only dry-run", report)
 	}
 	assertProfileAdoptionBlockingGatesForTest(t, report.AdoptionReady, report.BlockingGateCount, report.RequiredGates)
+	if report.RollbackContract.Status != "implemented_contract" ||
+		report.RollbackContract.MutationMode != "observe_only_no_mutation" ||
+		report.RollbackContract.RuntimeProfileSource != "responses_server.model_profiles" ||
+		report.RollbackContract.Strategy == "" ||
+		report.RollbackContract.RollbackScope != "remove_or_disable_adopted_profile_records_only" ||
+		!containsStringFragment(report.RollbackContract.RequiredArtifacts, "adopted_profile_source_marker") {
+		t.Fatalf("rollback contract = %+v, want mutation-free implemented contract", report.RollbackContract)
+	}
 	if !report.ExplicitConfigPresent || report.CandidateCount != 1 || report.ProposedChangeCount != 0 || report.ConflictCount != 1 {
 		t.Fatalf("profile adoption counters = %+v", report)
 	}
@@ -1278,12 +1286,22 @@ type modelsCodexConfigEnvelopeForTest struct {
 			CatalogProfileRole             string   `json:"catalog_profile_role"`
 			ProviderChannelProfileAdoption string   `json:"provider_channel_profile_adoption"`
 			ProfileAdoptionReport          struct {
-				Mode                  string   `json:"mode"`
-				DryRun                bool     `json:"dry_run"`
-				Mutates               bool     `json:"mutates"`
-				Status                string   `json:"status"`
-				RuntimeProfileSource  string   `json:"runtime_profile_source"`
-				CandidateSource       string   `json:"candidate_source"`
+				Mode                 string `json:"mode"`
+				DryRun               bool   `json:"dry_run"`
+				Mutates              bool   `json:"mutates"`
+				Status               string `json:"status"`
+				RuntimeProfileSource string `json:"runtime_profile_source"`
+				CandidateSource      string `json:"candidate_source"`
+				RollbackContract     struct {
+					Status               string   `json:"status"`
+					MutationMode         string   `json:"mutation_mode"`
+					RuntimeProfileSource string   `json:"runtime_profile_source"`
+					AdoptionSource       string   `json:"adoption_source"`
+					Strategy             string   `json:"strategy"`
+					RollbackScope        string   `json:"rollback_scope"`
+					RequiredArtifacts    []string `json:"required_artifacts"`
+					Limitations          []string `json:"limitations"`
+				} `json:"rollback_contract"`
 				ExplicitConfigPresent bool     `json:"explicit_config_present"`
 				AdoptionReady         bool     `json:"adoption_ready"`
 				CandidateCount        int      `json:"candidate_count"`
@@ -1392,10 +1410,10 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 }) {
 	t.Helper()
 	if adoptionReady {
-		t.Fatalf("adoption_ready = true, want false while schema/rollback/test gates are blocking")
+		t.Fatalf("adoption_ready = true, want false while schema/test gates are blocking")
 	}
-	if blockingGateCount != 3 {
-		t.Fatalf("blocking_gate_count = %d, want 3", blockingGateCount)
+	if blockingGateCount != 2 {
+		t.Fatalf("blocking_gate_count = %d, want 2", blockingGateCount)
 	}
 	got := map[string]struct {
 		Status   string
@@ -1409,7 +1427,7 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 			Reason   string
 		}{Status: gate.Status, Blocking: gate.Blocking, Reason: gate.Reason}
 	}
-	for _, gate := range []string{"schema_migration", "rollback_plan", "dsn_gated_tests"} {
+	for _, gate := range []string{"schema_migration", "dsn_gated_tests"} {
 		status, ok := got[gate]
 		if !ok || status.Status != "blocking_not_implemented" || !status.Blocking || status.Reason == "" {
 			t.Fatalf("gate %s = %+v, want blocking_not_implemented with reason; all gates=%+v", gate, status, gates)
@@ -1420,6 +1438,9 @@ func assertProfileAdoptionBlockingGatesForTest(t *testing.T, adoptionReady bool,
 		if !ok || status.Status != "implemented_observe_only" || status.Blocking || status.Reason == "" {
 			t.Fatalf("gate %s = %+v, want implemented_observe_only non-blocking with reason; all gates=%+v", gate, status, gates)
 		}
+	}
+	if status, ok := got["rollback_plan"]; !ok || status.Status != "implemented_contract" || status.Blocking || status.Reason == "" {
+		t.Fatalf("rollback_plan gate = %+v, want implemented_contract non-blocking with reason; all gates=%+v", status, gates)
 	}
 }
 

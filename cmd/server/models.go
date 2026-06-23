@@ -109,6 +109,7 @@ type modelsProfileAdoptionReport struct {
 	Status                string                           `json:"status"`
 	RuntimeProfileSource  string                           `json:"runtime_profile_source"`
 	CandidateSource       string                           `json:"candidate_source"`
+	RollbackContract      modelsProfileRollbackContract    `json:"rollback_contract"`
 	ExplicitConfigPresent bool                             `json:"explicit_config_present"`
 	AdoptionReady         bool                             `json:"adoption_ready"`
 	CandidateCount        int                              `json:"candidate_count"`
@@ -120,6 +121,17 @@ type modelsProfileAdoptionReport struct {
 	Fields                []modelsProfileAdoptionFieldDiff `json:"fields,omitempty"`
 	Candidates            []modelsProfileAdoptionCandidate `json:"candidates,omitempty"`
 	Conflicts             []modelsProfileAdoptionConflict  `json:"conflicts,omitempty"`
+}
+
+type modelsProfileRollbackContract struct {
+	Status               string   `json:"status"`
+	MutationMode         string   `json:"mutation_mode"`
+	RuntimeProfileSource string   `json:"runtime_profile_source"`
+	AdoptionSource       string   `json:"adoption_source"`
+	Strategy             string   `json:"strategy"`
+	RollbackScope        string   `json:"rollback_scope"`
+	RequiredArtifacts    []string `json:"required_artifacts"`
+	Limitations          []string `json:"limitations,omitempty"`
 }
 
 type modelsProfileAdoptionGate struct {
@@ -430,6 +442,7 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 		Status:                "unavailable",
 		RuntimeProfileSource:  "responses_server.model_profiles",
 		CandidateSource:       diagnostics.ChannelSource,
+		RollbackContract:      buildModelsProfileRollbackContract(diagnostics.ChannelSource),
 		ExplicitConfigPresent: match.Matched,
 		BlockedReasons:        []string{},
 	}
@@ -547,9 +560,9 @@ func buildModelsProfileAdoptionRequiredGateStatuses() ([]modelsProfileAdoptionGa
 		},
 		{
 			Gate:     "rollback_plan",
-			Status:   "blocking_not_implemented",
-			Blocking: true,
-			Reason:   "there is no rollback contract for catalog/channel profile adoption into runtime profiles",
+			Status:   "implemented_contract",
+			Blocking: false,
+			Reason:   "profile_adoption_report includes a mutation-free rollback contract for future catalog/channel adoption",
 		},
 		{
 			Gate:     "dsn_gated_tests",
@@ -565,6 +578,33 @@ func buildModelsProfileAdoptionRequiredGateStatuses() ([]modelsProfileAdoptionGa
 		}
 	}
 	return gates, blockingCount
+}
+
+func buildModelsProfileRollbackContract(candidateSource string) modelsProfileRollbackContract {
+	source := strings.TrimSpace(candidateSource)
+	if source == "" {
+		source = "channel_models"
+	}
+	return modelsProfileRollbackContract{
+		Status:               "implemented_contract",
+		MutationMode:         "observe_only_no_mutation",
+		RuntimeProfileSource: "responses_server.model_profiles",
+		AdoptionSource:       source,
+		Strategy:             "shadow_write_then_promote_with_responses_server.model_profiles_precedence",
+		RollbackScope:        "remove_or_disable_adopted_profile_records_only",
+		RequiredArtifacts: []string{
+			"schema_migration",
+			"adopted_profile_source_marker",
+			"dry_run_diff",
+			"conflict_report",
+			"dsn_gated_tests",
+		},
+		Limitations: []string{
+			"current command does not mutate runtime profiles",
+			"rollback cannot remove explicit responses_server.model_profiles entries",
+			"future adoption must preserve capability false blocks",
+		},
+	}
 }
 
 func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRecord) (bool, string) {
