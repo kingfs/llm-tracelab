@@ -480,7 +480,7 @@ services:
 GOPROXY=https://goproxy.cn,direct docker compose build
 ```
 
-`task docker:build` 和 `task docker:up` 使用同一套构建变量约定，会自动读取当前 shell 的 `GOPROXY`、`GOSUMDB`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`（以及对应的小写变量）并传入 Docker build，无需额外改脚本：
+`task docker:build` 和 `task docker:up` 使用同一套构建变量约定。优先读取 `DOCKER_BUILD_*`，其次读取当前 shell 的 `GOPROXY`、`GOSUMDB`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`（以及对应的小写变量）；如果 shell 没有导出 `GOPROXY` / `GOSUMDB`，会回落到 `go env GOPROXY` / `go env GOSUMDB`。当 HTTP(S) proxy 指向宿主机 `127.0.0.1` 或 `localhost` 时，任务会自动转换为 Docker build 容器可访问的 `host.docker.internal`。
 
 ```bash
 GOPROXY=https://goproxy.cn,direct task docker:build
@@ -494,13 +494,13 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
 DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 ```
 
-同样地，直接执行 `docker compose build` / `docker compose up --build` 时，也优先读取 `DOCKER_BUILD_*`，再回落到普通环境变量。
+直接执行 `docker compose build` / `docker compose up --build` 时，Compose 只能读取已导出的环境变量；需要自动读取 `go env` 和转换本机回环代理时，请使用 `task docker:build` 或 `task docker:up`。
 
 推荐约定：
 
-- 本地开发：优先设置 `DOCKER_BUILD_GOPROXY`；如果已经全局设置 `GOPROXY`，脚本也会自动兼容
+- 本地开发：优先设置 `DOCKER_BUILD_GOPROXY`；如果只配置了 `go env GOPROXY`，任务也会自动兼容
 - CI / GitHub Actions：默认不设置，直接使用公开默认值 `https://proxy.golang.org,direct`
-- 如果公司网络还要求系统代理，优先设置 `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`；未设置时会回落到 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
+- 如果公司网络还要求系统代理，优先设置 `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`；未设置时会回落到 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`，并自动处理宿主机回环地址
 
 默认挂载：
 

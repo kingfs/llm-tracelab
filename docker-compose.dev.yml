@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
       args:
         GOPROXY: ${DOCKER_BUILD_GOPROXY:-${GOPROXY:-https://proxy.golang.org,direct}}
         GOSUMDB: ${DOCKER_BUILD_GOSUMDB:-${GOSUMDB:-sum.golang.org}}

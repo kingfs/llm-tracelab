@@ -455,7 +455,7 @@ If the default Go module proxy is slow or blocked in your network, pass `GOPROXY
 GOPROXY=https://goproxy.cn,direct docker compose build
 ```
 
-`task docker:build` and `task docker:up` now share the same build variable convention. They automatically forward the current shell's `GOPROXY`, `GOSUMDB`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values, including lowercase variants, into Docker build:
+`task docker:build` and `task docker:up` share the same build variable convention. They prefer `DOCKER_BUILD_*`, then the current shell's `GOPROXY`, `GOSUMDB`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values, including lowercase variants. If `GOPROXY` / `GOSUMDB` are not exported in the shell, the tasks fall back to `go env GOPROXY` / `go env GOSUMDB`. When HTTP(S) proxy points at host `127.0.0.1` or `localhost`, the tasks rewrite it to `host.docker.internal` so Docker build containers can reach it.
 
 ```bash
 GOPROXY=https://goproxy.cn,direct task docker:build
@@ -469,13 +469,13 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
 DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 ```
 
-The same precedence also applies when you run `docker compose build` or `docker compose up --build` directly.
+Direct `docker compose build` or `docker compose up --build` can only read exported environment variables. Use `task docker:build` or `task docker:up` when you want the automatic `go env` fallback and host loopback proxy rewrite.
 
 Recommended convention:
 
-- Local development: prefer `DOCKER_BUILD_GOPROXY`; existing shell-wide `GOPROXY` values are still honored as fallback
+- Local development: prefer `DOCKER_BUILD_GOPROXY`; `go env GOPROXY` is also honored when no shell `GOPROXY` is exported
 - CI / GitHub Actions: leave them unset and use the public default `https://proxy.golang.org,direct`
-- If your network also requires system-level proxy settings, prefer `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`; regular proxy env vars remain supported as fallback
+- If your network also requires system-level proxy settings, prefer `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`; regular proxy env vars remain supported as fallback, with host loopback addresses rewritten for Docker build
 
 Default mounts:
 
