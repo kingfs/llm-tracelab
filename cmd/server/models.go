@@ -115,6 +115,7 @@ type modelsProfileAdoptionReport struct {
 	AdoptionReady         bool                             `json:"adoption_ready"`
 	CandidateCount        int                              `json:"candidate_count"`
 	ProposedChangeCount   int                              `json:"proposed_change_count"`
+	AppliedChangeCount    int                              `json:"applied_change_count"`
 	ConflictCount         int                              `json:"conflict_count"`
 	BlockingGateCount     int                              `json:"blocking_gate_count"`
 	BlockedReasons        []string                         `json:"blocked_reasons,omitempty"`
@@ -154,6 +155,7 @@ type modelsProfileAdoptionFieldDiff struct {
 
 type modelsProfileAdoptionCandidate struct {
 	ChannelID                   string `json:"channel_id"`
+	ChannelEnabled              bool   `json:"channel_enabled"`
 	Model                       string `json:"model"`
 	Source                      string `json:"source"`
 	Enabled                     bool   `json:"enabled"`
@@ -262,7 +264,10 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 		cfg = &appconfig.Config{}
 	}
 	model = strings.TrimSpace(model)
-	match := cfg.MatchResponsesModelProfile(model)
+	explicitMatch := cfg.MatchResponsesModelProfile(model)
+	catalogDiagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, explicitMatch.Matched, checkDB)
+	adoptionReport := buildModelsProfileAdoptionReport(cfg.ResponsesAdoptChannelModelProfilesEnabled(), explicitMatch, catalogDiagnostics)
+	match := effectiveModelsProfileMatch(model, explicitMatch, cfg.ResponsesAdoptChannelModelProfilesEnabled(), adoptionReport)
 	profile := match.Profile
 	warnings := make([]string, 0, 4)
 	if !cfg.ResponsesServerEnabled() {
@@ -287,7 +292,6 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 	provider, providerWarnings := buildModelsCodexProviderConfig(cfg)
 	warnings = append(warnings, providerWarnings...)
 	historyThreshold, historyThresholdSource := codexCompactHistoryItemThreshold(cfg, match)
-	catalogDiagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched, checkDB)
 	warnings = append(warnings, catalogDiagnostics.DriftWarnings...)
 	codexConfigDiagnostics := modelsCodexLocalConfig{Status: "not_configured", DriftWarnings: []string{}}
 	diagnostics := modelsCodexDiagnostics{
@@ -300,11 +304,11 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 			Pattern:       profile.Pattern,
 			UpstreamModel: profile.UpstreamModel,
 		},
-		RuntimeProfileSource:              "responses_server.model_profiles",
-		ProfilePrecedence:                 []string{"responses_server.model_profiles", "zero_limits_when_unmatched"},
-		CatalogProfileRole:                "diagnostic_only",
-		ProviderChannelProfileAdoption:    "observe_only",
-		ProfileAdoptionReport:             buildModelsProfileAdoptionReport(match, catalogDiagnostics),
+		RuntimeProfileSource:              modelsRuntimeProfileSource(match),
+		ProfilePrecedence:                 modelsProfilePrecedence(cfg.ResponsesAdoptChannelModelProfilesEnabled()),
+		CatalogProfileRole:                modelsCatalogProfileRole(cfg.ResponsesAdoptChannelModelProfilesEnabled()),
+		ProviderChannelProfileAdoption:    modelsProviderChannelProfileAdoptionMode(cfg.ResponsesAdoptChannelModelProfilesEnabled()),
+		ProfileAdoptionReport:             adoptionReport,
 		ProfileConflictStrategy:           "responses_server.model_profiles_wins",
 		ProfileAdoptionRequiredGates:      modelsProfileAdoptionRequiredGates,
 		CapabilitySource:                  "provider_upstream_capabilities",
@@ -351,6 +355,7 @@ type modelsCatalogDriftDiagnostics struct {
 	ChannelSource       string
 	DriftWarnings       []string
 	ChannelModels       []store.ChannelModelRecord
+	ChannelEnabled      map[string]bool
 }
 
 func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, profileMatched bool, checkDB bool) modelsCatalogDriftDiagnostics {
@@ -400,6 +405,14 @@ func buildModelsCatalogDriftDiagnostics(cfg *appconfig.Config, model string, pro
 	if err != nil {
 		return diagnostics
 	}
+	channelConfigs, err := st.ListChannelConfigs()
+	if err != nil {
+		return diagnostics
+	}
+	diagnostics.ChannelEnabled = make(map[string]bool, len(channelConfigs))
+	for _, channel := range channelConfigs {
+		diagnostics.ChannelEnabled[channel.ID] = channel.Enabled
+	}
 	diagnostics.DatabaseAvailable = true
 	diagnostics.ChannelSource = "missing"
 	for _, channelModel := range channelModels {
@@ -448,10 +461,10 @@ func modelsCatalogDriftWarnings(model string, profileMatched bool, diagnostics m
 	return warnings
 }
 
-func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch, diagnostics modelsCatalogDriftDiagnostics) modelsProfileAdoptionReport {
+func buildModelsProfileAdoptionReport(runtimeAdoptionEnabled bool, match appconfig.ResponsesModelProfileMatch, diagnostics modelsCatalogDriftDiagnostics) modelsProfileAdoptionReport {
 	report := modelsProfileAdoptionReport{
-		Mode:                  "observe_only",
-		DryRun:                true,
+		Mode:                  modelsProviderChannelProfileAdoptionMode(runtimeAdoptionEnabled),
+		DryRun:                !runtimeAdoptionEnabled,
 		Mutates:               false,
 		Status:                "unavailable",
 		RuntimeProfileSource:  "responses_server.model_profiles",
@@ -477,6 +490,7 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 	for _, channelModel := range diagnostics.ChannelModels {
 		candidate := modelsProfileAdoptionCandidate{
 			ChannelID:               channelModel.ChannelID,
+			ChannelEnabled:          diagnostics.ChannelEnabled[channelModel.ChannelID],
 			Model:                   channelModel.Model,
 			Source:                  channelModel.Source,
 			Enabled:                 channelModel.Enabled,
@@ -496,7 +510,7 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 		if channelModel.CompactHistoryItemThreshold != nil {
 			candidate.CompactHistoryItemThreshold = *channelModel.CompactHistoryItemThreshold
 		}
-		candidate.Eligible, candidate.BlockedReason = modelsProfileAdoptionCandidateEligibility(channelModel)
+		candidate.Eligible, candidate.BlockedReason = modelsProfileAdoptionCandidateEligibility(channelModel, candidate.ChannelEnabled)
 		report.Candidates = append(report.Candidates, candidate)
 		if candidate.Eligible {
 			report.CandidateCount++
@@ -508,14 +522,14 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 		return report
 	}
 
-	contextWindow, source, conflict := selectModelsProfileAdoptionContextWindowCandidate(report.Candidates)
+	candidateProfile, source, conflict := selectModelsProfileAdoptionProfileCandidate(report.Candidates)
 	if conflict {
 		report.Status = "conflict"
 		report.ConflictCount++
-		report.BlockedReasons = append(report.BlockedReasons, "conflicting_channel_context_window_candidates")
+		report.BlockedReasons = append(report.BlockedReasons, "conflicting_channel_profile_candidates")
 		return report
 	}
-	if contextWindow <= 0 {
+	if candidateProfile.ContextWindowTokens <= 0 {
 		report.Status = "no_candidate"
 		report.BlockedReasons = append(report.BlockedReasons, "channel_context_window_missing")
 		return report
@@ -528,32 +542,41 @@ func buildModelsProfileAdoptionReport(match appconfig.ResponsesModelProfileMatch
 	field := modelsProfileAdoptionFieldDiff{
 		Field:           "context_window_tokens",
 		RuntimeValue:    runtimeValue,
-		CandidateValue:  contextWindow,
+		CandidateValue:  candidateProfile.ContextWindowTokens,
 		RuntimeSource:   match.Source,
 		CandidateSource: source,
 	}
 	if match.Matched {
-		if runtimeValue == contextWindow {
+		if runtimeValue == candidateProfile.ContextWindowTokens {
 			field.Status = "no_change"
 			report.Status = "no_change"
 		} else {
 			field.Status = "blocked_explicit_config"
-			field.Reason = "explicit responses_server.model_profiles entry wins in observe_only adoption"
+			field.Reason = "explicit responses_server.model_profiles entry wins over channel model profile adoption"
 			report.Status = "blocked"
 			report.ConflictCount++
 			report.BlockedReasons = append(report.BlockedReasons, "explicit_runtime_profile_present")
 			report.Conflicts = append(report.Conflicts, modelsProfileAdoptionConflict{
 				Field:           field.Field,
 				RuntimeValue:    runtimeValue,
-				CandidateValue:  contextWindow,
+				CandidateValue:  candidateProfile.ContextWindowTokens,
 				RuntimeSource:   field.RuntimeSource,
 				CandidateSource: field.CandidateSource,
 				Strategy:        "responses_server.model_profiles_wins",
 			})
 		}
+		report.Fields = append(report.Fields, field)
+		return report
+	}
+
+	if runtimeAdoptionEnabled {
+		field.Status = "adopted_by_runtime_opt_in"
+		field.Reason = "responses_server.adopt_channel_model_profiles=true promotes adopted channel model profiles at runtime"
+		report.Status = "adopted_runtime"
+		report.AppliedChangeCount = 1
 	} else {
-		field.Status = "would_adopt_after_gates"
-		field.Reason = "candidate is reported for future adoption only; runtime profile remains unchanged"
+		field.Status = "would_adopt_with_runtime_opt_in"
+		field.Reason = "set responses_server.adopt_channel_model_profiles=true to promote adopted channel model profiles at runtime"
 		report.Status = "would_change"
 		report.ProposedChangeCount = 1
 	}
@@ -571,27 +594,27 @@ func buildModelsProfileAdoptionRequiredGateStatuses() ([]modelsProfileAdoptionGa
 		},
 		{
 			Gate:     "dry_run_diff",
-			Status:   "implemented_observe_only",
+			Status:   "implemented_contract",
 			Blocking: false,
-			Reason:   "profile_adoption_report reports candidate diffs without mutating runtime config",
+			Reason:   "profile_adoption_report reports disabled-mode diffs and enabled-mode runtime adoption effects",
 		},
 		{
 			Gate:     "conflict_report",
-			Status:   "implemented_observe_only",
+			Status:   "implemented_contract",
 			Blocking: false,
-			Reason:   "profile_adoption_report reports explicit runtime profile conflicts and capability false blocks",
+			Reason:   "profile_adoption_report reports explicit runtime profile conflicts, candidate conflicts, and capability false blocks",
 		},
 		{
 			Gate:     "rollback_plan",
 			Status:   "implemented_contract",
 			Blocking: false,
-			Reason:   "profile_adoption_report includes a mutation-free rollback contract for future catalog/channel adoption",
+			Reason:   "profile_adoption_report includes a rollback contract for runtime opt-in channel profile adoption",
 		},
 		{
 			Gate:     "dsn_gated_tests",
-			Status:   "implemented_observe_only",
+			Status:   "implemented_contract",
 			Blocking: false,
-			Reason:   "observe-only catalog/channel profile adoption report is covered by opt-in DSN-gated tests",
+			Reason:   "catalog/channel profile adoption report is covered by SQLite tests and opt-in Postgres DSN tests",
 		},
 	}
 	blockingCount := 0
@@ -610,11 +633,11 @@ func buildModelsProfileRollbackContract(candidateSource string) modelsProfileRol
 	}
 	return modelsProfileRollbackContract{
 		Status:               "implemented_contract",
-		MutationMode:         "observe_only_no_mutation",
+		MutationMode:         "runtime_opt_in_no_persistent_mutation",
 		RuntimeProfileSource: "responses_server.model_profiles",
 		AdoptionSource:       source,
-		Strategy:             "shadow_write_then_promote_with_responses_server.model_profiles_precedence",
-		RollbackScope:        "remove_or_disable_adopted_profile_records_only",
+		Strategy:             "responses_server.model_profiles_precedence_then_channel_model_profile_opt_in",
+		RollbackScope:        "disable responses_server.adopt_channel_model_profiles or remove adopted channel model profile markers",
 		RequiredArtifacts: []string{
 			"schema_migration",
 			"adopted_profile_source_marker",
@@ -623,14 +646,17 @@ func buildModelsProfileRollbackContract(candidateSource string) modelsProfileRol
 			"dsn_gated_tests",
 		},
 		Limitations: []string{
-			"current command does not mutate runtime profiles",
+			"current command does not mutate persistent profiles",
 			"rollback cannot remove explicit responses_server.model_profiles entries",
-			"future adoption must preserve capability false blocks",
+			"runtime adoption preserves capability false blocks",
 		},
 	}
 }
 
-func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRecord) (bool, string) {
+func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRecord, channelEnabled bool) (bool, string) {
+	if !channelEnabled {
+		return false, "channel_disabled_or_missing"
+	}
 	if !channelModel.Enabled {
 		return false, "channel_model_disabled"
 	}
@@ -646,24 +672,87 @@ func modelsProfileAdoptionCandidateEligibility(channelModel store.ChannelModelRe
 	return true, ""
 }
 
-func selectModelsProfileAdoptionContextWindowCandidate(candidates []modelsProfileAdoptionCandidate) (int, string, bool) {
-	value := 0
+func selectModelsProfileAdoptionProfileCandidate(candidates []modelsProfileAdoptionCandidate) (appconfig.ResponsesModelProfileConfig, string, bool) {
+	var profile appconfig.ResponsesModelProfileConfig
 	source := ""
 	for _, candidate := range candidates {
 		if !candidate.Eligible || candidate.ContextWindowTokens <= 0 {
 			continue
 		}
 		candidateSource := "channel_models." + candidate.ChannelID + ".context_window"
-		if value == 0 {
-			value = candidate.ContextWindowTokens
+		next := appconfig.ResponsesModelProfileConfig{
+			Name:                        candidate.Model,
+			ContextWindowTokens:         candidate.ContextWindowTokens,
+			MaxOutputTokens:             candidate.MaxOutputTokens,
+			CompactHistoryItemThreshold: candidate.CompactHistoryItemThreshold,
+			UpstreamModel:               candidate.UpstreamModel,
+		}
+		if profile.ContextWindowTokens == 0 {
+			profile = next
 			source = candidateSource
 			continue
 		}
-		if value != candidate.ContextWindowTokens {
-			return 0, "", true
+		if !sameModelsProfileAdoptionCandidate(profile, next) {
+			return appconfig.ResponsesModelProfileConfig{}, "", true
 		}
 	}
-	return value, source, false
+	return profile, source, false
+}
+
+func sameModelsProfileAdoptionCandidate(left appconfig.ResponsesModelProfileConfig, right appconfig.ResponsesModelProfileConfig) bool {
+	return left.ContextWindowTokens == right.ContextWindowTokens &&
+		left.MaxOutputTokens == right.MaxOutputTokens &&
+		left.CompactHistoryItemThreshold == right.CompactHistoryItemThreshold &&
+		left.UpstreamModel == right.UpstreamModel
+}
+
+func effectiveModelsProfileMatch(model string, explicit appconfig.ResponsesModelProfileMatch, runtimeAdoptionEnabled bool, report modelsProfileAdoptionReport) appconfig.ResponsesModelProfileMatch {
+	if explicit.Matched || !runtimeAdoptionEnabled || report.Status != "adopted_runtime" {
+		return explicit
+	}
+	profile, source, conflict := selectModelsProfileAdoptionProfileCandidate(report.Candidates)
+	if conflict || profile.ContextWindowTokens <= 0 {
+		return explicit
+	}
+	profile.Name = strings.TrimSpace(model)
+	return appconfig.ResponsesModelProfileMatch{
+		Matched: true,
+		Index:   -1,
+		Kind:    "channel_model_profile",
+		Source:  source,
+		Profile: profile,
+	}
+}
+
+func modelsRuntimeProfileSource(match appconfig.ResponsesModelProfileMatch) string {
+	if strings.HasPrefix(match.Source, "channel_models.") {
+		return "channel_models.profile_adoption"
+	}
+	if match.Matched {
+		return "responses_server.model_profiles"
+	}
+	return "none"
+}
+
+func modelsProfilePrecedence(runtimeAdoptionEnabled bool) []string {
+	if runtimeAdoptionEnabled {
+		return []string{"responses_server.model_profiles", "channel_models.profile_adoption", "zero_limits_when_unmatched"}
+	}
+	return []string{"responses_server.model_profiles", "zero_limits_when_unmatched"}
+}
+
+func modelsCatalogProfileRole(runtimeAdoptionEnabled bool) string {
+	if runtimeAdoptionEnabled {
+		return "runtime_opt_in_source"
+	}
+	return "available_for_runtime_opt_in"
+}
+
+func modelsProviderChannelProfileAdoptionMode(runtimeAdoptionEnabled bool) string {
+	if runtimeAdoptionEnabled {
+		return "runtime_opt_in"
+	}
+	return "report_only"
 }
 
 func triStateCapability(value *int) string {
@@ -958,12 +1047,13 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.ProfileConflictStrategy,
 		strings.Join(result.Diagnostics.ProfileAdoptionRequiredGates, ","),
 	)
-	fmt.Fprintf(w, "# profile_adoption_report: mode=%s dry_run=%t mutates=%t status=%s proposed_changes=%d conflicts=%d blocked_reasons=%s\n",
+	fmt.Fprintf(w, "# profile_adoption_report: mode=%s dry_run=%t mutates=%t status=%s proposed_changes=%d applied_changes=%d conflicts=%d blocked_reasons=%s\n",
 		result.Diagnostics.ProfileAdoptionReport.Mode,
 		result.Diagnostics.ProfileAdoptionReport.DryRun,
 		result.Diagnostics.ProfileAdoptionReport.Mutates,
 		result.Diagnostics.ProfileAdoptionReport.Status,
 		result.Diagnostics.ProfileAdoptionReport.ProposedChangeCount,
+		result.Diagnostics.ProfileAdoptionReport.AppliedChangeCount,
 		result.Diagnostics.ProfileAdoptionReport.ConflictCount,
 		strings.Join(result.Diagnostics.ProfileAdoptionReport.BlockedReasons, ","),
 	)

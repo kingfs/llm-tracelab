@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 )
 
 func boolPtr(v bool) *bool { return &v }
@@ -334,6 +335,41 @@ func TestRouterResponsesEndpointAllowsNativeResponsesTarget(t *testing.T) {
 		if candidate.ID == "chat" && !candidate.SupportsPath {
 			t.Fatalf("chat completions candidate = %+v, want compatible fallback for /v1/responses", candidate)
 		}
+	}
+}
+
+func TestSupportsLocalResponsesServerBackendExcludesNativeResponsesOnlyTarget(t *testing.T) {
+	responsesEnabled := true
+	chatDisabled := false
+	native, err := upstream.Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.openai.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "responses_native",
+		Capabilities: config.UpstreamCapabilitiesConfig{
+			Responses:       &responsesEnabled,
+			ChatCompletions: &chatDisabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve(native) error = %v", err)
+	}
+	if !native.SupportsEndpoint("/v1/responses") {
+		t.Fatal("native responses target should support /v1/responses pass-through")
+	}
+	if SupportsLocalResponsesServerBackend(native) {
+		t.Fatal("native responses-only target must not satisfy local Responses server backend")
+	}
+
+	chat, err := upstream.Resolve(config.UpstreamConfig{
+		BaseURL:        "https://compat.example.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+	})
+	if err != nil {
+		t.Fatalf("Resolve(chat) error = %v", err)
+	}
+	if !SupportsLocalResponsesServerBackend(chat) {
+		t.Fatal("chat completions target should satisfy local Responses server backend")
 	}
 }
 

@@ -1678,14 +1678,7 @@ func supportsPath(target *Target, rawPath string) bool {
 }
 
 func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string) bool {
-	switch llm.NormalizeEndpoint(endpoint) {
-	case "/v1/chat/completions":
-		return resolved.SupportsChatCompletionsAPI()
-	case "/v1/responses":
-		return resolved.SupportsResponsesAPI() || resolved.APIType == upstream.APITypeChatCompletions
-	default:
-		return true
-	}
+	return resolved.SupportsEndpoint(endpoint)
 }
 
 func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
