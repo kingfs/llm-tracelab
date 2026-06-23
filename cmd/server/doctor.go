@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"os"
 	pathpkg "path"
 	"strconv"
 	"strings"
@@ -166,6 +169,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorResponsesHTTPGuard(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesDefaultModel(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesStoreReadiness(cfg))
+	result.Checks = append(result.Checks, checkDoctorResponsesStoreHealth(cfg, opts.checkDB))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelProfiles(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelCatalogDrift(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesCodexConfigDrift(cfg, opts.codexConfigPath))
@@ -558,6 +562,143 @@ func checkDoctorResponsesStoreAutoMigrate(cfg *appconfig.Config, detail map[stri
 		}
 	}
 	return doctorCheck{Name: "responses_server.store", Status: doctorStatusPass, Message: "responses server store configuration is ready for offline startup", Detail: detail}
+}
+
+var doctorResponsesSemanticTables = []string{"responses", "response_items"}
+var doctorResponsesAuditTables = []string{"request_audits", "execution_events", "upstream_exchanges", "tool_call_audits"}
+var doctorResponsesSettingsTables = []string{"app_settings"}
+
+func checkDoctorResponsesStoreHealth(cfg *appconfig.Config, checkDB bool) doctorCheck {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	requiredTables := doctorResponsesRequiredStoreHealthTables()
+	detail := map[string]any{
+		"enabled":                  cfg.ResponsesServerEnabled(),
+		"force_store":              cfg.ResponsesForceStore(),
+		"database_driver":          driver,
+		"database_driver_raw":      strings.TrimSpace(cfg.Database.Driver),
+		"database_dsn":             redactConfigInspectDSN(cfg.DatabaseDSN()),
+		"database_auto_migrate":    cfg.DatabaseAutoMigrate(),
+		"migration_mode":           appDBMigrationMode(driver),
+		"status_check":             appDBStatusCheckMode(checkDB),
+		"check_db_required":        !checkDB && cfg.ResponsesServerEnabled() && cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate(),
+		"required_semantic_tables": append([]string(nil), doctorResponsesSemanticTables...),
+		"required_audit_tables":    append([]string(nil), doctorResponsesAuditTables...),
+		"required_settings_tables": append([]string(nil), doctorResponsesSettingsTables...),
+		"required_tables":          requiredTables,
+	}
+	if !cfg.ResponsesServerEnabled() {
+		detail["skipped_reason"] = "responses_server.enabled is false"
+		return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
+	}
+	if !checkDB {
+		if cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate() {
+			detail["warnings"] = []string{"responses_server.force_store is true and database.auto_migrate is false; run doctor --check-db or db migrate status --check-db before serving"}
+			return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusWarn, Message: "responses store health needs an explicit database check", Detail: detail}
+		}
+		return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusPass, Message: "responses store health reported from configuration", Detail: detail}
+	}
+
+	if err := applyAppDBStatusCheck(cfg, detail); err != nil {
+		detail["error"] = redactDoctorMessage(err.Error())
+		return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusFail, Message: "responses store database status check failed", Detail: detail}
+	}
+	missing, err := checkDoctorResponsesStoreTables(cfg, requiredTables)
+	if err != nil {
+		detail["error"] = redactDoctorMessage(err.Error())
+		return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusFail, Message: "responses store table check failed", Detail: detail}
+	}
+	detail["database_tables_checked"] = true
+	detail["database_required_tables_present"] = len(missing) == 0
+	if len(missing) > 0 {
+		detail["database_missing_tables"] = missing
+		return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusFail, Message: "responses store database is missing required tables", Detail: detail}
+	}
+	return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusPass, Message: "responses store database contains required tables", Detail: detail}
+}
+
+func doctorResponsesRequiredStoreHealthTables() []string {
+	tables := make([]string, 0, len(doctorResponsesSemanticTables)+len(doctorResponsesAuditTables)+len(doctorResponsesSettingsTables))
+	tables = append(tables, doctorResponsesSemanticTables...)
+	tables = append(tables, doctorResponsesAuditTables...)
+	tables = append(tables, doctorResponsesSettingsTables...)
+	return tables
+}
+
+func checkDoctorResponsesStoreTables(cfg *appconfig.Config, requiredTables []string) ([]string, error) {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	switch driver {
+	case "sqlite":
+		return checkDoctorResponsesSQLiteTables(cfg.DatabaseDSN(), requiredTables)
+	case "postgres":
+		return checkDoctorResponsesPostgresTables(cfg.DatabaseDSN(), requiredTables)
+	default:
+		return nil, fmt.Errorf("responses store table check does not support database driver %q", driver)
+	}
+}
+
+func checkDoctorResponsesSQLiteTables(dsn string, requiredTables []string) ([]string, error) {
+	dbPath := appconfig.SQLitePathFromDSN(dsn)
+	if strings.TrimSpace(dbPath) == "" {
+		return nil, fmt.Errorf("sqlite application database path is empty")
+	}
+	if dbPath == ":memory:" {
+		return nil, fmt.Errorf("sqlite in-memory database is not inspectable")
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("sqlite application database file does not exist")
+		}
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", doctorSQLiteReadOnlyDSN(dbPath))
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	var missing []string
+	for _, table := range requiredTables {
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS (
+			SELECT 1
+			FROM sqlite_master
+			WHERE type = 'table' AND name = ?
+		)`, table).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			missing = append(missing, table)
+		}
+	}
+	return missing, nil
+}
+
+func doctorSQLiteReadOnlyDSN(dbPath string) string {
+	values := url.Values{}
+	values.Set("mode", "ro")
+	return (&url.URL{Scheme: "file", Path: dbPath, RawQuery: values.Encode()}).String()
+}
+
+func checkDoctorResponsesPostgresTables(dsn string, requiredTables []string) ([]string, error) {
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	var missing []string
+	for _, table := range requiredTables {
+		var exists bool
+		if err := db.QueryRow(`SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = current_schema() AND table_name = $1
+		)`, table).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			missing = append(missing, table)
+		}
+	}
+	return missing, nil
 }
 
 func checkDoctorResponsesModelProfiles(cfg *appconfig.Config) doctorCheck {

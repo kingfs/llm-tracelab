@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -779,6 +781,236 @@ upstream:
 	envelope := decodeDoctorEnvelopeForTest(t, out)
 	if got := doctorCheckStatusForTest(envelope, "responses_server.store"); got != doctorStatusFail {
 		t.Fatalf("responses_server.store status = %q, want fail", got)
+	}
+}
+
+func TestDoctorResponsesStoreHealthDisabledSkips(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: false
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.store_health")
+	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.enabled is false" {
+		t.Fatalf("responses_server.store_health = %+v, want disabled pass with skipped reason", check)
+	}
+}
+
+func TestDoctorResponsesStoreHealthOfflineReadyPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.store_health")
+	if check.Status != doctorStatusPass || check.Detail["status_check"] != "configuration-only" || check.Detail["check_db_required"] != false {
+		t.Fatalf("responses_server.store_health = %+v, want offline ready pass", check)
+	}
+	if got := len(check.Detail["required_tables"].([]any)); got != 7 {
+		t.Fatalf("required_tables count = %d, want 7", got)
+	}
+}
+
+func TestDoctorResponsesStoreHealthOfflineForceStoreWarns(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  force_store: true
+database:
+  driver: sqlite
+  auto_migrate: false
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.store_health")
+	if check.Status != doctorStatusWarn || check.Detail["check_db_required"] != true {
+		t.Fatalf("responses_server.store_health = %+v, want force_store offline warning", check)
+	}
+	if warnings, ok := check.Detail["warnings"].([]any); !ok || len(warnings) == 0 {
+		t.Fatalf("warnings = %#v, want non-empty warning list", check.Detail["warnings"])
+	}
+}
+
+func TestDoctorResponsesStoreHealthCheckDBMissingTableFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE responses (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create partial sqlite schema error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+database:
+  driver: sqlite
+  dsn: "`+dbPath+`"
+  auto_migrate: false
+trace:
+  output_dir: "`+dir+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json", "--check-db")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want missing table failure, output=%s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.store_health")
+	if check.Status != doctorStatusFail || check.Detail["database_required_tables_present"] != false {
+		t.Fatalf("responses_server.store_health = %+v, want missing table fail", check)
+	}
+	if !doctorDetailStringSliceContains(check.Detail, "database_missing_tables", "response_items") || !doctorDetailStringSliceContains(check.Detail, "database_missing_tables", "app_settings") {
+		t.Fatalf("database_missing_tables = %#v, want response_items and app_settings", check.Detail["database_missing_tables"])
+	}
+}
+
+func TestDoctorResponsesStoreHealthCheckDBSQLiteTablesPass(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  force_store: true
+database:
+  driver: sqlite
+  dsn: "`+dbPath+`"
+  auto_migrate: false
+trace:
+  output_dir: "`+dir+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json", "--check-db")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.store_health")
+	if check.Status != doctorStatusPass || check.Detail["status_check"] != "database" || check.Detail["database_required_tables_present"] != true {
+		t.Fatalf("responses_server.store_health = %+v, want SQLite table pass", check)
+	}
+}
+
+func TestDoctorResponsesStoreHealthCheckDBDoesNotLeakDSNSecret(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  force_store: true
+database:
+  driver: postgres
+  dsn: postgres://app:doctor-store-secret@127.0.0.1:1/traces?sslmode=disable&api_key=doctor-store-query-secret
+  auto_migrate: false
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json", "--check-db")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want database failure, output=%s", out)
+	}
+	for _, secret := range []string{"doctor-store-secret", "doctor-store-query-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("doctor output leaked secret marker %q: %s", secret, out)
+		}
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.store_health")
+	if check.Status != doctorStatusFail || !strings.Contains(fmt.Sprint(check.Detail["database_dsn"]), "<redacted>") {
+		t.Fatalf("responses_server.store_health = %+v, want redacted database failure", check)
 	}
 }
 
