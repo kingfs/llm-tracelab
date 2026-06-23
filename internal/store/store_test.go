@@ -812,6 +812,146 @@ func TestPostgresSessionAndOverviewRuntimeSQLRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	upstreamID := "pg-analytics-primary-" + suffix
+	model := "gpt-postgres-analytics-" + suffix
+	requestIDs := []string{
+		"req_pg_analytics_ok_" + suffix,
+		"req_pg_analytics_rate_limited_" + suffix,
+		"req_pg_analytics_other_model_" + suffix,
+	}
+	t.Cleanup(func() {
+		if _, err := st.db.Exec(
+			`DELETE FROM logs WHERE request_id = ? OR request_id = ? OR request_id = ?`,
+			requestIDs[0],
+			requestIDs[1],
+			requestIDs[2],
+		); err != nil {
+			t.Logf("cleanup postgres analytics logs error = %v", err)
+		}
+	})
+
+	writeLog := func(name string, requestID string, recordedAt time.Time, modelName string, statusCode int, errorText string, routingFailureReason string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("# llm-tracelab/v3\n\nPOST /v1/responses HTTP/1.1\n\nHTTP/1.1 200 OK\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:                      requestID,
+				Time:                           recordedAt,
+				Model:                          modelName,
+				Provider:                       "openai_compatible",
+				Operation:                      "responses.create",
+				Endpoint:                       "/v1/responses",
+				URL:                            "/v1/responses",
+				Method:                         http.MethodPost,
+				StatusCode:                     statusCode,
+				DurationMs:                     100,
+				TTFTMs:                         25,
+				ClientIP:                       "127.0.0.1",
+				ContentLength:                  4,
+				Error:                          errorText,
+				SelectedUpstreamID:             upstreamID,
+				SelectedUpstreamBaseURL:        "https://postgres-analytics.invalid/v1",
+				SelectedUpstreamProviderPreset: "openai",
+				RoutingPolicy:                  "p2c",
+				RoutingScore:                   0.75,
+				RoutingCandidateCount:          2,
+				RoutingFailureReason:           routingFailureReason,
+			},
+			Usage: recordfile.UsageInfo{
+				PromptTokens:     7,
+				CompletionTokens: 5,
+				TotalTokens:      12,
+			},
+		}
+		if err := st.UpsertLog(path, header); err != nil {
+			t.Fatalf("UpsertLog(%q) error = %v", path, err)
+		}
+	}
+
+	base := time.Date(2026, 6, 23, 9, 0, 0, 0, time.UTC)
+	writeLog("postgres-analytics-ok.http", requestIDs[0], base, model, http.StatusOK, "", "")
+	writeLog("postgres-analytics-rate-limited.http", requestIDs[1], base.Add(10*time.Minute), model, http.StatusTooManyRequests, "rate limit exceeded", "all_targets_open")
+	writeLog("postgres-analytics-other-model.http", requestIDs[2], base.Add(20*time.Minute), "gemini-postgres-analytics-"+suffix, http.StatusBadGateway, "selection failed", "no_supporting_target")
+
+	analytics, err := st.ListUpstreamAnalytics(5, 5, base.Add(-time.Minute), model)
+	if err != nil {
+		t.Fatalf("ListUpstreamAnalytics(postgres) error = %v", err)
+	}
+	var upstream UpstreamAnalyticsRecord
+	for _, item := range analytics {
+		if item.UpstreamID == upstreamID {
+			upstream = item
+			break
+		}
+	}
+	if upstream.UpstreamID == "" {
+		t.Fatalf("ListUpstreamAnalytics(postgres) missing upstream %q in %#v", upstreamID, analytics)
+	}
+	if upstream.RequestCount != 2 || upstream.SuccessRequest != 1 || upstream.FailedRequest != 1 || upstream.TotalTokens != 12 {
+		t.Fatalf("upstream analytics = %#v, want request/success/failure/tokens 2/1/1/12", upstream)
+	}
+	if upstream.LastModel != model || !containsString(upstream.Models, model) {
+		t.Fatalf("upstream models = last:%q models:%#v, want %q", upstream.LastModel, upstream.Models, model)
+	}
+	if len(upstream.RecentFailures) != 1 || upstream.RecentFailures[0].Reason != "rate_limited" {
+		t.Fatalf("upstream failures = %#v, want one rate_limited failure", upstream.RecentFailures)
+	}
+
+	detail, err := st.GetUpstreamDetail(upstreamID, base.Add(-time.Minute), model, 10, time.Hour, 3)
+	if err != nil {
+		t.Fatalf("GetUpstreamDetail(postgres) error = %v", err)
+	}
+	if detail.Analytics.UpstreamID != upstreamID || len(detail.Traces) != 2 {
+		t.Fatalf("GetUpstreamDetail(postgres) = analytics:%#v traces:%d, want upstream %q with two traces", detail.Analytics, len(detail.Traces), upstreamID)
+	}
+	if len(detail.FailureReasons) != 1 || detail.FailureReasons[0].Label != "rate_limited" {
+		t.Fatalf("detail failure reasons = %#v, want rate_limited", detail.FailureReasons)
+	}
+
+	routing, err := st.GetRoutingFailureAnalytics(base.Add(-time.Minute), model, 5, 5, time.Hour, 3)
+	if err != nil {
+		t.Fatalf("GetRoutingFailureAnalytics(postgres) error = %v", err)
+	}
+	if routing.Total != 1 || len(routing.Reasons) != 1 || routing.Reasons[0].Label != "all_targets_open" {
+		t.Fatalf("routing analytics = %#v, want one all_targets_open failure", routing)
+	}
+	if len(routing.Recent) != 1 || routing.Recent[0].Reason != "all_targets_open" || routing.Recent[0].StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("routing recent = %#v, want one filtered 429 all_targets_open failure", routing.Recent)
+	}
+	timelineTotal := 0
+	for _, item := range routing.Timeline {
+		timelineTotal += item.Count
+	}
+	if timelineTotal != 1 {
+		t.Fatalf("routing timeline = %#v, want total 1", routing.Timeline)
+	}
+}
+
 func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
 	t.Parallel()
 
