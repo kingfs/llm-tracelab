@@ -2632,6 +2632,221 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 	}
 }
 
+func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDeferred(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamCalls := 0
+	var searchChatBody map[string]any
+	var finalChatBody map[string]any
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var chatBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch upstreamCalls {
+		case 1:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_first","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"first answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`)
+		case 2:
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_auto_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Search compact summary."},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`)
+		case 3:
+			searchChatBody = chatBody
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_search","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_search_forced","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"llm tracelab\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":6,"completion_tokens":3,"total_tokens":9}}`)
+		case 4:
+			finalChatBody = chatBody
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_final","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Forced search completed after deferred fallback."},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}`)
+		default:
+			http.Error(w, "unexpected extra call", http.StatusInternalServerError)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled:                     true,
+			AutoCompact:                 true,
+			CompactHistoryItemThreshold: 1,
+		},
+		Tools: config.ToolsConfig{
+			WebSearch: config.WebSearchToolConfig{
+				Enabled:    true,
+				Provider:   "mock",
+				MaxResults: 2,
+			},
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	firstResp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":"first"}`))
+	if err != nil {
+		t.Fatalf("first response request: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("first status = %d, want 200; body=%s", firstResp.StatusCode, string(body))
+	}
+	var first protocol.Response
+	if err := json.NewDecoder(firstResp.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+
+	secondBody := fmt.Sprintf(`{"model":"gpt-5","previous_response_id":%q,"input":"search now","stream":true,"tools":[{"type":"web_search_preview"}],"tool_choice":"web_search"}`, first.ID)
+	secondReq, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondResp, err := proxyServer.Client().Do(secondReq)
+	if err != nil {
+		t.Fatalf("second Do() error = %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("second status = %d, want 200 SSE; body=%s", secondResp.StatusCode, string(body))
+	}
+	if contentType := secondResp.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", contentType)
+	}
+	bodyBytes, err := io.ReadAll(secondResp.Body)
+	if err != nil {
+		t.Fatalf("read second SSE body: %v", err)
+	}
+	streamBody := string(bodyBytes)
+	for _, event := range []string{
+		"response.created",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_text.delta",
+		"response.completed",
+	} {
+		if !strings.Contains(streamBody, "event: "+event+"\n") {
+			t.Fatalf("stream body missing deferred event %q:\n%s", event, streamBody)
+		}
+	}
+	if strings.Contains(streamBody, "response.function_call_arguments.delta") {
+		t.Fatalf("stream body unexpectedly used incremental argument deltas after fallback:\n%s", streamBody)
+	}
+	if !strings.Contains(streamBody, `"type":"web_search_call"`) ||
+		!strings.Contains(streamBody, `"call_id":"call_search_forced"`) ||
+		!strings.Contains(streamBody, `"status":"completed"`) ||
+		!strings.Contains(streamBody, "Forced search completed after deferred fallback.") {
+		t.Fatalf("stream body missing deferred web_search output/final text:\n%s", streamBody)
+	}
+	if upstreamCalls != 4 {
+		t.Fatalf("upstreamCalls = %d, want first + compact + search + final", upstreamCalls)
+	}
+	if searchChatBody == nil || finalChatBody == nil {
+		t.Fatalf("missing captured deferred chat bodies search=%v final=%v", searchChatBody != nil, finalChatBody != nil)
+	}
+	if got := searchChatBody["tool_choice"]; got == nil {
+		t.Fatalf("search chat tool_choice = nil, want forced web_search")
+	}
+	finalMessages, ok := finalChatBody["messages"].([]any)
+	if !ok || len(finalMessages) < 4 {
+		t.Fatalf("final chat messages = %#v, want compact context plus web_search tool loop", finalChatBody["messages"])
+	}
+	toolMessage, ok := finalMessages[len(finalMessages)-1].(map[string]any)
+	if !ok || toolMessage["role"] != "tool" || toolMessage["tool_call_id"] != "call_search_forced" {
+		t.Fatalf("final tool message mismatch: %#v", finalMessages[len(finalMessages)-1])
+	}
+	toolContent, _ := toolMessage["content"].(string)
+	if !strings.Contains(toolContent, "Mock search result 1") || !strings.Contains(toolContent, "llm tracelab") {
+		t.Fatalf("final tool content missing mock result: %q", toolContent)
+	}
+
+	completedAudits, err := waitForRequestAuditsWithStatus(st, 2, "completed", time.Second)
+	if err != nil {
+		t.Fatalf("waitForRequestAuditsWithStatus(completed) error = %v", err)
+	}
+	if len(completedAudits) < 2 {
+		t.Fatalf("completed audits = %d, want first and fallback request: %+v", len(completedAudits), completedAudits)
+	}
+	secondAudit := completedAudits[1]
+	events, err := waitForExecutionEvents(st, 9, time.Second)
+	if err != nil {
+		t.Fatalf("waitForExecutionEvents() error = %v", err)
+	}
+	hasFallback := false
+	hasDeferredStarted := false
+	hasDeferredCompleted := false
+	hasCompact := false
+	hasToolCompleted := false
+	for _, event := range events {
+		if event.RequestAuditID != secondAudit.ID && event.DetailsJSON["request_audit_id"] != secondAudit.ID {
+			continue
+		}
+		switch {
+		case event.EventType == "response.stream" && event.Status == "fallback":
+			hasFallback = event.DetailsJSON["from_mode"] == "incremental" &&
+				event.DetailsJSON["to_mode"] == "deferred" &&
+				strings.Contains(event.Message, "auto compact tool combination requires deferred stream")
+		case event.EventType == "response.stream" && event.Status == "started" && event.DetailsJSON["mode"] == "deferred":
+			hasDeferredStarted = true
+		case event.EventType == "response.stream" && event.Status == "completed" && event.DetailsJSON["mode"] == "deferred":
+			hasDeferredCompleted = true
+		case event.EventType == "response.compact" && event.Status == "auto_triggered":
+			hasCompact = true
+		case event.EventType == "response.tool_call" && event.Status == "completed" && event.DetailsJSON["tool_name"] == "web_search" && event.DetailsJSON["stream"] == false:
+			hasToolCompleted = true
+		}
+	}
+	if !hasFallback || !hasDeferredStarted || !hasDeferredCompleted || !hasCompact || !hasToolCompleted {
+		t.Fatalf("events missing fallback/deferred/compact/tool completion: fallback=%v started=%v completed=%v compact=%v tool=%v events=%+v", hasFallback, hasDeferredStarted, hasDeferredCompleted, hasCompact, hasToolCompleted, events)
+	}
+
+	exchanges, err := waitForUpstreamExchanges(st, 4, time.Second)
+	if err != nil {
+		t.Fatalf("waitForUpstreamExchanges() error = %v", err)
+	}
+	secondAuditExchangeCount := 0
+	for _, exchange := range exchanges {
+		if exchange.RequestAuditID == secondAudit.ID {
+			secondAuditExchangeCount++
+		}
+	}
+	if secondAuditExchangeCount != 3 {
+		t.Fatalf("second request upstream exchanges = %d, want compact + search + final linked to completed audit %q: %+v", secondAuditExchangeCount, secondAudit.ID, exchanges)
+	}
+}
+
 func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerRestart(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
