@@ -25,13 +25,14 @@ const (
 )
 
 type doctorOptions struct {
-	configPath     string
-	format         string
-	stdout         io.Writer
-	checkDB        bool
-	probeProviders bool
-	failOnWarn     bool
-	failOnFail     bool
+	configPath      string
+	codexConfigPath string
+	format          string
+	stdout          io.Writer
+	checkDB         bool
+	probeProviders  bool
+	failOnWarn      bool
+	failOnFail      bool
 }
 
 type doctorResult struct {
@@ -84,6 +85,7 @@ type doctorCheck struct {
 
 func newDoctorCommand(runtime *cliRuntime) *cobra.Command {
 	var checkDB bool
+	var codexConfigPath string
 	var probeProviders bool
 	var failOnWarn bool
 	var failOnFail bool
@@ -94,18 +96,20 @@ func newDoctorCommand(runtime *cliRuntime) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCode(func() int {
 				return runDoctorWithOptions(doctorOptions{
-					configPath:     runtime.configPath(),
-					format:         runtime.outputFormat(),
-					stdout:         cmd.OutOrStdout(),
-					checkDB:        checkDB,
-					probeProviders: probeProviders,
-					failOnWarn:     failOnWarn,
-					failOnFail:     failOnFail,
+					configPath:      runtime.configPath(),
+					codexConfigPath: codexConfigPath,
+					format:          runtime.outputFormat(),
+					stdout:          cmd.OutOrStdout(),
+					checkDB:         checkDB,
+					probeProviders:  probeProviders,
+					failOnWarn:      failOnWarn,
+					failOnFail:      failOnFail,
 				})
 			})
 		},
 	}
 	cmd.Flags().BoolVar(&checkDB, "check-db", false, "Read migration status from the configured database")
+	cmd.Flags().StringVar(&codexConfigPath, "codex-config", "", "Path to a local Codex TOML config file to diagnose for drift")
 	cmd.Flags().BoolVar(&probeProviders, "probe-providers", false, "Probe configured provider endpoints")
 	cmd.Flags().BoolVar(&failOnWarn, "fail-on-warn", false, "Exit non-zero when diagnostics contain warnings")
 	cmd.Flags().BoolVar(&failOnFail, "fail-on-fail", true, "Exit non-zero when diagnostics contain failures")
@@ -164,6 +168,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorResponsesStoreReadiness(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelProfiles(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelCatalogDrift(cfg))
+	result.Checks = append(result.Checks, checkDoctorResponsesCodexConfigDrift(cfg, opts.codexConfigPath))
 	result.Checks = append(result.Checks, checkDoctorWebSearch(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderConfig(cfg))
 	result.Checks = append(result.Checks, checkDoctorAuthMigrationScope())
@@ -681,6 +686,59 @@ func checkDoctorResponsesModelCatalogDrift(cfg *appconfig.Config) doctorCheck {
 		return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusPass, Message: "responses model catalog drift check skipped; application SQLite database unavailable", Detail: detail}
 	}
 	return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusPass, Message: "responses model catalog/channel drift not detected", Detail: detail}
+}
+
+func checkDoctorResponsesCodexConfigDrift(cfg *appconfig.Config, codexConfigPath string) doctorCheck {
+	model := cfg.ResponsesDefaultModel()
+	result := buildModelsCodexConfigResult(cfg, model, codexConfigPath)
+	diagnostics := result.Diagnostics.CodexConfig
+	detail := doctorCodexConfigDriftDetail(cfg, result, diagnostics, strings.TrimSpace(codexConfigPath) != "")
+
+	switch diagnostics.Status {
+	case "not_configured":
+		detail["skipped_reason"] = "doctor --codex-config is empty"
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusPass, Message: "Codex config drift check skipped; not configured", Detail: detail}
+	case "ok":
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusPass, Message: "Codex config drift not detected", Detail: detail}
+	case "missing":
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusWarn, Message: "Codex config file is missing", Detail: detail}
+	case "unreadable":
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusWarn, Message: "Codex config file is unreadable", Detail: detail}
+	case "parse_error":
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusWarn, Message: "Codex config file is invalid TOML", Detail: detail}
+	case "drift":
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusWarn, Message: "Codex config drift detected", Detail: detail}
+	default:
+		return doctorCheck{Name: "responses_server.codex_config_drift", Status: doctorStatusWarn, Message: "Codex config drift check returned an unknown status", Detail: detail}
+	}
+}
+
+func doctorCodexConfigDriftDetail(cfg *appconfig.Config, result modelsCodexConfigResult, diagnostics modelsCodexLocalConfig, configured bool) map[string]any {
+	driftWarnings := diagnostics.DriftWarnings
+	if driftWarnings == nil {
+		driftWarnings = []string{}
+	}
+	fields := diagnostics.Fields
+	if fields == nil {
+		fields = []modelsCodexLocalFieldStatus{}
+	}
+	return map[string]any{
+		"configured":        configured,
+		"enabled":           cfg.ResponsesServerEnabled(),
+		"model":             result.Model,
+		"status":            diagnostics.Status,
+		"profile_name":      diagnostics.ProfileName,
+		"provider_name":     diagnostics.ProviderName,
+		"present":           diagnostics.Present,
+		"readable":          diagnostics.Readable,
+		"parsed":            diagnostics.Parsed,
+		"profile_present":   diagnostics.ProfilePresent,
+		"provider_present":  diagnostics.ProviderPresent,
+		"fields":            fields,
+		"drift_warnings":    driftWarnings,
+		"matched_profile":   result.Diagnostics.MatchedProfile,
+		"provider_base_url": redactURLLike(result.Provider.BaseURL),
+	}
 }
 
 func checkDoctorWebSearch(cfg *appconfig.Config) doctorCheck {

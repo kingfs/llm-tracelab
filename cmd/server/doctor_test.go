@@ -187,6 +187,220 @@ upstream:
 	}
 }
 
+func TestDoctorCodexConfigDriftSkipsLocalConfigWithoutFlag(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	codexDir := filepath.Join(homeDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(.codex) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(`api_key = "doctor-codex-home-secret"`), 0o644); err != nil {
+		t.Fatalf("WriteFile(home codex config) error = %v", err)
+	}
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-5
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	if strings.Contains(out, "doctor-codex-home-secret") {
+		t.Fatalf("doctor output leaked unconfigured Codex config secret: %s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_config_drift")
+	if check.Status != doctorStatusPass || check.Detail["status"] != "not_configured" || check.Detail["configured"] != false {
+		t.Fatalf("responses_server.codex_config_drift = %+v, want not_configured pass", check)
+	}
+}
+
+func TestDoctorCodexConfigDriftReportsMatchingLocalConfig(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  path: /v1/responses
+  default_model: gpt-5
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+	codexPath := filepath.Join(dir, "codex.toml")
+	codexBody := `
+[profiles.gpt-5]
+model_provider = "llm-tracelab"
+model = "gpt-5"
+model_context_window = 200
+model_auto_compact_token_limit = 160
+
+[model_providers.llm-tracelab]
+name = "llm-tracelab"
+base_url = "http://127.0.0.1:8080/v1"
+env_key = "LLM_TRACELAB_API_KEY"
+wire_api = "responses"
+request_max_retries = 2
+stream_max_retries = 2
+stream_idle_timeout_ms = 120000
+`
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+
+	out, err := executeDoctorForTest(configPath, "--format", "json", "--codex-config", codexPath)
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_config_drift")
+	if check.Status != doctorStatusPass || check.Detail["status"] != "ok" || check.Detail["profile_present"] != true || check.Detail["provider_present"] != true {
+		t.Fatalf("responses_server.codex_config_drift = %+v, want ok", check)
+	}
+	if warnings, ok := check.Detail["drift_warnings"].([]any); !ok || len(warnings) != 0 {
+		t.Fatalf("drift_warnings = %#v, want empty", check.Detail["drift_warnings"])
+	}
+}
+
+func TestDoctorCodexConfigDriftWarnsForLocalDrift(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-5
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+	codexPath := filepath.Join(dir, "codex.toml")
+	codexBody := `
+[profiles.other-model]
+model_provider = "other-provider"
+model = "other-model"
+model_context_window = 100
+model_auto_compact_token_limit = 80
+
+[model_providers.other-provider]
+base_url = "http://127.0.0.1:9999/v1"
+env_key = "OTHER_KEY"
+wire_api = "chat"
+`
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+
+	out, err := executeDoctorForTest(configPath, "--format", "json", "--codex-config", codexPath)
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_config_drift")
+	if check.Status != doctorStatusWarn || envelope.Result.Status != doctorStatusWarn || envelope.Result.Summary.Fail != 0 {
+		t.Fatalf("doctor result = %+v check = %+v, want drift warning without failure", envelope.Result.Summary, check)
+	}
+	for _, want := range []string{"profile \"gpt-5\" is missing", "provider \"llm-tracelab\" is missing", "profile.model_provider is missing", "provider.base_url is missing"} {
+		if !doctorDetailStringSliceContains(check.Detail, "drift_warnings", want) {
+			t.Fatalf("drift_warnings missing %q: %#v", want, check.Detail["drift_warnings"])
+		}
+	}
+}
+
+func TestDoctorCodexConfigDriftDoesNotLeakLocalSecrets(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-5
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+	codexPath := filepath.Join(dir, "codex.toml")
+	codexBody := `
+[profiles.gpt-5]
+model_provider = "llm-tracelab"
+model = "gpt-5"
+model_context_window = 100
+model_auto_compact_token_limit = 80
+
+[model_providers.llm-tracelab]
+base_url = "https://user:doctor-codex-url-secret@example.com/v1?token=doctor-codex-query-secret"
+env_key = "LLM_TRACELAB_API_KEY"
+wire_api = "chat"
+api_key = "doctor-codex-api-secret"
+`
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+
+	out, err := executeDoctorForTest(configPath, "--format", "json", "--codex-config", codexPath)
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	for _, secret := range []string{"doctor-codex-url-secret", "doctor-codex-query-secret", "doctor-codex-api-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("doctor output leaked local Codex secret marker %q: %s", secret, out)
+		}
+	}
+	if !strings.Contains(out, "%3Credacted%3E") {
+		t.Fatalf("doctor output = %s, want redacted URL value", out)
+	}
+}
+
 func TestDoctorResponsesHTTPGuardDisabledPasses(t *testing.T) {
 	t.Parallel()
 
