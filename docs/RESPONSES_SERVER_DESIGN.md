@@ -5,6 +5,8 @@
 
 本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-23 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
 
+当前 production packaging 已把默认部署样例调整为 Postgres-backed gateway：`docker-compose.yml` 提供 app + Postgres，并可通过 `search` profile 启用 SearXNG；`config/config.yaml` 默认展示 `responses_server.enabled=true`、Postgres DSN 和 OpenAI-compatible/vLLM Chat Completions upstream。部署细节见 [Production Deployment](./PRODUCTION_DEPLOYMENT.md)。这不改变本文的能力边界：本地 Responses server-mode 当前仍以 Chat Completions backend 编排实现，不表示 native Responses semantic interposition、MCP/file/code/computer-use 真实执行器 lifecycle、独立 auth migration namespace 或 root/container 级 executor 沙箱已经完成。
+
 ## 已落地实现截至 2026-06-23
 
 当前已经落地的范围是可选的 `/v1/responses` 本地 server-mode，不改变默认 proxy 行为：

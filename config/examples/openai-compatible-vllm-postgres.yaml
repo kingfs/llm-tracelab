@@ -35,14 +35,6 @@ responses_server:
       max_output_tokens: 4096
       compact_history_item_threshold: 80
       upstream_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
-  function_executors:
-    enabled: false
-    timeout: 2s
-    max_result_bytes: 65536
-    redaction:
-      arguments: true
-      output: true
-    executors: []
 
 tools:
   web_search:
@@ -51,7 +43,6 @@ tools:
     max_results: 5
     base_url: "http://searxng:8080"
     timeout_ms: 5000
-    user_agent: "llm-tracelab/production"
 
 router:
   model_discovery:
@@ -89,11 +80,6 @@ upstreams:
         tokenize: false
       protocol_family: "openai_compatible"
       routing_profile: "vllm_openai"
-      api_version: ""
-      deployment: ""
-      project: ""
-      location: ""
-      model_resource: ""
       headers: {}
 
 debug:
