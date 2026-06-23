@@ -442,6 +442,7 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 启动方式：
 
 ```bash
+cp .env.example .env
 export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
 export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1
 export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder

@@ -36,6 +36,7 @@ docker compose up --build
 For a real deployment, override at least:
 
 ```bash
+cp .env.example .env
 export POSTGRES_PASSWORD='<strong-password>'
 export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:<strong-password>@postgres:5432/llm_tracelab?sslmode=disable'
 export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL='<served-model>'
