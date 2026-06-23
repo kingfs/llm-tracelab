@@ -119,7 +119,7 @@ Responses audit schema 的职责边界如下：
 
 后续接入顺序建议继续处理 hosted/server-side streaming lifecycle 细化、compact events 和更完整的 Responses audit 关联入口。
 
-Storage 生产边界已定案：SQLite application DB 长期作为 local-first `startup_schema_fallback` 保留，不在本轮实现 versioned migrator；`db migrate status --check-db` 对 SQLite 只读解释 marker/required table 状态，不做 destructive repair、文件创建或数据 rewrite。Postgres auth 继续共享 application `schema_migrations` namespace；独立 auth namespace 需要先完成 adoption、dry-run/status、rollback 语义和测试门禁，当前未实现。
+Storage 生产边界已定案：SQLite application DB 长期作为 local-first `startup_schema_fallback` 保留，不在本轮实现 versioned migrator；`db migrate status --check-db` 对 SQLite 只读解释 marker/required table 状态，不做 destructive repair、文件创建或数据 rewrite。Postgres auth 继续共享 application `schema_migrations` namespace；独立 auth namespace 当前未实现。`auth migrate status` / dry-run 已有设计态机器可读字段：`auth_namespace_adoption_status` 标记 Postgres 为 `design_required_not_implemented`，`auth_namespace_dry_run_semantics` 和 `auth_namespace_status_semantics` 分别约束未来 dry-run mutation-free、status read-only，`auth_namespace_rollback_scope` 明确当前 Postgres rollback 仍是 `shared_application_migration_set`，`auth_namespace_test_gate` 明确默认测试离线且真实 Postgres 检查必须 DSN-gated。
 
 当前重要表包括：
 

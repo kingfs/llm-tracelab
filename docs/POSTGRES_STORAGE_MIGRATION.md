@@ -47,7 +47,12 @@ claim that Postgres persistence is fully production mature today.
   the auth-owned required table set (`users`, `api_tokens`), table check
   results, `postgres_auth_namespace_strategy:
   shared_application_schema_migrations`, and
-  `independent_auth_namespace_status: not_implemented` for Postgres.
+  `independent_auth_namespace_status: not_implemented` for Postgres. It now
+  also carries design-only adoption fields:
+  `auth_namespace_adoption_status: design_required_not_implemented`,
+  `auth_namespace_adoption_plan`, `auth_namespace_dry_run_semantics`,
+  `auth_namespace_status_semantics`, `auth_namespace_rollback_scope:
+  shared_application_migration_set`, and `auth_namespace_test_gate`.
   `auth migrate status --check-db` is an explicit opt-in read-only check:
   Postgres reads the shared `schema_migrations` state and checks the auth-owned
   tables in the current schema, while SQLite reads the configured auth migration
@@ -159,7 +164,9 @@ For Postgres evaluation:
   namespace. `auth migrate status` and dry-run output intentionally report
   `postgres_auth_namespace_strategy: shared_application_schema_migrations` and
   `independent_auth_namespace_status: not_implemented`; those fields are the
-  operator contract until an independent auth namespace is implemented.
+  operator contract until an independent auth namespace is implemented. The
+  companion adoption fields are also report-only: they describe the required
+  future behavior and must not be interpreted as an implemented namespace split.
 
 For production-like Postgres trials, run `db migrate up` against a fresh
 database first, capture the exact llm-tracelab build and migration version, and
@@ -205,6 +212,69 @@ Until those gates are met, production operators should run `db migrate up` as
 the canonical Postgres schema setup step and use `auth migrate status
 --check-db` only to verify auth-owned table presence and the shared namespace
 state.
+
+## Independent Auth Namespace Adoption Design
+
+This design does not change current behavior. Postgres auth migrations still
+delegate to `internal/appdbmigrate` and use the application
+`ent/postgres-migrations` source plus the shared `schema_migrations` table.
+
+Future independent auth namespace adoption must be explicit and idempotent:
+
+- Detect the current shared state by reading application `schema_migrations`
+  and checking the auth-owned required tables (`users`, `api_tokens`) in the
+  current schema.
+- Refuse adoption if required auth tables are missing, if the shared namespace
+  is dirty, or if the target independent auth namespace marker is dirty.
+- Initialize only the future auth namespace marker/version state for migrations
+  whose effects are already present. Adoption must not create, drop, rewrite,
+  or roll back application tables.
+- Preserve existing auth data. Adoption is metadata-only unless a future auth
+  migration introduces an additive auth-owned table/index that is not already
+  present.
+- Be safe to rerun: an already adopted database should return an adopted/no-op
+  status rather than attempting duplicate DDL.
+
+Dry-run and status semantics:
+
+- `auth migrate up --dry-run` must remain mutation-free. In a future adoption
+  implementation it should report whether adoption would be needed, blocked, or
+  already complete, plus the shared version, independent auth version, dirty
+  flags, and auth table health.
+- `auth migrate status` without `--check-db` remains configuration-only.
+- `auth migrate status --check-db` remains read-only. During transition it must
+  report both namespace states: the legacy shared application
+  `schema_migrations` state and the independent auth namespace marker state.
+- Output fields should stay additive. Existing fields such as
+  `postgres_auth_namespace_strategy` and
+  `independent_auth_namespace_status` must not change meaning silently.
+
+Rollback semantics:
+
+- Current Postgres rollback scope is
+  `auth_namespace_rollback_scope: shared_application_migration_set`; running
+  `auth migrate down` rolls back the shared application/auth migration set and
+  is therefore application-wide.
+- After a real split, independent auth rollback must only apply migrations from
+  the auth-owned migration source and namespace. It must not roll back
+  application migrations or drop application tables.
+- Adoption itself must not provide a rollback that deletes shared application
+  migration history. The safe rollback for a failed adoption attempt is to
+  remove or repair only the new auth namespace marker before any new
+  auth-owned DDL is applied.
+
+Testing gate:
+
+- Default tests must stay offline and must not require network or a real
+  Postgres server.
+- Unit tests should cover the report/status/dry-run helper semantics with
+  SQLite or config-only Postgres reports.
+- Any real Postgres adoption/status checks must be gated by an explicit DSN
+  environment variable, follow the existing `LLM_TRACELAB_TEST_POSTGRES_DSN`
+  pattern, and use disposable schemas/databases.
+- Tests must verify idempotent adoption, dirty shared namespace refusal,
+  missing auth table refusal, read-only status behavior, and rollback scope
+  boundaries before any namespace split is shipped.
 
 ## Stage 6 Target
 
@@ -343,6 +413,14 @@ independent Postgres auth migration namespace; Postgres remains
 `shared_application_schema_migrations` with independent auth namespace
 `not_implemented`.
 
+Stage 16J follow-up adds design-only operator fields for the future independent
+auth namespace adoption path. Postgres reports
+`auth_namespace_adoption_status: design_required_not_implemented`,
+`auth_namespace_dry_run_semantics`, `auth_namespace_status_semantics`,
+`auth_namespace_rollback_scope: shared_application_migration_set`, and
+`auth_namespace_test_gate`. These are additive output fields, not an
+implementation of the split.
+
 Stage 16K adds the durable hosted tool audit read model. `tool_call_audits` is
 defined in ent, generated into `ent/dao/**`, included in SQLite startup schema
 fallback, covered by a minimal additive SQLite migration, and checked into
@@ -408,8 +486,10 @@ been committed or applied in a shared environment.
   namespace is still missing. Current status/dry-run output documents this as
   `postgres_auth_namespace_strategy: shared_application_schema_migrations` and
   `independent_auth_namespace_status: not_implemented`; the split requires a
-  separately versioned auth migration directory/table plan before command
-  ownership or rollback semantics change.
+  separately versioned auth migration directory/table plan, idempotent adoption
+  of existing `users`/`api_tokens` tables, read-only transition status,
+  mutation-free dry-run, auth-only rollback boundaries, and DSN-gated Postgres
+  tests before command ownership or rollback semantics change.
 - SQLite application migrations still use schema initialization rather than
   explicit versioned files. `db migrate status` and dry-run output report
   `sqlite_schema_strategy: startup_schema_fallback` and

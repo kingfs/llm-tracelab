@@ -276,6 +276,12 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 	postgresAuthNamespaceStrategy := "not_applicable"
 	independentAuthNamespaceStatus := "implemented"
 	independentAuthNamespacePlan := "sqlite auth migrations already use the configured auth database migration namespace"
+	authNamespaceAdoptionStatus := "not_required"
+	authNamespaceAdoptionPlan := "sqlite auth migrations already own their configured migration namespace"
+	authNamespaceDryRunSemantics := "report configured auth migration source and planned operation without mutating the database"
+	authNamespaceStatusSemantics := "read the configured sqlite auth migration namespace when --check-db is requested"
+	authNamespaceRollbackScope := "auth_database_migration_set"
+	authNamespaceTestGate := "default offline sqlite tests; no external database required"
 	const namespaceNote = "postgres auth migrations currently share the application schema_migrations namespace; an independent auth namespace has not been split yet"
 	note := "sqlite auth migrations use the configured auth database path and embedded sqlite migration files"
 	if normalizeAuthStoreDriver(cfg.DatabaseDriver()) == "postgres" {
@@ -286,6 +292,12 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 		postgresAuthNamespaceStrategy = "shared_application_schema_migrations"
 		independentAuthNamespaceStatus = "not_implemented"
 		independentAuthNamespacePlan = "split auth-owned Postgres migrations into a separately versioned auth namespace before changing command ownership or rollback semantics"
+		authNamespaceAdoptionStatus = "design_required_not_implemented"
+		authNamespaceAdoptionPlan = "future adoption must verify users/api_tokens under the shared application schema_migrations namespace, initialize an independent auth namespace marker idempotently, and avoid dropping or rolling back application tables"
+		authNamespaceDryRunSemantics = "report-only; future adoption dry-run must not create an auth namespace marker, mutate auth tables, or change shared schema_migrations"
+		authNamespaceStatusSemantics = "read-only; during transition status must report shared application namespace state, independent auth namespace marker state, and auth-owned table health"
+		authNamespaceRollbackScope = "shared_application_migration_set"
+		authNamespaceTestGate = "default tests stay offline; Postgres adoption/status checks must be DSN-gated"
 		note = namespaceNote
 	}
 	return map[string]any{
@@ -310,6 +322,12 @@ func authMigrationReport(cfg *config.Config, direction string, steps int, all bo
 		"postgres_auth_namespace_strategy":      postgresAuthNamespaceStrategy,
 		"independent_auth_namespace_status":     independentAuthNamespaceStatus,
 		"independent_auth_namespace_plan":       independentAuthNamespacePlan,
+		"auth_namespace_adoption_status":        authNamespaceAdoptionStatus,
+		"auth_namespace_adoption_plan":          authNamespaceAdoptionPlan,
+		"auth_namespace_dry_run_semantics":      authNamespaceDryRunSemantics,
+		"auth_namespace_status_semantics":       authNamespaceStatusSemantics,
+		"auth_namespace_rollback_scope":         authNamespaceRollbackScope,
+		"auth_namespace_test_gate":              authNamespaceTestGate,
 		"auth_required_tables":                  auth.RequiredTables(),
 		"auth_tables_checked":                   []string{},
 		"auth_required_tables_present":          false,
@@ -361,6 +379,12 @@ func writeAuthMigrationReportText(w io.Writer, result map[string]any) {
 	fmt.Fprintf(w, "postgres_auth_namespace_strategy: %s\n", result["postgres_auth_namespace_strategy"])
 	fmt.Fprintf(w, "independent_auth_namespace_status: %s\n", result["independent_auth_namespace_status"])
 	fmt.Fprintf(w, "independent_auth_namespace_plan: %s\n", result["independent_auth_namespace_plan"])
+	fmt.Fprintf(w, "auth_namespace_adoption_status: %s\n", result["auth_namespace_adoption_status"])
+	fmt.Fprintf(w, "auth_namespace_adoption_plan: %s\n", result["auth_namespace_adoption_plan"])
+	fmt.Fprintf(w, "auth_namespace_dry_run_semantics: %s\n", result["auth_namespace_dry_run_semantics"])
+	fmt.Fprintf(w, "auth_namespace_status_semantics: %s\n", result["auth_namespace_status_semantics"])
+	fmt.Fprintf(w, "auth_namespace_rollback_scope: %s\n", result["auth_namespace_rollback_scope"])
+	fmt.Fprintf(w, "auth_namespace_test_gate: %s\n", result["auth_namespace_test_gate"])
 	fmt.Fprintf(w, "auth_required_tables: %s\n", strings.Join(stringSliceResult(result["auth_required_tables"]), ","))
 	fmt.Fprintf(w, "auth_tables_checked: %s\n", strings.Join(stringSliceResult(result["auth_tables_checked"]), ","))
 	fmt.Fprintf(w, "auth_required_tables_present: %v\n", result["auth_required_tables_present"])
