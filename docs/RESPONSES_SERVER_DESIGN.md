@@ -108,7 +108,13 @@ client
 - `mode: proxy`：按现有代理路径转发 `/v1/responses` 到上游 `/v1/responses`，只做 routing、recording、解析和索引。
 - `mode: responses_server`：由 TraceLab 接管 Responses 语义。即使上游也支持 Responses，也可配置为由本地 runtime 统一处理状态、tools、audit 和 compact。
 
-当前已先落地 `responses_server` + OpenAI-compatible Chat Completions 上游的非流式最小链路；native Responses pass-through 仍沿用普通代理路径，尚未实现完整 semantic interposition。
+当前边界是：
+
+- 未开启 `responses_server.enabled` 时，native Responses target 的 `/v1/responses` 请求沿用普通 proxy 热路径，直接转发上游并写入 `.http` cassette，录制 endpoint 仍是 `/v1/responses`。
+- 开启 `responses_server.enabled` 时，配置的 Responses path 在 handler 鉴权后先进入本地 Responses HTTP handler，不再走普通 `/v1/responses` reverse proxy 路径。
+- 本地 Responses runtime 当前通过内部 `POST /v1/chat/completions` model call 实现语义服务，因此 route target 必须是 OpenAI-compatible Chat Completions backend。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 native target 不满足该 backend 边界，即使它支持 native `/v1/responses` pass-through，也不能被 runtime 当作 Chat Completions upstream 使用。
+
+当前已先落地 `responses_server` + OpenAI-compatible Chat Completions 上游链路；native Responses pass-through 沿用普通代理路径，native Responses 的完整 semantic interposition 仍未实现。
 
 ### 上游只有 Chat Completions
 
@@ -177,7 +183,7 @@ providers:
 
 - 一个 provider 可以有多个 endpoint profile，但 routing 时必须明确选中与请求路径兼容的 profile。
 - 本地 Responses server-mode 当前会通过内部 `/v1/chat/completions` 调用上游，因此需要至少一个可选择的 target 支持 `api_type: chat_completions`，或者显式 `capabilities.chat_completions: true`。
-- 显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 不会被内部 Chat Completions 选中。
+- 显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 target 可以服务 native `/v1/responses` proxy pass-through，但不会被本地 Responses runtime 的内部 Chat Completions adapter 选中。
 - 当请求体包含 `tools` 时，显式 `capabilities.tool_calling: false` 的 target 不会被选中，decision trace 的候选项会标记 `unsupported_tools`。
 - `api_type: chat_completions` 不等于 `responses_native`。由 TraceLab server mode 补齐 Responses 语义。
 - 后续 provider/channel `model_profiles` 会成为 Responses Runtime 构建 context、compact 和 Codex profile 建议的事实源；当前 `responses_server.model_profiles` 是本地 server-mode 的 runtime profile source，匹配失败时按 zero limits 回落。`models codex-config` 会把这一优先级作为 `runtime_profile_source` / `profile_precedence` 输出，并把 catalog/channel 标成 `diagnostic_only`。
