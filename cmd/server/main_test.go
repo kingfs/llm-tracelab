@@ -1617,6 +1617,12 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 			PostgresNamespaceStrategy  string   `json:"postgres_auth_namespace_strategy"`
 			IndependentNamespaceStatus string   `json:"independent_auth_namespace_status"`
 			IndependentNamespacePlan   string   `json:"independent_auth_namespace_plan"`
+			AdoptionStatus             string   `json:"auth_namespace_adoption_status"`
+			AdoptionPlan               string   `json:"auth_namespace_adoption_plan"`
+			DryRunSemantics            string   `json:"auth_namespace_dry_run_semantics"`
+			StatusSemantics            string   `json:"auth_namespace_status_semantics"`
+			RollbackScope              string   `json:"auth_namespace_rollback_scope"`
+			TestGate                   string   `json:"auth_namespace_test_gate"`
 			RequiredTables             []string `json:"auth_required_tables"`
 			TablesChecked              []string `json:"auth_tables_checked"`
 			RequiredTablesPresent      bool     `json:"auth_required_tables_present"`
@@ -1641,6 +1647,12 @@ func TestAuthMigrateDryRunJSONKeepsAuthNamespace(t *testing.T) {
 	}
 	if envelope.Result.PostgresNamespaceStrategy != "shared_application_schema_migrations" || envelope.Result.IndependentNamespaceStatus != "not_implemented" || !strings.Contains(envelope.Result.IndependentNamespacePlan, "separately versioned auth namespace") {
 		t.Fatalf("auth dry-run independent namespace fields = %+v", envelope.Result)
+	}
+	if envelope.Result.AdoptionStatus != "design_required_not_implemented" || !strings.Contains(envelope.Result.AdoptionPlan, "initialize an independent auth namespace marker idempotently") {
+		t.Fatalf("auth dry-run adoption fields = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.DryRunSemantics, "report-only") || !strings.Contains(envelope.Result.StatusSemantics, "read-only") || envelope.Result.RollbackScope != "shared_application_migration_set" || !strings.Contains(envelope.Result.TestGate, "DSN-gated") {
+		t.Fatalf("auth dry-run operator semantics = %+v", envelope.Result)
 	}
 	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || len(envelope.Result.TablesChecked) != 0 || envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
 		t.Fatalf("auth dry-run table health fields = %+v", envelope.Result)
@@ -1686,6 +1698,12 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 			PostgresNamespaceStrategy  string   `json:"postgres_auth_namespace_strategy"`
 			IndependentNamespaceStatus string   `json:"independent_auth_namespace_status"`
 			IndependentNamespacePlan   string   `json:"independent_auth_namespace_plan"`
+			AdoptionStatus             string   `json:"auth_namespace_adoption_status"`
+			AdoptionPlan               string   `json:"auth_namespace_adoption_plan"`
+			DryRunSemantics            string   `json:"auth_namespace_dry_run_semantics"`
+			StatusSemantics            string   `json:"auth_namespace_status_semantics"`
+			RollbackScope              string   `json:"auth_namespace_rollback_scope"`
+			TestGate                   string   `json:"auth_namespace_test_gate"`
 			RequiredTables             []string `json:"auth_required_tables"`
 			TablesChecked              []string `json:"auth_tables_checked"`
 			RequiredTablesPresent      bool     `json:"auth_required_tables_present"`
@@ -1713,6 +1731,12 @@ func TestAuthMigrateStatusJSONReportsSharedPostgresNamespace(t *testing.T) {
 	}
 	if envelope.Result.PostgresNamespaceStrategy != "shared_application_schema_migrations" || envelope.Result.IndependentNamespaceStatus != "not_implemented" || !strings.Contains(envelope.Result.IndependentNamespacePlan, "separately versioned auth namespace") {
 		t.Fatalf("postgres auth independent namespace fields = %+v", envelope.Result)
+	}
+	if envelope.Result.AdoptionStatus != "design_required_not_implemented" || !strings.Contains(envelope.Result.AdoptionPlan, "users/api_tokens") {
+		t.Fatalf("postgres auth adoption fields = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.DryRunSemantics, "must not create") || !strings.Contains(envelope.Result.StatusSemantics, "shared application namespace state") || envelope.Result.RollbackScope != "shared_application_migration_set" || !strings.Contains(envelope.Result.TestGate, "offline") {
+		t.Fatalf("postgres auth operator semantics = %+v", envelope.Result)
 	}
 	if strings.Join(envelope.Result.RequiredTables, ",") != "users,api_tokens" || len(envelope.Result.TablesChecked) != 0 || envelope.Result.RequiredTablesPresent || len(envelope.Result.MissingTables) != 0 {
 		t.Fatalf("postgres auth table health fields = %+v", envelope.Result)
@@ -1744,6 +1768,9 @@ func TestAuthMigrateStatusTextReportsNamespaceAndRedactedDSN(t *testing.T) {
 		"independent_auth_namespace: false",
 		"postgres_auth_namespace_strategy: shared_application_schema_migrations",
 		"independent_auth_namespace_status: not_implemented",
+		"auth_namespace_adoption_status: design_required_not_implemented",
+		"auth_namespace_rollback_scope: shared_application_migration_set",
+		"auth_namespace_test_gate: default tests stay offline",
 		"auth_required_tables: users,api_tokens",
 		"auth_required_tables_present: false",
 		"namespace_note: postgres auth migrations currently share",
