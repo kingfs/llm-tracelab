@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -152,11 +153,43 @@ type ToolCallAuditView struct {
 	CreatedAt      time.Time
 }
 
+type PendingToolCallDiagnostic struct {
+	CallID       string
+	ToolName     string
+	Executor     string
+	LatestStatus string
+	StatusesSeen []string
+}
+
+type CompactSummaryDiagnostic struct {
+	EventCount       int
+	AutoTriggered    bool
+	LatestEventID    string
+	LatestStatus     string
+	LatestOccurredAt time.Time
+}
+
+type RequestAuditDiagnostics struct {
+	EventCount            int
+	UpstreamExchangeCount int
+	ToolCallCount         int
+	LatestStatus          string
+	HasCancelled          bool
+	HasFailed             bool
+	HasStreamEvents       bool
+	HasCompactEvents      bool
+	PendingToolCallCount  int
+	PendingToolCalls      []PendingToolCallDiagnostic
+	CompactCandidate      bool
+	CompactSummary        *CompactSummaryDiagnostic
+}
+
 type RequestAuditTrace struct {
 	RequestAudit      RequestAuditView
 	ExecutionEvents   []ExecutionEventView
 	UpstreamExchanges []UpstreamExchangeView
 	ToolCalls         []ToolCallView
+	Diagnostics       RequestAuditDiagnostics
 }
 
 func (s *QueryService) ListRequestAudits(ctx context.Context, params ListRequestAuditsParams) ([]RequestAuditView, error) {
@@ -255,7 +288,72 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 	trace.ExecutionEvents = events
 	trace.UpstreamExchanges = exchanges
 	trace.ToolCalls = deriveToolCalls(events)
+	trace.Diagnostics = DeriveRequestAuditDiagnostics(trace.RequestAudit, trace.ExecutionEvents, trace.UpstreamExchanges, trace.ToolCalls)
 	return trace, true, nil
+}
+
+func DeriveRequestAuditDiagnostics(audit RequestAuditView, events []ExecutionEventView, exchanges []UpstreamExchangeView, toolCalls []ToolCallView) RequestAuditDiagnostics {
+	diagnostics := RequestAuditDiagnostics{
+		EventCount:            len(events),
+		UpstreamExchangeCount: len(exchanges),
+		ToolCallCount:         len(toolCalls),
+		LatestStatus:          audit.Status,
+		PendingToolCalls:      []PendingToolCallDiagnostic{},
+	}
+	if statusIsCancelled(audit.Status) {
+		diagnostics.HasCancelled = true
+	}
+	if statusIsFailed(audit.Status) || audit.ErrorText != "" {
+		diagnostics.HasFailed = true
+	}
+	for _, exchange := range exchanges {
+		if exchange.ErrorText != "" || exchange.StatusCode >= 400 {
+			diagnostics.HasFailed = true
+		}
+	}
+	var compactSummary *CompactSummaryDiagnostic
+	for _, event := range events {
+		if event.Status != "" && audit.Status == "" {
+			diagnostics.LatestStatus = event.Status
+		}
+		if statusIsCancelled(event.Status) || eventContains(event, "cancel") {
+			diagnostics.HasCancelled = true
+		}
+		if statusIsFailed(event.Status) || event.Message != "" && statusIsFailed(event.Message) {
+			diagnostics.HasFailed = true
+		}
+		if isStreamEvent(event) {
+			diagnostics.HasStreamEvents = true
+		}
+		if isCompactEvent(event) {
+			diagnostics.HasCompactEvents = true
+			diagnostics.CompactCandidate = true
+			if compactSummary == nil {
+				compactSummary = &CompactSummaryDiagnostic{}
+			}
+			compactSummary.EventCount++
+			compactSummary.LatestEventID = event.ID
+			compactSummary.LatestStatus = event.Status
+			compactSummary.LatestOccurredAt = event.OccurredAt
+			if eventDetailBool(event.DetailsJSON, "auto_triggered") || eventContains(event, "auto_triggered") {
+				compactSummary.AutoTriggered = true
+			}
+		}
+	}
+	for _, toolCall := range toolCalls {
+		if isPendingToolCall(toolCall) {
+			diagnostics.PendingToolCalls = append(diagnostics.PendingToolCalls, PendingToolCallDiagnostic{
+				CallID:       toolCall.CallID,
+				ToolName:     toolCall.ToolName,
+				Executor:     toolCall.Executor,
+				LatestStatus: toolCall.LatestStatus,
+				StatusesSeen: append([]string(nil), toolCall.StatusesSeen...),
+			})
+		}
+	}
+	diagnostics.PendingToolCallCount = len(diagnostics.PendingToolCalls)
+	diagnostics.CompactSummary = compactSummary
+	return diagnostics
 }
 
 func (s *QueryService) FindRequestAuditReferenceByTraceID(ctx context.Context, traceID string) (RequestAuditReference, bool, error) {
@@ -598,6 +696,85 @@ func toolInt(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func statusIsCancelled(status string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(status)), "cancel")
+}
+
+func statusIsFailed(status string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	switch normalized {
+	case "failed", "failure", "error", "errored", "rejected":
+		return true
+	default:
+		return strings.Contains(normalized, "failed")
+	}
+}
+
+func isStreamEvent(event ExecutionEventView) bool {
+	return eventContains(event, "stream") || eventDetailBool(event.DetailsJSON, "stream")
+}
+
+func isCompactEvent(event ExecutionEventView) bool {
+	return eventContains(event, "compact") || eventDetailBool(event.DetailsJSON, "auto_triggered")
+}
+
+func eventContains(event ExecutionEventView, needle string) bool {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	if needle == "" {
+		return false
+	}
+	if strings.Contains(strings.ToLower(event.EventType), needle) ||
+		strings.Contains(strings.ToLower(event.Phase), needle) ||
+		strings.Contains(strings.ToLower(event.Status), needle) ||
+		strings.Contains(strings.ToLower(event.Message), needle) {
+		return true
+	}
+	for key, value := range event.DetailsJSON {
+		if strings.Contains(strings.ToLower(key), needle) {
+			return true
+		}
+		if text, ok := value.(string); ok && strings.Contains(strings.ToLower(text), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func eventDetailBool(details map[string]any, keys ...string) bool {
+	if len(details) == 0 {
+		return false
+	}
+	for _, key := range keys {
+		value, ok := details[key]
+		if !ok {
+			continue
+		}
+		if typed, ok := value.(bool); ok && typed {
+			return true
+		}
+	}
+	return false
+}
+
+func isPendingToolCall(call ToolCallView) bool {
+	seenActive := false
+	for _, status := range call.StatusesSeen {
+		switch strings.ToLower(strings.TrimSpace(status)) {
+		case "completed", "failed", "submitted":
+			return false
+		case "started", "requested":
+			seenActive = true
+		}
+	}
+	if !seenActive {
+		switch strings.ToLower(strings.TrimSpace(call.LatestStatus)) {
+		case "started", "requested":
+			seenActive = true
+		}
+	}
+	return seenActive
 }
 
 func toolCallAuditView(record *dao.ToolCallAudit) ToolCallAuditView {

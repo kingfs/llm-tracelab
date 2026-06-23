@@ -26,6 +26,7 @@ type auditQueryOptions struct {
 	includeEvents    bool
 	includeExchanges bool
 	includeTools     bool
+	list             bool
 	limit            int
 }
 
@@ -44,12 +45,15 @@ type auditToolCallAuditsOptions struct {
 }
 
 type auditQueryResult struct {
-	Query             auditQuerySelector        `json:"query"`
-	Found             bool                      `json:"found"`
-	RequestAudit      *auditRequestAuditView    `json:"request_audit,omitempty"`
-	Events            []auditExecutionEventView `json:"events"`
-	UpstreamExchanges []auditUpstreamExchange   `json:"upstream_exchanges"`
-	ToolCalls         []auditToolCallView       `json:"tool_calls"`
+	Query             auditQuerySelector         `json:"query"`
+	Found             bool                       `json:"found"`
+	Count             int                        `json:"count,omitempty"`
+	RequestAudit      *auditRequestAuditView     `json:"request_audit,omitempty"`
+	RequestAudits     []auditRequestAuditSummary `json:"request_audits,omitempty"`
+	Diagnostics       *auditDiagnosticsView      `json:"diagnostics,omitempty"`
+	Events            []auditExecutionEventView  `json:"events"`
+	UpstreamExchanges []auditUpstreamExchange    `json:"upstream_exchanges"`
+	ToolCalls         []auditToolCallView        `json:"tool_calls"`
 }
 
 type auditToolCallAuditsResult struct {
@@ -66,6 +70,7 @@ type auditQuerySelector struct {
 	IncludeEvents    bool   `json:"include_events"`
 	IncludeExchanges bool   `json:"include_exchanges"`
 	IncludeTools     bool   `json:"include_tools"`
+	List             bool   `json:"list"`
 	Limit            int    `json:"limit,omitempty"`
 }
 
@@ -94,6 +99,46 @@ type auditRequestAuditView struct {
 	Status          string         `json:"status,omitempty"`
 	ErrorText       string         `json:"error_text,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
+}
+
+type auditRequestAuditSummary struct {
+	ID              string    `json:"id"`
+	ResponseID      string    `json:"response_id,omitempty"`
+	ConversationID  string    `json:"conversation_id,omitempty"`
+	ClientRequestID string    `json:"client_request_id,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type auditPendingToolCallDiagnostic struct {
+	CallID       string   `json:"call_id,omitempty"`
+	ToolName     string   `json:"tool_name,omitempty"`
+	Executor     string   `json:"executor,omitempty"`
+	LatestStatus string   `json:"latest_status,omitempty"`
+	StatusesSeen []string `json:"statuses_seen,omitempty"`
+}
+
+type auditCompactSummaryDiagnostic struct {
+	EventCount       int       `json:"event_count"`
+	AutoTriggered    bool      `json:"auto_triggered"`
+	LatestEventID    string    `json:"latest_event_id,omitempty"`
+	LatestStatus     string    `json:"latest_status,omitempty"`
+	LatestOccurredAt time.Time `json:"latest_occurred_at,omitempty"`
+}
+
+type auditDiagnosticsView struct {
+	EventCount            int                              `json:"event_count"`
+	UpstreamExchangeCount int                              `json:"upstream_exchange_count"`
+	ToolCallCount         int                              `json:"tool_call_count"`
+	LatestStatus          string                           `json:"latest_status,omitempty"`
+	HasCancelled          bool                             `json:"has_cancelled"`
+	HasFailed             bool                             `json:"has_failed"`
+	HasStreamEvents       bool                             `json:"has_stream_events"`
+	HasCompactEvents      bool                             `json:"has_compact_events"`
+	PendingToolCallCount  int                              `json:"pending_tool_call_count"`
+	PendingToolCalls      []auditPendingToolCallDiagnostic `json:"pending_tool_calls,omitempty"`
+	CompactCandidate      bool                             `json:"compact_candidate"`
+	CompactSummary        *auditCompactSummaryDiagnostic   `json:"compact_summary,omitempty"`
 }
 
 type auditExecutionEventView struct {
@@ -205,7 +250,8 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 		Short:   "Query a stored Responses audit trace",
 		Long: "Query a stored Responses audit trace by response id, request audit id, client request id, or conversation id.\n" +
 			"Multiple selectors are combined with AND semantics. If a selector matches multiple request audits, the latest trace is returned.\n" +
-			"By default only the request audit envelope is printed; use --include-events, --include-exchanges, and --include-tools to include related diagnostics.",
+			"By default only the request audit envelope and derived diagnostics are printed; use --include-events, --include-exchanges, and --include-tools to include related diagnostics.\n" +
+			"Use --list with conversation or client request selectors to return matching request audit summaries instead of the latest trace.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.configPath = runtime.configPath()
@@ -221,7 +267,8 @@ func newAuditQueryCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.includeEvents, "include-events", false, "Include execution events in the output")
 	cmd.Flags().BoolVar(&opts.includeExchanges, "include-exchanges", false, "Include upstream exchanges in the output")
 	cmd.Flags().BoolVar(&opts.includeTools, "include-tools", false, "Include derived tool-call diagnostics in the output")
-	cmd.Flags().IntVar(&opts.limit, "limit", responsesaudit.DefaultAuditQueryLimit, "Maximum events, tool-call events, and upstream exchanges to return when included")
+	cmd.Flags().BoolVar(&opts.list, "list", false, "List matching request audit summaries instead of returning the latest trace")
+	cmd.Flags().IntVar(&opts.limit, "limit", responsesaudit.DefaultAuditQueryLimit, "Maximum request audit summaries, events, tool-call events, and upstream exchanges to return")
 	return cmd
 }
 
@@ -287,7 +334,60 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 		}
 	}()
 
-	trace, found, err := responsesaudit.NewQueryService(st.EntClient()).GetRequestAuditTrace(context.Background(), responsesaudit.GetRequestAuditTraceParams{
+	queryService := responsesaudit.NewQueryService(st.EntClient())
+	result := auditQueryResult{
+		Query: auditQuerySelector{
+			ResponseID:       responseID,
+			RequestAuditID:   requestAuditID,
+			ClientRequestID:  clientRequestID,
+			ConversationID:   conversationID,
+			IncludeEvents:    opts.includeEvents,
+			IncludeExchanges: opts.includeExchanges,
+			IncludeTools:     opts.includeTools,
+			List:             opts.list,
+			Limit:            opts.limit,
+		},
+		Events:            []auditExecutionEventView{},
+		UpstreamExchanges: []auditUpstreamExchange{},
+		ToolCalls:         []auditToolCallView{},
+	}
+	if opts.list {
+		audits, err := queryService.ListRequestAudits(context.Background(), responsesaudit.ListRequestAuditsParams{
+			ResponseID:      responseID,
+			RequestAuditID:  requestAuditID,
+			ClientRequestID: clientRequestID,
+			ConversationID:  conversationID,
+			Limit:           opts.limit,
+		})
+		if err != nil {
+			return cliExitError{
+				code:     exitCodeAPI,
+				category: errorCategoryAPI,
+				errCode:  "RESPONSES_AUDIT_QUERY_FAILED",
+				message:  err.Error(),
+			}
+		}
+		result.RequestAudits = []auditRequestAuditSummary{}
+		for _, audit := range audits {
+			result.RequestAudits = append(result.RequestAudits, auditRequestAuditSummaryFromAudit(audit))
+		}
+		result.Count = len(result.RequestAudits)
+		result.Found = result.Count > 0
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "audit.query", result, func(w io.Writer) error {
+			writeAuditQueryText(w, result)
+			return nil
+		}); err != nil {
+			return cliExitError{
+				code:     exitCodeInternal,
+				category: errorCategoryInternal,
+				errCode:  "OUTPUT_WRITE_FAILED",
+				message:  err.Error(),
+			}
+		}
+		return nil
+	}
+
+	trace, found, err := queryService.GetRequestAuditTrace(context.Background(), responsesaudit.GetRequestAuditTraceParams{
 		ResponseID:            responseID,
 		RequestAuditID:        requestAuditID,
 		ClientRequestID:       clientRequestID,
@@ -303,22 +403,7 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 			message:  err.Error(),
 		}
 	}
-	result := auditQueryResult{
-		Query: auditQuerySelector{
-			ResponseID:       responseID,
-			RequestAuditID:   requestAuditID,
-			ClientRequestID:  clientRequestID,
-			ConversationID:   conversationID,
-			IncludeEvents:    opts.includeEvents,
-			IncludeExchanges: opts.includeExchanges,
-			IncludeTools:     opts.includeTools,
-			Limit:            opts.limit,
-		},
-		Found:             found,
-		Events:            []auditExecutionEventView{},
-		UpstreamExchanges: []auditUpstreamExchange{},
-		ToolCalls:         []auditToolCallView{},
-	}
+	result.Found = found
 	if !found {
 		return cliExitError{
 			code:     exitCodeAPI,
@@ -328,6 +413,7 @@ func runAuditQueryWithOptions(opts auditQueryOptions) error {
 		}
 	}
 	result.RequestAudit = auditRequestAuditFromAudit(trace.RequestAudit)
+	result.Diagnostics = auditDiagnosticsFromAudit(trace.Diagnostics)
 	if opts.includeEvents {
 		for _, event := range trace.ExecutionEvents {
 			result.Events = append(result.Events, auditExecutionEventFromAudit(event))
@@ -454,6 +540,54 @@ func auditRequestAuditFromAudit(audit responsesaudit.RequestAuditView) *auditReq
 		Status:          audit.Status,
 		ErrorText:       audit.ErrorText,
 		CreatedAt:       audit.CreatedAt,
+	}
+}
+
+func auditRequestAuditSummaryFromAudit(audit responsesaudit.RequestAuditView) auditRequestAuditSummary {
+	return auditRequestAuditSummary{
+		ID:              audit.ID,
+		ResponseID:      audit.ResponseID,
+		ConversationID:  audit.ConversationID,
+		ClientRequestID: audit.ClientRequestID,
+		Status:          audit.Status,
+		CreatedAt:       audit.CreatedAt,
+	}
+}
+
+func auditDiagnosticsFromAudit(diagnostics responsesaudit.RequestAuditDiagnostics) *auditDiagnosticsView {
+	pending := make([]auditPendingToolCallDiagnostic, 0, len(diagnostics.PendingToolCalls))
+	for _, toolCall := range diagnostics.PendingToolCalls {
+		pending = append(pending, auditPendingToolCallDiagnostic{
+			CallID:       toolCall.CallID,
+			ToolName:     toolCall.ToolName,
+			Executor:     toolCall.Executor,
+			LatestStatus: toolCall.LatestStatus,
+			StatusesSeen: append([]string(nil), toolCall.StatusesSeen...),
+		})
+	}
+	var compactSummary *auditCompactSummaryDiagnostic
+	if diagnostics.CompactSummary != nil {
+		compactSummary = &auditCompactSummaryDiagnostic{
+			EventCount:       diagnostics.CompactSummary.EventCount,
+			AutoTriggered:    diagnostics.CompactSummary.AutoTriggered,
+			LatestEventID:    diagnostics.CompactSummary.LatestEventID,
+			LatestStatus:     diagnostics.CompactSummary.LatestStatus,
+			LatestOccurredAt: diagnostics.CompactSummary.LatestOccurredAt,
+		}
+	}
+	return &auditDiagnosticsView{
+		EventCount:            diagnostics.EventCount,
+		UpstreamExchangeCount: diagnostics.UpstreamExchangeCount,
+		ToolCallCount:         diagnostics.ToolCallCount,
+		LatestStatus:          diagnostics.LatestStatus,
+		HasCancelled:          diagnostics.HasCancelled,
+		HasFailed:             diagnostics.HasFailed,
+		HasStreamEvents:       diagnostics.HasStreamEvents,
+		HasCompactEvents:      diagnostics.HasCompactEvents,
+		PendingToolCallCount:  diagnostics.PendingToolCallCount,
+		PendingToolCalls:      pending,
+		CompactCandidate:      diagnostics.CompactCandidate,
+		CompactSummary:        compactSummary,
 	}
 }
 
@@ -593,6 +727,29 @@ func auditJSONSummary(payload map[string]any) auditJSONPayloadSummary {
 }
 
 func writeAuditQueryText(w io.Writer, result auditQueryResult) {
+	if result.Query.List {
+		fmt.Fprintf(w, "request_audits: %d\n", result.Count)
+		for _, audit := range result.RequestAudits {
+			fmt.Fprintf(w, "- %s", audit.ID)
+			if audit.ResponseID != "" {
+				fmt.Fprintf(w, " response_id=%s", audit.ResponseID)
+			}
+			if audit.ConversationID != "" {
+				fmt.Fprintf(w, " conversation_id=%s", audit.ConversationID)
+			}
+			if audit.ClientRequestID != "" {
+				fmt.Fprintf(w, " client_request_id=%s", audit.ClientRequestID)
+			}
+			if audit.Status != "" {
+				fmt.Fprintf(w, " status=%s", audit.Status)
+			}
+			if !audit.CreatedAt.IsZero() {
+				fmt.Fprintf(w, " created_at=%s", audit.CreatedAt.Format(time.RFC3339))
+			}
+			fmt.Fprintln(w)
+		}
+		return
+	}
 	if result.RequestAudit == nil {
 		fmt.Fprintln(w, "responses audit trace not found")
 		return
@@ -608,6 +765,20 @@ func writeAuditQueryText(w io.Writer, result auditQueryResult) {
 	}
 	if audit.BodyPreview != "" {
 		fmt.Fprintf(w, "body_preview: %s\n", audit.BodyPreview)
+	}
+	if result.Diagnostics != nil {
+		fmt.Fprintf(w, "diagnostics: events=%d upstream_exchanges=%d tool_calls=%d latest_status=%s cancelled=%t failed=%t stream=%t compact=%t pending_tool_calls=%d compact_candidate=%t\n",
+			result.Diagnostics.EventCount,
+			result.Diagnostics.UpstreamExchangeCount,
+			result.Diagnostics.ToolCallCount,
+			result.Diagnostics.LatestStatus,
+			result.Diagnostics.HasCancelled,
+			result.Diagnostics.HasFailed,
+			result.Diagnostics.HasStreamEvents,
+			result.Diagnostics.HasCompactEvents,
+			result.Diagnostics.PendingToolCallCount,
+			result.Diagnostics.CompactCandidate,
+		)
 	}
 	if result.Query.IncludeEvents {
 		fmt.Fprintf(w, "events: %d\n", len(result.Events))
