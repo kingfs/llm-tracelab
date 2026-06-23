@@ -1851,6 +1851,61 @@ func TestRuntimeCreateAutoCompactFallsBackToGlobalThresholdWhenProfileDoesNotMat
 	}
 }
 
+func TestRuntimeCreateStreamAutoCompactRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_target", "gpt-test")
+	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+	}, client, store)
+	sink := &fakeResponseStreamSink{}
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_stream_compact_target",
+		Input:              "new question",
+	}, sink)
+	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
+		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
+	}
+	if !strings.Contains(err.Error(), "auto compact requires deferred stream") {
+		t.Fatalf("CreateStream() error = %q, want auto compact fallback reason", err.Error())
+	}
+	if len(client.streamReqs) != 0 || len(client.reqs) != 0 {
+		t.Fatalf("chat requests = stream:%d nonstream:%d, want none before deferred fallback", len(client.streamReqs), len(client.reqs))
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("stream events = %#v, want none before deferred fallback", sink.events)
+	}
+}
+
+func TestRuntimeCreateStreamUnsupportedToolCombinationRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore())
+	sink := &fakeResponseStreamSink{}
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input: "use unknown tool",
+		Tools: []protocol.Tool{{
+			Type: "unknown_tool",
+		}},
+	}, sink)
+	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
+		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
+	}
+	if !strings.Contains(err.Error(), "tool combination requires deferred stream") {
+		t.Fatalf("CreateStream() error = %q, want tool fallback reason", err.Error())
+	}
+	if len(client.streamReqs) != 0 || len(client.reqs) != 0 {
+		t.Fatalf("chat requests = stream:%d nonstream:%d, want none before deferred fallback", len(client.streamReqs), len(client.reqs))
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("stream events = %#v, want none before deferred fallback", sink.events)
+	}
+}
+
 func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{

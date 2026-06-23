@@ -370,10 +370,10 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		return protocol.Response{}, err
 	}
 	if !incrementalStreamSupportsTools(req.Tools, webSearchReady) {
-		return protocol.Response{}, ErrIncrementalStreamUnsupported
+		return protocol.Response{}, fmt.Errorf("%w: tool combination requires deferred stream", ErrIncrementalStreamUnsupported)
 	}
 	if r.autoCompactDecision(req, budget, history, inputItems, webSearchReady).ShouldCompact {
-		return protocol.Response{}, ErrIncrementalStreamUnsupported
+		return protocol.Response{}, fmt.Errorf("%w: auto compact requires deferred stream", ErrIncrementalStreamUnsupported)
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	chatReq.Stream = true

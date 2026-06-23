@@ -53,7 +53,7 @@
 - 已吸收：简单文本增量、普通 function arguments delta/done、provider 就绪 `web_search` 与已注册 executor 的 stream tool loop 首切。
 - llm-tracelab 落点：`internal/responses/runtime/runtime.go`、`internal/proxy/responses_server.go`、`internal/responses/chatclient`。
 - responses-gateway 对照：`internal/interfaces/http/router.go`、`internal/orchestrator/runtime.go`。
-- 差异：llm-tracelab 对 auto compact 等复杂路径仍 fallback 到 deferred SSE envelope；responses-gateway 文档强调 typed event lifecycle，但也以 Codex fixture 驱动分阶段落地。
+- 差异：llm-tracelab 对 auto compact 等复杂路径仍 fallback 到 deferred SSE envelope；当前已明确 auto compact 与不支持工具组合的 runtime fallback contract，并能在写出 SSE/调用上游前返回带 reason 的 `ErrIncrementalStreamUnsupported`，但真实 streaming auto compact 仍未完成。responses-gateway 文档强调 typed event lifecycle，但也以 Codex fixture 驱动分阶段落地。
 
 ### Postgres 状态存储
 

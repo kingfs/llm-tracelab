@@ -26,6 +26,7 @@
 - `previous_response_id` continuation、Responses runtime store、`/v1/responses/:id/input_items`。
 - 显式 `/v1/responses/compact`、item-count auto compact、context-window token-budget auto compact 和 auto compact provenance 首切。
 - Chat Completions SSE cassette 记录与聚合，Responses streaming 覆盖简单文本、function arguments、registered executor 和 hosted `web_search` 的首切路径。
+- Runtime incremental stream fallback contract 首切：auto compact 和不支持的工具组合会在写出任何 SSE 或调用上游前返回可识别 fallback error，并带 deferred fallback reason，HTTP handler 可安全转入 deferred envelope 并写 fallback audit event。
 - Hosted `web_search`、server-side function executor registry、YAML `static_response` / `external_command` opt-in executor 和轻量 process policy。
 - ent-backed Responses store、SQLite fallback raw DDL、Postgres checked-in application migrations、open-vs-migrate 分离。
 - `request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 CLI/Monitor/MCP 查询首切。
@@ -51,7 +52,7 @@
 近期可并行切片：
 
 - `runtime/compact-v2-provenance`：实现 compact metadata/read model 的 item refs 和 retained window，不输出 raw prompt/summary/tool args。
-- `runtime/stream-fallback-contract`：为 auto compact/tool loop fallback 增加稳定 contract tests，明确 fallback 条件和 audit event。
+- `runtime/stream-fallback-contract`：已完成首切，auto compact 与不支持工具组合的 incremental stream fallback 有 runtime contract tests；HTTP handler 既有 fallback audit event 继续覆盖 deferred fallback。后续仍需减少复杂路径 fallback，并补跨轮/混合工具生命周期。
 
 ### Storage 主线
 
