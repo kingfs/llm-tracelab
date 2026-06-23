@@ -317,7 +317,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	functionExecutors := r.functionToolExecutorSnapshot()
 	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
 	if compactDecision.ShouldCompact {
-		if !autoCompactIncrementalStreamEligible(req) {
+		if !autoCompactIncrementalStreamEligible(req, webSearchReady) {
 			return protocol.Response{}, fmt.Errorf("%w: auto compact tool combination requires deferred stream", ErrIncrementalStreamUnsupported)
 		}
 		req, history, err = r.applyAutoCompactDecision(ctx, req, model, modelProfile, budget, history, inputItems, compactDecision)
@@ -878,13 +878,19 @@ func (r *Runtime) applyAutoCompactDecision(ctx context.Context, req protocol.Cre
 	return req, compactedHistory, nil
 }
 
-func autoCompactIncrementalStreamEligible(req protocol.CreateResponseRequest) bool {
+func autoCompactIncrementalStreamEligible(req protocol.CreateResponseRequest, webSearchReady bool) bool {
 	for _, tool := range req.Tools {
-		if tool.Type != "function" {
-			return false
-		}
-		name := normalizeFunctionToolName(tool.Name)
-		if name == "" {
+		switch tool.Type {
+		case "function":
+			name := normalizeFunctionToolName(tool.Name)
+			if name == "" {
+				return false
+			}
+		case "web_search", "web_search_preview":
+			if !webSearchReady {
+				return false
+			}
+		default:
 			return false
 		}
 	}

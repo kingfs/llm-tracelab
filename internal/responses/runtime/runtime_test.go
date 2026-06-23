@@ -2229,6 +2229,179 @@ func TestRuntimeCreateStreamAutoCompactsRegisteredFunctionToolExecutesAndContinu
 	}
 }
 
+func TestRuntimeCreateStreamAutoCompactsHostedWebSearchExecutesAndContinuesStreaming(t *testing.T) {
+	choices := []struct {
+		name string
+		set  bool
+		any  any
+	}{
+		{name: "nil"},
+		{name: "empty", set: true, any: ""},
+		{name: "none", set: true, any: "none"},
+		{name: "auto", set: true, any: "auto"},
+	}
+
+	for _, choice := range choices {
+		t.Run(choice.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			seedResponseForAutoCompactTest(t, store, "resp_stream_compact_web_search_target_"+choice.name, "gpt-test")
+			client := &fakeChatClient{
+				resp: ChatCompletionResponse{
+					Choices: []ChatChoice{{
+						Message:      ChatMessage{Role: "assistant", Content: "Stream compact summary."},
+						FinishReason: "stop",
+					}},
+					Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16},
+				},
+				streamEventBatches: [][]ChatStreamEvent{
+					{
+						{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+							Index:          0,
+							ID:             "call_search",
+							Type:           "function",
+							FunctionName:   "web_search",
+							ArgumentsDelta: `{"query"`,
+						}}},
+						{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+							Index:          0,
+							ArgumentsDelta: `:"llm trace replay"}`,
+						}}},
+					},
+					{
+						{ChoiceIndex: 0, ContentDelta: "Use "},
+						{ChoiceIndex: 0, ContentDelta: "cassettes."},
+					},
+				},
+				streamResps: []ChatCompletionResponse{
+					{
+						Choices: []ChatChoice{{
+							Message: ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{
+								ID:   "call_search",
+								Type: "function",
+								Function: ChatToolCallFunction{
+									Name:      "web_search",
+									Arguments: `{"query":"llm trace replay"}`,
+								},
+							}}},
+							FinishReason: "tool_calls",
+						}},
+						Usage: ChatUsage{PromptTokens: 6, CompletionTokens: 3, TotalTokens: 9},
+					},
+					{
+						Choices: []ChatChoice{{
+							Message:      ChatMessage{Role: "assistant", Content: "Use cassettes."},
+							FinishReason: "stop",
+						}},
+						Usage: ChatUsage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+					},
+				},
+			}
+			provider := &fakeWebSearchProvider{
+				result: websearch.Result{Results: []websearch.SearchResult{{
+					Title:   "TraceLab docs",
+					URL:     "https://example.test/docs",
+					Snippet: "Record and replay LLM API traffic.",
+				}}},
+			}
+			events := &fakeExecutionEventRecorder{}
+			rt := New(Config{
+				DefaultModel:                "fallback-model",
+				AutoCompact:                 true,
+				CompactHistoryItemThreshold: 1,
+				WebSearchEnabled:            true,
+				WebSearchMaxResults:         2,
+			}, client, store, WithWebSearchProvider(provider), WithExecutionEventRecorder(events))
+			sink := &fakeResponseStreamSink{}
+
+			req := protocol.CreateResponseRequest{
+				Model:              "gpt-test",
+				PreviousResponseID: "resp_stream_compact_web_search_target_" + choice.name,
+				Input:              "search docs",
+				Tools:              []protocol.Tool{{Type: "web_search_preview"}},
+			}
+			if choice.set {
+				req.ToolChoice = choice.any
+			}
+			resp, err := rt.CreateStream(context.Background(), req, sink)
+			if err != nil {
+				t.Fatalf("CreateStream() error = %v", err)
+			}
+			if len(client.reqs) != 1 {
+				t.Fatalf("non-stream chat requests = %d, want compact request before streaming", len(client.reqs))
+			}
+			if len(client.streamReqs) != 2 || !client.streamReqs[0].Stream || !client.streamReqs[1].Stream {
+				t.Fatalf("stream chat requests = %#v, want tool stream + final text stream after compact", client.streamReqs)
+			}
+			if got := client.streamReqs[0].ToolChoice; got != req.ToolChoice {
+				t.Fatalf("first stream tool_choice = %#v, want %#v", got, req.ToolChoice)
+			}
+			if len(client.streamReqs[0].Tools) != 1 || client.streamReqs[0].Tools[0].Function.Name != "web_search" {
+				t.Fatalf("first stream tools = %#v, want web_search", client.streamReqs[0].Tools)
+			}
+			if resp.PreviousResponseID == "" || resp.PreviousResponseID == req.PreviousResponseID {
+				t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+			}
+			if len(client.streamReqs[0].Messages) < 2 || !strings.Contains(chatMessageContentText(client.streamReqs[0].Messages[0].Content), "Stream compact summary") {
+				t.Fatalf("post-compact stream messages = %#v, want compact summary in context", client.streamReqs[0].Messages)
+			}
+			if len(provider.queries) != 1 || provider.queries[0].Text != "llm trace replay" || provider.queries[0].MaxResults != 2 {
+				t.Fatalf("provider queries = %#v", provider.queries)
+			}
+			secondMessages := client.streamReqs[1].Messages
+			if len(secondMessages) < 4 {
+				t.Fatalf("second stream messages len = %d, want compact context plus web_search tool loop: %#v", len(secondMessages), secondMessages)
+			}
+			if secondMessages[len(secondMessages)-2].Role != "assistant" || len(secondMessages[len(secondMessages)-2].ToolCalls) != 1 || secondMessages[len(secondMessages)-2].ToolCalls[0].Function.Name != "web_search" {
+				t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[len(secondMessages)-2])
+			}
+			if secondMessages[len(secondMessages)-1].Role != "tool" || secondMessages[len(secondMessages)-1].ToolCallID != "call_search" {
+				t.Fatalf("second tool message mismatch: %#v", secondMessages[len(secondMessages)-1])
+			}
+			if len(sink.functionDelta) != 2 || sink.functionDelta[0].Delta != `{"query"` || sink.functionDelta[1].Arguments != `{"query":"llm trace replay"}` {
+				t.Fatalf("function deltas = %#v, want streamed web_search arguments", sink.functionDelta)
+			}
+			if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_search" || sink.functionDone[0].Arguments != `{"query":"llm trace replay"}` {
+				t.Fatalf("function done = %#v, want full web_search arguments", sink.functionDone)
+			}
+			if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "web_search_call" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_search" {
+				t.Fatalf("output item added = %#v, want started web_search_call call_search", sink.outputAdded)
+			}
+			if got := sink.outputAdded[0].Item.Action["query"]; got != "llm trace replay" {
+				t.Fatalf("output item added query = %#v", got)
+			}
+			if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "web_search_call" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_search" {
+				t.Fatalf("output item done = %#v, want completed web_search_call call_search", sink.outputDone)
+			}
+			if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Use " || sink.deltas[1].Delta != "cassettes." {
+				t.Fatalf("text deltas = %#v, want final streamed text after web_search", sink.deltas)
+			}
+			wantEvents := []string{
+				"response.created",
+				"response.function_call_arguments.delta",
+				"response.function_call_arguments.delta",
+				"response.function_call_arguments.done",
+				"response.output_item.added",
+				"response.output_item.done",
+				"response.output_text.delta",
+				"response.output_text.delta",
+				"response.completed",
+			}
+			if !reflect.DeepEqual(sink.events, wantEvents) {
+				t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+			}
+			if len(resp.Output) != 2 || resp.Output[0].Type != "web_search_call" || resp.Output[0].CallID != "call_search" || resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Use cassettes." {
+				t.Fatalf("final output = %#v, want web_search_call + final message", resp.Output)
+			}
+			if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
+				t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
+			}
+			if got := findExecutionEvent(events.events, "response.tool_call", "completed"); got == nil || got.DetailsJSON["tool_name"] != "web_search" || got.DetailsJSON["stream"] != true {
+				t.Fatalf("execution events missing completed stream web_search event: %#v", events.events)
+			}
+		})
+	}
+}
+
 func TestRuntimeCreateStreamAutoCompactForcedFunctionToolChoiceRequiresDeferredFallbackBeforeWriting(t *testing.T) {
 	store := NewMemoryStore()
 	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_forced_tool_target", "gpt-test")
@@ -2261,6 +2434,74 @@ func TestRuntimeCreateStreamAutoCompactForcedFunctionToolChoiceRequiresDeferredF
 	}
 	if !strings.Contains(err.Error(), "auto compact tool combination requires deferred stream") {
 		t.Fatalf("CreateStream() error = %q, want auto compact tool fallback reason", err.Error())
+	}
+	if len(client.streamReqs) != 0 || len(client.reqs) != 0 {
+		t.Fatalf("chat requests = stream:%d nonstream:%d, want none before deferred fallback", len(client.streamReqs), len(client.reqs))
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("stream events = %#v, want none before deferred fallback", sink.events)
+	}
+}
+
+func TestRuntimeCreateStreamAutoCompactForcedHostedWebSearchRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_forced_web_search_target", "gpt-test")
+	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
+	provider := &fakeWebSearchProvider{}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+		WebSearchEnabled:            true,
+	}, client, store, WithWebSearchProvider(provider))
+	sink := &fakeResponseStreamSink{}
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_stream_compact_forced_web_search_target",
+		Input:              "new question",
+		ToolChoice:         "web_search",
+		Tools:              []protocol.Tool{{Type: "web_search_preview"}},
+	}, sink)
+	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
+		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
+	}
+	if !strings.Contains(err.Error(), "auto compact tool combination requires deferred stream") {
+		t.Fatalf("CreateStream() error = %q, want auto compact tool fallback reason", err.Error())
+	}
+	if len(client.streamReqs) != 0 || len(client.reqs) != 0 {
+		t.Fatalf("chat requests = stream:%d nonstream:%d, want none before deferred fallback", len(client.streamReqs), len(client.reqs))
+	}
+	if len(provider.queries) != 0 {
+		t.Fatalf("provider queries = %#v, want none before deferred fallback", provider.queries)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("stream events = %#v, want none before deferred fallback", sink.events)
+	}
+}
+
+func TestRuntimeCreateStreamAutoCompactUnknownHostedToolRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_unknown_hosted_tool_target", "gpt-test")
+	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+	}, client, store)
+	sink := &fakeResponseStreamSink{}
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_stream_compact_unknown_hosted_tool_target",
+		Input:              "new question",
+		Tools:              []protocol.Tool{{Type: "file_search"}},
+	}, sink)
+	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
+		t.Fatalf("CreateStream() error = %v, want ErrIncrementalStreamUnsupported", err)
+	}
+	if !strings.Contains(err.Error(), "tool combination requires deferred stream") {
+		t.Fatalf("CreateStream() error = %q, want tool fallback reason", err.Error())
 	}
 	if len(client.streamReqs) != 0 || len(client.reqs) != 0 {
 		t.Fatalf("chat requests = stream:%d nonstream:%d, want none before deferred fallback", len(client.streamReqs), len(client.reqs))
