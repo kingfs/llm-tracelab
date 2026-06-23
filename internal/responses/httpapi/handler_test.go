@@ -698,6 +698,71 @@ func TestCreateResponseIncrementalStreamWritesFailedEventAfterOutput(t *testing.
 	}
 }
 
+func TestCreateResponseIncrementalStreamAuditsCancelledAfterOutput(t *testing.T) {
+	rt := &fakeIncrementalRuntime{
+		streamResp: protocol.Response{
+			ID:        "resp_stream_cancelled",
+			Object:    "response",
+			Status:    "completed",
+			Model:     "gpt-test",
+			CreatedAt: 123,
+			Output: []protocol.OutputItem{{
+				ID:        "fc_call_lookup",
+				Type:      "function_call",
+				Status:    "completed",
+				CallID:    "call_lookup",
+				Name:      "lookup",
+				Arguments: `{"q":"codex"}`,
+			}},
+		},
+		streamOutputAdded: []runtime.ResponseOutputItemAdded{{
+			OutputIndex: 0,
+			Item: protocol.OutputItem{
+				ID:     "fco_call_lookup",
+				Type:   "function_call_output",
+				Status: "in_progress",
+				CallID: "call_lookup",
+				Name:   "lookup",
+			},
+		}},
+		streamErrAfterOutput: context.Canceled,
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d after partial stream write; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, event := range []string{"response.created", "response.output_item.added", "response.failed"} {
+		if !strings.Contains(body, "event: "+event+"\n") {
+			t.Fatalf("incremental cancelled stream missing event %q:\n%s", event, body)
+		}
+	}
+	if strings.Contains(body, "event: response.completed\n") {
+		t.Fatalf("incremental cancelled stream unexpectedly completed:\n%s", body)
+	}
+	if !strings.Contains(body, `"message":"request cancelled"`) || !strings.Contains(body, `"code":"cancelled"`) {
+		t.Fatalf("incremental cancelled stream missing cancelled payload:\n%s", body)
+	}
+	addedIndex := strings.Index(body, "event: response.output_item.added\n")
+	failedIndex := strings.Index(body, "event: response.failed\n")
+	if addedIndex < 0 || failedIndex < 0 || addedIndex >= failedIndex {
+		t.Fatalf("incremental cancelled stream event order mismatch:\n%s", body)
+	}
+	if auditor.acceptedCalls != 1 || auditor.completedID != "" || auditor.rejectedID != "audit_1" || auditor.rejected.Status != "cancelled" || auditor.rejected.ErrorText != context.Canceled.Error() {
+		t.Fatalf("stream cancelled audit mismatch: accepted=%d completed=%q rejected=%q/%#v", auditor.acceptedCalls, auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 3 {
+		t.Fatalf("execution events = %d, want accepted/stream started/stream cancelled: %#v", len(auditor.events), auditor.events)
+	}
+	if auditor.events[2].EventType != "response.stream" || auditor.events[2].Status != "cancelled" || auditor.events[2].Message != context.Canceled.Error() || auditor.events[2].DetailsJSON["stream"] != true {
+		t.Fatalf("stream cancelled event mismatch: %#v", auditor.events[2])
+	}
+}
+
 func TestCreateResponseRuntimeError(t *testing.T) {
 	auditor := &fakeAuditor{}
 	rec := httptest.NewRecorder()
