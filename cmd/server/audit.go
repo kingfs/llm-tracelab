@@ -310,7 +310,7 @@ func newAuditToolCallsCommand(runtime *cliRuntime) *cobra.Command {
 		Aliases: []string{"tool-call-audits"},
 		Short:   "Query stored tool-call audit records",
 		Long: "Query durable tool-call audit records by response id, request audit id, conversation id, call id, tool type, tool name, executor, or lifecycle status.\n" +
-			"Multiple selectors are combined with AND semantics. JSON output only includes payload summaries, redacted error summaries, lifecycle metadata, counts, and status.",
+			"Multiple selectors are combined with AND semantics. JSON output defaults to payload summaries only; use --include-payloads to include raw input_json, output_json, and metadata_json, which may contain sensitive data.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.configPath = runtime.configPath()
@@ -327,7 +327,7 @@ func newAuditToolCallsCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&opts.toolName, "tool-name", "", "Tool name to query")
 	cmd.Flags().StringVar(&opts.executor, "executor", "", "Tool executor id to query")
 	cmd.Flags().StringVar(&opts.status, "status", "", "Tool-call audit lifecycle status to query; one of: "+strings.Join(responsesaudit.ToolCallAuditStatusValues(), ", "))
-	cmd.Flags().BoolVar(&opts.includePayloads, "include-payloads", false, "Deprecated: raw payload output is not supported by this CLI")
+	cmd.Flags().BoolVar(&opts.includePayloads, "include-payloads", false, "Include raw input_json, output_json, and metadata_json; may expose sensitive data")
 	cmd.Flags().BoolVar(&opts.latestByCall, "latest-by-call", false, "Group matching audit rows by call id and print latest lifecycle status with event counts")
 	cmd.Flags().IntVar(&opts.limit, "limit", responsesaudit.DefaultAuditQueryLimit, "Maximum tool-call audit records to return")
 	return cmd
@@ -506,9 +506,6 @@ func runAuditToolCallAuditsWithOptions(opts auditToolCallAuditsOptions) error {
 	status, ok := responsesaudit.NormalizeToolCallAuditStatus(opts.status)
 	if !ok {
 		return cliUsageError(fmt.Sprintf("--status must be one of: %s", strings.Join(responsesaudit.ToolCallAuditStatusValues(), ", ")), "status")
-	}
-	if opts.includePayloads {
-		return cliUsageError("--include-payloads is not supported for audit tool-calls; CLI output is limited to summaries and lifecycle metadata", "include-payloads")
 	}
 	if opts.limit < 0 {
 		return cliUsageError("--limit must be greater than or equal to 0", "limit")

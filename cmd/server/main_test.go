@@ -2701,29 +2701,71 @@ func TestAuditToolCallsCommandListsRecordsWithoutPayloadsByDefault(t *testing.T)
 	}
 }
 
-func TestAuditToolCallsCommandRejectsIncludePayloads(t *testing.T) {
+func TestAuditToolCallsCommandCanIncludePayloads(t *testing.T) {
 	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	const secretMarker = "SECRET_TOOL_CALL_AUDIT_INCLUDED"
+	if _, err := auditor.RecordToolCallAudit(context.Background(), responsesaudit.ToolCallAudit{
+		ID:           "tcaud_payload_cli",
+		ResponseID:   "resp_payload_cli",
+		CallID:       "call_payload_cli",
+		ToolType:     "function",
+		ToolName:     "lookup",
+		Executor:     "function_executor:lookup",
+		Status:       "completed",
+		InputJSON:    map[string]any{"q": secretMarker},
+		OutputJSON:   map[string]any{"answer": secretMarker},
+		MetadataJSON: map[string]any{"note": secretMarker},
+		CreatedAt:    time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
 
 	cmd := newRootCommand()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	cmd.SetArgs([]string{
+		"-c", configPath,
 		"--format", "json",
 		"audit", "tool-call-audits",
 		"--call-id", "call_payload_cli",
 		"--include-payloads",
 	})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("Execute() error = nil, want usage error")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
 	}
-	var exit cliExitError
-	if !errors.As(err, &exit) || exit.code != exitCodeUsage {
-		t.Fatalf("Execute() error = %v, want usage cliExitError", err)
+	var envelope struct {
+		Result struct {
+			Query struct {
+				IncludePayloads bool `json:"include_payloads"`
+			} `json:"query"`
+			ToolCallAudits []struct {
+				InputJSON    map[string]any `json:"input_json"`
+				OutputJSON   map[string]any `json:"output_json"`
+				MetadataJSON map[string]any `json:"metadata_json"`
+			} `json:"tool_call_audits"`
+		} `json:"result"`
 	}
-	if !strings.Contains(err.Error(), "include-payloads") {
-		t.Fatalf("error = %q, want include-payloads usage message", err.Error())
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
+	}
+	if !envelope.Result.Query.IncludePayloads || len(envelope.Result.ToolCallAudits) != 1 {
+		t.Fatalf("envelope = %+v, want one record with payloads", envelope)
+	}
+	record := envelope.Result.ToolCallAudits[0]
+	if record.InputJSON["q"] != secretMarker || record.OutputJSON["answer"] != secretMarker || record.MetadataJSON["note"] != secretMarker {
+		t.Fatalf("payloads = input:%v output:%v metadata:%v, want marker values", record.InputJSON, record.OutputJSON, record.MetadataJSON)
 	}
 }
 
