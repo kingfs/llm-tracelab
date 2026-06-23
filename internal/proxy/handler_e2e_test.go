@@ -65,6 +65,9 @@ func TestProxyExternalCommandExecutorHelper(t *testing.T) {
 		}
 		q, _ := arguments["q"].(string)
 		fmt.Printf(`{"source":"external_command","call_id":%q,"name":%q,"q":%q}`, input.CallID, input.Name, q)
+	case "responses-e2e-fail":
+		fmt.Fprintln(os.Stderr, "intentional executor failure")
+		os.Exit(3)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown mode %q", args[modeIndex])
 		os.Exit(2)
@@ -2208,6 +2211,214 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 	}
 	if responsePayload.Output[1].Type != "message" || len(responsePayload.Output[1].Content) == 0 || responsePayload.Output[1].Content[0].Text != "External lookup completed." {
 		t.Fatalf("final response output = %#v, want final assistant message", responsePayload.Output[1])
+	}
+}
+
+func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamCalls := 0
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var chatBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&chatBody); err != nil {
+			t.Errorf("decode upstream request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		switch upstreamCalls {
+		case 1:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_first","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"first answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":2,"total_tokens":6}}`)
+		case 2:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"chatcmpl_auto_compact","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"Compact summary before failing tool."},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}`)
+		case 3:
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, strings.Join([]string{
+				`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_lookup_fail","type":"function","function":{"name":"lookup_fail","arguments":"{\"q\""}}]},"finish_reason":null}]}`,
+				`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"gpt-5","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"codex\"}"}}]},"finish_reason":"tool_calls"}]}`,
+				`data: {"id":"chatcmpl_tool","object":"chat.completion.chunk","model":"gpt-5","choices":[],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}`,
+				`data: [DONE]`,
+			}, "\n"))
+		default:
+			http.Error(w, "unexpected extra call", http.StatusInternalServerError)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled:                     true,
+			AutoCompact:                 true,
+			CompactHistoryItemThreshold: 1,
+			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
+				Enabled:        true,
+				Timeout:        time.Second,
+				MaxResultBytes: 512,
+				Executors: []config.ResponsesFunctionExecutorBinding{
+					{
+						Name:    "lookup_fail",
+						Type:    "external_command",
+						Command: os.Args[0],
+						Args:    []string{"-test.run=TestProxyExternalCommandExecutorHelper", "--", "responses-e2e-fail"},
+						Env:     map[string]string{"LLM_TRACELAB_PROXY_EXTERNAL_EXECUTOR_HELPER": "1"},
+					},
+				},
+			},
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-chat",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ApiKey:         "upstream-secret",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "server",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	firstResp, err := http.Post(proxyServer.URL+"/v1/responses", "application/json", strings.NewReader(`{"model":"gpt-5","input":"first"}`))
+	if err != nil {
+		t.Fatalf("first response request: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("first status = %d, want 200; body=%s", firstResp.StatusCode, string(body))
+	}
+	var first protocol.Response
+	if err := json.NewDecoder(firstResp.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+
+	secondBody := fmt.Sprintf(`{"model":"gpt-5","previous_response_id":%q,"input":"lookup","stream":true,"tools":[{"type":"function","name":"lookup_fail","parameters":{"type":"object"}}]}`, first.ID)
+	secondReq, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", strings.NewReader(secondBody))
+	if err != nil {
+		t.Fatalf("second request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondResp, err := proxyServer.Client().Do(secondReq)
+	if err != nil {
+		t.Fatalf("second Do() error = %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("second status = %d, want 200 SSE; body=%s", secondResp.StatusCode, string(body))
+	}
+	if contentType := secondResp.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/event-stream") {
+		t.Fatalf("Content-Type = %q, want text/event-stream", contentType)
+	}
+	bodyBytes, err := io.ReadAll(secondResp.Body)
+	if err != nil {
+		t.Fatalf("read second SSE body: %v", err)
+	}
+	streamBody := string(bodyBytes)
+	for _, event := range []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.failed",
+	} {
+		if !strings.Contains(streamBody, "event: "+event+"\n") {
+			t.Fatalf("stream body missing event %q:\n%s", event, streamBody)
+		}
+	}
+	if strings.Contains(streamBody, "event: response.completed\n") {
+		t.Fatalf("stream body unexpectedly completed:\n%s", streamBody)
+	}
+	if !strings.Contains(streamBody, `"type":"function_call_output"`) ||
+		!strings.Contains(streamBody, `"call_id":"call_lookup_fail"`) ||
+		!strings.Contains(streamBody, `"status":"failed"`) ||
+		!strings.Contains(streamBody, `"message":"external command function executor failed`) {
+		t.Fatalf("stream body missing failed function output/error:\n%s", streamBody)
+	}
+	addedIndex := strings.Index(streamBody, "event: response.output_item.added\n")
+	doneIndex := strings.Index(streamBody, "event: response.output_item.done\n")
+	failedIndex := strings.Index(streamBody, "event: response.failed\n")
+	if addedIndex < 0 || doneIndex < 0 || failedIndex < 0 || addedIndex >= doneIndex || doneIndex >= failedIndex {
+		t.Fatalf("stream event order mismatch:\n%s", streamBody)
+	}
+	if upstreamCalls != 3 {
+		t.Fatalf("upstreamCalls = %d, want first + compact + stream tool call", upstreamCalls)
+	}
+
+	audits, err := waitForRequestAuditsWithStatus(st, 1, "failed", time.Second)
+	if err != nil {
+		t.Fatalf("waitForRequestAuditsWithStatus(failed) error = %v", err)
+	}
+	if len(audits) != 1 {
+		t.Fatalf("failed audits = %d, want 1: %+v", len(audits), audits)
+	}
+	failedAudit := audits[0]
+	if !strings.Contains(failedAudit.ErrorText, "external command function executor failed") {
+		t.Fatalf("failed audit error = %q, want executor failure", failedAudit.ErrorText)
+	}
+
+	events, err := waitForExecutionEvents(st, 8, time.Second)
+	if err != nil {
+		t.Fatalf("waitForExecutionEvents() error = %v", err)
+	}
+	hasCompact := false
+	hasToolFailed := false
+	hasStreamFailed := false
+	for _, event := range events {
+		switch {
+		case event.EventType == "response.compact" && event.Status == "auto_triggered":
+			hasCompact = true
+		case event.EventType == "response.tool_call" && event.Status == "failed" && event.DetailsJSON["tool_name"] == "lookup_fail" && event.DetailsJSON["stream"] == true:
+			hasToolFailed = true
+		case event.EventType == "response.stream" && event.Status == "failed":
+			hasStreamFailed = true
+		}
+	}
+	if !hasCompact || !hasToolFailed || !hasStreamFailed {
+		t.Fatalf("execution events missing compact/tool_failed/stream_failed: compact=%v tool=%v stream=%v events=%+v", hasCompact, hasToolFailed, hasStreamFailed, events)
+	}
+
+	exchanges, err := waitForUpstreamExchanges(st, 3, time.Second)
+	if err != nil {
+		t.Fatalf("waitForUpstreamExchanges() error = %v", err)
+	}
+	if len(exchanges) < 3 {
+		t.Fatalf("upstream exchanges len = %d, want at least 3: %+v", len(exchanges), exchanges)
+	}
+	secondAuditExchangeCount := 0
+	for _, exchange := range exchanges {
+		if exchange.RequestAuditID == failedAudit.ID {
+			secondAuditExchangeCount++
+		}
+	}
+	if secondAuditExchangeCount < 2 {
+		t.Fatalf("second request upstream exchanges = %d, want compact + stream exchanges linked to failed audit %q: %+v", secondAuditExchangeCount, failedAudit.ID, exchanges)
 	}
 }
 
