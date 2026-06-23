@@ -50,7 +50,7 @@ func newRootCommand() *cobra.Command {
 func newRootCommandWithRuntime(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           cliName,
-		Short:         "Local-first LLM API record/replay proxy",
+		Short:         "Postgres-first LLM gateway with Responses server-mode and record/replay",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {

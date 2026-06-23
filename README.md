@@ -88,7 +88,7 @@ data/traces/
 
 v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略、Responses server 和首次 bootstrap upstream。模型渠道和模型启停应通过 Monitor Web 管理，并持久化到应用数据库。
 
-[config/config.yaml](./config/config.yaml) 是提交到仓库的默认生产样例配置，不放真实密钥。它要求通过环境变量提供 Postgres DSN、OpenAI-compatible/vLLM upstream 和默认模型；本地 SQLite 开发可使用 [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)。
+[config/config.yaml](./config/config.yaml) 是提交到仓库的默认 Postgres-first 样例配置，不放真实密钥；它带有本地 Postgres / vLLM 占位值，便于 `config inspect` 和 `doctor` 离线运行。生产部署必须用环境变量覆盖 Postgres DSN、OpenAI-compatible/vLLM upstream 和默认模型；本地 SQLite 开发可使用 [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)。
 
 推荐的基础配置结构如下：
 
@@ -363,7 +363,7 @@ task run
 task migrate
 ```
 
-默认读取生产样例 `config/config.yaml`，需要先设置 Postgres 和 upstream 环境变量。SQLite 本地开发可以显式指定：
+默认读取 Postgres-first 样例 `config/config.yaml`；本地 `config inspect` / `doctor` 可直接运行，真实启动前应配置可用 Postgres 和 upstream。SQLite 本地开发可以显式指定：
 
 ```bash
 CONFIG=config/examples/local-sqlite.yaml task run

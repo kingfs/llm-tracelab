@@ -149,7 +149,7 @@ system events 是 TraceLab 自身运行和派生管道异常，不是普通用�
 
 ## Reanalysis
 
-reanalysis 只基于本地 cassette 和 SQLite 派生状态工作。
+reanalysis 只基于本地 cassette 和 application DB 派生状态工作；生产写入 Postgres，SQLite 仅用于 legacy/dev/test fallback。
 
 任务必须写入 `analysis_jobs`，便于审计：
 

@@ -97,7 +97,7 @@ MCP 使用和代理 API 相同的个人 token。
 - `list_analysis_jobs`：列出分析任务。
 - `get_analysis_job`：查看任务详情。
 
-这些操作只读取本地 cassette 并写入 SQLite 派生状态，不会访问上游模型。
+这些操作只读取本地 cassette 并写入 application DB 派生状态；生产部署写入 Postgres，本地 fallback 可写入 SQLite。重分析不会访问上游模型。
 
 ### 安全相关查询
 

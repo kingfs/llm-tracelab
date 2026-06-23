@@ -1593,6 +1593,7 @@ func (r *Runtime) recordUnsupportedHostedToolAudit(ctx context.Context, req prot
 	reason := unsupported.Reason
 	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
 		ConversationID: audit.CodexConversationID(req.Metadata),
+		CallID:         rejectedHostedToolCallID(toolName, createdAt),
 		ToolType:       "hosted",
 		ToolName:       toolName,
 		Executor:       "hosted:" + toolName,
@@ -1606,6 +1607,26 @@ func (r *Runtime) recordUnsupportedHostedToolAudit(ctx context.Context, req prot
 		},
 		CreatedAt: createdAt,
 	})
+}
+
+func rejectedHostedToolCallID(toolName string, createdAt time.Time) string {
+	normalized := strings.TrimSpace(toolName)
+	if normalized == "" {
+		normalized = "hosted"
+	}
+	normalized = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r
+		case r >= 'A' && r <= 'Z':
+			return r
+		case r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, normalized)
+	return "rejected_" + normalized + "_" + strconv.FormatInt(createdAt.UnixNano(), 10)
 }
 
 func toolCallAuditMetadata(iteration int, exec toolExecutionContext) map[string]any {

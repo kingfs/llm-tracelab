@@ -7,12 +7,12 @@
 ## 快速读取路径
 
 1. [当前实现概览](./CURRENT_IMPLEMENTATION.md)：项目现在已经实现了什么、没有实现什么。
-2. [架构说明](./ARCHITECTURE.md)：代理、录制、SQLite、Monitor、MCP 与重分析之间的关系。
+2. [架构说明](./ARCHITECTURE.md)：代理、录制、Postgres-first application DB、Monitor、MCP 与重分析之间的关系。
 3. [协议参考](./protocol-reference/README.md)：当前协议族、协议差异和上游 schema 快照。
 4. [开发命令](./DEVELOPMENT_COMMANDS.md)：稳定的构建、测试、格式化、检查入口。
 5. [维护基线](./MAINTAINER_BASELINE.md)：修改存储、录制、Monitor、MCP、重分析时必须遵守的约束。
 
-如果你在参与 Responses server 演进设计或实现，请先读 [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)。该文档记录目标设计、截至 2026-06-23 的已落地状态和剩余缺口；后续阶段推进顺序见 [Responses Gateway 完成计划](./RESPONSES_GATEWAY_COMPLETION_PLAN.md) 与 [Responses Gateway 重构路线图](./RESPONSES_GATEWAY_ROADMAP.md)。通用当前事实仍以当前实现概览和项目基线为准。
+如果你在参与 Responses server 演进设计或实现，请先读 [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)。该文档记录目标设计、截至 2026-06-23 的已落地状态和剩余缺口；最终收敛证据见 [Final Completion Audit](./FINAL_COMPLETION_AUDIT.md)。通用当前事实仍以当前实现概览和项目基线为准。
 
 ## 当前事实文档
 
@@ -24,6 +24,7 @@
 - [Provider 协议入口](./PROVIDER_PROTOCOL_ENTRYPOINTS.md)
 - [协议参考](./protocol-reference/README.md)
 - [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)
+- [Final Completion Audit](./FINAL_COMPLETION_AUDIT.md)
 - [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)
 - [Responses Gateway 完成计划](./RESPONSES_GATEWAY_COMPLETION_PLAN.md)
 - [Responses Gateway 重构路线图](./RESPONSES_GATEWAY_ROADMAP.md)

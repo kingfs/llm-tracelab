@@ -84,7 +84,7 @@ data/traces/
 
 Starting with v1, YAML should be limited to service startup settings: ports, database, trace output directory, auth, MCP, router policy, Responses server, and first-run bootstrap upstreams. Model channels and model enablement should be managed in the Monitor Web UI and persisted to the application database.
 
-[config/config.yaml](./config/config.yaml) is the tracked default production example and should not contain real secrets. It expects environment variables for the Postgres DSN, OpenAI-compatible/vLLM upstream, and default model. Local SQLite development can use [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml).
+[config/config.yaml](./config/config.yaml) is the tracked default Postgres-first example and should not contain real secrets. It includes local Postgres / vLLM placeholder values so `config inspect` and `doctor` can run offline. Production deployments must override the Postgres DSN, OpenAI-compatible/vLLM upstream, and default model through environment variables. Local SQLite development can use [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml).
 
 The recommended base config shape is:
 
@@ -338,7 +338,7 @@ task run
 task migrate
 ```
 
-The default config path is the production example `config/config.yaml`, which requires Postgres and upstream environment variables. For SQLite local development, choose a config explicitly:
+The default config path is the Postgres-first example `config/config.yaml`; local `config inspect` / `doctor` work as-is, while real startup should point at a reachable Postgres database and upstream. For SQLite local development, choose a config explicitly:
 
 ```bash
 CONFIG=config/examples/local-sqlite.yaml task run

@@ -2,13 +2,13 @@
 
 ## 目标
 
-`llm-tracelab` 的目标是把真实 LLM HTTP 调用录制成可检查、可回放、可重算的本地事实。
+`llm-tracelab` 的目标是把真实 LLM HTTP 调用录制成可检查、可回放、可重算的事实，并以 Postgres-first application DB 承载生产级 gateway 状态、配置、审计和查询。
 
 架构原则：
 
 - 转发路径保持简单可靠。
 - raw cassette 是 replay 和详情页的事实源。
-- SQLite 保存列表、统计、配置和派生分析。
+- Postgres 是生产结构化查询源；SQLite 只作为 legacy/dev/test fallback。
 - 协议解析和审计结果可以从 raw cassette 重建。
 - 测试 replay 不依赖上游网络。
 
@@ -21,9 +21,9 @@
 5. 请求转发到上游。
 6. recorder 把原始 HTTP 请求/响应写入 `.http` cassette。
 7. `pkg/llm.ResponsePipeline` 从响应流中抽取 usage 和 `llm.*` timeline 事件。
-8. SQLite 写入 trace、路由、usage、session、upstream 等索引字段。
+8. Application DB 写入 trace、路由、usage、session、upstream 等索引字段；生产部署使用 Postgres。
 9. observe/reanalysis 管道从 raw cassette 解析 Observation IR、findings 和分析任务结果。
-10. Monitor 和 MCP 从 SQLite 查询列表/聚合，从 cassette 读取详情。
+10. Monitor 和 MCP 从 application DB 查询列表/聚合，从 cassette 读取详情。
 11. 单元测试通过 `pkg/replay.Transport` 从 cassette 回放响应。
 
 ## 协议边界
@@ -107,7 +107,7 @@ raw cassette：
 - raw protocol 详情源。
 - 派生数据重建源。
 
-SQLite：
+Application DB：
 
 - trace/session/upstream/model/channel 列表和聚合。
 - auth user/token。
@@ -116,6 +116,8 @@ SQLite：
 - Observation IR 和 findings。
 - analysis jobs。
 - eval/dataset/score/experiment。
+
+生产 application DB 必须使用 Postgres。SQLite 覆盖同类表集时只作为本地开发、离线测试和既有本地 DB 兼容 fallback。
 
 Monitor 列表页不应依赖扫描文件系统。
 
@@ -126,7 +128,7 @@ Monitor 列表页不应依赖扫描文件系统。
 - `internal/router`：多上游选择、健康、重试、sticky、决策记录。
 - `internal/upstream`：上游配置解析、协议族、路由 profile、鉴权 header、URL 构造。
 - `internal/recorder`：cassette 写入和 metadata finalization。
-- `internal/store`：SQLite schema、升级、索引、查询和派生状态。
+- `internal/store`：Postgres/SQLite application DB、schema 初始化/迁移、索引、查询和派生状态。
 - `internal/monitor`：Monitor API 与嵌入式 React UI。
 - `internal/mcpserver`：MCP 工具层。
 - `internal/reanalysis`：trace/session/batch 重分析任务。

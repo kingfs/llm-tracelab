@@ -3586,6 +3586,9 @@ func TestRuntimeCreateRejectsForcedUnsupportedHostedTool(t *testing.T) {
 			if entry.ToolType != "hosted" || entry.ToolName != toolType || entry.Executor != "hosted:"+toolType {
 				t.Fatalf("tool audit tool fields = %#v, want hosted %s", entry, toolType)
 			}
+			if !strings.HasPrefix(entry.CallID, "rejected_"+toolType+"_") {
+				t.Fatalf("tool audit call_id = %q, want rejected %s call id", entry.CallID, toolType)
+			}
 			if entry.Status != "rejected" || entry.Phase != "tool_call" || entry.ErrorText != err.Error() {
 				t.Fatalf("tool audit status/error = %#v, want rejected tool_call with unsupported error", entry)
 			}
@@ -3638,6 +3641,9 @@ func TestRuntimeCreateStreamRejectsForcedUnsupportedHostedTool(t *testing.T) {
 			}
 			if entry.ToolType != "hosted" || entry.ToolName != toolType || entry.Executor != "hosted:"+toolType {
 				t.Fatalf("stream tool audit tool fields = %#v, want hosted %s", entry, toolType)
+			}
+			if !strings.HasPrefix(entry.CallID, "rejected_"+toolType+"_") {
+				t.Fatalf("stream tool audit call_id = %q, want rejected %s call id", entry.CallID, toolType)
 			}
 			if entry.Status != "rejected" || entry.Phase != "tool_call" || entry.ErrorText != err.Error() {
 				t.Fatalf("stream tool audit status/error = %#v, want rejected tool_call with unsupported error", entry)
