@@ -314,9 +314,10 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if !incrementalStreamSupportsTools(req.Tools, webSearchReady) {
 		return protocol.Response{}, fmt.Errorf("%w: tool combination requires deferred stream", ErrIncrementalStreamUnsupported)
 	}
+	functionExecutors := r.functionToolExecutorSnapshot()
 	compactDecision := r.autoCompactDecision(req, budget, history, inputItems, webSearchReady)
 	if compactDecision.ShouldCompact {
-		if !autoCompactIncrementalStreamEligible(req) {
+		if !autoCompactIncrementalStreamEligible(req, functionExecutors) {
 			return protocol.Response{}, fmt.Errorf("%w: auto compact tool combination requires deferred stream", ErrIncrementalStreamUnsupported)
 		}
 		req, history, err = r.applyAutoCompactDecision(ctx, req, model, modelProfile, budget, history, inputItems, compactDecision)
@@ -326,7 +327,6 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	}
 	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
 	chatReq.Stream = true
-	functionExecutors := r.functionToolExecutorSnapshot()
 
 	responseID := newResponseID()
 	created := protocol.Response{
@@ -878,9 +878,18 @@ func (r *Runtime) applyAutoCompactDecision(ctx context.Context, req protocol.Cre
 	return req, compactedHistory, nil
 }
 
-func autoCompactIncrementalStreamEligible(req protocol.CreateResponseRequest) bool {
-	if len(req.Tools) != 0 {
-		return false
+func autoCompactIncrementalStreamEligible(req protocol.CreateResponseRequest, functionExecutors map[string]configuredFunctionToolExecutor) bool {
+	for _, tool := range req.Tools {
+		if tool.Type != "function" {
+			return false
+		}
+		name := normalizeFunctionToolName(tool.Name)
+		if name == "" {
+			return false
+		}
+		if configured := functionExecutors[name]; configured.executor != nil {
+			return false
+		}
 	}
 	switch choice := req.ToolChoice.(type) {
 	case nil:

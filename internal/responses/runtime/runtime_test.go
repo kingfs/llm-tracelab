@@ -1993,7 +1993,96 @@ func TestRuntimeCreateStreamAutoCompactsSimpleTextBeforeStreaming(t *testing.T) 
 	}
 }
 
-func TestRuntimeCreateStreamAutoCompactWithToolsRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+func TestRuntimeCreateStreamAutoCompactsUnregisteredFunctionToolAndStreamsArguments(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_client_function_target", "gpt-test")
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "Stream compact summary."},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16},
+		},
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:        0,
+				ID:           "call_lookup",
+				Type:         "function",
+				FunctionName: "lookup",
+			}}},
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ArgumentsDelta: `{"q"`,
+			}}},
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ArgumentsDelta: `:"codex"}`,
+			}}},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{
+					ID:   "call_lookup",
+					Type: "function",
+					Function: ChatToolCallFunction{
+						Name:      "lookup",
+						Arguments: `{"q":"codex"}`,
+					},
+				}}},
+				FinishReason: "tool_calls",
+			}},
+			Usage: ChatUsage{PromptTokens: 6, CompletionTokens: 3, TotalTokens: 9},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+	}, client, store, WithExecutionEventRecorder(events))
+	sink := &fakeResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_stream_compact_client_function_target",
+		Input:              "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("non-stream chat requests = %d, want compact request before streaming", len(client.reqs))
+	}
+	if len(client.streamReqs) != 1 || !client.streamReqs[0].Stream || len(client.streamReqs[0].Tools) != 1 || client.streamReqs[0].Tools[0].Function.Name != "lookup" {
+		t.Fatalf("stream chat requests = %#v, want one streaming request with lookup tool after compact", client.streamReqs)
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_stream_compact_client_function_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	if len(sink.functionDelta) != 2 || sink.functionDelta[0].Delta != `{"q"` || sink.functionDelta[1].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function deltas = %#v, want streamed argument chunks", sink.functionDelta)
+	}
+	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function done = %#v, want full arguments", sink.functionDone)
+	}
+	if len(resp.Output) != 1 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("final output = %#v, want client-owned function_call", resp.Output)
+	}
+	if len(sink.outputAdded) != 0 || len(sink.outputDone) != 0 {
+		t.Fatalf("server-side output events added=%#v done=%#v, want none for client-owned function", sink.outputAdded, sink.outputDone)
+	}
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
+		t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
+	}
+}
+
+func TestRuntimeCreateStreamAutoCompactWithRegisteredFunctionRequiresDeferredFallbackBeforeWriting(t *testing.T) {
 	store := NewMemoryStore()
 	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_tool_target", "gpt-test")
 	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
@@ -2001,7 +2090,7 @@ func TestRuntimeCreateStreamAutoCompactWithToolsRequiresDeferredFallbackBeforeWr
 		DefaultModel:                "fallback-model",
 		AutoCompact:                 true,
 		CompactHistoryItemThreshold: 1,
-	}, client, store)
+	}, client, store, WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: "must not run"}))
 	sink := &fakeResponseStreamSink{}
 
 	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{

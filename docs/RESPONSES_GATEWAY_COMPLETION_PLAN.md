@@ -26,8 +26,8 @@
 - `previous_response_id` continuation、Responses runtime store、`/v1/responses/:id/input_items`。
 - 显式 `/v1/responses/compact`、item-count auto compact、context-window token-budget auto compact 和 auto compact provenance 首切。
 - Compact v2 provenance event-derived read model 首切：manual/auto compact events 引用 source/retained item refs、summary item ids、retained window 和 budget 白名单字段，`QueryService.ListCompactProvenance` 可查询且不输出 raw prompt/summary/tool args/tool output。
-- Chat Completions SSE cassette 记录与聚合，Responses streaming 覆盖简单文本、auto compact 后简单文本 continuation、function arguments、registered executor 和 hosted `web_search` 的首切路径。
-- Runtime incremental stream fallback contract 首切：不支持的工具组合，以及 auto compact 后带工具声明或非平凡 `tool_choice` 的组合，会在写出任何 SSE 或调用上游前返回可识别 fallback error，并带 deferred fallback reason；HTTP handler 可安全转入 deferred envelope 并写 fallback audit event。
+- Chat Completions SSE cassette 记录与聚合，Responses streaming 覆盖简单文本、auto compact 后简单文本 continuation、auto compact 后未注册普通 `function` tool arguments、普通 function arguments、registered executor 和 hosted `web_search` 的首切路径。
+- Runtime incremental stream fallback contract 首切：不支持的工具组合，以及 auto compact 后 hosted/未知工具、同名 registered executor 或非平凡 `tool_choice` 的组合，会在写出任何 SSE 或调用上游前返回可识别 fallback error，并带 deferred fallback reason；HTTP handler 可安全转入 deferred envelope 并写 fallback audit event。
 - Tool ownership boundary 首切：普通 `function` 默认 client-owned；即使 registry 中存在其它 executor，未注册同名 executor 的 function call 也只返回给客户端，不触发 server-side execution。
 - Hosted `web_search`、server-side function executor registry、YAML `static_response` / `external_command` opt-in executor 和轻量 process policy。
 - ent-backed Responses store、SQLite fallback raw DDL、Postgres checked-in application migrations、open-vs-migrate 分离。
@@ -48,14 +48,14 @@
 必须完成：
 
 - Compact v2/context optimization：summary provenance、source/retained item refs、retention window、artifact-bearing item 策略和可查询 read model。
-- Auto compact streaming：简单文本 continuation 已能在自动 compact 后继续真实增量 streaming；带工具声明或非平凡 `tool_choice` 的 auto compact 组合仍显式 fallback 并可审计，后续需继续收敛复杂路径。
+- Auto compact streaming：简单文本 continuation 和未注册普通 `function` tool arguments 已能在自动 compact 后继续真实增量 streaming；hosted/未知工具、同名 registered executor 或非平凡 `tool_choice` 的 auto compact 组合仍显式 fallback 并可审计，后续需继续收敛复杂路径。
 - Stream/tool lifecycle：补跨轮、混合工具、部分成功后失败、cancel/error 的稳定 event ordering 和 final response 对齐。
 - Tool ownership boundary：普通 `function` 默认 client-owned 的首切已有 regression test；server-side executor 必须显式 opt-in；MCP/file/code/computer-use 必须先有安全设计，不直接执行任意外部能力。
 
 近期可并行切片：
 
 - `runtime/compact-v2-provenance`：实现 compact metadata/read model 的 item refs 和 retained window，不输出 raw prompt/summary/tool args。
-- `runtime/stream-fallback-contract`：已完成首切，不支持工具组合、以及 auto compact 后带工具声明或非平凡 `tool_choice` 的 incremental stream fallback 有 runtime contract tests；auto compact 后简单文本 continuation 已不再 fallback。HTTP handler 既有 fallback audit event 继续覆盖 deferred fallback。后续仍需减少复杂路径 fallback，并补跨轮/混合工具生命周期。
+- `runtime/stream-fallback-contract`：已完成首切，不支持工具组合、以及 auto compact 后 hosted/未知工具、同名 registered executor 或非平凡 `tool_choice` 的 incremental stream fallback 有 runtime contract tests；auto compact 后简单文本 continuation 和未注册普通 `function` tool arguments 已不再 fallback。HTTP handler 既有 fallback audit event 继续覆盖 deferred fallback。后续仍需减少复杂路径 fallback，并补跨轮/混合工具生命周期。
 
 ### Storage 主线
 
