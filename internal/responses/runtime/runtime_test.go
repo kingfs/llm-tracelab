@@ -663,6 +663,67 @@ func TestRuntimeCreateStreamEmitsFunctionCallArgumentDeltas(t *testing.T) {
 	}
 }
 
+func TestRuntimeCreateStreamLeavesUnregisteredFunctionToolClientOwned(t *testing.T) {
+	client := &fakeChatClient{
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+				Index:          0,
+				ID:             "call_lookup",
+				Type:           "function",
+				FunctionName:   "lookup",
+				ArgumentsDelta: `{"q":"codex"}`,
+			}}},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{
+					ID:   "call_lookup",
+					Type: "function",
+					Function: ChatToolCallFunction{
+						Name:      "lookup",
+						Arguments: `{"q":"codex"}`,
+					},
+				}}},
+				FinishReason: "tool_calls",
+			}},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(
+		Config{DefaultModel: "fallback-model"},
+		client,
+		NewMemoryStore(),
+		WithExecutionEventRecorder(events),
+		WithFunctionToolExecutor("other_tool", StaticFunctionToolExecutor{Output: "must not run"}),
+	)
+	sink := &fakeResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "lookup codex",
+		Stream: true,
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.streamReqs) != 1 {
+		t.Fatalf("stream requests = %d, want only client-owned function call round", len(client.streamReqs))
+	}
+	if len(resp.Output) != 1 || resp.Output[0].Type != "function_call" || resp.Output[0].CallID != "call_lookup" || resp.Output[0].Name != "lookup" {
+		t.Fatalf("response output = %#v, want client-owned function_call", resp.Output)
+	}
+	if len(sink.outputAdded) != 0 || len(sink.outputDone) != 0 {
+		t.Fatalf("server-side output events added=%#v done=%#v, want none for unregistered function", sink.outputAdded, sink.outputDone)
+	}
+	if len(events.events) != 1 || events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "lookup" {
+		t.Fatalf("execution events = %#v, want only requested event for client-owned function", events.events)
+	}
+}
+
 func TestRuntimeCreateStreamExecutesRegisteredFunctionToolExecutor(t *testing.T) {
 	client := &fakeChatClient{
 		streamEventBatches: [][]ChatStreamEvent{

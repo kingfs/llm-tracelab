@@ -27,6 +27,7 @@
 - 显式 `/v1/responses/compact`、item-count auto compact、context-window token-budget auto compact 和 auto compact provenance 首切。
 - Chat Completions SSE cassette 记录与聚合，Responses streaming 覆盖简单文本、function arguments、registered executor 和 hosted `web_search` 的首切路径。
 - Runtime incremental stream fallback contract 首切：auto compact 和不支持的工具组合会在写出任何 SSE 或调用上游前返回可识别 fallback error，并带 deferred fallback reason，HTTP handler 可安全转入 deferred envelope 并写 fallback audit event。
+- Tool ownership boundary 首切：普通 `function` 默认 client-owned；即使 registry 中存在其它 executor，未注册同名 executor 的 function call 也只返回给客户端，不触发 server-side execution。
 - Hosted `web_search`、server-side function executor registry、YAML `static_response` / `external_command` opt-in executor 和轻量 process policy。
 - ent-backed Responses store、SQLite fallback raw DDL、Postgres checked-in application migrations、open-vs-migrate 分离。
 - `request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 CLI/Monitor/MCP 查询首切。
@@ -48,7 +49,7 @@
 - Compact v2/context optimization：summary provenance、source/retained item refs、retention window、artifact-bearing item 策略和可查询 read model。
 - Auto compact streaming：避免复杂路径长期 fallback 到 deferred envelope，至少明确哪些路径可真实增量、哪些路径显式 fallback 并可审计。
 - Stream/tool lifecycle：补跨轮、混合工具、部分成功后失败、cancel/error 的稳定 event ordering 和 final response 对齐。
-- Tool ownership boundary：普通 `function` 默认 client-owned，server-side executor 必须显式 opt-in；MCP/file/code/computer-use 必须先有安全设计，不直接执行任意外部能力。
+- Tool ownership boundary：普通 `function` 默认 client-owned 的首切已有 regression test；server-side executor 必须显式 opt-in；MCP/file/code/computer-use 必须先有安全设计，不直接执行任意外部能力。
 
 近期可并行切片：
 
