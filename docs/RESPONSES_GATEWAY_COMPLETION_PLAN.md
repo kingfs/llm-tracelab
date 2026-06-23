@@ -77,7 +77,7 @@
 - Provider API surface/capability registry 成为 routing、doctor、setup、models/codex-config 的共同事实来源。
 - Probe/setup/apply 形成闭环：只填缺失字段，不覆盖显式配置或 capability false，不回显 secret。
 - Model profile 与 provider/channel/model catalog 的关系明确：context window、max output、tool capability、upstream model rewrite、tokenize capability 的来源可解释。
-- Native Responses provider 的模式边界明确：proxy pass-through、record-only 和 local semantic interposition 不能混淆。
+- Native Responses provider 的模式边界明确：默认 proxy/record-only 路径可以把 `/v1/responses` 原样转发并录制到 native Responses upstream；`responses_server.enabled=true` 时，配置的 Responses path 由本地 semantic runtime 接管，runtime 内部模型调用仍只选择 Chat Completions-compatible target，不能把显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 provider 当作 `/v1/chat/completions` upstream 使用。
 
 近期可并行切片：
 

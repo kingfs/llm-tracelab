@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1073,6 +1074,132 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 	}
 	if !strings.Contains(err.Error(), router.LocalResponsesServerBackendRequiredError) {
 		t.Fatalf("NewHandler() error = %q, want contain %q", err.Error(), router.LocalResponsesServerBackendRequiredError)
+	}
+}
+
+func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var nativeRequests atomic.Int32
+	nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nativeRequests.Add(1)
+		http.Error(w, "native responses target must not be used by local runtime chat adapter", http.StatusTeapot)
+	}))
+	defer nativeServer.Close()
+
+	var chatRequests atomic.Int32
+	var gotChatPath string
+	var gotChatBody map[string]any
+	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatRequests.Add(1)
+		gotChatPath = r.URL.Path
+		if r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotChatBody); err != nil {
+			t.Errorf("decode upstream chat request body: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_boundary","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`)
+	}))
+	defer chatServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			Enabled: true,
+		},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "native-responses",
+				Enabled:        boolPtr(true),
+				Priority:       200,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        nativeServer.URL + "/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Mode:           "proxy",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       boolPtr(true),
+						ChatCompletions: boolPtr(false),
+					},
+				},
+			},
+			{
+				ID:             "chat-backend",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        chatServer.URL + "/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "responses_server",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ChatCompletions: boolPtr(true),
+					},
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("resp.StatusCode = %d, want 200", resp.StatusCode)
+	}
+	if got := nativeRequests.Load(); got != 0 {
+		t.Fatalf("native responses target received %d requests, want 0", got)
+	}
+	if got := chatRequests.Load(); got != 1 {
+		t.Fatalf("chat backend received %d requests, want 1", got)
+	}
+	if gotChatPath != "/v1/chat/completions" {
+		t.Fatalf("chat upstream path = %q, want /v1/chat/completions", gotChatPath)
+	}
+	if gotChatBody["model"] != "gpt-5" {
+		t.Fatalf("chat body model = %v, want gpt-5; body=%+v", gotChatBody["model"], gotChatBody)
+	}
+
+	parsed, err := waitForRecordedPrelude(findRecordedHTTP(t, outputDir), time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude() error = %v", err)
+	}
+	if parsed.Header.Meta.URL != "/v1/chat/completions" || parsed.Header.Meta.Endpoint != "/v1/chat/completions" {
+		t.Fatalf("recorded path endpoint = %q/%q, want /v1/chat/completions", parsed.Header.Meta.URL, parsed.Header.Meta.Endpoint)
+	}
+	if parsed.Header.Meta.SelectedUpstreamID != "chat-backend" {
+		t.Fatalf("SelectedUpstreamID = %q, want chat-backend", parsed.Header.Meta.SelectedUpstreamID)
 	}
 }
 
