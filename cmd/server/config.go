@@ -480,10 +480,12 @@ func (p configSourceProbe) upstreamsSourceSummary(cfg *appconfig.Config) configI
 		"LLM_TRACELAB_UPSTREAM_PROJECT",
 		"LLM_TRACELAB_UPSTREAM_LOCATION",
 		"LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE",
+		"LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL",
+		"LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY",
 	) {
 		targets = configSourceEffective
 	}
-	if anyStringEnvSet("LLM_TRACELAB_UPSTREAM_API_KEY") {
+	if anyStringEnvSet("LLM_TRACELAB_UPSTREAM_API_KEY", "LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY") {
 		credentials = configSourceEffective
 	}
 	if strings.TrimSpace(cfg.Upstream.ApiKey) != "" && len(cfg.Upstreams) == 0 && credentials == configSourceNotConfigured {

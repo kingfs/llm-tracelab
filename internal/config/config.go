@@ -400,6 +400,16 @@ func applyEnvOverrides(cfg *Config) {
 			upstream.ModelResource = v
 		})
 	}
+	if v := os.Getenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"); v != "" {
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.BaseURL = v
+		})
+	}
+	if v := os.Getenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"); v != "" {
+		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+			upstream.ApiKey = v
+		})
+	}
 	if v := os.Getenv("LLM_TRACELAB_PROVIDER_PROBE_STARTUP_FILL"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ProviderProbe.StartupFill = parsed

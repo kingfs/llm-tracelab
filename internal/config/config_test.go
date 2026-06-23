@@ -198,6 +198,48 @@ func TestLegacyUpstreamEnvOverridesFirstConfiguredUpstream(t *testing.T) {
 	}
 }
 
+func TestBootstrapUpstreamEnvOverridesOnlyFirstConfiguredUpstream(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
+	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
+
+	cfg := Config{
+		Upstream: UpstreamConfig{
+			BaseURL: "https://legacy.example.com/v1",
+			ApiKey:  "legacy-placeholder-key",
+		},
+		Upstreams: []UpstreamTargetConfig{
+			{
+				ID: "primary",
+				Upstream: UpstreamConfig{
+					BaseURL: "https://api.openai.com/v1",
+					ApiKey:  "config-placeholder-key",
+				},
+			},
+			{
+				ID: "secondary",
+				Upstream: UpstreamConfig{
+					BaseURL: "https://secondary.example.com/v1",
+					ApiKey:  "secondary-placeholder-key",
+				},
+			},
+		},
+	}
+	applyEnvOverrides(&cfg)
+
+	if cfg.Upstream.BaseURL != "https://legacy.example.com/v1" || cfg.Upstream.ApiKey != "legacy-placeholder-key" {
+		t.Fatalf("legacy upstream = %+v, want unchanged", cfg.Upstream)
+	}
+	if cfg.Upstreams[0].Upstream.BaseURL != "http://host.docker.internal:8000/v1" {
+		t.Fatalf("first upstream base_url = %q", cfg.Upstreams[0].Upstream.BaseURL)
+	}
+	if cfg.Upstreams[0].Upstream.ApiKey != "bootstrap-placeholder-key" {
+		t.Fatalf("first upstream api_key = %q", cfg.Upstreams[0].Upstream.ApiKey)
+	}
+	if cfg.Upstreams[1].Upstream.BaseURL != "https://secondary.example.com/v1" || cfg.Upstreams[1].Upstream.ApiKey != "secondary-placeholder-key" {
+		t.Fatalf("second upstream = %+v, want unchanged", cfg.Upstreams[1].Upstream)
+	}
+}
+
 func TestLoadExpandsEnvReferences(t *testing.T) {
 	t.Setenv("OPENAI_TEST_KEY", "test-placeholder-key")
 	path := writeTempConfig(t, `
