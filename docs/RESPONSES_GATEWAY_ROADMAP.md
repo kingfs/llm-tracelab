@@ -23,12 +23,12 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - Chat Completions SSE cassette 记录与聚合。
 - deferred Responses SSE envelope、incremental fallback 审计事件，以及简单文本输出的真实增量 Responses streaming 首切。
 - context cancellation audit。
-- 显式 `/v1/responses/compact` 和 item-count 自动 compact 阈值。
+- 显式 `/v1/responses/compact`、item-count 自动 compact 阈值，以及 auto compact `response.compact` / `auto_triggered` event provenance 首切。
 
 尚未作为基线能力：
 
 - tool/auto-compact 等复杂场景的 Responses SSE 真实边读边转发。
-- model profile 驱动的完整 context optimization；当前已有可注入 estimator 边界、adapter-backed estimator 层、默认确定性保守计数器，以及 HTTP provider `/tokenize` chat prompt counter 的自动选择首切。
+- model profile 驱动的完整 context optimization；当前已有可注入 estimator 边界、adapter-backed estimator 层、默认确定性保守计数器、HTTP provider `/tokenize` chat prompt counter 的自动选择首切，以及不含 raw prompt/summary/tool args 的 auto compact provenance 首切。
 - provider detection 的完整配置/Monitor 工作流；当前已有手动 `provider probe` 诊断建议、只读批量 `provider probe-report` / Monitor report API，以及默认关闭的启动时保守补全开关。
 - server-side function executor 的更强隔离；当前已有默认关闭的 YAML `static_response` / `external_command` executor 首切、`external_command` opt-in working directory/absolute command/allowed_command_dirs/reject_root 轻量进程隔离首切、Monitor validate-only、安全 overlay 持久化到 `app_settings`，以及当前进程 runtime executor registry 热更新首切。
 - provider setup 的完整持久化配置工作流；当前已有手动 `provider probe` 诊断建议、只读批量 `provider probe-report` / Monitor report API、默认关闭的启动时保守补全开关、provider setup validate/apply 首切，以及 Monitor create dialog 的 validate -> review normalized config/probe/secret state -> create 状态编排首切。
@@ -81,7 +81,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 ### Stage 21：Model Profile 与 Context Budget（estimator adapter 与可注入 `/tokenize` counter 已落地）
 
-目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的可注入 estimator 触发 auto compact；默认 estimator 现在通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback 到 conservative estimator。HTTP provider `/tokenize` chat prompt counter 已能在 profile 有 `name` 或 `pattern`、配置 `context_window_tokens`、未显式 `tokenize_counter.enabled=false`，且匹配 upstream/router target 声明 `capabilities.tokenize=true` 时自动接入默认 proxy/runtime 装配；显式 `enabled=true` 仍可强制启用，显式 false 可关闭。后续再做更完整的上下文优化。
+目标：把 compact 阈值、上下文窗口、输出上限、上游模型名映射等配置收敛到 model profile。当前已允许 profile 覆盖 item-count compact 阈值、`upstream_model`、默认 `max_output_tokens`，并用 `context_window_tokens` 的可注入 estimator 触发 auto compact；默认 estimator 现在通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback 到 conservative estimator。HTTP provider `/tokenize` chat prompt counter 已能在 profile 有 `name` 或 `pattern`、配置 `context_window_tokens`、未显式 `tokenize_counter.enabled=false`，且匹配 upstream/router target 声明 `capabilities.tokenize=true` 时自动接入默认 proxy/runtime 装配；显式 `enabled=true` 仍可强制启用，显式 false 可关闭。auto compact `response.compact` / `auto_triggered` event 已补 provenance 首切，包含触发原因、原始/保留/丢弃 input item 计数、保留半开窗口、previous/compact response ID 存在性，以及 token/window/reserved-output limit 来源；不会写 raw prompt、raw summary 或 raw tool args。后续再做更完整的上下文优化。
 
 依赖：Stage 19B 的自动 compact。
 
@@ -90,7 +90,7 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - 全局 compact 阈值继续兼容。
 - model profile 匹配当前 model 时覆盖 compact 阈值。
 - profile `max_output_tokens` 在客户端未显式传值时作为内部 Chat Completions `max_tokens` 默认值。
-- `context_window_tokens` 超预算时写 `response.compact` `auto_triggered` 事件，details 标明 `trigger=context_window_tokens`、估算输入 tokens、窗口和预留输出。
+- `context_window_tokens` 超预算时写 `response.compact` `auto_triggered` 事件，details 标明 `trigger=context_window_tokens`、估算输入 tokens、窗口、预留输出和 limit 来源；item-count auto compact 同一事件也带原始/保留/丢弃计数与保留窗口 provenance。
 - 文档明确当前 token budgeting 已有 estimator/adapter 扩展边界和可注入 `/tokenize` counter，默认仍是确定性保守计数，不是自动启用的模型专用 tokenizer。
 
 ### Stage 22：Persistence Operability 收敛
