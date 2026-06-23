@@ -2082,9 +2082,156 @@ func TestRuntimeCreateStreamAutoCompactsUnregisteredFunctionToolAndStreamsArgume
 	}
 }
 
-func TestRuntimeCreateStreamAutoCompactWithRegisteredFunctionRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+func TestRuntimeCreateStreamAutoCompactsRegisteredFunctionToolExecutesAndContinuesStreaming(t *testing.T) {
 	store := NewMemoryStore()
 	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_tool_target", "gpt-test")
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Role: "assistant", Content: "Stream compact summary."},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 4, TotalTokens: 16},
+		},
+		streamEventBatches: [][]ChatStreamEvent{
+			{
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:        0,
+					ID:           "call_lookup",
+					Type:         "function",
+					FunctionName: "lookup",
+				}}},
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ArgumentsDelta: `{"q"`,
+				}}},
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ArgumentsDelta: `:"codex"}`,
+				}}},
+			},
+			{
+				{ChoiceIndex: 0, ContentDelta: "Lookup "},
+				{ChoiceIndex: 0, ContentDelta: "complete."},
+			},
+		},
+		streamResps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{
+						ID:   "call_lookup",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "lookup",
+							Arguments: `{"q":"codex"}`,
+						},
+					}}},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 6, CompletionTokens: 3, TotalTokens: 9},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "Lookup complete."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 9, CompletionTokens: 2, TotalTokens: 11},
+			},
+		},
+	}
+	var executed FunctionToolCall
+	events := &fakeExecutionEventRecorder{}
+	rt := New(Config{
+		DefaultModel:                "fallback-model",
+		AutoCompact:                 true,
+		CompactHistoryItemThreshold: 1,
+	}, client, store,
+		WithExecutionEventRecorder(events),
+		WithFunctionToolExecutor("lookup", FunctionToolExecutorFunc(func(ctx context.Context, call FunctionToolCall) (FunctionToolResult, error) {
+			executed = call
+			return FunctionToolResult{Output: map[string]any{"answer": "42"}}, nil
+		})),
+	)
+	sink := &fakeResponseStreamSink{}
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Model:              "gpt-test",
+		PreviousResponseID: "resp_stream_compact_tool_target",
+		Input:              "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("non-stream chat requests = %d, want compact request before streaming", len(client.reqs))
+	}
+	if len(client.streamReqs) != 2 || !client.streamReqs[0].Stream || !client.streamReqs[1].Stream {
+		t.Fatalf("stream chat requests = %#v, want tool stream + final text stream after compact", client.streamReqs)
+	}
+	if resp.PreviousResponseID == "" || resp.PreviousResponseID == "resp_stream_compact_tool_target" {
+		t.Fatalf("response previous_response_id = %q, want generated compact response id", resp.PreviousResponseID)
+	}
+	if len(client.streamReqs[0].Messages) < 2 || !strings.Contains(chatMessageContentText(client.streamReqs[0].Messages[0].Content), "Stream compact summary") {
+		t.Fatalf("post-compact stream messages = %#v, want compact summary in context", client.streamReqs[0].Messages)
+	}
+	secondMessages := client.streamReqs[1].Messages
+	if len(secondMessages) < 4 {
+		t.Fatalf("second stream messages len = %d, want compact context plus user/tool loop: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[len(secondMessages)-2].Role != "assistant" || len(secondMessages[len(secondMessages)-2].ToolCalls) != 1 || secondMessages[len(secondMessages)-2].ToolCalls[0].ID != "call_lookup" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[len(secondMessages)-2])
+	}
+	if secondMessages[len(secondMessages)-1].Role != "tool" || secondMessages[len(secondMessages)-1].ToolCallID != "call_lookup" || secondMessages[len(secondMessages)-1].Content != `{"answer":"42"}` {
+		t.Fatalf("second tool message mismatch: %#v", secondMessages[len(secondMessages)-1])
+	}
+	if executed.CallID != "call_lookup" || executed.Name != "lookup" || executed.Arguments != `{"q":"codex"}` {
+		t.Fatalf("executed function call = %#v, want streamed arguments", executed)
+	}
+	if len(sink.functionDelta) != 2 || sink.functionDelta[0].Delta != `{"q"` || sink.functionDelta[1].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function deltas = %#v, want streamed argument chunks", sink.functionDelta)
+	}
+	if len(sink.functionDone) != 1 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[0].Arguments != `{"q":"codex"}` {
+		t.Fatalf("function done = %#v, want full arguments", sink.functionDone)
+	}
+	if len(sink.outputAdded) != 1 || sink.outputAdded[0].OutputIndex != 0 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_lookup" {
+		t.Fatalf("output item added = %#v, want started function_call_output call_lookup", sink.outputAdded)
+	}
+	if len(sink.outputDone) != 1 || sink.outputDone[0].OutputIndex != 0 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.CallID != "call_lookup" || !reflect.DeepEqual(sink.outputDone[0].Item.Output, map[string]any{"answer": "42"}) {
+		t.Fatalf("output item done = %#v, want completed function_call_output call_lookup", sink.outputDone)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Lookup " || sink.deltas[1].Delta != "complete." {
+		t.Fatalf("text deltas = %#v, want final streamed text after tool output", sink.deltas)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(resp.Output) != 2 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Lookup complete." {
+		t.Fatalf("final output = %#v, want function output + final message", resp.Output)
+	}
+	if got := findExecutionEvent(events.events, "response.compact", "auto_triggered"); got == nil {
+		t.Fatalf("execution events missing auto_triggered compact event: %#v", events.events)
+	}
+}
+
+func TestRuntimeCreateStreamAutoCompactForcedFunctionToolChoiceRequiresDeferredFallbackBeforeWriting(t *testing.T) {
+	store := NewMemoryStore()
+	seedResponseForAutoCompactTest(t, store, "resp_stream_compact_forced_tool_target", "gpt-test")
 	client := &fakeChatClient{streamResp: finalChatResponse("should not stream")}
 	rt := New(Config{
 		DefaultModel:                "fallback-model",
@@ -2095,8 +2242,14 @@ func TestRuntimeCreateStreamAutoCompactWithRegisteredFunctionRequiresDeferredFal
 
 	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
 		Model:              "gpt-test",
-		PreviousResponseID: "resp_stream_compact_tool_target",
+		PreviousResponseID: "resp_stream_compact_forced_tool_target",
 		Input:              "new question",
+		ToolChoice: map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": "lookup",
+			},
+		},
 		Tools: []protocol.Tool{{
 			Type:       "function",
 			Name:       "lookup",
