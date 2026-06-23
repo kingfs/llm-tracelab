@@ -458,7 +458,7 @@ func (p configSourceProbe) databaseDSNSource(cfg *appconfig.Config) string {
 }
 
 func (p configSourceProbe) upstreamsSourceSummary(cfg *appconfig.Config) configInspectUpstreamsSourceSummary {
-	targets := configSourceDefault
+	targets := configSourceNotConfigured
 	credentials := configSourceNotConfigured
 	if p.has("upstreams") {
 		targets = configSourceConfigFile

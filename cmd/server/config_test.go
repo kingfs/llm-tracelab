@@ -107,7 +107,7 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	if sources.Tools.WebSearch.Provider != configSourceDefault {
 		t.Fatalf("sources.tools.web_search.provider = %q", sources.Tools.WebSearch.Provider)
 	}
-	if sources.Upstreams.Targets != configSourceDefault || sources.Upstreams.Credentials != configSourceNotConfigured {
+	if sources.Upstreams.Targets != configSourceNotConfigured || sources.Upstreams.Credentials != configSourceNotConfigured {
 		t.Fatalf("sources.upstreams = %+v", sources.Upstreams)
 	}
 }

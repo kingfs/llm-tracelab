@@ -39,6 +39,33 @@ func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
 	}
 }
 
+func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = t.TempDir()
+	cfg.Trace.OutputDir = cfg.Debug.OutputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/models status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"data":[]`) {
+		t.Fatalf("GET /v1/models body = %s, want empty data array", rec.Body.String())
+	}
+}
+
 func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 	var usage recorder.UsageInfo
 	sniffer := UsageSniffer{

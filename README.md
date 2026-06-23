@@ -86,9 +86,9 @@ data/traces/
 
 ### 1. 配置服务启动参数
 
-v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略、Responses server 和首次 bootstrap upstream。模型渠道和模型启停应通过 Monitor Web 管理，并持久化到应用数据库。
+v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略、Responses server 和工具开关。模型渠道、provider 地址、API key、模型启停和模型 profile 应通过 Monitor Web 管理，并持久化到应用数据库。
 
-[config/config.yaml](./config/config.yaml) 是提交到仓库的默认 Postgres-first 样例配置，不放真实密钥；它带有本地 Postgres / vLLM 占位值，便于 `config inspect` 和 `doctor` 离线运行。生产部署必须用环境变量覆盖 Postgres DSN、OpenAI-compatible/vLLM upstream 和默认模型；本地 SQLite 开发可使用 [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)。
+[config/config.yaml](./config/config.yaml) 是提交到仓库的默认 Postgres-first 启动配置，不放真实密钥，也不内置 provider。没有任何上游配置时，服务仍应能启动，Monitor Web 可用于后续配置 providers。生产部署只需要通过环境变量注入部署现场值：Postgres DSN/密码、对外端口，以及可选的单个 bootstrap upstream 地址和 API key。本地 SQLite 开发可使用 [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)。
 
 推荐的基础配置结构如下：
 
@@ -105,7 +105,7 @@ mcp:
 
 database:
   driver: "postgres"
-  dsn: "$env:LLM_TRACELAB_DATABASE_DSN"
+  dsn: ""
   max_open_conns: 16
   max_idle_conns: 8
   auto_migrate: true
@@ -118,7 +118,7 @@ trace:
 
 responses_server:
   enabled: true
-  default_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+  default_model: ""
   force_store: true
   path: "/v1/responses"
   auto_compact: true
@@ -141,21 +141,7 @@ debug:
   mask_key: true
 ```
 
-历史 `upstream` / `upstreams` YAML 仍然兼容，但只建议作为首次启动 bootstrap 或迁移入口使用。当应用数据库中已经存在 channel 配置时，运行时以数据库为准，不再持续同步 YAML upstreams。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
-
-兼容的 bootstrap 示例：
-
-```yaml
-upstream:
-  base_url: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"
-  api_key: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"
-  provider_preset: "vllm"
-  api_type: "chat_completions"
-  capabilities:
-    chat_completions: true
-    responses: false
-    tool_calling: true
-```
+历史 `upstream` / `upstreams` YAML 仍然兼容，但不再作为长期生产配置入口。首次启动时，如果设置了 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`，系统会导入一个 OpenAI-compatible bootstrap provider；如果未设置，服务仅启动 Web 和管理面。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
 
 同一个 upstream 下配置多个 explicit credentials 的示例和 sticky route target、credential-safe metadata、limit scope 说明见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)。文档示例只使用 `$env:...` 占位符，不应在 YAML 中提交真实 provider secret。
 
@@ -169,44 +155,7 @@ upstream:
 - [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
 - [config/examples/vertex.yaml](./config/examples/vertex.yaml)
 
-支持的环境变量覆盖：
-
-- `LLM_TRACELAB_SERVER_PORT`
-- `LLM_TRACELAB_MONITOR_PORT`
-- `LLM_TRACELAB_HOST_SERVER_PORT`
-- `LLM_TRACELAB_HOST_MONITOR_PORT`
-- `LLM_TRACELAB_DATABASE_DRIVER`
-- `LLM_TRACELAB_DATABASE_DSN`
-- `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
-- `LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS`
-- `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`
-- `LLM_TRACELAB_TRACE_OUTPUT_DIR`
-- `LLM_TRACELAB_AUTH_SESSION_TTL`
-- `LLM_TRACELAB_MCP_ENABLED`
-- `LLM_TRACELAB_MCP_PATH`
-- `LLM_TRACELAB_RESPONSES_ENABLED`
-- `LLM_TRACELAB_RESPONSES_DEFAULT_MODEL`
-- `LLM_TRACELAB_RESPONSES_FORCE_STORE`
-- `LLM_TRACELAB_RESPONSES_PATH`
-- `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`
-- `LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER`
-- `LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL`
-- `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`
-- `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`
-- `LLM_TRACELAB_UPSTREAM_BASE_URL`
-- `LLM_TRACELAB_UPSTREAM_API_KEY`
-- `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
-- `LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY`
-- `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
-- `LLM_TRACELAB_UPSTREAM_API_VERSION`
-- `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
-- `LLM_TRACELAB_UPSTREAM_PROJECT`
-- `LLM_TRACELAB_UPSTREAM_LOCATION`
-- `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
-- `LLM_TRACELAB_OUTPUT_DIR`
-- `LLM_TRACELAB_MASK_KEY`
-
-兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 仍会覆盖 legacy 单 `upstream` 和第一个 bootstrap upstream target，适合单默认上游迁移。生产 `upstreams` 示例优先使用 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_*`，避免同时填充 legacy 单 `upstream`；更复杂的多渠道生产配置请在 Monitor Web 中管理。
+生产建议通过环境变量注入的值保持最小：`LLM_TRACELAB_DATABASE_DSN`、`POSTGRES_PASSWORD`、`LLM_TRACELAB_HOST_SERVER_PORT`、`LLM_TRACELAB_HOST_MONITOR_PORT`，以及可选的 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`、`LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`、`LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`。其余服务行为默认保留在 `config/config.yaml`。兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 仍可用于老单上游迁移，但新部署应优先通过 Monitor Web 管理 providers。
 
 访问控制说明：
 
@@ -443,21 +392,24 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 
 ```bash
 cp .env.example .env
-export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
-docker compose up --build
+docker compose up -d
 docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
-然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
+然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Providers` 页面配置上游地址、API key 和模型；在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
 SDK 调用 proxy 时把这个 token 作为 SDK API key；直接 curl 时使用 `Authorization: Bearer <token>`。
 
 可选 SearXNG hosted `web_search`：
 
 ```bash
 export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
-docker compose --profile search up --build
+docker compose --profile search up -d
+```
+
+本地开发需要从源码构建镜像时使用 dev override：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 如果只想直接使用已经发布到 Docker Hub 的镜像，需要同时提供外部 Postgres：

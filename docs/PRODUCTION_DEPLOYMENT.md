@@ -23,46 +23,35 @@ it does not replace raw cassette replay.
 
 ## Required Environment
 
-For the checked-in `docker-compose.yml`, the local defaults are usable for an
-evaluation stack:
+For the checked-in `docker-compose.yml`, the local defaults start Postgres,
+the gateway, Monitor, MCP, and the recorder without requiring any upstream
+provider:
 
 ```bash
-export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
-docker compose up --build
+cp .env.example .env
+docker compose up -d
 ```
 
-For a real deployment, override at least:
+For a real deployment, override at least the database password/DSN:
 
 ```bash
 cp .env.example .env
 export POSTGRES_PASSWORD='<strong-password>'
 export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:<strong-password>@postgres:5432/llm_tracelab?sslmode=disable'
-export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL='<served-model>'
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL='https://your-openai-compatible-upstream/v1'
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY='<provider-or-vllm-token>'
 ```
 
-The default config enables `responses_server.enabled=true` and uses an
-OpenAI-compatible Chat Completions backend. vLLM is the default preset in
-Compose, but any compatible upstream can be used by changing
-`LLM_TRACELAB_BOOTSTRAP_UPSTREAM_*` values and, when needed, the routing
-profile in a mounted config file. The legacy `LLM_TRACELAB_UPSTREAM_*`
-variables are still supported for single-upstream migration, but production
-`upstreams` examples avoid them because they also populate the legacy single
-`upstream` compatibility block.
+Optionally set `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL` and
+`LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY` to import one initial
+OpenAI-compatible provider. Leaving both empty is valid: configure providers,
+credentials, and models in Monitor Web after login. The legacy
+`LLM_TRACELAB_UPSTREAM_*` variables remain supported for single-upstream
+migration, but new deployments should use the Web-managed provider database.
 
 ## Migrations And First User
 
-The Compose app command runs:
-
-```bash
-/app/bin/llm-tracelab -c /app/config/config.yaml db migrate up
-/app/bin/llm-tracelab -c /app/config/config.yaml serve
-```
-
-Manual equivalent:
+The app starts with `serve`; with `database.auto_migrate: true`, startup applies
+the checked-in application Postgres migrations before opening the store. Manual
+equivalent:
 
 ```bash
 docker compose run --rm llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml db migrate up
@@ -80,7 +69,7 @@ Start with SearXNG enabled:
 
 ```bash
 export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
-docker compose --profile search up --build
+docker compose --profile search up -d
 ```
 
 The application reads `tools.web_search.provider=searxng` and

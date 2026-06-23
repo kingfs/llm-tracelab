@@ -240,6 +240,32 @@ func TestBootstrapUpstreamEnvOverridesOnlyFirstConfiguredUpstream(t *testing.T) 
 	}
 }
 
+func TestBootstrapUpstreamEnvCreatesSingleDefaultUpstream(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL", "http://host.docker.internal:8000/v1")
+	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
+
+	cfg := Config{}
+	applyEnvOverrides(&cfg)
+
+	targets := cfg.EffectiveUpstreams()
+	if len(targets) != 1 {
+		t.Fatalf("len(EffectiveUpstreams()) = %d, want 1", len(targets))
+	}
+	target := targets[0]
+	if target.Upstream.BaseURL != "http://host.docker.internal:8000/v1" {
+		t.Fatalf("bootstrap base_url = %q", target.Upstream.BaseURL)
+	}
+	if target.Upstream.ApiKey != "bootstrap-placeholder-key" {
+		t.Fatalf("bootstrap api_key = %q", target.Upstream.ApiKey)
+	}
+	if target.Upstream.ProviderPreset != "openai" || target.Upstream.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("bootstrap upstream preset/family = %q/%q", target.Upstream.ProviderPreset, target.Upstream.ProtocolFamily)
+	}
+	if target.Upstream.Capabilities.ChatCompletions == nil || !*target.Upstream.Capabilities.ChatCompletions {
+		t.Fatalf("bootstrap chat_completions capability = %#v", target.Upstream.Capabilities.ChatCompletions)
+	}
+}
+
 func TestLoadExpandsEnvReferences(t *testing.T) {
 	t.Setenv("OPENAI_TEST_KEY", "test-placeholder-key")
 	path := writeTempConfig(t, `

@@ -401,12 +401,14 @@ func applyEnvOverrides(cfg *Config) {
 		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"); v != "" {
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+		ensureBootstrapUpstream(cfg)
+		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
 			upstream.BaseURL = v
 		})
 	}
 	if v := os.Getenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"); v != "" {
-		applyFirstUpstreamOverride(cfg, func(upstream *UpstreamConfig) {
+		ensureBootstrapUpstream(cfg)
+		applyFirstUpstreamOverrideOrSingle(cfg, func(upstream *UpstreamConfig) {
 			upstream.ApiKey = v
 		})
 	}
@@ -521,6 +523,40 @@ func applyFirstUpstreamOverride(cfg *Config, apply func(*UpstreamConfig)) {
 	apply(&cfg.Upstreams[0].Upstream)
 }
 
+func applyFirstUpstreamOverrideOrSingle(cfg *Config, apply func(*UpstreamConfig)) {
+	if len(cfg.Upstreams) > 0 {
+		apply(&cfg.Upstreams[0].Upstream)
+		return
+	}
+	apply(&cfg.Upstream)
+}
+
+func ensureBootstrapUpstream(cfg *Config) {
+	if cfg == nil || len(cfg.Upstreams) > 0 || strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
+		return
+	}
+	chatCompletions := true
+	responses := false
+	toolCalling := true
+	models := true
+	tokenize := false
+	cfg.Upstream = UpstreamConfig{
+		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+		Mode:           "proxy",
+		Capabilities: UpstreamCapabilitiesConfig{
+			ChatCompletions: &chatCompletions,
+			Responses:       &responses,
+			ToolCalling:     &toolCalling,
+			Models:          &models,
+			Tokenize:        &tokenize,
+		},
+		ProtocolFamily: "openai_compatible",
+		RoutingProfile: "openai",
+		Headers:        map[string]string{},
+	}
+}
+
 func expandEnvRefs(target any) error {
 	return expandEnvValue(reflect.ValueOf(target), "")
 }
@@ -607,6 +643,9 @@ func expandEnvString(raw string, path string) (string, error) {
 func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {
 	if len(c.Upstreams) > 0 {
 		return append([]UpstreamTargetConfig(nil), c.Upstreams...)
+	}
+	if strings.TrimSpace(c.Upstream.BaseURL) == "" {
+		return nil
 	}
 
 	enabled := true

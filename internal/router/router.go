@@ -350,9 +350,6 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
 		return nil, fmt.Errorf("config cannot define both upstream and upstreams")
 	}
-	if len(targetCfgs) == 0 {
-		return nil, fmt.Errorf("no upstream targets configured")
-	}
 
 	r := &Router{
 		modelToTargets:   make(map[string][]*Target),
@@ -381,6 +378,9 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 	if r.failureThreshold <= 0 {
 		r.failureThreshold = 3
 	}
+	if len(targetCfgs) == 0 {
+		return r, nil
+	}
 
 	targets, err := buildTargets(targetCfgs)
 	if err != nil {
@@ -391,6 +391,9 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 }
 
 func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
+	if len(targetCfgs) == 0 {
+		return nil, nil
+	}
 	seenIDs := map[string]struct{}{}
 	targets := make([]*Target, 0, len(targetCfgs))
 	for idx, targetCfg := range targetCfgs {
@@ -483,6 +486,12 @@ func sortTargets(targets []*Target) {
 }
 
 func (r *Router) Initialize() error {
+	if r == nil {
+		return nil
+	}
+	if len(r.Targets()) == 0 {
+		return nil
+	}
 	usable, err := r.refreshAll()
 	if err != nil {
 		return err
@@ -499,9 +508,6 @@ func (r *Router) Initialize() error {
 func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 	if r == nil {
 		return fmt.Errorf("router is nil")
-	}
-	if len(targetCfgs) == 0 {
-		return fmt.Errorf("no upstream targets configured")
 	}
 	nextTargets, err := buildTargets(targetCfgs)
 	if err != nil {
@@ -520,8 +526,10 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 		}
 	}
 
-	if _, err := r.refreshTargets(nextTargets); err != nil {
-		return err
+	if len(nextTargets) > 0 {
+		if _, err := r.refreshTargets(nextTargets); err != nil {
+			return err
+		}
 	}
 
 	r.mu.Lock()
@@ -554,12 +562,16 @@ func (r *Router) HasLocalResponsesServerBackend() bool {
 
 func ValidateLocalResponsesServerBackendConfig(cfg *config.Config) error {
 	if cfg == nil {
-		return LocalResponsesServerBackendRequired()
+		return nil
 	}
 	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
 		return fmt.Errorf("config cannot define both upstream and upstreams")
 	}
-	for idx, targetCfg := range cfg.EffectiveUpstreams() {
+	targets := cfg.EffectiveUpstreams()
+	if len(targets) == 0 {
+		return nil
+	}
+	for idx, targetCfg := range targets {
 		enabled := true
 		if targetCfg.Enabled != nil {
 			enabled = *targetCfg.Enabled

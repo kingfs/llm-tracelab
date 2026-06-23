@@ -82,9 +82,9 @@ data/traces/
 
 ### 1. Configure Startup Settings
 
-Starting with v1, YAML should be limited to service startup settings: ports, database, trace output directory, auth, MCP, router policy, Responses server, and first-run bootstrap upstreams. Model channels and model enablement should be managed in the Monitor Web UI and persisted to the application database.
+Starting with v1, YAML should be limited to service startup settings: ports, database, trace output directory, auth, MCP, router policy, Responses server, and tool switches. Model channels, provider base URLs, API keys, model enablement, and model profiles should be managed in the Monitor Web UI and persisted to the application database.
 
-[config/config.yaml](./config/config.yaml) is the tracked default Postgres-first example and should not contain real secrets. It includes local Postgres / vLLM placeholder values so `config inspect` and `doctor` can run offline. Production deployments must override the Postgres DSN, OpenAI-compatible/vLLM upstream, and default model through environment variables. Local SQLite development can use [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml).
+[config/config.yaml](./config/config.yaml) is the tracked default Postgres-first startup config. It contains no real secrets and no built-in provider. With no upstream configured, the service still starts and Monitor Web can be used to configure providers later. Production deployments should inject only deployment-local values through environment variables: Postgres DSN/password, exposed ports, and an optional single bootstrap upstream base URL/API key. Local SQLite development can use [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml).
 
 The recommended base config shape is:
 
@@ -101,7 +101,7 @@ mcp:
 
 database:
   driver: "postgres"
-  dsn: "$env:LLM_TRACELAB_DATABASE_DSN"
+  dsn: ""
   max_open_conns: 16
   max_idle_conns: 8
   auto_migrate: true
@@ -114,7 +114,7 @@ trace:
 
 responses_server:
   enabled: true
-  default_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+  default_model: ""
   force_store: true
   path: "/v1/responses"
   auto_compact: true
@@ -137,21 +137,7 @@ debug:
   mask_key: true
 ```
 
-Legacy `upstream` / `upstreams` YAML is still supported, but it should be treated as a first-run bootstrap or migration input. Once channel configuration exists in the application database, runtime routing uses the database and does not continuously sync YAML upstreams. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
-
-Compatible bootstrap example:
-
-```yaml
-upstream:
-  base_url: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"
-  api_key: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"
-  provider_preset: "vllm"
-  api_type: "chat_completions"
-  capabilities:
-    chat_completions: true
-    responses: false
-    tool_calling: true
-```
+Legacy `upstream` / `upstreams` YAML is still supported, but it is no longer the long-term production configuration entry point. On first startup, setting `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL` imports one OpenAI-compatible bootstrap provider; leaving it empty starts only the Web and management surface. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
 
 For an example with two explicit credentials under one upstream, plus sticky route target, credential-safe metadata, and limit scope guidance, see [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md). The examples use `$env:...` placeholders only; do not commit real provider secrets in YAML.
 
@@ -165,44 +151,7 @@ If you prefer starting from a ready-made bootstrap config, use one of these exam
 - [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
 - [config/examples/vertex.yaml](./config/examples/vertex.yaml)
 
-Supported environment variable overrides:
-
-- `LLM_TRACELAB_SERVER_PORT`
-- `LLM_TRACELAB_MONITOR_PORT`
-- `LLM_TRACELAB_HOST_SERVER_PORT`
-- `LLM_TRACELAB_HOST_MONITOR_PORT`
-- `LLM_TRACELAB_DATABASE_DRIVER`
-- `LLM_TRACELAB_DATABASE_DSN`
-- `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
-- `LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS`
-- `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`
-- `LLM_TRACELAB_TRACE_OUTPUT_DIR`
-- `LLM_TRACELAB_AUTH_SESSION_TTL`
-- `LLM_TRACELAB_MCP_ENABLED`
-- `LLM_TRACELAB_MCP_PATH`
-- `LLM_TRACELAB_RESPONSES_ENABLED`
-- `LLM_TRACELAB_RESPONSES_DEFAULT_MODEL`
-- `LLM_TRACELAB_RESPONSES_FORCE_STORE`
-- `LLM_TRACELAB_RESPONSES_PATH`
-- `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`
-- `LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER`
-- `LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL`
-- `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`
-- `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`
-- `LLM_TRACELAB_UPSTREAM_BASE_URL`
-- `LLM_TRACELAB_UPSTREAM_API_KEY`
-- `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
-- `LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY`
-- `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
-- `LLM_TRACELAB_UPSTREAM_API_VERSION`
-- `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
-- `LLM_TRACELAB_UPSTREAM_PROJECT`
-- `LLM_TRACELAB_UPSTREAM_LOCATION`
-- `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
-- `LLM_TRACELAB_OUTPUT_DIR`
-- `LLM_TRACELAB_MASK_KEY`
-
-The legacy `LLM_TRACELAB_UPSTREAM_*` variables still override both the legacy single `upstream` and the first bootstrap upstream target. This is useful for migrating a single default upstream. Production `upstreams` examples prefer `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_*` so they do not populate the legacy single `upstream`; for more complex multi-channel deployments, manage channels in Monitor Web.
+Production environment injection should stay small: `LLM_TRACELAB_DATABASE_DSN`, `POSTGRES_PASSWORD`, `LLM_TRACELAB_HOST_SERVER_PORT`, `LLM_TRACELAB_HOST_MONITOR_PORT`, and optional `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`, `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`, `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`. Keep other service behavior in `config/config.yaml`. The legacy `LLM_TRACELAB_UPSTREAM_*` variables remain available for old single-upstream migrations, but new deployments should manage providers in Monitor Web.
 
 Access control notes:
 
@@ -418,21 +367,24 @@ Start it with:
 
 ```bash
 cp .env.example .env
-export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1
-export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
-docker compose up --build
+docker compose up -d
 docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
-Then visit `http://localhost:8081`, sign in, and create a personal token from the `Tokens` page for SDK / MCP traffic.
+Then visit `http://localhost:8081`, sign in, configure upstream base URLs, API keys, and models from the `Providers` page, and create a personal token from the `Tokens` page for SDK / MCP traffic.
 When SDKs call the proxy, use this token as the SDK API key. For direct curl calls, send `Authorization: Bearer <token>`.
 
 Optional SearXNG hosted `web_search`:
 
 ```bash
 export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
-docker compose --profile search up --build
+docker compose --profile search up -d
+```
+
+For local source builds, use the dev override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
 If you only want to use the published Docker Hub image, provide an external Postgres database:

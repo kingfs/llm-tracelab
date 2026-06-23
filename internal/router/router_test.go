@@ -64,6 +64,32 @@ func TestRouterSelectUsesModelCatalog(t *testing.T) {
 	}
 }
 
+func TestRouterAllowsEmptyStartupConfig(t *testing.T) {
+	rtr, err := New(&config.Config{}, nil)
+	if err != nil {
+		t.Fatalf("New(empty) error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize(empty) error = %v", err)
+	}
+	if got := rtr.Targets(); len(got) != 0 {
+		t.Fatalf("len(Targets()) = %d, want 0", len(got))
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"gpt-5"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	_, err = rtr.Select(req)
+	if err == nil {
+		t.Fatal("Select(empty) error = nil, want no supporting target")
+	}
+	if SelectionFailureReason(err) != SelectionFailureNoSupportingTarget {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureNoSupportingTarget)
+	}
+}
+
 func TestRouterReloadReplacesCatalogAndPreservesOldOnFailure(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{

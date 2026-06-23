@@ -389,7 +389,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	var localResponses http.Handler
 	responsesPath := cfg.ResponsesServerPath()
 	if cfg.ResponsesServerEnabled() {
-		if !rtr.HasLocalResponsesServerBackend() {
+		if rtr != nil && len(rtr.Targets()) > 0 && !rtr.HasLocalResponsesServerBackend() {
 			return nil, router.LocalResponsesServerBackendRequired()
 		}
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
@@ -461,7 +461,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		rt := responsesruntime.New(runtimeConfig, &responsesChatCompletionsAdapter{
 			router:        rtr,
 			recorder:      rec,
-			routingPolicy: rtr.Policy(),
+			routingPolicy: routerPolicy(rtr),
 			auditor:       upstreamExchangeRecorder,
 			events:        executionEventRecorder,
 		}, responseStore, runtimeOptions...)
@@ -598,6 +598,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
 		h.serveAggregatedModelList(w, r, start)
+		return
+	}
+	if h.router == nil || len(h.router.Targets()) == 0 {
+		selectErr := &router.SelectionError{
+			Reason:  router.SelectionFailureNoSupportingTarget,
+			Message: "no upstream targets are configured; add a provider in Monitor",
+		}
+		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, nil, nil)
+		http.Error(w, selectErr.Error(), http.StatusBadGateway)
 		return
 	}
 
@@ -1513,12 +1522,10 @@ func isTransientRetryStatus(code int) bool {
 }
 
 func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
-	if h == nil || h.router == nil {
-		http.Error(w, "router unavailable", http.StatusBadGateway)
-		return
+	var models []string
+	if h != nil && h.router != nil {
+		models = h.router.AggregatedModels()
 	}
-
-	models := h.router.AggregatedModels()
 	payload := aggregatedModelListResponse{
 		Object: "list",
 		Data:   make([]aggregatedModelListEntry, 0, len(models)),
@@ -1589,10 +1596,17 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) routerPolicy() string {
-	if h == nil || h.router == nil {
+	if h == nil {
 		return ""
 	}
-	return h.router.Policy()
+	return routerPolicy(h.router)
+}
+
+func routerPolicy(rtr *router.Router) string {
+	if rtr == nil {
+		return ""
+	}
+	return rtr.Policy()
 }
 
 func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent) {
