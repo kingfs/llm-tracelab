@@ -3050,7 +3050,7 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
 	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
 		ID:                "openai-primary",
 		BaseURL:           "https://api.openai.com/v1",
@@ -3138,7 +3138,7 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
 	writeLog("match-a.http", now.Add(-20*time.Minute), "gpt-5", "no_supporting_target")
 	writeLog("match-b.http", now.Add(-10*time.Minute), "gpt-5", "all_targets_open")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "gemini-2.5-flash", "no_supporting_target")
@@ -3333,7 +3333,7 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
 	writeLog("match-a.http", now.Add(-20*time.Minute), "/v1/responses", "gpt-5", 200, "")
 	writeLog("match-b.http", now.Add(-10*time.Minute), "/v1/chat/completions", "gpt-5", 503, "upstream overloaded")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, "")
