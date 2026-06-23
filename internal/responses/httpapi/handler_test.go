@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -426,6 +427,57 @@ func TestCreateResponseStreamFallbackRecordsUnsupportedIncrementalEvent(t *testi
 		t.Fatalf("deferred completed event mismatch: %#v", auditor.events[3])
 	}
 	if auditor.events[4].EventType != "response.request" || auditor.events[4].Status != "completed" || auditor.events[4].ResponseID != "resp_deferred" {
+		t.Fatalf("request completed event mismatch: %#v", auditor.events[4])
+	}
+}
+
+func TestCreateResponseStreamFallbackPreservesWrappedUnsupportedReason(t *testing.T) {
+	wrappedErr := fmt.Errorf("%w: auto compact tool combination requires deferred stream", runtime.ErrIncrementalStreamUnsupported)
+	rt := &fakeIncrementalRuntime{
+		fakeRuntime: fakeRuntime{
+			createResp: protocol.Response{
+				ID:        "resp_deferred_wrapped",
+				Object:    "response",
+				Status:    "completed",
+				Model:     "gpt-test",
+				CreatedAt: 123,
+				Output: []protocol.OutputItem{{
+					ID:      "msg_1",
+					Type:    "message",
+					Status:  "completed",
+					Role:    "assistant",
+					Content: []protocol.ContentPart{{Type: "output_text", Text: "deferred wrapped"}},
+				}},
+			},
+		},
+		streamErr: wrappedErr,
+	}
+	auditor := &fakeAuditor{}
+	rec := httptest.NewRecorder()
+	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello","stream":true,"tools":[{"type":"web_search"}]}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !rt.streamReq.Stream || rt.createReq.Input != "hello" || !rt.createReq.Stream {
+		t.Fatalf("runtime fallback requests mismatch: stream=%#v create=%#v", rt.streamReq, rt.createReq)
+	}
+	if auditor.rejectedID != "" || auditor.completedID != "audit_1" {
+		t.Fatalf("stream fallback audit mismatch: completed=%q rejected=%q/%#v", auditor.completedID, auditor.rejectedID, auditor.rejected)
+	}
+	if len(auditor.events) != 5 {
+		t.Fatalf("execution events = %d, want accepted/fallback/stream started/stream completed/request completed: %#v", len(auditor.events), auditor.events)
+	}
+	fallback := auditor.events[1]
+	if fallback.EventType != "response.stream" || fallback.Status != "fallback" {
+		t.Fatalf("fallback event mismatch: %#v", fallback)
+	}
+	reason, _ := fallback.DetailsJSON["reason"].(string)
+	if !strings.Contains(reason, runtime.ErrIncrementalStreamUnsupported.Error()) || !strings.Contains(reason, "auto compact tool combination requires deferred stream") {
+		t.Fatalf("fallback reason = %q, want wrapped unsupported stream reason", reason)
+	}
+	if auditor.events[4].EventType != "response.request" || auditor.events[4].Status != "completed" || auditor.events[4].ResponseID != "resp_deferred_wrapped" {
 		t.Fatalf("request completed event mismatch: %#v", auditor.events[4])
 	}
 }
