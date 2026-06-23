@@ -107,8 +107,8 @@
 
 ### Request audit 诊断深度
 
-- 已有：`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切，Monitor `/api/responses/audit/tool-calls` 和 MCP `responses_audit_tool_calls` 已提供独立 tool-call audit read model 查询。当前还可通过 `--include-tools` 从既有 `execution_events.event_type == "response.tool_call"` 派生保守的 tool call diagnostics，汇总 call id、工具名、executor、状态序列、latest status、started/completed 时间、error/output/query/arguments 的脱敏摘要和事件计数。
-- 缺口：缺少 thread/session/turn 范围查询、compact candidate summary、pending function call diagnostics、stream/cancel/request feature 顶层诊断；`audit query --include-tools` 仍是 derived event 视图，未来真实 MCP/file/code/computer-use runtime lifecycle 还没有统一写入 `tool_call_audits` read model。
+- 已有：`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切，并已在 JSON/text trace 输出中提供顶层 `diagnostics`，汇总 event/upstream/tool-call count、latest status、cancel/failed/stream/compact signals、pending tool call count/list 和保守 compact candidate/summary。`audit query --list` 可按 conversation/client-request 等现有 selector 返回 request audit summary 列表，字段限于 id、response_id、conversation_id、client_request_id、status、created_at。Monitor `/api/responses/audit/tool-calls` 和 MCP `responses_audit_tool_calls` 已提供独立 tool-call audit read model 查询。当前还可通过 `--include-tools` 从既有 `execution_events.event_type == "response.tool_call"` 派生保守的 tool call diagnostics，汇总 call id、工具名、executor、状态序列、latest status、started/completed 时间、error/output/query/arguments 的脱敏摘要和事件计数。
+- 缺口：仍缺少真实 thread/session/turn schema 字段和对应范围查询；`audit query` 的 compact/pending/stream/cancel diagnostics 是基于已取到 request audit、events、exchanges 和 derived tool calls 的保守派生，不输出 raw sensitive payload。`audit query --include-tools` 仍是 derived event 视图，未来真实 MCP/file/code/computer-use runtime lifecycle 还没有统一写入 `tool_call_audits` read model。
 - llm-tracelab 下一步落点：扩展 `cmd/server/audit.go`，复用并扩展 `internal/responses/audit.QueryService`。
 
 ### Compact 与 context optimization
@@ -159,10 +159,10 @@
 ### `audit query` CLI
 
 - 已吸收首切：`llm-tracelab audit query`（别名 `audit responses`）提供面向 agent 的只读 Responses audit trace 查询入口，复用当前 config 的 application store 和 `internal/responses/audit.QueryService`。
-- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --include-tools --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时返回最新一条 trace；默认只输出 request audit envelope，events/exchanges/tool calls 需显式打开。
-- 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body；当前 `tool_calls` 仍是 derived conservative view，不输出 raw arguments/query/output/error，只输出 redacted summary 和事件引用。`--include-events` 仍按原行为输出 events 的 `details_json`，需要调用者自行按权限使用。
+- 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --include-tools --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时默认返回最新一条 trace；默认输出 request audit envelope 和顶层 diagnostics，events/exchanges/tool calls 需显式打开。`--list` 会返回 matching request audit summary 列表而不是最新 trace，适合 conversation/client-request 范围排查。
+- 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body；`--list` summary 不含 body/header raw；当前 `tool_calls` 和 diagnostics 仍是 derived conservative view，不输出 raw arguments/query/output/error，只输出 redacted summary、事件引用或计数/状态。`--include-events` 仍按原行为输出 events 的 `details_json`，需要调用者自行按权限使用。
 - responses-gateway 能力：按 response/request/thread/session/turn/client request id 查询，并输出 diagnostics envelope。
-- 剩余缺口：尚未支持 thread/session/turn 范围查询、compact candidate 和 Codex-specific diagnostics；`audit tool-calls`、Monitor API 和 MCP tool 已提供独立 `tool_call_audits` 查询。
+- 剩余缺口：尚未支持真实 thread/session/turn 字段和范围查询；compact candidate、pending tool call、stream/cancel/request diagnostics 已有保守顶层派生，但尚不是完整 Codex-specific diagnostics；`audit tool-calls`、Monitor API 和 MCP tool 已提供独立 `tool_call_audits` 查询。
 
 ### Codex profile 生成命令
 

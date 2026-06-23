@@ -1760,6 +1760,12 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 				ID      string `json:"id"`
 				TraceID string `json:"trace_id"`
 			} `json:"upstream_exchanges"`
+			Diagnostics struct {
+				EventCount            int    `json:"event_count"`
+				UpstreamExchangeCount int    `json:"upstream_exchange_count"`
+				LatestStatus          string `json:"latest_status"`
+				HasFailed             bool   `json:"has_failed"`
+			} `json:"diagnostics"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
@@ -1786,6 +1792,9 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 	if len(envelope.Result.UpstreamExchanges) != 1 || envelope.Result.UpstreamExchanges[0].TraceID != "trace_cli" {
 		t.Fatalf("upstream exchanges = %+v, want trace_cli", envelope.Result.UpstreamExchanges)
 	}
+	if envelope.Result.Diagnostics.EventCount != 1 || envelope.Result.Diagnostics.UpstreamExchangeCount != 1 || envelope.Result.Diagnostics.LatestStatus != "completed" || envelope.Result.Diagnostics.HasFailed {
+		t.Fatalf("diagnostics = %+v, want limited counts and completed non-failed status", envelope.Result.Diagnostics)
+	}
 	if strings.Contains(out.String(), "raw_request_body") {
 		t.Fatalf("audit query output contains raw request body field: %s", out.String())
 	}
@@ -1794,6 +1803,114 @@ func TestAuditQueryCommandReturnsResponsesAuditTraceJSON(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "old-secret") {
 		t.Fatalf("audit query output fell back to older matching secret: %s", out.String())
+	}
+}
+
+func TestAuditQueryCommandListsRequestAuditSummariesJSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := writeResponsesAuditCLIConfig(t, dir)
+	st, err := store.NewWithDatabase(dir, "sqlite", filepath.Join(dir, "trace_index.sqlite3"), 1, 1)
+	if err != nil {
+		t.Fatalf("store.NewWithDatabase() error = %v", err)
+	}
+	base := time.Date(2026, 6, 22, 12, 30, 0, 0, time.UTC)
+	const secretMarker = "SECRET_AUDIT_LIST_MARKER"
+	for _, seed := range []struct {
+		id        string
+		resp      string
+		conv      string
+		clientReq string
+		status    string
+		body      string
+		createdAt time.Time
+	}{
+		{id: "reqaudit_list_old", resp: "resp_list_old", conv: "conv_list", clientReq: "client_list", status: "completed", body: `{"secret":"` + secretMarker + `-old"}`, createdAt: base},
+		{id: "reqaudit_list_new", resp: "resp_list_new", conv: "conv_list", clientReq: "client_list", status: "failed", body: `{"secret":"` + secretMarker + `-new"}`, createdAt: base.Add(time.Minute)},
+		{id: "reqaudit_list_other", resp: "resp_list_other", conv: "conv_other", clientReq: "client_list", status: "completed", body: `{"secret":"` + secretMarker + `-other"}`, createdAt: base.Add(2 * time.Minute)},
+	} {
+		if err := st.EntClient().RequestAudit.Create().
+			SetID(seed.id).
+			SetResponseID(seed.resp).
+			SetConversationID(seed.conv).
+			SetMethod("POST").
+			SetPath("/v1/responses").
+			SetClientRequestID(seed.clientReq).
+			SetHeaderJSON(map[string]any{"authorization": "Bearer " + secretMarker, "content-type": "application/json"}).
+			SetBodyPreview(seed.body).
+			SetBodySha256("sha-list").
+			SetStatus(seed.status).
+			SetCreatedAt(seed.createdAt).
+			Exec(context.Background()); err != nil {
+			t.Fatalf("create request audit %s: %v", seed.id, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("store.Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{
+		"-c", configPath,
+		"--format", "json",
+		"audit", "query",
+		"--conversation-id", "conv_list",
+		"--client-request-id", "client_list",
+		"--list",
+		"--limit", "10",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			Query struct {
+				ConversationID  string `json:"conversation_id"`
+				ClientRequestID string `json:"client_request_id"`
+				List            bool   `json:"list"`
+			} `json:"query"`
+			Found         bool `json:"found"`
+			Count         int  `json:"count"`
+			RequestAudits []struct {
+				ID              string         `json:"id"`
+				ResponseID      string         `json:"response_id"`
+				ConversationID  string         `json:"conversation_id"`
+				ClientRequestID string         `json:"client_request_id"`
+				Status          string         `json:"status"`
+				BodyPreview     string         `json:"body_preview"`
+				HeaderJSON      map[string]any `json:"header_json"`
+			} `json:"request_audits"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; output=%s", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "audit.query" || !envelope.Result.Query.List || !envelope.Result.Found {
+		t.Fatalf("envelope = %+v, want ok audit.query list found", envelope)
+	}
+	if envelope.Result.Query.ConversationID != "conv_list" || envelope.Result.Query.ClientRequestID != "client_list" {
+		t.Fatalf("query = %+v, want conv/client selectors", envelope.Result.Query)
+	}
+	if envelope.Result.Count != 2 || len(envelope.Result.RequestAudits) != 2 {
+		t.Fatalf("request_audits = %+v count=%d, want two", envelope.Result.RequestAudits, envelope.Result.Count)
+	}
+	if envelope.Result.RequestAudits[0].ID != "reqaudit_list_new" || envelope.Result.RequestAudits[0].ResponseID != "resp_list_new" || envelope.Result.RequestAudits[0].Status != "failed" {
+		t.Fatalf("first request audit = %+v, want latest failed summary", envelope.Result.RequestAudits[0])
+	}
+	if envelope.Result.RequestAudits[1].ID != "reqaudit_list_old" || envelope.Result.RequestAudits[1].ResponseID != "resp_list_old" {
+		t.Fatalf("second request audit = %+v, want older summary", envelope.Result.RequestAudits[1])
+	}
+	if envelope.Result.RequestAudits[0].BodyPreview != "" || envelope.Result.RequestAudits[0].HeaderJSON != nil {
+		t.Fatalf("summary leaked body/header fields: %+v", envelope.Result.RequestAudits[0])
+	}
+	if strings.Contains(out.String(), secretMarker) || strings.Contains(out.String(), "body_preview") || strings.Contains(out.String(), "header_json") {
+		t.Fatalf("audit query list leaked sensitive fields: %s", out.String())
 	}
 }
 

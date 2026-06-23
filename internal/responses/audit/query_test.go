@@ -317,6 +317,131 @@ func TestQueryServiceDerivesToolCallDiagnostics(t *testing.T) {
 	}
 }
 
+func TestQueryServiceDerivesRequestAuditDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 22, 14, 0, 0, 0, time.UTC)
+	const secretMarker = "SECRET_DIAGNOSTIC_MARKER"
+
+	mustCreateRequestAudit(t, client, requestAuditSeed{
+		id:             "audit_diag",
+		responseID:     "resp_diag",
+		conversationID: "conv_diag",
+		method:         "POST",
+		path:           "/v1/responses",
+		status:         "cancelled",
+		createdAt:      base,
+	})
+	for _, seed := range []executionEventSeed{
+		{
+			id:             "diag_stream_started",
+			requestAuditID: "audit_diag",
+			responseID:     "resp_diag",
+			conversationID: "conv_diag",
+			eventType:      "response.stream",
+			phase:          "stream",
+			status:         "started",
+			detailsJSON:    map[string]any{"stream": true},
+			occurredAt:     base.Add(time.Second),
+		},
+		{
+			id:             "diag_tool_requested",
+			requestAuditID: "audit_diag",
+			responseID:     "resp_diag",
+			conversationID: "conv_diag",
+			eventType:      "response.tool_call",
+			phase:          "tool_call",
+			status:         "requested",
+			detailsJSON: map[string]any{
+				"call_id":   "call_pending",
+				"tool_name": "lookup",
+				"executor":  "client",
+				"arguments": `{"token":"` + secretMarker + `"}`,
+			},
+			occurredAt: base.Add(2 * time.Second),
+		},
+		{
+			id:             "diag_tool_submitted",
+			requestAuditID: "audit_diag",
+			responseID:     "resp_diag",
+			conversationID: "conv_diag",
+			eventType:      "response.tool_call",
+			phase:          "tool_call",
+			status:         "submitted",
+			detailsJSON: map[string]any{
+				"call_id":   "call_done",
+				"tool_name": "lookup",
+				"executor":  "client",
+			},
+			occurredAt: base.Add(3 * time.Second),
+		},
+		{
+			id:             "diag_compact",
+			requestAuditID: "audit_diag",
+			responseID:     "resp_diag",
+			conversationID: "conv_diag",
+			eventType:      "response.compact",
+			phase:          "compact",
+			status:         "completed",
+			detailsJSON:    map[string]any{"auto_triggered": true, "summary": secretMarker},
+			occurredAt:     base.Add(4 * time.Second),
+		},
+		{
+			id:             "diag_model_failed",
+			requestAuditID: "audit_diag",
+			responseID:     "resp_diag",
+			conversationID: "conv_diag",
+			eventType:      "model_call",
+			phase:          "upstream",
+			status:         "failed",
+			message:        "failed with " + secretMarker,
+			occurredAt:     base.Add(5 * time.Second),
+		},
+	} {
+		mustCreateExecutionEvent(t, client, seed)
+	}
+	mustCreateUpstreamExchange(t, client, upstreamExchangeSeed{
+		id:             "diag_upex",
+		requestAuditID: "audit_diag",
+		responseID:     "resp_diag",
+		statusCode:     499,
+		startedAt:      base.Add(time.Second),
+		completedAt:    base.Add(2 * time.Second),
+	})
+
+	trace, found, err := NewQueryService(client).GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		RequestAuditID:        "audit_diag",
+		EventLimit:            10,
+		UpstreamExchangeLimit: 10,
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace() error = %v", err)
+	}
+	if !found {
+		t.Fatal("GetRequestAuditTrace() found = false, want true")
+	}
+	diagnostics := trace.Diagnostics
+	if diagnostics.EventCount != 5 || diagnostics.UpstreamExchangeCount != 1 || diagnostics.ToolCallCount != 2 {
+		t.Fatalf("diagnostic counts = %+v, want events=5 upstream=1 tools=2", diagnostics)
+	}
+	if diagnostics.LatestStatus != "cancelled" || !diagnostics.HasCancelled || !diagnostics.HasFailed || !diagnostics.HasStreamEvents || !diagnostics.HasCompactEvents {
+		t.Fatalf("diagnostic status flags = %+v, want cancelled/failed/stream/compact", diagnostics)
+	}
+	if diagnostics.PendingToolCallCount != 1 || len(diagnostics.PendingToolCalls) != 1 || diagnostics.PendingToolCalls[0].CallID != "call_pending" {
+		t.Fatalf("pending tool calls = %+v, want call_pending only", diagnostics.PendingToolCalls)
+	}
+	if !diagnostics.CompactCandidate || diagnostics.CompactSummary == nil || !diagnostics.CompactSummary.AutoTriggered || diagnostics.CompactSummary.LatestEventID != "diag_compact" {
+		t.Fatalf("compact diagnostics = candidate:%t summary:%+v, want auto-triggered diag_compact", diagnostics.CompactCandidate, diagnostics.CompactSummary)
+	}
+	payload, err := json.Marshal(diagnostics)
+	if err != nil {
+		t.Fatalf("json.Marshal(Diagnostics) error = %v", err)
+	}
+	if strings.Contains(string(payload), secretMarker) {
+		t.Fatalf("Diagnostics leaked secret marker: %s", payload)
+	}
+}
+
 func TestQueryServiceListRequestAuditsLimitAndEmptyResults(t *testing.T) {
 	ctx := context.Background()
 	client := openAuditTestClient(t)
