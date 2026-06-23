@@ -256,7 +256,7 @@ func TestCodexStreamTextEventFixtureContract(t *testing.T) {
 func TestCodexUnsupportedHostedToolExpectedErrorFixtureContract(t *testing.T) {
 	fx := decodeCodexFixture[codexfixtures.ExpectedErrorFixture](t, "unsupported_hosted_tool_expected_error.json")
 
-	wantTypes := []string{"mcp", "file_search", "code_interpreter"}
+	wantTypes := []string{"mcp", "file_search", "code_interpreter", "computer_use_preview"}
 	if len(fx.RequestExamples) != len(wantTypes) {
 		t.Fatalf("request_examples len = %d, want %d", len(fx.RequestExamples), len(wantTypes))
 	}
@@ -284,6 +284,9 @@ func TestCodexUnsupportedHostedToolExpectedErrorFixtureContract(t *testing.T) {
 	}
 	if _, ok := fx.RequestExamples[2].Tools[0].Extra["container"]; !ok {
 		t.Fatalf("code_interpreter container was not preserved in Extra: %#v", fx.RequestExamples[2].Tools[0].Extra)
+	}
+	if fx.RequestExamples[3].Tools[0].Extra["display_width"] == nil || fx.RequestExamples[3].Tools[0].Extra["display_height"] == nil {
+		t.Fatalf("computer_use_preview display fields were not preserved in Extra: %#v", fx.RequestExamples[3].Tools[0].Extra)
 	}
 	if !strings.Contains(fx.ExpectedError.Error.Message, "unsupported hosted tool") || fx.ExpectedError.Error.Type != "invalid_request_error" || fx.ExpectedError.Error.Code != "unsupported_tool" {
 		t.Fatalf("expected_error mismatch: %#v", fx.ExpectedError)
