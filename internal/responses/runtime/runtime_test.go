@@ -1033,6 +1033,181 @@ func TestRuntimeCreateStreamExecutesMultipleFunctionToolCallsInOrder(t *testing.
 	}
 }
 
+func TestRuntimeCreateStreamExecutesMixedFunctionAndHostedWebSearchInOrder(t *testing.T) {
+	client := &fakeChatClient{
+		streamEventBatches: [][]ChatStreamEvent{
+			{
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{
+					{
+						Index:          0,
+						ID:             "call_lookup",
+						FunctionName:   "lookup",
+						ArgumentsDelta: `{"q":"codex"}`,
+					},
+					{
+						Index:          1,
+						ID:             "call_search",
+						FunctionName:   "web_search",
+						ArgumentsDelta: `{"query":"llm tracelab"}`,
+					},
+				}},
+			},
+			{
+				{ChoiceIndex: 0, ContentDelta: "Mixed "},
+				{ChoiceIndex: 0, ContentDelta: "complete."},
+			},
+		},
+		streamResps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{
+							{
+								ID:   "call_lookup",
+								Type: "function",
+								Function: ChatToolCallFunction{
+									Name:      "lookup",
+									Arguments: `{"q":"codex"}`,
+								},
+							},
+							{
+								ID:   "call_search",
+								Type: "function",
+								Function: ChatToolCallFunction{
+									Name:      "web_search",
+									Arguments: `{"query":"llm tracelab"}`,
+								},
+							},
+						},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 11, CompletionTokens: 5, TotalTokens: 16},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "Mixed complete."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 13, CompletionTokens: 3, TotalTokens: 16},
+			},
+		},
+	}
+	provider := &fakeWebSearchProvider{
+		result: websearch.Result{Results: []websearch.SearchResult{{
+			Title:   "TraceLab",
+			URL:     "https://example.test/tracelab",
+			Snippet: "Responses gateway runtime.",
+		}}},
+	}
+	store := NewMemoryStore()
+	sink := &fakeResponseStreamSink{}
+	events := &fakeExecutionEventRecorder{}
+	rt := New(
+		Config{
+			DefaultModel:        "fallback-model",
+			WebSearchEnabled:    true,
+			WebSearchMaxResults: 3,
+		},
+		client,
+		store,
+		WithWebSearchProvider(provider),
+		WithExecutionEventRecorder(events),
+		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"found": true}}),
+	)
+
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:  "run mixed tools",
+		Stream: true,
+		Tools: []protocol.Tool{
+			{Type: "function", Name: "lookup", Parameters: map[string]any{"type": "object"}},
+			{Type: "web_search_preview"},
+		},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream() error = %v", err)
+	}
+	if len(client.streamReqs) != 2 {
+		t.Fatalf("stream requests = %d, want tool call + final call", len(client.streamReqs))
+	}
+	firstTools := client.streamReqs[0].Tools
+	if !hasChatTool(firstTools, "lookup") || !hasChatTool(firstTools, "web_search") {
+		t.Fatalf("first stream tools = %#v, want lookup and web_search", firstTools)
+	}
+	if len(provider.queries) != 1 || provider.queries[0].Text != "llm tracelab" || provider.queries[0].MaxResults != 3 {
+		t.Fatalf("provider queries = %#v, want llm tracelab max 3", provider.queries)
+	}
+	secondMessages := client.streamReqs[1].Messages
+	if len(secondMessages) != 4 {
+		t.Fatalf("second stream messages len = %d, want user assistant and two tool messages: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 2 || secondMessages[1].ToolCalls[0].ID != "call_lookup" || secondMessages[1].ToolCalls[1].ID != "call_search" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_lookup" || secondMessages[2].Content != `{"found":true}` {
+		t.Fatalf("lookup tool message mismatch: %#v", secondMessages[2])
+	}
+	searchContent, _ := secondMessages[3].Content.(string)
+	if secondMessages[3].Role != "tool" || secondMessages[3].ToolCallID != "call_search" || !strings.Contains(searchContent, "TraceLab") || !strings.Contains(searchContent, "llm tracelab") {
+		t.Fatalf("web_search tool message mismatch: %#v", secondMessages[3])
+	}
+	if len(sink.functionDone) != 2 || sink.functionDone[0].OutputIndex != 0 || sink.functionDone[0].CallID != "call_lookup" || sink.functionDone[1].OutputIndex != 1 || sink.functionDone[1].CallID != "call_search" {
+		t.Fatalf("function argument done = %#v, want lookup then web_search", sink.functionDone)
+	}
+	if len(sink.outputAdded) != 2 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.CallID != "call_lookup" || sink.outputAdded[1].Item.Type != "web_search_call" || sink.outputAdded[1].Item.CallID != "call_search" {
+		t.Fatalf("output item added = %#v, want lookup then web_search", sink.outputAdded)
+	}
+	if len(sink.outputDone) != 2 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[1].Item.Type != "web_search_call" || sink.outputDone[1].Item.Status != "completed" {
+		t.Fatalf("output item done = %#v, want completed lookup then completed web_search", sink.outputDone)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 2 || sink.deltas[0].Delta != "Mixed " || sink.deltas[1].Delta != "complete." {
+		t.Fatalf("text deltas = %#v", sink.deltas)
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.delta",
+		"response.function_call_arguments.done",
+		"response.function_call_arguments.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.output_item.done",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if resp.Usage != (protocol.Usage{InputTokens: 24, OutputTokens: 8, TotalTokens: 32}) {
+		t.Fatalf("usage = %#v", resp.Usage)
+	}
+	if len(resp.Output) != 3 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_lookup" || resp.Output[1].Type != "web_search_call" || resp.Output[1].CallID != "call_search" || resp.Output[2].Type != "message" {
+		t.Fatalf("output = %#v, want lookup output, web_search_call, final message", resp.Output)
+	}
+	if resp.Output[2].Content[0].Text != "Mixed complete." {
+		t.Fatalf("final output = %#v, want Mixed complete.", resp.Output[2])
+	}
+	if len(events.events) != 6 {
+		t.Fatalf("execution events len = %d, want requested/started/completed for both tools: %#v", len(events.events), events.events)
+	}
+	wantStatuses := []string{"requested", "requested", "started", "completed", "started", "completed"}
+	wantTools := []string{"lookup", "web_search", "lookup", "lookup", "web_search", "web_search"}
+	for i := range wantStatuses {
+		if events.events[i].Status != wantStatuses[i] || events.events[i].DetailsJSON["tool_name"] != wantTools[i] {
+			t.Fatalf("execution event %d = %#v, want %s/%s", i, events.events[i], wantTools[i], wantStatuses[i])
+		}
+	}
+	stored, ok, err := store.Get(context.Background(), resp.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored response lookup ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(stored.Output, resp.Output) {
+		t.Fatalf("stored output mismatch\nwant: %#v\n got: %#v", resp.Output, stored.Output)
+	}
+}
+
 func TestRuntimeCreateStreamEmitsFailedOutputItemDoneForFunctionToolExecutorFailure(t *testing.T) {
 	client := &fakeChatClient{
 		streamEvents: []ChatStreamEvent{

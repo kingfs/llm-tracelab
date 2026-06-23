@@ -53,7 +53,7 @@
 - 已吸收：简单文本增量、普通 function arguments delta/done、provider 就绪 `web_search` 与已注册 executor 的 stream tool loop 首切。
 - llm-tracelab 落点：`internal/responses/runtime/runtime.go`、`internal/proxy/responses_server.go`、`internal/responses/chatclient`。
 - responses-gateway 对照：`internal/interfaces/http/router.go`、`internal/orchestrator/runtime.go`。
-- 差异：llm-tracelab 对 auto compact 的真实增量 streaming 已从简单文本推进到普通 function arguments 和同名 registered executor stream tool loop；client-owned `function_call_output` continuation 也已有 `stream:true` 回归覆盖。对 hosted/未知工具、非平凡 `tool_choice` 以及更复杂混合工具 lifecycle 仍保守 fallback 到 deferred SSE envelope。当前已明确 auto compact 与不支持工具组合的 runtime fallback contract，并能在写出 SSE/调用上游前返回带 reason 的 `ErrIncrementalStreamUnsupported`。responses-gateway 文档强调 typed event lifecycle，但也以 Codex fixture 驱动分阶段落地。
+- 差异：llm-tracelab 对 auto compact 的真实增量 streaming 已从简单文本推进到普通 function arguments 和同名 registered executor stream tool loop；client-owned `function_call_output` continuation 和同轮 registered function + hosted `web_search` mixed success 也已有 `stream:true` 回归覆盖。对 hosted/未知工具、非平凡 `tool_choice`、mixed partial failure/cancel 以及更复杂混合工具 lifecycle 仍保守 fallback 到 deferred SSE envelope 或继续作为缺口。当前已明确 auto compact 与不支持工具组合的 runtime fallback contract，并能在写出 SSE/调用上游前返回带 reason 的 `ErrIncrementalStreamUnsupported`。responses-gateway 文档强调 typed event lifecycle，但也以 Codex fixture 驱动分阶段落地。
 
 ### Postgres 状态存储
 
@@ -121,7 +121,7 @@
 ### Hosted/server-side tool lifecycle
 
 - 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切；强制执行 unsupported hosted tools 时会返回 stable rejection contract 并写 `tool_call_audits` rejected read model；`audit query --include-tools` 已基于 execution events 提供 derived tool call summary。独立 `tool_call_audits` 表、recorder、query API、runtime web_search/function executor 双写、unsupported hosted tool rejected 写入、`audit tool-calls` CLI、Monitor API 和 MCP tool 已落地，SQLite startup schema、SQLite migration、Postgres migration 与 status 检查也已覆盖。`audit tool-calls` CLI 现在可用 `--status started|completed|failed|rejected`、`--tool-type`、`--tool-name`、`--executor` 过滤 durable read model，并可用 `--latest-by-call` 输出按 call_id 聚合的 latest status、event_count、statuses_seen 和 lifecycle timestamps；默认输出限制为 payload summary、redacted error summary、metadata/count/status，只有显式 `--include-payloads` 才输出 raw input/output/metadata JSON。
-- 缺口：client-owned `function_call_output` 的跨轮流式 continuation 已有回归覆盖；复杂跨轮/混合工具失败 lifecycle 仍不完整。MCP、file search、code interpreter、computer-use 仍未实现真实执行器，当前只有强制执行时的 stable rejection + audit contract。
+- 缺口：client-owned `function_call_output` 的跨轮流式 continuation、同轮 registered function + hosted `web_search` mixed success 已有回归覆盖；复杂跨轮/混合工具失败或 cancel lifecycle 仍不完整。MCP、file search、code interpreter、computer-use 仍未实现真实执行器，当前只有强制执行时的 stable rejection + audit contract。
 - llm-tracelab 下一步落点：`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
 - responses-gateway 对照：`docs/tool-runtime.md` 的 `tool_call_audits` 和 MCP runtime boundary。
 
