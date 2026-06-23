@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -917,6 +918,163 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 	if len(scores) != 1 || scores[0].EvaluatorKey != "postgres_eval_round_trip" {
 		t.Fatalf("ListScores(dataset+trace postgres) = %#v, want postgres_eval_round_trip", scores)
 	}
+}
+
+func TestPostgresAnalysisJobReadModelsRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	queuedTargetID := "trace-pg-analysis-queued-" + suffix
+	completedTargetID := "trace-pg-analysis-completed-" + suffix
+	failedTargetID := "trace-pg-analysis-failed-" + suffix
+	var queuedJobID, completedJobID, failedJobID int64
+	t.Cleanup(func() {
+		for _, cleanup := range []struct {
+			query string
+			args  []any
+		}{
+			{query: `DELETE FROM system_events WHERE job_id IN (?, ?, ?) OR trace_id IN (?, ?, ?)`, args: []any{
+				queuedJobID, completedJobID, failedJobID,
+				queuedTargetID, completedTargetID, failedTargetID,
+			}},
+			{query: `DELETE FROM analysis_jobs WHERE id IN (?, ?, ?) OR target_id IN (?, ?, ?)`, args: []any{
+				queuedJobID, completedJobID, failedJobID,
+				queuedTargetID, completedTargetID, failedTargetID,
+			}},
+		} {
+			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
+				t.Logf("cleanup %q error = %v", cleanup.query, err)
+			}
+		}
+	})
+
+	queuedJob, err := st.CreateAnalysisJob(AnalysisJobRecord{
+		JobType:     "postgres_trace_reanalyze",
+		TargetType:  "trace",
+		TargetID:    queuedTargetID,
+		StepsJSON:   `["reparse_observation","scan_findings"]`,
+		RequestJSON: `{"mode":"worker"}`,
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysisJob(queued postgres) error = %v", err)
+	}
+	queuedJobID = queuedJob.ID
+	if queuedJob.ID == 0 || queuedJob.Status != "queued" || queuedJob.ResultJSON != "{}" {
+		t.Fatalf("queued postgres job = %+v, want queued defaults and id", queuedJob)
+	}
+
+	completedJob, err := st.CreateAnalysisJob(AnalysisJobRecord{
+		JobType:    "postgres_trace_reanalyze",
+		TargetType: "trace",
+		TargetID:   completedTargetID,
+		Status:     "queued",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysisJob(completed postgres) error = %v", err)
+	}
+	completedJobID = completedJob.ID
+
+	failedJob, err := st.CreateAnalysisJob(AnalysisJobRecord{
+		JobType:    "postgres_trace_reanalyze",
+		TargetType: "trace",
+		TargetID:   failedTargetID,
+		Status:     "queued",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysisJob(failed postgres) error = %v", err)
+	}
+	failedJobID = failedJob.ID
+
+	workerJobs, err := st.ListAnalysisJobsForWorker(10000)
+	if err != nil {
+		t.Fatalf("ListAnalysisJobsForWorker(postgres) error = %v", err)
+	}
+	if !analysisJobListContains(workerJobs, queuedJob.ID, "queued") ||
+		!analysisJobListContains(workerJobs, completedJob.ID, "queued") ||
+		!analysisJobListContains(workerJobs, failedJob.ID, "queued") {
+		t.Fatalf("worker jobs = %+v, want all inserted queued postgres jobs", workerJobs)
+	}
+
+	if err := st.MarkAnalysisJobRunning(completedJob.ID); err != nil {
+		t.Fatalf("MarkAnalysisJobRunning(postgres) error = %v", err)
+	}
+	running, err := st.GetAnalysisJob(completedJob.ID)
+	if err != nil {
+		t.Fatalf("GetAnalysisJob(running postgres) error = %v", err)
+	}
+	if running.Status != "running" || running.Attempts != 1 || running.StartedAt.IsZero() {
+		t.Fatalf("running postgres job = %+v, want running with one attempt and started_at", running)
+	}
+
+	if err := st.MarkAnalysisJobCompleted(completedJob.ID, `{"findings":2}`); err != nil {
+		t.Fatalf("MarkAnalysisJobCompleted(postgres) error = %v", err)
+	}
+	completed, err := st.GetAnalysisJob(completedJob.ID)
+	if err != nil {
+		t.Fatalf("GetAnalysisJob(completed postgres) error = %v", err)
+	}
+	if completed.Status != "completed" || completed.ResultJSON != `{"findings":2}` || completed.FinishedAt.IsZero() {
+		t.Fatalf("completed postgres job = %+v, want completed result and finished_at", completed)
+	}
+
+	completedJobs, err := st.ListAnalysisJobs("completed", "trace", completedTargetID, 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisJobs(completed postgres) error = %v", err)
+	}
+	if len(completedJobs) != 1 || completedJobs[0].ID != completedJob.ID {
+		t.Fatalf("completed jobs = %+v, want job %d", completedJobs, completedJob.ID)
+	}
+
+	if err := st.MarkAnalysisJobFailed(failedJob.ID, "postgres read model failure"); err != nil {
+		t.Fatalf("MarkAnalysisJobFailed(postgres) error = %v", err)
+	}
+	failed, err := st.GetAnalysisJob(failedJob.ID)
+	if err != nil {
+		t.Fatalf("GetAnalysisJob(failed postgres) error = %v", err)
+	}
+	if failed.Status != "failed" || failed.LastError != "postgres read model failure" || failed.FinishedAt.IsZero() {
+		t.Fatalf("failed postgres job = %+v, want failed error and finished_at", failed)
+	}
+
+	events, err := st.ListSystemEvents(SystemEventFilter{
+		Source:   "analyzer",
+		Category: "analysis_job_failure",
+		Query:    failedTargetID,
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(analysis job failure postgres) error = %v", err)
+	}
+	if events.Total == 0 || len(events.Items) == 0 || events.Items[0].JobID != strconv.FormatInt(failedJob.ID, 10) {
+		t.Fatalf("analysis job failure events = %+v, want job %d", events, failedJob.ID)
+	}
+}
+
+func analysisJobListContains(jobs []AnalysisJobRecord, id int64, status string) bool {
+	for _, job := range jobs {
+		if job.ID == id && job.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPostgresSystemEventReadModelRoundTrip(t *testing.T) {
