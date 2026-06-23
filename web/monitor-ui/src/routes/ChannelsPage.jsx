@@ -767,7 +767,17 @@ function setupValidationSignature(form) {
 }
 
 function buildSetupStatus(result, stale, form) {
+  const explicitSurface = Boolean((form.api_type || "").trim() && (form.protocol_family || "").trim());
   if (!result) {
+    if (explicitSurface) {
+      return {
+        canApply: true,
+        title: "Ready with explicit protocol",
+        label: "manual",
+        tone: "gold",
+        reason: "Create with the selected API type and protocol family. Validation is optional.",
+      };
+    }
     return {
       canApply: false,
       title: "Not validated",
@@ -787,7 +797,7 @@ function buildSetupStatus(result, stale, form) {
   }
   const detected = result.probe?.status === "detected";
   const normalized = result.normalized_config || {};
-  const explicitSurface = Boolean((form.api_type || normalized.api_type || "").trim() && (form.protocol_family || normalized.protocol_family || "").trim());
+  const explicitOrNormalizedSurface = Boolean((form.api_type || normalized.api_type || "").trim() && (form.protocol_family || normalized.protocol_family || "").trim());
   if (detected) {
     return {
       canApply: true,
@@ -797,7 +807,7 @@ function buildSetupStatus(result, stale, form) {
       reason: "Provider probe detected a compatible setup.",
     };
   }
-  if (explicitSurface) {
+  if (explicitOrNormalizedSurface) {
     return {
       canApply: true,
       title: "Ready with explicit protocol",

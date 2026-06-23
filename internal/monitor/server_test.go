@@ -2428,6 +2428,60 @@ func TestProviderSetupApplyAllowsExplicitSurfaceWhenProbeFails(t *testing.T) {
 	}
 }
 
+func TestProviderSetupApplyAllowsVLLMWithoutAPIKeyWhenExplicit(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not available", http.StatusInternalServerError)
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"qujing",
+		"name":"qujing",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"vllm",
+		"api_type":"chat_completions",
+		"protocol_family":"openai_compatible",
+		"routing_profile":"vllm_openai",
+		"enabled":true,
+		"model_discovery":"disabled",
+		"allow_unknown_models":true
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload providerSetupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if !payload.Applied || payload.Secret.APIKeySet || payload.Secret.APIKeyHint != "" {
+		t.Fatalf("setup apply secret state = %+v", payload.Secret)
+	}
+	record, err := st.GetChannelConfig("qujing")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.ProviderPreset != "vllm" || record.RoutingProfile != "vllm_openai" {
+		t.Fatalf("record provider route = %q/%q", record.ProviderPreset, record.RoutingProfile)
+	}
+	if len(record.APIKeyCiphertext) != 0 || record.APIKeyHint != "" {
+		t.Fatalf("record api key state = %q/%q", string(record.APIKeyCiphertext), record.APIKeyHint)
+	}
+	if !record.AllowUnknownModels {
+		t.Fatalf("record AllowUnknownModels = false, want true")
+	}
+}
+
 func TestProviderSetupSuggestionsDoNotOverrideExplicitFields(t *testing.T) {
 	t.Parallel()
 
