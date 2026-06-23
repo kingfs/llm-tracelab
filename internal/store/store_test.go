@@ -543,6 +543,223 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	}
 }
 
+func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	now := time.Now().UTC()
+	writeLog := func(requestID, status string) LogEntry {
+		t.Helper()
+		recordPath := filepath.Join(dir, requestID+".http")
+		if err := os.WriteFile(recordPath, []byte("# readmodel\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", recordPath, err)
+		}
+		header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+		header.Meta.RequestID = requestID
+		header.Meta.Time = now
+		header.Meta.URL = "https://api.openai.com/v1/responses"
+		header.Meta.Method = http.MethodPost
+		header.Meta.StatusCode = http.StatusOK
+		header.Meta.Provider = "openai_compatible"
+		header.Meta.Operation = "responses"
+		header.Meta.Model = "gpt-postgres-readmodel"
+		if err := st.UpsertLog(recordPath, header); err != nil {
+			t.Fatalf("UpsertLog(%s) error = %v", status, err)
+		}
+		entry, err := st.GetByRequestID(requestID)
+		if err != nil {
+			t.Fatalf("GetByRequestID(%s) error = %v", requestID, err)
+		}
+		return entry
+	}
+
+	parsedEntry := writeLog("req_pg_readmodel_parsed_"+suffix, "parsed")
+	unparsedEntry := writeLog("req_pg_readmodel_unparsed_"+suffix, "unparsed")
+	queuedTraceID := "trace_pg_readmodel_queued_" + suffix
+	runningTraceID := "trace_pg_readmodel_running_" + suffix
+	failedTraceID := "trace_pg_readmodel_failed_" + suffix
+
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       parsedEntry.ID,
+		Provider:      "openai_compatible",
+		Operation:     "responses",
+		Model:         "gpt-postgres-readmodel",
+		Parser:        "postgres-readmodel",
+		ParserVersion: "1",
+		Status:        observe.ParseStatusParsed,
+	}); err != nil {
+		t.Fatalf("SaveObservation(postgres) error = %v", err)
+	}
+	if err := st.EnqueueParseJob(queuedTraceID); err != nil {
+		t.Fatalf("EnqueueParseJob(queued) error = %v", err)
+	}
+	queuedJobs, err := st.ListParseJobs("queued", 10000)
+	if err != nil {
+		t.Fatalf("ListParseJobs(queued) error = %v", err)
+	}
+	if !parseJobListContains(queuedJobs, queuedTraceID, "queued") {
+		t.Fatalf("queued parse jobs = %+v, want trace %s", queuedJobs, queuedTraceID)
+	}
+
+	if err := st.EnqueueParseJob(runningTraceID); err != nil {
+		t.Fatalf("EnqueueParseJob(running) error = %v", err)
+	}
+	runningJobs, err := st.ListParseJobs("queued", 10000)
+	if err != nil {
+		t.Fatalf("ListParseJobs(before running) error = %v", err)
+	}
+	runningJob, ok := findParseJob(runningJobs, runningTraceID)
+	if !ok {
+		t.Fatalf("queued parse jobs = %+v, want trace %s before running", runningJobs, runningTraceID)
+	}
+	if err := st.MarkParseJobRunning(runningJob.ID); err != nil {
+		t.Fatalf("MarkParseJobRunning(postgres) error = %v", err)
+	}
+
+	if err := st.EnqueueParseJob(failedTraceID); err != nil {
+		t.Fatalf("EnqueueParseJob(failed) error = %v", err)
+	}
+	failedJobs, err := st.ListParseJobs("queued", 10000)
+	if err != nil {
+		t.Fatalf("ListParseJobs(before failed) error = %v", err)
+	}
+	failedJob, ok := findParseJob(failedJobs, failedTraceID)
+	if !ok {
+		t.Fatalf("queued parse jobs = %+v, want trace %s before failure", failedJobs, failedTraceID)
+	}
+	if err := st.MarkParseJobFailed(failedJob.ID, "postgres readmodel parse failure"); err != nil {
+		t.Fatalf("MarkParseJobFailed(postgres) error = %v", err)
+	}
+
+	metadata, err := st.LoadObservationMetadata([]string{parsedEntry.ID, queuedTraceID, unparsedEntry.ID})
+	if err != nil {
+		t.Fatalf("LoadObservationMetadata(postgres) error = %v", err)
+	}
+	if metadata[parsedEntry.ID].Parser != "postgres-readmodel" || metadata[parsedEntry.ID].Status != string(observe.ParseStatusParsed) {
+		t.Fatalf("parsed metadata = %+v", metadata[parsedEntry.ID])
+	}
+	if metadata[queuedTraceID].Status != "queued" {
+		t.Fatalf("queued metadata = %+v, want queued fallback from parse_jobs", metadata[queuedTraceID])
+	}
+	if metadata[unparsedEntry.ID].Status != "unparsed" {
+		t.Fatalf("unparsed metadata = %+v", metadata[unparsedEntry.ID])
+	}
+
+	finding := observe.Finding{
+		ID:              "finding_pg_readmodel_" + suffix,
+		TraceID:         parsedEntry.ID,
+		Category:        "postgres_readmodel",
+		Severity:        observe.SeverityCritical,
+		Confidence:      0.98,
+		Title:           "Postgres readmodel finding",
+		EvidencePath:    "trace#" + parsedEntry.ID,
+		EvidenceExcerpt: "postgres readmodel evidence",
+		Detector:        "store_test",
+		DetectorVersion: "1",
+	}
+	if err := st.SaveFindings(parsedEntry.ID, []observe.Finding{finding}); err != nil {
+		t.Fatalf("SaveFindings(postgres) error = %v", err)
+	}
+	allFindings, err := st.ListAllFindings(FindingFilter{Category: "postgres_readmodel", Severity: string(observe.SeverityCritical)}, 100)
+	if err != nil {
+		t.Fatalf("ListAllFindings(postgres) error = %v", err)
+	}
+	if !findingListContains(allFindings, finding.ID) {
+		t.Fatalf("all findings = %+v, want finding %s", allFindings, finding.ID)
+	}
+
+	runID, err := st.SaveAnalysisRun(AnalysisRunRecord{
+		TraceID:         parsedEntry.ID,
+		SessionID:       "session_pg_readmodel_" + suffix,
+		Kind:            "postgres_readmodel",
+		Analyzer:        "store_test",
+		AnalyzerVersion: "1",
+		InputRef:        "trace:" + parsedEntry.ID,
+		OutputJSON:      `{"postgres":true}`,
+		Status:          "failed",
+	})
+	if err != nil {
+		t.Fatalf("SaveAnalysisRun(postgres) error = %v", err)
+	}
+	runs, err := st.ListAnalysisRuns("session_pg_readmodel_"+suffix, parsedEntry.ID, "postgres_readmodel", 10)
+	if err != nil {
+		t.Fatalf("ListAnalysisRuns(postgres) error = %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != runID || runs[0].Status != "failed" {
+		t.Fatalf("analysis runs = %+v, want failed run %d", runs, runID)
+	}
+
+	dashboard, err := st.Overview(OverviewOptions{Since: now.Add(-time.Minute), Limit: 100, BucketCount: 2, BucketSize: time.Minute})
+	if err != nil {
+		t.Fatalf("Overview(postgres) error = %v", err)
+	}
+	if dashboard.Observation.Parsed < 1 || dashboard.Observation.Queued < 1 || dashboard.Observation.Running < 1 || dashboard.Observation.Failed < 1 {
+		t.Fatalf("overview observation = %+v, want parsed/queued/running/failed counts", dashboard.Observation)
+	}
+	if !parseJobListContains(dashboard.Observation.RecentFailures, failedTraceID, "failed") {
+		t.Fatalf("overview recent parse failures = %+v, want trace %s", dashboard.Observation.RecentFailures, failedTraceID)
+	}
+	if dashboard.Analysis.Failed < 1 || !analysisRunListContains(dashboard.Analysis.Recent, runID) {
+		t.Fatalf("overview analysis = %+v, want failed run %d", dashboard.Analysis, runID)
+	}
+	if !findingListContains(dashboard.Attention.HighRiskFindings, finding.ID) {
+		t.Fatalf("overview high risk findings = %+v, want finding %s", dashboard.Attention.HighRiskFindings, finding.ID)
+	}
+}
+
+func findParseJob(jobs []ParseJobRecord, traceID string) (ParseJobRecord, bool) {
+	for _, job := range jobs {
+		if job.TraceID == traceID {
+			return job, true
+		}
+	}
+	return ParseJobRecord{}, false
+}
+
+func parseJobListContains(jobs []ParseJobRecord, traceID string, status string) bool {
+	for _, job := range jobs {
+		if job.TraceID == traceID && job.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func findingListContains(findings []observe.Finding, id string) bool {
+	for _, finding := range findings {
+		if finding.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func analysisRunListContains(runs []AnalysisRunRecord, id int64) bool {
+	for _, run := range runs {
+		if run.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
 	if dsn == "" {
