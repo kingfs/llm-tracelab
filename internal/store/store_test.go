@@ -717,11 +717,17 @@ func TestPostgresObservationReadModelsRoundTrip(t *testing.T) {
 	if !parseJobListContains(dashboard.Observation.RecentFailures, failedTraceID, "failed") {
 		t.Fatalf("overview recent parse failures = %+v, want trace %s", dashboard.Observation.RecentFailures, failedTraceID)
 	}
+	if !parseJobListContainsError(dashboard.Observation.RecentFailures, failedTraceID, "postgres readmodel parse failure") {
+		t.Fatalf("overview recent parse failures = %+v, want trace %s with persisted error text", dashboard.Observation.RecentFailures, failedTraceID)
+	}
 	if dashboard.Analysis.Failed < 1 || !analysisRunListContains(dashboard.Analysis.Recent, runID) {
 		t.Fatalf("overview analysis = %+v, want failed run %d", dashboard.Analysis, runID)
 	}
 	if !findingListContains(dashboard.Attention.HighRiskFindings, finding.ID) {
 		t.Fatalf("overview high risk findings = %+v, want finding %s", dashboard.Attention.HighRiskFindings, finding.ID)
+	}
+	if !countItemsContain(dashboard.Breakdown.FindingCategories, "postgres_readmodel") {
+		t.Fatalf("overview finding categories = %+v, want postgres_readmodel category", dashboard.Breakdown.FindingCategories)
 	}
 }
 
@@ -743,9 +749,27 @@ func parseJobListContains(jobs []ParseJobRecord, traceID string, status string) 
 	return false
 }
 
+func parseJobListContainsError(jobs []ParseJobRecord, traceID string, errorText string) bool {
+	for _, job := range jobs {
+		if job.TraceID == traceID && strings.Contains(job.LastError, errorText) {
+			return true
+		}
+	}
+	return false
+}
+
 func findingListContains(findings []observe.Finding, id string) bool {
 	for _, finding := range findings {
 		if finding.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func countItemsContain(items []CountItem, label string) bool {
+	for _, item := range items {
+		if item.Label == label && item.Count > 0 {
 			return true
 		}
 	}
