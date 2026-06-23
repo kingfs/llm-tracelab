@@ -631,11 +631,23 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 		Exec(context.Background()); err != nil {
 		t.Fatalf("create execution event: %v", err)
 	}
+	cassettePath := filepath.Join(t.TempDir(), "trace-monitor-1.http")
+	cassette := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/chat/completions", false, "200 OK", nil, `{"model":"gpt-5","input":"hello"}`, `{"id":"resp-monitor-1","output_text":"hello"}`, func(header *recordfile.RecordHeader) {
+		header.Meta.RequestID = "trace-monitor-1"
+		header.Meta.RequestAuditID = "reqaudit-monitor-1"
+		header.Meta.ResponseID = "resp-monitor-1"
+		header.Meta.ConversationID = "thread-monitor-1"
+		header.Meta.ClientRequestID = "client-monitor-1"
+	})
+	if err := os.WriteFile(cassettePath, cassette, 0o644); err != nil {
+		t.Fatalf("write cassette: %v", err)
+	}
 	if err := st.EntClient().UpstreamExchange.Create().
 		SetID("upex-monitor-1").
 		SetRequestAuditID("reqaudit-monitor-1").
 		SetResponseID("resp-monitor-1").
 		SetTraceID("trace-monitor-1").
+		SetCassettePath(cassettePath).
 		SetStatusCode(http.StatusOK).
 		SetStartedAt(base.Add(2 * time.Second)).
 		Exec(context.Background()); err != nil {
@@ -662,6 +674,15 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	}
 	if len(payload.UpstreamExchanges) != 1 || payload.UpstreamExchanges[0].TraceID != "trace-monitor-1" {
 		t.Fatalf("upstream exchanges = %+v, want trace-monitor-1", payload.UpstreamExchanges)
+	}
+	if payload.FinalResponse == nil || payload.FinalResponse.ResponseID != "resp-monitor-1" || payload.FinalResponse.ClientRequestID != "client-monitor-1" {
+		t.Fatalf("final response = %+v, want response/client correlation", payload.FinalResponse)
+	}
+	if len(payload.RawCassettes) != 1 || payload.RawCassettes[0].TraceID != "trace-monitor-1" || payload.RawCassettes[0].ReadError != "" {
+		t.Fatalf("raw cassettes = %+v, want linked readable cassette", payload.RawCassettes)
+	}
+	if !strings.Contains(payload.RawCassettes[0].Response.Body, `"id":"resp-monitor-1"`) {
+		t.Fatalf("raw cassette response body = %q, want final upstream response preview", payload.RawCassettes[0].Response.Body)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace", nil)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
 const (
@@ -53,6 +55,7 @@ type GetRequestAuditTraceParams struct {
 	ConversationID        string
 	EventLimit            int
 	UpstreamExchangeLimit int
+	CassetteBodyLimit     int
 }
 
 type ListToolCallAuditsParams struct {
@@ -123,6 +126,30 @@ type UpstreamExchangeView struct {
 	StartedAt      time.Time
 	CompletedAt    time.Time
 	ErrorText      string
+}
+
+type FinalResponseView struct {
+	ResponseID      string    `json:"response_id,omitempty"`
+	RequestAuditID  string    `json:"request_audit_id,omitempty"`
+	ConversationID  string    `json:"conversation_id,omitempty"`
+	ClientRequestID string    `json:"client_request_id,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	ErrorText       string    `json:"error_text,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	StatusCode      int       `json:"status_code,omitempty"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+}
+
+type RawCassetteView struct {
+	ExchangeID   string                         `json:"exchange_id,omitempty"`
+	TraceID      string                         `json:"trace_id,omitempty"`
+	CassettePath string                         `json:"cassette_path,omitempty"`
+	ReadError    string                         `json:"read_error,omitempty"`
+	Header       recordfile.RecordHeader        `json:"header,omitempty"`
+	Events       []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request      recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response     recordfile.HTTPResponseSummary `json:"response,omitempty"`
 }
 
 type ToolCallEventReference struct {
@@ -259,8 +286,10 @@ type RequestAuditDiagnostics struct {
 
 type RequestAuditTrace struct {
 	RequestAudit      RequestAuditView
+	FinalResponse     FinalResponseView
 	ExecutionEvents   []ExecutionEventView
 	UpstreamExchanges []UpstreamExchangeView
+	RawCassettes      []RawCassetteView
 	ToolCalls         []ToolCallView
 	Diagnostics       RequestAuditDiagnostics
 }
@@ -480,9 +509,128 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 	}
 	trace.ExecutionEvents = events
 	trace.UpstreamExchanges = exchanges
+	trace.FinalResponse = deriveFinalResponse(trace.RequestAudit, events, exchanges)
+	trace.RawCassettes = loadRawCassettes(exchanges, params.CassetteBodyLimit)
 	trace.ToolCalls = deriveToolCalls(events)
 	trace.Diagnostics = DeriveRequestAuditDiagnostics(trace.RequestAudit, trace.ExecutionEvents, trace.UpstreamExchanges, trace.ToolCalls)
 	return trace, true, nil
+}
+
+func deriveFinalResponse(audit RequestAuditView, events []ExecutionEventView, exchanges []UpstreamExchangeView) FinalResponseView {
+	out := FinalResponseView{
+		ResponseID:      audit.ResponseID,
+		RequestAuditID:  audit.ID,
+		ConversationID:  audit.ConversationID,
+		ClientRequestID: audit.ClientRequestID,
+		Status:          audit.Status,
+		ErrorText:       audit.ErrorText,
+	}
+	for _, event := range events {
+		if event.ResponseID != "" && out.ResponseID == "" {
+			out.ResponseID = event.ResponseID
+		}
+		if event.ConversationID != "" && out.ConversationID == "" {
+			out.ConversationID = event.ConversationID
+		}
+		if event.Status != "" {
+			out.Status = event.Status
+		}
+		if event.Message != "" && out.ErrorText == "" && statusIsFailed(event.Status) {
+			out.ErrorText = event.Message
+		}
+		if event.Status == "completed" || event.Status == "failed" || event.Status == "cancelled" {
+			if event.OccurredAt.After(out.CompletedAt) {
+				out.CompletedAt = event.OccurredAt
+			}
+		}
+	}
+	for _, exchange := range exchanges {
+		if exchange.Model != "" && out.Model == "" {
+			out.Model = exchange.Model
+		}
+		if exchange.Endpoint != "" && out.Endpoint == "" {
+			out.Endpoint = exchange.Endpoint
+		}
+		if exchange.StatusCode != 0 {
+			out.StatusCode = exchange.StatusCode
+		}
+		if exchange.ErrorText != "" && out.ErrorText == "" {
+			out.ErrorText = exchange.ErrorText
+		}
+		if exchange.CompletedAt.After(out.CompletedAt) {
+			out.CompletedAt = exchange.CompletedAt
+		}
+	}
+	return out
+}
+
+func loadRawCassettes(exchanges []UpstreamExchangeView, bodyLimit int) []RawCassetteView {
+	if len(exchanges) == 0 {
+		return []RawCassetteView{}
+	}
+	out := make([]RawCassetteView, 0, len(exchanges))
+	seen := map[string]struct{}{}
+	for _, exchange := range exchanges {
+		if exchange.CassettePath == "" {
+			continue
+		}
+		key := exchange.CassettePath
+		if exchange.TraceID != "" {
+			key += "#" + exchange.TraceID
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		item := RawCassetteView{
+			ExchangeID:   exchange.ID,
+			TraceID:      exchange.TraceID,
+			CassettePath: exchange.CassettePath,
+		}
+		content, err := os.ReadFile(exchange.CassettePath)
+		if err != nil {
+			item.ReadError = err.Error()
+			out = append(out, item)
+			continue
+		}
+		summary, err := recordfile.SummarizeHTTPExchange(content, recordfile.CassetteSummaryOptions{BodyLimit: bodyLimit})
+		if err != nil {
+			item.ReadError = err.Error()
+			out = append(out, item)
+			continue
+		}
+		item.Header = summary.Header
+		item.Events = summary.Events
+		item.Request = summary.Request
+		item.Request.Header = redactRawCassetteHeaders(item.Request.Header)
+		item.Response = summary.Response
+		out = append(out, item)
+	}
+	return out
+}
+
+func redactRawCassetteHeaders(header map[string][]string) map[string][]string {
+	if len(header) == 0 {
+		return header
+	}
+	out := make(map[string][]string, len(header))
+	for key, values := range header {
+		if sensitiveRawCassetteHeader(key) {
+			out[key] = []string{"<redacted>"}
+			continue
+		}
+		out[key] = append([]string(nil), values...)
+	}
+	return out
+}
+
+func sensitiveRawCassetteHeader(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "authorization", "cookie", "set-cookie", "api-key", "x-api-key", "x-goog-api-key":
+		return true
+	default:
+		return false
+	}
 }
 
 func DeriveRequestAuditDiagnostics(audit RequestAuditView, events []ExecutionEventView, exchanges []UpstreamExchangeView, toolCalls []ToolCallView) RequestAuditDiagnostics {
