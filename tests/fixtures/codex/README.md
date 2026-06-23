@@ -25,6 +25,6 @@ Coverage:
   descriptor accepted as compatibility input.
 - `unsupported_hosted_tool_expected_error.json`: expected stable error shape for
   unsupported hosted tools such as `mcp`, `file_search`, and
-  `code_interpreter`. Runtime and HTTP tests assert the stable `unsupported_tool`
-  rejection path for forced hosted tool execution; the tools themselves are not
-  implemented.
+  `code_interpreter`, and `computer_use_preview`. Runtime and HTTP tests assert
+  the stable `unsupported_tool` rejection path for forced hosted tool execution;
+  the tools themselves are not implemented.
