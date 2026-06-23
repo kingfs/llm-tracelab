@@ -411,9 +411,29 @@ func (s *auditedStreamSink) ResponseCreated(resp protocol.Response) error {
 	return s.writer.ResponseCreated(resp)
 }
 
+func (s *auditedStreamSink) ResponseInProgress(resp protocol.Response) error {
+	s.start()
+	return s.writer.ResponseInProgress(resp)
+}
+
 func (s *auditedStreamSink) OutputTextDelta(delta runtime.ResponseTextDelta) error {
 	s.start()
 	return s.writer.OutputTextDelta(delta)
+}
+
+func (s *auditedStreamSink) OutputTextDone(done runtime.ResponseTextDone) error {
+	s.start()
+	return s.writer.OutputTextDone(done)
+}
+
+func (s *auditedStreamSink) ContentPartAdded(added runtime.ResponseContentPartAdded) error {
+	s.start()
+	return s.writer.ContentPartAdded(added)
+}
+
+func (s *auditedStreamSink) ContentPartDone(done runtime.ResponseContentPartDone) error {
+	s.start()
+	return s.writer.ContentPartDone(done)
 }
 
 func (s *auditedStreamSink) FunctionCallArgumentsDelta(delta runtime.ResponseFunctionCallArgumentsDelta) error {
@@ -481,6 +501,10 @@ func (s *streamWriter) ResponseCreated(resp protocol.Response) error {
 	return s.write("response.created", protocol.StreamEvent{Type: "response.created", Response: &resp})
 }
 
+func (s *streamWriter) ResponseInProgress(resp protocol.Response) error {
+	return s.write("response.in_progress", protocol.StreamEvent{Type: "response.in_progress", Response: &resp})
+}
+
 func (s *streamWriter) OutputTextDelta(delta runtime.ResponseTextDelta) error {
 	outputIndex := delta.OutputIndex
 	contentIndex := delta.ContentIndex
@@ -490,6 +514,42 @@ func (s *streamWriter) OutputTextDelta(delta runtime.ResponseTextDelta) error {
 		ItemID:       delta.ItemID,
 		ContentIndex: &contentIndex,
 		Delta:        delta.Delta,
+	})
+}
+
+func (s *streamWriter) OutputTextDone(done runtime.ResponseTextDone) error {
+	outputIndex := done.OutputIndex
+	contentIndex := done.ContentIndex
+	return s.write("response.output_text.done", protocol.StreamEvent{
+		Type:         "response.output_text.done",
+		OutputIndex:  &outputIndex,
+		ItemID:       done.ItemID,
+		ContentIndex: &contentIndex,
+		Text:         done.Text,
+	})
+}
+
+func (s *streamWriter) ContentPartAdded(added runtime.ResponseContentPartAdded) error {
+	outputIndex := added.OutputIndex
+	contentIndex := added.ContentIndex
+	return s.write("response.content_part.added", protocol.StreamEvent{
+		Type:         "response.content_part.added",
+		OutputIndex:  &outputIndex,
+		ItemID:       added.ItemID,
+		ContentIndex: &contentIndex,
+		Part:         &added.Part,
+	})
+}
+
+func (s *streamWriter) ContentPartDone(done runtime.ResponseContentPartDone) error {
+	outputIndex := done.OutputIndex
+	contentIndex := done.ContentIndex
+	return s.write("response.content_part.done", protocol.StreamEvent{
+		Type:         "response.content_part.done",
+		OutputIndex:  &outputIndex,
+		ItemID:       done.ItemID,
+		ContentIndex: &contentIndex,
+		Part:         &done.Part,
 	})
 }
 
