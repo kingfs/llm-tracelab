@@ -161,6 +161,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorResponsesDefaultModel(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesStoreReadiness(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelProfiles(cfg))
+	result.Checks = append(result.Checks, checkDoctorResponsesModelCatalogDrift(cfg))
 	result.Checks = append(result.Checks, checkDoctorWebSearch(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderConfig(cfg))
 	result.Checks = append(result.Checks, checkDoctorAuthMigrationScope())
@@ -428,6 +429,53 @@ func doctorResponsesModelProfileLabel(idx int, profile appconfig.ResponsesModelP
 		return fmt.Sprintf("model_profiles[%d] pattern %q", idx, profile.Pattern)
 	}
 	return fmt.Sprintf("model_profiles[%d]", idx)
+}
+
+func checkDoctorResponsesModelCatalogDrift(cfg *appconfig.Config) doctorCheck {
+	model := cfg.ResponsesDefaultModel()
+	detail := map[string]any{
+		"enabled": cfg.ResponsesServerEnabled(),
+		"model":   model,
+	}
+	if !cfg.ResponsesServerEnabled() {
+		detail["skipped_reason"] = "responses_server.enabled is false"
+		return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
+	}
+	if strings.TrimSpace(model) == "" {
+		detail["skipped_reason"] = "responses_server.default_model is empty"
+		return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusWarn, Message: "responses default model is empty; model catalog drift check skipped", Detail: detail}
+	}
+
+	match := cfg.MatchResponsesModelProfile(model)
+	diagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched)
+	detail["matched_profile"] = modelsCodexMatchedProfile{
+		Matched:       match.Matched,
+		Index:         match.Index,
+		Kind:          match.Kind,
+		Source:        match.Source,
+		Name:          match.Profile.Name,
+		Pattern:       match.Profile.Pattern,
+		UpstreamModel: match.Profile.UpstreamModel,
+	}
+	detail["database_available"] = diagnostics.DatabaseAvailable
+	detail["catalog_model_present"] = diagnostics.CatalogModelPresent
+	detail["channel_model_present"] = diagnostics.ChannelModelPresent
+	detail["channel_model_count"] = diagnostics.ChannelModelCount
+	detail["catalog_source"] = diagnostics.CatalogSource
+	detail["channel_source"] = diagnostics.ChannelSource
+	driftWarnings := diagnostics.DriftWarnings
+	if driftWarnings == nil {
+		driftWarnings = []string{}
+	}
+	detail["drift_warnings"] = driftWarnings
+
+	if len(driftWarnings) > 0 {
+		return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusWarn, Message: "responses model catalog/channel drift detected", Detail: detail}
+	}
+	if !diagnostics.DatabaseAvailable {
+		return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusPass, Message: "responses model catalog drift check skipped; application SQLite database unavailable", Detail: detail}
+	}
+	return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusPass, Message: "responses model catalog/channel drift not detected", Detail: detail}
 }
 
 func checkDoctorWebSearch(cfg *appconfig.Config) doctorCheck {
