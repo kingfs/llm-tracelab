@@ -270,4 +270,12 @@ func TestMigrateUpPostgresIntegration(t *testing.T) {
 	if dirty {
 		t.Fatalf("schema_migrations dirty = true")
 	}
+
+	status, err := CheckStatus("postgres", dsn)
+	if err != nil {
+		t.Fatalf("CheckStatus(postgres) error = %v", err)
+	}
+	if !status.Versioned || !status.Available || status.Version != version || status.Dirty {
+		t.Fatalf("CheckStatus(postgres) = %+v, want available clean version %d", status, version)
+	}
 }
