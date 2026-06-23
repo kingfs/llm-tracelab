@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/kingfs/llm-tracelab/internal/store"
 )
 
 type doctorEnvelopeForTest struct {
@@ -140,6 +142,10 @@ upstream:
 	if got := doctorCheckStatusForTest(envelope, "responses_server.backend"); got != doctorStatusPass {
 		t.Fatalf("responses_server.backend status = %q, want pass", got)
 	}
+	check := doctorCheckForTest(envelope, "responses_server.model_catalog_drift")
+	if check.Status != doctorStatusWarn || check.Detail["skipped_reason"] != "responses_server.default_model is empty" {
+		t.Fatalf("responses_server.model_catalog_drift = %+v, want skipped warning", check)
+	}
 }
 
 func TestDoctorResponsesServerDefaultModelPasses(t *testing.T) {
@@ -178,6 +184,166 @@ upstream:
 	}
 	if got := doctorCheckStatusForTest(envelope, "responses_server.model_profiles"); got != doctorStatusPass {
 		t.Fatalf("responses_server.model_profiles status = %q, want pass", got)
+	}
+}
+
+func TestDoctorResponsesModelCatalogDriftDisabledPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: false
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.model_catalog_drift")
+	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.enabled is false" {
+		t.Fatalf("responses_server.model_catalog_drift = %+v, want disabled pass", check)
+	}
+}
+
+func TestDoctorResponsesModelCatalogDriftDBUnavailablePasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-test
+  model_profiles:
+    - name: gpt-test
+      context_window_tokens: 2048
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.model_catalog_drift")
+	if check.Status != doctorStatusPass || check.Detail["database_available"] != false || check.Detail["catalog_source"] != "unavailable" || check.Detail["channel_source"] != "unavailable" {
+		t.Fatalf("responses_server.model_catalog_drift = %+v, want unavailable pass", check)
+	}
+	if strings.Contains(out, "api.example.com") {
+		t.Fatalf("doctor output exposed upstream URL while checking unavailable DB: %s", out)
+	}
+}
+
+func TestDoctorResponsesModelCatalogDriftCatalogAndChannelHitsPass(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	writeDoctorModelCatalogDriftStore(t, dir, dbPath, true)
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-5
+  model_profiles:
+    - name: gpt-5
+      context_window_tokens: 2048
+database:
+  driver: sqlite
+  dsn: "`+dbPath+`"
+trace:
+  output_dir: "`+dir+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.model_catalog_drift")
+	if check.Status != doctorStatusPass || check.Detail["database_available"] != true || check.Detail["catalog_model_present"] != true || check.Detail["channel_model_present"] != true {
+		t.Fatalf("responses_server.model_catalog_drift = %+v, want catalog/channel pass", check)
+	}
+	if got := int(check.Detail["channel_model_count"].(float64)); got != 1 {
+		t.Fatalf("channel_model_count = %d, want 1", got)
+	}
+	if warnings, ok := check.Detail["drift_warnings"].([]any); !ok || len(warnings) != 0 {
+		t.Fatalf("drift_warnings = %#v, want empty", check.Detail["drift_warnings"])
+	}
+}
+
+func TestDoctorResponsesModelCatalogDriftWarnsForProfileCatalogChannelMiss(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "trace_index.sqlite3")
+	writeDoctorModelCatalogDriftStore(t, dir, dbPath, false)
+	configPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  default_model: gpt-5
+  model_profiles:
+    - name: gpt-5
+      context_window_tokens: 2048
+database:
+  driver: sqlite
+  dsn: "`+dbPath+`"
+trace:
+  output_dir: "`+dir+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai_compatible
+  api_type: chat_completions
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.model_catalog_drift")
+	if check.Status != doctorStatusWarn || envelope.Result.Status != doctorStatusWarn || envelope.Result.Summary.Fail != 0 {
+		t.Fatalf("doctor result = %+v check = %+v, want drift warning without failure", envelope.Result.Summary, check)
+	}
+	for _, want := range []string{"model_catalog has no entry", "channel_models has no entry"} {
+		if !doctorDetailStringSliceContains(check.Detail, "drift_warnings", want) {
+			t.Fatalf("drift_warnings missing %q: %#v", want, check.Detail["drift_warnings"])
+		}
 	}
 }
 
@@ -592,6 +758,57 @@ func doctorCheckForTest(envelope doctorEnvelopeForTest, name string) struct {
 		Message string         `json:"message"`
 		Detail  map[string]any `json:"detail"`
 	}{}
+}
+
+func writeDoctorModelCatalogDriftStore(t *testing.T, dir string, dbPath string, includeModel bool) {
+	t.Helper()
+	st, err := store.NewWithDatabase(dir, "sqlite", dbPath, 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+	if !includeModel {
+		return
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.com/v1",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+		Priority:       10,
+		Weight:         1,
+		CapacityHint:   1,
+		ModelDiscovery: "list_models",
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if err := st.UpsertModelCatalog(store.ModelCatalogRecord{Model: "gpt-5", DisplayName: "GPT-5"}); err != nil {
+		t.Fatalf("UpsertModelCatalog() error = %v", err)
+	}
+}
+
+func doctorDetailStringSliceContains(detail map[string]any, key string, fragment string) bool {
+	items, ok := detail[key].([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		text, ok := item.(string)
+		if ok && strings.Contains(text, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func doctorProbeSummaryForTest(t *testing.T, detail map[string]any) map[string]int {
