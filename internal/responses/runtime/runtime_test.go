@@ -2635,6 +2635,100 @@ func TestRuntimeCreateContinuesAfterClientSubmittedFunctionOutput(t *testing.T) 
 	}
 }
 
+func TestRuntimeCreateStreamContinuesAfterClientSubmittedFunctionOutput(t *testing.T) {
+	client := &fakeChatClient{
+		resp: functionToolChatResponse("call_lookup", "lookup"),
+		streamEvents: []ChatStreamEvent{
+			{ChoiceIndex: 0, ContentDelta: "Streamed "},
+			{ChoiceIndex: 0, ContentDelta: "lookup result."},
+		},
+		streamResp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message:      ChatMessage{Content: "Streamed lookup result."},
+				FinishReason: "stop",
+			}},
+			Usage: ChatUsage{PromptTokens: 15, CompletionTokens: 4, TotalTokens: 19},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	store := NewMemoryStore()
+	rt := New(Config{DefaultModel: "gpt-test"}, client, store, WithExecutionEventRecorder(events))
+
+	first, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "lookup codex",
+		Tools: []protocol.Tool{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("first Create returned error: %v", err)
+	}
+	sink := &fakeResponseStreamSink{}
+	second, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		PreviousResponseID: first.ID,
+		Input: []any{map[string]any{
+			"type":    "function_call_output",
+			"call_id": "call_lookup",
+			"name":    "lookup",
+			"output":  map[string]any{"ok": true, "value": "42"},
+			"status":  "completed",
+		}},
+		Stream: true,
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream returned error: %v", err)
+	}
+	if len(client.reqs) != 1 || len(client.streamReqs) != 1 {
+		t.Fatalf("chat calls = nonstream:%d stream:%d, want 1/1", len(client.reqs), len(client.streamReqs))
+	}
+	streamMessages := client.streamReqs[0].Messages
+	if len(streamMessages) != 3 {
+		t.Fatalf("stream messages len = %d, want prior user, assistant function call, submitted tool output: %#v", len(streamMessages), streamMessages)
+	}
+	if streamMessages[0].Role != "user" || streamMessages[0].Content != "lookup codex" {
+		t.Fatalf("history user message mismatch: %#v", streamMessages[0])
+	}
+	if streamMessages[1].Role != "assistant" || len(streamMessages[1].ToolCalls) != 1 || streamMessages[1].ToolCalls[0].ID != "call_lookup" {
+		t.Fatalf("history assistant function call mismatch: %#v", streamMessages[1])
+	}
+	if streamMessages[2].Role != "tool" || streamMessages[2].ToolCallID != "call_lookup" || streamMessages[2].Content != `{"ok":true,"value":"42"}` {
+		t.Fatalf("submitted tool output message mismatch: %#v", streamMessages[2])
+	}
+	wantEvents := []string{
+		"response.created",
+		"response.output_text.delta",
+		"response.output_text.delta",
+		"response.completed",
+	}
+	if !reflect.DeepEqual(sink.events, wantEvents) {
+		t.Fatalf("stream events mismatch\nwant: %#v\n got: %#v", wantEvents, sink.events)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 0 || sink.deltas[0].Delta != "Streamed " || sink.deltas[1].Delta != "lookup result." {
+		t.Fatalf("text deltas = %#v", sink.deltas)
+	}
+	if len(second.Output) != 1 || second.Output[0].Type != "message" || second.Output[0].Content[0].Text != "Streamed lookup result." {
+		t.Fatalf("second output = %#v, want streamed final message", second.Output)
+	}
+	stored, ok, err := store.Get(context.Background(), second.ID)
+	if err != nil || !ok {
+		t.Fatalf("stored streamed response lookup ok=%v err=%v", ok, err)
+	}
+	if !reflect.DeepEqual(stored.Output, second.Output) {
+		t.Fatalf("stored streamed output mismatch\nwant: %#v\n got: %#v", second.Output, stored.Output)
+	}
+	if len(events.events) != 2 {
+		t.Fatalf("execution events len = %d, want requested and submitted: %#v", len(events.events), events.events)
+	}
+	if events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "lookup" || events.events[0].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("requested event mismatch: %#v", events.events[0])
+	}
+	if events.events[1].Status != "submitted" || events.events[1].DetailsJSON["tool_name"] != "lookup" || events.events[1].DetailsJSON["call_id"] != "call_lookup" {
+		t.Fatalf("submitted event mismatch: %#v", events.events[1])
+	}
+}
+
 func TestRuntimeFunctionToolExecutorRegistryReplaceAffectsNextCreate(t *testing.T) {
 	client := &fakeChatClient{
 		resps: []ChatCompletionResponse{
