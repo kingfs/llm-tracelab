@@ -95,13 +95,13 @@
 - 当前覆盖：`config.load`、`server.port`、monitor/MCP consistency、application database migration mode/report、Responses server backend validation、`responses_server.http_guard` 离线入口边界诊断、`responses_server.default_model`、Responses store driver/auto-migrate readiness、model profile context-window/compact threshold numeric relationships、默认模型与本地 SQLite `model_catalog` / `channel_models` drift 只读诊断、web_search provider config validation、provider config basic count、auth migration scope note。
 - 安全边界：默认离线，不做真实模型推理或 provider 网络请求；只有显式 `--probe-providers` 才执行受控 provider endpoint probe；`--check-db` 才读取数据库 migration status；输出复用 DSN/URL 脱敏摘要，不输出 API key/header secret。
 - llm-tracelab 落点：`cmd/server/doctor.go`，复用 `appDBMigrationReport`、`router.ValidateLocalResponsesServerBackendConfig`、`websearch.NewProvider` 和 `config inspect` 的脱敏摘要。
-- 剩余缺口：store backend 深度健康检查仍需 `--check-db` 或后续更细检查；Codex profile 建议和 Codex 本地配置文件 drift 仍待补齐。HTTP guard 诊断已覆盖 Responses path、归一化 path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要以及 MCP/monitor management path 明显冲突。model profile drift 与 catalog/channel 的交叉校验已在 `models codex-config` 与 `doctor` 中落地本地 SQLite 只读诊断；DB 不可用、非 SQLite 或 Postgres 配置保持离线回落。
+- 剩余缺口：store backend 深度健康检查仍需 `--check-db` 或后续更细检查；Codex 本地配置文件 drift 尚未接入 `doctor`。HTTP guard 诊断已覆盖 Responses path、归一化 path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要以及 MCP/monitor management path 明显冲突。Codex profile 建议和显式 `--codex-config <path>` 本地 TOML drift 检查已在 `models codex-config` 落地；model profile drift 与 catalog/channel 的交叉校验已在 `models codex-config` 与 `doctor` 中落地本地 SQLite 只读诊断；DB 不可用、非 SQLite 或 Postgres 配置保持离线回落。
 ### Codex compatibility profile
 
 - 已吸收首切：新增独立 [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)，固化 text create、stream text、function call、`function_call_output` continuation、ordinary `web_search` descriptor、unsupported hosted tool 的最小兼容合约。
 - fixture 资产：新增 `tests/fixtures/codex/` 离线 examples，覆盖请求、期望 response/event/error 形状；`task test:codex-fixtures` 已接入 focused 离线 runner，会枚举当前 fixture inventory 并校验 JSON/NDJSON 结构、HTTP handler reachability 和最小 runtime/parser 对齐；不依赖真实 Codex、真实模型或网络。
 - llm-tracelab 落点：`docs/CODEX_RESPONSES_COMPATIBILITY.md`、`tests/fixtures/codex/*`、`internal/responses/codexfixtures`、`internal/responses/httpapi`、`internal/responses/runtime`，运行时事实仍以 `internal/responses/httpapi`、`internal/responses/runtime`、`internal/proxy/responses_server.go` 为准。
-- 剩余缺口：fixture runner 不是完整真实 Codex/e2e runner；Codex TOML/profile 生成已接本地 SQLite catalog/channel drift 诊断，但尚未检查用户机器上的 Codex 本地配置文件 drift；unsupported hosted tools 已有强制执行时的 stable `unsupported_tool` gate 和 rejected tool-call audit，但尚无真实执行器；Codex-specific audit diagnostics 仍只覆盖 response/request/tool-call 查询首切。
+- 剩余缺口：fixture runner 不是完整真实 Codex/e2e runner；Codex TOML/profile 生成已接本地 SQLite catalog/channel drift 诊断，并可在显式传入 `--codex-config <path>` 时检查用户机器上的 Codex 本地配置文件 drift；unsupported hosted tools 已有强制执行时的 stable `unsupported_tool` gate 和 rejected tool-call audit，但尚无真实执行器；Codex-specific audit diagnostics 仍只覆盖 response/request/tool-call 查询首切。
 
 ## 部分吸收能力
 
@@ -144,7 +144,7 @@
 ### `doctor` 深度诊断
 
 - 已吸收首切：`llm-tracelab doctor` 覆盖离线启动前诊断、稳定 JSON envelope、`--check-db`、`--probe-providers` 受控 provider endpoint probe、`--fail-on-warn`、`--fail-on-fail`、Responses default model、HTTP guard、store driver/auto-migrate readiness、model profile context-window/compact threshold numeric relationships，以及默认模型与本地 SQLite `model_catalog` / `channel_models` drift 只读诊断。`responses_server.http_guard` 会在 server-mode 关闭时 pass 并标注 skipped reason；开启时离线输出 path、normalized path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要，并对非法 path、过小 body limit 和 MCP/monitor management path 明显冲突给出 fail/warn。
-- 剩余缺口：尚未检查 store backend 深度健康、Codex profile 建议与 Codex 本地配置文件 drift。`models codex-config` 与 `doctor` 均能在本地 SQLite app DB 可用时检查请求模型的 catalog/channel drift；DB 不可用、`:memory:`、非 SQLite 或 Postgres 配置不会触发真实网络或远端数据库连接。
+- 剩余缺口：尚未检查 store backend 深度健康；doctor 尚未接入 Codex 本地 TOML drift。`models codex-config` 已支持 Codex profile 建议，并可通过显式 `--codex-config <path>` 只读检查本地 Codex 配置 drift；`models codex-config` 与 `doctor` 均能在本地 SQLite app DB 可用时检查请求模型的 catalog/channel drift；DB 不可用、`:memory:`、非 SQLite 或 Postgres 配置不会触发真实网络或远端数据库连接。
 - responses-gateway 能力：读取同一套配置，输出稳定 JSON，检查 config、HTTP guard、默认模型、vLLM `/models`、model profile context window drift、store backend、web_search 配置。
 - llm-tracelab 后续落点：继续扩展 `cmd/server/doctor.go`，受控复用 `internal/providerprobe` 和更细的 responses/profile/store 诊断，但保持默认离线。
 
@@ -166,16 +166,16 @@
 
 ### Codex profile 生成命令
 
-- 已吸收首切：`llm-tracelab models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 `models.codex_config` JSON envelope、Codex TOML 建议、provider `base_url` 推导、`wire_api=responses`、profile match/compact threshold diagnostics 和 warnings；本地 SQLite app DB 文件可用时，会以 `AutoMigrate:false` 打开 store 并只读检查 `model_catalog` / `channel_models` 中是否存在请求模型，输出 `catalog_model_present`、`channel_model_present`、`channel_model_count`、source 状态和 drift warnings。
-- 安全边界：不探上游网络、不运行真实 Codex、不输出真实 API key/header secret/DSN；DB 不存在、`:memory:`、非 SQLite、打开失败或 Postgres 配置时均保持离线回落。无 profile 时不失败，输出 0 值并 warning。
-- 剩余缺口：尚未从数据库 catalog/channel 合并 profile 参数，也未检查 Codex 本地配置 drift。
+- 已吸收首切：`llm-tracelab models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 `models.codex_config` JSON envelope、Codex TOML 建议、provider `base_url` 推导、`wire_api=responses`、profile match/compact threshold diagnostics 和 warnings；本地 SQLite app DB 文件可用时，会以 `AutoMigrate:false` 打开 store 并只读检查 `model_catalog` / `channel_models` 中是否存在请求模型，输出 `catalog_model_present`、`channel_model_present`、`channel_model_count`、source 状态和 drift warnings；显式传入 `--codex-config <path>` 时，还会只读解析本地 Codex TOML，检查 `[profiles.<model>]`、`[model_providers.llm-tracelab]` 和 profile/provider 关键字段 drift。
+- 安全边界：不探上游网络、不运行真实 Codex、不输出真实 API key/header secret/DSN；未传 `--codex-config` 时不读取用户真实 Codex 文件；传入 path 后，文件不存在、不可读或解析失败只产生 diagnostics/warnings，不会 panic 或回显完整文件内容，URL actual 会脱敏。DB 不存在、`:memory:`、非 SQLite、打开失败或 Postgres 配置时均保持离线回落。无 profile 时不失败，输出 0 值并 warning。
+- 剩余缺口：尚未从数据库 catalog/channel 合并 profile 参数；doctor 尚未复用 Codex 本地 TOML drift 检查。
 - responses-gateway 能力：输出 `model_context_window`、`model_auto_compact_token_limit`、provider `base_url`、`wire_api=responses` 等稳定 JSON/TOML。
 - llm-tracelab 建议落点：`cmd/server/models.go` 或 `cmd/server/provider.go` 子命令；数据来源应优先是 `responses_server.model_profiles` 和 channel/model catalog。
 
 ### Codex fixture/runbook 资产
 
 - 已吸收首切：已有集中 `tests/fixtures/codex` 离线 fixture、`docs/CODEX_RESPONSES_COMPATIBILITY.md` profile 文档、`internal/responses/codexfixtures` runner helper、`task test:codex-fixtures`，以及 `internal/responses/httpapi` / `internal/responses/runtime` focused offline Go tests。
-- 剩余缺口：当前是 focused 离线 fixture gate，不是完整真实 Codex/e2e runner；没有长任务 compact/cancel/run-report 脚本资产；Codex TOML/profile 生成已有本地 SQLite catalog/channel drift 首切，但尚未检查 Codex 本地配置文件 drift。
+- 剩余缺口：当前是 focused 离线 fixture gate，不是完整真实 Codex/e2e runner；没有长任务 compact/cancel/run-report 脚本资产；Codex TOML/profile 生成已有本地 SQLite catalog/channel drift 首切，并可通过显式 `--codex-config <path>` 检查 Codex 本地配置文件 drift。
 - responses-gateway 能力：`docs/codex-longrun-compact-runbook.md`、`scripts/codex-longrun-*.sh`、Codex fixture profile。
 - llm-tracelab 建议落点：在现有离线 fixtures 基础上决定是否引入脚本；不要让测试依赖真实 Codex 或网络。
 

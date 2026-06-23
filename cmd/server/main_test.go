@@ -901,6 +901,181 @@ responses_server:
 	}
 }
 
+func TestModelsCodexConfigCommandSkipsLocalCodexConfigWithoutFlag(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5")
+	codexConfig := envelope.Result.Diagnostics.CodexConfig
+	if codexConfig.Status != "not_configured" || codexConfig.Present || codexConfig.Readable || codexConfig.Parsed {
+		t.Fatalf("codex_config = %+v, want not_configured without file reads", codexConfig)
+	}
+	if len(codexConfig.DriftWarnings) != 0 || len(envelope.Result.Warnings) != 0 {
+		t.Fatalf("warnings = %+v codex=%+v, want none", envelope.Result.Warnings, codexConfig.DriftWarnings)
+	}
+}
+
+func TestModelsCodexConfigCommandReportsMatchingLocalCodexConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  path: /v1/responses
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	codexPath := filepath.Join(dir, "codex.toml")
+	codexBody := `
+[profiles.gpt-5]
+model_provider = "llm-tracelab"
+model = "gpt-5"
+model_context_window = 200
+model_auto_compact_token_limit = 160
+
+[model_providers.llm-tracelab]
+name = "llm-tracelab"
+base_url = "http://127.0.0.1:8080/v1"
+env_key = "LLM_TRACELAB_API_KEY"
+wire_api = "responses"
+request_max_retries = 2
+stream_max_retries = 2
+stream_idle_timeout_ms = 120000
+`
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5", "--codex-config", codexPath)
+	codexConfig := envelope.Result.Diagnostics.CodexConfig
+	if codexConfig.Status != "ok" || !codexConfig.Present || !codexConfig.Readable || !codexConfig.Parsed || !codexConfig.ProfilePresent || !codexConfig.ProviderPresent {
+		t.Fatalf("codex_config = %+v, want ok", codexConfig)
+	}
+	if len(codexConfig.DriftWarnings) != 0 || len(envelope.Result.Warnings) != 0 {
+		t.Fatalf("warnings = %+v codex=%+v, want none", envelope.Result.Warnings, codexConfig.DriftWarnings)
+	}
+	for _, field := range codexConfig.Fields {
+		if !field.Present || !field.Matched {
+			t.Fatalf("field = %+v, want present and matched", field)
+		}
+	}
+}
+
+func TestModelsCodexConfigCommandWarnsForLocalCodexConfigDrift(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	codexPath := filepath.Join(dir, "codex.toml")
+	codexBody := `
+[profiles.other-model]
+model_provider = "other-provider"
+model = "other-model"
+model_context_window = 100
+model_auto_compact_token_limit = 80
+
+[model_providers.other-provider]
+base_url = "http://127.0.0.1:9999/v1"
+env_key = "OTHER_KEY"
+wire_api = "chat"
+`
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+
+	envelope := executeModelsCodexConfigJSONForTest(t, configPath, "gpt-5", "--codex-config", codexPath)
+	codexConfig := envelope.Result.Diagnostics.CodexConfig
+	if codexConfig.Status != "drift" || !codexConfig.Present || !codexConfig.Readable || !codexConfig.Parsed || codexConfig.ProfilePresent || codexConfig.ProviderPresent {
+		t.Fatalf("codex_config = %+v, want missing profile/provider drift", codexConfig)
+	}
+	for _, want := range []string{"profile \"gpt-5\" is missing", "provider \"llm-tracelab\" is missing", "profile.model_provider is missing", "provider.base_url is missing"} {
+		if !containsStringFragment(codexConfig.DriftWarnings, want) || !containsStringFragment(envelope.Result.Warnings, want) {
+			t.Fatalf("warnings missing %q: warnings=%+v codex=%+v", want, envelope.Result.Warnings, codexConfig.DriftWarnings)
+		}
+	}
+}
+
+func TestModelsCodexConfigCommandDoesNotLeakLocalCodexConfigSecrets(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := `
+server:
+  port: "8080"
+responses_server:
+  enabled: true
+  model_profiles:
+    - name: "gpt-5"
+      context_window_tokens: 200
+`
+	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	codexPath := filepath.Join(dir, "codex.toml")
+	codexBody := `
+[profiles.gpt-5]
+model_provider = "llm-tracelab"
+model = "gpt-5"
+model_context_window = 100
+model_auto_compact_token_limit = 80
+
+[model_providers.llm-tracelab]
+base_url = "https://user:codex-url-secret@example.com/v1?token=codex-query-secret"
+env_key = "LLM_TRACELAB_API_KEY"
+wire_api = "chat"
+api_key = "codex-api-secret"
+`
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o644); err != nil {
+		t.Fatalf("WriteFile(codex) error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "models", "codex-config", "--codex-config", codexPath, "gpt-5"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+
+	output := out.String()
+	for _, secret := range []string{"codex-url-secret", "codex-query-secret", "codex-api-secret"} {
+		if strings.Contains(output, secret) {
+			t.Fatalf("models codex-config output leaked local Codex secret marker %q: %s", secret, output)
+		}
+	}
+	if !strings.Contains(output, "%3Credacted%3E") {
+		t.Fatalf("output = %s, want redacted URL value", output)
+	}
+}
+
 type modelsCodexConfigEnvelopeForTest struct {
 	OK      bool   `json:"ok"`
 	Command string `json:"command"`
@@ -913,18 +1088,40 @@ type modelsCodexConfigEnvelopeForTest struct {
 			CatalogSource       string   `json:"catalog_source"`
 			ChannelSource       string   `json:"channel_source"`
 			DriftWarnings       []string `json:"drift_warnings"`
+			CodexConfig         struct {
+				Path            string `json:"path"`
+				Status          string `json:"status"`
+				Present         bool   `json:"present"`
+				Readable        bool   `json:"readable"`
+				Parsed          bool   `json:"parsed"`
+				ProfileName     string `json:"profile_name"`
+				ProviderName    string `json:"provider_name"`
+				ProfilePresent  bool   `json:"profile_present"`
+				ProviderPresent bool   `json:"provider_present"`
+				Fields          []struct {
+					Field    string `json:"field"`
+					Present  bool   `json:"present"`
+					Matched  bool   `json:"matched"`
+					Expected string `json:"expected"`
+					Actual   string `json:"actual"`
+				} `json:"fields"`
+				DriftWarnings []string `json:"drift_warnings"`
+			} `json:"codex_config"`
 		} `json:"diagnostics"`
 		Warnings []string `json:"warnings"`
 	} `json:"result"`
 }
 
-func executeModelsCodexConfigJSONForTest(t *testing.T, configPath string, model string) modelsCodexConfigEnvelopeForTest {
+func executeModelsCodexConfigJSONForTest(t *testing.T, configPath string, model string, extraArgs ...string) modelsCodexConfigEnvelopeForTest {
 	t.Helper()
 	cmd := newRootCommand()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "models", "codex-config", model})
+	args := []string{"-c", configPath, "--format", "json", "models", "codex-config"}
+	args = append(args, extraArgs...)
+	args = append(args, model)
+	cmd.SetArgs(args)
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}

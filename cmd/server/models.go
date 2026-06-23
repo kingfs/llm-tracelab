@@ -12,6 +12,7 @@ import (
 
 	appconfig "github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
@@ -27,10 +28,11 @@ const (
 )
 
 type modelsCodexConfigOptions struct {
-	configPath string
-	format     string
-	stdout     io.Writer
-	model      string
+	configPath      string
+	codexConfigPath string
+	format          string
+	stdout          io.Writer
+	model           string
 }
 
 type modelsCodexConfigResult struct {
@@ -77,6 +79,7 @@ type modelsCodexDiagnostics struct {
 	CatalogSource                     string                    `json:"catalog_source"`
 	ChannelSource                     string                    `json:"channel_source"`
 	DriftWarnings                     []string                  `json:"drift_warnings,omitempty"`
+	CodexConfig                       modelsCodexLocalConfig    `json:"codex_config"`
 }
 
 type modelsCodexMatchedProfile struct {
@@ -87,6 +90,28 @@ type modelsCodexMatchedProfile struct {
 	Name          string `json:"name,omitempty"`
 	Pattern       string `json:"pattern,omitempty"`
 	UpstreamModel string `json:"upstream_model,omitempty"`
+}
+
+type modelsCodexLocalConfig struct {
+	Path            string                        `json:"path,omitempty"`
+	Status          string                        `json:"status"`
+	Present         bool                          `json:"present"`
+	Readable        bool                          `json:"readable"`
+	Parsed          bool                          `json:"parsed"`
+	ProfileName     string                        `json:"profile_name,omitempty"`
+	ProviderName    string                        `json:"provider_name,omitempty"`
+	ProfilePresent  bool                          `json:"profile_present"`
+	ProviderPresent bool                          `json:"provider_present"`
+	Fields          []modelsCodexLocalFieldStatus `json:"fields,omitempty"`
+	DriftWarnings   []string                      `json:"drift_warnings"`
+}
+
+type modelsCodexLocalFieldStatus struct {
+	Field    string `json:"field"`
+	Present  bool   `json:"present"`
+	Matched  bool   `json:"matched"`
+	Expected string `json:"expected"`
+	Actual   string `json:"actual,omitempty"`
 }
 
 func newModelsCommand(runtime *cliRuntime) *cobra.Command {
@@ -104,21 +129,25 @@ func newModelsCommand(runtime *cliRuntime) *cobra.Command {
 }
 
 func newModelsCodexConfigCommand(runtime *cliRuntime) *cobra.Command {
-	return &cobra.Command{
+	var codexConfigPath string
+	cmd := &cobra.Command{
 		Use:   "codex-config <model>",
 		Short: "Generate a Codex profile TOML suggestion from local Responses model profiles",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCode(func() int {
 				return runModelsCodexConfigWithOptions(modelsCodexConfigOptions{
-					configPath: runtime.configPath(),
-					format:     runtime.outputFormat(),
-					stdout:     cmd.OutOrStdout(),
-					model:      args[0],
+					configPath:      runtime.configPath(),
+					codexConfigPath: codexConfigPath,
+					format:          runtime.outputFormat(),
+					stdout:          cmd.OutOrStdout(),
+					model:           args[0],
 				})
 			})
 		},
 	}
+	cmd.Flags().StringVar(&codexConfigPath, "codex-config", "", "Path to a local Codex TOML config file to diagnose for drift")
+	return cmd
 }
 
 func runModelsCodexConfigWithOptions(opts modelsCodexConfigOptions) int {
@@ -127,7 +156,7 @@ func runModelsCodexConfigWithOptions(opts modelsCodexConfigOptions) int {
 		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
 		return 1
 	}
-	result := buildModelsCodexConfigResult(cfg, opts.model)
+	result := buildModelsCodexConfigResult(cfg, opts.model, opts.codexConfigPath)
 	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, codexConfigCommand, result, func(w io.Writer) error {
 		writeModelsCodexConfigText(w, result)
 		return nil
@@ -138,7 +167,7 @@ func runModelsCodexConfigWithOptions(opts modelsCodexConfigOptions) int {
 	return 0
 }
 
-func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCodexConfigResult {
+func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConfigPath string) modelsCodexConfigResult {
 	if cfg == nil {
 		cfg = &appconfig.Config{}
 	}
@@ -170,6 +199,7 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCod
 	historyThreshold, historyThresholdSource := codexCompactHistoryItemThreshold(cfg, match)
 	catalogDiagnostics := buildModelsCatalogDriftDiagnostics(cfg, model, match.Matched)
 	warnings = append(warnings, catalogDiagnostics.DriftWarnings...)
+	codexConfigDiagnostics := modelsCodexLocalConfig{Status: "not_configured", DriftWarnings: []string{}}
 	diagnostics := modelsCodexDiagnostics{
 		MatchedProfile: modelsCodexMatchedProfile{
 			Matched:       match.Matched,
@@ -192,6 +222,7 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCod
 		CatalogSource:                     catalogDiagnostics.CatalogSource,
 		ChannelSource:                     catalogDiagnostics.ChannelSource,
 		DriftWarnings:                     catalogDiagnostics.DriftWarnings,
+		CodexConfig:                       codexConfigDiagnostics,
 	}
 	result := modelsCodexConfigResult{
 		Model:   model,
@@ -207,6 +238,9 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string) modelsCod
 		Warnings:    warnings,
 	}
 	result.TOML = modelsCodexConfigTOML(result)
+	result.Diagnostics.CodexConfig = diagnoseModelsCodexLocalConfig(codexConfigPath, result)
+	warnings = append(warnings, result.Diagnostics.CodexConfig.DriftWarnings...)
+	result.Warnings = warnings
 	return result
 }
 
@@ -309,6 +343,188 @@ func modelsCatalogDriftWarnings(model string, profileMatched bool, diagnostics m
 	return warnings
 }
 
+func diagnoseModelsCodexLocalConfig(path string, suggestion modelsCodexConfigResult) modelsCodexLocalConfig {
+	path = strings.TrimSpace(path)
+	diagnostics := modelsCodexLocalConfig{
+		Path:          path,
+		Status:        "not_configured",
+		ProfileName:   suggestion.Model,
+		ProviderName:  suggestion.Profile.ModelProvider,
+		DriftWarnings: []string{},
+	}
+	if path == "" {
+		return diagnostics
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			diagnostics.Status = "missing"
+			diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, "codex config file does not exist")
+			return diagnostics
+		}
+		diagnostics.Status = "unreadable"
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, "codex config file is not readable")
+		return diagnostics
+	}
+	diagnostics.Present = true
+	if info.IsDir() {
+		diagnostics.Status = "unreadable"
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, "codex config path is a directory")
+		return diagnostics
+	}
+
+	body, err := os.ReadFile(path)
+	if err != nil {
+		diagnostics.Status = "unreadable"
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, "codex config file is not readable")
+		return diagnostics
+	}
+	diagnostics.Readable = true
+
+	var document map[string]any
+	if err := toml.Unmarshal(body, &document); err != nil {
+		diagnostics.Status = "parse_error"
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, "codex config file is invalid TOML")
+		return diagnostics
+	}
+	diagnostics.Parsed = true
+
+	profiles := tomlChildMap(document, "profiles")
+	profile := tomlChildMap(profiles, suggestion.Model)
+	diagnostics.ProfilePresent = profile != nil
+	if !diagnostics.ProfilePresent {
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, fmt.Sprintf("codex config profile %q is missing", suggestion.Model))
+	}
+
+	providers := tomlChildMap(document, "model_providers")
+	provider := tomlChildMap(providers, suggestion.Profile.ModelProvider)
+	diagnostics.ProviderPresent = provider != nil
+	if !diagnostics.ProviderPresent {
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, fmt.Sprintf("codex config provider %q is missing", suggestion.Profile.ModelProvider))
+	}
+
+	diagnostics.Fields = append(diagnostics.Fields,
+		compareModelsCodexStringField(profile, "profile.model_provider", "model_provider", suggestion.Profile.ModelProvider, false),
+		compareModelsCodexStringField(profile, "profile.model", "model", suggestion.Profile.Model, false),
+		compareModelsCodexIntField(profile, "profile.model_context_window", "model_context_window", suggestion.Profile.ModelContextWindow),
+		compareModelsCodexIntField(profile, "profile.model_auto_compact_token_limit", "model_auto_compact_token_limit", suggestion.Profile.ModelAutoCompactTokenLimit),
+		compareModelsCodexStringField(provider, "provider.base_url", "base_url", suggestion.Provider.BaseURL, true),
+		compareModelsCodexStringField(provider, "provider.wire_api", "wire_api", suggestion.Provider.WireAPI, false),
+		compareModelsCodexStringField(provider, "provider.env_key", "env_key", suggestion.Provider.EnvKey, false),
+	)
+	for _, field := range diagnostics.Fields {
+		if field.Matched {
+			continue
+		}
+		if !field.Present {
+			diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, fmt.Sprintf("codex config field %s is missing; expected %s", field.Field, field.Expected))
+			continue
+		}
+		diagnostics.DriftWarnings = append(diagnostics.DriftWarnings, fmt.Sprintf("codex config field %s is %s; expected %s", field.Field, field.Actual, field.Expected))
+	}
+
+	if len(diagnostics.DriftWarnings) > 0 {
+		diagnostics.Status = "drift"
+		return diagnostics
+	}
+	diagnostics.Status = "ok"
+	return diagnostics
+}
+
+func tomlChildMap(parent map[string]any, key string) map[string]any {
+	if parent == nil {
+		return nil
+	}
+	child, ok := parent[key]
+	if !ok {
+		return nil
+	}
+	childMap, ok := child.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return childMap
+}
+
+func compareModelsCodexStringField(parent map[string]any, field string, key string, expected string, redactURL bool) modelsCodexLocalFieldStatus {
+	status := modelsCodexLocalFieldStatus{
+		Field:    field,
+		Expected: expected,
+	}
+	if redactURL {
+		status.Expected = redactURLLike(expected)
+	}
+	if parent == nil {
+		return status
+	}
+	raw, ok := parent[key]
+	if !ok {
+		return status
+	}
+	status.Present = true
+	actual, ok := raw.(string)
+	if !ok {
+		status.Actual = fmt.Sprintf("<%T>", raw)
+		return status
+	}
+	status.Matched = actual == expected
+	if redactURL {
+		status.Actual = redactURLLike(actual)
+	} else {
+		status.Actual = actual
+	}
+	return status
+}
+
+func compareModelsCodexIntField(parent map[string]any, field string, key string, expected int) modelsCodexLocalFieldStatus {
+	status := modelsCodexLocalFieldStatus{
+		Field:    field,
+		Expected: strconv.Itoa(expected),
+	}
+	if parent == nil {
+		return status
+	}
+	raw, ok := parent[key]
+	if !ok {
+		return status
+	}
+	status.Present = true
+	actual, ok := tomlInt(raw)
+	if !ok {
+		status.Actual = fmt.Sprintf("<%T>", raw)
+		return status
+	}
+	status.Actual = strconv.Itoa(actual)
+	status.Matched = actual == expected
+	return status
+}
+
+func tomlInt(raw any) (int, bool) {
+	switch value := raw.(type) {
+	case int:
+		return value, true
+	case int64:
+		return int(value), true
+	case int32:
+		return int(value), true
+	case uint:
+		if value > uint(^uint(0)>>1) {
+			return 0, false
+		}
+		return int(value), true
+	case uint64:
+		if value > uint64(^uint(0)>>1) {
+			return 0, false
+		}
+		return int(value), true
+	case uint32:
+		return int(value), true
+	default:
+		return 0, false
+	}
+}
+
 func buildModelsCodexProviderConfig(cfg *appconfig.Config) (modelsCodexProviderConfig, []string) {
 	warnings := []string{}
 	origin, originWarnings := codexServerOrigin(cfg.Server.Port)
@@ -398,6 +614,18 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.CatalogSource,
 		result.Diagnostics.ChannelSource,
 	)
+	fmt.Fprintf(w, "# codex_config: status=%s present=%t readable=%t parsed=%t profile_present=%t provider_present=%t",
+		result.Diagnostics.CodexConfig.Status,
+		result.Diagnostics.CodexConfig.Present,
+		result.Diagnostics.CodexConfig.Readable,
+		result.Diagnostics.CodexConfig.Parsed,
+		result.Diagnostics.CodexConfig.ProfilePresent,
+		result.Diagnostics.CodexConfig.ProviderPresent,
+	)
+	if result.Diagnostics.CodexConfig.Path != "" {
+		fmt.Fprintf(w, " path=%s", result.Diagnostics.CodexConfig.Path)
+	}
+	fmt.Fprintln(w)
 	fmt.Fprintln(w)
 	fmt.Fprint(w, result.TOML)
 }
