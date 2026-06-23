@@ -702,6 +702,116 @@ func TestPostgresEvalRunAndScoresRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPostgresSessionAndOverviewRuntimeSQLRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ReplaceAll(t.Name(), "/", "_") + "_" + time.Now().UTC().Format("20060102150405.000000000")
+	sessionID := "sess_pg_monitor_" + suffix
+	requestIDs := []string{
+		"req_pg_monitor_stream_" + suffix,
+		"req_pg_monitor_batch_" + suffix,
+	}
+	t.Cleanup(func() {
+		if _, err := st.db.Exec(`DELETE FROM logs WHERE session_id = ? OR request_id = ? OR request_id = ?`, sessionID, requestIDs[0], requestIDs[1]); err != nil {
+			t.Logf("cleanup postgres monitor logs error = %v", err)
+		}
+	})
+
+	writeLog := func(name string, requestID string, provider string, stream bool, statusCode int, recordedAt time.Time) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("postgres monitor smoke\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta: recordfile.MetaData{
+				RequestID:     requestID,
+				Time:          recordedAt,
+				Model:         "gpt-postgres-monitor",
+				Provider:      provider,
+				Operation:     "responses.create",
+				Endpoint:      "/v1/responses",
+				URL:           "/v1/responses",
+				Method:        http.MethodPost,
+				StatusCode:    statusCode,
+				DurationMs:    100,
+				TTFTMs:        25,
+				ClientIP:      "127.0.0.1",
+				ContentLength: 4,
+			},
+			Layout: recordfile.LayoutInfo{
+				IsStream: stream,
+			},
+			Usage: recordfile.UsageInfo{
+				TotalTokens: 11,
+			},
+		}
+		if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{
+			SessionID:     sessionID,
+			SessionSource: "postgres.runtime_sql_test",
+		}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+		}
+	}
+
+	base := time.Date(2026, 6, 23, 8, 0, 0, 0, time.UTC)
+	writeLog("postgres-session-stream.http", requestIDs[0], "openai_compatible", true, http.StatusOK, base)
+	writeLog("postgres-session-batch.http", requestIDs[1], "anthropic", false, http.StatusTooManyRequests, base.Add(time.Minute))
+
+	page, err := st.ListSessionPage(1, 10, ListFilter{Query: sessionID})
+	if err != nil {
+		t.Fatalf("ListSessionPage(postgres) error = %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].SessionID != sessionID {
+		t.Fatalf("ListSessionPage(postgres) = %#v, want one session %q", page.Items, sessionID)
+	}
+	if page.Items[0].RequestCount != 2 || page.Items[0].StreamCount != 1 {
+		t.Fatalf("session counts = requests:%d streams:%d, want 2/1", page.Items[0].RequestCount, page.Items[0].StreamCount)
+	}
+	if !containsString(page.Items[0].Providers, "openai_compatible") || !containsString(page.Items[0].Providers, "anthropic") {
+		t.Fatalf("session providers = %#v, want openai_compatible and anthropic", page.Items[0].Providers)
+	}
+
+	session, err := st.GetSession(sessionID)
+	if err != nil {
+		t.Fatalf("GetSession(postgres) error = %v", err)
+	}
+	if session.RequestCount != 2 || session.StreamCount != 1 || session.FailedRequest != 1 {
+		t.Fatalf("GetSession(postgres) counts = requests:%d streams:%d failed:%d, want 2/1/1", session.RequestCount, session.StreamCount, session.FailedRequest)
+	}
+
+	overview, err := st.Overview(OverviewOptions{
+		Since:       base.Add(-time.Minute),
+		Limit:       5,
+		BucketSize:  time.Hour,
+		BucketCount: 2,
+	})
+	if err != nil {
+		t.Fatalf("Overview(postgres) error = %v", err)
+	}
+	if overview.Summary.StreamCount < 1 || overview.Summary.SessionCount < 1 {
+		t.Fatalf("Overview(postgres) summary = %#v, want stream and session counts", overview.Summary)
+	}
+}
+
 func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
 	t.Parallel()
 
@@ -3198,4 +3308,13 @@ func mustTraceID(t *testing.T, st *Store, path string) string {
 		t.Fatalf("trace id query error = %v", err)
 	}
 	return traceID
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
