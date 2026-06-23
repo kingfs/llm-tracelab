@@ -67,6 +67,13 @@ type ListToolCallAuditsParams struct {
 	Limit          int
 }
 
+type ListCompactProvenanceParams struct {
+	ResponseID     string
+	RequestAuditID string
+	ConversationID string
+	Limit          int
+}
+
 type RequestAuditReference struct {
 	ResponseID     string
 	RequestAuditID string
@@ -178,6 +185,45 @@ type ToolCallLifecycleSummaryView struct {
 	RequestAuditID string
 	ResponseID     string
 	ConversationID string
+}
+
+type CompactItemRefView struct {
+	Index  int
+	Kind   string
+	Type   string
+	ID     string
+	Status string
+	Role   string
+	CallID string
+	Name   string
+}
+
+type CompactRetainedWindowView struct {
+	Start int
+	End   int
+	Mode  string
+}
+
+type CompactProvenanceView struct {
+	EventID                   string
+	ResponseID                string
+	RequestAuditID            string
+	ConversationID            string
+	EventStatus               string
+	OccurredAt                time.Time
+	Version                   string
+	SourceResponseID          string
+	CompactResponseID         string
+	Trigger                   string
+	TriggerReason             string
+	Auto                      bool
+	Manual                    bool
+	SourceItemRefs            []CompactItemRefView
+	RetainedItemRefs          []CompactItemRefView
+	SummaryItemIDs            []string
+	RetainedWindow            CompactRetainedWindowView
+	Budget                    map[string]any
+	ProvenanceRedactionPolicy string
 }
 
 type PendingToolCallDiagnostic struct {
@@ -293,6 +339,37 @@ func (s *QueryService) ListToolCallAudits(ctx context.Context, params ListToolCa
 	out := make([]ToolCallAuditView, 0, len(records))
 	for _, record := range records {
 		out = append(out, toolCallAuditView(record))
+	}
+	return out, nil
+}
+
+func (s *QueryService) ListCompactProvenance(ctx context.Context, params ListCompactProvenanceParams) ([]CompactProvenanceView, error) {
+	if s == nil || s.client == nil {
+		return nil, nil
+	}
+	query := s.client.ExecutionEvent.Query().
+		Where(executionevent.EventTypeEQ("response.compact")).
+		Order(executionevent.ByOccurredAt(entsql.OrderDesc()), executionevent.ByID(entsql.OrderDesc())).
+		Limit(normalizeAuditQueryLimit(params.Limit))
+	if params.ResponseID != "" {
+		query.Where(executionevent.ResponseIDEQ(params.ResponseID))
+	}
+	if params.RequestAuditID != "" {
+		query.Where(executionevent.RequestAuditIDEQ(params.RequestAuditID))
+	}
+	if params.ConversationID != "" {
+		query.Where(executionevent.ConversationIDEQ(params.ConversationID))
+	}
+	records, err := query.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CompactProvenanceView, 0, len(records))
+	for _, record := range records {
+		view, ok := compactProvenanceView(record)
+		if ok {
+			out = append(out, view)
+		}
 	}
 	return out, nil
 }
@@ -997,6 +1074,162 @@ func toolCallAuditView(record *dao.ToolCallAudit) ToolCallAuditView {
 		CompletedAt:    record.CompletedAt,
 		CreatedAt:      record.CreatedAt,
 	}
+}
+
+func compactProvenanceView(record *dao.ExecutionEvent) (CompactProvenanceView, bool) {
+	if record == nil {
+		return CompactProvenanceView{}, false
+	}
+	details := record.DetailsJSON
+	if !eventDetailBool(details, "metadata_compact_provenance") && details["source_item_refs"] == nil && details["retained_item_refs"] == nil {
+		return CompactProvenanceView{}, false
+	}
+	view := CompactProvenanceView{
+		EventID:                   record.ID,
+		ResponseID:                record.ResponseID,
+		RequestAuditID:            record.RequestAuditID,
+		ConversationID:            record.ConversationID,
+		EventStatus:               record.Status,
+		OccurredAt:                record.OccurredAt,
+		Version:                   compactDetailString(details, "provenance_version", "version"),
+		SourceResponseID:          compactDetailString(details, "target_response_id", "source_response_id"),
+		CompactResponseID:         compactDetailString(details, "compact_response_id", "metadata_compact_provenance_id"),
+		Trigger:                   compactDetailString(details, "trigger"),
+		TriggerReason:             compactDetailString(details, "trigger_reason"),
+		Auto:                      eventDetailBool(details, "auto", "auto_triggered"),
+		Manual:                    eventDetailBool(details, "manual"),
+		SourceItemRefs:            compactItemRefs(details["source_item_refs"]),
+		RetainedItemRefs:          compactItemRefs(details["retained_item_refs"]),
+		SummaryItemIDs:            compactStringSlice(details["summary_item_ids"]),
+		RetainedWindow:            compactRetainedWindow(details["retained_window"]),
+		Budget:                    compactBudget(details["budget"]),
+		ProvenanceRedactionPolicy: compactDetailString(details, "provenance_redaction_policy"),
+	}
+	return view, true
+}
+
+func compactItemRefs(value any) []CompactItemRefView {
+	items := compactMapSlice(value)
+	refs := make([]CompactItemRefView, 0, len(items))
+	for _, item := range items {
+		refs = append(refs, CompactItemRefView{
+			Index:  compactInt(item["index"]),
+			Kind:   compactString(item["kind"]),
+			Type:   compactString(item["type"]),
+			ID:     compactString(item["id"]),
+			Status: compactString(item["status"]),
+			Role:   compactString(item["role"]),
+			CallID: compactString(item["call_id"]),
+			Name:   compactString(item["name"]),
+		})
+	}
+	return refs
+}
+
+func compactRetainedWindow(value any) CompactRetainedWindowView {
+	window, ok := value.(map[string]any)
+	if !ok {
+		return CompactRetainedWindowView{}
+	}
+	return CompactRetainedWindowView{
+		Start: compactInt(window["start"]),
+		End:   compactInt(window["end"]),
+		Mode:  compactString(window["mode"]),
+	}
+}
+
+func compactBudget(value any) map[string]any {
+	budget, ok := value.(map[string]any)
+	if !ok || len(budget) == 0 {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	for _, key := range []string{
+		"history_items",
+		"history_item_threshold",
+		"estimated_input_tokens",
+		"context_window_tokens",
+		"reserved_output_tokens",
+		"history_item_threshold_source",
+		"context_window_limit_source",
+		"reserved_output_limit_source",
+	} {
+		if value, ok := budget[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func compactMapSlice(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := item.(map[string]any); ok {
+				out = append(out, mapped)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func compactStringSlice(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := compactString(item); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func compactDetailString(details map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if text := compactString(details[key]); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func compactString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	default:
+		return ""
+	}
+}
+
+func compactInt(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		n, err := strconv.Atoi(string(typed))
+		if err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 func cloneMap(in map[string]any) map[string]any {
