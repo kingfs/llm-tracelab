@@ -66,11 +66,11 @@
 - Postgres application migration 状态、down/dry-run、required table health 和 schema namespace 的生产说明继续保持机器可读。
 - SQLite fallback 策略已定案：本 Storage 边界长期保留 `startup_schema_fallback` 作为 local-first fallback，不在本轮实现 application versioned migrator；`db migrate status --check-db` 只读解释 marker/required table 状态，不承担 destructive repair，生产级 versioned migration 走 Postgres。
 - Auth namespace 已定案：当前 Postgres auth 继续复用 application `schema_migrations` namespace；独立 auth namespace 不直接拆。`auth migrate status` / dry-run 已追加设计态机器可读字段，覆盖 adoption 仍未实现、未来 dry-run 必须 mutation-free、status 必须 read-only、当前 rollback scope 仍是 `shared_application_migration_set`、默认测试必须离线且 Postgres 检查 DSN-gated。真正拆分前还必须落地独立 migration source/namespace marker、idempotent adoption、auth-only rollback 和测试门禁。
-- 审计更深 raw SQL 兼容：已补一个 Monitor session/overview Postgres DSN-gated 首切；analytics、更广 eval/experiment 和其余 monitor 查询中仍依赖 SQLite 方言的路径要继续审计。
+- 审计更深 raw SQL 兼容：已补 Monitor session/overview、upstream/routing analytics、model catalog/detail analytics 的 Postgres DSN-gated 覆盖；其余 monitor/analytics 查询中仍依赖 SQLite 方言的路径要继续审计。
 
 近期可并行切片：
 
-- `storage/postgres-runtime-sql-coverage`：继续补 analytics/eval/experiment/monitor 查询的 Postgres DSN-gated 覆盖，默认测试保持离线；首切已覆盖 session list/detail 与 overview summary 的 provider aggregation 和 stream-count 布尔聚合。
+- `storage/postgres-runtime-sql-coverage`：继续补 analytics/eval/experiment/monitor 查询的 Postgres DSN-gated 覆盖，默认测试保持离线；已覆盖 session list/detail、overview summary 的 provider aggregation 和 stream-count 布尔聚合、upstream/routing analytics，以及 model catalog/detail analytics。
 - `storage/auth-namespace-adoption-design`：已收敛为文档与 operator 输出合同，不改变当前 shared namespace 行为；后续实施任务必须按 adoption、dry-run/status、rollback 和测试门禁逐项落地。
 
 ### Provider 主线

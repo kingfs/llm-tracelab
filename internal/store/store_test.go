@@ -1598,6 +1598,140 @@ func TestPostgresUpstreamAndRoutingAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 	}
 }
 
+func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := appdbmigrate.MigrateUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateUp(postgres) error = %v", err)
+	}
+
+	dir := t.TempDir()
+	st, err := NewWithDatabaseOptions(dir, "postgres", dsn, 4, 4, DatabaseOptions{AutoMigrate: false})
+	if err != nil {
+		t.Fatalf("NewWithDatabaseOptions(postgres) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Logf("Close(postgres store) error = %v", err)
+		}
+	})
+
+	suffix := strings.ToLower(strings.NewReplacer("/", "_", ".", "_").Replace(t.Name())) + "_" + time.Now().UTC().Format("20060102150405000000000")
+	openAIChannelID := "pg-model-openai-" + suffix
+	openRouterChannelID := "pg-model-openrouter-" + suffix
+	model := "gpt-postgres-model-" + suffix
+	traceModel := "gpt-postgres-trace-only-" + suffix
+	requestIDs := []string{
+		"req_pg_model_success_" + suffix,
+		"req_pg_model_missing_usage_" + suffix,
+		"req_pg_model_failed_" + suffix,
+		"req_pg_model_trace_only_" + suffix,
+		"req_pg_model_list_" + suffix,
+	}
+	t.Cleanup(func() {
+		for _, cleanup := range []struct {
+			query string
+			args  []any
+		}{
+			{query: `DELETE FROM logs WHERE request_id IN (?, ?, ?, ?, ?)`, args: []any{requestIDs[0], requestIDs[1], requestIDs[2], requestIDs[3], requestIDs[4]}},
+			{query: `DELETE FROM channel_models WHERE upstream_id IN (?, ?)`, args: []any{openAIChannelID, openRouterChannelID}},
+			{query: `DELETE FROM channel_configs WHERE id IN (?, ?)`, args: []any{openAIChannelID, openRouterChannelID}},
+		} {
+			if _, err := st.db.Exec(cleanup.query, cleanup.args...); err != nil {
+				t.Logf("cleanup postgres model analytics query %q error = %v", cleanup.query, err)
+			}
+		}
+	})
+
+	for _, channel := range []ChannelConfigRecord{
+		{ID: openAIChannelID, Name: "Postgres Model OpenAI", BaseURL: "https://postgres-model-openai.invalid/v1", ProviderPreset: "openai", HeadersJSON: "{}", Enabled: true},
+		{ID: openRouterChannelID, Name: "Postgres Model OpenRouter", BaseURL: "https://postgres-model-openrouter.invalid/api/v1", ProviderPreset: "openrouter", HeadersJSON: "{}", Enabled: true},
+	} {
+		if _, err := st.UpsertChannelConfig(channel); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s postgres) error = %v", channel.ID, err)
+		}
+	}
+	if err := st.ReplaceChannelModels(openAIChannelID, []ChannelModelRecord{{Model: model, DisplayName: "Postgres Model", Source: "manual", Enabled: true}}); err != nil {
+		t.Fatalf("ReplaceChannelModels(openai postgres) error = %v", err)
+	}
+	if err := st.ReplaceChannelModels(openRouterChannelID, []ChannelModelRecord{{Model: model, DisplayName: "Postgres Model", Source: "manual", Enabled: false}}); err != nil {
+		t.Fatalf("ReplaceChannelModels(openrouter postgres) error = %v", err)
+	}
+
+	base := time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC)
+	writeModelLog(t, st, dir, "postgres-model-success.http", model, "/v1/responses", http.MethodPost, openAIChannelID, http.StatusOK, 100, base)
+	writeModelLog(t, st, dir, "postgres-model-missing-usage.http", model, "/v1/responses", http.MethodPost, openAIChannelID, http.StatusOK, 0, base.Add(10*time.Minute))
+	writeModelLog(t, st, dir, "postgres-model-failed.http", model, "/v1/responses", http.MethodPost, openRouterChannelID, http.StatusBadGateway, 50, base.Add(20*time.Minute))
+	writeModelLog(t, st, dir, "postgres-model-trace-only.http", traceModel, "/v1/responses", http.MethodPost, openAIChannelID, http.StatusOK, 25, base.Add(30*time.Minute))
+	writeModelLog(t, st, dir, "postgres-list-models.http", "list_models", "/v1/models", http.MethodGet, openAIChannelID, http.StatusOK, 0, base.Add(40*time.Minute))
+
+	for i, requestID := range requestIDs {
+		if _, err := st.db.Exec(`UPDATE logs SET request_id = ? WHERE path = ?`, requestID, filepath.Join(dir, []string{
+			"postgres-model-success.http",
+			"postgres-model-missing-usage.http",
+			"postgres-model-failed.http",
+			"postgres-model-trace-only.http",
+			"postgres-list-models.http",
+		}[i])); err != nil {
+			t.Fatalf("update request id %q error = %v", requestID, err)
+		}
+	}
+
+	items, err := st.ListModelCatalogAnalytics(base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("ListModelCatalogAnalytics(postgres) error = %v", err)
+	}
+	var catalogItem ModelCatalogAnalyticsRecord
+	for _, item := range items {
+		if item.Model == model {
+			catalogItem = item
+			break
+		}
+	}
+	if catalogItem.Model == "" {
+		t.Fatalf("ListModelCatalogAnalytics(postgres) missing model %q in %#v", model, items)
+	}
+	if catalogItem.ChannelCount != 2 || catalogItem.EnabledChannelCount != 1 || catalogItem.ProviderCount != 2 {
+		t.Fatalf("catalog item = %+v, want channel/enabled/provider counts 2/1/2", catalogItem)
+	}
+	if catalogItem.Summary.RequestCount != 3 || catalogItem.Summary.SuccessRequest != 2 || catalogItem.Summary.FailedRequest != 1 || catalogItem.Summary.MissingUsage != 1 || catalogItem.Summary.TotalTokens != 150 {
+		t.Fatalf("catalog summary = %+v, want request/success/failure/missing/tokens 3/2/1/1/150", catalogItem.Summary)
+	}
+
+	var traceOnlyItem ModelCatalogAnalyticsRecord
+	for _, item := range items {
+		if item.Model == traceModel {
+			traceOnlyItem = item
+			break
+		}
+	}
+	if traceOnlyItem.Model == "" || traceOnlyItem.ChannelCount != 0 || traceOnlyItem.Summary.RequestCount != 1 || traceOnlyItem.Summary.TotalTokens != 25 {
+		t.Fatalf("trace-only catalog item = %+v, want one log-derived model without channel metadata", traceOnlyItem)
+	}
+	for _, item := range items {
+		if item.Model == "list_models" {
+			t.Fatalf("ListModelCatalogAnalytics(postgres) included list_models pseudo model: %#v", items)
+		}
+	}
+
+	detail, err := st.GetModelDetailAnalytics(model, base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), time.Hour, 4)
+	if err != nil {
+		t.Fatalf("GetModelDetailAnalytics(postgres) error = %v", err)
+	}
+	if len(detail.Channels) != 2 {
+		t.Fatalf("detail channels len = %d, want 2: %#v", len(detail.Channels), detail.Channels)
+	}
+	if len(detail.Trends) != 4 {
+		t.Fatalf("detail trends len = %d, want 4: %#v", len(detail.Trends), detail.Trends)
+	}
+	lastTrend := detail.Trends[len(detail.Trends)-1]
+	if lastTrend.RequestCount != 3 || lastTrend.FailedRequest != 1 || lastTrend.MissingUsage != 1 || lastTrend.TotalTokens != 150 {
+		t.Fatalf("last trend = %+v, want request/failure/missing/tokens 3/1/1/150", lastTrend)
+	}
+}
+
 func TestNewWithDatabaseRejectsUnsupportedDriver(t *testing.T) {
 	t.Parallel()
 
