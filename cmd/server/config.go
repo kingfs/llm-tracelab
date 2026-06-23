@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	appconfig "github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -57,9 +58,14 @@ type configInspectMCP struct {
 }
 
 type configInspectDatabase struct {
-	Driver      string `json:"driver"`
-	DSN         string `json:"dsn"`
-	AutoMigrate bool   `json:"auto_migrate"`
+	Driver                  string `json:"driver"`
+	DSN                     string `json:"dsn"`
+	AutoMigrate             bool   `json:"auto_migrate"`
+	MigrationMode           string `json:"migration_mode"`
+	ProductionStorageDriver string `json:"production_storage_driver"`
+	ProductionReady         bool   `json:"production_ready"`
+	StorageRole             string `json:"storage_role"`
+	StorageContract         string `json:"storage_contract"`
 }
 
 type configInspectTrace struct {
@@ -237,9 +243,14 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 			Path:    configInspectMCPPath(cfg),
 		},
 		Database: configInspectDatabase{
-			Driver:      cfg.DatabaseDriver(),
-			DSN:         redactConfigInspectDSN(cfg.DatabaseDSN()),
-			AutoMigrate: cfg.DatabaseAutoMigrate(),
+			Driver:                  cfg.DatabaseDriver(),
+			DSN:                     redactConfigInspectDSN(cfg.DatabaseDSN()),
+			AutoMigrate:             cfg.DatabaseAutoMigrate(),
+			MigrationMode:           appDBMigrationMode(cfg.DatabaseDriver()),
+			ProductionStorageDriver: appdbmigrate.ProductionStorageDriver,
+			ProductionReady:         normalizeAuthStoreDriver(cfg.DatabaseDriver()) == appdbmigrate.ProductionStorageDriver,
+			StorageRole:             configInspectDatabaseStorageRole(cfg.DatabaseDriver()),
+			StorageContract:         configInspectDatabaseStorageContract(cfg.DatabaseDriver()),
 		},
 		Trace: configInspectTrace{
 			OutputDir: cfg.TraceOutputDir(),
@@ -583,11 +594,33 @@ func shouldRedactKey(key string) bool {
 	return false
 }
 
+func configInspectDatabaseStorageRole(driver string) string {
+	if normalizeAuthStoreDriver(driver) == appdbmigrate.ProductionStorageDriver {
+		return "production"
+	}
+	return appdbmigrate.SQLiteStorageRole
+}
+
+func configInspectDatabaseStorageContract(driver string) string {
+	if normalizeAuthStoreDriver(driver) == appdbmigrate.ProductionStorageDriver {
+		return appdbmigrate.PostgresStorageContract
+	}
+	return appdbmigrate.SQLiteStorageContract
+}
+
 func writeConfigInspectText(w io.Writer, result configInspectResult) {
 	fmt.Fprintf(w, "config: %s\n", result.ConfigPath)
 	fmt.Fprintf(w, "server: port=%s monitor_port=%s\n", result.Server.Port, result.Monitor.Port)
 	fmt.Fprintf(w, "mcp: enabled=%t path=%s\n", result.MCP.Enabled, result.MCP.Path)
-	fmt.Fprintf(w, "database: driver=%s dsn=%s auto_migrate=%t\n", result.Database.Driver, result.Database.DSN, result.Database.AutoMigrate)
+	fmt.Fprintf(w, "database: driver=%s dsn=%s auto_migrate=%t migration_mode=%s production_ready=%t storage_role=%s storage_contract=%s\n",
+		result.Database.Driver,
+		result.Database.DSN,
+		result.Database.AutoMigrate,
+		result.Database.MigrationMode,
+		result.Database.ProductionReady,
+		result.Database.StorageRole,
+		result.Database.StorageContract,
+	)
 	fmt.Fprintf(w, "trace: output_dir=%s\n", result.Trace.OutputDir)
 	fmt.Fprintf(w, "responses_server: enabled=%t path=%s default_model=%s max_body=%d auto_compact=%t profiles=%d executors_enabled=%t\n",
 		result.ResponsesServer.Enabled,

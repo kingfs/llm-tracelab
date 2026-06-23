@@ -21,9 +21,15 @@ import (
 const postgresMigrationRoot = "postgres-migrations"
 const sqliteApplicationSchemaMarker = "app_schema_status"
 const sqliteApplicationSchemaNamespace = "application"
+const ProductionStorageDriver = "postgres"
+const PostgresSchemaStrategy = "versioned_checked_in_sql"
+const PostgresMigrationAuthority = "ent/postgres-migrations checked-in SQL via db migrate up"
+const PostgresStorageContract = "postgres_versioned_migrations_are_the_production_storage_contract"
 const SQLiteSchemaStrategy = "startup_schema_fallback"
 const SQLiteVersionedMigrationStatus = "not_implemented"
-const SQLiteMigrationAdvice = "SQLite application DB uses startup schema fallback; run startup or db migrate up for idempotent schema initialization, and use Postgres for versioned production migrations."
+const SQLiteStorageRole = "legacy_dev_test_compatibility"
+const SQLiteStorageContract = "sqlite_startup_schema_fallback_for_legacy_dev_test_only"
+const SQLiteMigrationAdvice = "SQLite application DB uses startup schema fallback for legacy/dev/test compatibility; run startup or db migrate up for idempotent schema initialization, and use Postgres for versioned production migrations."
 
 var sqliteApplicationRequiredTables = []string{
 	"logs",
@@ -64,6 +70,11 @@ func MigrateDown(driver string, dsn string, steps int, all bool) error {
 type Status struct {
 	Driver                string
 	Versioned             bool
+	ProductionReady       bool
+	StorageRole           string
+	StorageContract       string
+	MigrationAuthority    string
+	SchemaStrategy        string
 	Available             bool
 	Version               uint
 	Dirty                 bool
@@ -81,8 +92,17 @@ func CheckStatus(driver string, dsn string) (Status, error) {
 	switch driver {
 	case "postgres":
 		status.Versioned = true
+		status.ProductionReady = true
+		status.StorageRole = "production"
+		status.StorageContract = PostgresStorageContract
+		status.MigrationAuthority = PostgresMigrationAuthority
+		status.SchemaStrategy = PostgresSchemaStrategy
 		return checkPostgresStatus(dsn, status)
 	case "sqlite":
+		status.StorageRole = SQLiteStorageRole
+		status.StorageContract = SQLiteStorageContract
+		status.MigrationAuthority = "internal/store raw DDL startup initialization"
+		status.SchemaStrategy = SQLiteSchemaStrategy
 		status.Advice = SQLiteMigrationAdvice
 		return checkSQLiteStatus(dsn, status)
 	default:

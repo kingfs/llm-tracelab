@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -315,12 +316,12 @@ func TestMigrateDatabaseUpPostgresRequiresDSN(t *testing.T) {
 	}
 }
 
-func TestMigrateDatabaseDownPostgresRequiresDSN(t *testing.T) {
+func TestMigrateDatabaseDownPostgresRollbackUnsupported(t *testing.T) {
 	t.Parallel()
 
 	err := MigrateDatabaseDown("postgresql", "", 1, false)
-	if err == nil || !strings.Contains(err.Error(), "postgres application database dsn is required") {
-		t.Fatalf("MigrateDatabaseDown(postgresql empty dsn) error = %v, want required dsn", err)
+	if !errors.Is(err, ErrPostgresAuthRollbackUnsupported) {
+		t.Fatalf("MigrateDatabaseDown(postgresql) error = %v, want ErrPostgresAuthRollbackUnsupported", err)
 	}
 }
 

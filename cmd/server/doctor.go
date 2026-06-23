@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	appconfig "github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
@@ -175,7 +176,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorResponsesCodexConfigDrift(cfg, opts.codexConfigPath))
 	result.Checks = append(result.Checks, checkDoctorWebSearch(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderConfig(cfg))
-	result.Checks = append(result.Checks, checkDoctorAuthMigrationScope())
+	result.Checks = append(result.Checks, checkDoctorAuthMigrationScope(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderProbe(cfg, opts.probeProviders))
 	finalizeDoctorResult(&result)
 	return result
@@ -517,14 +518,18 @@ func checkDoctorResponsesDefaultModel(cfg *appconfig.Config) doctorCheck {
 func checkDoctorResponsesStoreReadiness(cfg *appconfig.Config) doctorCheck {
 	effectiveDriver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
 	detail := map[string]any{
-		"enabled":               cfg.ResponsesServerEnabled(),
-		"force_store":           cfg.ResponsesForceStore(),
-		"database_driver":       effectiveDriver,
-		"database_driver_raw":   strings.TrimSpace(cfg.Database.Driver),
-		"database_dsn":          redactConfigInspectDSN(cfg.DatabaseDSN()),
-		"database_auto_migrate": cfg.DatabaseAutoMigrate(),
-		"migration_mode":        appDBMigrationMode(effectiveDriver),
-		"status_check":          "configuration-only",
+		"enabled":                   cfg.ResponsesServerEnabled(),
+		"force_store":               cfg.ResponsesForceStore(),
+		"database_driver":           effectiveDriver,
+		"database_driver_raw":       strings.TrimSpace(cfg.Database.Driver),
+		"database_dsn":              redactConfigInspectDSN(cfg.DatabaseDSN()),
+		"database_auto_migrate":     cfg.DatabaseAutoMigrate(),
+		"migration_mode":            appDBMigrationMode(effectiveDriver),
+		"production_storage_driver": appdbmigrate.ProductionStorageDriver,
+		"production_ready":          effectiveDriver == appdbmigrate.ProductionStorageDriver,
+		"storage_role":              configInspectDatabaseStorageRole(effectiveDriver),
+		"storage_contract":          configInspectDatabaseStorageContract(effectiveDriver),
+		"status_check":              "configuration-only",
 	}
 	if !cfg.ResponsesServerEnabled() {
 		return doctorCheck{Name: "responses_server.store", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
@@ -572,19 +577,23 @@ func checkDoctorResponsesStoreHealth(cfg *appconfig.Config, checkDB bool) doctor
 	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
 	requiredTables := doctorResponsesRequiredStoreHealthTables()
 	detail := map[string]any{
-		"enabled":                  cfg.ResponsesServerEnabled(),
-		"force_store":              cfg.ResponsesForceStore(),
-		"database_driver":          driver,
-		"database_driver_raw":      strings.TrimSpace(cfg.Database.Driver),
-		"database_dsn":             redactConfigInspectDSN(cfg.DatabaseDSN()),
-		"database_auto_migrate":    cfg.DatabaseAutoMigrate(),
-		"migration_mode":           appDBMigrationMode(driver),
-		"status_check":             appDBStatusCheckMode(checkDB),
-		"check_db_required":        !checkDB && cfg.ResponsesServerEnabled() && cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate(),
-		"required_semantic_tables": append([]string(nil), doctorResponsesSemanticTables...),
-		"required_audit_tables":    append([]string(nil), doctorResponsesAuditTables...),
-		"required_settings_tables": append([]string(nil), doctorResponsesSettingsTables...),
-		"required_tables":          requiredTables,
+		"enabled":                   cfg.ResponsesServerEnabled(),
+		"force_store":               cfg.ResponsesForceStore(),
+		"database_driver":           driver,
+		"database_driver_raw":       strings.TrimSpace(cfg.Database.Driver),
+		"database_dsn":              redactConfigInspectDSN(cfg.DatabaseDSN()),
+		"database_auto_migrate":     cfg.DatabaseAutoMigrate(),
+		"migration_mode":            appDBMigrationMode(driver),
+		"production_storage_driver": appdbmigrate.ProductionStorageDriver,
+		"production_ready":          driver == appdbmigrate.ProductionStorageDriver,
+		"storage_role":              configInspectDatabaseStorageRole(driver),
+		"storage_contract":          configInspectDatabaseStorageContract(driver),
+		"status_check":              appDBStatusCheckMode(checkDB),
+		"check_db_required":         !checkDB && cfg.ResponsesServerEnabled() && cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate(),
+		"required_semantic_tables":  append([]string(nil), doctorResponsesSemanticTables...),
+		"required_audit_tables":     append([]string(nil), doctorResponsesAuditTables...),
+		"required_settings_tables":  append([]string(nil), doctorResponsesSettingsTables...),
+		"required_tables":           requiredTables,
 	}
 	if !cfg.ResponsesServerEnabled() {
 		detail["skipped_reason"] = "responses_server.enabled is false"
@@ -930,14 +939,43 @@ func checkDoctorProviderConfig(cfg *appconfig.Config) doctorCheck {
 	}
 }
 
-func checkDoctorAuthMigrationScope() doctorCheck {
+func checkDoctorAuthMigrationScope(cfg *appconfig.Config) doctorCheck {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	shared := driver == appdbmigrate.ProductionStorageDriver
+	effectiveNamespace := "auth"
+	schemaAuthority := "sqlite_auth_embedded_migrations"
+	rollbackScope := "auth_database_migration_set"
+	rollbackSupported := true
+	storageContract := "sqlite_auth_migrations_for_legacy_dev_test"
+	storageRole := appdbmigrate.SQLiteStorageRole
+	if shared {
+		effectiveNamespace = "application"
+		schemaAuthority = "application_postgres_migration_set"
+		rollbackScope = "unsupported_from_auth_cli_shared_application_migration_set"
+		rollbackSupported = false
+		storageContract = "postgres_application_schema_owns_auth_tables"
+		storageRole = "production"
+	}
 	return doctorCheck{
 		Name:    "auth.migration_scope",
 		Status:  doctorStatusPass,
-		Message: "auth migrations are managed by the auth migrate command, outside application db migrate",
+		Message: "auth migration scope contract reported",
 		Detail: map[string]any{
-			"application_db_scope": "excluded",
-			"command":              "auth migrate",
+			"database_driver":                  driver,
+			"production_storage_driver":        appdbmigrate.ProductionStorageDriver,
+			"production_ready":                 shared,
+			"database_namespace":               "auth",
+			"effective_database_namespace":     effectiveNamespace,
+			"schema_authority":                 schemaAuthority,
+			"storage_role":                     storageRole,
+			"storage_contract":                 storageContract,
+			"application_namespace_shared":     shared,
+			"independent_auth_namespace":       !shared,
+			"postgres_auth_namespace_strategy": map[bool]string{true: "shared_application_schema_migrations", false: "not_applicable"}[shared],
+			"rollback_supported":               rollbackSupported,
+			"auth_namespace_rollback_scope":    rollbackScope,
+			"command":                          "auth migrate",
+			"canonical_postgres_setup_command": "db migrate up",
 		},
 	}
 }

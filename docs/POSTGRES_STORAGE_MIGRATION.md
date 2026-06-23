@@ -2,9 +2,10 @@
 
 Date: 2026-06-23
 
-This note records the Stage 6A migration strategy for Postgres-first
-persistence. It is a productionization plan and current-state boundary, not a
-claim that Postgres persistence is fully production mature today.
+This note records the production storage contract: Postgres is the only
+production storage, migration, and operations path. SQLite remains available
+only for legacy/local development/test compatibility and replay-safe fallback
+workflows.
 
 ## Current State
 
@@ -24,8 +25,9 @@ claim that Postgres persistence is fully production mature today.
   `NewWithDatabaseOptions(..., AutoMigrate:false)` after running the explicit
   application migrator, so application store startup no longer relies on
   Postgres `Schema.Create`.
-- SQLite remains the default for empty driver values and keeps the existing
-  local path / `file:` DSN behavior.
+- SQLite remains the default for empty driver values for compatibility only.
+  Production configurations must set `database.driver: postgres` or
+  `postgresql` and an explicit `database.dsn`.
 - The checked-in `ent/migrations` directory contains SQLite-oriented
   golang-migrate files. The checked-in `ent/postgres-migrations` directory now
   contains versioned Postgres application schema generated from
@@ -37,10 +39,11 @@ claim that Postgres persistence is fully production mature today.
   `ent/migrate/main.go` is a dialect-aware generator: SQLite remains the
   default and writes to `ent/migrations`; Postgres requires an explicit Atlas
   dev URL and writes to `ent/postgres-migrations`.
-- `internal/auth/migrate.go` embeds `ent/migrations` for SQLite and delegates
-  Postgres `up` and `down` migrations to `internal/appdbmigrate`. The Postgres
-  rollback path is operationally constrained by the shared application/auth
-  migration namespace.
+- `internal/auth/migrate.go` embeds `ent/migrations` for SQLite compatibility
+  and delegates Postgres `up` to `internal/appdbmigrate`. Postgres
+  `auth migrate down` is blocked because auth tables are owned by the shared
+  application `schema_migrations` namespace; rollback must use backup restore
+  or a reviewed application migration plan.
 - `auth migrate status` and `auth migrate up/down --dry-run` report auth
   migration source, namespace, scope, and whether Postgres is using the shared
   application migration namespace. The machine-readable report also includes
@@ -52,7 +55,8 @@ claim that Postgres persistence is fully production mature today.
   `auth_namespace_adoption_status: design_required_not_implemented`,
   `auth_namespace_adoption_plan`, `auth_namespace_dry_run_semantics`,
   `auth_namespace_status_semantics`, `auth_namespace_rollback_scope:
-  shared_application_migration_set`, and `auth_namespace_test_gate`.
+  unsupported_from_auth_cli_shared_application_migration_set`, and
+  `auth_namespace_test_gate`.
   `auth migrate status --check-db` is an explicit opt-in read-only check:
   Postgres reads the shared `schema_migrations` state and checks the auth-owned
   tables in the current schema, while SQLite reads the configured auth migration
@@ -89,8 +93,9 @@ claim that Postgres persistence is fully production mature today.
   findings, analysis summaries, observation summaries, recent parse failures,
   upstream/routing analytics, model catalog/detail analytics, and channel usage
   summary/trends/model usage/recent failures.
-- `db migrate down` is intentionally unsupported outside `--dry-run`; ent auto
-  migration does not provide a safe rollback plan.
+- `db migrate down` is intentionally unsupported outside `--dry-run`; the
+  production contract is forward migration with checked-in SQL plus backup or a
+  reviewed manual rollback plan.
 - The Responses runtime has ent-backed persistence for `responses` and
   `response_items`. Request audit, execution events, upstream exchange
   correlation, and `tool_call_audits` also belong to the application database,
@@ -102,16 +107,15 @@ Stage 6 splits migration ownership explicitly:
 
 | Command | Intended owner | SQLite status | Postgres status |
 | --- | --- | --- | --- |
-| `db migrate up|down` | Application database: trace index, routing/channel/model data, Responses state, and future audit tables | `up` uses current application schema initialization; `down` is unsupported except dry-run | `up` applies checked-in SQL from `ent/postgres-migrations` via `golang-migrate`; `down` is unsupported except dry-run |
-| `auth migrate up|down|status` | Auth database: users, tokens, auth-owned schema | `up` and `down` use embedded SQLite migrations; `status --check-db` reads the auth migration table | `up` applies the shared checked-in `ent/postgres-migrations` SQL; `down` rolls back the same shared migration set; `status --check-db` reads the shared `schema_migrations` table and reports the shared namespace |
+| `db migrate up|down` | Application database: trace index, routing/channel/model data, Responses state, and audit tables | compatibility startup schema initialization; `down` is unsupported except dry-run | production path; `up` applies checked-in SQL from `ent/postgres-migrations` via `golang-migrate`; `down` is unsupported except dry-run |
+| `auth migrate up|down|status` | Auth tables: users and tokens | embedded SQLite compatibility migrations; `status --check-db` reads the auth migration table | auth tables are owned by the application Postgres migration set; `up` applies shared checked-in SQL; `down` is blocked; `status --check-db` reads shared `schema_migrations` and auth table health |
 
 `db migrate` is no longer an alias for the auth migrator. Postgres `db migrate
 up` is now the versioned application migration path, and command/server store
-opening has an explicit no-auto-migrate mode. Production operators should still
-account for the shared application/auth Postgres migration namespace, shared
-application/auth rollback semantics, missing independent auth namespace, and
-remaining runtime SQL compatibility gaps before declaring the whole Postgres
-deployment model mature.
+opening has an explicit no-auto-migrate mode. Production operators should treat
+`db migrate up` as the canonical schema setup command. The shared
+application/auth Postgres namespace is the current production contract, not a
+hidden rollback surface for `auth migrate down`.
 The top-level `migrate` command remains a cassette rewrite/index rebuild
 workflow; when `database.auto_migrate` is enabled, it initializes the
 application database schema and does not run the auth migrator.
@@ -138,9 +142,9 @@ For SQLite/local development:
   it must adopt legacy startup-schema databases without data loss, preserve
   replay, support offline tests, and document rollback/repair behavior before
   replacing the current fallback. Until then, Postgres is the only versioned
-  migration path for production-like deployments.
+  migration path for production deployments.
 
-For Postgres evaluation:
+For Postgres production:
 
 - Use an explicit `database.driver: postgres` or `postgresql` and a full
   `database.dsn`.
@@ -162,8 +166,9 @@ For Postgres evaluation:
   downgrade path, reviewable SQL, or drift policy.
 - If `database.auto_migrate: false`, the database schema must already exist.
   Auth commands such as `auth init-user` also require auth tables to exist.
-  Postgres auth `up` and `down` are versioned through the shared migration set,
-  but a separately owned auth migration namespace is still incomplete.
+  Postgres auth tables are versioned through the shared application migration
+  set. `auth migrate down` is blocked so the auth command cannot roll back
+  application tables.
 - Treat the current Postgres auth namespace as shared with the application
   namespace. `auth migrate status` and dry-run output intentionally report
   `postgres_auth_namespace_strategy: shared_application_schema_migrations` and
@@ -172,25 +177,24 @@ For Postgres evaluation:
   companion adoption fields are also report-only: they describe the required
   future behavior and must not be interpreted as an implemented namespace split.
 
-For production-like Postgres trials, run `db migrate up` against a fresh
-database first, capture the exact llm-tracelab build and migration version, and
-then start the service with application store auto schema creation disabled by
-construction. Treat the shared application/auth migration namespace as a known
-operational constraint until auth migrations are split or formally documented as
-part of the application schema.
+For production Postgres deployments, run `db migrate up` against a fresh or
+managed database first, capture the exact llm-tracelab build and migration
+version, and then start the service. Treat the shared application/auth
+migration namespace as the documented contract until an explicitly designed
+independent auth namespace is implemented.
 
 ## Finalized Storage Boundary
 
 The Storage line is now defined by two explicit decisions:
 
 1. SQLite application storage remains a startup-schema fallback for local-first
-   use, tests, and replay-compatible development. It is not being promoted to a
-   versioned application migrator in this line. Completion means the fallback is
-   visible, read-only status checks are non-destructive, legacy DBs remain
-   compatible, and operator advice clearly says to use Postgres for versioned
-   production migrations.
+   use, tests, legacy compatibility, and replay-compatible development. It is
+   not a production storage or versioned migration target. Completion means the
+   fallback is visible, read-only status checks are non-destructive, legacy DBs
+   remain compatible, and operator advice clearly says to use Postgres for
+   versioned production migrations.
 2. Postgres auth storage remains in the shared application
-   `schema_migrations` namespace for the current productionization boundary.
+   `schema_migrations` namespace for the current production boundary.
    The code and CLI must not imply that a separate auth namespace exists. The
    next step is design-gated migration work, not an opportunistic namespace
    split.
@@ -255,10 +259,11 @@ Dry-run and status semantics:
 
 Rollback semantics:
 
-- Current Postgres rollback scope is
-  `auth_namespace_rollback_scope: shared_application_migration_set`; running
-  `auth migrate down` rolls back the shared application/auth migration set and
-  is therefore application-wide.
+- Current Postgres auth rollback scope is
+  `auth_namespace_rollback_scope:
+  unsupported_from_auth_cli_shared_application_migration_set`; `auth migrate
+  down` is blocked because the shared application/auth migration set is
+  application-wide.
 - After a real split, independent auth rollback must only apply migrations from
   the auth-owned migration source and namespace. It must not roll back
   application migrations or drop application tables.
@@ -406,10 +411,10 @@ now expose stable SQLite fields in both JSON and text output:
 SQLite, does not create a missing DB file, and adds `database_status_advice`
 when marker or required-table checks need operator interpretation.
 
-Stage 16I routes Postgres auth migration `down` through the same shared
-versioned SQL rollback path in `internal/appdbmigrate`. This closes the
-previous Postgres auth rollback command gap, while preserving the explicit
-warning that auth and application schemas still share one migration namespace.
+Stage 16I originally routed Postgres auth migration `down` through the same
+shared versioned SQL rollback path in `internal/appdbmigrate`. The current
+production contract supersedes that behavior: Postgres `auth migrate down` is
+blocked so the auth command cannot roll back application tables.
 
 Stage 16J adds auth migration status reporting. `auth migrate status` and
 `auth migrate up/down --dry-run` now include namespace, source, scope, rollback
@@ -427,7 +432,8 @@ Stage 16J follow-up adds design-only operator fields for the future independent
 auth namespace adoption path. Postgres reports
 `auth_namespace_adoption_status: design_required_not_implemented`,
 `auth_namespace_dry_run_semantics`, `auth_namespace_status_semantics`,
-`auth_namespace_rollback_scope: shared_application_migration_set`, and
+`auth_namespace_rollback_scope:
+unsupported_from_auth_cli_shared_application_migration_set`, and
 `auth_namespace_test_gate`. These are additive output fields, not an
 implementation of the split.
 
@@ -491,10 +497,13 @@ been committed or applied in a shared environment.
 
 ## Remaining Gaps
 
-- Postgres auth migration `up` and `down` are versioned through the shared
-  `ent/postgres-migrations` set, but a separately owned auth migration
-  namespace is still missing. Current status/dry-run output documents this as
-  `postgres_auth_namespace_strategy: shared_application_schema_migrations` and
+- Postgres auth migration `up` is versioned through the shared
+  `ent/postgres-migrations` set, and `auth migrate down` is blocked because a
+  separately owned auth migration namespace is still missing. Current
+  status/dry-run output documents this as
+  `postgres_auth_namespace_strategy: shared_application_schema_migrations`,
+  `auth_namespace_rollback_scope:
+  unsupported_from_auth_cli_shared_application_migration_set`, and
   `independent_auth_namespace_status: not_implemented`; the split requires a
   separately versioned auth migration directory/table plan, idempotent adoption
   of existing `users`/`api_tokens` tables, read-only transition status,

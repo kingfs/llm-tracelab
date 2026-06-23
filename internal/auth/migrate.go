@@ -28,6 +28,8 @@ var authRequiredTables = []string{
 	"api_tokens",
 }
 
+var ErrPostgresAuthRollbackUnsupported = errors.New("postgres auth migrate down is unsupported because auth tables are owned by the application schema_migrations namespace; restore from backup or use a reviewed application migration plan")
+
 func RequiredTables() []string {
 	return cloneStrings(authRequiredTables)
 }
@@ -200,7 +202,7 @@ func MigrateDown(dbPath string, steps int, all bool) error {
 
 func MigrateDatabaseDown(driver string, dsn string, steps int, all bool) error {
 	if normalizeDriver(driver) == "postgres" {
-		return appdbmigrate.MigrateDown(driver, dsn, steps, all)
+		return ErrPostgresAuthRollbackUnsupported
 	}
 	m, err := newMigrator(driver, dsn)
 	if err != nil {
@@ -224,10 +226,19 @@ func MigrateDatabaseDown(driver string, dsn string, steps int, all bool) error {
 type MigrationStatus struct {
 	Driver                     string
 	Versioned                  bool
+	ProductionReady            bool
 	Available                  bool
 	Version                    uint
 	Dirty                      bool
 	DatabasePath               string
+	EffectiveDatabaseNamespace string
+	SchemaAuthority            string
+	StorageContract            string
+	StorageRole                string
+	NamespaceMode              string
+	RollbackSupported          bool
+	RollbackScope              string
+	OperatorAdvice             string
 	SharedApplicationNamespace bool
 	RequiredTables             []string
 	TablesChecked              []string
@@ -239,11 +250,13 @@ type MigrationStatus struct {
 func CheckStatus(driver string, dsn string) (MigrationStatus, error) {
 	driver = normalizeDriver(driver)
 	status := MigrationStatus{
-		Driver:         driver,
-		Versioned:      true,
-		RequiredTables: cloneStrings(authRequiredTables),
-		TablesChecked:  []string{},
-		MissingTables:  []string{},
+		Driver:            driver,
+		Versioned:         true,
+		RollbackScope:     "auth_database_migration_set",
+		RollbackSupported: true,
+		RequiredTables:    cloneStrings(authRequiredTables),
+		TablesChecked:     []string{},
+		MissingTables:     []string{},
 	}
 	switch driver {
 	case "postgres":
@@ -254,10 +267,19 @@ func CheckStatus(driver string, dsn string) (MigrationStatus, error) {
 		status.Available = appStatus.Available
 		status.Version = appStatus.Version
 		status.Dirty = appStatus.Dirty
+		status.ProductionReady = true
+		status.EffectiveDatabaseNamespace = "application"
+		status.SchemaAuthority = "application_postgres_migration_set"
+		status.StorageContract = "postgres_application_schema_owns_auth_tables"
+		status.StorageRole = "production"
+		status.NamespaceMode = "shared_application_schema_migrations"
+		status.RollbackSupported = false
+		status.RollbackScope = "unsupported_from_auth_cli_shared_application_migration_set"
+		status.OperatorAdvice = "run db migrate up as the canonical Postgres schema setup; use auth migrate status --check-db only to verify users/api_tokens and shared schema_migrations state"
 		status.SharedApplicationNamespace = true
 		status.Message = appStatus.Message
 		if status.Message == "" {
-			status.Message = "postgres auth migrations currently share the application schema_migrations namespace"
+			status.Message = "postgres auth tables are owned by the application schema_migrations namespace"
 		}
 		if err := checkPostgresAuthTables(dsn, &status); err != nil {
 			return status, err
@@ -273,6 +295,12 @@ func CheckStatus(driver string, dsn string) (MigrationStatus, error) {
 func checkSQLiteMigrationStatus(dsn string, status MigrationStatus) (MigrationStatus, error) {
 	dbPath := config.SQLitePathFromDSN(dsn)
 	status.DatabasePath = dbPath
+	status.EffectiveDatabaseNamespace = "auth"
+	status.SchemaAuthority = "sqlite_auth_embedded_migrations"
+	status.StorageContract = "sqlite_auth_migrations_for_legacy_dev_test"
+	status.StorageRole = appdbmigrate.SQLiteStorageRole
+	status.NamespaceMode = "independent_sqlite_auth_schema_migrations"
+	status.OperatorAdvice = "SQLite auth migrations remain available for legacy/dev/test compatibility; use Postgres for production storage"
 	if strings.TrimSpace(dbPath) == "" {
 		status.Message = "sqlite auth database path is empty"
 		return status, nil
