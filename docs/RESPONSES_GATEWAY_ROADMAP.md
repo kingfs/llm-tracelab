@@ -1,6 +1,6 @@
 # Responses Gateway 重构路线图
 
-本文记录从当前实现继续推进 Responses gateway 化的阶段边界。事实能力以 `CURRENT_IMPLEMENTATION.md` 和 `PROJECT_BASELINE.md` 为准；完整目标设计见 `RESPONSES_SERVER_DESIGN.md`。
+本文记录从当前实现继续推进 Responses gateway 化的阶段边界。事实能力以 `CURRENT_IMPLEMENTATION.md` 和 `PROJECT_BASELINE.md` 为准；完整目标设计见 `RESPONSES_SERVER_DESIGN.md`；当前收敛后的完成定义和停止发散规则见 `RESPONSES_GATEWAY_COMPLETION_PLAN.md`。
 
 ## 目标边界
 
@@ -36,9 +36,9 @@ TraceLab 的新定位是 production-grade LLM gateway：
 
 ## 阶段计划
 
-### 2026-06-23 推进批次：Responses gateway operability
+### 2026-06-23 推进批次：Responses gateway operability（已收束）
 
-目标：在不破坏现有 proxy/record/replay 主线的前提下，把 `responses-gateway` 已验证的运维诊断、Codex 兼容和 audit CLI 能力继续吸收到 TraceLab。该批次优先补“生产可解释性”，不把普通代理热路径改造成跨协议转换网关。
+目标：在不破坏现有 proxy/record/replay 主线的前提下，把 `responses-gateway` 已验证的运维诊断、Codex 兼容和 audit CLI 能力继续吸收到 TraceLab。该批次已完成必要 operability 首切；后续不再把 doctor/audit/config inspect 小增强作为独立主线，除非它们直接服务 Runtime、Storage 或 Provider 三条收敛主线。
 
 已完成切片：
 
@@ -48,16 +48,13 @@ TraceLab 的新定位是 production-grade LLM gateway：
 - `audit query`：已有 response/request/client-request/conversation selector、顶层 diagnostics、`--list` summary，以及 `--status` list 过滤；输出仍避免 raw body/header/tool payload。
 - `audit tool-calls`：durable `tool_call_audits` 查询已支持 status/tool_type/tool_name/executor/call_id selector 和 `--latest-by-call` lifecycle 聚合摘要；CLI 默认输出 payload summaries、redacted error summary、metadata/count/status，显式 `--include-payloads` 保留原始 payload 调试入口。
 
-当前并行推进切片：
-
-- `doctor` store/backend 深度健康：在默认离线模式下解释 required table set、migration mode 和 `force_store` 风险；在显式 `--check-db` 时只读确认 Responses semantic/audit 关键表完整性。
-- Hosted/server-side tool lifecycle audit 查询：只增强已写入 `tool_call_audits` 的只读过滤和按 call_id 聚合摘要，不实现新的 MCP/file/code/computer-use executor。
+当前并行推进切片：无。下一批次按 `RESPONSES_GATEWAY_COMPLETION_PLAN.md` 收敛到 Runtime、Storage、Provider 三条主线。
 
 后续依赖顺序：
 
-1. 先完成 operability 小切片，保证 `doctor` / `config inspect` / `audit query` 能解释当前 server-mode 生产状态。
-2. 再推进 migration 生产化：SQLite 是否进入 versioned migration、auth 是否拆独立 namespace，必须先有文档化方案和 dry-run/status 语义。
-3. 再推进更重的 runtime 能力：完整 context optimization、复杂 stream tool lifecycle、未来 MCP/file/code/computer-use 执行器。执行器必须先走安全边界设计，不直接把任意工具执行接入 runtime。
+1. Runtime：完整 context optimization/compact v2、复杂 stream tool lifecycle、未来 MCP/file/code/computer-use 执行器安全边界。
+2. Storage：Postgres-first 生产边界、SQLite fallback 策略、auth migration namespace 定案。
+3. Provider：API surface/capability registry、provider onboarding 和 native Responses mode boundary。
 
 验收门禁：
 
