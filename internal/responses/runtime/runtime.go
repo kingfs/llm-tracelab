@@ -574,7 +574,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 				ConversationID: audit.CodexConversationID(req.Metadata),
 			})
 			if err != nil {
-				_ = streamOutputItemDone(sink, outputIndex, failedToolOutputItem(call))
+				_ = streamOutputItemDone(sink, outputIndex, failedToolOutputItem(call, err))
 				return protocol.Response{}, err
 			}
 			if err := streamOutputItemDone(sink, outputIndex, outputItem); err != nil {
@@ -785,10 +785,14 @@ func startedToolOutputItem(call executableToolCall) protocol.OutputItem {
 	}
 }
 
-func failedToolOutputItem(call executableToolCall) protocol.OutputItem {
+func failedToolOutputItem(call executableToolCall, err error) protocol.OutputItem {
 	item := startedToolOutputItem(call)
 	item.Status = "failed"
-	item.Output = nil
+	if call.kind == executableToolKindMCP && err != nil {
+		item.Output = map[string]any{
+			"error": err.Error(),
+		}
+	}
 	return item
 }
 
@@ -819,6 +823,8 @@ func incrementalStreamSupportsTools(tools []protocol.Tool, webSearchReady bool) 
 				continue
 			}
 			return false
+		case "mcp":
+			continue
 		default:
 			return false
 		}
@@ -1176,6 +1182,8 @@ func autoCompactIncrementalStreamEligible(req protocol.CreateResponseRequest, we
 			if !webSearchReady {
 				return false
 			}
+		case "mcp":
+			continue
 		default:
 			return false
 		}
@@ -1559,14 +1567,22 @@ func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCal
 	if toolName == "" {
 		toolName = call.call.Function.Name
 	}
+	argServerID, argServerLabel, argServerURL := mcpServerSelectorFromArguments(call.call.Function.Arguments)
+	serverID := firstNonEmptyString(argServerID, call.protocolTool.ServerID)
+	serverLabel := firstNonEmptyString(argServerLabel, call.protocolTool.ServerLabel)
+	serverURL := firstNonEmptyString(argServerURL, call.protocolTool.ServerURL)
 	eventDetails := map[string]any{
 		"tool_name":       toolName,
 		"call_id":         call.call.ID,
+		"server_id":       serverID,
+		"server_label":    serverLabel,
+		"server_url":      serverURL,
 		"argument_bytes":  len([]byte(call.call.Function.Arguments)),
 		"argument_sha256": auditSHA256(call.call.Function.Arguments),
 		"iteration":       iteration,
 		"executor":        "hosted:mcp",
 		"stream":          exec.Stream,
+		"status":          "started",
 	}
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType:   "response.tool_call",
@@ -1588,7 +1604,7 @@ func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCal
 		Status:         "started",
 		Phase:          "tool_call",
 		InputJSON:      inputSummary,
-		MetadataJSON:   toolCallAuditMetadata(iteration, exec),
+		MetadataJSON:   mcpToolCallAuditMetadata(iteration, exec, serverID, serverLabel, serverURL),
 		StartedAt:      startedAt,
 		CreatedAt:      startedAt,
 	})
@@ -1607,7 +1623,8 @@ func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCal
 			Status:    "failed",
 			Message:   err.Error(),
 			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
-				"error": err.Error(),
+				"status": "failed",
+				"error":  err.Error(),
 			}),
 		})
 		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
@@ -1621,7 +1638,7 @@ func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCal
 			Phase:          "tool_call",
 			InputJSON:      inputSummary,
 			ErrorText:      err.Error(),
-			MetadataJSON:   toolCallAuditMetadata(iteration, exec),
+			MetadataJSON:   mcpToolCallAuditMetadata(iteration, exec, serverID, serverLabel, serverURL),
 			StartedAt:      startedAt,
 			CompletedAt:    completedAt,
 			CreatedAt:      completedAt,
@@ -1636,6 +1653,7 @@ func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCal
 		Phase:     "tool_call",
 		Status:    "completed",
 		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+			"status":       "completed",
 			"output_chars": len(toolContent),
 		}),
 	})
@@ -1653,7 +1671,7 @@ func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCal
 			"output_chars": len(toolContent),
 			"summary":      outputSummary,
 		},
-		MetadataJSON: toolCallAuditMetadata(iteration, exec),
+		MetadataJSON: mcpToolCallAuditMetadata(iteration, exec, serverID, serverLabel, serverURL),
 		StartedAt:    startedAt,
 		CompletedAt:  completedAt,
 		CreatedAt:    completedAt,
@@ -1889,6 +1907,20 @@ func toolCallAuditMetadata(iteration int, exec toolExecutionContext) map[string]
 		"iteration": iteration,
 		"stream":    exec.Stream,
 	}
+}
+
+func mcpToolCallAuditMetadata(iteration int, exec toolExecutionContext, serverID string, serverLabel string, serverURL string) map[string]any {
+	metadata := toolCallAuditMetadata(iteration, exec)
+	if serverID != "" {
+		metadata["server_id"] = serverID
+	}
+	if serverLabel != "" {
+		metadata["server_label"] = serverLabel
+	}
+	if serverURL != "" {
+		metadata["server_url"] = serverURL
+	}
+	return metadata
 }
 
 func auditSHA256(value string) string {
@@ -2266,6 +2298,14 @@ func mcpChatTool() ChatTool {
 						"type":        "string",
 						"description": "The MCP server label from the Responses tool descriptor.",
 					},
+					"server_id": map[string]any{
+						"type":        "string",
+						"description": "The MCP server id from the Responses tool descriptor.",
+					},
+					"server_url": map[string]any{
+						"type":        "string",
+						"description": "The MCP server URL from the Responses tool descriptor. It is only used to select a configured server.",
+					},
 					"tool": map[string]any{
 						"type":        "string",
 						"description": "The MCP tool name to call.",
@@ -2484,20 +2524,42 @@ func mcpProtocolToolForCall(tools []protocol.Tool, arguments string) (protocol.T
 	if len(mcpTools) == 0 {
 		return protocol.Tool{}, false
 	}
-	var payload struct {
-		ServerLabel string `json:"server_label"`
-		ServerID    string `json:"server_id"`
-	}
-	_ = json.Unmarshal([]byte(arguments), &payload)
-	serverLabel := firstNonEmptyString(payload.ServerLabel, payload.ServerID)
-	if serverLabel != "" {
+	serverID, serverLabel, serverURL := mcpServerSelectorFromArguments(arguments)
+	if serverID != "" || serverLabel != "" || serverURL != "" {
+		matches := make([]protocol.Tool, 0, len(mcpTools))
 		for _, tool := range mcpTools {
-			if tool.ServerLabel == serverLabel {
-				return tool, true
+			if serverID != "" && tool.ServerID != serverID {
+				continue
 			}
+			if serverLabel != "" && tool.ServerLabel != serverLabel {
+				continue
+			}
+			if serverURL != "" && tool.ServerURL != serverURL {
+				continue
+			}
+			matches = append(matches, tool)
 		}
+		if len(matches) == 1 {
+			return matches[0], true
+		}
+		return protocol.Tool{}, false
 	}
-	return mcpTools[0], true
+	if len(mcpTools) == 1 {
+		return mcpTools[0], true
+	}
+	return protocol.Tool{}, false
+}
+
+func mcpServerSelectorFromArguments(arguments string) (serverID string, serverLabel string, serverURL string) {
+	var payload struct {
+		ServerID    string `json:"server_id"`
+		ServerLabel string `json:"server_label"`
+		ServerURL   string `json:"server_url"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
+		return "", "", ""
+	}
+	return strings.TrimSpace(payload.ServerID), strings.TrimSpace(payload.ServerLabel), strings.TrimSpace(payload.ServerURL)
 }
 
 func webSearchCallOutput(call ChatToolCall, query string, result websearch.Result) protocol.OutputItem {

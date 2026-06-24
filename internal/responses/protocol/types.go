@@ -115,6 +115,8 @@ type Tool struct {
 	Description     string         `json:"description,omitempty"`
 	Parameters      map[string]any `json:"parameters,omitempty"`
 	ServerLabel     string         `json:"server_label,omitempty"`
+	ServerID        string         `json:"server_id,omitempty"`
+	ServerURL       string         `json:"server_url,omitempty"`
 	AllowedTools    any            `json:"allowed_tools,omitempty"`
 	RequireApproval any            `json:"require_approval,omitempty"`
 	Filters         any            `json:"filters,omitempty"`
@@ -139,6 +141,8 @@ func (t *Tool) UnmarshalJSON(data []byte) error {
 		"description",
 		"parameters",
 		"server_label",
+		"server_id",
+		"server_url",
 		"allowed_tools",
 		"require_approval",
 		"filters",
@@ -179,6 +183,12 @@ func (t Tool) MarshalJSON() ([]byte, error) {
 	}
 	if t.ServerLabel != "" {
 		out["server_label"] = t.ServerLabel
+	}
+	if t.ServerID != "" {
+		out["server_id"] = t.ServerID
+	}
+	if t.ServerURL != "" {
+		out["server_url"] = t.ServerURL
 	}
 	if t.AllowedTools != nil {
 		out["allowed_tools"] = t.AllowedTools
