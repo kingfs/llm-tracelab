@@ -255,6 +255,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	if r.client == nil {
 		return protocol.Response{}, fmt.Errorf("chat completions client is required")
 	}
+	ctx = withModelCallSequence(ctx)
 	model := req.Model
 	if model == "" {
 		model = r.cfg.DefaultModel
@@ -402,6 +403,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	if sink == nil {
 		return protocol.Response{}, fmt.Errorf("response stream sink is required")
 	}
+	ctx = withModelCallSequence(ctx)
 	model := req.Model
 	if model == "" {
 		model = r.cfg.DefaultModel
@@ -489,11 +491,16 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	output := []protocol.OutputItem{}
 	toolIterations := 0
 	for {
+		role := ModelExchangeRolePrimaryModelCall
+		if toolIterations > 0 {
+			role = ModelExchangeRoleToolFollowup
+		}
 		messageID := "msg_" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		outputOffset := len(output)
 		functionStream := newFunctionCallStreamState(sink, outputOffset)
 		textStream := newMessageTextStreamState(sink, outputOffset, messageID)
-		chatResp, err := streamer.ChatCompletionStream(ctx, chatReq, func(event ChatStreamEvent) error {
+		callCtx := withNextModelCallMetadata(ctx, role, responseID)
+		chatResp, err := streamer.ChatCompletionStream(callCtx, chatReq, func(event ChatStreamEvent) error {
 			if event.ChoiceIndex != 0 {
 				return nil
 			}
@@ -932,6 +939,7 @@ func (s *functionCallStreamState) call(delta ChatStreamToolCallDelta) *functionC
 }
 
 func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseRequest) (protocol.Response, error) {
+	ctx = withModelCallSequence(ctx)
 	if r.client == nil {
 		return protocol.Response{}, fmt.Errorf("chat completions client is required")
 	}
@@ -963,18 +971,21 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 		return protocol.Response{}, fmt.Errorf("model is required")
 	}
 
+	respID := newResponseID()
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 		EventType: "response.compact",
 		Phase:     "compact",
 		Status:    "model_call_started",
 		DetailsJSON: map[string]any{
-			"target_response_id": req.ResponseID,
-			"model":              model,
-			"history_items":      len(history),
+			"target_response_id":  req.ResponseID,
+			"compact_response_id": respID,
+			"model":               model,
+			"history_items":       len(history),
 		},
 	})
 	chatModel := r.cfg.ContextBudgetForModel(model).UpstreamModelOr(model)
-	chatResp, err := r.client.ChatCompletion(ctx, compactChatRequest(chatModel, history))
+	callCtx := withNextModelCallMetadata(ctx, ModelExchangeRoleCompact, respID)
+	chatResp, err := r.client.ChatCompletion(callCtx, compactChatRequest(chatModel, history))
 	if err != nil {
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
 			EventType: "response.compact",
@@ -982,8 +993,9 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 			Status:    "failed",
 			Message:   err.Error(),
 			DetailsJSON: map[string]any{
-				"target_response_id": req.ResponseID,
-				"model":              model,
+				"target_response_id":  req.ResponseID,
+				"compact_response_id": respID,
+				"model":               model,
 			},
 		})
 		return protocol.Response{}, err
@@ -1005,7 +1017,6 @@ func (r *Runtime) Compact(ctx context.Context, req protocol.CompactResponseReque
 		Status:  "completed",
 		Content: []protocol.ContentPart{{Type: "summary_text", Text: summary}},
 	}}
-	respID := newResponseID()
 	metadata := compactResponseMetadata(target.Metadata, req.Metadata, req.ResponseID, respID, history, inputItems, outputItems)
 	resp := protocol.Response{
 		ID:                 respID,
@@ -1324,7 +1335,12 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 	conversationID := audit.CodexConversationID(req.Metadata)
 
 	for {
-		chatResp, err := r.client.ChatCompletion(ctx, chatReq)
+		role := ModelExchangeRolePrimaryModelCall
+		if toolIterations > 0 {
+			role = ModelExchangeRoleToolFollowup
+		}
+		callCtx := withNextModelCallMetadata(ctx, role, responseID)
+		chatResp, err := r.client.ChatCompletion(callCtx, chatReq)
 		if err != nil {
 			return protocol.Response{}, err
 		}
