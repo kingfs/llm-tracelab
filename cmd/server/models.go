@@ -25,6 +25,8 @@ const (
 	codexConfigRequestMaxRetries = 2
 	codexConfigStreamMaxRetries  = 2
 	codexConfigStreamIdleTimeout = 120000
+	codexConfigToolOutputLimit   = 6000
+	codexConfigReasoningEffort   = "medium"
 )
 
 var modelsProfileAdoptionRequiredGates = []string{"schema_migration", "dry_run_diff", "conflict_report", "rollback_plan", "dsn_gated_tests"}
@@ -53,6 +55,8 @@ type modelsCodexProfileConfig struct {
 	Model                      string `json:"model"`
 	ModelContextWindow         int    `json:"model_context_window"`
 	ModelAutoCompactTokenLimit int    `json:"model_auto_compact_token_limit"`
+	ToolOutputTokenLimit       int    `json:"tool_output_token_limit"`
+	ModelReasoningEffort       string `json:"model_reasoning_effort"`
 }
 
 type modelsCodexProviderConfig struct {
@@ -78,8 +82,11 @@ type modelsCodexDiagnostics struct {
 	ProfileConflictStrategy           string                      `json:"profile_conflict_strategy"`
 	ProfileAdoptionRequiredGates      []string                    `json:"profile_adoption_required_gates"`
 	CapabilitySource                  string                      `json:"capability_source"`
+	ModelContextWindowSource          string                      `json:"model_context_window_source"`
 	CompactLimitSource                string                      `json:"compact_limit_source"`
 	CompactLimitMarginTokens          int                         `json:"compact_limit_margin_tokens"`
+	ToolOutputTokenLimitSource        string                      `json:"tool_output_token_limit_source"`
+	ModelReasoningEffortSource        string                      `json:"model_reasoning_effort_source"`
 	CompactHistoryItemThreshold       int                         `json:"compact_history_item_threshold"`
 	CompactHistoryItemThresholdSource string                      `json:"compact_history_item_threshold_source"`
 	ResponsesServerEnabled            bool                        `json:"responses_server_enabled"`
@@ -289,6 +296,9 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 	} else if match.Matched {
 		warnings = append(warnings, fmt.Sprintf("matched profile for model %q has no context_window_tokens; Codex token limits are emitted as 0", model))
 	}
+	contextWindowSource := codexMatchedProfileFieldSource(match, "context_window_tokens")
+	toolOutputLimit, toolOutputLimitSource := codexToolOutputTokenLimit(match)
+	reasoningEffort, reasoningEffortSource := codexModelReasoningEffort(match)
 	provider, providerWarnings := buildModelsCodexProviderConfig(cfg)
 	warnings = append(warnings, providerWarnings...)
 	historyThreshold, historyThresholdSource := codexCompactHistoryItemThreshold(cfg, match)
@@ -312,8 +322,11 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 		ProfileConflictStrategy:           "responses_server.model_profiles_wins",
 		ProfileAdoptionRequiredGates:      modelsProfileAdoptionRequiredGates,
 		CapabilitySource:                  "provider_upstream_capabilities",
+		ModelContextWindowSource:          contextWindowSource,
 		CompactLimitSource:                compactLimitSource,
 		CompactLimitMarginTokens:          contextWindow - autoCompactLimit,
+		ToolOutputTokenLimitSource:        toolOutputLimitSource,
+		ModelReasoningEffortSource:        reasoningEffortSource,
 		CompactHistoryItemThreshold:       historyThreshold,
 		CompactHistoryItemThresholdSource: historyThresholdSource,
 		ResponsesServerEnabled:            cfg.ResponsesServerEnabled(),
@@ -334,6 +347,8 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 			Model:                      model,
 			ModelContextWindow:         contextWindow,
 			ModelAutoCompactTokenLimit: autoCompactLimit,
+			ToolOutputTokenLimit:       toolOutputLimit,
+			ModelReasoningEffort:       reasoningEffort,
 		},
 		Provider:    provider,
 		Diagnostics: diagnostics,
@@ -831,6 +846,8 @@ func diagnoseModelsCodexLocalConfig(path string, suggestion modelsCodexConfigRes
 		compareModelsCodexStringField(profile, "profile.model", "model", suggestion.Profile.Model, false),
 		compareModelsCodexIntField(profile, "profile.model_context_window", "model_context_window", suggestion.Profile.ModelContextWindow),
 		compareModelsCodexIntField(profile, "profile.model_auto_compact_token_limit", "model_auto_compact_token_limit", suggestion.Profile.ModelAutoCompactTokenLimit),
+		compareModelsCodexOptionalIntField(profile, "profile.tool_output_token_limit", "tool_output_token_limit", suggestion.Profile.ToolOutputTokenLimit),
+		compareModelsCodexOptionalStringField(profile, "profile.model_reasoning_effort", "model_reasoning_effort", suggestion.Profile.ModelReasoningEffort, false),
 		compareModelsCodexStringField(provider, "provider.base_url", "base_url", suggestion.Provider.BaseURL, true),
 		compareModelsCodexStringField(provider, "provider.wire_api", "wire_api", suggestion.Provider.WireAPI, false),
 		compareModelsCodexStringField(provider, "provider.env_key", "env_key", suggestion.Provider.EnvKey, false),
@@ -899,6 +916,14 @@ func compareModelsCodexStringField(parent map[string]any, field string, key stri
 	return status
 }
 
+func compareModelsCodexOptionalStringField(parent map[string]any, field string, key string, expected string, redactURL bool) modelsCodexLocalFieldStatus {
+	status := compareModelsCodexStringField(parent, field, key, expected, redactURL)
+	if parent == nil || !status.Present {
+		status.Matched = true
+	}
+	return status
+}
+
 func compareModelsCodexIntField(parent map[string]any, field string, key string, expected int) modelsCodexLocalFieldStatus {
 	status := modelsCodexLocalFieldStatus{
 		Field:    field,
@@ -919,6 +944,14 @@ func compareModelsCodexIntField(parent map[string]any, field string, key string,
 	}
 	status.Actual = strconv.Itoa(actual)
 	status.Matched = actual == expected
+	return status
+}
+
+func compareModelsCodexOptionalIntField(parent map[string]any, field string, key string, expected int) modelsCodexLocalFieldStatus {
+	status := compareModelsCodexIntField(parent, field, key, expected)
+	if parent == nil || !status.Present {
+		status.Matched = true
+	}
 	return status
 }
 
@@ -1019,6 +1052,30 @@ func codexCompactHistoryItemThreshold(cfg *appconfig.Config, match appconfig.Res
 	return 0, "none"
 }
 
+func codexMatchedProfileFieldSource(match appconfig.ResponsesModelProfileMatch, field string) string {
+	if !match.Matched {
+		return "none"
+	}
+	return match.Source + "." + field
+}
+
+func codexToolOutputTokenLimit(match appconfig.ResponsesModelProfileMatch) (int, string) {
+	if match.Matched && match.Profile.ToolOutputTokenLimit > 0 {
+		return match.Profile.ToolOutputTokenLimit, match.Source + ".tool_output_token_limit"
+	}
+	return codexConfigToolOutputLimit, "default.tool_output_token_limit"
+}
+
+func codexModelReasoningEffort(match appconfig.ResponsesModelProfileMatch) (string, string) {
+	if match.Matched {
+		effort := strings.TrimSpace(match.Profile.ModelReasoningEffort)
+		if effort != "" {
+			return effort, match.Source + ".model_reasoning_effort"
+		}
+	}
+	return codexConfigReasoningEffort, "default.model_reasoning_effort"
+}
+
 func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 	fmt.Fprintf(w, "# llm-tracelab Codex config suggestion\n")
 	fmt.Fprintf(w, "# model: %s\n", result.Model)
@@ -1041,6 +1098,12 @@ func writeModelsCodexConfigText(w io.Writer, result modelsCodexConfigResult) {
 		result.Diagnostics.CatalogProfileRole,
 		result.Diagnostics.CapabilitySource,
 		strings.Join(result.Diagnostics.ProfilePrecedence, ","),
+	)
+	fmt.Fprintf(w, "# codex_profile_fields: model_context_window_source=%s model_auto_compact_token_limit_source=%s tool_output_token_limit_source=%s model_reasoning_effort_source=%s\n",
+		result.Diagnostics.ModelContextWindowSource,
+		result.Diagnostics.CompactLimitSource,
+		result.Diagnostics.ToolOutputTokenLimitSource,
+		result.Diagnostics.ModelReasoningEffortSource,
 	)
 	fmt.Fprintf(w, "# profile_adoption: provider_channel_profile_adoption=%s conflict_strategy=%s required_gates=%s\n",
 		result.Diagnostics.ProviderChannelProfileAdoption,
@@ -1098,7 +1161,9 @@ func modelsCodexConfigTOML(result modelsCodexConfigResult) string {
 	fmt.Fprintf(&b, "model_provider = %s\n", tomlString(result.Profile.ModelProvider))
 	fmt.Fprintf(&b, "model = %s\n", tomlString(result.Profile.Model))
 	fmt.Fprintf(&b, "model_context_window = %d\n", result.Profile.ModelContextWindow)
-	fmt.Fprintf(&b, "model_auto_compact_token_limit = %d\n\n", result.Profile.ModelAutoCompactTokenLimit)
+	fmt.Fprintf(&b, "model_auto_compact_token_limit = %d\n", result.Profile.ModelAutoCompactTokenLimit)
+	fmt.Fprintf(&b, "tool_output_token_limit = %d\n", result.Profile.ToolOutputTokenLimit)
+	fmt.Fprintf(&b, "model_reasoning_effort = %s\n\n", tomlString(result.Profile.ModelReasoningEffort))
 	fmt.Fprintf(&b, "[model_providers.%s]\n", tomlBareKey(result.Profile.ModelProvider))
 	fmt.Fprintf(&b, "name = %s\n", tomlString(result.Provider.Name))
 	fmt.Fprintf(&b, "base_url = %s\n", tomlString(result.Provider.BaseURL))

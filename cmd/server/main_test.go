@@ -599,6 +599,8 @@ responses_server:
       context_window_tokens: 100
     - name: "gpt-5"
       context_window_tokens: 200
+      tool_output_token_limit: 7000
+      model_reasoning_effort: high
       compact_history_item_threshold: 9
 upstreams:
   - id: openai
@@ -645,6 +647,8 @@ upstreams:
 				Model                      string `json:"model"`
 				ModelContextWindow         int    `json:"model_context_window"`
 				ModelAutoCompactTokenLimit int    `json:"model_auto_compact_token_limit"`
+				ToolOutputTokenLimit       int    `json:"tool_output_token_limit"`
+				ModelReasoningEffort       string `json:"model_reasoning_effort"`
 			} `json:"profile"`
 			Provider struct {
 				BaseURL       string `json:"base_url"`
@@ -666,8 +670,11 @@ upstreams:
 				ProfileConflictStrategy           string   `json:"profile_conflict_strategy"`
 				ProfileAdoptionRequiredGates      []string `json:"profile_adoption_required_gates"`
 				CapabilitySource                  string   `json:"capability_source"`
+				ModelContextWindowSource          string   `json:"model_context_window_source"`
 				CompactLimitSource                string   `json:"compact_limit_source"`
 				CompactLimitMarginTokens          int      `json:"compact_limit_margin_tokens"`
+				ToolOutputTokenLimitSource        string   `json:"tool_output_token_limit_source"`
+				ModelReasoningEffortSource        string   `json:"model_reasoning_effort_source"`
 				CompactHistoryItemThreshold       int      `json:"compact_history_item_threshold"`
 				CompactHistoryItemThresholdSource string   `json:"compact_history_item_threshold_source"`
 				ResponsesServerEnabled            bool     `json:"responses_server_enabled"`
@@ -688,7 +695,7 @@ upstreams:
 	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8181/v1" || envelope.Result.Provider.ResponsesPath != "/v1/responses" || envelope.Result.Provider.EnvKey != "LLM_TRACELAB_API_KEY" || envelope.Result.Provider.WireAPI != "responses" {
 		t.Fatalf("provider = %+v", envelope.Result.Provider)
 	}
-	if envelope.Result.Profile.ModelProvider != "llm-tracelab" || envelope.Result.Profile.Model != "gpt-5" || envelope.Result.Profile.ModelContextWindow != 200 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 160 {
+	if envelope.Result.Profile.ModelProvider != "llm-tracelab" || envelope.Result.Profile.Model != "gpt-5" || envelope.Result.Profile.ModelContextWindow != 200 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 160 || envelope.Result.Profile.ToolOutputTokenLimit != 7000 || envelope.Result.Profile.ModelReasoningEffort != "high" {
 		t.Fatalf("profile = %+v", envelope.Result.Profile)
 	}
 	if !envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Kind != "exact" || envelope.Result.Diagnostics.MatchedProfile.Index != 1 || envelope.Result.Diagnostics.MatchedProfile.Source != "responses_server.model_profiles[1].name" {
@@ -706,13 +713,18 @@ upstreams:
 	if envelope.Result.Diagnostics.CompactLimitSource != "responses_server.model_profiles[1].name.context_window_tokens_80_percent" || envelope.Result.Diagnostics.CompactLimitMarginTokens != 40 {
 		t.Fatalf("compact limit diagnostics = %+v", envelope.Result.Diagnostics)
 	}
+	if envelope.Result.Diagnostics.ModelContextWindowSource != "responses_server.model_profiles[1].name.context_window_tokens" ||
+		envelope.Result.Diagnostics.ToolOutputTokenLimitSource != "responses_server.model_profiles[1].name.tool_output_token_limit" ||
+		envelope.Result.Diagnostics.ModelReasoningEffortSource != "responses_server.model_profiles[1].name.model_reasoning_effort" {
+		t.Fatalf("codex profile field diagnostics = %+v", envelope.Result.Diagnostics)
+	}
 	if envelope.Result.Diagnostics.CompactHistoryItemThreshold != 9 || envelope.Result.Diagnostics.CompactHistoryItemThresholdSource != "responses_server.model_profiles[1].name.compact_history_item_threshold" || !envelope.Result.Diagnostics.ResponsesServerEnabled {
 		t.Fatalf("threshold diagnostics = %+v", envelope.Result.Diagnostics)
 	}
 	if len(envelope.Result.Warnings) != 0 {
 		t.Fatalf("warnings = %+v, want none", envelope.Result.Warnings)
 	}
-	if !strings.Contains(envelope.Result.TOML, `wire_api = "responses"`) || !strings.Contains(envelope.Result.TOML, `env_key = "LLM_TRACELAB_API_KEY"`) {
+	if !strings.Contains(envelope.Result.TOML, `wire_api = "responses"`) || !strings.Contains(envelope.Result.TOML, `env_key = "LLM_TRACELAB_API_KEY"`) || !strings.Contains(envelope.Result.TOML, `tool_output_token_limit = 7000`) || !strings.Contains(envelope.Result.TOML, `model_reasoning_effort = "high"`) {
 		t.Fatalf("toml = %s", envelope.Result.TOML)
 	}
 }
@@ -753,12 +765,15 @@ upstream:
 	}
 	for _, want := range []string{
 		`# profile_sources: runtime_profile_source=responses_server.model_profiles catalog_profile_role=available_for_runtime_opt_in capability_source=provider_upstream_capabilities precedence=responses_server.model_profiles,zero_limits_when_unmatched`,
+		`# codex_profile_fields: model_context_window_source=responses_server.model_profiles[0].pattern.context_window_tokens model_auto_compact_token_limit_source=responses_server.model_profiles[0].pattern.context_window_tokens_80_percent tool_output_token_limit_source=default.tool_output_token_limit model_reasoning_effort_source=default.model_reasoning_effort`,
 		`# profile_adoption: provider_channel_profile_adoption=report_only conflict_strategy=responses_server.model_profiles_wins required_gates=schema_migration,dry_run_diff,conflict_report,rollback_plan,dsn_gated_tests`,
 		`# profile_adoption_gates: adoption_ready=true blocking_gate_count=0 required_gate_statuses=schema_migration:implemented_runtime_opt_in,dry_run_diff:implemented_contract,conflict_report:implemented_contract,rollback_plan:implemented_contract,dsn_gated_tests:implemented_contract`,
 		`model_provider = "llm-tracelab"`,
 		`model = "qwen3-32b"`,
 		`model_context_window = 32000`,
 		`model_auto_compact_token_limit = 25600`,
+		`tool_output_token_limit = 6000`,
+		`model_reasoning_effort = "medium"`,
 		`[model_providers.llm-tracelab]`,
 		`base_url = "http://127.0.0.1:8080/openai/v1"`,
 		`env_key = "LLM_TRACELAB_API_KEY"`,
@@ -799,8 +814,10 @@ responses_server:
 	var envelope struct {
 		Result struct {
 			Profile struct {
-				ModelContextWindow         int `json:"model_context_window"`
-				ModelAutoCompactTokenLimit int `json:"model_auto_compact_token_limit"`
+				ModelContextWindow         int    `json:"model_context_window"`
+				ModelAutoCompactTokenLimit int    `json:"model_auto_compact_token_limit"`
+				ToolOutputTokenLimit       int    `json:"tool_output_token_limit"`
+				ModelReasoningEffort       string `json:"model_reasoning_effort"`
 			} `json:"profile"`
 			Provider struct {
 				BaseURL       string `json:"base_url"`
@@ -819,8 +836,8 @@ responses_server:
 	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
 	}
-	if envelope.Result.Profile.ModelContextWindow != 0 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 0 {
-		t.Fatalf("profile = %+v, want zero limits", envelope.Result.Profile)
+	if envelope.Result.Profile.ModelContextWindow != 0 || envelope.Result.Profile.ModelAutoCompactTokenLimit != 0 || envelope.Result.Profile.ToolOutputTokenLimit != 6000 || envelope.Result.Profile.ModelReasoningEffort != "medium" {
+		t.Fatalf("profile = %+v, want zero context limits with Codex defaults", envelope.Result.Profile)
 	}
 	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8182/custom/respond" || envelope.Result.Provider.ResponsesPath != "/custom/respond" {
 		t.Fatalf("provider = %+v", envelope.Result.Provider)
@@ -1387,6 +1404,8 @@ model_provider = "llm-tracelab"
 model = "gpt-5"
 model_context_window = 200
 model_auto_compact_token_limit = 160
+tool_output_token_limit = 6000
+model_reasoning_effort = "medium"
 
 [model_providers.llm-tracelab]
 name = "llm-tracelab"
@@ -1518,8 +1537,10 @@ type modelsCodexConfigEnvelopeForTest struct {
 	Command string `json:"command"`
 	Result  struct {
 		Profile struct {
-			ModelContextWindow         int `json:"model_context_window"`
-			ModelAutoCompactTokenLimit int `json:"model_auto_compact_token_limit"`
+			ModelContextWindow         int    `json:"model_context_window"`
+			ModelAutoCompactTokenLimit int    `json:"model_auto_compact_token_limit"`
+			ToolOutputTokenLimit       int    `json:"tool_output_token_limit"`
+			ModelReasoningEffort       string `json:"model_reasoning_effort"`
 		} `json:"profile"`
 		Diagnostics struct {
 			MatchedProfile struct {
@@ -1597,6 +1618,10 @@ type modelsCodexConfigEnvelopeForTest struct {
 			ProfileConflictStrategy      string   `json:"profile_conflict_strategy"`
 			ProfileAdoptionRequiredGates []string `json:"profile_adoption_required_gates"`
 			CapabilitySource             string   `json:"capability_source"`
+			ModelContextWindowSource     string   `json:"model_context_window_source"`
+			CompactLimitSource           string   `json:"compact_limit_source"`
+			ToolOutputTokenLimitSource   string   `json:"tool_output_token_limit_source"`
+			ModelReasoningEffortSource   string   `json:"model_reasoning_effort_source"`
 			DatabaseAvailable            bool     `json:"database_available"`
 			CatalogModelPresent          bool     `json:"catalog_model_present"`
 			ChannelModelPresent          bool     `json:"channel_model_present"`
