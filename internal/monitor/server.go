@@ -215,6 +215,8 @@ type responsesAuditTraceResponse struct {
 	RequestAudit      *responsesRequestAuditView    `json:"request_audit,omitempty"`
 	FinalResponse     *responsesFinalResponseView   `json:"final_response,omitempty"`
 	Events            []responsesExecutionEventView `json:"events"`
+	EntryExchange     *responsesExchangeView        `json:"entry_exchange,omitempty"`
+	ModelExchanges    []responsesExchangeView       `json:"model_exchanges"`
 	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
 	RawCassettes      []responsesRawCassetteView    `json:"raw_cassettes"`
 }
@@ -270,19 +272,45 @@ type responsesExecutionEventView struct {
 }
 
 type responsesUpstreamExchange struct {
-	ID             string    `json:"id"`
-	ResponseID     string    `json:"response_id,omitempty"`
-	RequestAuditID string    `json:"request_audit_id,omitempty"`
-	TraceID        string    `json:"trace_id,omitempty"`
-	CassettePath   string    `json:"cassette_path,omitempty"`
-	UpstreamID     string    `json:"upstream_id,omitempty"`
-	RouteTarget    string    `json:"route_target,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	Endpoint       string    `json:"endpoint,omitempty"`
-	StatusCode     int       `json:"status_code,omitempty"`
-	StartedAt      time.Time `json:"started_at,omitempty"`
-	CompletedAt    time.Time `json:"completed_at,omitempty"`
-	ErrorText      string    `json:"error_text,omitempty"`
+	ID               string    `json:"id"`
+	ResponseID       string    `json:"response_id,omitempty"`
+	RequestAuditID   string    `json:"request_audit_id,omitempty"`
+	TraceID          string    `json:"trace_id,omitempty"`
+	CassettePath     string    `json:"cassette_path,omitempty"`
+	ExchangeKind     string    `json:"exchange_kind,omitempty"`
+	ExchangeRole     string    `json:"exchange_role,omitempty"`
+	ParentExchangeID string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int       `json:"sequence_index,omitempty"`
+	UpstreamID       string    `json:"upstream_id,omitempty"`
+	RouteTarget      string    `json:"route_target,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Provider         string    `json:"provider,omitempty"`
+	Endpoint         string    `json:"endpoint,omitempty"`
+	StatusCode       int       `json:"status_code,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+	ErrorText        string    `json:"error_text,omitempty"`
+}
+
+type responsesExchangeView struct {
+	ID               string    `json:"id,omitempty"`
+	ResponseID       string    `json:"response_id,omitempty"`
+	RequestAuditID   string    `json:"request_audit_id,omitempty"`
+	TraceID          string    `json:"trace_id,omitempty"`
+	CassettePath     string    `json:"cassette_path,omitempty"`
+	ExchangeKind     string    `json:"exchange_kind,omitempty"`
+	ExchangeRole     string    `json:"exchange_role,omitempty"`
+	ParentExchangeID string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int       `json:"sequence_index,omitempty"`
+	UpstreamID       string    `json:"upstream_id,omitempty"`
+	RouteTarget      string    `json:"route_target,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Provider         string    `json:"provider,omitempty"`
+	Endpoint         string    `json:"endpoint,omitempty"`
+	StatusCode       int       `json:"status_code,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+	ErrorText        string    `json:"error_text,omitempty"`
 }
 
 type responsesFinalResponseView struct {
@@ -299,14 +327,18 @@ type responsesFinalResponseView struct {
 }
 
 type responsesRawCassetteView struct {
-	ExchangeID   string                         `json:"exchange_id,omitempty"`
-	TraceID      string                         `json:"trace_id,omitempty"`
-	CassettePath string                         `json:"cassette_path,omitempty"`
-	ReadError    string                         `json:"read_error,omitempty"`
-	Header       recordHeaderView               `json:"header,omitempty"`
-	Events       []recordfile.RecordEvent       `json:"events,omitempty"`
-	Request      recordfile.HTTPRequestSummary  `json:"request,omitempty"`
-	Response     recordfile.HTTPResponseSummary `json:"response,omitempty"`
+	ExchangeID       string                         `json:"exchange_id,omitempty"`
+	TraceID          string                         `json:"trace_id,omitempty"`
+	CassettePath     string                         `json:"cassette_path,omitempty"`
+	ExchangeKind     string                         `json:"exchange_kind,omitempty"`
+	ExchangeRole     string                         `json:"exchange_role,omitempty"`
+	ParentExchangeID string                         `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int                            `json:"sequence_index,omitempty"`
+	ReadError        string                         `json:"read_error,omitempty"`
+	Header           recordHeaderView               `json:"header,omitempty"`
+	Events           []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request          recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response         recordfile.HTTPResponseSummary `json:"response,omitempty"`
 }
 
 type responsesToolCallAuditView struct {
@@ -5366,18 +5398,24 @@ func responsesAuditTraceFromAudit(trace responsesaudit.RequestAuditTrace, respon
 		RequestAudit:      responsesRequestAuditFromAudit(trace.RequestAudit),
 		FinalResponse:     responsesFinalResponseFromAudit(trace.FinalResponse),
 		Events:            make([]responsesExecutionEventView, 0, len(trace.ExecutionEvents)),
+		ModelExchanges:    make([]responsesExchangeView, 0, len(trace.UpstreamExchanges)),
 		UpstreamExchanges: make([]responsesUpstreamExchange, 0, len(trace.UpstreamExchanges)),
 		RawCassettes:      make([]responsesRawCassetteView, 0, len(trace.RawCassettes)),
 	}
 	for _, event := range trace.ExecutionEvents {
 		out.Events = append(out.Events, responsesExecutionEventFromAudit(event))
 	}
-	for _, exchange := range trace.UpstreamExchanges {
-		out.UpstreamExchanges = append(out.UpstreamExchanges, responsesUpstreamExchangeFromAudit(exchange))
-	}
 	for _, cassette := range trace.RawCassettes {
 		out.RawCassettes = append(out.RawCassettes, responsesRawCassetteFromAudit(cassette))
 	}
+	cassetteByExchangeID := responsesRawCassettesByExchangeID(out.RawCassettes)
+	for _, exchange := range trace.UpstreamExchanges {
+		dto := responsesUpstreamExchangeFromAudit(exchange)
+		responsesApplyCassetteMetadata(&dto, cassetteByExchangeID[dto.ID])
+		out.UpstreamExchanges = append(out.UpstreamExchanges, dto)
+		out.ModelExchanges = append(out.ModelExchanges, responsesModelExchangeFromUpstream(dto))
+	}
+	out.EntryExchange = responsesEntryExchangeFromAudit(trace, out.RawCassettes)
 	return out
 }
 
@@ -5431,6 +5469,95 @@ func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchange
 	}
 }
 
+func responsesModelExchangeFromUpstream(exchange responsesUpstreamExchange) responsesExchangeView {
+	return responsesExchangeView{
+		ID:               exchange.ID,
+		ResponseID:       exchange.ResponseID,
+		RequestAuditID:   exchange.RequestAuditID,
+		TraceID:          exchange.TraceID,
+		CassettePath:     exchange.CassettePath,
+		ExchangeKind:     firstNonEmptyLocal(exchange.ExchangeKind, "model"),
+		ExchangeRole:     exchange.ExchangeRole,
+		ParentExchangeID: exchange.ParentExchangeID,
+		SequenceIndex:    exchange.SequenceIndex,
+		UpstreamID:       exchange.UpstreamID,
+		RouteTarget:      exchange.RouteTarget,
+		Model:            exchange.Model,
+		Provider:         exchange.Provider,
+		Endpoint:         exchange.Endpoint,
+		StatusCode:       exchange.StatusCode,
+		StartedAt:        exchange.StartedAt,
+		CompletedAt:      exchange.CompletedAt,
+		ErrorText:        exchange.ErrorText,
+	}
+}
+
+func responsesEntryExchangeFromAudit(trace responsesaudit.RequestAuditTrace, cassettes []responsesRawCassetteView) *responsesExchangeView {
+	for _, cassette := range cassettes {
+		if cassette.ExchangeKind != "entry" {
+			continue
+		}
+		meta := responsesRecordMeta(cassette.Header.Meta)
+		return &responsesExchangeView{
+			ID:               firstNonEmptyLocal(cassette.ExchangeID, meta.ExchangeID),
+			ResponseID:       firstNonEmptyLocal(meta.ResponseID, trace.RequestAudit.ResponseID, trace.FinalResponse.ResponseID),
+			RequestAuditID:   firstNonEmptyLocal(meta.RequestAuditID, trace.RequestAudit.ID),
+			TraceID:          firstNonEmptyLocal(cassette.TraceID, meta.RequestID),
+			CassettePath:     cassette.CassettePath,
+			ExchangeKind:     firstNonEmptyLocal(cassette.ExchangeKind, meta.ExchangeKind, "entry"),
+			ExchangeRole:     firstNonEmptyLocal(cassette.ExchangeRole, meta.ExchangeRole, "client_request"),
+			ParentExchangeID: firstNonEmptyLocal(cassette.ParentExchangeID, meta.ParentExchangeID),
+			SequenceIndex:    firstNonZero(cassette.SequenceIndex, meta.SequenceIndex),
+			Model:            meta.Model,
+			Provider:         meta.Provider,
+			Endpoint:         firstNonEmptyLocal(meta.Endpoint, trace.RequestAudit.Path),
+			StatusCode:       firstNonZero(meta.StatusCode, trace.FinalResponse.StatusCode),
+			CompletedAt:      trace.FinalResponse.CompletedAt,
+			ErrorText:        firstNonEmptyLocal(meta.Error, trace.FinalResponse.ErrorText),
+		}
+	}
+	if trace.RequestAudit.ID == "" && trace.RequestAudit.ResponseID == "" && trace.FinalResponse.ResponseID == "" {
+		return nil
+	}
+	return &responsesExchangeView{
+		ID:             trace.RequestAudit.ID,
+		ResponseID:     firstNonEmptyLocal(trace.RequestAudit.ResponseID, trace.FinalResponse.ResponseID),
+		RequestAuditID: trace.RequestAudit.ID,
+		ExchangeKind:   "entry",
+		ExchangeRole:   "client_request",
+		Model:          trace.FinalResponse.Model,
+		Endpoint:       firstNonEmptyLocal(trace.FinalResponse.Endpoint, trace.RequestAudit.Path),
+		StatusCode:     trace.FinalResponse.StatusCode,
+		StartedAt:      trace.RequestAudit.CreatedAt,
+		CompletedAt:    trace.FinalResponse.CompletedAt,
+		ErrorText:      firstNonEmptyLocal(trace.RequestAudit.ErrorText, trace.FinalResponse.ErrorText),
+	}
+}
+
+func responsesRawCassettesByExchangeID(cassettes []responsesRawCassetteView) map[string]responsesRawCassetteView {
+	out := make(map[string]responsesRawCassetteView, len(cassettes))
+	for _, cassette := range cassettes {
+		if cassette.ExchangeID != "" {
+			out[cassette.ExchangeID] = cassette
+		}
+	}
+	return out
+}
+
+func responsesApplyCassetteMetadata(exchange *responsesUpstreamExchange, cassette responsesRawCassetteView) {
+	if exchange == nil {
+		return
+	}
+	meta := responsesRecordMeta(cassette.Header.Meta)
+	exchange.ExchangeKind = firstNonEmptyLocal(exchange.ExchangeKind, cassette.ExchangeKind, meta.ExchangeKind, "model")
+	exchange.ExchangeRole = firstNonEmptyLocal(exchange.ExchangeRole, cassette.ExchangeRole, meta.ExchangeRole)
+	exchange.ParentExchangeID = firstNonEmptyLocal(exchange.ParentExchangeID, cassette.ParentExchangeID, meta.ParentExchangeID)
+	exchange.SequenceIndex = firstNonZero(exchange.SequenceIndex, cassette.SequenceIndex, meta.SequenceIndex)
+	exchange.Provider = firstNonEmptyLocal(exchange.Provider, meta.Provider)
+	exchange.Model = firstNonEmptyLocal(exchange.Model, meta.Model)
+	exchange.Endpoint = firstNonEmptyLocal(exchange.Endpoint, meta.Endpoint)
+}
+
 func responsesFinalResponseFromAudit(response responsesaudit.FinalResponseView) *responsesFinalResponseView {
 	if response.ResponseID == "" && response.RequestAuditID == "" && response.Status == "" {
 		return nil
@@ -5450,11 +5577,16 @@ func responsesFinalResponseFromAudit(response responsesaudit.FinalResponseView) 
 }
 
 func responsesRawCassetteFromAudit(cassette responsesaudit.RawCassetteView) responsesRawCassetteView {
+	meta := responsesRecordMeta(cassette.Header.Meta)
 	return responsesRawCassetteView{
-		ExchangeID:   cassette.ExchangeID,
-		TraceID:      cassette.TraceID,
-		CassettePath: cassette.CassettePath,
-		ReadError:    cassette.ReadError,
+		ExchangeID:       firstNonEmptyLocal(cassette.ExchangeID, meta.ExchangeID),
+		TraceID:          firstNonEmptyLocal(cassette.TraceID, meta.RequestID),
+		CassettePath:     cassette.CassettePath,
+		ExchangeKind:     meta.ExchangeKind,
+		ExchangeRole:     meta.ExchangeRole,
+		ParentExchangeID: meta.ParentExchangeID,
+		SequenceIndex:    meta.SequenceIndex,
+		ReadError:        cassette.ReadError,
 		Header: recordHeaderView{
 			Version: cassette.Header.Version,
 			Meta:    cassette.Header.Meta,
@@ -5465,6 +5597,53 @@ func responsesRawCassetteFromAudit(cassette responsesaudit.RawCassetteView) resp
 		Request:  cassette.Request,
 		Response: cassette.Response,
 	}
+}
+
+type responsesRecordMetaView struct {
+	RequestID        string
+	ResponseID       string
+	RequestAuditID   string
+	ExchangeID       string
+	ExchangeKind     string
+	ExchangeRole     string
+	ParentExchangeID string
+	SequenceIndex    int
+	Model            string
+	Provider         string
+	Endpoint         string
+	StatusCode       int
+	Error            string
+}
+
+func responsesRecordMeta(value any) responsesRecordMetaView {
+	meta, ok := value.(recordfile.MetaData)
+	if !ok {
+		return responsesRecordMetaView{}
+	}
+	return responsesRecordMetaView{
+		RequestID:        meta.RequestID,
+		ResponseID:       meta.ResponseID,
+		RequestAuditID:   meta.RequestAuditID,
+		ExchangeID:       meta.ExchangeID,
+		ExchangeKind:     meta.ExchangeKind,
+		ExchangeRole:     meta.ExchangeRole,
+		ParentExchangeID: meta.ParentExchangeID,
+		SequenceIndex:    meta.SequenceIndex,
+		Model:            meta.Model,
+		Provider:         meta.Provider,
+		Endpoint:         meta.Endpoint,
+		StatusCode:       meta.StatusCode,
+		Error:            meta.Error,
+	}
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func responsesToolCallAuditFromAudit(record responsesaudit.ToolCallAuditView, includePayloads bool) responsesToolCallAuditView {

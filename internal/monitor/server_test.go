@@ -638,6 +638,14 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 		header.Meta.ResponseID = "resp-monitor-1"
 		header.Meta.ConversationID = "thread-monitor-1"
 		header.Meta.ClientRequestID = "client-monitor-1"
+		header.Meta.ExchangeID = "upex-monitor-1"
+		header.Meta.ExchangeKind = "model"
+		header.Meta.ExchangeRole = "primary_model_call"
+		header.Meta.ParentExchangeID = "reqaudit-monitor-1"
+		header.Meta.SequenceIndex = 2
+		header.Meta.Provider = "openai"
+		header.Meta.Model = "gpt-5"
+		header.Meta.Endpoint = "/v1/chat/completions"
 	})
 	if err := os.WriteFile(cassettePath, cassette, 0o644); err != nil {
 		t.Fatalf("write cassette: %v", err)
@@ -662,8 +670,9 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
+	responseBody := rr.Body.Bytes()
 	var payload responsesAuditTraceResponse
-	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if payload.RequestAudit == nil || payload.RequestAudit.ID != "reqaudit-monitor-1" {
@@ -675,14 +684,35 @@ func TestResponsesAuditTraceAPIHandler(t *testing.T) {
 	if len(payload.UpstreamExchanges) != 1 || payload.UpstreamExchanges[0].TraceID != "trace-monitor-1" {
 		t.Fatalf("upstream exchanges = %+v, want trace-monitor-1", payload.UpstreamExchanges)
 	}
+	if got := payload.UpstreamExchanges[0]; got.ExchangeKind != "model" || got.ExchangeRole != "primary_model_call" || got.ParentExchangeID != "reqaudit-monitor-1" || got.SequenceIndex != 2 {
+		t.Fatalf("upstream exchange metadata = %+v, want model primary_model_call reqaudit-monitor-1 seq 2", got)
+	}
+	if payload.EntryExchange == nil || payload.EntryExchange.ExchangeKind != "entry" || payload.EntryExchange.ExchangeRole != "client_request" || payload.EntryExchange.RequestAuditID != "reqaudit-monitor-1" {
+		t.Fatalf("entry exchange = %+v, want fallback entry summary for reqaudit-monitor-1", payload.EntryExchange)
+	}
+	if len(payload.ModelExchanges) != 1 || payload.ModelExchanges[0].ExchangeKind != "model" || payload.ModelExchanges[0].ExchangeRole != "primary_model_call" || payload.ModelExchanges[0].SequenceIndex != 2 {
+		t.Fatalf("model exchanges = %+v, want model metadata copied from cassette", payload.ModelExchanges)
+	}
 	if payload.FinalResponse == nil || payload.FinalResponse.ResponseID != "resp-monitor-1" || payload.FinalResponse.ClientRequestID != "client-monitor-1" {
 		t.Fatalf("final response = %+v, want response/client correlation", payload.FinalResponse)
 	}
 	if len(payload.RawCassettes) != 1 || payload.RawCassettes[0].TraceID != "trace-monitor-1" || payload.RawCassettes[0].ReadError != "" {
 		t.Fatalf("raw cassettes = %+v, want linked readable cassette", payload.RawCassettes)
 	}
+	if got := payload.RawCassettes[0]; got.ExchangeKind != "model" || got.ExchangeRole != "primary_model_call" || got.ParentExchangeID != "reqaudit-monitor-1" || got.SequenceIndex != 2 {
+		t.Fatalf("raw cassette metadata = %+v, want model primary_model_call reqaudit-monitor-1 seq 2", got)
+	}
 	if !strings.Contains(payload.RawCassettes[0].Response.Body, `"id":"resp-monitor-1"`) {
 		t.Fatalf("raw cassette response body = %q, want final upstream response preview", payload.RawCassettes[0].Response.Body)
+	}
+	var rawPayload map[string]json.RawMessage
+	if err := json.Unmarshal(responseBody, &rawPayload); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	for _, key := range []string{"entry_exchange", "model_exchanges", "upstream_exchanges", "raw_cassettes"} {
+		if _, ok := rawPayload[key]; !ok {
+			t.Fatalf("response missing JSON key %q: %s", key, string(responseBody))
+		}
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace", nil)

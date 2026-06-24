@@ -314,7 +314,8 @@ function formatBool(value) {
 function ResponsesAuditTrace({ trace }) {
   const audit = trace.request_audit || {};
   const events = trace.events || [];
-  const exchanges = trace.upstream_exchanges || [];
+  const entryExchange = trace.entry_exchange || null;
+  const exchanges = trace.model_exchanges?.length ? trace.model_exchanges : (trace.upstream_exchanges || []);
   return (
     <div className="responses-audit-trace">
       <div className="finding-card responses-audit-record">
@@ -346,6 +347,8 @@ function ResponsesAuditTrace({ trace }) {
           </div>
         </div>
       </div>
+
+      {entryExchange ? <ResponsesEntryExchangeSummary exchange={entryExchange} /> : null}
 
       <section className="responses-audit-section">
         <div className="panel-head panel-head-compact">
@@ -386,13 +389,37 @@ function ResponsesAuditTrace({ trace }) {
       <section className="responses-audit-section">
         <div className="panel-head panel-head-compact">
           <div>
-            <p className="eyebrow">Upstream exchanges</p>
+            <p className="eyebrow">Model exchanges</p>
             <h2>{exchanges.length} exchange{exchanges.length === 1 ? "" : "s"}</h2>
           </div>
         </div>
-        {exchanges.length ? <ResponsesExchangeTable exchanges={exchanges} /> : <EmptyState title="No upstream exchanges" detail="No recorded upstream exchange is linked to this audit record." compact />}
+        {exchanges.length ? <ResponsesExchangeTable exchanges={exchanges} /> : <EmptyState title="No model exchanges" detail="No recorded model exchange is linked to this audit record." compact />}
       </section>
     </div>
+  );
+}
+
+function ResponsesEntryExchangeSummary({ exchange }) {
+  return (
+    <section className="responses-audit-section">
+      <div className="panel-head panel-head-compact">
+        <div>
+          <p className="eyebrow">Entry exchange</p>
+          <h2>{exchange.exchange_role || exchange.exchange_kind || "client request"}</h2>
+        </div>
+        <InlineTag tone={exchange.error_text || Number(exchange.status_code || 0) >= 400 ? "danger" : "green"}>{exchange.status_code || (exchange.error_text ? "error" : "entry")}</InlineTag>
+      </div>
+      <div className="detail-meta-strip responses-entry-exchange-summary">
+        <DetailMetaPill label="kind" value={exchange.exchange_kind || "entry"} />
+        <DetailMetaPill label="role" value={exchange.exchange_role || "-"} />
+        <DetailMetaPill label="sequence" value={formatSequence(exchange.sequence_index)} />
+        <DetailMetaPill label="model" value={exchange.model || "-"} />
+        <DetailMetaPill label="provider" value={exchange.provider || "-"} />
+        <DetailMetaPill label="endpoint" value={exchange.endpoint || "-"} mono />
+        <DetailMetaPill label="cassette" value={exchange.cassette_path || "-"} mono />
+      </div>
+      {exchange.error_text ? <pre className="timeline-message responses-audit-error">{exchange.error_text}</pre> : null}
+    </section>
   );
 }
 
@@ -400,26 +427,40 @@ function ResponsesExchangeTable({ exchanges }) {
   return (
     <div className="responses-exchange-table">
       <div className="responses-exchange-head">
-        <span>Trace</span>
-        <span>Upstream</span>
-        <span>Model</span>
+        <span>Exchange</span>
+        <span>Model / provider</span>
+        <span>Endpoint</span>
         <span>Status</span>
+        <span>Trace</span>
+        <span>Cassette</span>
         <span>Started</span>
       </div>
       {exchanges.map((exchange) => (
-        <div className="responses-exchange-row" key={exchange.id}>
-          <span className="mono">{exchange.trace_id ? <Link to={`/traces/${encodeURIComponent(exchange.trace_id)}`}>{exchange.trace_id}</Link> : exchange.id}</span>
-          <span>{exchange.upstream_id || exchange.route_target || "-"}</span>
-          <span>{exchange.model || exchange.endpoint || "-"}</span>
+        <div className="responses-exchange-row" key={exchange.id || exchange.trace_id || `${exchange.exchange_role || "exchange"}-${exchange.sequence_index || 0}`}>
+          <span>
+            <span className="responses-exchange-primary">{exchange.exchange_role || exchange.exchange_kind || "model"}</span>
+            <span className="responses-exchange-subline">{exchange.exchange_kind || "model"} / seq {formatSequence(exchange.sequence_index)}</span>
+          </span>
+          <span>
+            <span className="responses-exchange-primary">{exchange.model || "-"}</span>
+            <span className="responses-exchange-subline">{exchange.provider || exchange.upstream_id || exchange.route_target || "-"}</span>
+          </span>
+          <span className="mono">{exchange.endpoint || "-"}</span>
           <span>
             <InlineTag tone={exchange.error_text || Number(exchange.status_code || 0) >= 400 ? "danger" : "green"}>{exchange.status_code || (exchange.error_text ? "error" : "-")}</InlineTag>
           </span>
+          <span className="mono">{exchange.trace_id ? <Link to={`/traces/${encodeURIComponent(exchange.trace_id)}`}>{exchange.trace_id}</Link> : exchange.id || "-"}</span>
+          <span className="mono">{exchange.cassette_path || "-"}</span>
           <span>{formatDateTime(exchange.started_at)}</span>
           {exchange.error_text ? <span className="responses-exchange-error">{exchange.error_text}</span> : null}
         </div>
       ))}
     </div>
   );
+}
+
+function formatSequence(value) {
+  return Number.isFinite(Number(value)) && Number(value) !== 0 ? String(value) : "0";
 }
 
 function formatJSON(value) {
