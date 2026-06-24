@@ -119,6 +119,62 @@ func TestRedactRoutingBaseURLRemovesCredentialsAndSensitiveQuery(t *testing.T) {
 	}
 }
 
+func TestMCPHostedExecutorOptionsMapsToolConfig(t *testing.T) {
+	disabled := false
+	options := mcpHostedExecutorOptions(config.MCPToolConfig{
+		Enabled:          true,
+		DefaultTimeoutMS: 2500,
+		MaxResultBytes:   4096,
+		Servers: []config.MCPToolServerConfig{{
+			ID:             "docs",
+			Label:          "Docs",
+			URL:            "https://mcp.example.com/mcp",
+			BearerTokenEnv: "DOCS_MCP_TOKEN",
+			EnabledTools:   []string{"search", "fetch"},
+			DisabledTools:  []string{"delete"},
+		}, {
+			ID:      "disabled",
+			URL:     "https://disabled.example.com/mcp",
+			Enabled: &disabled,
+		}},
+	})
+
+	if !options.Enabled {
+		t.Fatalf("options.Enabled = false, want true")
+	}
+	if len(options.Servers) != 2 {
+		t.Fatalf("len(options.Servers) = %d, want 2", len(options.Servers))
+	}
+	first := options.Servers[0]
+	if first.ID != "docs" || first.Label != "Docs" || first.URL != "https://mcp.example.com/mcp" || first.BearerTokenEnv != "DOCS_MCP_TOKEN" || !first.Enabled {
+		t.Fatalf("first server = %+v, want mapped enabled server", first)
+	}
+	if first.Timeout != 2500*time.Millisecond || first.MaxResultBytes != 4096 {
+		t.Fatalf("first server limits = %s/%d, want 2500ms/4096", first.Timeout, first.MaxResultBytes)
+	}
+	if strings.Join(first.AllowedTools, ",") != "search,fetch" || strings.Join(first.DeniedTools, ",") != "delete" {
+		t.Fatalf("first server filters = %+v/%+v", first.AllowedTools, first.DeniedTools)
+	}
+	if options.Servers[1].Enabled {
+		t.Fatalf("second server Enabled = true, want false")
+	}
+}
+
+func TestMCPHostedExecutorOptionsDisabledWithoutEnabledServers(t *testing.T) {
+	disabled := false
+	options := mcpHostedExecutorOptions(config.MCPToolConfig{
+		Enabled: true,
+		Servers: []config.MCPToolServerConfig{{
+			ID:      "disabled",
+			Enabled: &disabled,
+		}},
+	})
+
+	if options.Enabled {
+		t.Fatalf("options.Enabled = true, want false without enabled servers")
+	}
+}
+
 func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	attrs := candidateEventAttributes([]router.CandidateDecision{{
 		ID:             "primary",

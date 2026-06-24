@@ -28,6 +28,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
 	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	mcptools "github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -451,6 +452,12 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			}
 			runtimeOptions = append(runtimeOptions, responsesruntime.WithWebSearchProvider(provider))
 		}
+		if cfg.MCPToolsEnabled() {
+			mcpOptions := mcpHostedExecutorOptions(cfg.MCPToolsConfig())
+			if mcpOptions.Enabled {
+				runtimeOptions = append(runtimeOptions, responsesruntime.WithMCPHostedExecutor(mcptools.NewExecutor(mcpOptions)))
+			}
+		}
 		if functionExecutorManager == nil {
 			functionExecutorManager, err = functionexec.NewManager(cfg.ResponsesFunctionExecutorsConfig())
 			if err != nil {
@@ -566,6 +573,33 @@ func sameRuntimeModelProfile(left responsesruntime.ModelProfile, right responses
 		left.Budget.ContextWindowTokens == right.Budget.ContextWindowTokens &&
 		left.Budget.MaxOutputTokens == right.Budget.MaxOutputTokens &&
 		left.Budget.CompactHistoryItemThreshold == right.Budget.CompactHistoryItemThreshold
+}
+
+func mcpHostedExecutorOptions(cfg config.MCPToolConfig) mcptools.Options {
+	timeout := time.Duration(cfg.DefaultTimeoutMS) * time.Millisecond
+	servers := make([]mcptools.ServerDescriptor, 0, len(cfg.Servers))
+	enabledServers := 0
+	for _, server := range cfg.Servers {
+		enabled := server.EnabledOrDefault()
+		if enabled {
+			enabledServers++
+		}
+		servers = append(servers, mcptools.ServerDescriptor{
+			ID:             server.ID,
+			Label:          server.Label,
+			Enabled:        enabled,
+			URL:            server.URL,
+			BearerTokenEnv: server.BearerTokenEnv,
+			Timeout:        timeout,
+			MaxResultBytes: cfg.MaxResultBytes,
+			AllowedTools:   append([]string(nil), server.EnabledTools...),
+			DeniedTools:    append([]string(nil), server.DisabledTools...),
+		})
+	}
+	return mcptools.Options{
+		Enabled: cfg.Enabled && enabledServers > 0,
+		Servers: servers,
+	}
 }
 
 func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier, managers ...*functionexec.Manager) (*Handler, error) {
