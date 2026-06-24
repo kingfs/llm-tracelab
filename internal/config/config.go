@@ -173,6 +173,8 @@ type ResponsesModelProfileConfig struct {
 	Pattern                     string                         `yaml:"pattern"`
 	ContextWindowTokens         int                            `yaml:"context_window_tokens"`
 	MaxOutputTokens             int                            `yaml:"max_output_tokens"`
+	ToolOutputTokenLimit        int                            `yaml:"tool_output_token_limit"`
+	ModelReasoningEffort        string                         `yaml:"model_reasoning_effort"`
 	CompactHistoryItemThreshold int                            `yaml:"compact_history_item_threshold"`
 	UpstreamModel               string                         `yaml:"upstream_model"`
 	TokenizeCounter             ResponsesTokenizeCounterConfig `yaml:"tokenize_counter"`
@@ -943,6 +945,7 @@ func (c Config) ResponsesModelProfiles() []ResponsesModelProfileConfig {
 	for _, profile := range c.ResponsesServer.ModelProfiles {
 		profile.Name = strings.TrimSpace(profile.Name)
 		profile.Pattern = strings.TrimSpace(profile.Pattern)
+		profile.ModelReasoningEffort = strings.TrimSpace(profile.ModelReasoningEffort)
 		profile.UpstreamModel = strings.TrimSpace(profile.UpstreamModel)
 		profile.TokenizeCounter.UpstreamID = strings.TrimSpace(profile.TokenizeCounter.UpstreamID)
 		profiles = append(profiles, profile)

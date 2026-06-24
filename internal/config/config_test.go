@@ -559,6 +559,8 @@ responses_server:
     - name: "qwen3"
       context_window_tokens: 32768
       max_output_tokens: 4096
+      tool_output_token_limit: 6000
+      model_reasoning_effort: " high "
       compact_history_item_threshold: 8
       upstream_model: "qwen/qwen3"
       tokenize_counter:
@@ -602,7 +604,7 @@ responses_server:
 	if len(profiles) != 2 {
 		t.Fatalf("ResponsesModelProfiles() len = %d, want 2", len(profiles))
 	}
-	if got := profiles[0]; got.Name != "qwen3" || got.ContextWindowTokens != 32768 || got.MaxOutputTokens != 4096 || got.CompactHistoryItemThreshold != 8 || got.UpstreamModel != "qwen/qwen3" {
+	if got := profiles[0]; got.Name != "qwen3" || got.ContextWindowTokens != 32768 || got.MaxOutputTokens != 4096 || got.ToolOutputTokenLimit != 6000 || got.ModelReasoningEffort != "high" || got.CompactHistoryItemThreshold != 8 || got.UpstreamModel != "qwen/qwen3" {
 		t.Fatalf("first model profile = %+v", got)
 	}
 	if got := profiles[0].TokenizeCounter; got.Enabled == nil || !*got.Enabled || got.UpstreamID != "primary" || got.Timeout != 750*time.Millisecond {
