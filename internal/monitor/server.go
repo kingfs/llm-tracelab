@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	llmspecs "github.com/kingfs/go-llm-specs"
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
@@ -1096,13 +1097,54 @@ type channelModelsResponse struct {
 }
 
 type channelModelItem struct {
-	Model       string    `json:"model"`
-	DisplayName string    `json:"display_name,omitempty"`
-	Source      string    `json:"source"`
-	Enabled     bool      `json:"enabled"`
-	FirstSeenAt time.Time `json:"first_seen_at"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
-	LastProbeAt time.Time `json:"last_probe_at,omitempty"`
+	Model                       string    `json:"model"`
+	DisplayName                 string    `json:"display_name,omitempty"`
+	Source                      string    `json:"source"`
+	Enabled                     bool      `json:"enabled"`
+	SupportsResponses           *bool     `json:"supports_responses,omitempty"`
+	SupportsChatCompletions     *bool     `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings          *bool     `json:"supports_embeddings,omitempty"`
+	ContextWindow               *int      `json:"context_window,omitempty"`
+	MaxOutputTokens             *int      `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int      `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string    `json:"upstream_model,omitempty"`
+	ProfileSource               string    `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string    `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string  `json:"input_modalities,omitempty"`
+	OutputModalities            []string  `json:"output_modalities,omitempty"`
+	FirstSeenAt                 time.Time `json:"first_seen_at"`
+	LastSeenAt                  time.Time `json:"last_seen_at"`
+	LastProbeAt                 time.Time `json:"last_probe_at,omitempty"`
+}
+
+type modelSpecLookupResponse struct {
+	Query       string                `json:"query"`
+	Matched     bool                  `json:"matched"`
+	Suggestion  *modelSpecSuggestion  `json:"suggestion,omitempty"`
+	Candidates  []modelSpecSuggestion `json:"candidates,omitempty"`
+	RefreshedAt time.Time             `json:"refreshed_at"`
+}
+
+type modelSpecSuggestion struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Provider         string   `json:"provider"`
+	Family           string   `json:"family"`
+	Series           string   `json:"series"`
+	Summary          string   `json:"summary"`
+	Description      string   `json:"description,omitempty"`
+	DescriptionCN    string   `json:"description_cn,omitempty"`
+	Tags             []string `json:"tags"`
+	Aliases          []string `json:"aliases"`
+	ContextWindow    int      `json:"context_window"`
+	MaxOutputTokens  int      `json:"max_output_tokens"`
+	Capabilities     []string `json:"capabilities"`
+	SupportsChat     bool     `json:"supports_chat_completions"`
+	SupportsTools    bool     `json:"supports_tool_calling"`
+	SupportsJSON     bool     `json:"supports_json_mode"`
+	SupportsEmbeds   bool     `json:"supports_embeddings"`
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
 }
 
 type channelProbeResponse struct {
@@ -1215,7 +1257,17 @@ func (u *channelHeaderUpdate) UnmarshalJSON(data []byte) error {
 }
 
 type channelModelPatchRequest struct {
-	Enabled bool `json:"enabled"`
+	DisplayName                 *string `json:"display_name"`
+	Enabled                     *bool   `json:"enabled"`
+	SupportsResponses           *bool   `json:"supports_responses"`
+	SupportsChatCompletions     *bool   `json:"supports_chat_completions"`
+	SupportsEmbeddings          *bool   `json:"supports_embeddings"`
+	ContextWindow               *int    `json:"context_window"`
+	MaxOutputTokens             *int    `json:"max_output_tokens"`
+	CompactHistoryItemThreshold *int    `json:"compact_history_item_threshold"`
+	UpstreamModel               *string `json:"upstream_model"`
+	ProfileSource               *string `json:"profile_source"`
+	ProfileAdoptionStatus       *string `json:"profile_adoption_status"`
 }
 
 type channelModelBatchPatchRequest struct {
@@ -1285,11 +1337,23 @@ type modelDetailResponse struct {
 }
 
 type modelChannelItem struct {
-	ChannelID string           `json:"channel_id"`
-	Model     string           `json:"model"`
-	Enabled   bool             `json:"enabled"`
-	Source    string           `json:"source"`
-	Summary   usageSummaryView `json:"summary"`
+	ChannelID                   string           `json:"channel_id"`
+	Model                       string           `json:"model"`
+	DisplayName                 string           `json:"display_name,omitempty"`
+	Enabled                     bool             `json:"enabled"`
+	Source                      string           `json:"source"`
+	SupportsResponses           *bool            `json:"supports_responses,omitempty"`
+	SupportsChatCompletions     *bool            `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings          *bool            `json:"supports_embeddings,omitempty"`
+	ContextWindow               *int             `json:"context_window,omitempty"`
+	MaxOutputTokens             *int             `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int             `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string           `json:"upstream_model,omitempty"`
+	ProfileSource               string           `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string           `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string         `json:"input_modalities,omitempty"`
+	OutputModalities            []string         `json:"output_modalities,omitempty"`
+	Summary                     usageSummaryView `json:"summary"`
 }
 
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
@@ -2098,8 +2162,30 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
 			return
 		}
-		model := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/models/"), "/")
+		relativePath := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/models/"), "/")
+		if relativePath == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasSuffix(relativePath, "/spec-lookup") {
+			model := strings.TrimSuffix(relativePath, "/spec-lookup")
+			if model == "" || strings.Contains(model, "/") {
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodPost {
+				http.NotFound(w, r)
+				return
+			}
+			writeJSON(w, http.StatusOK, modelSpecLookup(model))
+			return
+		}
+		model := relativePath
 		if model == "" || strings.Contains(model, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return
 		}
@@ -2120,17 +2206,118 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			RefreshedAt: time.Now().UTC(),
 			Window:      windowLabel,
 		}
+		modelRecords := map[string]store.ChannelModelRecord{}
+		if records, err := st.ListChannelModels("", false); err == nil {
+			for _, record := range records {
+				if strings.EqualFold(record.Model, model) {
+					modelRecords[record.ChannelID] = record
+				}
+			}
+		}
 		for _, channelRecord := range detail.Channels {
-			resp.Channels = append(resp.Channels, modelChannelItem{
+			item := modelChannelItem{
 				ChannelID: channelRecord.ChannelID,
 				Model:     channelRecord.Model,
 				Enabled:   channelRecord.Enabled,
 				Source:    channelRecord.Source,
 				Summary:   usageSummaryViewFromRecord(channelRecord.Summary),
-			})
+			}
+			if record, ok := modelRecords[channelRecord.ChannelID]; ok {
+				enrichModelChannelItemFromRecord(&item, record)
+			}
+			resp.Channels = append(resp.Channels, item)
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+func modelSpecLookup(model string) modelSpecLookupResponse {
+	model = strings.TrimSpace(model)
+	resp := modelSpecLookupResponse{
+		Query:       model,
+		RefreshedAt: time.Now().UTC(),
+	}
+	if spec, ok := llmspecs.Get(model); ok {
+		suggestion := modelSpecSuggestionFromSpec(spec)
+		resp.Matched = true
+		resp.Suggestion = &suggestion
+		return resp
+	}
+	candidates := llmspecs.Search(model, 5)
+	resp.Candidates = make([]modelSpecSuggestion, 0, len(candidates))
+	for _, candidate := range candidates {
+		resp.Candidates = append(resp.Candidates, modelSpecSuggestionFromSpec(candidate))
+	}
+	if len(resp.Candidates) > 0 {
+		resp.Suggestion = &resp.Candidates[0]
+	}
+	return resp
+}
+
+func modelSpecSuggestionFromSpec(model llmspecs.Model) modelSpecSuggestion {
+	features := model.Features()
+	card := model.Card()
+	return modelSpecSuggestion{
+		ID:               model.ID(),
+		Name:             model.Name(),
+		Provider:         model.Provider(),
+		Family:           model.Family(),
+		Series:           model.Series(),
+		Summary:          model.Summary(),
+		Description:      model.Description(),
+		DescriptionCN:    model.DescriptionCN(),
+		Tags:             append([]string(nil), model.Tags()...),
+		Aliases:          append([]string(nil), model.Aliases()...),
+		ContextWindow:    model.ContextLength(),
+		MaxOutputTokens:  model.MaxOutput(),
+		Capabilities:     features.ToStrings(),
+		SupportsChat:     model.HasCapability(llmspecs.CapChat),
+		SupportsTools:    model.HasCapability(llmspecs.CapFunctionCall),
+		SupportsJSON:     model.HasCapability(llmspecs.CapJsonMode),
+		SupportsEmbeds:   model.HasCapability(llmspecs.CapEmbedding),
+		InputModalities:  inputModalitiesFromCapabilities(card.Features),
+		OutputModalities: outputModalitiesFromCapabilities(card.Features),
+	}
+}
+
+func inputModalitiesFromCapabilities(features llmspecs.Capability) []string {
+	out := make([]string, 0, 4)
+	if features.Has(llmspecs.ModalityTextIn) {
+		out = append(out, "text")
+	}
+	if features.Has(llmspecs.ModalityImageIn) {
+		out = append(out, "image")
+	}
+	if features.Has(llmspecs.ModalityAudioIn) {
+		out = append(out, "audio")
+	}
+	if features.Has(llmspecs.ModalityVideoIn) {
+		out = append(out, "video")
+	}
+	if features.Has(llmspecs.ModalityFileIn) {
+		out = append(out, "file")
+	}
+	return out
+}
+
+func outputModalitiesFromCapabilities(features llmspecs.Capability) []string {
+	out := make([]string, 0, 3)
+	if features.Has(llmspecs.ModalityTextOut) {
+		out = append(out, "text")
+	}
+	if features.Has(llmspecs.ModalityImageOut) {
+		out = append(out, "image")
+	}
+	if features.Has(llmspecs.ModalityAudioOut) {
+		out = append(out, "audio")
+	}
+	if features.Has(llmspecs.ModalityVideoOut) {
+		out = append(out, "video")
+	}
+	if features.Has(llmspecs.ModalityFileOut) {
+		out = append(out, "file")
+	}
+	return out
 }
 
 func providerPresetAPIHandler() http.HandlerFunc {
@@ -2886,7 +3073,20 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
 		return
 	}
-	if err := st.SetChannelModelEnabled(channelID, model, req.Enabled); err != nil {
+	record, err := st.UpdateChannelModelProfile(channelID, model, store.ChannelModelProfilePatch{
+		DisplayName:                 req.DisplayName,
+		Enabled:                     req.Enabled,
+		SupportsResponses:           req.SupportsResponses,
+		SupportsChatCompletions:     req.SupportsChatCompletions,
+		SupportsEmbeddings:          req.SupportsEmbeddings,
+		ContextWindow:               req.ContextWindow,
+		MaxOutputTokens:             req.MaxOutputTokens,
+		CompactHistoryItemThreshold: req.CompactHistoryItemThreshold,
+		UpstreamModel:               req.UpstreamModel,
+		ProfileSource:               req.ProfileSource,
+		ProfileAdoptionStatus:       req.ProfileAdoptionStatus,
+	})
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -2894,7 +3094,7 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, channelModelItemFromRecord(record))
 }
 
 func normalizeModelList(models []string) []string {
@@ -3070,14 +3270,65 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 
 func channelModelItemFromRecord(record store.ChannelModelRecord) channelModelItem {
 	return channelModelItem{
-		Model:       record.Model,
-		DisplayName: record.DisplayName,
-		Source:      record.Source,
-		Enabled:     record.Enabled,
-		FirstSeenAt: record.FirstSeenAt,
-		LastSeenAt:  record.LastSeenAt,
-		LastProbeAt: record.LastProbeAt,
+		Model:                       record.Model,
+		DisplayName:                 record.DisplayName,
+		Source:                      record.Source,
+		Enabled:                     record.Enabled,
+		SupportsResponses:           capabilityBool(record.SupportsResponses),
+		SupportsChatCompletions:     capabilityBool(record.SupportsChatCompletions),
+		SupportsEmbeddings:          capabilityBool(record.SupportsEmbeddings),
+		ContextWindow:               record.ContextWindow,
+		MaxOutputTokens:             record.MaxOutputTokens,
+		CompactHistoryItemThreshold: record.CompactHistoryItemThreshold,
+		UpstreamModel:               record.UpstreamModel,
+		ProfileSource:               record.ProfileSource,
+		ProfileAdoptionStatus:       record.ProfileAdoptionStatus,
+		InputModalities:             decodeStringList(record.InputModalitiesJSON),
+		OutputModalities:            decodeStringList(record.OutputModalitiesJSON),
+		FirstSeenAt:                 record.FirstSeenAt,
+		LastSeenAt:                  record.LastSeenAt,
+		LastProbeAt:                 record.LastProbeAt,
 	}
+}
+
+func enrichModelChannelItemFromRecord(item *modelChannelItem, record store.ChannelModelRecord) {
+	if item == nil {
+		return
+	}
+	item.DisplayName = record.DisplayName
+	item.Enabled = record.Enabled
+	item.Source = record.Source
+	item.SupportsResponses = capabilityBool(record.SupportsResponses)
+	item.SupportsChatCompletions = capabilityBool(record.SupportsChatCompletions)
+	item.SupportsEmbeddings = capabilityBool(record.SupportsEmbeddings)
+	item.ContextWindow = record.ContextWindow
+	item.MaxOutputTokens = record.MaxOutputTokens
+	item.CompactHistoryItemThreshold = record.CompactHistoryItemThreshold
+	item.UpstreamModel = record.UpstreamModel
+	item.ProfileSource = record.ProfileSource
+	item.ProfileAdoptionStatus = record.ProfileAdoptionStatus
+	item.InputModalities = decodeStringList(record.InputModalitiesJSON)
+	item.OutputModalities = decodeStringList(record.OutputModalitiesJSON)
+}
+
+func capabilityBool(value *int) *bool {
+	if value == nil {
+		return nil
+	}
+	out := *value != 0
+	return &out
+}
+
+func decodeStringList(raw string) []string {
+	var out []string
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "[]"
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID string, since time.Time, bucketSize time.Duration, bucketCount int, includeDetail bool) {

@@ -2822,7 +2822,7 @@ func TestModelCatalogAPI(t *testing.T) {
 		t.Fatalf("UpsertChannelConfig() error = %v", err)
 	}
 	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
-		{Model: "gpt-5", Source: "manual", Enabled: true},
+		{Model: "gpt-5", Source: "manual", Enabled: true, ContextWindow: intPtr(272000), MaxOutputTokens: intPtr(128000), ProfileAdoptionStatus: "adopted"},
 		{Model: "gpt-zero", Source: "manual", Enabled: true},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
@@ -2877,6 +2877,23 @@ func TestModelCatalogAPI(t *testing.T) {
 	if detail.Model.Model != "gpt-5" || len(detail.Channels) != 1 || len(detail.Trends) != 24 {
 		t.Fatalf("model detail = %+v", detail)
 	}
+	if detail.Channels[0].ContextWindow == nil || *detail.Channels[0].ContextWindow != 272000 || detail.Channels[0].ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("model detail channel profile = %+v", detail.Channels[0])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/qwen3.6-35b-a3b/spec-lookup", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("model spec lookup status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var spec modelSpecLookupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("json.Unmarshal(spec) error = %v", err)
+	}
+	if !spec.Matched || spec.Suggestion == nil || spec.Suggestion.ContextWindow != 262144 {
+		t.Fatalf("model spec lookup = %+v", spec)
+	}
 }
 
 func TestChannelModelPatchReloadsRouter(t *testing.T) {
@@ -2917,11 +2934,18 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false,"context_window":262144,"max_output_tokens":65536,"profile_source":"go-llm-specs","profile_adoption_status":"adopted","supports_chat_completions":true}`))
 	rr := httptest.NewRecorder()
 	channelDetailAPIHandler(st, rtr, channel.NewService(st)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("disable model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var updated channelModelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("json.Unmarshal(updated) error = %v", err)
+	}
+	if updated.ContextWindow == nil || *updated.ContextWindow != 262144 || updated.ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("updated model = %+v", updated)
 	}
 
 	selectReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
@@ -2929,6 +2953,10 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 	if _, err := rtr.Select(selectReq); err == nil {
 		t.Fatalf("Select(gpt-5) error = nil, want no supporting target after reload")
 	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {

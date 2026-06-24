@@ -321,6 +321,20 @@ type ChannelModelRecord struct {
 	LastProbeAt                 time.Time
 }
 
+type ChannelModelProfilePatch struct {
+	DisplayName                 *string
+	Enabled                     *bool
+	SupportsResponses           *bool
+	SupportsChatCompletions     *bool
+	SupportsEmbeddings          *bool
+	ContextWindow               *int
+	MaxOutputTokens             *int
+	CompactHistoryItemThreshold *int
+	UpstreamModel               *string
+	ProfileSource               *string
+	ProfileAdoptionStatus       *string
+}
+
 type ModelCatalogRecord struct {
 	Model       string
 	DisplayName string
@@ -1154,6 +1168,81 @@ func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled b
 		SetLastSeenAt(time.Now().UTC()).
 		Save(context.Background())
 	return err
+}
+
+func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch ChannelModelProfilePatch) (ChannelModelRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	model = strings.ToLower(strings.TrimSpace(model))
+	if channelID == "" {
+		return ChannelModelRecord{}, fmt.Errorf("channel id is required")
+	}
+	if model == "" {
+		return ChannelModelRecord{}, fmt.Errorf("model is required")
+	}
+	update := s.client.ChannelModel.Update().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		SetLastSeenAt(time.Now().UTC())
+	if patch.DisplayName != nil {
+		update.SetDisplayName(strings.TrimSpace(*patch.DisplayName))
+	}
+	if patch.Enabled != nil {
+		update.SetEnabled(*patch.Enabled)
+	}
+	if patch.SupportsResponses != nil {
+		update.SetSupportsResponses(boolToCapabilityInt(*patch.SupportsResponses))
+	}
+	if patch.SupportsChatCompletions != nil {
+		update.SetSupportsChatCompletions(boolToCapabilityInt(*patch.SupportsChatCompletions))
+	}
+	if patch.SupportsEmbeddings != nil {
+		update.SetSupportsEmbeddings(boolToCapabilityInt(*patch.SupportsEmbeddings))
+	}
+	if patch.ContextWindow != nil {
+		update.SetContextWindow(*patch.ContextWindow)
+	}
+	if patch.MaxOutputTokens != nil {
+		update.SetMaxOutputTokens(*patch.MaxOutputTokens)
+	}
+	if patch.CompactHistoryItemThreshold != nil {
+		update.SetCompactHistoryItemThreshold(*patch.CompactHistoryItemThreshold)
+	}
+	if patch.UpstreamModel != nil {
+		update.SetUpstreamModel(strings.TrimSpace(*patch.UpstreamModel))
+	}
+	if patch.ProfileSource != nil {
+		update.SetProfileSource(strings.TrimSpace(*patch.ProfileSource))
+	}
+	if patch.ProfileAdoptionStatus != nil {
+		update.SetProfileAdoptionStatus(strings.TrimSpace(*patch.ProfileAdoptionStatus))
+	}
+	if _, err := update.Save(context.Background()); err != nil {
+		return ChannelModelRecord{}, err
+	}
+	row, err := s.client.ChannelModel.Query().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		Only(context.Background())
+	if err != nil {
+		return ChannelModelRecord{}, err
+	}
+	record := channelModelRecordFromEnt(row)
+	if record.DisplayName != "" {
+		if err := s.UpsertModelCatalog(ModelCatalogRecord{
+			Model:       record.Model,
+			DisplayName: record.DisplayName,
+			FirstSeenAt: record.FirstSeenAt,
+			LastSeenAt:  record.LastSeenAt,
+		}); err != nil {
+			return ChannelModelRecord{}, err
+		}
+	}
+	return record, nil
+}
+
+func boolToCapabilityInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (s *Store) DeleteChannelModel(channelID string, model string) error {

@@ -3497,6 +3497,96 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.model-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.model-config-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.model-config-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.model-config-card-head > div:first-child,
+.model-spec-summary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.model-config-card-head strong,
+.model-spec-summary strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-spec-summary {
+  padding: 10px 12px;
+  border-radius: var(--radius-control);
+  background: rgba(2, 132, 199, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+}
+
+.model-spec-summary span,
+.model-config-card-head span,
+.model-config-status {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.model-config-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.model-config-fields label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.model-config-fields span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.model-config-fields input,
+.model-config-fields select {
+  width: 100%;
+  min-width: 0;
+}
+
+.model-capability-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.model-capability-toggles label {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
 .model-market-metrics-compact {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -3893,6 +3983,8 @@ a:focus-visible {
   .channel-grid,
   .provider-grid,
   .model-market-grid,
+  .model-config-grid,
+  .model-config-fields,
   .overview-provider-grid,
   .overview-chart-grid,
   .overview-breakdown-grid,

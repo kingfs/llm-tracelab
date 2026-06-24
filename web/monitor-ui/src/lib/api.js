@@ -40,6 +40,7 @@ export const apiPaths = {
   sessionReanalyze: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/reanalyze`,
   models: "/api/models",
   model: (model) => `/api/models/${encodeURIComponent(model)}`,
+  modelSpecLookup: (model) => `/api/models/${encodeURIComponent(model)}/spec-lookup`,
   channels: "/api/channels",
   channel: (channelID) => `/api/channels/${encodeURIComponent(channelID)}`,
   channelProbe: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/probe`,
