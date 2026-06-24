@@ -991,6 +991,96 @@ tools:
 	}
 }
 
+func TestMCPToolsConfigDisabledByDefault(t *testing.T) {
+	clearMCPToolsEnv(t)
+	cfg := Config{}
+	mcpTools := cfg.MCPToolsConfig()
+
+	if cfg.MCPToolsEnabled() {
+		t.Fatalf("MCPToolsEnabled() = true, want false")
+	}
+	if mcpTools.Enabled {
+		t.Fatalf("MCPToolsConfig().Enabled = true, want false")
+	}
+	if mcpTools.DefaultTimeoutMS != 60000 {
+		t.Fatalf("MCPToolsConfig().DefaultTimeoutMS = %d, want 60000", mcpTools.DefaultTimeoutMS)
+	}
+	if mcpTools.MaxResultBytes != 65536 {
+		t.Fatalf("MCPToolsConfig().MaxResultBytes = %d, want 65536", mcpTools.MaxResultBytes)
+	}
+	if len(mcpTools.Servers) != 0 {
+		t.Fatalf("MCPToolsConfig().Servers = %d, want 0", len(mcpTools.Servers))
+	}
+}
+
+func TestMCPToolsEnvOverrides(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_TOOLS_MCP_ENABLED", "true")
+	t.Setenv("LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS", "2500")
+	t.Setenv("LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES", "4096")
+
+	cfg := Config{}
+	cfg.Tools.MCP.DefaultTimeoutMS = 1000
+	cfg.Tools.MCP.MaxResultBytes = 2048
+	applyEnvOverrides(&cfg)
+
+	mcpTools := cfg.MCPToolsConfig()
+	if !cfg.MCPToolsEnabled() {
+		t.Fatalf("MCPToolsEnabled() = false, want true")
+	}
+	if mcpTools.DefaultTimeoutMS != 2500 {
+		t.Fatalf("MCPToolsConfig().DefaultTimeoutMS = %d, want 2500", mcpTools.DefaultTimeoutMS)
+	}
+	if mcpTools.MaxResultBytes != 4096 {
+		t.Fatalf("MCPToolsConfig().MaxResultBytes = %d, want 4096", mcpTools.MaxResultBytes)
+	}
+}
+
+func TestLoadParsesMCPToolsConfigFromYAML(t *testing.T) {
+	clearMCPToolsEnv(t)
+	path := writeTempConfig(t, `
+tools:
+  mcp:
+    enabled: true
+    default_timeout_ms: 1500
+    max_result_bytes: 8192
+    servers:
+      - id: linear
+        label: Linear
+        url: "https://mcp.example.com/sse?api_key=query-secret"
+        bearer_token_env: LINEAR_MCP_TOKEN
+        enabled_tools: [create_issue, list_issues]
+        disabled_tools: [delete_issue]
+      - id: disabled
+        url: "https://disabled.example.com/mcp"
+        enabled: false
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	mcpTools := cfg.MCPToolsConfig()
+	if !cfg.MCPToolsEnabled() {
+		t.Fatalf("MCPToolsEnabled() = false, want true")
+	}
+	if mcpTools.DefaultTimeoutMS != 1500 || mcpTools.MaxResultBytes != 8192 {
+		t.Fatalf("MCPToolsConfig() = %+v, want YAML timeout/result limits", mcpTools)
+	}
+	if len(mcpTools.Servers) != 2 {
+		t.Fatalf("len(MCPToolsConfig().Servers) = %d, want 2", len(mcpTools.Servers))
+	}
+	first := mcpTools.Servers[0]
+	if first.ID != "linear" || first.Label != "Linear" || first.URL != "https://mcp.example.com/sse?api_key=query-secret" || first.BearerTokenEnv != "LINEAR_MCP_TOKEN" || !first.EnabledOrDefault() {
+		t.Fatalf("first server = %+v, want parsed enabled server", first)
+	}
+	if strings.Join(first.EnabledTools, ",") != "create_issue,list_issues" || strings.Join(first.DisabledTools, ",") != "delete_issue" {
+		t.Fatalf("first server tools = %+v/%+v", first.EnabledTools, first.DisabledTools)
+	}
+	if mcpTools.Servers[1].EnabledOrDefault() {
+		t.Fatalf("second server EnabledOrDefault() = true, want false")
+	}
+}
+
 func TestLimitScopeDefaults(t *testing.T) {
 	if got := (LimitConfig{}).ScopeOrDefault(); got != "global" {
 		t.Fatalf("ScopeOrDefault() = %q, want global", got)
@@ -1036,6 +1126,17 @@ func clearWebSearchEnv(t *testing.T) {
 		"LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL",
 		"LLM_TRACELAB_TOOLS_WEB_SEARCH_TIMEOUT_MS",
 		"LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+func clearMCPToolsEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"LLM_TRACELAB_TOOLS_MCP_ENABLED",
+		"LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS",
+		"LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES",
 	} {
 		t.Setenv(name, "")
 	}

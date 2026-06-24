@@ -1080,6 +1080,117 @@ upstream:
 	}
 }
 
+func TestDoctorMCPToolsDisabledPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+tools:
+  mcp:
+    enabled: false
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "tools.mcp.config")
+	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "tools.mcp.enabled is false" {
+		t.Fatalf("tools.mcp.config = %+v, want skipped pass", check)
+	}
+}
+
+func TestDoctorMCPToolsEnabledWithoutServersFails(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+tools:
+  mcp:
+    enabled: true
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "tools.mcp.config")
+	if check.Status != doctorStatusFail || check.Detail["server_count"] != float64(0) {
+		t.Fatalf("tools.mcp.config = %+v, want no-server failure", check)
+	}
+}
+
+func TestDoctorMCPToolsInvalidServerFailsWithoutLeakingBearerToken(t *testing.T) {
+	t.Setenv("DOCTOR_MCP_TOKEN", "doctor-mcp-token-secret")
+	t.Setenv("DOCTOR_MCP_EMPTY_TOKEN", "")
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+tools:
+  mcp:
+    enabled: true
+    servers:
+      - id: missing-url
+        bearer_token_env: DOCTOR_MCP_TOKEN
+      - id: empty-token
+        url: https://mcp.example.com/sse?api_key=doctor-mcp-query-secret
+        bearer_token_env: DOCTOR_MCP_EMPTY_TOKEN
+      - id: disabled
+        enabled: false
+        bearer_token_env: DOCTOR_MCP_TOKEN
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err == nil {
+		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	}
+	for _, secret := range []string{"doctor-mcp-token-secret", "doctor-mcp-query-secret"} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("doctor output leaked secret marker %q: %s", secret, out)
+		}
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "tools.mcp.config")
+	if check.Status != doctorStatusFail || check.Detail["enabled_servers"] != float64(2) {
+		t.Fatalf("tools.mcp.config = %+v, want invalid server failure", check)
+	}
+	if !doctorDetailStringSliceContains(check.Detail, "failures", "missing-url") || !doctorDetailStringSliceContains(check.Detail, "failures", "environment variable is empty or unset") {
+		t.Fatalf("tools.mcp.config failures = %+v", check.Detail["failures"])
+	}
+}
+
 func TestDoctorFailOnWarnReturnsError(t *testing.T) {
 	t.Parallel()
 

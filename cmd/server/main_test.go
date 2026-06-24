@@ -369,6 +369,7 @@ func TestSchemaCommandSupportsJSONEnvelopeForCommandPath(t *testing.T) {
 
 func TestConfigInspectCommandSupportsRedactedJSONEnvelope(t *testing.T) {
 	t.Setenv("OPENAI_TEST_KEY", "sk-secret-from-env")
+	t.Setenv("MCP_TEST_TOKEN", "mcp-bearer-secret")
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.yaml")
@@ -403,6 +404,17 @@ tools:
     enabled: true
     provider: searxng
     base_url: https://search.example.com/search?api_key=web-secret&q=test
+  mcp:
+    enabled: true
+    default_timeout_ms: 7000
+    max_result_bytes: 1234
+    servers:
+      - id: hosted
+        label: Hosted MCP
+        url: https://mcp.example.com/sse?api_key=mcp-query-secret&name=ok
+        bearer_token_env: MCP_TEST_TOKEN
+        enabled_tools: [search, fetch]
+        disabled_tools: [delete]
 provider_probe:
   startup_fill: true
   timeout: 3s
@@ -449,6 +461,8 @@ upstreams:
 		"upstream-header-secret",
 		"credential-api-secret",
 		"credential-header-secret",
+		"mcp-bearer-secret",
+		"mcp-query-secret",
 	} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("config inspect output leaked secret marker %q", secret)
@@ -480,7 +494,33 @@ upstreams:
 				WebSearch struct {
 					BaseURL string `json:"base_url"`
 				} `json:"web_search"`
+				MCP struct {
+					Enabled          bool `json:"enabled"`
+					DefaultTimeoutMS int  `json:"default_timeout_ms"`
+					MaxResultBytes   int  `json:"max_result_bytes"`
+					ServerCount      int  `json:"server_count"`
+					EnabledServers   int  `json:"enabled_servers"`
+					Servers          []struct {
+						ID                    string   `json:"id"`
+						URL                   string   `json:"url"`
+						BearerTokenEnv        string   `json:"bearer_token_env"`
+						BearerTokenConfigured bool     `json:"bearer_token_configured"`
+						EnabledTools          []string `json:"enabled_tools"`
+						DisabledTools         []string `json:"disabled_tools"`
+						Enabled               bool     `json:"enabled"`
+					} `json:"servers"`
+				} `json:"mcp"`
 			} `json:"tools"`
+			Sources struct {
+				Tools struct {
+					MCP struct {
+						Enabled          string `json:"enabled"`
+						DefaultTimeoutMS string `json:"default_timeout_ms"`
+						MaxResultBytes   string `json:"max_result_bytes"`
+						Servers          string `json:"servers"`
+					} `json:"mcp"`
+				} `json:"tools"`
+			} `json:"sources"`
 			ProviderProbe struct {
 				StartupFill bool   `json:"startup_fill"`
 				Timeout     string `json:"timeout"`
@@ -513,6 +553,19 @@ upstreams:
 	}
 	if !strings.Contains(envelope.Result.Tools.WebSearch.BaseURL, "%3Credacted%3E") {
 		t.Fatalf("tools.web_search.base_url = %q, want redacted query", envelope.Result.Tools.WebSearch.BaseURL)
+	}
+	if !envelope.Result.Tools.MCP.Enabled || envelope.Result.Tools.MCP.DefaultTimeoutMS != 7000 || envelope.Result.Tools.MCP.MaxResultBytes != 1234 || envelope.Result.Tools.MCP.ServerCount != 1 || envelope.Result.Tools.MCP.EnabledServers != 1 {
+		t.Fatalf("tools.mcp = %+v, want enabled summary", envelope.Result.Tools.MCP)
+	}
+	mcpServer := envelope.Result.Tools.MCP.Servers[0]
+	if mcpServer.ID != "hosted" || !mcpServer.Enabled || mcpServer.BearerTokenEnv != "MCP_TEST_TOKEN" || !mcpServer.BearerTokenConfigured || !strings.Contains(mcpServer.URL, "%3Credacted%3E") {
+		t.Fatalf("tools.mcp server = %+v, want redacted configured server", mcpServer)
+	}
+	if strings.Join(mcpServer.EnabledTools, ",") != "search,fetch" || strings.Join(mcpServer.DisabledTools, ",") != "delete" {
+		t.Fatalf("tools.mcp server tool filters = %+v/%+v", mcpServer.EnabledTools, mcpServer.DisabledTools)
+	}
+	if envelope.Result.Sources.Tools.MCP.Enabled != "config_file" || envelope.Result.Sources.Tools.MCP.DefaultTimeoutMS != "config_file" || envelope.Result.Sources.Tools.MCP.MaxResultBytes != "config_file" || envelope.Result.Sources.Tools.MCP.Servers != "config_file" {
+		t.Fatalf("tools.mcp sources = %+v, want config_file", envelope.Result.Sources.Tools.MCP)
 	}
 	if !envelope.Result.ProviderProbe.StartupFill || envelope.Result.ProviderProbe.Timeout != "3s" {
 		t.Fatalf("provider_probe result = %+v", envelope.Result.ProviderProbe)

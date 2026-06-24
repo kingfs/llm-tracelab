@@ -175,6 +175,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorResponsesModelCatalogDrift(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesCodexConfigDrift(cfg, opts.codexConfigPath))
 	result.Checks = append(result.Checks, checkDoctorWebSearch(cfg))
+	result.Checks = append(result.Checks, checkDoctorMCPTools(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderConfig(cfg))
 	result.Checks = append(result.Checks, checkDoctorAuthMigrationScope(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderProbe(cfg, opts.probeProviders))
@@ -916,6 +917,80 @@ func checkDoctorWebSearch(cfg *appconfig.Config) doctorCheck {
 		return doctorCheck{Name: "web_search.provider", Status: doctorStatusFail, Message: "web search provider configuration is invalid", Detail: detail}
 	}
 	return doctorCheck{Name: "web_search.provider", Status: doctorStatusPass, Message: "web search provider configuration is valid", Detail: detail}
+}
+
+func checkDoctorMCPTools(cfg *appconfig.Config) doctorCheck {
+	mcpTools := cfg.MCPToolsConfig()
+	detail := map[string]any{
+		"enabled":            mcpTools.Enabled,
+		"default_timeout_ms": mcpTools.DefaultTimeoutMS,
+		"max_result_bytes":   mcpTools.MaxResultBytes,
+		"server_count":       len(mcpTools.Servers),
+		"enabled_servers":    0,
+		"servers":            doctorMCPToolServerDetails(mcpTools.Servers),
+	}
+	if !mcpTools.Enabled {
+		detail["skipped_reason"] = "tools.mcp.enabled is false"
+		return doctorCheck{Name: "tools.mcp.config", Status: doctorStatusPass, Message: "MCP hosted tools are disabled", Detail: detail}
+	}
+	if len(mcpTools.Servers) == 0 {
+		return doctorCheck{Name: "tools.mcp.config", Status: doctorStatusFail, Message: "MCP hosted tools are enabled but no servers are configured", Detail: detail}
+	}
+
+	var failures []string
+	enabledServers := 0
+	for idx, server := range mcpTools.Servers {
+		if !server.EnabledOrDefault() {
+			continue
+		}
+		enabledServers++
+		label := doctorMCPToolServerLabel(idx, server)
+		if strings.TrimSpace(server.URL) == "" {
+			failures = append(failures, label+" url is required")
+		} else if parsed, err := url.Parse(strings.TrimSpace(server.URL)); err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			failures = append(failures, label+" url must be an absolute URL")
+		}
+		if envName := strings.TrimSpace(server.BearerTokenEnv); envName != "" && os.Getenv(envName) == "" {
+			failures = append(failures, label+" bearer_token_env is set but the environment variable is empty or unset")
+		}
+	}
+	detail["enabled_servers"] = enabledServers
+	if enabledServers == 0 {
+		failures = append(failures, "tools.mcp has no enabled servers")
+	}
+	if len(failures) > 0 {
+		detail["failures"] = failures
+		return doctorCheck{Name: "tools.mcp.config", Status: doctorStatusFail, Message: "MCP hosted tool configuration is invalid", Detail: detail}
+	}
+	return doctorCheck{Name: "tools.mcp.config", Status: doctorStatusPass, Message: "MCP hosted tool configuration is valid", Detail: detail}
+}
+
+func doctorMCPToolServerDetails(servers []appconfig.MCPToolServerConfig) []map[string]any {
+	out := make([]map[string]any, 0, len(servers))
+	for _, server := range servers {
+		envName := strings.TrimSpace(server.BearerTokenEnv)
+		out = append(out, map[string]any{
+			"id":                      strings.TrimSpace(server.ID),
+			"label":                   strings.TrimSpace(server.Label),
+			"url":                     redactURLLike(server.URL),
+			"bearer_token_env":        envName,
+			"bearer_token_configured": envName != "" && os.Getenv(envName) != "",
+			"enabled_tools":           append([]string(nil), server.EnabledTools...),
+			"disabled_tools":          append([]string(nil), server.DisabledTools...),
+			"enabled":                 server.EnabledOrDefault(),
+		})
+	}
+	return out
+}
+
+func doctorMCPToolServerLabel(idx int, server appconfig.MCPToolServerConfig) string {
+	if server.ID != "" {
+		return fmt.Sprintf("servers[%d] %q", idx, server.ID)
+	}
+	if server.Label != "" {
+		return fmt.Sprintf("servers[%d] %q", idx, server.Label)
+	}
+	return fmt.Sprintf("servers[%d]", idx)
 }
 
 func checkDoctorProviderConfig(cfg *appconfig.Config) doctorCheck {
