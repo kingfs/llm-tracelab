@@ -12,7 +12,7 @@
 4. [开发命令](./DEVELOPMENT_COMMANDS.md)：稳定的构建、测试、格式化、检查入口。
 5. [维护基线](./MAINTAINER_BASELINE.md)：修改存储、录制、Monitor、MCP、重分析时必须遵守的约束。
 
-如果你在参与 Responses server 演进设计或实现，请先读 [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)。该文档记录目标设计、截至 2026-06-23 的已落地状态和剩余缺口；最终收敛证据见 [Final Completion Audit](./FINAL_COMPLETION_AUDIT.md)。通用当前事实仍以当前实现概览和项目基线为准。
+如果你在参与 Responses server 演进设计或实现，请先读 [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)。该文档记录目标设计、截至 2026-06-23 的已落地状态和剩余缺口；Hosted tools 的分阶段实现计划见 [Hosted Tools Roadmap](./HOSTED_TOOLS_ROADMAP.md)；最终收敛证据见 [Final Completion Audit](./FINAL_COMPLETION_AUDIT.md)。通用当前事实仍以当前实现概览和项目基线为准。
 
 ## 当前事实文档
 
@@ -24,6 +24,7 @@
 - [Provider 协议入口](./PROVIDER_PROTOCOL_ENTRYPOINTS.md)
 - [协议参考](./protocol-reference/README.md)
 - [Responses Server 设计](./RESPONSES_SERVER_DESIGN.md)
+- [Hosted Tools Roadmap](./HOSTED_TOOLS_ROADMAP.md)
 - [Final Completion Audit](./FINAL_COMPLETION_AUDIT.md)
 - [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)
 - [Responses Gateway 完成计划](./RESPONSES_GATEWAY_COMPLETION_PLAN.md)
