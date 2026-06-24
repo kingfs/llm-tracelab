@@ -79,6 +79,7 @@ func newRootCommandWithRuntime(runtime *cliRuntime) *cobra.Command {
 		newDoctorCommand(runtime),
 		newProviderCommand(runtime),
 		newModelsCommand(runtime),
+		newToolsCommand(runtime),
 		newAuditCommand(runtime),
 		newAuthCommand(runtime),
 		newAnalyzeCommand(runtime),
