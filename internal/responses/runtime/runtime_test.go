@@ -1677,7 +1677,7 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 		result: websearch.Result{Results: []websearch.SearchResult{{
 			Title:   "TraceLab docs",
 			URL:     "https://example.test/docs",
-			Snippet: "Record and replay LLM API traffic.",
+			Snippet: "Record and replay LLM API traffic." + strings.Repeat(" extra detail", 80),
 		}}},
 	}
 	store := NewMemoryStore()
@@ -1720,8 +1720,11 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 		t.Fatalf("second tool message metadata mismatch: %#v", secondMessages[2])
 	}
 	toolContent, _ := secondMessages[2].Content.(string)
-	if !strings.Contains(toolContent, "TraceLab docs") || !strings.Contains(toolContent, "llm trace replay") {
+	if !strings.Contains(toolContent, "TraceLab docs") || !strings.Contains(toolContent, "https://example.test/docs") || !strings.Contains(toolContent, "Record and replay LLM API traffic.") || !strings.Contains(toolContent, "llm trace replay") {
 		t.Fatalf("second tool message content missing result: %q", toolContent)
+	}
+	if strings.Contains(toolContent, strings.Repeat(" extra detail", 30)) {
+		t.Fatalf("second tool message content leaked long raw result: %q", toolContent)
 	}
 	if len(sink.functionDelta) != 2 || sink.functionDelta[1].Arguments != `{"query":"llm trace replay"}` {
 		t.Fatalf("function argument deltas = %#v", sink.functionDelta)
@@ -1767,19 +1770,33 @@ func TestRuntimeCreateStreamExecutesHostedWebSearchToolLoop(t *testing.T) {
 	if got := resp.Output[0].Action["query"]; got != "llm trace replay" {
 		t.Fatalf("web_search action query = %#v", got)
 	}
+	if got := resp.Output[0].Action["result_count"]; got != 1 {
+		t.Fatalf("web_search action result_count = %#v", got)
+	}
+	sources, ok := resp.Output[0].Action["sources"].([]map[string]any)
+	if !ok || len(sources) != 1 {
+		t.Fatalf("web_search action sources = %#v, want one summarized source", resp.Output[0].Action["sources"])
+	}
+	if sources[0]["title"] != "TraceLab docs" || sources[0]["url"] != "https://example.test/docs" {
+		t.Fatalf("web_search action source identity = %#v", sources[0])
+	}
+	snippet, _ := sources[0]["snippet"].(string)
+	if !strings.HasPrefix(snippet, "Record and replay LLM API traffic.") || len([]rune(snippet)) > 283 {
+		t.Fatalf("web_search action source snippet = %q, want safe summary", snippet)
+	}
 	if resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Use cassettes." {
 		t.Fatalf("second output = %#v", resp.Output[1])
 	}
 	if len(events.events) != 3 {
 		t.Fatalf("execution events len = %d, want requested/started/completed: %#v", len(events.events), events.events)
 	}
-	if events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "web_search" || events.events[0].DetailsJSON["call_id"] != "call_search" {
+	if events.events[0].Status != "requested" || events.events[0].DetailsJSON["tool_name"] != "web_search" || events.events[0].DetailsJSON["call_id"] != "call_search" || events.events[0].DetailsJSON["query"] != "llm trace replay" || events.events[0].DetailsJSON["provider"] != "custom" {
 		t.Fatalf("requested event mismatch: %#v", events.events[0])
 	}
-	if events.events[1].Status != "started" || events.events[1].DetailsJSON["tool_name"] != "web_search" || events.events[1].DetailsJSON["stream"] != true {
+	if events.events[1].Status != "started" || events.events[1].DetailsJSON["tool_name"] != "web_search" || events.events[1].DetailsJSON["stream"] != true || events.events[1].DetailsJSON["provider"] != "custom" {
 		t.Fatalf("started event mismatch: %#v", events.events[1])
 	}
-	if events.events[2].Status != "completed" || events.events[2].DetailsJSON["tool_name"] != "web_search" || events.events[2].DetailsJSON["call_id"] != "call_search" || events.events[2].DetailsJSON["stream"] != true {
+	if events.events[2].Status != "completed" || events.events[2].DetailsJSON["tool_name"] != "web_search" || events.events[2].DetailsJSON["call_id"] != "call_search" || events.events[2].DetailsJSON["stream"] != true || events.events[2].DetailsJSON["result_count"] != 1 {
 		t.Fatalf("completed event mismatch: %#v", events.events[2])
 	}
 	if len(toolAudits.entries) != 2 || toolAudits.entries[0].Status != "started" || toolAudits.entries[1].Status != "completed" {

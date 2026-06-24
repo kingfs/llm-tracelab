@@ -219,25 +219,35 @@ func ValidateAll() error {
 }
 
 func requireCodexCompatFixtures(seen map[string]File) error {
-	const name = "codex_web_search_absent_tools_request.json"
-	if _, ok := seen[name]; !ok {
-		return fmt.Errorf("missing Codex compatibility request fixture %s", name)
-	}
-	req, err := Decode[protocol.CreateResponseRequest](name)
-	if err != nil {
-		return err
-	}
-	if req.Model == "" || req.Input == nil {
-		return fmt.Errorf("%s: request must include model and input", name)
-	}
-	if req.Store == nil || !*req.Store {
-		return fmt.Errorf("%s: request must set store=true", name)
-	}
-	if len(req.Tools) != 0 {
-		return fmt.Errorf("%s: tools must be absent in the raw Codex fixture", name)
-	}
-	if req.ToolChoice != nil {
-		return fmt.Errorf("%s: tool_choice must be absent in the raw Codex fixture", name)
+	for _, fixture := range []struct {
+		name   string
+		stream bool
+	}{
+		{name: "codex_web_search_absent_tools_request.json"},
+		{name: "codex_chinese_news_stream_absent_tools_request.json", stream: true},
+	} {
+		if _, ok := seen[fixture.name]; !ok {
+			return fmt.Errorf("missing Codex compatibility request fixture %s", fixture.name)
+		}
+		req, err := Decode[protocol.CreateResponseRequest](fixture.name)
+		if err != nil {
+			return err
+		}
+		if req.Model == "" || req.Input == nil {
+			return fmt.Errorf("%s: request must include model and input", fixture.name)
+		}
+		if req.Store == nil || !*req.Store {
+			return fmt.Errorf("%s: request must set store=true", fixture.name)
+		}
+		if len(req.Tools) != 0 {
+			return fmt.Errorf("%s: tools must be absent in the raw Codex fixture", fixture.name)
+		}
+		if req.ToolChoice != nil {
+			return fmt.Errorf("%s: tool_choice must be absent in the raw Codex fixture", fixture.name)
+		}
+		if req.Stream != fixture.stream {
+			return fmt.Errorf("%s: stream = %v, want %v", fixture.name, req.Stream, fixture.stream)
+		}
 	}
 	return nil
 }
@@ -252,6 +262,7 @@ type requiredRequestFixture struct {
 func requirePhase0HostedToolFixtures(seen map[string]File) error {
 	required := []requiredRequestFixture{
 		{Name: "ordinary_web_search_descriptor_request.json", ToolType: "web_search", ToolChoice: "auto", Stream: true},
+		{Name: "web_search_preview_extended_descriptor_request.json", ToolType: "web_search_preview", ToolChoice: "auto", Stream: true},
 		{Name: "forced_web_search_request.json", ToolType: "web_search", ToolChoice: "web_search"},
 		{Name: "unsupported_mcp_request.json", ToolType: "mcp", ToolChoice: "mcp"},
 		{Name: "unsupported_file_search_request.json", ToolType: "file_search", ToolChoice: "file_search"},

@@ -1390,6 +1390,7 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 		"iteration":   iteration,
 		"max_results": r.cfg.WebSearchMaxResults,
 		"executor":    "hosted:web_search",
+		"provider":    webSearchProviderName(r.webSearchProvider),
 		"stream":      exec.Stream,
 	}
 	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
@@ -1425,7 +1426,8 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 			Status:    "failed",
 			Message:   err.Error(),
 			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
-				"error": err.Error(),
+				"error":       err.Error(),
+				"duration_ms": durationMilliseconds(startedAt, completedAt),
 			}),
 		})
 		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
@@ -1461,6 +1463,7 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
 				"error":        err.Error(),
 				"result_count": len(result.Results),
+				"duration_ms":  durationMilliseconds(startedAt, completedAt),
 			}),
 		})
 		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
@@ -1495,6 +1498,7 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 		Status:    "completed",
 		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
 			"result_count": len(result.Results),
+			"duration_ms":  durationMilliseconds(startedAt, completedAt),
 		}),
 	})
 	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
@@ -1899,15 +1903,21 @@ func (r *Runtime) recordRequestedFunctionCalls(ctx context.Context, outputItems 
 		if item.Type != "function_call" {
 			continue
 		}
+		details := map[string]any{
+			"tool_name": item.Name,
+			"call_id":   item.CallID,
+			"arguments": item.Arguments,
+		}
+		if item.Name == "web_search" {
+			details["query"] = webSearchQueryFromArguments(item.Arguments)
+			details["executor"] = "hosted:web_search"
+			details["provider"] = webSearchProviderName(r.webSearchProvider)
+		}
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
-			EventType: "response.tool_call",
-			Phase:     "tool_call",
-			Status:    "requested",
-			DetailsJSON: map[string]any{
-				"tool_name": item.Name,
-				"call_id":   item.CallID,
-				"arguments": item.Arguments,
-			},
+			EventType:   "response.tool_call",
+			Phase:       "tool_call",
+			Status:      "requested",
+			DetailsJSON: details,
 		})
 	}
 }
@@ -2491,29 +2501,16 @@ func mcpProtocolToolForCall(tools []protocol.Tool, arguments string) (protocol.T
 }
 
 func webSearchCallOutput(call ChatToolCall, query string, result websearch.Result) protocol.OutputItem {
-	sources := make([]any, 0, len(result.Results))
-	for _, item := range result.Results {
-		source := map[string]any{}
-		if item.Title != "" {
-			source["title"] = item.Title
-		}
-		if item.URL != "" {
-			source["url"] = item.URL
-		}
-		if item.Snippet != "" {
-			source["snippet"] = item.Snippet
-		}
-		sources = append(sources, source)
-	}
 	return protocol.OutputItem{
 		ID:     "ws_" + call.ID,
 		Type:   "web_search_call",
 		Status: "completed",
 		CallID: call.ID,
 		Action: map[string]any{
-			"type":    "search",
-			"query":   query,
-			"sources": sources,
+			"type":         "search",
+			"query":        query,
+			"result_count": len(result.Results),
+			"sources":      webSearchSourceSummaries(result.Results),
 		},
 	}
 }
@@ -2542,17 +2539,55 @@ func functionToolCallOutput(call ChatToolCall, output any) protocol.OutputItem {
 
 func webSearchToolMessageContent(query string, result websearch.Result) (string, error) {
 	payload := struct {
-		Query   string                   `json:"query"`
-		Results []websearch.SearchResult `json:"results"`
+		Query   string           `json:"query"`
+		Results []map[string]any `json:"results"`
 	}{
 		Query:   query,
-		Results: result.Results,
+		Results: webSearchSourceSummaries(result.Results),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("marshal web_search tool output: %w", err)
 	}
 	return string(data), nil
+}
+
+func webSearchSourceSummaries(results []websearch.SearchResult) []map[string]any {
+	sources := make([]map[string]any, 0, len(results))
+	for _, item := range results {
+		source := map[string]any{}
+		if title := truncateForWebSearchSummary(item.Title, 160); title != "" {
+			source["title"] = title
+		}
+		if url := truncateForWebSearchSummary(item.URL, 512); url != "" {
+			source["url"] = url
+		}
+		if snippet := truncateForWebSearchSummary(item.Snippet, 280); snippet != "" {
+			source["snippet"] = snippet
+		}
+		sources = append(sources, source)
+	}
+	return sources
+}
+
+func truncateForWebSearchSummary(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 || len([]rune(value)) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	return strings.TrimSpace(string(runes[:limit])) + "..."
+}
+
+func durationMilliseconds(startedAt, completedAt time.Time) int64 {
+	if startedAt.IsZero() || completedAt.IsZero() || completedAt.Before(startedAt) {
+		return 0
+	}
+	return completedAt.Sub(startedAt).Milliseconds()
+}
+
+func webSearchProviderName(provider websearch.Provider) string {
+	return websearch.ProviderName(provider)
 }
 
 func hostedSummaryValue(value hosted.RedactedValue) any {

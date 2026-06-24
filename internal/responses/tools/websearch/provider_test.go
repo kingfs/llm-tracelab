@@ -48,6 +48,30 @@ func TestNewProviderReturnsDisabledProviderByDefault(t *testing.T) {
 	}
 }
 
+func TestProviderName(t *testing.T) {
+	searxng, err := NewProvider(Options{Provider: "searxng", BaseURL: "http://127.0.0.1:8888"})
+	if err != nil {
+		t.Fatalf("NewProvider returned error: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		provider Provider
+		want     string
+	}{
+		{name: "nil", want: ProviderDisabled},
+		{name: "disabled", provider: DisabledProvider{}, want: ProviderDisabled},
+		{name: "mock", provider: MockProvider{}, want: ProviderMock},
+		{name: "searxng", provider: searxng, want: ProviderSearXNG},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ProviderName(tc.provider); got != tc.want {
+				t.Fatalf("ProviderName() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNewProviderRejectsUnknownProvider(t *testing.T) {
 	_, err := NewProvider(Options{Provider: "real"})
 	if err == nil {

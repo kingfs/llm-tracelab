@@ -26,6 +26,12 @@ Coverage:
 - `codex_web_search_absent_tools_request.json`: raw Codex web search-shaped
   request that omits `tools` and `tool_choice`; HTTP compatibility
   normalization may inject an available hosted search descriptor.
+- `codex_chinese_news_stream_absent_tools_request.json`: raw Codex request for
+  Chinese today's-news search with `stream:true` and no `tools` or
+  `tool_choice`.
+- `web_search_preview_extended_descriptor_request.json`: hosted
+  `web_search_preview` descriptor carrying official extension fields such as
+  `include`, `external_web_access`, and `search_content_types`.
 - `forced_web_search_request.json`: forced hosted web search descriptor,
   documenting the execution-or-stable-rejection contract.
 - `unsupported_mcp_request.json`, `unsupported_file_search_request.json`,
