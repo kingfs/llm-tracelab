@@ -42,6 +42,7 @@ func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"forced_web_search_request.json",
 		"function_call_expected_response.json",
 		"function_call_output_continuation_request.json",
 		"function_call_request.json",
@@ -50,7 +51,11 @@ func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
 		"stream_text_request.json",
 		"text_create_expected_response.json",
 		"text_create_request.json",
+		"unsupported_code_interpreter_request.json",
+		"unsupported_computer_use_preview_request.json",
+		"unsupported_file_search_request.json",
 		"unsupported_hosted_tool_expected_error.json",
+		"unsupported_mcp_request.json",
 	}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("codex fixture inventory changed without runner update\nwant: %#v\n got: %#v", want, names)
@@ -175,6 +180,53 @@ func TestCodexFixtureCreateRequestContracts(t *testing.T) {
 		requireStoreTrue(t, req)
 		requireCodexThread(t, req, "thread_fixture_web_search")
 	})
+
+	t.Run("forced web_search request shape", func(t *testing.T) {
+		req := decodeCodexFixture[protocol.CreateResponseRequest](t, "forced_web_search_request.json")
+
+		if len(req.Tools) != 1 {
+			t.Fatalf("tools len = %d, want 1", len(req.Tools))
+		}
+		tool := req.Tools[0]
+		if tool.Type != "web_search" || tool.MaxNumResults != 3 || tool.UserLocation == nil {
+			t.Fatalf("tool = %#v, want forced web_search descriptor", tool)
+		}
+		choice, ok := req.ToolChoice.(map[string]any)
+		if !ok || choice["type"] != "web_search" {
+			t.Fatalf("tool_choice = %#v, want web_search object", req.ToolChoice)
+		}
+		requireStoreTrue(t, req)
+		requireCodexThread(t, req, "thread_fixture_forced_web_search")
+	})
+
+	for _, tc := range []struct {
+		name       string
+		toolType   string
+		threadID   string
+		extraField string
+	}{
+		{name: "unsupported_mcp_request.json", toolType: "mcp", threadID: "thread_fixture_unsupported_mcp"},
+		{name: "unsupported_file_search_request.json", toolType: "file_search", threadID: "thread_fixture_unsupported_file_search", extraField: "vector_store_ids"},
+		{name: "unsupported_code_interpreter_request.json", toolType: "code_interpreter", threadID: "thread_fixture_unsupported_code_interpreter", extraField: "container"},
+		{name: "unsupported_computer_use_preview_request.json", toolType: "computer_use_preview", threadID: "thread_fixture_unsupported_computer_use_preview", extraField: "display_width"},
+	} {
+		t.Run(tc.name+" shape", func(t *testing.T) {
+			req := decodeCodexFixture[protocol.CreateResponseRequest](t, tc.name)
+
+			if len(req.Tools) != 1 || req.Tools[0].Type != tc.toolType {
+				t.Fatalf("tools = %#v, want one %s descriptor", req.Tools, tc.toolType)
+			}
+			choice, ok := req.ToolChoice.(map[string]any)
+			if !ok || choice["type"] != tc.toolType {
+				t.Fatalf("tool_choice = %#v, want %s object", req.ToolChoice, tc.toolType)
+			}
+			if tc.extraField != "" && req.Tools[0].Extra[tc.extraField] == nil {
+				t.Fatalf("%s was not preserved in Extra: %#v", tc.extraField, req.Tools[0].Extra)
+			}
+			requireStoreTrue(t, req)
+			requireCodexThread(t, req, tc.threadID)
+		})
+	}
 }
 
 func TestCodexFixtureExpectedResponseContracts(t *testing.T) {

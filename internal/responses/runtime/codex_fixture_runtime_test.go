@@ -31,6 +31,9 @@ func TestCodexCreateRequestFixturesReachRuntimeChatRequest(t *testing.T) {
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			req := decodeCodexFixture[protocol.CreateResponseRequest](t, name)
+			if codexFixtureRequiresHostedRuntime(req) {
+				t.Skip("fixture documents hosted tool execution or rejection, not chat fallback alignment")
+			}
 			client := &fakeChatClient{resp: finalChatResponse("offline fixture response")}
 			rt := New(Config{DefaultModel: "fallback-model", WebSearchEnabled: false}, client, NewMemoryStore())
 
@@ -52,6 +55,19 @@ func TestCodexCreateRequestFixturesReachRuntimeChatRequest(t *testing.T) {
 				t.Fatalf("response mismatch: %#v", resp)
 			}
 		})
+	}
+}
+
+func codexFixtureRequiresHostedRuntime(req protocol.CreateResponseRequest) bool {
+	choice, ok := req.ToolChoice.(map[string]any)
+	if !ok {
+		return false
+	}
+	switch choice["type"] {
+	case "web_search", "web_search_preview", "mcp", "file_search", "code_interpreter", "computer_use_preview":
+		return true
+	default:
+		return false
 	}
 }
 

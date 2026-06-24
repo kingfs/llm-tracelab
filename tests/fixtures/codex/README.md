@@ -23,6 +23,12 @@ Coverage:
   continuation using `previous_response_id`.
 - `ordinary_web_search_descriptor_request.json`: ordinary hosted web search
   descriptor accepted as compatibility input.
+- `forced_web_search_request.json`: forced hosted web search descriptor,
+  documenting the execution-or-stable-rejection contract.
+- `unsupported_mcp_request.json`, `unsupported_file_search_request.json`,
+  `unsupported_code_interpreter_request.json`, and
+  `unsupported_computer_use_preview_request.json`: standalone request examples
+  for hosted tools that must be rejected until explicit runtimes exist.
 - `unsupported_hosted_tool_expected_error.json`: expected stable error shape for
   unsupported hosted tools such as `mcp`, `file_search`, and
   `code_interpreter`, and `computer_use_preview`. Runtime and HTTP tests assert

@@ -1,0 +1,23 @@
+{
+  "model": "local-test-model",
+  "input": "Use a hosted browser computer to inspect the app UI.",
+  "tools": [
+    {
+      "type": "computer_use_preview",
+      "display_width": 1024,
+      "display_height": 768
+    }
+  ],
+  "tool_choice": {
+    "type": "computer_use_preview"
+  },
+  "store": true,
+  "metadata": {
+    "fixture": "codex_unsupported_computer_use_preview",
+    "expected_behavior": "unsupported hosted computer_use_preview must be rejected before execution or fabricated output",
+    "codex": {
+      "thread_id": "thread_fixture_unsupported_computer_use_preview",
+      "client_request_id": "turn_fixture_unsupported_computer_use_preview_1"
+    }
+  }
+}
