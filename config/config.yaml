@@ -30,6 +30,12 @@ responses_server:
   auto_compact: true
   compact_history_item_threshold: 80
   adopt_channel_model_profiles: true
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: ["web_search"]
+    inject_when_tools_absent: true
+    preserve_client_tools: true
+    default_tool_choice: "auto"
   function_executors:
     enabled: false
     timeout: 2s
@@ -41,12 +47,17 @@ responses_server:
 
 tools:
   web_search:
-    enabled: false
+    enabled: true
     provider: "searxng"
     max_results: 5
     base_url: "http://searxng:8080"
     timeout_ms: 5000
     user_agent: "llm-tracelab/production"
+  mcp:
+    enabled: true
+    default_timeout_ms: 60000
+    max_result_bytes: 65536
+    servers: []
 
 router:
   model_discovery:

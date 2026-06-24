@@ -179,11 +179,16 @@ type UsageSniffer struct {
 	Usage    *recorder.UsageInfo
 	Pipeline *llm.ResponsePipeline
 	Events   *[]recorder.RecordEvent
+	Start    time.Time
+	TTFTMs   *int64
 }
 
 func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 	n, err = s.Source.Read(p)
 	if n > 0 {
+		if s.TTFTMs != nil && *s.TTFTMs <= 0 && !s.Start.IsZero() {
+			*s.TTFTMs = time.Since(s.Start).Milliseconds()
+		}
 		data := p[:n]
 
 		// 1. 写入日志文件并计数

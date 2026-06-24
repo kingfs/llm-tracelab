@@ -84,6 +84,31 @@ func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 	}
 }
 
+func TestUsageSnifferRecordsTTFTFromFirstSourceBytes(t *testing.T) {
+	var ttft int64
+	start := time.Now().Add(-25 * time.Millisecond)
+	sniffer := UsageSniffer{
+		Source: nopReadCloser{Reader: bytes.NewBufferString(`{"id":"chatcmpl_ttft"}`)},
+		Start:  start,
+		TTFTMs: &ttft,
+	}
+
+	buf := make([]byte, 4)
+	if _, err := sniffer.Read(buf); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	first := ttft
+	if first <= 0 {
+		t.Fatalf("TTFTMs = %d, want positive first-byte latency", first)
+	}
+	if _, err := sniffer.Read(buf); err != nil && err != io.EOF {
+		t.Fatalf("second Read() error = %v", err)
+	}
+	if ttft != first {
+		t.Fatalf("TTFTMs changed from %d to %d after subsequent read", first, ttft)
+	}
+}
+
 func TestEnsureStreamOptionsOnlyAppliesToChatCompletions(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","stream":true}`))
 	if err != nil {
