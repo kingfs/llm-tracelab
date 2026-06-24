@@ -5,6 +5,14 @@ search:
     - html
     - json
 
+outgoing:
+    request_timeout: 8.0
+    max_request_timeout: 20.0
+    extra_proxy_timeout: 10
+    proxies:
+      all://:
+        - http://your-proxy-server:7890
+
 server:
   secret_key: "llm-tracelab-compose-secret-change-me"
   limiter: true
