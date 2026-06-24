@@ -103,6 +103,10 @@ func (db *rebindingDB) Query(query string, args ...any) (*sql.Rows, error) {
 	return db.DB.Query(db.rebind(query), args...)
 }
 
+func (db *rebindingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return db.DB.QueryContext(ctx, db.rebind(query), args...)
+}
+
 func (db *rebindingDB) QueryRow(query string, args ...any) *sql.Row {
 	return db.DB.QueryRow(db.rebind(query), args...)
 }
