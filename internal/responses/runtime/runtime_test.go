@@ -26,6 +26,8 @@ type fakeChatClient struct {
 	errs                 []error
 	err                  error
 	streamReqs           []ChatCompletionRequest
+	callMetadata         []ModelCallMetadata
+	streamCallMetadata   []ModelCallMetadata
 	streamEvents         []ChatStreamEvent
 	streamEventBatches   [][]ChatStreamEvent
 	streamResp           ChatCompletionResponse
@@ -130,6 +132,9 @@ func (f *fixedTokenEstimator) EstimateResponsePromptTokens(req protocol.CreateRe
 func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error) {
 	f.req = req
 	f.reqs = append(f.reqs, req)
+	if metadata, ok := ModelCallMetadataFromContext(ctx); ok {
+		f.callMetadata = append(f.callMetadata, metadata)
+	}
 	index := len(f.reqs) - 1
 	if index < len(f.errs) && f.errs[index] != nil {
 		return ChatCompletionResponse{}, f.errs[index]
@@ -145,6 +150,9 @@ func (f *fakeChatClient) ChatCompletion(ctx context.Context, req ChatCompletionR
 
 func (f *fakeChatClient) ChatCompletionStream(ctx context.Context, req ChatCompletionRequest, handle ChatStreamCallback) (ChatCompletionResponse, error) {
 	f.streamReqs = append(f.streamReqs, req)
+	if metadata, ok := ModelCallMetadataFromContext(ctx); ok {
+		f.streamCallMetadata = append(f.streamCallMetadata, metadata)
+	}
 	index := len(f.streamReqs) - 1
 	if f.streamErr != nil {
 		return ChatCompletionResponse{}, f.streamErr
@@ -402,6 +410,68 @@ func TestRuntimeCreateStringInputCallsChatClientAndStoresResponse(t *testing.T) 
 	}
 	if len(inputs) != 1 || inputs[0].Type != "message" || inputs[0].Role != "user" || inputs[0].Content[0].Text != "hello" {
 		t.Fatalf("stored input items mismatch: %#v", inputs)
+	}
+}
+
+func TestRuntimeCreateClassifiesPrimaryAndToolFollowupModelCalls(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			functionToolChatResponse("call_lookup", "lookup"),
+			finalChatResponse("done"),
+		},
+	}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(),
+		WithFunctionToolExecutor("lookup", StaticFunctionToolExecutor{Output: map[string]any{"ok": true}}),
+	)
+
+	resp, err := rt.Create(context.Background(), functionToolCreateRequest("lookup codex"))
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+
+	if len(client.callMetadata) != 2 {
+		t.Fatalf("model call metadata len = %d, want 2: %#v", len(client.callMetadata), client.callMetadata)
+	}
+	want := []ModelCallMetadata{
+		{ExchangeKind: ModelExchangeKind, ExchangeRole: ModelExchangeRolePrimaryModelCall, SequenceIndex: 0, ResponseID: resp.ID},
+		{ExchangeKind: ModelExchangeKind, ExchangeRole: ModelExchangeRoleToolFollowup, SequenceIndex: 1, ResponseID: resp.ID},
+	}
+	if !reflect.DeepEqual(client.callMetadata, want) {
+		t.Fatalf("model call metadata mismatch\nwant: %#v\n got: %#v", want, client.callMetadata)
+	}
+}
+
+func TestRuntimeCompactClassifiesCompactModelCall(t *testing.T) {
+	store := NewMemoryStore()
+	if err := store.Put(context.Background(), protocol.Response{
+		ID:        "resp_source",
+		Object:    "response",
+		Status:    "completed",
+		Model:     "gpt-test",
+		Output:    []protocol.OutputItem{{ID: "msg_source", Type: "message", Status: "completed", Content: []protocol.ContentPart{{Type: "output_text", Text: "Keep replay stable."}}}},
+		CreatedAt: time.Now().Unix(),
+	}, protocol.CreateResponseRequest{Model: "gpt-test", Input: "remember this"}, []protocol.InputItem{{ID: "input_source", Type: "message", Role: "user", Content: []protocol.ContentPart{{Type: "input_text", Text: "remember this"}}}}, nil); err != nil {
+		t.Fatalf("seed response: %v", err)
+	}
+	client := &fakeChatClient{resp: finalChatResponse("Replay constraints matter.")}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, store)
+
+	resp, err := rt.Compact(context.Background(), protocol.CompactResponseRequest{ResponseID: "resp_source"})
+	if err != nil {
+		t.Fatalf("Compact returned error: %v", err)
+	}
+
+	if len(client.callMetadata) != 1 {
+		t.Fatalf("model call metadata len = %d, want 1: %#v", len(client.callMetadata), client.callMetadata)
+	}
+	want := ModelCallMetadata{
+		ExchangeKind:  ModelExchangeKind,
+		ExchangeRole:  ModelExchangeRoleCompact,
+		SequenceIndex: 0,
+		ResponseID:    resp.ID,
+	}
+	if client.callMetadata[0] != want {
+		t.Fatalf("compact model call metadata = %#v, want %#v", client.callMetadata[0], want)
 	}
 }
 

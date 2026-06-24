@@ -1037,6 +1037,13 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	if modelCompleted.DetailsJSON["cassette_path"] != recordPath || modelCompleted.DetailsJSON["trace_id"] != parsed.Header.Meta.RequestID {
 		t.Fatalf("model call completed event details = %#v, want cassette_path=%q trace_id=%q", modelCompleted.DetailsJSON, recordPath, parsed.Header.Meta.RequestID)
 	}
+	if modelCompleted.ResponseID != responseID ||
+		modelCompleted.DetailsJSON["response_id"] != responseID ||
+		modelCompleted.DetailsJSON["exchange_kind"] != "model" ||
+		modelCompleted.DetailsJSON["exchange_role"] != "primary_model_call" ||
+		modelCompleted.DetailsJSON["sequence_index"] != float64(0) {
+		t.Fatalf("model call completed role details = %#v response_id=%q, want primary model sequence 0 for %q", modelCompleted.DetailsJSON, modelCompleted.ResponseID, responseID)
+	}
 	requestCompleted := events[eventsByKey["response.request/request/completed"]]
 	if requestCompleted.ResponseID != responseID {
 		t.Fatalf("completed request event response_id = %q, want %q", requestCompleted.ResponseID, responseID)
@@ -1679,6 +1686,25 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	}
 	if events[0].Status != "started" || events[len(events)-1].Status != "completed" || events[len(events)-1].ResponseID != compacted.ID {
 		t.Fatalf("compact event statuses/response = %+v", events)
+	}
+	modelEvents, err := st.EntClient().ExecutionEvent.Query().
+		Where(executionevent.EventTypeEQ("response.model_call")).
+		Order(executionevent.ByOccurredAt(), executionevent.ByID()).
+		All(context.Background())
+	if err != nil {
+		t.Fatalf("query model call execution events: %v", err)
+	}
+	if len(modelEvents) != 4 {
+		t.Fatalf("model call events len = %d, want create started/completed + compact started/completed: %+v", len(modelEvents), modelEvents)
+	}
+	compactModelCompleted := modelEvents[3]
+	if compactModelCompleted.Status != "completed" ||
+		compactModelCompleted.ResponseID != compacted.ID ||
+		compactModelCompleted.DetailsJSON["response_id"] != compacted.ID ||
+		compactModelCompleted.DetailsJSON["exchange_kind"] != "model" ||
+		compactModelCompleted.DetailsJSON["exchange_role"] != "compact_model_call" ||
+		compactModelCompleted.DetailsJSON["sequence_index"] != float64(0) {
+		t.Fatalf("compact model call completed details = %#v response_id=%q, want compact model sequence 0 for %q", compactModelCompleted.DetailsJSON, compactModelCompleted.ResponseID, compacted.ID)
 	}
 }
 

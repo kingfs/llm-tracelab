@@ -258,6 +258,17 @@ func (a *responsesChatCompletionsAdapter) recordModelCallEvent(ctx context.Conte
 	if logInfo.Header.Meta.StatusCode != 0 {
 		details["status_code"] = logInfo.Header.Meta.StatusCode
 	}
+	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok {
+		details["exchange_kind"] = metadata.ExchangeKind
+		details["exchange_role"] = metadata.ExchangeRole
+		details["sequence_index"] = metadata.SequenceIndex
+		if metadata.ResponseID != "" {
+			details["response_id"] = metadata.ResponseID
+			if event.ResponseID == "" {
+				event.ResponseID = metadata.ResponseID
+			}
+		}
+	}
 	if event.DetailsJSON != nil {
 		for key, value := range event.DetailsJSON {
 			details[key] = value
@@ -304,6 +315,9 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 		StartedAt:      startedAt,
 		CompletedAt:    completedAt,
 		ErrorText:      logInfo.Header.Meta.Error,
+	}
+	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok && metadata.ResponseID != "" {
+		entry.ResponseID = metadata.ResponseID
 	}
 	if err := a.auditor.RecordUpstreamExchange(context.WithoutCancel(ctx), entry); err != nil {
 		slog.Error("Failed to record responses upstream exchange", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)

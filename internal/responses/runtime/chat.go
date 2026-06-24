@@ -2,6 +2,57 @@ package runtime
 
 import "context"
 
+const (
+	ModelExchangeKind                 = "model"
+	ModelExchangeRolePrimaryModelCall = "primary_model_call"
+	ModelExchangeRoleToolFollowup     = "tool_followup_model_call"
+	ModelExchangeRoleCompact          = "compact_model_call"
+)
+
+type modelCallContextKey struct{}
+type modelCallSequenceContextKey struct{}
+
+type ModelCallMetadata struct {
+	ExchangeKind  string
+	ExchangeRole  string
+	SequenceIndex int
+	ResponseID    string
+}
+
+type modelCallSequence struct {
+	next int
+}
+
+func withModelCallSequence(ctx context.Context) context.Context {
+	if _, ok := modelCallSequenceFromContext(ctx); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, modelCallSequenceContextKey{}, &modelCallSequence{})
+}
+
+func modelCallSequenceFromContext(ctx context.Context) (*modelCallSequence, bool) {
+	seq, ok := ctx.Value(modelCallSequenceContextKey{}).(*modelCallSequence)
+	return seq, ok && seq != nil
+}
+
+func withNextModelCallMetadata(ctx context.Context, role string, responseID string) context.Context {
+	ctx = withModelCallSequence(ctx)
+	seq, _ := modelCallSequenceFromContext(ctx)
+	metadata := ModelCallMetadata{
+		ExchangeKind:  ModelExchangeKind,
+		ExchangeRole:  role,
+		SequenceIndex: seq.next,
+		ResponseID:    responseID,
+	}
+	seq.next++
+	return context.WithValue(ctx, modelCallContextKey{}, metadata)
+}
+
+func ModelCallMetadataFromContext(ctx context.Context) (ModelCallMetadata, bool) {
+	metadata, ok := ctx.Value(modelCallContextKey{}).(ModelCallMetadata)
+	return metadata, ok
+}
+
 type ChatCompletionsClient interface {
 	ChatCompletion(ctx context.Context, req ChatCompletionRequest) (ChatCompletionResponse, error)
 }
