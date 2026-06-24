@@ -13,8 +13,11 @@ import (
 )
 
 const (
-	ToolTypeWebSearch = "web_search"
-	ToolTypeMCP       = "mcp"
+	ToolTypeWebSearch          = "web_search"
+	ToolTypeMCP                = "mcp"
+	ToolTypeFileSearch         = "file_search"
+	ToolTypeCodeInterpreter    = "code_interpreter"
+	ToolTypeComputerUsePreview = "computer_use_preview"
 )
 
 type Phase string

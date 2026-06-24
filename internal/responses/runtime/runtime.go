@@ -14,6 +14,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/llm-tracelab/internal/responses/tools/hosted"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
 
@@ -36,6 +37,7 @@ type Runtime struct {
 	store               Store
 	tokenEstimator      TokenEstimator
 	webSearchProvider   websearch.Provider
+	hostedRegistry      *hosted.Registry
 	functionExecutorsMu sync.RWMutex
 	functionExecutors   *FunctionToolExecutorRegistry
 	events              audit.ExecutionEventRecorder
@@ -59,6 +61,7 @@ func WithTokenEstimator(estimator TokenEstimator) Option {
 func WithWebSearchProvider(provider websearch.Provider) Option {
 	return func(r *Runtime) {
 		r.webSearchProvider = provider
+		r.registerWebSearchHostedExecutor()
 	}
 }
 
@@ -162,6 +165,7 @@ func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) 
 		client:            client,
 		store:             store,
 		tokenEstimator:    NewAdapterBackedTokenEstimator(ChatTokenCounter{}),
+		hostedRegistry:    mustHostedRegistry(),
 		functionExecutors: NewFunctionToolExecutorRegistry(nil),
 	}
 	for _, opt := range opts {
@@ -171,6 +175,64 @@ func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) 
 		opt(rt)
 	}
 	return rt
+}
+
+func mustHostedRegistry() *hosted.Registry {
+	registry, err := hosted.NewRegistry()
+	if err != nil {
+		panic(err)
+	}
+	return registry
+}
+
+func (r *Runtime) registerWebSearchHostedExecutor() {
+	if r == nil || r.webSearchProvider == nil {
+		return
+	}
+	if r.hostedRegistry == nil {
+		r.hostedRegistry = mustHostedRegistry()
+	}
+	_ = r.hostedRegistry.Register(hostedWebSearchExecutor{runtime: r})
+}
+
+type hostedWebSearchExecutor struct {
+	runtime *Runtime
+}
+
+func (e hostedWebSearchExecutor) Type() string {
+	return hosted.ToolTypeWebSearch
+}
+
+func (e hostedWebSearchExecutor) Enabled(hosted.ToolContext) bool {
+	return e.runtime != nil && e.runtime.cfg.WebSearchEnabled && e.runtime.webSearchProvider != nil
+}
+
+func (e hostedWebSearchExecutor) ExecuteHostedTool(ctx context.Context, _ hosted.ToolContext, call hosted.ToolCall) (hosted.ToolResult, error) {
+	if !e.Enabled(hosted.ToolContext{}) {
+		return hosted.ToolResult{}, UnsupportedHostedToolError{Tool: hosted.ToolTypeWebSearch, Reason: "web_search is not enabled or no provider is configured"}
+	}
+	query := webSearchQueryFromArguments(string(call.Arguments))
+	result, err := e.runtime.webSearchProvider.Search(ctx, websearch.Query{
+		Text:       query,
+		MaxResults: e.runtime.cfg.WebSearchMaxResults,
+	})
+	if err != nil {
+		return hosted.ToolResult{}, err
+	}
+	return hosted.ToolResult{
+		Output: result,
+		Status: hosted.StatusCompleted,
+		Summary: hosted.SafeSummary{
+			Arguments: hosted.RedactedValue{Value: map[string]any{
+				"query_chars":  len(query),
+				"query_sha256": auditSHA256(query),
+				"max_results":  e.runtime.cfg.WebSearchMaxResults,
+			}},
+			Output: hosted.RedactedValue{Value: map[string]any{
+				"result_count": len(result.Results),
+			}},
+		},
+	}, nil
 }
 
 func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest) (protocol.Response, error) {
@@ -1188,7 +1250,27 @@ func (e MaxToolIterationsError) Error() string {
 }
 
 func (r *Runtime) webSearchReady() bool {
-	return r.cfg.WebSearchEnabled && r.webSearchProvider != nil
+	return r.hostedToolReady(hosted.ToolTypeWebSearch, protocol.CreateResponseRequest{}, "")
+}
+
+func (r *Runtime) hostedToolReady(toolType string, req protocol.CreateResponseRequest, model string) bool {
+	executor, ok := r.hostedExecutor(toolType)
+	return ok && executor.Enabled(r.hostedToolContext(req, model))
+}
+
+func (r *Runtime) hostedExecutor(toolType string) (hosted.Executor, bool) {
+	if r == nil || r.hostedRegistry == nil {
+		return nil, false
+	}
+	return r.hostedRegistry.Resolve(toolType)
+}
+
+func (r *Runtime) hostedToolContext(req protocol.CreateResponseRequest, model string) hosted.ToolContext {
+	return hosted.ToolContext{
+		Model:    model,
+		Tools:    req.Tools,
+		Metadata: req.Metadata,
+	}
 }
 
 func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateResponseRequest, model string, chatReq ChatCompletionRequest, functionExecutors map[string]configuredFunctionToolExecutor) (protocol.Response, error) {
@@ -1297,10 +1379,7 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 		StartedAt:    startedAt,
 		CreatedAt:    startedAt,
 	})
-	result, err := r.webSearchProvider.Search(ctx, websearch.Query{
-		Text:       call.query,
-		MaxResults: r.cfg.WebSearchMaxResults,
-	})
+	result, err := r.executeHostedWebSearch(ctx, call, exec)
 	if err != nil {
 		completedAt := time.Now()
 		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
@@ -1404,6 +1483,33 @@ func (r *Runtime) executeWebSearchToolCall(ctx context.Context, call executableT
 		CreatedAt:    completedAt,
 	})
 	return webSearchCallOutput(call.call, call.query, result), toolContent, nil
+}
+
+func (r *Runtime) executeHostedWebSearch(ctx context.Context, call executableToolCall, exec toolExecutionContext) (websearch.Result, error) {
+	executor := call.hostedExecutor
+	if executor == nil {
+		var ok bool
+		executor, ok = r.hostedExecutor(hosted.ToolTypeWebSearch)
+		if !ok {
+			return websearch.Result{}, UnsupportedHostedToolError{Tool: hosted.ToolTypeWebSearch, Reason: "web_search is not enabled or no provider is configured"}
+		}
+	}
+	result, err := executor.ExecuteHostedTool(ctx, hosted.ToolContext{
+		ResponseID: exec.ResponseID,
+	}, hosted.ToolCall{
+		ID:        call.call.ID,
+		Type:      hosted.ToolTypeWebSearch,
+		Name:      hosted.ToolTypeWebSearch,
+		Arguments: json.RawMessage(call.call.Function.Arguments),
+	})
+	if err != nil {
+		return websearch.Result{}, err
+	}
+	output, ok := result.Output.(websearch.Result)
+	if !ok {
+		return websearch.Result{}, fmt.Errorf("hosted web_search returned %T, want websearch.Result", result.Output)
+	}
+	return output, nil
 }
 
 func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
@@ -1690,12 +1796,13 @@ func mergeEventDetails(base map[string]any, extra map[string]any) map[string]any
 }
 
 func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool, budget ContextBudget) ChatCompletionRequest {
-	tools := responseToolsToChatTools(req.Tools, webSearchReady)
+	hostedTools := hostedToolSet{hosted.ToolTypeWebSearch: webSearchReady}
+	tools := responseToolsToChatToolsWithHostedTools(req.Tools, hostedTools)
 	return ChatCompletionRequest{
 		Model:       model,
 		Messages:    responseInputToMessages(req, history, inputItems),
 		Tools:       tools,
-		ToolChoice:  chatToolChoice(req.ToolChoice, tools),
+		ToolChoice:  chatToolChoiceWithHostedTools(req.ToolChoice, tools, hostedTools),
 		MaxTokens:   effectiveMaxOutputTokens(req, budget),
 		Temperature: req.Temperature,
 		TopP:        req.TopP,
@@ -1929,6 +2036,18 @@ func responseInputToMessages(req protocol.CreateResponseRequest, history []Ledge
 }
 
 func responseToolsToChatTools(tools []protocol.Tool, webSearchReady bool) []ChatTool {
+	return responseToolsToChatToolsWithHostedTools(tools, hostedToolSet{
+		hosted.ToolTypeWebSearch: webSearchReady,
+	})
+}
+
+type hostedToolSet map[string]bool
+
+func (s hostedToolSet) ready(toolType string) bool {
+	return s[toolType]
+}
+
+func responseToolsToChatToolsWithHostedTools(tools []protocol.Tool, hostedTools hostedToolSet) []ChatTool {
 	out := make([]ChatTool, 0, len(tools))
 	for _, tool := range tools {
 		switch tool.Type {
@@ -1942,7 +2061,7 @@ func responseToolsToChatTools(tools []protocol.Tool, webSearchReady bool) []Chat
 				},
 			})
 		case "web_search", "web_search_preview":
-			if webSearchReady {
+			if hostedTools.ready(hosted.ToolTypeWebSearch) {
 				out = append(out, webSearchChatTool())
 			}
 		}
@@ -1973,7 +2092,7 @@ func webSearchChatTool() ChatTool {
 
 func forcedWebSearchTool(toolChoice any) bool {
 	tool, ok := forcedHostedToolName(toolChoice)
-	return ok && (tool == "web_search" || tool == "web_search_preview")
+	return ok && hostedToolAlias(tool) == hosted.ToolTypeWebSearch
 }
 
 func forcedHostedToolNameOrDefault(toolChoice any, fallback string) string {
@@ -1990,10 +2109,19 @@ func forcedUnsupportedHostedTool(toolChoice any) (string, bool) {
 		return "", false
 	}
 	switch tool {
-	case "mcp", "file_search", "code_interpreter", "computer_use_preview":
+	case hosted.ToolTypeMCP, hosted.ToolTypeFileSearch, hosted.ToolTypeCodeInterpreter, hosted.ToolTypeComputerUsePreview:
 		return tool, true
 	default:
 		return "", false
+	}
+}
+
+func hostedToolAlias(toolType string) string {
+	switch strings.TrimSpace(toolType) {
+	case "web_search_preview":
+		return hosted.ToolTypeWebSearch
+	default:
+		return strings.TrimSpace(toolType)
 	}
 }
 
@@ -2024,13 +2152,19 @@ func forcedHostedToolName(toolChoice any) (string, bool) {
 }
 
 func chatToolChoice(choice any, tools []ChatTool) any {
+	return chatToolChoiceWithHostedTools(choice, tools, hostedToolSet{
+		hosted.ToolTypeWebSearch: hasChatTool(tools, "web_search"),
+	})
+}
+
+func chatToolChoiceWithHostedTools(choice any, tools []ChatTool, hostedTools hostedToolSet) any {
 	if len(tools) == 0 {
 		return nil
 	}
 	if !forcedWebSearchTool(choice) {
 		return choice
 	}
-	if !hasChatTool(tools, "web_search") {
+	if !hostedTools.ready(hosted.ToolTypeWebSearch) || !hasChatTool(tools, "web_search") {
 		return nil
 	}
 	return map[string]any{
@@ -2056,11 +2190,12 @@ const (
 )
 
 type executableToolCall struct {
-	kind     string
-	call     ChatToolCall
-	query    string
-	executor FunctionToolExecutor
-	policy   FunctionToolExecutorPolicy
+	kind           string
+	call           ChatToolCall
+	query          string
+	hostedExecutor hosted.Executor
+	executor       FunctionToolExecutor
+	policy         FunctionToolExecutorPolicy
 }
 
 func (r *Runtime) executableToolCalls(chat ChatCompletionResponse, functionExecutors map[string]configuredFunctionToolExecutor) ([]executableToolCall, bool, bool) {
@@ -2078,11 +2213,12 @@ func (r *Runtime) executableToolCalls(chat ChatCompletionResponse, functionExecu
 		}
 		switch call.Function.Name {
 		case "web_search":
-			if !r.webSearchReady() {
+			executor, ok := r.hostedExecutor(hosted.ToolTypeWebSearch)
+			if !ok || !executor.Enabled(r.hostedToolContext(protocol.CreateResponseRequest{}, "")) {
 				return nil, true, true
 			}
 			query := webSearchQueryFromArguments(call.Function.Arguments)
-			out = append(out, executableToolCall{kind: executableToolKindWebSearch, call: call, query: query})
+			out = append(out, executableToolCall{kind: executableToolKindWebSearch, call: call, query: query, hostedExecutor: executor})
 		default:
 			configured := functionExecutors[normalizeFunctionToolName(call.Function.Name)]
 			if configured.executor == nil {
