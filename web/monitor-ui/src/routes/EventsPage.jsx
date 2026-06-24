@@ -5,6 +5,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { StatCard } from "../components/common/Display";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { buildTraceLink, formatDateTime, formatFailureReason, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
 const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
@@ -13,6 +14,7 @@ const SEVERITY_OPTIONS = ["all", "critical", "error", "warning", "info"];
 const SOURCE_OPTIONS = ["all", "parser", "analyzer", "router", "upstream", "proxy", "recorder", "monitor", "store", "auth", "mcp"];
 
 export function EventsPage() {
+  const { language, t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [refreshTick, setRefreshTick] = useState(0);
   const [selectedID, setSelectedID] = useState("");
@@ -65,10 +67,10 @@ export function EventsPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">System health</p>
-          <h1>Events</h1>
+          <h1>{t("events.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <div className="view-toggle" aria-label="Events window">
+          <div className="view-toggle" aria-label={t("events.window")}>
             {WINDOW_OPTIONS.map((option) => (
               <button key={option} className={`ghost-button ${currentFilter(searchParams, "window", "today") === option ? "active" : ""}`.trim()} type="button" onClick={() => setFilter("window", option)}>
                 {option}
@@ -76,41 +78,41 @@ export function EventsPage() {
             ))}
           </div>
           <button className="ghost-button" type="button" onClick={markAllRead} disabled={busyID === "read-all"}>
-            Mark all read
+            {t("events.markAllRead")}
           </button>
           <span className="badge">{data?.refreshed_at ? formatDateTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
 
-      {error ? <EmptyState title="Unable to load events" detail={error} tone="danger" /> : null}
-      {loading && !data ? <EmptyState title="Loading events" detail="Fetching TraceLab runtime and analysis exceptions." /> : null}
+      {error ? <EmptyState title={t("events.loadError")} detail={error} tone="danger" /> : null}
+      {loading && !data ? <EmptyState title={t("events.loading")} detail={t("events.loadingDetail")} /> : null}
 
       <section className="hero-grid overview-kpi-grid">
-        <StatCard label="Unread" value={summary?.unread ?? 0} detail={`${summary?.total ?? 0} total events`} accent={(summary?.unread ?? 0) ? "accent-red" : "accent-green"} />
-        <StatCard label="Critical" value={summary?.critical ?? 0} detail="unread critical" accent={(summary?.critical ?? 0) ? "accent-red" : ""} />
-        <StatCard label="Error" value={summary?.error ?? 0} detail="unread errors" accent={(summary?.error ?? 0) ? "accent-red" : ""} />
-        <StatCard label="Warning" value={summary?.warning ?? 0} detail="unread warnings" accent={(summary?.warning ?? 0) ? "accent-gold" : ""} />
+        <StatCard label={t("events.unread")} value={summary?.unread ?? 0} detail={t("events.totalEvents", { count: summary?.total ?? 0 })} accent={(summary?.unread ?? 0) ? "accent-red" : "accent-green"} />
+        <StatCard label={t("events.critical")} value={summary?.critical ?? 0} detail={t("events.unreadCritical")} accent={(summary?.critical ?? 0) ? "accent-red" : ""} />
+        <StatCard label={t("events.error")} value={summary?.error ?? 0} detail={t("events.unreadErrors")} accent={(summary?.error ?? 0) ? "accent-red" : ""} />
+        <StatCard label={t("events.warning")} value={summary?.warning ?? 0} detail={t("events.unreadWarnings")} accent={(summary?.warning ?? 0) ? "accent-gold" : ""} />
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Inbox filters</p>
-            <h2>Runtime exceptions</h2>
+            <h2>{t("events.runtimeExceptions")}</h2>
           </div>
-          <span className="badge">{data?.total ?? 0} matching</span>
+          <span className="badge">{t("events.matching", { count: data?.total ?? 0 })}</span>
         </div>
         <div className="filter-bar event-filter-bar">
-          <select className="filter-input" value={currentFilter(searchParams, "status", "unread")} onChange={(event) => setFilter("status", event.target.value)} aria-label="Status">
-            {STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+          <select className="filter-input" value={currentFilter(searchParams, "status", "unread")} onChange={(event) => setFilter("status", event.target.value)} aria-label={t("events.status")}>
+            {STATUS_OPTIONS.map((option) => <option key={option} value={option}>{formatEventOption(option, t, language)}</option>)}
           </select>
-          <select className="filter-input" value={currentFilter(searchParams, "severity", "all")} onChange={(event) => setFilter("severity", event.target.value)} aria-label="Severity">
-            {SEVERITY_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+          <select className="filter-input" value={currentFilter(searchParams, "severity", "all")} onChange={(event) => setFilter("severity", event.target.value)} aria-label={t("events.severity")}>
+            {SEVERITY_OPTIONS.map((option) => <option key={option} value={option}>{formatEventOption(option, t, language)}</option>)}
           </select>
-          <select className="filter-input" value={currentFilter(searchParams, "source", "all")} onChange={(event) => setFilter("source", event.target.value)} aria-label="Source">
-            {SOURCE_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+          <select className="filter-input" value={currentFilter(searchParams, "source", "all")} onChange={(event) => setFilter("source", event.target.value)} aria-label={t("events.source")}>
+            {SOURCE_OPTIONS.map((option) => <option key={option} value={option}>{formatEventOption(option, t, language)}</option>)}
           </select>
-          <input className="filter-input filter-input-wide" type="search" value={searchParams.get("q") || ""} onChange={(event) => setFilter("q", event.target.value)} placeholder="Search fingerprint, trace, model, or message" />
+          <input className="filter-input filter-input-wide" type="search" value={searchParams.get("q") || ""} onChange={(event) => setFilter("q", event.target.value)} placeholder={t("events.search")} />
         </div>
       </section>
 
@@ -130,7 +132,7 @@ export function EventsPage() {
                   <small>{formatDateTime(item.last_seen_at)}</small>
                 </span>
               </button>
-            )) : <EmptyState title="No events match" detail="Adjust filters to inspect historical runtime exceptions." compact />}
+            )) : <EmptyState title={t("events.noMatch")} detail={t("events.noMatchDetail")} compact />}
           </div>
         </section>
 
@@ -138,7 +140,7 @@ export function EventsPage() {
           {selected ? (
             <EventDetail event={selected} busyID={busyID} onAction={mutateEvent} />
           ) : (
-            <EmptyState title="No event selected" detail="Select an event row to inspect details and related objects." />
+            <EmptyState title={t("events.noSelected")} detail={t("events.noSelectedDetail")} />
           )}
         </section>
       </div>
@@ -147,6 +149,7 @@ export function EventsPage() {
 }
 
 function EventDetail({ event, busyID, onAction }) {
+  const { t } = useI18n();
   return (
     <div className="event-detail">
       <div className="panel-head event-detail-head">
@@ -167,14 +170,14 @@ function EventDetail({ event, busyID, onAction }) {
         <Meta label="fingerprint" value={event.fingerprint} mono />
       </div>
       <div className="trace-tag-group event-links">
-        {event.trace_id ? <Link className="ghost-button" to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}>Trace</Link> : null}
-        {event.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(event.session_id)}`}>Session</Link> : null}
-        {event.upstream_id ? <Link className="ghost-button" to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}>Upstream</Link> : null}
+        {event.trace_id ? <Link className="ghost-button" to={buildTraceLink(event.trace_id, "events", event.session_id || "", "protocol", "observation")}>{t("events.trace")}</Link> : null}
+        {event.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(event.session_id)}`}>{t("events.session")}</Link> : null}
+        {event.upstream_id ? <Link className="ghost-button" to={`/upstreams/${encodeURIComponent(event.upstream_id)}`}>{t("events.upstream")}</Link> : null}
       </div>
       <div className="event-actions">
-        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>Mark read</button>
-        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>Resolve</button>
-        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>Ignore</button>
+        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "read")} disabled={busyID === `${event.id}:read` || event.status === "read"}>{t("events.markRead")}</button>
+        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "resolve")} disabled={busyID === `${event.id}:resolve` || event.status === "resolved"}>{t("events.resolve")}</button>
+        <button className="ghost-button" type="button" onClick={() => onAction(event.id, "ignore")} disabled={busyID === `${event.id}:ignore` || event.status === "ignored"}>{t("events.ignore")}</button>
       </div>
       <pre className="code-block event-details-json">{formatJSON(event.details_json)}</pre>
     </div>
@@ -183,6 +186,24 @@ function EventDetail({ event, busyID, onAction }) {
 
 function Meta({ label, value, mono = false }) {
   return <span className="detail-meta-pill"><span className="detail-meta-label">{label}</span><strong className={mono ? "mono" : ""}>{value || "-"}</strong></span>;
+}
+
+function formatEventOption(option, t, language) {
+  if (language === "en") {
+    return option;
+  }
+  const map = {
+    all: "全部",
+    unread: "未读",
+    read: "已读",
+    resolved: "已解决",
+    ignored: "已忽略",
+    critical: t("events.critical"),
+    error: t("events.error"),
+    warning: t("events.warning"),
+    info: "信息",
+  };
+  return map[option] || option;
 }
 
 function eventQueryParams(searchParams) {

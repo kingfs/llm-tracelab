@@ -13,3 +13,5 @@ web/monitor-ui/test-results/
 web/monitor-ui/playwright-report/
 worktrees/
 *.tgz
+.playwright-cli/
+.playwright/

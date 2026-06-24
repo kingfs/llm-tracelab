@@ -7,6 +7,7 @@ import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { formatCount, formatTime, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
@@ -14,6 +15,7 @@ const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
 
 export function RoutingPage() {
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeRoutingWindow(searchParams.get("window"));
   const activeFilters = readRoutingFilters(searchParams);
@@ -71,10 +73,10 @@ export function RoutingPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Routing decisions</p>
-          <h1>Routing</h1>
+          <h1>{t("routing.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <span className="badge badge-live">refresh / 60s</span>
+          <span className="badge badge-live">{t("common.refresh60")}</span>
           <span className="badge">{traces.data?.refreshed_at ? formatTime(traces.data.refreshed_at) : "..."}</span>
         </div>
       </header>
@@ -83,10 +85,10 @@ export function RoutingPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Decision log</p>
-            <h2>Recent selected routes</h2>
+            <h2>{t("routing.recent")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Routing window">
+            <div className="view-toggle" role="tablist" aria-label={t("routing.window")}>
               {WINDOW_OPTIONS.map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
@@ -96,33 +98,33 @@ export function RoutingPage() {
           </div>
         </div>
         <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
-          <input className="filter-input" type="search" name="routing_model" placeholder="Model" value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
-          <input className="filter-input" type="search" name="routing_upstream" placeholder="Channel / upstream" value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
+          <input className="filter-input" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
+          <input className="filter-input" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
           <select className="filter-input" name="routing_status" aria-label="Routing status" value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
-            <option value="">Any status</option>
-            <option value="success">Success</option>
-            <option value="error">Error</option>
+            <option value="">{t("routing.anyStatus")}</option>
+            <option value="success">{t("routing.statusSuccess")}</option>
+            <option value="error">{t("routing.statusError")}</option>
           </select>
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_duration" placeholder="Min duration" value={filters.min_duration_ms} onChange={(event) => updateFilter("min_duration_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_duration" placeholder="Max duration" value={filters.max_duration_ms} onChange={(event) => updateFilter("max_duration_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_ttft" placeholder="Min TTFT" value={filters.min_ttft_ms} onChange={(event) => updateFilter("min_ttft_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_ttft" placeholder="Max TTFT" value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_tokens" placeholder="Min tokens" value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
-          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_tokens" placeholder="Max tokens" value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
-          <button className="ghost-button" type="submit">Apply</button>
-          <button className="ghost-button" type="button" onClick={resetFilters}>Reset</button>
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_duration" placeholder={t("routing.minDuration")} value={filters.min_duration_ms} onChange={(event) => updateFilter("min_duration_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_duration" placeholder={t("routing.maxDuration")} value={filters.max_duration_ms} onChange={(event) => updateFilter("max_duration_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_ttft" placeholder={t("routing.minTTFT")} value={filters.min_ttft_ms} onChange={(event) => updateFilter("min_ttft_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_ttft" placeholder={t("routing.maxTTFT")} value={filters.max_ttft_ms} onChange={(event) => updateFilter("max_ttft_ms", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_min_tokens" placeholder={t("routing.minTokens")} value={filters.min_tokens} onChange={(event) => updateFilter("min_tokens", event.target.value)} />
+          <input className="filter-input filter-input-small" type="number" min="0" name="routing_max_tokens" placeholder={t("routing.maxTokens")} value={filters.max_tokens} onChange={(event) => updateFilter("max_tokens", event.target.value)} />
+          <button className="ghost-button" type="submit">{t("common.apply")}</button>
+          <button className="ghost-button" type="button" onClick={resetFilters}>{t("common.reset")}</button>
         </form>
         <div className="hero-grid hero-grid-compact">
-          <StatCard label="Routed requests" value={formatCount(summary.requests)} />
-          <StatCard label="Channels" value={formatCount(summary.channels)} />
-          <StatCard label="Errors" value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing)} />
+          <StatCard label={t("routing.routedRequests")} value={formatCount(summary.requests)} />
+          <StatCard label={t("routing.channels")} value={formatCount(summary.channels)} />
+          <StatCard label={t("common.errors")} value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
+          <StatCard label={t("common.tokens")} value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing, t)} />
         </div>
       </section>
 
-      {traces.error ? <EmptyState title="Unable to load routing records" detail={traces.error} tone="danger" /> : null}
-      {routingSummary.error ? <EmptyState title="Unable to load routing event summary" detail={routingSummary.error} tone="danger" compact /> : null}
-      {traces.loading && !traces.data ? <EmptyState title="Loading routing records" detail="Reading recent traces with selected channels, status, tokens, duration, and TTFT." /> : null}
+      {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
+      {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
+      {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
       {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
       {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
     </div>
@@ -179,9 +181,9 @@ function hasMissingUsage(item) {
   return item.status_code >= 200 && item.status_code < 300 && Number(item.total_tokens || 0) === 0 && Number(item.prompt_tokens || 0) === 0 && Number(item.completion_tokens || 0) === 0;
 }
 
-function usageCoverageDetail(missing) {
+function usageCoverageDetail(missing, t = (key, values) => `${values?.count || 0} missing usage`) {
   const count = Number(missing || 0);
-  return count > 0 ? `${formatCount(count)} missing usage` : "";
+  return count > 0 ? t("providers.missingUsage", { count: formatCount(count) }) : "";
 }
 
 function routingSummaryWindow(windowValue) {
@@ -232,6 +234,7 @@ function mergeCountItems(...groups) {
 }
 
 function CredentialRoutingSummaryPanel({ summary, windowValue }) {
+  const { t } = useI18n();
   const hasCredentialData = summary.routeTargets.length || summary.channels.length || summary.credentials.length || summary.stickyBreakTotal > 0;
   const stickyBreakContext = firstNonEmptyItem(summary.stickyBreakRouteTargets, summary.stickyBreakPreviousRouteTargets, summary.stickyBreakPreviousUpstreams);
   return (
@@ -239,30 +242,30 @@ function CredentialRoutingSummaryPanel({ summary, windowValue }) {
       <div className="panel-head">
         <div>
           <p className="eyebrow">Credential routing</p>
-          <h2>Event-backed route target summary</h2>
+          <h2>{t("routing.credentialSummary")}</h2>
         </div>
         <div className="trace-tag-group">
           <InlineTag>{windowValue}</InlineTag>
-          <InlineTag tone={summary.eventfulTraces ? "green" : "default"}>{formatCount(summary.eventfulTraces)} eventful</InlineTag>
-          {summary.missingEvents ? <InlineTag tone="gold">{formatCount(summary.missingEvents)} legacy / missing</InlineTag> : null}
-          {summary.parseErrors ? <InlineTag tone="danger">{formatCount(summary.parseErrors)} parse errors</InlineTag> : null}
+          <InlineTag tone={summary.eventfulTraces ? "green" : "default"}>{t("routing.eventful", { count: formatCount(summary.eventfulTraces) })}</InlineTag>
+          {summary.missingEvents ? <InlineTag tone="gold">{t("routing.legacyMissing", { count: formatCount(summary.missingEvents) })}</InlineTag> : null}
+          {summary.parseErrors ? <InlineTag tone="danger">{t("routing.parseErrors", { count: formatCount(summary.parseErrors) })}</InlineTag> : null}
         </div>
       </div>
       <div className="hero-grid hero-grid-compact">
-        <StatCard label="Route targets" value={formatCount(summary.routeTargets.length)} detail={topCountDetail(summary.routeTargets)} mono />
-        <StatCard label="Channels" value={formatCount(summary.channels.length || summary.selectedUpstreams.length)} detail={topCountDetail(summary.channels.length ? summary.channels : summary.selectedUpstreams)} mono />
-        <StatCard label="Credentials" value={formatCount(summary.credentials.length)} detail={topCountDetail(summary.credentials)} mono />
-        <StatCard label="Sticky breaks" value={formatCount(summary.stickyBreakTotal)} detail={stickyBreakContext ? stickyBreakContext.label : ""} accent={summary.stickyBreakTotal ? "accent-red" : ""} mono />
+        <StatCard label={t("routing.routeTargets")} value={formatCount(summary.routeTargets.length)} detail={topCountDetail(summary.routeTargets)} mono />
+        <StatCard label={t("routing.channels")} value={formatCount(summary.channels.length || summary.selectedUpstreams.length)} detail={topCountDetail(summary.channels.length ? summary.channels : summary.selectedUpstreams)} mono />
+        <StatCard label={t("routing.credentials")} value={formatCount(summary.credentials.length)} detail={topCountDetail(summary.credentials)} mono />
+        <StatCard label={t("routing.stickyBreaks")} value={formatCount(summary.stickyBreakTotal)} detail={stickyBreakContext ? stickyBreakContext.label : ""} accent={summary.stickyBreakTotal ? "accent-red" : ""} mono />
       </div>
       {hasCredentialData ? (
         <div className="session-breakdown-grid">
-          <BreakdownList title="Route targets" items={summary.routeTargets} formatter={(item) => item.label} />
-          <BreakdownList title="Channels" items={summary.channels.length ? summary.channels : summary.selectedUpstreams} formatter={(item) => item.label} />
-          <BreakdownList title="Credentials" items={summary.credentials} formatter={(item) => item.label} />
-          <BreakdownList title="Sticky credential breaks" items={stickyBreakItems(summary)} formatter={(item) => item.label} />
+          <BreakdownList title={t("routing.routeTargets")} items={summary.routeTargets} formatter={(item) => item.label} />
+          <BreakdownList title={t("routing.channels")} items={summary.channels.length ? summary.channels : summary.selectedUpstreams} formatter={(item) => item.label} />
+          <BreakdownList title={t("routing.credentials")} items={summary.credentials} formatter={(item) => item.label} />
+          <BreakdownList title={t("routing.stickyCredentialBreaks")} items={stickyBreakItems(summary)} formatter={(item) => item.label} />
         </div>
       ) : (
-        <EmptyState title="No credential routing events" detail="Recent routing events do not include credential fields yet. Legacy route and sticky counts still appear in the selected route list." compact />
+        <EmptyState title={t("routing.noCredentialEvents")} detail={t("routing.noCredentialEventsDetail")} compact />
       )}
     </section>
   );

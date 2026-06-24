@@ -172,8 +172,8 @@ export function OverviewPage() {
                 },
               }))}
               series={[
-                { key: "requests", name: "requests" },
-                { key: "failures", name: "failures" },
+                { key: "requests", name: t("overview.requests") },
+                { key: "failures", name: t("overview.failed") },
               ]}
               metric="value"
               height={220}
@@ -183,7 +183,7 @@ export function OverviewPage() {
             <div className="breakdown-title">{t("overview.tokens")}</div>
             <MultiLineChart
               items={(data?.timeline || []).map((item) => ({ time: item.time, value: item.total_tokens }))}
-              series={[{ key: "value", name: "tokens" }]}
+              series={[{ key: "value", name: t("overview.tokens") }]}
               metric="value"
               height={220}
             />
@@ -199,8 +199,8 @@ export function OverviewPage() {
                 },
               }))}
               series={[
-                { key: "ttft", name: "ttft s" },
-                { key: "latency", name: "latency s" },
+                { key: "ttft", name: "TTFT s" },
+                { key: "latency", name: `${t("overview.latency")} s` },
               ]}
               metric="value"
               height={220}

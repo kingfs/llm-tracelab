@@ -4,9 +4,11 @@ import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, deleteJSON, postJSON, requestJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { formatDateTime } from "../lib/monitor";
 
 export function TokensPage() {
+  const { t } = useI18n();
   const [name, setName] = useState("local-dev");
   const [ttl, setTTL] = useState("");
   const [scope, setScope] = useState("api");
@@ -31,7 +33,7 @@ export function TokensPage() {
       setCreated(payload);
       setRefreshTick((tick) => tick + 1);
     } catch (err) {
-      setError(err.message || "Unable to create token.");
+      setError(err.message || t("tokens.createError"));
     } finally {
       setLoading(false);
     }
@@ -44,7 +46,7 @@ export function TokensPage() {
       await requestJSON(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { method: "DELETE" });
       setRefreshTick((tick) => tick + 1);
     } catch (err) {
-      setError(err.message || "Unable to revoke token.");
+      setError(err.message || t("tokens.revokeError"));
     } finally {
       setBusyToken(0);
     }
@@ -57,7 +59,7 @@ export function TokensPage() {
       await deleteJSON(apiURL(`${apiPaths.authTokens}/${encodeURIComponent(tokenID)}`, { delete: "1" }));
       setRefreshTick((tick) => tick + 1);
     } catch (err) {
-      setError(err.message || "Unable to delete token.");
+      setError(err.message || t("tokens.deleteError"));
     } finally {
       setBusyToken(0);
     }
@@ -68,51 +70,51 @@ export function TokensPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Access control</p>
-          <h1>API tokens</h1>
+          <h1>{t("tokens.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <span className="badge">{summary.active} active</span>
-          <span className="badge">{summary.total} total</span>
+          <span className="badge">{t("tokens.activeBadge", { count: summary.active })}</span>
+          <span className="badge">{t("tokens.totalBadge", { count: summary.total })}</span>
         </div>
       </header>
 
       <section className="hero-grid hero-grid-compact token-summary-grid">
-        <StatCard label="Total" value={summary.total} />
-        <StatCard label="Active" value={summary.active} accent="accent-green" />
-        <StatCard label="Expired" value={summary.expired} accent={summary.expired ? "accent-gold" : ""} />
-        <StatCard label="Revoked" value={summary.revoked} accent={summary.revoked ? "accent-red" : ""} />
+        <StatCard label={t("common.total")} value={summary.total} />
+        <StatCard label={t("common.active")} value={summary.active} accent="accent-green" />
+        <StatCard label={t("common.expired")} value={summary.expired} accent={summary.expired ? "accent-gold" : ""} />
+        <StatCard label={t("common.revoked")} value={summary.revoked} accent={summary.revoked ? "accent-red" : ""} />
       </section>
 
       <section className="panel token-panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Current user</p>
-            <h2>Create token</h2>
+            <h2>{t("tokens.create")}</h2>
           </div>
         </div>
         <form className="token-form" onSubmit={createToken}>
           <label className="token-field" htmlFor="token-name">
-            <span>Name</span>
+            <span>{t("tokens.name")}</span>
             <input id="token-name" type="text" value={name} onChange={(event) => setName(event.target.value)} />
           </label>
           <label className="token-field" htmlFor="token-ttl">
-            <span>TTL</span>
-            <input id="token-ttl" type="text" placeholder="24h, 720h, or empty" value={ttl} onChange={(event) => setTTL(event.target.value)} />
+            <span>{t("tokens.ttl")}</span>
+            <input id="token-ttl" type="text" placeholder={t("tokens.ttlPlaceholder")} value={ttl} onChange={(event) => setTTL(event.target.value)} />
           </label>
           <label className="token-field" htmlFor="token-scope">
-            <span>Scope</span>
+            <span>{t("tokens.scope")}</span>
             <input id="token-scope" type="text" value={scope} onChange={(event) => setScope(event.target.value)} />
           </label>
-          <button className="icon-button token-create-button" type="submit" disabled={loading} title={loading ? "Creating token" : "Create token"} aria-label={loading ? "Creating token" : "Create token"}>
+          <button className="icon-button token-create-button" type="submit" disabled={loading} title={loading ? t("tokens.creating") : t("tokens.create")} aria-label={loading ? t("tokens.creating") : t("tokens.create")}>
             <PlusIcon />
           </button>
         </form>
         {error ? <p className="auth-error">{error}</p> : null}
         {created?.token ? (
           <div className="token-result">
-            <span>Bearer token, shown once</span>
+            <span>{t("tokens.shownOnce")}</span>
             <code>{created.token}</code>
-            <small>Prefix {created.prefix || "-"} is stored for future identification. The raw token cannot be shown again.</small>
+            <small>{t("tokens.prefixStored", { prefix: created.prefix || "-" })}</small>
           </div>
         ) : null}
       </section>
@@ -121,14 +123,14 @@ export function TokensPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Token inventory</p>
-            <h2>{showAll ? "All tokens" : "Active tokens"}</h2>
+            <h2>{showAll ? t("tokens.allTokens") : t("tokens.activeTokens")}</h2>
           </div>
           <button className={showAll ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setShowAll((value) => !value)}>
-            {showAll ? "Show active" : "Show all"}
+            {showAll ? t("tokens.showActive") : t("tokens.showAll")}
           </button>
         </div>
-        {tokens.error ? <EmptyState title="Unable to load tokens" detail={tokens.error} tone="danger" /> : null}
-        {tokens.loading && !tokens.data ? <EmptyState title="Loading tokens" detail="Reading token metadata for the current user." /> : null}
+        {tokens.error ? <EmptyState title={t("tokens.loadError")} detail={tokens.error} tone="danger" /> : null}
+        {tokens.loading && !tokens.data ? <EmptyState title={t("tokens.loading")} detail={t("tokens.loadingDetail")} /> : null}
         {tokens.data ? <TokenTable items={visibleItems} busyToken={busyToken} onRevoke={revokeToken} onDelete={deleteToken} /> : null}
       </section>
     </main>
@@ -136,20 +138,21 @@ export function TokensPage() {
 }
 
 function TokenTable({ items, busyToken, onRevoke, onDelete }) {
+  const { t } = useI18n();
   if (!items.length) {
-    return <EmptyState title="No tokens" detail="No API tokens have been created for the current user." />;
+    return <EmptyState title={t("tokens.noTokens")} detail={t("tokens.noTokensDetail")} />;
   }
   return (
     <div className="token-table">
       <div className="token-table-head">
-        <span>Name</span>
-        <span>Prefix</span>
-        <span>Scope</span>
-        <span>Status</span>
-        <span>Created</span>
-        <span>Expires</span>
-        <span>Last used</span>
-        <span>Actions</span>
+        <span>{t("tokens.name")}</span>
+        <span>{t("tokens.prefix")}</span>
+        <span>{t("tokens.scope")}</span>
+        <span>{t("common.status")}</span>
+        <span>{t("common.created")}</span>
+        <span>{t("tokens.expires")}</span>
+        <span>{t("tokens.lastUsed")}</span>
+        <span>{t("common.actions")}</span>
       </div>
       {items.map((item) => (
         <article className="token-row" key={item.id}>
@@ -158,14 +161,14 @@ function TokenTable({ items, busyToken, onRevoke, onDelete }) {
           <span>{item.scope || "all"}</span>
           <InlineTag tone={statusTone(item.status)}>{item.status || "unknown"}</InlineTag>
           <span>{formatDateTime(item.created_at)}</span>
-          <span>{item.expires_at ? formatDateTime(item.expires_at) : "never"}</span>
-          <span>{item.last_used_at ? formatDateTime(item.last_used_at) : "never"}</span>
+          <span>{item.expires_at ? formatDateTime(item.expires_at) : t("common.never")}</span>
+          <span>{item.last_used_at ? formatDateTime(item.last_used_at) : t("common.never")}</span>
           <div className="action-group">
             <button className="ghost-button" type="button" disabled={item.status !== "active" || busyToken === item.id} onClick={() => onRevoke(item.id)}>
-              {busyToken === item.id ? "Revoking" : "Revoke"}
+              {busyToken === item.id ? t("tokens.revoking") : t("tokens.revoke")}
             </button>
             <button className="ghost-button" type="button" disabled={busyToken === item.id} onClick={() => onDelete(item.id)}>
-              {busyToken === item.id ? "Deleting" : "Delete"}
+              {busyToken === item.id ? t("tokens.deleting") : t("tokens.delete")}
             </button>
           </div>
         </article>

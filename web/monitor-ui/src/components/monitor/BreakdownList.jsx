@@ -1,8 +1,10 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { EmptyState } from "../common/EmptyState";
+import { useI18n } from "../../lib/i18n";
 
 export function BreakdownList({ title, items, formatter, linkFor }) {
+  const { t } = useI18n();
   return (
     <section className="breakdown-card">
       <div className="breakdown-title">{title}</div>
@@ -28,7 +30,7 @@ export function BreakdownList({ title, items, formatter, linkFor }) {
           })}
         </div>
       ) : (
-        <EmptyState title="No distribution data" detail="This section has nothing to aggregate in the current filter window." compact />
+        <EmptyState title={t("common.noDistribution")} detail={t("common.noDistributionDetail")} compact />
       )}
     </section>
   );

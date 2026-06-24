@@ -5,9 +5,11 @@ import { DetailMetaPill, InlineTag } from "../components/common/Badges";
 import { CodeBlock } from "../components/common/Display";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, requestJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { formatDateTime, setOrDeleteParam } from "../lib/monitor";
 
 export function AuditPage() {
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const category = searchParams.get("category") || "";
   const severity = searchParams.get("severity") || "";
@@ -55,13 +57,13 @@ export function AuditPage() {
         if (cancelled || error.name === "AbortError") {
           return;
         }
-        setTraceState({ loading: false, data: null, error: error.message || "Unable to load responses audit trace." });
+        setTraceState({ loading: false, data: null, error: error.message || t("audit.loadResponsesTraceError") });
       });
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [responseID, requestAuditID]);
+  }, [responseID, requestAuditID, t]);
 
   const setFilter = (key, value) => {
     const next = new URLSearchParams(searchParams);
@@ -94,14 +96,14 @@ export function AuditPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Findings</p>
-          <h1>Audit</h1>
+          <h1>{t("audit.title")}</h1>
         </div>
       </header>
       <section className="panel responses-audit-panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Responses audit trace</p>
-            <h2>Request lineage</h2>
+            <h2>{t("audit.requestLineage")}</h2>
           </div>
           {traceState.data ? (
             <InlineTag tone={traceState.data.request_audit?.status === "completed" ? "green" : "gold"}>{traceState.data.request_audit?.status || "loaded"}</InlineTag>
@@ -122,12 +124,12 @@ export function AuditPage() {
             value={traceForm.requestAuditID}
             onChange={(event) => setTraceForm((current) => ({ ...current, requestAuditID: event.target.value }))}
           />
-          <button className="ghost-button active" type="submit" disabled={!traceForm.responseID.trim() && !traceForm.requestAuditID.trim()}>Load trace</button>
-          <button className="ghost-button" type="button" onClick={resetTraceQuery}>Clear</button>
+          <button className="ghost-button active" type="submit" disabled={!traceForm.responseID.trim() && !traceForm.requestAuditID.trim()}>{t("audit.loadTrace")}</button>
+          <button className="ghost-button" type="button" onClick={resetTraceQuery}>{t("audit.clear")}</button>
         </form>
-        {!responseID && !requestAuditID ? <EmptyState title="No Responses trace selected" detail="Enter a response_id or request_audit_id to inspect request audit, execution events, and upstream exchanges." compact /> : null}
-        {traceState.loading ? <EmptyState title="Loading Responses trace" detail="Resolving request audit lineage from the local store." compact /> : null}
-        {traceState.error ? <EmptyState title="Unable to load Responses trace" detail={traceState.error} tone="danger" compact /> : null}
+        {!responseID && !requestAuditID ? <EmptyState title={t("audit.noResponsesTrace")} detail={t("audit.noResponsesTraceDetail")} compact /> : null}
+        {traceState.loading ? <EmptyState title={t("audit.loadingResponsesTrace")} detail={t("audit.loadingResponsesTraceDetail")} compact /> : null}
+        {traceState.error ? <EmptyState title={t("audit.loadResponsesTraceError")} detail={traceState.error} tone="danger" compact /> : null}
         {traceState.data ? <ResponsesAuditTrace trace={traceState.data} /> : null}
       </section>
       <ResponsesFunctionExecutorsPanel state={functionExecutors} />
@@ -135,23 +137,23 @@ export function AuditPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Cross-trace findings</p>
-            <h2>Latest findings</h2>
+            <h2>{t("audit.latestFindings")}</h2>
           </div>
-          <InlineTag tone={items.length ? "danger" : "green"}>{findings.data?.total ?? 0} total</InlineTag>
+          <InlineTag tone={items.length ? "danger" : "green"}>{t("audit.totalFindings", { count: findings.data?.total ?? 0 })}</InlineTag>
         </div>
         <form className="filter-bar" onSubmit={(event) => event.preventDefault()}>
-          <input className="filter-input" type="search" placeholder="category" value={category} onChange={(event) => setFilter("category", event.target.value)} />
+          <input className="filter-input" type="search" placeholder={t("audit.category")} value={category} onChange={(event) => setFilter("category", event.target.value)} />
           <select className="filter-input" aria-label="Finding severity" value={severity} onChange={(event) => setFilter("severity", event.target.value)}>
-            <option value="">Any severity</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
+            <option value="">{t("audit.anySeverity")}</option>
+            <option value="critical">{t("audit.severityCritical")}</option>
+            <option value="high">{t("audit.severityHigh")}</option>
+            <option value="medium">{t("audit.severityMedium")}</option>
+            <option value="low">{t("audit.severityLow")}</option>
           </select>
-          <button className="ghost-button" type="button" onClick={resetFilters}>Reset</button>
+          <button className="ghost-button" type="button" onClick={resetFilters}>{t("common.reset")}</button>
         </form>
-        {findings.error ? <EmptyState title="Unable to load findings" detail={findings.error} tone="danger" /> : null}
-        {findings.loading && !findings.data ? <EmptyState title="Loading findings" detail="Reading deterministic findings across traces." /> : null}
+        {findings.error ? <EmptyState title={t("audit.loadFindingsError")} detail={findings.error} tone="danger" /> : null}
+        {findings.loading && !findings.data ? <EmptyState title={t("audit.loadingFindings")} detail={t("audit.loadingFindingsDetail")} /> : null}
         {items.length ? (
           <div className="finding-list">
             {items.map((finding) => (
@@ -172,14 +174,14 @@ export function AuditPage() {
                   <DetailMetaPill label="detector" value={`${finding.detector || "-"} ${finding.detector_version || ""}`.trim()} />
                 </div>
                 <div className="action-group action-group-start">
-                  <Link className="ghost-button" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}>Open Finding</Link>
-                  <Link className="ghost-button" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=protocol`}>Protocol</Link>
+                  <Link className="ghost-button" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=audit`}>{t("audit.openFinding")}</Link>
+                  <Link className="ghost-button" to={`/traces/${encodeURIComponent(finding.trace_id)}?tab=protocol`}>{t("audit.protocol")}</Link>
                 </div>
               </article>
             ))}
           </div>
         ) : findings.data ? (
-          <EmptyState title="No findings" detail="No deterministic audit findings have been stored yet." />
+          <EmptyState title={t("audit.noFindings")} detail={t("audit.noFindingsDetail")} />
         ) : null}
       </section>
     </div>
@@ -187,6 +189,7 @@ export function AuditPage() {
 }
 
 function ResponsesFunctionExecutorsPanel({ state }) {
+  const { t } = useI18n();
   const [localSummary, setLocalSummary] = useState(null);
   const [enabledDraft, setEnabledDraft] = useState(false);
   const [writeState, setWriteState] = useState({ loading: false, message: "", error: "" });
@@ -225,34 +228,34 @@ function ResponsesFunctionExecutorsPanel({ state }) {
       <div className="panel-head">
         <div>
           <p className="eyebrow">Responses function executors</p>
-          <h2>Server-side tools</h2>
+            <h2>{t("audit.serverTools")}</h2>
         </div>
-        {state.loading && !state.data ? <InlineTag>loading</InlineTag> : <InlineTag tone={data.enabled ? "green" : "gold"}>{data.enabled ? "enabled" : "disabled"}</InlineTag>}
+        {state.loading && !state.data ? <InlineTag>{t("audit.loading")}</InlineTag> : <InlineTag tone={data.enabled ? "green" : "gold"}>{data.enabled ? t("audit.enabled") : t("audit.disabled")}</InlineTag>}
       </div>
-      {state.error ? <EmptyState title="Unable to load function executors" detail={state.error} tone="danger" compact /> : null}
+      {state.error ? <EmptyState title={t("audit.loadFunctionExecutorsError")} detail={state.error} tone="danger" compact /> : null}
       {!state.error ? (
         <>
           <div className="responses-function-executor-controls">
             <label className="provider-form-check">
               <input type="checkbox" checked={enabledDraft} onChange={(event) => setEnabledDraft(event.target.checked)} />
-              Enabled
+              {t("audit.enabled")}
             </label>
             <div className="provider-form-actions">
-              <button className="ghost-button" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(true)}>Validate</button>
-              <button className="ghost-button active" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(false)}>Apply</button>
+              <button className="ghost-button" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(true)}>{t("audit.validate")}</button>
+              <button className="ghost-button active" type="button" disabled={writeState.loading} onClick={() => submitExecutorConfig(false)}>{t("common.apply")}</button>
             </div>
             {writeState.message ? <InlineTag tone="green">{writeState.message}</InlineTag> : null}
             {writeState.error ? <InlineTag tone="danger">{writeState.error}</InlineTag> : null}
           </div>
           <div className="detail-meta-strip">
-            <DetailMetaPill label="timeout" value={data.timeout || "-"} />
-            <DetailMetaPill label="max result" value={data.max_result_bytes ? `${data.max_result_bytes} bytes` : "-"} />
-            <DetailMetaPill label="arguments" value={data.redaction?.arguments ? "redacted" : "visible"} />
-            <DetailMetaPill label="output" value={data.redaction?.output ? "redacted" : "visible"} />
+            <DetailMetaPill label={t("audit.timeout")} value={data.timeout || "-"} />
+            <DetailMetaPill label={t("audit.maxResult")} value={data.max_result_bytes ? `${data.max_result_bytes} bytes` : "-"} />
+            <DetailMetaPill label={t("audit.arguments")} value={data.redaction?.arguments ? t("audit.redacted") : t("audit.visible")} />
+            <DetailMetaPill label={t("audit.output")} value={data.redaction?.output ? t("audit.redacted") : t("audit.visible")} />
           </div>
           <div className="trace-tag-group">
             {(data.supported_types || []).map((type) => <InlineTag key={type} tone="accent">{type}</InlineTag>)}
-            {!data.supported_types?.length ? <InlineTag>no supported types</InlineTag> : null}
+            {!data.supported_types?.length ? <InlineTag>{t("audit.noSupportedTypes")}</InlineTag> : null}
           </div>
           <ExecutorWarnings title="Warnings" warnings={warnings} />
           {executors.length ? (
@@ -281,7 +284,7 @@ function ResponsesFunctionExecutorsPanel({ state }) {
               ))}
             </div>
           ) : (
-            <EmptyState title="No function executors" detail="No server-side function executor bindings are configured for this process." compact />
+            <EmptyState title={t("audit.noFunctionExecutors")} detail={t("audit.noFunctionExecutorsDetail")} compact />
           )}
         </>
       ) : null}

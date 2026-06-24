@@ -10,13 +10,15 @@ import {
   YAxis,
 } from "recharts";
 import { formatCount, formatTimelineBucketLabel } from "../../lib/monitor";
+import { useI18n } from "../../lib/i18n";
 
 const COLORS = ["#38bdf8", "#34d399", "#fbbf24", "#fb7185", "#a78bfa", "#22d3ee", "#f97316", "#10b981"];
 
 export function MultiLineChart({ items = [], series = [], metric = "request_count", height = 260 }) {
+  const { t } = useI18n();
   const data = buildChartData(items, series, metric);
   if (!data.length || !series.length) {
-    return <div className="chart-empty">No trend data</div>;
+    return <div className="chart-empty">{t("common.noTrend")}</div>;
   }
   return (
     <div className="line-chart-card" style={{ height }}>
@@ -47,6 +49,7 @@ export function MultiLineChart({ items = [], series = [], metric = "request_coun
 }
 
 export function SingleUsageCharts({ items = [], height = 240 }) {
+  const { t } = useI18n();
   const requestSeries = [
     { key: "requests", name: "requests" },
     { key: "errors", name: "errors" },
@@ -55,7 +58,7 @@ export function SingleUsageCharts({ items = [], height = 240 }) {
   return (
     <div className="usage-chart-grid">
       <section className="usage-chart-panel">
-        <div className="breakdown-title">Requests</div>
+        <div className="breakdown-title">{t("common.requests")}</div>
         <MultiLineChart
           items={items.map((item) => ({
             time: item.time,
@@ -70,7 +73,7 @@ export function SingleUsageCharts({ items = [], height = 240 }) {
         />
       </section>
       <section className="usage-chart-panel">
-        <div className="breakdown-title">Tokens</div>
+        <div className="breakdown-title">{t("common.tokens")}</div>
         <MultiLineChart items={items.map((item) => ({ time: item.time, value: item.total_tokens }))} series={tokenSeries} metric="value" height={height} />
       </section>
     </div>

@@ -467,6 +467,11 @@ a {
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
+.topbar .eyebrow,
+.panel-head .eyebrow {
+  display: none;
+}
+
 .topbar-meta,
 .pager {
   display: flex;
