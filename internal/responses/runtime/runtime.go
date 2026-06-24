@@ -2074,11 +2074,6 @@ func mergeEventDetails(base map[string]any, extra map[string]any) map[string]any
 	return out
 }
 
-func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool, budget ContextBudget) ChatCompletionRequest {
-	hostedTools := hostedToolSet{hosted.ToolTypeWebSearch: webSearchReady}
-	return chatCompletionRequestWithHostedTools(req, model, history, inputItems, hostedTools, budget)
-}
-
 func chatCompletionRequestWithHostedTools(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, hostedTools hostedToolSet, budget ContextBudget) ChatCompletionRequest {
 	tools := responseToolsToChatToolsWithHostedTools(req.Tools, hostedTools)
 	return ChatCompletionRequest{
@@ -2478,12 +2473,6 @@ func forcedHostedToolName(toolChoice any) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func chatToolChoice(choice any, tools []ChatTool) any {
-	return chatToolChoiceWithHostedTools(choice, tools, hostedToolSet{
-		hosted.ToolTypeWebSearch: hasChatTool(tools, "web_search"),
-	})
 }
 
 func chatToolChoiceWithHostedTools(choice any, tools []ChatTool, hostedTools hostedToolSet) any {
