@@ -65,6 +65,22 @@ func WithWebSearchProvider(provider websearch.Provider) Option {
 	}
 }
 
+func WithHostedToolExecutor(executor hosted.Executor) Option {
+	return func(r *Runtime) {
+		if executor == nil {
+			return
+		}
+		if r.hostedRegistry == nil {
+			r.hostedRegistry = mustHostedRegistry()
+		}
+		_ = r.hostedRegistry.Register(executor)
+	}
+}
+
+func WithMCPHostedExecutor(executor hosted.Executor) Option {
+	return WithHostedToolExecutor(executor)
+}
+
 func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
 	return func(r *Runtime) {
 		r.events = recorder
@@ -256,6 +272,7 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
 	webSearchReady := r.webSearchReady()
+	hostedTools := r.hostedToolsForRequest(req, model, webSearchReady)
 	req, history, err = r.applyAutoCompact(ctx, req, model, modelProfile, budget, history, inputItems, webSearchReady)
 	if err != nil {
 		return protocol.Response{}, err
@@ -265,12 +282,17 @@ func (r *Runtime) Create(ctx context.Context, req protocol.CreateResponseRequest
 		r.recordUnsupportedHostedToolAudit(ctx, req, forcedHostedToolNameOrDefault(req.ToolChoice, "web_search"), err, false)
 		return protocol.Response{}, err
 	}
+	if forcedMCPTool(req.ToolChoice) && !hostedTools.ready(hosted.ToolTypeMCP) {
+		err := UnsupportedHostedToolError{Tool: hosted.ToolTypeMCP, Reason: "mcp hosted tool executor is not enabled or no executor is configured"}
+		r.recordUnsupportedHostedToolAudit(ctx, req, hosted.ToolTypeMCP, err, false)
+		return protocol.Response{}, err
+	}
 	if tool, ok := forcedUnsupportedHostedTool(req.ToolChoice); ok {
 		err := UnsupportedHostedToolError{Tool: tool, Reason: "hosted tool runtime is not implemented"}
 		r.recordUnsupportedHostedToolAudit(ctx, req, tool, err, false)
 		return protocol.Response{}, err
 	}
-	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
+	chatReq := chatCompletionRequestWithHostedTools(req, chatModel, history, inputItems, hostedTools, budget)
 	functionExecutors := r.functionToolExecutorSnapshot()
 	resp, err := r.createWithToolLoop(ctx, req, model, chatReq, functionExecutors)
 	if err != nil {
@@ -397,9 +419,15 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 	budget := modelProfile.Budget
 	chatModel := modelProfile.UpstreamModelOr(model)
 	webSearchReady := r.webSearchReady()
+	hostedTools := r.hostedToolsForRequest(req, model, webSearchReady)
 	if !webSearchReady && forcedWebSearchTool(req.ToolChoice) {
 		err := UnsupportedHostedToolError{Tool: "web_search", Reason: "web_search is not enabled or no provider is configured"}
 		r.recordUnsupportedHostedToolAudit(ctx, req, forcedHostedToolNameOrDefault(req.ToolChoice, "web_search"), err, true)
+		return protocol.Response{}, err
+	}
+	if forcedMCPTool(req.ToolChoice) && !hostedTools.ready(hosted.ToolTypeMCP) {
+		err := UnsupportedHostedToolError{Tool: hosted.ToolTypeMCP, Reason: "mcp hosted tool executor is not enabled or no executor is configured"}
+		r.recordUnsupportedHostedToolAudit(ctx, req, hosted.ToolTypeMCP, err, true)
 		return protocol.Response{}, err
 	}
 	if tool, ok := forcedUnsupportedHostedTool(req.ToolChoice); ok {
@@ -421,7 +449,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 			return protocol.Response{}, err
 		}
 	}
-	chatReq := chatCompletionRequest(req, chatModel, history, inputItems, webSearchReady, budget)
+	chatReq := chatCompletionRequestWithHostedTools(req, chatModel, history, inputItems, hostedTools, budget)
 	chatReq.Stream = true
 
 	responseID := newResponseID()
@@ -506,7 +534,7 @@ func (r *Runtime) CreateStream(ctx context.Context, req protocol.CreateResponseR
 		if err := textStream.done(outputItems); err != nil {
 			return protocol.Response{}, err
 		}
-		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors)
+		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors, req, model)
 		if !hasToolCalls || !allExecutable {
 			output = append(output, outputItems...)
 			resp := responseFromOutputWithID(responseID, req, model, output, usage)
@@ -1273,6 +1301,13 @@ func (r *Runtime) hostedToolContext(req protocol.CreateResponseRequest, model st
 	}
 }
 
+func (r *Runtime) hostedToolsForRequest(req protocol.CreateResponseRequest, model string, webSearchReady bool) hostedToolSet {
+	return hostedToolSet{
+		hosted.ToolTypeWebSearch: webSearchReady,
+		hosted.ToolTypeMCP:       r.hostedToolReady(hosted.ToolTypeMCP, req, model),
+	}
+}
+
 func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateResponseRequest, model string, chatReq ChatCompletionRequest, functionExecutors map[string]configuredFunctionToolExecutor) (protocol.Response, error) {
 	var usage ChatUsage
 	output := []protocol.OutputItem{}
@@ -1287,7 +1322,7 @@ func (r *Runtime) createWithToolLoop(ctx context.Context, req protocol.CreateRes
 		}
 		usage = addChatUsage(usage, chatResp.Usage)
 
-		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors)
+		calls, hasToolCalls, allExecutable := r.executableToolCalls(chatResp, functionExecutors, req, model)
 		if !hasToolCalls || !allExecutable {
 			chatResp.Usage = usage
 			outputItems := chatToOutputItems(chatResp)
@@ -1337,6 +1372,8 @@ func (r *Runtime) executeToolCall(ctx context.Context, call executableToolCall, 
 	switch call.kind {
 	case executableToolKindWebSearch:
 		return r.executeWebSearchToolCall(ctx, call, iteration, exec)
+	case executableToolKindMCP:
+		return r.executeMCPToolCall(ctx, call, iteration, exec)
 	case executableToolKindFunction:
 		return r.executeFunctionToolCall(ctx, call, iteration, exec)
 	default:
@@ -1510,6 +1547,114 @@ func (r *Runtime) executeHostedWebSearch(ctx context.Context, call executableToo
 		return websearch.Result{}, fmt.Errorf("hosted web_search returned %T, want websearch.Result", result.Output)
 	}
 	return output, nil
+}
+
+func (r *Runtime) executeMCPToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
+	startedAt := time.Now()
+	toolName := mcpToolNameFromArguments(call.call.Function.Arguments)
+	if toolName == "" {
+		toolName = call.call.Function.Name
+	}
+	eventDetails := map[string]any{
+		"tool_name":       toolName,
+		"call_id":         call.call.ID,
+		"argument_bytes":  len([]byte(call.call.Function.Arguments)),
+		"argument_sha256": auditSHA256(call.call.Function.Arguments),
+		"iteration":       iteration,
+		"executor":        "hosted:mcp",
+		"stream":          exec.Stream,
+	}
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType:   "response.tool_call",
+		Phase:       "tool_call",
+		Status:      "started",
+		DetailsJSON: eventDetails,
+	})
+	inputSummary := map[string]any{
+		"argument_bytes":  len([]byte(call.call.Function.Arguments)),
+		"argument_sha256": auditSHA256(call.call.Function.Arguments),
+	}
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ResponseID:     exec.ResponseID,
+		ConversationID: exec.ConversationID,
+		CallID:         call.call.ID,
+		ToolType:       "hosted:mcp",
+		ToolName:       toolName,
+		Executor:       "hosted:mcp",
+		Status:         "started",
+		Phase:          "tool_call",
+		InputJSON:      inputSummary,
+		MetadataJSON:   toolCallAuditMetadata(iteration, exec),
+		StartedAt:      startedAt,
+		CreatedAt:      startedAt,
+	})
+	result, err := call.hostedExecutor.ExecuteHostedTool(ctx, call.hostedContext, hosted.ToolCall{
+		ID:        call.call.ID,
+		Type:      hosted.ToolTypeMCP,
+		Name:      toolName,
+		Arguments: json.RawMessage(call.call.Function.Arguments),
+		Tool:      call.protocolTool,
+	})
+	if err != nil {
+		completedAt := time.Now()
+		r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+			EventType: "response.tool_call",
+			Phase:     "tool_call",
+			Status:    "failed",
+			Message:   err.Error(),
+			DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+				"error": err.Error(),
+			}),
+		})
+		r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+			ResponseID:     exec.ResponseID,
+			ConversationID: exec.ConversationID,
+			CallID:         call.call.ID,
+			ToolType:       "hosted:mcp",
+			ToolName:       toolName,
+			Executor:       "hosted:mcp",
+			Status:         "failed",
+			Phase:          "tool_call",
+			InputJSON:      inputSummary,
+			ErrorText:      err.Error(),
+			MetadataJSON:   toolCallAuditMetadata(iteration, exec),
+			StartedAt:      startedAt,
+			CompletedAt:    completedAt,
+			CreatedAt:      completedAt,
+		})
+		return protocol.OutputItem{}, "", err
+	}
+	toolContent := toolOutputContent(result.Output)
+	outputSummary := hostedSummaryValue(result.Summary.Output)
+	completedAt := time.Now()
+	r.recordExecutionEvent(ctx, audit.ExecutionEvent{
+		EventType: "response.tool_call",
+		Phase:     "tool_call",
+		Status:    "completed",
+		DetailsJSON: mergeEventDetails(eventDetails, map[string]any{
+			"output_chars": len(toolContent),
+		}),
+	})
+	r.recordToolCallAudit(ctx, audit.ToolCallAudit{
+		ResponseID:     exec.ResponseID,
+		ConversationID: exec.ConversationID,
+		CallID:         call.call.ID,
+		ToolType:       "hosted:mcp",
+		ToolName:       toolName,
+		Executor:       "hosted:mcp",
+		Status:         "completed",
+		Phase:          "tool_call",
+		InputJSON:      inputSummary,
+		OutputJSON: map[string]any{
+			"output_chars": len(toolContent),
+			"summary":      outputSummary,
+		},
+		MetadataJSON: toolCallAuditMetadata(iteration, exec),
+		StartedAt:    startedAt,
+		CompletedAt:  completedAt,
+		CreatedAt:    completedAt,
+	})
+	return mcpToolCallOutput(call.call, result.Output), toolContent, nil
 }
 
 func (r *Runtime) executeFunctionToolCall(ctx context.Context, call executableToolCall, iteration int, exec toolExecutionContext) (protocol.OutputItem, string, error) {
@@ -1797,6 +1942,10 @@ func mergeEventDetails(base map[string]any, extra map[string]any) map[string]any
 
 func chatCompletionRequest(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, webSearchReady bool, budget ContextBudget) ChatCompletionRequest {
 	hostedTools := hostedToolSet{hosted.ToolTypeWebSearch: webSearchReady}
+	return chatCompletionRequestWithHostedTools(req, model, history, inputItems, hostedTools, budget)
+}
+
+func chatCompletionRequestWithHostedTools(req protocol.CreateResponseRequest, model string, history []LedgerItem, inputItems []protocol.InputItem, hostedTools hostedToolSet, budget ContextBudget) ChatCompletionRequest {
 	tools := responseToolsToChatToolsWithHostedTools(req.Tools, hostedTools)
 	return ChatCompletionRequest{
 		Model:       model,
@@ -2064,6 +2213,10 @@ func responseToolsToChatToolsWithHostedTools(tools []protocol.Tool, hostedTools 
 			if hostedTools.ready(hosted.ToolTypeWebSearch) {
 				out = append(out, webSearchChatTool())
 			}
+		case "mcp":
+			if hostedTools.ready(hosted.ToolTypeMCP) && !hasChatTool(out, "mcp_call") {
+				out = append(out, mcpChatTool())
+			}
 		}
 	}
 	return out
@@ -2090,9 +2243,43 @@ func webSearchChatTool() ChatTool {
 	}
 }
 
+func mcpChatTool() ChatTool {
+	return ChatTool{
+		Type: "function",
+		Function: ChatFunction{
+			Name:        "mcp_call",
+			Description: "Call an enabled hosted MCP server tool.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"server_label": map[string]any{
+						"type":        "string",
+						"description": "The MCP server label from the Responses tool descriptor.",
+					},
+					"tool": map[string]any{
+						"type":        "string",
+						"description": "The MCP tool name to call.",
+					},
+					"arguments": map[string]any{
+						"type":        "object",
+						"description": "Arguments to pass to the MCP tool.",
+					},
+				},
+				"required":             []string{"tool"},
+				"additionalProperties": true,
+			},
+		},
+	}
+}
+
 func forcedWebSearchTool(toolChoice any) bool {
 	tool, ok := forcedHostedToolName(toolChoice)
 	return ok && hostedToolAlias(tool) == hosted.ToolTypeWebSearch
+}
+
+func forcedMCPTool(toolChoice any) bool {
+	tool, ok := forcedHostedToolName(toolChoice)
+	return ok && hostedToolAlias(tool) == hosted.ToolTypeMCP
 }
 
 func forcedHostedToolNameOrDefault(toolChoice any, fallback string) string {
@@ -2109,7 +2296,7 @@ func forcedUnsupportedHostedTool(toolChoice any) (string, bool) {
 		return "", false
 	}
 	switch tool {
-	case hosted.ToolTypeMCP, hosted.ToolTypeFileSearch, hosted.ToolTypeCodeInterpreter, hosted.ToolTypeComputerUsePreview:
+	case hosted.ToolTypeFileSearch, hosted.ToolTypeCodeInterpreter, hosted.ToolTypeComputerUsePreview:
 		return tool, true
 	default:
 		return "", false
@@ -2161,17 +2348,29 @@ func chatToolChoiceWithHostedTools(choice any, tools []ChatTool, hostedTools hos
 	if len(tools) == 0 {
 		return nil
 	}
-	if !forcedWebSearchTool(choice) {
+	switch {
+	case forcedWebSearchTool(choice):
+		if !hostedTools.ready(hosted.ToolTypeWebSearch) || !hasChatTool(tools, "web_search") {
+			return nil
+		}
+		return map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": "web_search",
+			},
+		}
+	case forcedMCPTool(choice):
+		if !hostedTools.ready(hosted.ToolTypeMCP) || !hasChatTool(tools, "mcp_call") {
+			return nil
+		}
+		return map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name": "mcp_call",
+			},
+		}
+	default:
 		return choice
-	}
-	if !hostedTools.ready(hosted.ToolTypeWebSearch) || !hasChatTool(tools, "web_search") {
-		return nil
-	}
-	return map[string]any{
-		"type": "function",
-		"function": map[string]any{
-			"name": "web_search",
-		},
 	}
 }
 
@@ -2186,6 +2385,7 @@ func hasChatTool(tools []ChatTool, name string) bool {
 
 const (
 	executableToolKindWebSearch = "web_search"
+	executableToolKindMCP       = "mcp"
 	executableToolKindFunction  = "function"
 )
 
@@ -2194,11 +2394,13 @@ type executableToolCall struct {
 	call           ChatToolCall
 	query          string
 	hostedExecutor hosted.Executor
+	hostedContext  hosted.ToolContext
+	protocolTool   protocol.Tool
 	executor       FunctionToolExecutor
 	policy         FunctionToolExecutorPolicy
 }
 
-func (r *Runtime) executableToolCalls(chat ChatCompletionResponse, functionExecutors map[string]configuredFunctionToolExecutor) ([]executableToolCall, bool, bool) {
+func (r *Runtime) executableToolCalls(chat ChatCompletionResponse, functionExecutors map[string]configuredFunctionToolExecutor, req protocol.CreateResponseRequest, model string) ([]executableToolCall, bool, bool) {
 	if len(chat.Choices) == 0 {
 		return nil, false, false
 	}
@@ -2219,6 +2421,17 @@ func (r *Runtime) executableToolCalls(chat ChatCompletionResponse, functionExecu
 			}
 			query := webSearchQueryFromArguments(call.Function.Arguments)
 			out = append(out, executableToolCall{kind: executableToolKindWebSearch, call: call, query: query, hostedExecutor: executor})
+		case "mcp_call":
+			executor, ok := r.hostedExecutor(hosted.ToolTypeMCP)
+			toolCtx := r.hostedToolContext(req, model)
+			if !ok || !executor.Enabled(toolCtx) {
+				return nil, true, true
+			}
+			protocolTool, ok := mcpProtocolToolForCall(req.Tools, call.Function.Arguments)
+			if !ok {
+				return nil, true, true
+			}
+			out = append(out, executableToolCall{kind: executableToolKindMCP, call: call, hostedExecutor: executor, hostedContext: toolCtx, protocolTool: protocolTool})
 		default:
 			configured := functionExecutors[normalizeFunctionToolName(call.Function.Name)]
 			if configured.executor == nil {
@@ -2238,6 +2451,43 @@ func webSearchQueryFromArguments(arguments string) string {
 		return strings.TrimSpace(arguments)
 	}
 	return strings.TrimSpace(payload.Query)
+}
+
+func mcpToolNameFromArguments(arguments string) string {
+	var payload struct {
+		Tool string `json:"tool"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &payload); err != nil {
+		return ""
+	}
+	return firstNonEmptyString(payload.Tool, payload.Name)
+}
+
+func mcpProtocolToolForCall(tools []protocol.Tool, arguments string) (protocol.Tool, bool) {
+	mcpTools := make([]protocol.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Type == hosted.ToolTypeMCP {
+			mcpTools = append(mcpTools, tool)
+		}
+	}
+	if len(mcpTools) == 0 {
+		return protocol.Tool{}, false
+	}
+	var payload struct {
+		ServerLabel string `json:"server_label"`
+		ServerID    string `json:"server_id"`
+	}
+	_ = json.Unmarshal([]byte(arguments), &payload)
+	serverLabel := firstNonEmptyString(payload.ServerLabel, payload.ServerID)
+	if serverLabel != "" {
+		for _, tool := range mcpTools {
+			if tool.ServerLabel == serverLabel {
+				return tool, true
+			}
+		}
+	}
+	return mcpTools[0], true
 }
 
 func webSearchCallOutput(call ChatToolCall, query string, result websearch.Result) protocol.OutputItem {
@@ -2268,6 +2518,17 @@ func webSearchCallOutput(call ChatToolCall, query string, result websearch.Resul
 	}
 }
 
+func mcpToolCallOutput(call ChatToolCall, output any) protocol.OutputItem {
+	return protocol.OutputItem{
+		ID:     "mcp_" + call.ID,
+		Type:   "function_call_output",
+		Status: "completed",
+		CallID: call.ID,
+		Name:   "mcp_call",
+		Output: output,
+	}
+}
+
 func functionToolCallOutput(call ChatToolCall, output any) protocol.OutputItem {
 	return protocol.OutputItem{
 		ID:     "fco_" + call.ID,
@@ -2292,6 +2553,23 @@ func webSearchToolMessageContent(query string, result websearch.Result) (string,
 		return "", fmt.Errorf("marshal web_search tool output: %w", err)
 	}
 	return string(data), nil
+}
+
+func hostedSummaryValue(value hosted.RedactedValue) any {
+	if value.Redacted {
+		return map[string]any{"redacted": true}
+	}
+	return value.Value
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func addChatUsage(left, right ChatUsage) ChatUsage {

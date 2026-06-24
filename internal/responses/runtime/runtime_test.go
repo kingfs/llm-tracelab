@@ -12,6 +12,7 @@ import (
 
 	"github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	"github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
 )
 
@@ -3548,6 +3549,216 @@ func TestResponseToolsToChatToolsMapsHostedWebSearchWhenReady(t *testing.T) {
 	disabled := responseToolsToChatTools([]protocol.Tool{{Type: "web_search"}}, false)
 	if len(disabled) != 0 {
 		t.Fatalf("disabled web_search mapped to chat tools: %#v", disabled)
+	}
+}
+
+func TestRuntimeCreateExecutesHostedMCPToolLoop(t *testing.T) {
+	client := &fakeChatClient{
+		resps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{
+						ToolCalls: []ChatToolCall{{
+							ID:   "call_mcp_read",
+							Type: "function",
+							Function: ChatToolCallFunction{
+								Name:      "mcp_call",
+								Arguments: `{"server_label":"workspace","tool":"read_file","arguments":{"path":"go.mod"}}`,
+							},
+						}},
+					},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 10, CompletionTokens: 4, TotalTokens: 14},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Content: "The module file was read."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 18, CompletionTokens: 6, TotalTokens: 24},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	toolAudits := &fakeToolCallAuditRecorder{}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(),
+		WithMCPHostedExecutor(mcp.NewExecutor(mcp.Options{
+			Enabled: true,
+			Servers: []mcp.ServerDescriptor{{
+				ID:           "srv_workspace",
+				Label:        "workspace",
+				Enabled:      true,
+				AllowedTools: []string{"read_file"},
+				Tools: []mcp.ToolDescriptor{{
+					Name:       "read_file",
+					Enabled:    true,
+					TextResult: "module github.com/kingfs/llm-tracelab",
+					StructuredResult: map[string]any{
+						"bytes": float64(38),
+					},
+				}},
+			}},
+		})),
+		WithExecutionEventRecorder(events),
+		WithToolCallAuditRecorder(toolAudits),
+	)
+
+	resp, err := rt.Create(audit.ContextWithRequestAuditID(context.Background(), "audit_mcp"), protocol.CreateResponseRequest{
+		Input:      "read go.mod",
+		ToolChoice: map[string]any{"type": "mcp"},
+		Metadata: map[string]any{
+			"codex": map[string]any{"thread_id": "thread_mcp"},
+		},
+		Tools: []protocol.Tool{{
+			Type:         "mcp",
+			ServerLabel:  "workspace",
+			AllowedTools: []any{"read_file"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if len(client.reqs) != 2 {
+		t.Fatalf("chat calls = %d, want 2", len(client.reqs))
+	}
+	firstTools := client.reqs[0].Tools
+	if len(firstTools) != 1 || firstTools[0].Function.Name != "mcp_call" {
+		t.Fatalf("first chat tools = %#v, want mcp_call", firstTools)
+	}
+	firstChoice, ok := client.reqs[0].ToolChoice.(map[string]any)
+	if !ok || firstChoice["type"] != "function" {
+		t.Fatalf("first chat tool_choice = %#v, want forced function mcp_call", client.reqs[0].ToolChoice)
+	}
+	firstChoiceFunction, ok := firstChoice["function"].(map[string]any)
+	if !ok || firstChoiceFunction["name"] != "mcp_call" {
+		t.Fatalf("first chat tool_choice function = %#v, want mcp_call", firstChoice["function"])
+	}
+	secondMessages := client.reqs[1].Messages
+	if len(secondMessages) != 3 {
+		t.Fatalf("second messages len = %d, want 3: %#v", len(secondMessages), secondMessages)
+	}
+	if secondMessages[1].Role != "assistant" || len(secondMessages[1].ToolCalls) != 1 || secondMessages[1].ToolCalls[0].Function.Name != "mcp_call" {
+		t.Fatalf("second assistant tool call message mismatch: %#v", secondMessages[1])
+	}
+	toolContent, _ := secondMessages[2].Content.(string)
+	if secondMessages[2].Role != "tool" || secondMessages[2].ToolCallID != "call_mcp_read" || !strings.Contains(toolContent, "read_file") || !strings.Contains(toolContent, "go.mod") {
+		t.Fatalf("second tool message mismatch: %#v", secondMessages[2])
+	}
+	if resp.Usage != (protocol.Usage{InputTokens: 28, OutputTokens: 10, TotalTokens: 38}) {
+		t.Fatalf("usage mismatch: %#v", resp.Usage)
+	}
+	if len(resp.Output) != 2 {
+		t.Fatalf("output len = %d, want mcp output + final message: %#v", len(resp.Output), resp.Output)
+	}
+	if got := resp.Output[0]; got.Type != "function_call_output" || got.Status != "completed" || got.CallID != "call_mcp_read" || got.Name != "mcp_call" {
+		t.Fatalf("unexpected mcp output item: %#v", got)
+	}
+	if got := resp.Output[1]; got.Type != "message" || got.Content[0].Text != "The module file was read." {
+		t.Fatalf("unexpected final message: %#v", got)
+	}
+	if len(events.events) != 2 || events.events[0].Status != "started" || events.events[1].Status != "completed" {
+		t.Fatalf("execution events = %#v, want started/completed", events.events)
+	}
+	if events.events[1].DetailsJSON["executor"] != "hosted:mcp" || events.events[1].DetailsJSON["tool_name"] != "read_file" {
+		t.Fatalf("completed event details = %#v, want hosted:mcp read_file", events.events[1].DetailsJSON)
+	}
+	if len(toolAudits.entries) != 2 || toolAudits.entries[0].Status != "started" || toolAudits.entries[1].Status != "completed" {
+		t.Fatalf("tool audits = %#v, want started/completed", toolAudits.entries)
+	}
+	completed := toolAudits.entries[1]
+	if completed.ResponseID != resp.ID || completed.ConversationID != "thread_mcp" || completed.ToolType != "hosted:mcp" || completed.Executor != "hosted:mcp" || completed.ToolName != "read_file" {
+		t.Fatalf("completed audit = %#v, want hosted:mcp identity", completed)
+	}
+}
+
+func TestRuntimeCreateRecordsHostedMCPToolFailure(t *testing.T) {
+	client := &fakeChatClient{
+		resp: ChatCompletionResponse{
+			Choices: []ChatChoice{{
+				Message: ChatMessage{
+					ToolCalls: []ChatToolCall{{
+						ID:   "call_mcp_delete",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "mcp_call",
+							Arguments: `{"server_label":"workspace","tool":"delete_file","arguments":{"path":"go.mod"}}`,
+						},
+					}},
+				},
+				FinishReason: "tool_calls",
+			}},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
+	toolAudits := &fakeToolCallAuditRecorder{}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(),
+		WithMCPHostedExecutor(mcp.NewExecutor(mcp.Options{
+			Enabled: true,
+			Servers: []mcp.ServerDescriptor{{
+				Label:       "workspace",
+				Enabled:     true,
+				DeniedTools: []string{"delete_file"},
+				Tools: []mcp.ToolDescriptor{{
+					Name:    "delete_file",
+					Enabled: true,
+				}},
+			}},
+		})),
+		WithExecutionEventRecorder(events),
+		WithToolCallAuditRecorder(toolAudits),
+	)
+
+	_, err := rt.Create(context.Background(), protocol.CreateResponseRequest{
+		Input: "delete go.mod",
+		Tools: []protocol.Tool{{
+			Type:        "mcp",
+			ServerLabel: "workspace",
+			Extra: map[string]any{
+				"denied_tools": []any{"delete_file"},
+			},
+		}},
+	})
+	if !errors.Is(err, mcp.ErrToolDenied) {
+		t.Fatalf("Create error = %v, want mcp.ErrToolDenied", err)
+	}
+	if len(events.events) != 2 || events.events[0].Status != "started" || events.events[1].Status != "failed" {
+		t.Fatalf("execution events = %#v, want started/failed", events.events)
+	}
+	if events.events[1].DetailsJSON["executor"] != "hosted:mcp" || events.events[1].DetailsJSON["error"] != mcp.ErrToolDenied.Error() {
+		t.Fatalf("failed event details = %#v, want hosted:mcp denied", events.events[1].DetailsJSON)
+	}
+	if len(toolAudits.entries) != 2 || toolAudits.entries[1].Status != "failed" || toolAudits.entries[1].Executor != "hosted:mcp" {
+		t.Fatalf("tool audits = %#v, want hosted:mcp failed", toolAudits.entries)
+	}
+}
+
+func TestRuntimeCreateStreamRejectsHostedMCPWithoutExecuting(t *testing.T) {
+	client := &fakeChatClient{streamResp: finalChatResponse("should not be called")}
+	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(),
+		WithMCPHostedExecutor(mcp.NewExecutor(mcp.Options{
+			Enabled: true,
+			Servers: []mcp.ServerDescriptor{{
+				Label:   "workspace",
+				Enabled: true,
+				Tools: []mcp.ToolDescriptor{{
+					Name:    "read_file",
+					Enabled: true,
+				}},
+			}},
+		})),
+	)
+
+	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+		Input:      "read go.mod",
+		ToolChoice: map[string]any{"type": "mcp"},
+		Tools:      []protocol.Tool{{Type: "mcp", ServerLabel: "workspace"}},
+	}, &fakeResponseStreamSink{})
+	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
+		t.Fatalf("CreateStream error = %v, want ErrIncrementalStreamUnsupported", err)
+	}
+	if len(client.streamReqs) != 0 {
+		t.Fatalf("stream chat calls = %d, want 0", len(client.streamReqs))
 	}
 }
 
