@@ -48,6 +48,7 @@ func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
 		"function_call_expected_response.json",
 		"function_call_output_continuation_request.json",
 		"function_call_request.json",
+		"mcp_descriptor_request.json",
 		"ordinary_web_search_descriptor_request.json",
 		"stream_text_events.ndjson",
 		"stream_text_request.json",
@@ -182,6 +183,32 @@ func TestCodexFixtureCreateRequestContracts(t *testing.T) {
 		}
 		requireStoreTrue(t, req)
 		requireCodexThread(t, req, "thread_fixture_web_search")
+	})
+
+	t.Run("mcp descriptor request shape", func(t *testing.T) {
+		req := decodeCodexFixture[protocol.CreateResponseRequest](t, "mcp_descriptor_request.json")
+
+		if !req.Stream {
+			t.Fatalf("stream = false, want true")
+		}
+		if len(req.Tools) != 1 {
+			t.Fatalf("tools len = %d, want 1", len(req.Tools))
+		}
+		tool := req.Tools[0]
+		if tool.Type != "mcp" || tool.ServerLabel != "workspace" || tool.ServerURL != "https://mcp.example.test/sse" {
+			t.Fatalf("tool = %#v, want mcp workspace descriptor with server_url", tool)
+		}
+		if names, ok := tool.AllowedTools.([]any); !ok || len(names) != 1 || names[0] != "read_file" {
+			t.Fatalf("allowed_tools = %#v, want read_file", tool.AllowedTools)
+		}
+		if tool.RequireApproval != "never" {
+			t.Fatalf("require_approval = %#v, want never", tool.RequireApproval)
+		}
+		if req.ToolChoice != "auto" {
+			t.Fatalf("tool_choice = %#v, want auto", req.ToolChoice)
+		}
+		requireStoreTrue(t, req)
+		requireCodexThread(t, req, "thread_fixture_mcp_descriptor")
 	})
 
 	t.Run("Codex web search absent tools request shape", func(t *testing.T) {

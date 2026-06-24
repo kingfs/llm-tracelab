@@ -29,8 +29,10 @@ var (
 	ErrToolDenied         = errors.New("mcp hosted tool is denied")
 	ErrToolNotAllowed     = errors.New("mcp hosted tool is not allowed")
 	ErrUnknownServer      = errors.New("mcp hosted server is unknown")
+	ErrAmbiguousServer    = errors.New("mcp hosted server descriptor is ambiguous")
 	ErrUnknownTool        = errors.New("mcp hosted tool is unknown")
 	ErrMissingBearerToken = errors.New("mcp hosted server bearer token is missing")
+	ErrClientCredentials  = errors.New("mcp hosted client-supplied authorization or token fields are not allowed")
 )
 
 type Options struct {
@@ -60,16 +62,20 @@ type ToolDescriptor struct {
 }
 
 type Descriptor struct {
-	Type         string
-	ServerLabel  string
-	AllowedTools []string
-	DeniedTools  []string
+	Type            string
+	ServerID        string
+	ServerLabel     string
+	ServerURL       string
+	AllowedTools    []string
+	DeniedTools     []string
+	RequireApproval any
 }
 
 type Executor struct {
 	enabled          bool
 	defaultServerKey string
 	servers          map[string]serverRuntime
+	serverList       []serverRuntime
 }
 
 type serverRuntime struct {
@@ -89,6 +95,7 @@ type serverRuntime struct {
 type callInput struct {
 	ServerID    string          `json:"server_id,omitempty"`
 	ServerLabel string          `json:"server_label,omitempty"`
+	ServerURL   string          `json:"server_url,omitempty"`
 	Tool        string          `json:"tool,omitempty"`
 	Name        string          `json:"name,omitempty"`
 	Arguments   json.RawMessage `json:"arguments,omitempty"`
@@ -150,6 +157,7 @@ func NewExecutor(opts Options) *Executor {
 		if runtime.label != "" {
 			e.servers[runtime.label] = runtime
 		}
+		e.serverList = append(e.serverList, runtime)
 	}
 	if len(opts.Servers) == 1 {
 		e.defaultServerKey = firstNonEmpty(opts.Servers[0].Label, opts.Servers[0].ID)
@@ -178,14 +186,20 @@ func (e *Executor) ExecuteHostedTool(ctx context.Context, toolCtx hosted.ToolCon
 	if err != nil {
 		return hosted.ToolResult{}, err
 	}
-	serverKey := firstNonEmpty(input.ServerLabel, input.ServerID, descriptor.ServerLabel)
+	if forbidden := firstClientCredentialField(call.Tool, call.Arguments); forbidden != "" {
+		return hosted.ToolResult{}, fmt.Errorf("%w: field %q rejected by policy", ErrClientCredentials, forbidden)
+	}
 	toolName := firstNonEmpty(input.Tool, input.Name, call.Name)
 	toolName = normalizeToolName(toolName)
 	if toolName == "" {
 		return hosted.ToolResult{}, ErrMissingTool
 	}
 
-	server, err := e.resolveServer(serverKey)
+	server, err := e.resolveServer(serverSelector{
+		id:    firstNonEmpty(input.ServerID, descriptor.ServerID),
+		label: firstNonEmpty(input.ServerLabel, descriptor.ServerLabel),
+		url:   firstNonEmpty(input.ServerURL, descriptor.ServerURL),
+	})
 	if err != nil {
 		return hosted.ToolResult{}, err
 	}
@@ -443,9 +457,12 @@ func sanitizeBearerError(err error, token string) error {
 
 func DescriptorFromProtocolTool(tool protocol.Tool) Descriptor {
 	descriptor := Descriptor{
-		Type:         strings.TrimSpace(tool.Type),
-		ServerLabel:  strings.TrimSpace(tool.ServerLabel),
-		AllowedTools: ParseToolNames(tool.AllowedTools),
+		Type:            strings.TrimSpace(tool.Type),
+		ServerID:        strings.TrimSpace(tool.ServerID),
+		ServerLabel:     strings.TrimSpace(tool.ServerLabel),
+		ServerURL:       strings.TrimSpace(tool.ServerURL),
+		AllowedTools:    ParseToolNames(tool.AllowedTools),
+		RequireApproval: tool.RequireApproval,
 	}
 	if tool.Extra != nil {
 		descriptor.DeniedTools = ParseToolNames(firstPresent(tool.Extra, "denied_tools", "deny_tools"))
@@ -510,14 +527,38 @@ func parseCallInput(call hosted.ToolCall) (callInput, map[string]any, error) {
 	return input, args, nil
 }
 
-func (e *Executor) resolveServer(key string) (serverRuntime, error) {
-	key = strings.TrimSpace(key)
-	if key != "" {
-		server, ok := e.servers[key]
-		if !ok {
-			return serverRuntime{}, ErrUnknownServer
+type serverSelector struct {
+	id    string
+	label string
+	url   string
+}
+
+func (e *Executor) resolveServer(selector serverSelector) (serverRuntime, error) {
+	selector.id = strings.TrimSpace(selector.id)
+	selector.label = strings.TrimSpace(selector.label)
+	selector.url = strings.TrimSpace(selector.url)
+	if selector.id != "" || selector.label != "" || selector.url != "" {
+		var matches []serverRuntime
+		for _, server := range e.serverList {
+			if selector.id != "" && server.id != selector.id {
+				continue
+			}
+			if selector.label != "" && server.label != selector.label {
+				continue
+			}
+			if selector.url != "" && server.url != selector.url {
+				continue
+			}
+			matches = append(matches, server)
 		}
-		return server, nil
+		switch len(matches) {
+		case 0:
+			return serverRuntime{}, ErrUnknownServer
+		case 1:
+			return matches[0], nil
+		default:
+			return serverRuntime{}, ErrAmbiguousServer
+		}
 	}
 	if e.defaultServerKey != "" {
 		if server, ok := e.servers[e.defaultServerKey]; ok {
@@ -525,6 +566,54 @@ func (e *Executor) resolveServer(key string) (serverRuntime, error) {
 		}
 	}
 	return serverRuntime{}, ErrUnknownServer
+}
+
+func firstClientCredentialField(tool protocol.Tool, raw json.RawMessage) string {
+	if field := credentialFieldInTool(tool); field != "" {
+		return field
+	}
+	var decoded any
+	if len(raw) > 0 && json.Unmarshal(raw, &decoded) == nil {
+		return credentialFieldInValue(decoded)
+	}
+	return ""
+}
+
+func credentialFieldInTool(tool protocol.Tool) string {
+	for _, key := range []string{"authorization", "auth", "token", "access_token", "bearer_token", "api_key"} {
+		if tool.Extra != nil {
+			if _, ok := tool.Extra[key]; ok {
+				return key
+			}
+		}
+	}
+	return credentialFieldInValue(tool.Extra)
+}
+
+func credentialFieldInValue(value any) string {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, nested := range v {
+			normalized := strings.ToLower(strings.TrimSpace(key))
+			switch normalized {
+			case "authorization", "auth", "token", "access_token", "bearer_token", "api_key":
+				return key
+			}
+			if strings.Contains(normalized, "authorization") || strings.Contains(normalized, "token") {
+				return key
+			}
+			if field := credentialFieldInValue(nested); field != "" {
+				return field
+			}
+		}
+	case []any:
+		for _, nested := range v {
+			if field := credentialFieldInValue(nested); field != "" {
+				return field
+			}
+		}
+	}
+	return ""
 }
 
 func summarizeJSON(raw json.RawMessage) map[string]any {

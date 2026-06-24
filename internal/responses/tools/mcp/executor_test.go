@@ -160,6 +160,92 @@ func TestExecutorRemoteStreamableHTTPHappyPath(t *testing.T) {
 	}
 }
 
+func TestExecutorRemoteStreamableHTTPRequiresConfiguredServerURLMatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}]}}`))
+	}))
+	defer server.Close()
+
+	executor := NewExecutor(Options{
+		Enabled: true,
+		Servers: []ServerDescriptor{{
+			ID:           "srv_workspace",
+			Label:        "workspace",
+			Enabled:      true,
+			URL:          server.URL,
+			AllowedTools: []string{"lookup"},
+		}},
+	})
+	result, err := executor.ExecuteHostedTool(context.Background(), hosted.ToolContext{}, hosted.ToolCall{
+		Type: hosted.ToolTypeMCP,
+		Tool: protocol.Tool{
+			Type:        hosted.ToolTypeMCP,
+			ServerLabel: "workspace",
+			ServerURL:   server.URL,
+		},
+		Arguments: json.RawMessage(`{"server_label":"workspace","server_url":"` + server.URL + `","tool":"lookup"}`),
+	})
+	if err != nil {
+		t.Fatalf("ExecuteHostedTool returned error: %v", err)
+	}
+	output := result.Output.(Output)
+	if output.ServerID != "srv_workspace" || output.ServerLabel != "workspace" {
+		t.Fatalf("output server = %#v, want configured workspace", output)
+	}
+
+	_, err = executor.ExecuteHostedTool(context.Background(), hosted.ToolContext{}, hosted.ToolCall{
+		Type: hosted.ToolTypeMCP,
+		Tool: protocol.Tool{
+			Type:        hosted.ToolTypeMCP,
+			ServerLabel: "workspace",
+			ServerURL:   "https://evil.example/mcp",
+		},
+		Arguments: json.RawMessage(`{"server_label":"workspace","server_url":"https://evil.example/mcp","tool":"lookup"}`),
+	})
+	if !errors.Is(err, ErrUnknownServer) {
+		t.Fatalf("ExecuteHostedTool error = %v, want ErrUnknownServer", err)
+	}
+}
+
+func TestExecutorRejectsClientSuppliedCredentialFields(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		tool      protocol.Tool
+		arguments json.RawMessage
+		secret    string
+	}{
+		{
+			name: "descriptor authorization",
+			tool: protocol.Tool{
+				Type:        hosted.ToolTypeMCP,
+				ServerLabel: "workspace",
+				Extra:       map[string]any{"authorization": "Bearer descriptor-secret"},
+			},
+			arguments: json.RawMessage(`{"server_label":"workspace","tool":"lookup"}`),
+			secret:    "descriptor-secret",
+		},
+		{
+			name:      "call token",
+			arguments: json.RawMessage(`{"server_label":"workspace","tool":"lookup","arguments":{"token":"call-secret"}}`),
+			secret:    "call-secret",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := testExecutor(true).ExecuteHostedTool(context.Background(), hosted.ToolContext{}, hosted.ToolCall{
+				Type:      hosted.ToolTypeMCP,
+				Tool:      tc.tool,
+				Arguments: tc.arguments,
+			})
+			if !errors.Is(err, ErrClientCredentials) {
+				t.Fatalf("ExecuteHostedTool error = %v, want ErrClientCredentials", err)
+			}
+			if strings.Contains(err.Error(), tc.secret) {
+				t.Fatalf("credential policy error leaked secret: %v", err)
+			}
+		})
+	}
+}
+
 func TestExecutorRemoteStreamableHTTPBearerHeader(t *testing.T) {
 	t.Setenv("MCP_TEST_TOKEN", "env-secret")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -333,14 +419,20 @@ func TestExecutorInvalidMissingTool(t *testing.T) {
 
 func TestDescriptorFromProtocolTool(t *testing.T) {
 	descriptor := DescriptorFromProtocolTool(protocol.Tool{
-		Type:         "mcp",
-		ServerLabel:  "workspace",
-		AllowedTools: map[string]any{"tools": []any{"lookup", "read_trace"}},
-		Extra:        map[string]any{"denied_tools": []any{"delete_trace"}},
+		Type:            "mcp",
+		ServerID:        "srv_workspace",
+		ServerLabel:     "workspace",
+		ServerURL:       "https://mcp.example.test/sse",
+		AllowedTools:    map[string]any{"tools": []any{"lookup", "read_trace"}},
+		RequireApproval: "never",
+		Extra:           map[string]any{"denied_tools": []any{"delete_trace"}},
 	})
 
-	if descriptor.Type != "mcp" || descriptor.ServerLabel != "workspace" {
-		t.Fatalf("descriptor type/server = %q/%q", descriptor.Type, descriptor.ServerLabel)
+	if descriptor.Type != "mcp" || descriptor.ServerID != "srv_workspace" || descriptor.ServerLabel != "workspace" || descriptor.ServerURL != "https://mcp.example.test/sse" {
+		t.Fatalf("descriptor identity = %#v", descriptor)
+	}
+	if descriptor.RequireApproval != "never" {
+		t.Fatalf("require approval = %#v, want never", descriptor.RequireApproval)
 	}
 	if strings.Join(descriptor.AllowedTools, ",") != "lookup,read_trace" {
 		t.Fatalf("allowed tools = %#v", descriptor.AllowedTools)

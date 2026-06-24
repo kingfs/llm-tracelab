@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -3750,32 +3752,126 @@ func TestRuntimeCreateRecordsHostedMCPToolFailure(t *testing.T) {
 	}
 }
 
-func TestRuntimeCreateStreamRejectsHostedMCPWithoutExecuting(t *testing.T) {
-	client := &fakeChatClient{streamResp: finalChatResponse("should not be called")}
+func TestMCPProtocolToolForCallMatchesServerDescriptorSafely(t *testing.T) {
+	tools := []protocol.Tool{
+		{Type: "mcp", ServerID: "srv_a", ServerLabel: "workspace", ServerURL: "https://a.example/mcp"},
+		{Type: "mcp", ServerID: "srv_b", ServerLabel: "workspace", ServerURL: "https://b.example/mcp"},
+	}
+	got, ok := mcpProtocolToolForCall(tools, `{"server_label":"workspace","server_url":"https://b.example/mcp","tool":"read_file"}`)
+	if !ok || got.ServerID != "srv_b" {
+		t.Fatalf("matched descriptor = %#v/%v, want srv_b by label+url", got, ok)
+	}
+	if _, ok := mcpProtocolToolForCall(tools, `{"server_label":"workspace","tool":"read_file"}`); ok {
+		t.Fatalf("ambiguous label-only descriptor matched, want safe failure")
+	}
+	if _, ok := mcpProtocolToolForCall(tools, `{"server_url":"https://evil.example/mcp","tool":"read_file"}`); ok {
+		t.Fatalf("unconfigured server_url matched, want safe failure")
+	}
+}
+
+func TestRuntimeCreateStreamExecutesHostedMCPToolLoop(t *testing.T) {
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"module github.com/kingfs/llm-tracelab"}],"structuredContent":{"bytes":38}}}`))
+	}))
+	defer mcpServer.Close()
+	callArguments := `{"server_label":"workspace","server_url":"` + mcpServer.URL + `","tool":"read_file","arguments":{"path":"go.mod"}}`
+	client := &fakeChatClient{
+		streamEventBatches: [][]ChatStreamEvent{
+			{
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ID:             "call_mcp_read",
+					Type:           "function",
+					FunctionName:   "mcp_call",
+					ArgumentsDelta: callArguments[:strings.Index(callArguments, `,"arguments"`)],
+				}}},
+				{ChoiceIndex: 0, ToolCallDeltas: []ChatStreamToolCallDelta{{
+					Index:          0,
+					ArgumentsDelta: callArguments[strings.Index(callArguments, `,"arguments"`):],
+				}}},
+			},
+			{
+				{ChoiceIndex: 0, ContentDelta: "Read "},
+				{ChoiceIndex: 0, ContentDelta: "complete."},
+			},
+		},
+		streamResps: []ChatCompletionResponse{
+			{
+				Choices: []ChatChoice{{
+					Message: ChatMessage{Role: "assistant", ToolCalls: []ChatToolCall{{
+						ID:   "call_mcp_read",
+						Type: "function",
+						Function: ChatToolCallFunction{
+							Name:      "mcp_call",
+							Arguments: callArguments,
+						},
+					}}},
+					FinishReason: "tool_calls",
+				}},
+				Usage: ChatUsage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11},
+			},
+			{
+				Choices: []ChatChoice{{
+					Message:      ChatMessage{Role: "assistant", Content: "Read complete."},
+					FinishReason: "stop",
+				}},
+				Usage: ChatUsage{PromptTokens: 12, CompletionTokens: 2, TotalTokens: 14},
+			},
+		},
+	}
+	events := &fakeExecutionEventRecorder{}
 	rt := New(Config{DefaultModel: "gpt-test"}, client, NewMemoryStore(),
 		WithMCPHostedExecutor(mcp.NewExecutor(mcp.Options{
 			Enabled: true,
 			Servers: []mcp.ServerDescriptor{{
+				ID:      "srv_workspace",
 				Label:   "workspace",
 				Enabled: true,
+				URL:     mcpServer.URL,
 				Tools: []mcp.ToolDescriptor{{
-					Name:    "read_file",
-					Enabled: true,
+					Name:       "read_file",
+					Enabled:    true,
+					TextResult: "module github.com/kingfs/llm-tracelab",
 				}},
 			}},
 		})),
+		WithExecutionEventRecorder(events),
 	)
+	sink := &fakeResponseStreamSink{}
 
-	_, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
+	resp, err := rt.CreateStream(context.Background(), protocol.CreateResponseRequest{
 		Input:      "read go.mod",
 		ToolChoice: map[string]any{"type": "mcp"},
-		Tools:      []protocol.Tool{{Type: "mcp", ServerLabel: "workspace"}},
-	}, &fakeResponseStreamSink{})
-	if !errors.Is(err, ErrIncrementalStreamUnsupported) {
-		t.Fatalf("CreateStream error = %v, want ErrIncrementalStreamUnsupported", err)
+		Tools: []protocol.Tool{{
+			Type:            "mcp",
+			ServerID:        "srv_workspace",
+			ServerLabel:     "workspace",
+			ServerURL:       mcpServer.URL,
+			AllowedTools:    []any{"read_file"},
+			RequireApproval: "never",
+		}},
+	}, sink)
+	if err != nil {
+		t.Fatalf("CreateStream error = %v", err)
 	}
-	if len(client.streamReqs) != 0 {
-		t.Fatalf("stream chat calls = %d, want 0", len(client.streamReqs))
+	if len(client.streamReqs) != 2 {
+		t.Fatalf("stream chat calls = %d, want mcp tool loop and final text", len(client.streamReqs))
+	}
+	if len(sink.outputAdded) != 1 || sink.outputAdded[0].Item.Type != "function_call_output" || sink.outputAdded[0].Item.Status != "in_progress" || sink.outputAdded[0].Item.CallID != "call_mcp_read" {
+		t.Fatalf("output added = %#v, want started mcp function_call_output", sink.outputAdded)
+	}
+	if len(sink.outputDone) != 1 || sink.outputDone[0].Item.Type != "function_call_output" || sink.outputDone[0].Item.Status != "completed" || sink.outputDone[0].Item.CallID != "call_mcp_read" {
+		t.Fatalf("output done = %#v, want completed mcp function_call_output", sink.outputDone)
+	}
+	if len(sink.deltas) != 2 || sink.deltas[0].OutputIndex != 1 || sink.deltas[0].Delta != "Read " || sink.deltas[1].Delta != "complete." {
+		t.Fatalf("text deltas = %#v, want final text after mcp", sink.deltas)
+	}
+	if len(resp.Output) != 2 || resp.Output[0].Type != "function_call_output" || resp.Output[0].CallID != "call_mcp_read" || resp.Output[1].Type != "message" || resp.Output[1].Content[0].Text != "Read complete." {
+		t.Fatalf("final output = %#v, want mcp output and final message", resp.Output)
+	}
+	completed := findExecutionEvent(events.events, "response.tool_call", "completed")
+	if completed == nil || completed.DetailsJSON["executor"] != "hosted:mcp" || completed.DetailsJSON["server_id"] != "srv_workspace" || completed.DetailsJSON["server_label"] != "workspace" || completed.DetailsJSON["server_url"] != mcpServer.URL || completed.DetailsJSON["stream"] != true || completed.DetailsJSON["status"] != "completed" {
+		t.Fatalf("completed mcp event = %#v", completed)
 	}
 }
 
