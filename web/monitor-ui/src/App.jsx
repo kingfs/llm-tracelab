@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
+import { useI18n } from "./lib/i18n";
 import { AnalysisPage } from "./routes/AnalysisPage";
 import { AuditPage } from "./routes/AuditPage";
 import { ChannelDetailPage } from "./routes/ChannelDetailPage";
@@ -20,6 +21,7 @@ import { TraceDetailPage } from "./routes/TraceDetailPage";
 import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 
 function App() {
+  const { t } = useI18n();
   const [auth, setAuth] = useState({ loading: true, required: false, authorized: false, error: "", user: null });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -44,12 +46,12 @@ function App() {
           }
         } catch {
           if (!cancelled) {
-            setAuth({ loading: false, required: true, authorized: false, error: "Invalid or missing monitor token.", user: null });
+            setAuth({ loading: false, required: true, authorized: false, error: t("auth.invalidToken"), user: null });
           }
         }
       } catch (error) {
         if (!cancelled) {
-          setAuth({ loading: false, required: true, authorized: false, error: error.message || "Unable to verify monitor token.", user: null });
+          setAuth({ loading: false, required: true, authorized: false, error: error.message || t("auth.verifyFailed"), user: null });
         }
       }
     }
@@ -58,7 +60,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   const submitToken = async (event) => {
     event.preventDefault();
@@ -70,34 +72,34 @@ function App() {
         setAuth({ loading: false, required: true, authorized: true, error: "", user });
         setPassword("");
       } catch {
-        setAuth({ loading: false, required: true, authorized: false, error: "Invalid username or password.", user: null });
+        setAuth({ loading: false, required: true, authorized: false, error: t("auth.invalidCredentials"), user: null });
       }
       return;
     }
-    setAuth({ loading: false, required: true, authorized: false, error: "Enter username and password.", user: null });
+    setAuth({ loading: false, required: true, authorized: false, error: t("auth.enterCredentials"), user: null });
   };
 
   const logout = () => {
     window.localStorage.removeItem(MONITOR_TOKEN_KEY);
-    setAuth({ loading: false, required: true, authorized: false, error: "Signed out.", user: null });
+    setAuth({ loading: false, required: true, authorized: false, error: t("auth.signedOut"), user: null });
   };
 
   if (auth.loading) {
-    return <div className="auth-screen"><div className="auth-panel"><p className="eyebrow">Access control</p><h1>Checking monitor access</h1></div></div>;
+    return <div className="auth-screen"><div className="auth-panel"><p className="eyebrow">{t("auth.eyebrow")}</p><h1>{t("auth.checking")}</h1></div></div>;
   }
 
   if (auth.required && !auth.authorized) {
     return (
       <div className="auth-screen">
         <form className="auth-panel" onSubmit={submitToken}>
-          <p className="eyebrow">Access control</p>
-          <h1>Sign in to monitor</h1>
-          <label htmlFor="monitor-username">Username</label>
+          <p className="eyebrow">{t("auth.eyebrow")}</p>
+          <h1>{t("auth.signInTitle")}</h1>
+          <label htmlFor="monitor-username">{t("auth.username")}</label>
           <input id="monitor-username" type="text" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} autoFocus />
-          <label htmlFor="monitor-password">Password</label>
+          <label htmlFor="monitor-password">{t("auth.password")}</label>
           <input id="monitor-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
           {auth.error ? <p className="auth-error">{auth.error}</p> : null}
-          <button className="ghost-button" type="submit">Sign in</button>
+          <button className="ghost-button" type="submit">{t("auth.signIn")}</button>
         </form>
       </div>
     );

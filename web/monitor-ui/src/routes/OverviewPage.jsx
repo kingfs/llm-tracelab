@@ -8,6 +8,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import {
   buildRoutingLink,
   buildTraceLink,
@@ -28,6 +29,7 @@ import {
 const REFRESH_MS = 60_000;
 
 export function OverviewPage() {
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [refreshTick, setRefreshTick] = useState(0);
@@ -59,69 +61,69 @@ export function OverviewPage() {
     <div className="shell shell-list">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Local First LLM Replay Proxy</p>
-          <h1>Overview</h1>
+          <p className="eyebrow">{t("overview.eyebrow")}</p>
+          <h1>{t("overview.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <div className="view-toggle" aria-label="Overview window">
+          <div className="view-toggle" aria-label={t("overview.window")}>
             {MONITOR_WINDOW_OPTIONS.map((option) => (
               <button key={option} className={`ghost-button ${windowValue === option ? "active" : ""}`.trim()} type="button" onClick={() => setWindow(option)}>
                 {option}
               </button>
             ))}
           </div>
-          <span className="badge badge-live">refresh / 60s</span>
+          <span className="badge badge-live">{t("overview.refresh")}</span>
           <span className="badge">{data?.refreshed_at ? formatDateTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
 
-      {error ? <EmptyState title="Unable to load overview" detail={error} tone="danger" /> : null}
-      {loading && !data ? <EmptyState title="Loading overview" detail="Aggregating indexed traffic, audit, routing, and analysis signals." /> : null}
+      {error ? <EmptyState title={t("overview.loadError")} detail={error} tone="danger" /> : null}
+      {loading && !data ? <EmptyState title={t("overview.loading")} detail={t("overview.loadingDetail")} /> : null}
 
       <section className="hero-grid overview-kpi-grid">
-        <StatCard label="Requests" value={summary.request_count ?? 0} detail={`${summary.session_count ?? 0} active sessions`} />
-        <StatCard label="Success" value={`${Number(summary.success_rate ?? 0).toFixed(1)}%`} detail={`${summary.success_request ?? 0} successful`} accent="accent-green" />
-        <StatCard label="Failed" value={summary.failed_request ?? 0} detail={`${attention.recent_failures?.length ?? 0} recent failures`} accent={(summary.failed_request ?? 0) > 0 ? "accent-red" : ""} />
-        <StatCard label="Tokens" value={formatTokenCount(summary.total_tokens ?? 0)} detail={`${summary.stream_count ?? 0} streaming traces`} accent="accent-gold" title={String(summary.total_tokens ?? 0)} />
+        <StatCard label={t("overview.requests")} value={summary.request_count ?? 0} detail={t("overview.activeSessions", { count: summary.session_count ?? 0 })} />
+        <StatCard label={t("overview.success")} value={`${Number(summary.success_rate ?? 0).toFixed(1)}%`} detail={t("overview.successful", { count: summary.success_request ?? 0 })} accent="accent-green" />
+        <StatCard label={t("overview.failed")} value={summary.failed_request ?? 0} detail={t("overview.recentFailures", { count: attention.recent_failures?.length ?? 0 })} accent={(summary.failed_request ?? 0) > 0 ? "accent-red" : ""} />
+        <StatCard label={t("overview.tokens")} value={formatTokenCount(summary.total_tokens ?? 0)} detail={t("overview.streamingTraces", { count: summary.stream_count ?? 0 })} accent="accent-gold" title={String(summary.total_tokens ?? 0)} />
         <StatCard label="TTFT" value={formatDuration(summary.avg_ttft_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_ttft_ms ?? 0)}`} />
-        <StatCard label="Latency" value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
-        <StatCard label="Findings" value={breakdown.finding_categories?.reduce((sum, item) => sum + Number(item.count || 0), 0) ?? 0} detail={`${attention.high_risk_findings?.length ?? 0} high risk`} accent={(attention.high_risk_findings?.length ?? 0) ? "accent-red" : ""} />
-        <StatCard label="System Events" value={eventSummary?.unread ?? 0} detail={`${eventSummary?.error ?? 0} errors, ${eventSummary?.warning ?? 0} warnings`} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
+        <StatCard label={t("overview.latency")} value={formatDuration(summary.avg_duration_ms ?? 0)} detail={`p95 ${formatDuration(summary.p95_duration_ms ?? 0)}`} />
+        <StatCard label={t("overview.findings")} value={breakdown.finding_categories?.reduce((sum, item) => sum + Number(item.count || 0), 0) ?? 0} detail={t("overview.highRisk", { count: attention.high_risk_findings?.length ?? 0 })} accent={(attention.high_risk_findings?.length ?? 0) ? "accent-red" : ""} />
+        <StatCard label={t("overview.systemEvents")} value={eventSummary?.unread ?? 0} detail={t("overview.eventCounts", { errors: eventSummary?.error ?? 0, warnings: eventSummary?.warning ?? 0 })} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Derived data</p>
-            <h2>Observation and analysis health</h2>
+            <p className="eyebrow">{t("overview.derivedData")}</p>
+            <h2>{t("overview.health")}</h2>
           </div>
         </div>
         <div className="hero-grid hero-grid-compact overview-health-grid">
-          <StatCard label="Unread Events" value={eventSummary?.unread ?? 0} detail={eventSummary?.last_seen_at ? `latest ${formatDateTime(eventSummary.last_seen_at)}` : "no runtime exceptions"} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
-          <StatCard label="Parsed" value={observation.parsed ?? 0} detail={`${observation.total_observations ?? 0} observation rows`} accent="accent-green" />
+          <StatCard label={t("overview.unreadEvents")} value={eventSummary?.unread ?? 0} detail={eventSummary?.last_seen_at ? t("overview.latest", { time: formatDateTime(eventSummary.last_seen_at) }) : t("overview.noRuntimeExceptions")} accent={(eventSummary?.unread ?? 0) ? "accent-red" : "accent-green"} />
+          <StatCard label={t("overview.parsed")} value={observation.parsed ?? 0} detail={t("overview.observationRows", { count: observation.total_observations ?? 0 })} accent="accent-green" />
           <Link className="stat-card stat-card-link" to="/requests?observation=unparsed">
-            <span>Unparsed</span>
+            <span>{t("overview.unparsed")}</span>
             <strong>{observation.unparsed ?? 0}</strong>
-            <small className="stat-detail">indexed traces without observation</small>
+            <small className="stat-detail">{t("overview.unparsedDetail")}</small>
           </Link>
-          <StatCard label="Parse Queue" value={(observation.queued ?? 0) + (observation.running ?? 0)} detail={`${observation.queued ?? 0} queued, ${observation.running ?? 0} running`} accent={(observation.queued ?? 0) || (observation.running ?? 0) ? "accent-gold" : ""} />
-          <StatCard label="Analysis" value={analysis.total ?? 0} detail={`${analysis.failed ?? 0} failed runs`} accent={(analysis.failed ?? 0) ? "accent-red" : "accent-gold"} />
+          <StatCard label={t("overview.parseQueue")} value={(observation.queued ?? 0) + (observation.running ?? 0)} detail={t("overview.queueDetail", { queued: observation.queued ?? 0, running: observation.running ?? 0 })} accent={(observation.queued ?? 0) || (observation.running ?? 0) ? "accent-gold" : ""} />
+          <StatCard label={t("nav.analysis")} value={analysis.total ?? 0} detail={t("overview.analysisFailed", { count: analysis.failed ?? 0 })} accent={(analysis.failed ?? 0) ? "accent-red" : "accent-gold"} />
         </div>
         <div className="panel-foot-actions overview-events-link">
-          <Link className="ghost-button active" to="/events">Open Events</Link>
+          <Link className="ghost-button active" to="/events">{t("overview.openEvents")}</Link>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Providers</p>
-            <h2>Configured upstreams</h2>
+            <p className="eyebrow">{t("overview.providers")}</p>
+            <h2>{t("overview.configuredUpstreams")}</h2>
           </div>
           <div className="panel-head-actions">
             <Link className="ghost-button active icon-text-button" to="/providers">
               <PlusIcon />
-              <span>New provider</span>
+              <span>{t("overview.newProvider")}</span>
             </Link>
           </div>
         </div>
@@ -135,32 +137,32 @@ export function OverviewPage() {
                   <span>{provider.provider_preset || "custom"}</span>
                 </div>
                 <div className="trace-tag-group">
-                  <InlineTag tone={provider.enabled ? "green" : "gold"}>{provider.enabled ? "enabled" : "disabled"}</InlineTag>
+                  <InlineTag tone={provider.enabled ? "green" : "gold"}>{provider.enabled ? t("overview.enabled") : t("overview.disabled")}</InlineTag>
                   {provider.last_probe_status ? <InlineTag tone={provider.last_probe_status === "success" ? "green" : "danger"}>{provider.last_probe_status}</InlineTag> : null}
                 </div>
                 <div className="detail-meta-strip">
-                  <OverviewProviderMetric label="models" value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
-                  <OverviewProviderMetric label="requests" value={formatCount(provider.summary?.request_count)} />
-                  <OverviewProviderMetric label="tokens" value={formatTokenCount(provider.summary?.total_tokens || 0)} />
+                  <OverviewProviderMetric label={t("overview.models")} value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
+                  <OverviewProviderMetric label={t("overview.requests")} value={formatCount(provider.summary?.request_count)} />
+                  <OverviewProviderMetric label={t("overview.tokens")} value={formatTokenCount(provider.summary?.total_tokens || 0)} />
                 </div>
               </Link>
             ))}
           </div>
         ) : (
-          <EmptyState title="No providers configured" detail="Add a provider before routing client traffic through TraceLab." compact />
+          <EmptyState title={t("overview.noProviders")} detail={t("overview.noProvidersDetail")} compact />
         )}
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Trend</p>
-            <h2>Workspace activity</h2>
+            <p className="eyebrow">{t("overview.trend")}</p>
+            <h2>{t("overview.workspaceActivity")}</h2>
           </div>
         </div>
         <div className="overview-chart-grid">
           <section className="usage-chart-panel">
-            <div className="breakdown-title">Requests and failures</div>
+            <div className="breakdown-title">{t("overview.requestsFailures")}</div>
             <MultiLineChart
               items={(data?.timeline || []).map((item) => ({
                 time: item.time,
@@ -178,7 +180,7 @@ export function OverviewPage() {
             />
           </section>
           <section className="usage-chart-panel">
-            <div className="breakdown-title">Tokens</div>
+            <div className="breakdown-title">{t("overview.tokens")}</div>
             <MultiLineChart
               items={(data?.timeline || []).map((item) => ({ time: item.time, value: item.total_tokens }))}
               series={[{ key: "value", name: "tokens" }]}
@@ -187,7 +189,7 @@ export function OverviewPage() {
             />
           </section>
           <section className="usage-chart-panel">
-            <div className="breakdown-title">TTFT and latency</div>
+            <div className="breakdown-title">{t("overview.ttftLatency")}</div>
             <MultiLineChart
               items={(data?.timeline || []).map((item) => ({
                 time: item.time,
@@ -210,42 +212,42 @@ export function OverviewPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Distribution</p>
-            <h2>Top breakdowns</h2>
+            <p className="eyebrow">{t("overview.distribution")}</p>
+            <h2>{t("overview.topBreakdowns")}</h2>
           </div>
         </div>
         <div className="session-breakdown-grid overview-breakdown-grid">
-          <BreakdownList title="Models" items={breakdown.models || []} formatter={(item) => item.label || "unknown-model"} linkFor={(item) => buildOverviewBreakdownLink("model", item.label, windowValue)} />
-          <BreakdownList title="Providers" items={breakdown.providers || []} formatter={(item) => formatProviderTag(item.label)} linkFor={(item) => buildOverviewBreakdownLink("provider", item.label, windowValue)} />
-          <BreakdownList title="Endpoints" items={breakdown.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} linkFor={(item) => buildOverviewBreakdownLink("endpoint", item.label, windowValue)} />
-          <BreakdownList title="Upstreams" items={breakdown.upstreams || []} formatter={(item) => item.label || "unknown-upstream"} linkFor={(item) => buildOverviewBreakdownLink("upstream", item.label, windowValue)} />
-          <BreakdownList title="Routing failures" items={breakdown.routing_failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} linkFor={(item) => buildOverviewBreakdownLink("routing_failure", item.label, windowValue)} />
-          <BreakdownList title="Finding categories" items={breakdown.finding_categories || []} formatter={(item) => formatFailureReason(item.label)} linkFor={(item) => buildOverviewBreakdownLink("finding_category", item.label, windowValue)} />
+          <BreakdownList title={t("overview.models")} items={breakdown.models || []} formatter={(item) => item.label || "unknown-model"} linkFor={(item) => buildOverviewBreakdownLink("model", item.label, windowValue)} />
+          <BreakdownList title={t("overview.providers")} items={breakdown.providers || []} formatter={(item) => formatProviderTag(item.label)} linkFor={(item) => buildOverviewBreakdownLink("provider", item.label, windowValue)} />
+          <BreakdownList title={t("overview.endpoints")} items={breakdown.endpoints || []} formatter={(item) => formatEndpointTag(item.label)} linkFor={(item) => buildOverviewBreakdownLink("endpoint", item.label, windowValue)} />
+          <BreakdownList title={t("overview.upstreams")} items={breakdown.upstreams || []} formatter={(item) => item.label || "unknown-upstream"} linkFor={(item) => buildOverviewBreakdownLink("upstream", item.label, windowValue)} />
+          <BreakdownList title={t("overview.routingFailures")} items={breakdown.routing_failure_reasons || []} formatter={(item) => formatFailureReason(item.label)} linkFor={(item) => buildOverviewBreakdownLink("routing_failure", item.label, windowValue)} />
+          <BreakdownList title={t("overview.findingCategories")} items={breakdown.finding_categories || []} formatter={(item) => formatFailureReason(item.label)} linkFor={(item) => buildOverviewBreakdownLink("finding_category", item.label, windowValue)} />
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Attention</p>
-            <h2>Needs review</h2>
+            <p className="eyebrow">{t("overview.attention")}</p>
+            <h2>{t("overview.needsReview")}</h2>
           </div>
           <div className="panel-head-actions">
-            <Link className="ghost-button" to="/audit">Audit</Link>
-            <Link className="ghost-button" to={buildRoutingLink(normalizeUpstreamWindow(windowValue))}>Routing</Link>
+            <Link className="ghost-button" to="/audit">{t("overview.audit")}</Link>
+            <Link className="ghost-button" to={buildRoutingLink(normalizeUpstreamWindow(windowValue))}>{t("overview.routing")}</Link>
           </div>
         </div>
         <div className="overview-attention-grid">
-          <AttentionPanel title="Recent failures" emptyTitle="No recent failures">
+          <AttentionPanel title={t("overview.recentFailuresTitle")} emptyTitle={t("overview.noRecentFailures")}>
             {(attention.recent_failures || []).length ? <RequestList items={attention.recent_failures || []} fromView="overview" focusFailures /> : null}
           </AttentionPanel>
-          <AttentionPanel title="Slow traces" emptyTitle="No slow traces">
+          <AttentionPanel title={t("overview.slowTraces")} emptyTitle={t("overview.noSlowTraces")}>
             {(attention.slow_traces || []).length ? <RequestList items={attention.slow_traces || []} fromView="overview" /> : null}
           </AttentionPanel>
-          <AttentionPanel title="High-risk findings" emptyTitle="No high-risk findings">
+          <AttentionPanel title={t("overview.highRiskFindings")} emptyTitle={t("overview.noHighRiskFindings")}>
             {(attention.high_risk_findings || []).length ? <FindingQueue items={attention.high_risk_findings || []} /> : null}
           </AttentionPanel>
-          <AttentionPanel title="Routing failures" emptyTitle="No routing failures">
+          <AttentionPanel title={t("overview.routingFailures")} emptyTitle={t("overview.noRoutingFailures")}>
             {(attention.routing_failures || []).length ? <RoutingFailureQueue items={attention.routing_failures || []} /> : null}
           </AttentionPanel>
         </div>
@@ -255,10 +257,11 @@ export function OverviewPage() {
 }
 
 function AttentionPanel({ title, emptyTitle, children }) {
+  const { t } = useI18n();
   return (
     <section className="overview-attention-panel">
       <div className="breakdown-title">{title}</div>
-      {children || <EmptyState title={emptyTitle} detail="No indexed records require attention in the current window." compact />}
+      {children || <EmptyState title={emptyTitle} detail={t("overview.noAttentionDetail")} compact />}
     </section>
   );
 }
@@ -285,12 +288,13 @@ function OverviewProviderMetric({ label, value }) {
 }
 
 function FindingQueue({ items }) {
+  const { t } = useI18n();
   return (
     <div className="overview-queue">
       {items.map((item) => (
         <Link className="overview-queue-row" key={item.id} to={buildTraceLink(item.trace_id, "overview", "", "audit", item.node_id || item.evidence_path || "finding")}>
           <div>
-            <strong>{item.title || item.category || "Finding"}</strong>
+            <strong>{item.title || item.category || t("overview.finding")}</strong>
             <span>{item.evidence_path || item.trace_id}</span>
           </div>
           <div className="trace-tag-group">

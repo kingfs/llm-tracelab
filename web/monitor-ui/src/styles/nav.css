@@ -354,6 +354,20 @@
   background: rgba(2, 8, 23, 0.38);
 }
 
+.theme-switcher-labelled {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.theme-switcher-labelled .theme-option {
+  width: auto;
+  min-width: 82px;
+  padding: 0 10px;
+  gap: 8px;
+  display: inline-flex;
+  font-size: 0.82rem;
+}
+
 .nav-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -376,6 +390,10 @@
   border-radius: 10px;
   background: var(--panel-strong);
   box-shadow: var(--shadow);
+}
+
+.preferences-modal {
+  width: min(560px, 100%);
 }
 
 .nav-modal-head,
@@ -450,6 +468,80 @@
   clip: rect(0 0 0 0);
 }
 
+.theme-switcher-labelled .theme-option-text {
+  position: static;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  clip: auto;
+  white-space: nowrap;
+}
+
+.preferences-list {
+  display: grid;
+  gap: 12px;
+}
+
+.preferences-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.preferences-row > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.preferences-row strong,
+.preferences-row span,
+.language-option {
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.preferences-row strong {
+  font-size: 0.94rem;
+}
+
+.preferences-row span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.language-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(2, 8, 23, 0.38);
+}
+
+.language-option {
+  min-width: 76px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.language-option-active {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text);
+}
+
 .nav-field {
   display: grid;
   gap: 6px;
@@ -475,12 +567,18 @@
 
 :root[data-theme="light"] .account-trigger,
 :root[data-theme="light"] .theme-switcher,
+:root[data-theme="light"] .language-switcher,
 :root[data-theme="light"] .nav-field input {
   background: transparent;
 }
 
 :root[data-theme="light"] .nav-field input,
-:root[data-theme="light"] .theme-switcher {
+:root[data-theme="light"] .theme-switcher,
+:root[data-theme="light"] .language-switcher {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .preferences-row {
   background: #ffffff;
 }
 
@@ -529,6 +627,10 @@
   background: #ececf1;
 }
 
+:root[data-theme="light"] .language-option-active {
+  background: #ececf1;
+}
+
 @media (prefers-color-scheme: light) {
   :root[data-theme="system"] .app-sidebar,
   :root[data-theme="system"] .account-menu {
@@ -538,12 +640,18 @@
 
   :root[data-theme="system"] .account-trigger,
   :root[data-theme="system"] .theme-switcher,
+  :root[data-theme="system"] .language-switcher,
   :root[data-theme="system"] .nav-field input {
     background: transparent;
   }
 
   :root[data-theme="system"] .nav-field input,
-  :root[data-theme="system"] .theme-switcher {
+  :root[data-theme="system"] .theme-switcher,
+  :root[data-theme="system"] .language-switcher {
+    background: #ffffff;
+  }
+
+  :root[data-theme="system"] .preferences-row {
     background: #ffffff;
   }
 
@@ -589,6 +697,10 @@
   }
 
   :root[data-theme="system"] .theme-option-active {
+    background: #ececf1;
+  }
+
+  :root[data-theme="system"] .language-option-active {
     background: #ececf1;
   }
 }
@@ -674,5 +786,14 @@
   .account-menu {
     right: 0;
     width: min(280px, calc(100vw - 24px));
+  }
+
+  .preferences-row {
+    grid-template-columns: 1fr;
+  }
+
+  .language-switcher,
+  .theme-switcher-labelled {
+    justify-content: flex-start;
   }
 }

@@ -1,4 +1,5 @@
 import React from "react";
+import { useI18n } from "../lib/i18n";
 
 const baseOrigin = () => {
   if (typeof window === "undefined") {
@@ -8,6 +9,7 @@ const baseOrigin = () => {
 };
 
 export function ConnectPage() {
+  const { t } = useI18n();
   const origin = baseOrigin();
   const token = "${LLM_TRACELAB_TOKEN}";
   const examples = [
@@ -15,7 +17,7 @@ export function ConnectPage() {
       title: "OpenAI-compatible Chat Completions",
       baseURL: `${origin}/v1`,
       endpoint: "/v1/chat/completions",
-      detail: "Use this for traditional OpenAI-compatible SDKs and gateways.",
+      detail: t("connect.openaiDetail"),
       curl: `curl ${origin}/v1/chat/completions \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
@@ -25,7 +27,7 @@ export function ConnectPage() {
       title: "OpenAI Responses / Codex",
       baseURL: `${origin}/responses`,
       endpoint: "/responses",
-      detail: "Use this for clients that speak the OpenAI Responses API. /v1/responses remains supported.",
+      detail: t("connect.responsesDetail"),
       curl: `curl ${origin}/responses \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
@@ -35,7 +37,7 @@ export function ConnectPage() {
       title: "Anthropic Messages / Claude Code",
       baseURL: `${origin}/anthropic`,
       endpoint: "/anthropic/messages",
-      detail: "Use this for Anthropic Messages clients. Requests route only to Anthropic-capable providers.",
+      detail: t("connect.anthropicDetail"),
       curl: `curl ${origin}/anthropic/messages \\
   -H "Authorization: Bearer ${token}" \\
   -H "Content-Type: application/json" \\
@@ -47,8 +49,8 @@ export function ConnectPage() {
     <div className="shell shell-list">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Client setup</p>
-          <h1>Connect</h1>
+          <p className="eyebrow">{t("connect.clientSetup")}</p>
+          <h1>{t("connect.title")}</h1>
         </div>
         <div className="topbar-meta">
           <span className="badge">{origin}</span>
@@ -58,8 +60,8 @@ export function ConnectPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Protocol entrypoints</p>
-            <h2>Choose the API shape your client speaks</h2>
+            <p className="eyebrow">{t("connect.entrypoints")}</p>
+            <h2>{t("connect.chooseAPI")}</h2>
           </div>
         </div>
         <div className="provider-entry-grid">
@@ -72,7 +74,7 @@ export function ConnectPage() {
               <p className="trace-subline">{item.detail}</p>
               <div className="detail-meta-strip">
                 <span className="detail-meta-pill">
-                  <span className="detail-meta-label">base url</span>
+                  <span className="detail-meta-label">{t("connect.baseURL")}</span>
                   <strong className="mono">{item.baseURL}</strong>
                 </span>
               </div>
