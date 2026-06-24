@@ -827,7 +827,45 @@ func (h *Handler) recordExecutionEvent(r *http.Request, event audit.ExecutionEve
 	}
 	if err := h.events.RecordExecutionEvent(auditWriteContext(r), event); err != nil {
 		slog.Error("Failed to write responses execution event", "event_type", event.EventType, "status", event.Status, "err", err)
+		return
 	}
+	slog.Info("Responses execution event recorded", responsesHTTPEventLogAttrs(event)...)
+}
+
+func responsesHTTPEventLogAttrs(event audit.ExecutionEvent) []any {
+	attrs := []any{
+		"event_type", event.EventType,
+		"phase", event.Phase,
+		"status", event.Status,
+	}
+	if event.ResponseID != "" {
+		attrs = append(attrs, "response_id", event.ResponseID)
+	}
+	if event.RequestAuditID != "" {
+		attrs = append(attrs, "request_audit_id", event.RequestAuditID)
+	}
+	if event.ConversationID != "" {
+		attrs = append(attrs, "conversation_id", event.ConversationID)
+	}
+	if event.Message != "" {
+		attrs = append(attrs, "message", event.Message)
+	}
+	for _, key := range []string{
+		"request_audit_id",
+		"method",
+		"path",
+		"stream",
+		"fallback_reason",
+		"target_response_id",
+	} {
+		if value, ok := event.DetailsJSON[key]; ok && value != nil {
+			attrs = append(attrs, key, value)
+		}
+	}
+	if compat, ok := event.DetailsJSON["codex_compat"]; ok {
+		attrs = append(attrs, "codex_compat", compat)
+	}
+	return attrs
 }
 
 func (h *Handler) serveResponseSubresource(w http.ResponseWriter, r *http.Request) {

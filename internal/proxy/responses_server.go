@@ -266,7 +266,22 @@ func (a *responsesChatCompletionsAdapter) recordModelCallEvent(ctx context.Conte
 	event.DetailsJSON = details
 	if err := a.events.RecordExecutionEvent(context.WithoutCancel(ctx), event); err != nil {
 		slog.Error("Failed to record responses model call event", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
+		return
 	}
+	slog.Info("Responses model call event recorded",
+		"event_type", event.EventType,
+		"phase", event.Phase,
+		"status", event.Status,
+		"request_audit_id", requestAuditID,
+		"trace_id", logInfo.Header.Meta.RequestID,
+		"cassette_path", logInfo.Path,
+		"upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
+		"model", logInfo.Header.Meta.Model,
+		"endpoint", logInfo.Header.Meta.Endpoint,
+		"status_code", logInfo.Header.Meta.StatusCode,
+		"duration_ms", logInfo.Header.Meta.DurationMs,
+		"ttft_ms", logInfo.Header.Meta.TTFTMs,
+	)
 }
 
 func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Context, logInfo *recorder.LogInfo, startedAt time.Time, completedAt time.Time, statusCode int) {
@@ -292,7 +307,19 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 	}
 	if err := a.auditor.RecordUpstreamExchange(context.WithoutCancel(ctx), entry); err != nil {
 		slog.Error("Failed to record responses upstream exchange", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
+		return
 	}
+	slog.Info("Responses upstream exchange recorded",
+		"request_audit_id", requestAuditID,
+		"trace_id", logInfo.Header.Meta.RequestID,
+		"cassette_path", logInfo.Path,
+		"upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
+		"model", logInfo.Header.Meta.Model,
+		"endpoint", logInfo.Header.Meta.Endpoint,
+		"status_code", statusCode,
+		"duration_ms", completedAt.Sub(startedAt).Milliseconds(),
+		"ttft_ms", logInfo.Header.Meta.TTFTMs,
+	)
 }
 
 func (h *Handler) serveLocalResponses(w http.ResponseWriter, r *http.Request) {

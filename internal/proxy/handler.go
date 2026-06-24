@@ -1384,9 +1384,15 @@ func (h *Handler) writeUpstreamResponse(
 	})
 
 	slog.Info("Request completed",
+		"request_id", logInfo.Header.Meta.RequestID,
 		"model", logInfo.Header.Meta.Model,
+		"endpoint", logInfo.Header.Meta.Endpoint,
 		"selected_upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
 		"status", code,
+		"duration_ms", logInfo.Header.Meta.DurationMs,
+		"ttft_ms", logInfo.Header.Meta.TTFTMs,
+		"stream", logInfo.Header.Layout.IsStream || selection.Request.Stream,
+		"content_length", written,
 		"tokens_total", logInfo.Header.Usage.TotalTokens,
 	)
 }

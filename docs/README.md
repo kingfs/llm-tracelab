@@ -27,6 +27,7 @@
 - [Hosted Tools Roadmap](./HOSTED_TOOLS_ROADMAP.md)
 - [Final Completion Audit](./FINAL_COMPLETION_AUDIT.md)
 - [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)
+- [集成测试诊断指南](./INTEGRATION_TEST_RUNBOOK.md)
 - [Responses Gateway 完成计划](./RESPONSES_GATEWAY_COMPLETION_PLAN.md)
 - [Responses Gateway 重构路线图](./RESPONSES_GATEWAY_ROADMAP.md)
 - [Responses Gateway 差距清单](./RESPONSES_GATEWAY_GAP_ANALYSIS.md)
@@ -38,6 +39,7 @@
 - [代理使用示例](./PROXY_USAGE_EXAMPLES.md)
 - [凭据路由操作指南](./CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)
 - [Codex MCP 本地配置](./CODEX_MCP_LOCAL_CONFIG.md)
+- [集成测试诊断指南](./INTEGRATION_TEST_RUNBOOK.md)
 
 ## 开发指南
 

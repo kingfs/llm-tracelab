@@ -1849,7 +1849,9 @@ func (r *Runtime) recordExecutionEvent(ctx context.Context, event audit.Executio
 	}
 	if err := r.events.RecordExecutionEvent(ctx, event); err != nil {
 		slog.Error("Failed to record responses runtime execution event", "event_type", event.EventType, "status", event.Status, "err", err)
+		return
 	}
+	slog.Info("Responses runtime execution event recorded", responsesRuntimeEventLogAttrs(event)...)
 }
 
 func (r *Runtime) recordToolCallAudit(ctx context.Context, entry audit.ToolCallAudit) {
@@ -1858,7 +1860,81 @@ func (r *Runtime) recordToolCallAudit(ctx context.Context, entry audit.ToolCallA
 	}
 	if _, err := r.toolCallAudits.RecordToolCallAudit(ctx, entry); err != nil {
 		slog.Error("Failed to record responses runtime tool call audit", "tool_name", entry.ToolName, "status", entry.Status, "err", err)
+		return
 	}
+	slog.Info("Responses tool call audit recorded", responsesToolCallAuditLogAttrs(entry)...)
+}
+
+func responsesRuntimeEventLogAttrs(event audit.ExecutionEvent) []any {
+	attrs := []any{
+		"event_type", event.EventType,
+		"phase", event.Phase,
+		"status", event.Status,
+	}
+	if event.ResponseID != "" {
+		attrs = append(attrs, "response_id", event.ResponseID)
+	}
+	if event.RequestAuditID != "" {
+		attrs = append(attrs, "request_audit_id", event.RequestAuditID)
+	}
+	if event.ConversationID != "" {
+		attrs = append(attrs, "conversation_id", event.ConversationID)
+	}
+	if event.Message != "" {
+		attrs = append(attrs, "message", event.Message)
+	}
+	for _, key := range []string{
+		"request_audit_id",
+		"call_id",
+		"tool_type",
+		"tool_name",
+		"executor",
+		"stream",
+		"query",
+		"result_count",
+		"server_id",
+		"server_label",
+		"status",
+		"error",
+		"response_id",
+		"conversation_id",
+	} {
+		if value, ok := event.DetailsJSON[key]; ok && value != nil {
+			attrs = append(attrs, key, value)
+		}
+	}
+	return attrs
+}
+
+func responsesToolCallAuditLogAttrs(entry audit.ToolCallAudit) []any {
+	attrs := []any{
+		"tool_type", entry.ToolType,
+		"tool_name", entry.ToolName,
+		"executor", entry.Executor,
+		"status", entry.Status,
+		"phase", entry.Phase,
+	}
+	if entry.ResponseID != "" {
+		attrs = append(attrs, "response_id", entry.ResponseID)
+	}
+	if entry.RequestAuditID != "" {
+		attrs = append(attrs, "request_audit_id", entry.RequestAuditID)
+	}
+	if entry.ConversationID != "" {
+		attrs = append(attrs, "conversation_id", entry.ConversationID)
+	}
+	if entry.CallID != "" {
+		attrs = append(attrs, "call_id", entry.CallID)
+	}
+	if entry.ErrorText != "" {
+		attrs = append(attrs, "error", entry.ErrorText)
+	}
+	for _, key := range []string{"stream", "query", "result_count", "server_id", "server_label"} {
+		if value, ok := entry.MetadataJSON[key]; ok && value != nil {
+			attrs = append(attrs, key, value)
+		}
+	}
+	return attrs
 }
 
 func (r *Runtime) recordUnsupportedHostedToolAudit(ctx context.Context, req protocol.CreateResponseRequest, toolName string, unsupported UnsupportedHostedToolError, stream bool) {

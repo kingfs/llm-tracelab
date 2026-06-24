@@ -199,19 +199,21 @@ Streaming 路径需要明确区分两类模式：
 短期策略：
 
 - `web_search` 和已注册 function executor 继续支持 incremental stream。
-- `mcp` 当前支持 non-stream tool loop；stream 请求先返回明确 fallback/unsupported，不误执行。后续 Phase 2E 再实现 incremental stream 简单路径。
+- `mcp` 已支持 non-stream tool loop 和首切 incremental stream 简单路径；复杂 approval/OAuth/side-effect 语义仍按后续阶段收敛。
 - `file_search` 第一版可支持 non-stream 和 deferred stream。
 - `code_interpreter`、`computer_use_preview` 第一版只支持 non-stream 或 deferred stream。
 
 ### 安全默认值
 
-默认配置：
+生产安全基线仍按保守默认设计：
 
 - `web_search`: disabled，生产可显式启用 SearXNG。
 - `mcp`: disabled。
 - `file_search`: disabled。
 - `code_interpreter`: disabled。
 - `computer_use_preview`: disabled。
+
+当前仓库的 `config/config.yaml` 是集成测试模板，按“默认全开测试”处理：`responses_server.enabled`、`responses_server.codex_compat.enabled`、`tools.web_search.enabled`、`tools.mcp.enabled` 和 `mcp.enabled` 已默认开启，便于验证 Codex + Responses server-mode + hosted tools 链路。高风险工具仍不进入默认测试路径。
 
 所有工具必须支持：
 
@@ -571,16 +573,22 @@ tools:
 已落地配置：
 
 ```yaml
+responses_server:
+  enabled: true
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: ["web_search"]
+
 tools:
   web_search:
-    enabled: false
+    enabled: true
     provider: searxng
     base_url: "http://searxng:8080"
     max_results: 5
     timeout_ms: 5000
 
   mcp:
-    enabled: false
+    enabled: true
     default_timeout_ms: 60000
     max_result_bytes: 65536
     servers:
@@ -592,6 +600,8 @@ tools:
         disabled_tools: []
         enabled: true
 ```
+
+说明：上面展示的是当前集成测试模板形态。生产部署可以按安全基线显式关闭 `web_search` / `mcp`，或仅启用有 allowlist、timeout、redaction 和审计策略的 server。
 
 建议最终配置结构：
 
@@ -722,7 +732,7 @@ Artifacts 不应放进 `.http` cassette。
 
 TraceLab 要做的是：
 
-- 已落地首切：`responses_server.codex_compat` 可在服务端显式启用，当 Codex/Responses 请求缺少 `tools` 时，TraceLab 可按 allowlist 自动注入当前已启用的 hosted `web_search` descriptor，并把 `tool_choice` 默认成 `auto`。该能力默认关闭，并通过 `config inspect` / `doctor` 暴露配置与诊断。
+- 已落地首切：`responses_server.codex_compat` 可在服务端显式启用，当 Codex/Responses 请求缺少 `tools` 时，TraceLab 可按 allowlist 自动注入当前已启用的 hosted `web_search` descriptor，并把 `tool_choice` 默认成 `auto`。当前集成测试模板默认开启；生产部署可显式关闭。该能力已通过 `config inspect`、`doctor` 和 `tools status` 暴露配置与诊断。
 - 当 Codex 或其它 Responses 客户端真的向 TraceLab `/v1/responses` 发送 `tools` 时，尽量兼容 OpenAI Responses hosted tool schema。
 - 维护 Codex fixture，记录真实 Codex 可能发送的 Responses 请求形状。
 - 对未知/暂未支持工具返回稳定 safe error，而不是静默忽略。
@@ -730,7 +740,7 @@ TraceLab 要做的是：
 
 当前边界：
 
-- 自动注入只覆盖 `web_search` / `web_search_preview`。`mcp` descriptor 需要 server/tool/approval 语义，后续在 MCP descriptor compatibility 阶段补齐，不自动注入裸 `mcp`。
+- 自动注入只覆盖 `web_search` / `web_search_preview`。`mcp` descriptor 需要 server/tool/approval 语义，已支持安全子集与 stream 简单路径；仍不自动注入裸 `mcp`。
 - 默认不覆盖客户端已传入的 `tools`；第一版只处理 tools absent 的 Codex 请求。
 
 Codex/客户端要做的是：
@@ -854,8 +864,8 @@ Integration-gated：
 3. Phase 2A：mock MCP executor。已完成。
 4. Phase 2B：HTTP MCP `tools/call` executor。已完成。
 5. Phase 2C：`tools.mcp` config/doctor/runtime assembly。已完成。
-6. Phase 2D：服务端 MCP `tools/list` discovery/status + Monitor/CLI tool status。
-7. Phase 2E：MCP incremental stream 简单路径。
+6. Phase 2D：服务端 MCP descriptor/status + CLI tool status。已完成首切；Monitor tool status 仍可后续补齐。
+7. Phase 2E：MCP incremental stream 简单路径。已完成首切；复杂 approval/OAuth/side-effect stream 仍在 Phase 2F 后扩展。
 8. Phase 2F：approval request/decision contract；Monitor/客户端 UI 后续接入。
 9. Phase 3A：file store + deterministic lexical search。
 10. Phase 3B：embedding + pgvector。
