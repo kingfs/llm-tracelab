@@ -1850,8 +1850,8 @@ func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 			break
 		}
 	}
-	if traceOnlyItem.Model == "" || traceOnlyItem.ChannelCount != 0 || traceOnlyItem.Summary.RequestCount != 1 || traceOnlyItem.Summary.TotalTokens != 25 {
-		t.Fatalf("trace-only catalog item = %+v, want one log-derived model without channel metadata", traceOnlyItem)
+	if traceOnlyItem.Model == "" || traceOnlyItem.ChannelCount != 1 || traceOnlyItem.ProviderCount != 1 || len(traceOnlyItem.Channels) != 1 || traceOnlyItem.Channels[0] != openAIChannelID || traceOnlyItem.Summary.RequestCount != 1 || traceOnlyItem.Summary.TotalTokens != 25 {
+		t.Fatalf("trace-only catalog item = %+v, want one log-derived model with channel metadata", traceOnlyItem)
 	}
 	for _, item := range items {
 		if item.Model == "list_models" {
@@ -1872,6 +1872,14 @@ func TestPostgresModelCatalogAnalyticsRuntimeSQLRoundTrip(t *testing.T) {
 	lastTrend := detail.Trends[len(detail.Trends)-1]
 	if lastTrend.RequestCount != 3 || lastTrend.FailedRequest != 1 || lastTrend.MissingUsage != 1 || lastTrend.TotalTokens != 150 {
 		t.Fatalf("last trend = %+v, want request/failure/missing/tokens 3/1/1/150", lastTrend)
+	}
+
+	traceOnlyDetail, err := st.GetModelDetailAnalytics(traceModel, base.Add(-time.Minute), time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), time.Hour, 4)
+	if err != nil {
+		t.Fatalf("GetModelDetailAnalytics(trace-only postgres) error = %v", err)
+	}
+	if len(traceOnlyDetail.Channels) != 1 || traceOnlyDetail.Channels[0].ChannelID != openAIChannelID || traceOnlyDetail.Channels[0].Source != "trace" {
+		t.Fatalf("trace-only detail channels = %#v, want log-derived channel", traceOnlyDetail.Channels)
 	}
 }
 

@@ -1162,12 +1162,18 @@ func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled b
 	if model == "" {
 		return fmt.Errorf("model is required")
 	}
-	_, err := s.client.ChannelModel.Update().
+	affected, err := s.client.ChannelModel.Update().
 		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
 		SetEnabled(enabled).
 		SetLastSeenAt(time.Now().UTC()).
 		Save(context.Background())
-	return err
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch ChannelModelProfilePatch) (ChannelModelRecord, error) {
@@ -1222,6 +1228,9 @@ func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch 
 		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
 		Only(context.Background())
 	if err != nil {
+		if dao.IsNotFound(err) {
+			return ChannelModelRecord{}, sql.ErrNoRows
+		}
 		return ChannelModelRecord{}, err
 	}
 	record := channelModelRecordFromEnt(row)
@@ -1421,12 +1430,27 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 	if err != nil {
 		return nil, err
 	}
+	logModelChannels, err := s.logModelChannels(since)
+	if err != nil {
+		return nil, err
+	}
 	for _, model := range logModels {
 		if !isUsageModelName(model) {
 			continue
 		}
 		if modelSet[model] == nil {
 			modelSet[model] = &ModelCatalogAnalyticsRecord{Model: model}
+		}
+		if providersByModel[model] == nil {
+			providersByModel[model] = map[string]struct{}{}
+			channelsByModel[model] = map[string]struct{}{}
+			enabledChannelsByModel[model] = map[string]struct{}{}
+		}
+		for channelID := range logModelChannels[model] {
+			channelsByModel[model][channelID] = struct{}{}
+			if provider := providerByChannel[channelID]; provider != "" {
+				providersByModel[model][provider] = struct{}{}
+			}
 		}
 	}
 	for _, record := range modelSet {
@@ -1488,10 +1512,12 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 	if err != nil {
 		return ModelDetailAnalyticsRecord{}, err
 	}
+	seenChannels := map[string]struct{}{}
 	for _, channelModel := range channelModels {
 		if strings.ToLower(channelModel.Model) != model || !isUsageModelName(model) {
 			continue
 		}
+		seenChannels[channelModel.ChannelID] = struct{}{}
 		summary, err := s.usageSummary("model = ? AND selected_upstream_id = ?", []any{model, channelModel.ChannelID}, since)
 		if err != nil {
 			return ModelDetailAnalyticsRecord{}, err
@@ -1501,6 +1527,25 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 			Model:     model,
 			Enabled:   channelModel.Enabled,
 			Source:    channelModel.Source,
+			Summary:   summary,
+		})
+	}
+	logChannels, err := s.modelLogChannels(model, since)
+	if err != nil {
+		return ModelDetailAnalyticsRecord{}, err
+	}
+	for _, channelID := range logChannels {
+		if _, ok := seenChannels[channelID]; ok {
+			continue
+		}
+		summary, err := s.usageSummary("model = ? AND selected_upstream_id = ?", []any{model, channelID}, since)
+		if err != nil {
+			return ModelDetailAnalyticsRecord{}, err
+		}
+		detail.Channels = append(detail.Channels, ChannelModelAnalyticsRecord{
+			ChannelID: channelID,
+			Model:     model,
+			Source:    "trace",
 			Summary:   summary,
 		})
 	}
@@ -2220,6 +2265,66 @@ func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, e
 		if model = strings.TrimSpace(model); model != "" {
 			out = append(out, model)
 		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) modelLogChannels(model string, since time.Time) ([]string, error) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	where := "LOWER(model) = ? AND selected_upstream_id <> ''"
+	args := []any{model}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT selected_upstream_id FROM logs WHERE `+where+` ORDER BY selected_upstream_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var channelID string
+		if err := rows.Scan(&channelID); err != nil {
+			return nil, err
+		}
+		if channelID = strings.TrimSpace(channelID); channelID != "" {
+			out = append(out, channelID)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) logModelChannels(since time.Time) (map[string]map[string]struct{}, error) {
+	where := "model <> '' AND LOWER(model) <> 'list_models' AND selected_upstream_id <> ''"
+	args := []any{}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model), selected_upstream_id FROM logs WHERE `+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]map[string]struct{}{}
+	for rows.Next() {
+		var model, channelID string
+		if err := rows.Scan(&model, &channelID); err != nil {
+			return nil, err
+		}
+		model = strings.TrimSpace(model)
+		channelID = strings.TrimSpace(channelID)
+		if model == "" || channelID == "" {
+			continue
+		}
+		if out[model] == nil {
+			out[model] = map[string]struct{}{}
+		}
+		out[model][channelID] = struct{}{}
 	}
 	return out, rows.Err()
 }

@@ -2849,6 +2849,28 @@ func TestModelCatalogAPI(t *testing.T) {
 	if err := st.UpsertLog(path, header); err != nil {
 		t.Fatalf("UpsertLog() error = %v", err)
 	}
+	traceOnlyPath := filepath.Join(dir, "model-trace-only-api.http")
+	if err := os.WriteFile(traceOnlyPath, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(traceOnly) error = %v", err)
+	}
+	traceOnlyHeader := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          "model-trace-only-api",
+			Time:               time.Now().UTC(),
+			Model:              "qwen3.6-27b",
+			URL:                "/v1/responses",
+			Method:             "POST",
+			StatusCode:         200,
+			DurationMs:         100,
+			TTFTMs:             10,
+			SelectedUpstreamID: "openai-primary",
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: 24},
+	}
+	if err := st.UpsertLog(traceOnlyPath, traceOnlyHeader); err != nil {
+		t.Fatalf("UpsertLog(traceOnly) error = %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/models?window=24h", nil)
 	rr := httptest.NewRecorder()
@@ -2860,8 +2882,11 @@ func TestModelCatalogAPI(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("json.Unmarshal(list) error = %v", err)
 	}
-	if len(list.Items) != 1 || list.Items[0].Model != "gpt-5" || list.Items[0].Summary.TotalTokens != 42 {
+	if len(list.Items) != 2 || list.Items[0].Model != "gpt-5" || list.Items[0].Summary.TotalTokens != 42 {
 		t.Fatalf("model list = %+v", list)
+	}
+	if list.Items[1].Model != "qwen3.6-27b" || list.Items[1].ChannelCount != 1 || len(list.Items[1].Channels) != 1 || list.Items[1].Channels[0] != "openai-primary" {
+		t.Fatalf("trace-only model list item = %+v", list.Items[1])
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/models/gpt-5?window=24h", nil)
@@ -2879,6 +2904,34 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if detail.Channels[0].ContextWindow == nil || *detail.Channels[0].ContextWindow != 272000 || detail.Channels[0].ProfileAdoptionStatus != "adopted" {
 		t.Fatalf("model detail channel profile = %+v", detail.Channels[0])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/qwen3.6-27b?window=24h", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("trace-only model detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var traceOnlyDetail modelDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &traceOnlyDetail); err != nil {
+		t.Fatalf("json.Unmarshal(traceOnlyDetail) error = %v", err)
+	}
+	if traceOnlyDetail.Model.Model != "qwen3.6-27b" || len(traceOnlyDetail.Channels) != 1 || traceOnlyDetail.Channels[0].ChannelID != "openai-primary" || traceOnlyDetail.Channels[0].Source != "trace" {
+		t.Fatalf("trace-only detail = %+v", traceOnlyDetail)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/qwen3.6-27b", strings.NewReader(`{"enabled":true,"context_window":262144,"max_output_tokens":65536,"profile_source":"manual","profile_adoption_status":"adopted","supports_chat_completions":true}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("trace-only model patch status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var patched channelModelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("json.Unmarshal(traceOnlyPatch) error = %v", err)
+	}
+	if !patched.Enabled || patched.ContextWindow == nil || *patched.ContextWindow != 262144 || patched.ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("patched trace-only model = %+v", patched)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/models/qwen3.6-35b-a3b/spec-lookup", nil)

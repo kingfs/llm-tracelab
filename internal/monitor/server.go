@@ -3086,6 +3086,9 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		ProfileSource:               req.ProfileSource,
 		ProfileAdoptionStatus:       req.ProfileAdoptionStatus,
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		record, err = st.UpsertChannelModel(channelID, channelModelRecordFromPatch(model, req))
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -3095,6 +3098,58 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		return
 	}
 	writeJSON(w, http.StatusOK, channelModelItemFromRecord(record))
+}
+
+func channelModelRecordFromPatch(model string, req channelModelPatchRequest) store.ChannelModelRecord {
+	displayName := strings.TrimSpace(model)
+	if req.DisplayName != nil && strings.TrimSpace(*req.DisplayName) != "" {
+		displayName = strings.TrimSpace(*req.DisplayName)
+	}
+	record := store.ChannelModelRecord{
+		Model:                       model,
+		DisplayName:                 displayName,
+		Source:                      "trace",
+		SupportsResponses:           capabilityIntPtr(req.SupportsResponses),
+		SupportsChatCompletions:     capabilityIntPtr(req.SupportsChatCompletions),
+		SupportsEmbeddings:          capabilityIntPtr(req.SupportsEmbeddings),
+		ContextWindow:               positiveIntPtr(req.ContextWindow),
+		MaxOutputTokens:             positiveIntPtr(req.MaxOutputTokens),
+		CompactHistoryItemThreshold: positiveIntPtr(req.CompactHistoryItemThreshold),
+		InputModalitiesJSON:         "[]",
+		OutputModalitiesJSON:        "[]",
+		RawModelJSON:                "{}",
+	}
+	if req.Enabled != nil {
+		record.Enabled = *req.Enabled
+	}
+	if req.UpstreamModel != nil {
+		record.UpstreamModel = strings.TrimSpace(*req.UpstreamModel)
+	}
+	if req.ProfileSource != nil {
+		record.ProfileSource = strings.TrimSpace(*req.ProfileSource)
+	}
+	if req.ProfileAdoptionStatus != nil {
+		record.ProfileAdoptionStatus = strings.TrimSpace(*req.ProfileAdoptionStatus)
+	}
+	return record
+}
+
+func capabilityIntPtr(value *bool) *int {
+	if value == nil {
+		return nil
+	}
+	out := 0
+	if *value {
+		out = 1
+	}
+	return &out
+}
+
+func positiveIntPtr(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	return value
 }
 
 func normalizeModelList(models []string) []string {
