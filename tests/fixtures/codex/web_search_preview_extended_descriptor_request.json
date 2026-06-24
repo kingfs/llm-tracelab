@@ -1,0 +1,29 @@
+{
+  "model": "local-test-model",
+  "input": "Use hosted web search preview if available, then answer with cited source summaries.",
+  "stream": true,
+  "tools": [
+    {
+      "type": "web_search_preview",
+      "max_num_results": 4,
+      "include": [
+        "web_search_call.action.sources"
+      ],
+      "external_web_access": true,
+      "search_content_types": [
+        "news",
+        "webpage"
+      ]
+    }
+  ],
+  "tool_choice": "auto",
+  "store": true,
+  "metadata": {
+    "fixture": "codex_web_search_preview_extended_descriptor",
+    "expected_behavior": "web_search_preview descriptor preserves official extension fields for compatibility while the runtime safely ignores unsupported descriptor options",
+    "codex": {
+      "thread_id": "thread_fixture_web_search_preview_extended",
+      "client_request_id": "turn_fixture_web_search_preview_extended_1"
+    }
+  }
+}

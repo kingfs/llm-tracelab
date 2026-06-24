@@ -42,6 +42,7 @@ func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"codex_chinese_news_stream_absent_tools_request.json",
 		"codex_web_search_absent_tools_request.json",
 		"forced_web_search_request.json",
 		"function_call_expected_response.json",
@@ -57,6 +58,7 @@ func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
 		"unsupported_file_search_request.json",
 		"unsupported_hosted_tool_expected_error.json",
 		"unsupported_mcp_request.json",
+		"web_search_preview_extended_descriptor_request.json",
 	}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("codex fixture inventory changed without runner update\nwant: %#v\n got: %#v", want, names)
@@ -196,6 +198,51 @@ func TestCodexFixtureCreateRequestContracts(t *testing.T) {
 		}
 		requireStoreTrue(t, req)
 		requireCodexThread(t, req, "thread_fixture_web_search_absent_tools")
+	})
+
+	t.Run("Codex Chinese news stream absent tools request shape", func(t *testing.T) {
+		req := decodeCodexFixture[protocol.CreateResponseRequest](t, "codex_chinese_news_stream_absent_tools_request.json")
+
+		if !req.Stream {
+			t.Fatalf("stream = false, want true")
+		}
+		if got, ok := req.Input.(string); !ok || !strings.Contains(got, "搜索今日新闻") {
+			t.Fatalf("input = %#v, want Chinese today's news prompt", req.Input)
+		}
+		if len(req.Tools) != 0 || req.ToolChoice != nil {
+			t.Fatalf("raw Codex request must omit tools and tool_choice: tools=%#v tool_choice=%#v", req.Tools, req.ToolChoice)
+		}
+		requireStoreTrue(t, req)
+		requireCodexThread(t, req, "thread_fixture_chinese_news_stream_absent_tools")
+	})
+
+	t.Run("web_search_preview extended descriptor request shape", func(t *testing.T) {
+		req := decodeCodexFixture[protocol.CreateResponseRequest](t, "web_search_preview_extended_descriptor_request.json")
+
+		if !req.Stream {
+			t.Fatalf("stream = false, want true")
+		}
+		if len(req.Tools) != 1 {
+			t.Fatalf("tools len = %d, want 1", len(req.Tools))
+		}
+		tool := req.Tools[0]
+		if tool.Type != "web_search_preview" || tool.MaxNumResults != 4 {
+			t.Fatalf("tool = %#v, want web_search_preview with max_num_results=4", tool)
+		}
+		if tool.Extra["external_web_access"] != true {
+			t.Fatalf("external_web_access extra = %#v, want true", tool.Extra["external_web_access"])
+		}
+		if include, ok := tool.Extra["include"].([]any); !ok || len(include) != 1 || include[0] != "web_search_call.action.sources" {
+			t.Fatalf("include extra = %#v, want sources include", tool.Extra["include"])
+		}
+		if contentTypes, ok := tool.Extra["search_content_types"].([]any); !ok || len(contentTypes) != 2 || contentTypes[0] != "news" || contentTypes[1] != "webpage" {
+			t.Fatalf("search_content_types extra = %#v, want news/webpage", tool.Extra["search_content_types"])
+		}
+		if req.ToolChoice != "auto" {
+			t.Fatalf("tool_choice = %#v, want auto", req.ToolChoice)
+		}
+		requireStoreTrue(t, req)
+		requireCodexThread(t, req, "thread_fixture_web_search_preview_extended")
 	})
 
 	t.Run("forced web_search request shape", func(t *testing.T) {

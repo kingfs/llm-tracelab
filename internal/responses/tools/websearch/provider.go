@@ -75,6 +75,21 @@ func NewProvider(opts Options) (Provider, error) {
 	}
 }
 
+func ProviderName(provider Provider) string {
+	switch provider.(type) {
+	case nil:
+		return ProviderDisabled
+	case DisabledProvider:
+		return ProviderDisabled
+	case MockProvider:
+		return ProviderMock
+	case *SearXNGProvider:
+		return ProviderSearXNG
+	default:
+		return "custom"
+	}
+}
+
 type SearXNGProvider struct {
 	baseURL    *url.URL
 	client     *http.Client
