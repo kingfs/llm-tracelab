@@ -41,7 +41,14 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 				StorageContract         string `json:"storage_contract"`
 			} `json:"database"`
 			ResponsesServer struct {
-				Path string `json:"path"`
+				Path        string `json:"path"`
+				CodexCompat struct {
+					Enabled               bool     `json:"enabled"`
+					AutoInjectHostedTools []string `json:"auto_inject_hosted_tools"`
+					InjectWhenToolsAbsent bool     `json:"inject_when_tools_absent"`
+					PreserveClientTools   bool     `json:"preserve_client_tools"`
+					DefaultToolChoice     any      `json:"default_tool_choice"`
+				} `json:"codex_compat"`
 			} `json:"responses_server"`
 			Tools struct {
 				WebSearch struct {
@@ -59,7 +66,14 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 					AutoMigrate string `json:"auto_migrate"`
 				} `json:"database"`
 				ResponsesServer struct {
-					Path string `json:"path"`
+					Path        string `json:"path"`
+					CodexCompat struct {
+						Enabled               string `json:"enabled"`
+						AutoInjectHostedTools string `json:"auto_inject_hosted_tools"`
+						InjectWhenToolsAbsent string `json:"inject_when_tools_absent"`
+						PreserveClientTools   string `json:"preserve_client_tools"`
+						DefaultToolChoice     string `json:"default_tool_choice"`
+					} `json:"codex_compat"`
 				} `json:"responses_server"`
 				Tools struct {
 					WebSearch struct {
@@ -88,6 +102,9 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	if envelope.Result.ResponsesServer.Path != "/v1/responses" {
 		t.Fatalf("responses path = %q", envelope.Result.ResponsesServer.Path)
 	}
+	if envelope.Result.ResponsesServer.CodexCompat.Enabled || len(envelope.Result.ResponsesServer.CodexCompat.AutoInjectHostedTools) != 0 || !envelope.Result.ResponsesServer.CodexCompat.InjectWhenToolsAbsent || !envelope.Result.ResponsesServer.CodexCompat.PreserveClientTools || envelope.Result.ResponsesServer.CodexCompat.DefaultToolChoice != "auto" {
+		t.Fatalf("responses codex_compat = %+v", envelope.Result.ResponsesServer.CodexCompat)
+	}
 	if envelope.Result.Tools.WebSearch.Provider != "disabled" {
 		t.Fatalf("web_search provider = %q", envelope.Result.Tools.WebSearch.Provider)
 	}
@@ -103,6 +120,9 @@ func TestConfigInspectSourcesDefaultsJSON(t *testing.T) {
 	}
 	if sources.ResponsesServer.Path != configSourceDefault {
 		t.Fatalf("sources.responses_server.path = %q", sources.ResponsesServer.Path)
+	}
+	if sources.ResponsesServer.CodexCompat.Enabled != configSourceDefault || sources.ResponsesServer.CodexCompat.AutoInjectHostedTools != configSourceDefault || sources.ResponsesServer.CodexCompat.InjectWhenToolsAbsent != configSourceDefault || sources.ResponsesServer.CodexCompat.PreserveClientTools != configSourceDefault || sources.ResponsesServer.CodexCompat.DefaultToolChoice != configSourceDefault {
+		t.Fatalf("sources.responses_server.codex_compat = %+v", sources.ResponsesServer.CodexCompat)
 	}
 	if sources.Tools.WebSearch.Provider != configSourceDefault {
 		t.Fatalf("sources.tools.web_search.provider = %q", sources.Tools.WebSearch.Provider)
@@ -135,6 +155,12 @@ responses_server:
   enabled: true
   default_model: gpt-5
   path: /v1/responses
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: [web_search]
+    inject_when_tools_absent: false
+    preserve_client_tools: false
+    default_tool_choice: required
 tools:
   web_search:
     enabled: true
@@ -189,6 +215,13 @@ upstreams:
 					Enabled      string `json:"enabled"`
 					Path         string `json:"path"`
 					DefaultModel string `json:"default_model"`
+					CodexCompat  struct {
+						Enabled               string `json:"enabled"`
+						AutoInjectHostedTools string `json:"auto_inject_hosted_tools"`
+						InjectWhenToolsAbsent string `json:"inject_when_tools_absent"`
+						PreserveClientTools   string `json:"preserve_client_tools"`
+						DefaultToolChoice     string `json:"default_tool_choice"`
+					} `json:"codex_compat"`
 				} `json:"responses_server"`
 				Tools struct {
 					WebSearch struct {
@@ -209,22 +242,27 @@ upstreams:
 	}
 	sources := envelope.Result.Sources
 	for name, got := range map[string]string{
-		"server.port":                    sources.Server.Port,
-		"monitor.port":                   sources.Monitor.Port,
-		"mcp.enabled":                    sources.MCP.Enabled,
-		"mcp.path":                       sources.MCP.Path,
-		"database.driver":                sources.Database.Driver,
-		"database.dsn":                   sources.Database.DSN,
-		"database.auto_migrate":          sources.Database.AutoMigrate,
-		"trace.output_dir":               sources.Trace.OutputDir,
-		"responses_server.enabled":       sources.ResponsesServer.Enabled,
-		"responses_server.path":          sources.ResponsesServer.Path,
-		"responses_server.default_model": sources.ResponsesServer.DefaultModel,
-		"tools.web_search.enabled":       sources.Tools.WebSearch.Enabled,
-		"tools.web_search.provider":      sources.Tools.WebSearch.Provider,
-		"tools.web_search.base_url":      sources.Tools.WebSearch.BaseURL,
-		"upstreams.targets":              sources.Upstreams.Targets,
-		"upstreams.credentials":          sources.Upstreams.Credentials,
+		"server.port":                           sources.Server.Port,
+		"monitor.port":                          sources.Monitor.Port,
+		"mcp.enabled":                           sources.MCP.Enabled,
+		"mcp.path":                              sources.MCP.Path,
+		"database.driver":                       sources.Database.Driver,
+		"database.dsn":                          sources.Database.DSN,
+		"database.auto_migrate":                 sources.Database.AutoMigrate,
+		"trace.output_dir":                      sources.Trace.OutputDir,
+		"responses_server.enabled":              sources.ResponsesServer.Enabled,
+		"responses_server.path":                 sources.ResponsesServer.Path,
+		"responses_server.default_model":        sources.ResponsesServer.DefaultModel,
+		"responses_server.codex_compat.enabled": sources.ResponsesServer.CodexCompat.Enabled,
+		"responses_server.codex_compat.auto_inject_hosted_tools": sources.ResponsesServer.CodexCompat.AutoInjectHostedTools,
+		"responses_server.codex_compat.inject_when_tools_absent": sources.ResponsesServer.CodexCompat.InjectWhenToolsAbsent,
+		"responses_server.codex_compat.preserve_client_tools":    sources.ResponsesServer.CodexCompat.PreserveClientTools,
+		"responses_server.codex_compat.default_tool_choice":      sources.ResponsesServer.CodexCompat.DefaultToolChoice,
+		"tools.web_search.enabled":                               sources.Tools.WebSearch.Enabled,
+		"tools.web_search.provider":                              sources.Tools.WebSearch.Provider,
+		"tools.web_search.base_url":                              sources.Tools.WebSearch.BaseURL,
+		"upstreams.targets":                                      sources.Upstreams.Targets,
+		"upstreams.credentials":                                  sources.Upstreams.Credentials,
 	} {
 		if got != configSourceConfigFile {
 			t.Fatalf("sources[%s] = %q, want %q", name, got, configSourceConfigFile)
@@ -240,7 +278,7 @@ upstreams:
 		t.Fatalf("Execute(text) error = %v", err)
 	}
 	text := out.String()
-	if !strings.Contains(text, "sources:") || !strings.Contains(text, "database.dsn=config_file") || !strings.Contains(text, "upstreams.targets=config_file") {
+	if !strings.Contains(text, "sources:") || !strings.Contains(text, "database.dsn=config_file") || !strings.Contains(text, "responses_server.codex_compat.enabled=config_file") || !strings.Contains(text, "upstreams.targets=config_file") {
 		t.Fatalf("text output missing source summary: %q", text)
 	}
 	for _, secret := range []string{"secret-db", "secret-web", "secret-token", "secret-key"} {
@@ -265,6 +303,11 @@ func clearConfigInspectSourceEnv(t *testing.T) {
 		"LLM_TRACELAB_RESPONSES_ENABLED",
 		"LLM_TRACELAB_RESPONSES_DEFAULT_MODEL",
 		"LLM_TRACELAB_RESPONSES_PATH",
+		"LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED",
+		"LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS",
+		"LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT",
+		"LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS",
+		"LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE",
 		"LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED",
 		"LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER",
 		"LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL",

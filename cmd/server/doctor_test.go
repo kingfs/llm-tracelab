@@ -1111,6 +1111,141 @@ upstream:
 	}
 }
 
+func TestDoctorResponsesCodexCompatDisabledPasses(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_compat")
+	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.codex_compat.enabled is false" {
+		t.Fatalf("responses_server.codex_compat = %+v, want disabled pass", check)
+	}
+}
+
+func TestDoctorResponsesCodexCompatWarnsWhenEnabledWithoutTools(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+responses_server:
+  codex_compat:
+    enabled: true
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_compat")
+	if check.Status != doctorStatusWarn || !doctorDetailStringSliceContains(check.Detail, "warnings", "auto_inject_hosted_tools is empty") {
+		t.Fatalf("responses_server.codex_compat = %+v, want no-tools warning", check)
+	}
+}
+
+func TestDoctorResponsesCodexCompatWarnsForDisabledHostedToolDependencies(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+responses_server:
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: [web_search, mcp]
+tools:
+  web_search:
+    enabled: false
+  mcp:
+    enabled: false
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_compat")
+	if check.Status != doctorStatusWarn {
+		t.Fatalf("responses_server.codex_compat = %+v, want warning", check)
+	}
+	if !doctorDetailStringSliceContains(check.Detail, "warnings", "tools.web_search.enabled is false") || !doctorDetailStringSliceContains(check.Detail, "warnings", "tools.mcp.enabled is false") {
+		t.Fatalf("responses_server.codex_compat warnings = %+v", check.Detail["warnings"])
+	}
+}
+
+func TestDoctorResponsesCodexCompatPassesWithEnabledHostedTool(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeDoctorTestConfig(t, `
+server:
+  port: "8080"
+database:
+  driver: sqlite
+trace:
+  output_dir: "`+t.TempDir()+`"
+responses_server:
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: [web_search]
+tools:
+  web_search:
+    enabled: true
+    provider: mock
+upstream:
+  base_url: https://api.example.com/v1
+  provider_preset: openai
+  protocol_family: openai
+  api_type: chat_completions
+`)
+
+	out, err := executeDoctorForTest(configPath, "--format", "json")
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
+	}
+	envelope := decodeDoctorEnvelopeForTest(t, out)
+	check := doctorCheckForTest(envelope, "responses_server.codex_compat")
+	if check.Status != doctorStatusPass || check.Detail["injectable_hosted_tool_cnt"] != float64(1) {
+		t.Fatalf("responses_server.codex_compat = %+v, want pass with one injectable tool", check)
+	}
+}
+
 func TestDoctorMCPToolsEnabledWithoutServersFails(t *testing.T) {
 	t.Parallel()
 
