@@ -5249,11 +5249,20 @@ func (s *Store) GetObservation(traceID string) (observe.TraceObservation, error)
 	if strings.TrimSpace(summary.WarningsJSON) != "" {
 		_ = json.Unmarshal([]byte(summary.WarningsJSON), &warnings)
 	}
+	var summaryMetadata struct {
+		ExchangeKind string `json:"exchange_kind"`
+		ExchangeRole string `json:"exchange_role"`
+	}
+	if strings.TrimSpace(summary.SummaryJSON) != "" {
+		_ = json.Unmarshal([]byte(summary.SummaryJSON), &summaryMetadata)
+	}
 	return observe.TraceObservation{
 		TraceID:       summary.TraceID,
 		Provider:      summary.Provider,
 		Operation:     summary.Operation,
 		Model:         summary.Model,
+		ExchangeKind:  summaryMetadata.ExchangeKind,
+		ExchangeRole:  summaryMetadata.ExchangeRole,
 		Parser:        summary.Parser,
 		ParserVersion: summary.ParserVersion,
 		Status:        observe.ParseStatus(summary.Status),
@@ -7495,6 +7504,8 @@ func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
 		"tool_calls":     len(obs.Tools.Calls),
 		"tool_results":   len(obs.Tools.Results),
 		"findings":       len(obs.Findings),
+		"exchange_kind":  obs.ExchangeKind,
+		"exchange_role":  obs.ExchangeRole,
 	}
 }
 

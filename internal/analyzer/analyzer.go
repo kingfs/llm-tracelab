@@ -16,6 +16,11 @@ import (
 )
 
 const excerptLimit = 240
+const (
+	exchangeKindEntry  = "entry"
+	exchangeKindModel  = "model"
+	exchangeRoleLegacy = "legacy_model"
+)
 
 type Detector interface {
 	Name() string
@@ -45,8 +50,12 @@ func DefaultDetectors() []Detector {
 
 func (r *Runner) Analyze(ctx context.Context, obs observe.TraceObservation) ([]observe.Finding, error) {
 	var findings []observe.Finding
+	scope := observationExchangeScope(obs)
 	for _, detector := range r.detectors {
 		if detector == nil {
+			continue
+		}
+		if !detectorAllowedForScope(detector, scope) {
 			continue
 		}
 		next, err := detector.Detect(ctx, obs)
@@ -69,6 +78,7 @@ func (r *Runner) Analyze(ctx context.Context, obs observe.TraceObservation) ([]o
 			if next[i].ID == "" {
 				next[i].ID = stableFindingID(next[i])
 			}
+			attachFindingExchangeScope(&next[i], scope)
 		}
 		findings = append(findings, next...)
 	}
@@ -79,6 +89,49 @@ func (r *Runner) Analyze(ctx context.Context, obs observe.TraceObservation) ([]o
 		return severityRank(findings[i].Severity) > severityRank(findings[j].Severity)
 	})
 	return findings, nil
+}
+
+type exchangeScope struct {
+	Kind string
+	Role string
+}
+
+func observationExchangeScope(obs observe.TraceObservation) exchangeScope {
+	kind := strings.TrimSpace(obs.ExchangeKind)
+	role := strings.TrimSpace(obs.ExchangeRole)
+	if kind == "" {
+		kind = exchangeKindModel
+	}
+	if role == "" && kind == exchangeKindModel {
+		role = exchangeRoleLegacy
+	}
+	return exchangeScope{Kind: kind, Role: role}
+}
+
+func detectorAllowedForScope(detector Detector, scope exchangeScope) bool {
+	if scope.Kind != exchangeKindEntry {
+		return true
+	}
+	switch detector.Name() {
+	case CredentialDetector{}.Name():
+		return true
+	default:
+		return false
+	}
+}
+
+func attachFindingExchangeScope(finding *observe.Finding, scope exchangeScope) {
+	if finding.Metadata == nil {
+		finding.Metadata = map[string]any{}
+	}
+	finding.Metadata["exchange_kind"] = scope.Kind
+	if scope.Role != "" {
+		finding.Metadata["exchange_role"] = scope.Role
+	}
+	finding.Metadata["exchange_scope"] = map[string]any{
+		"kind": scope.Kind,
+		"role": scope.Role,
+	}
 }
 
 type DangerousShellDetector struct{}

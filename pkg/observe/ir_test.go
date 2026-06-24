@@ -16,6 +16,8 @@ func TestTraceObservationJSONRoundTrip(t *testing.T) {
 		Operation:     "responses",
 		Endpoint:      "/v1/responses",
 		Model:         "gpt-5.1",
+		ExchangeKind:  "model",
+		ExchangeRole:  "primary_model_call",
 		Parser:        "openai-responses",
 		ParserVersion: "0.1.0",
 		Status:        ParseStatusParsed,
@@ -62,6 +64,10 @@ func TestTraceObservationJSONRoundTrip(t *testing.T) {
 			NodeID:          nodeID,
 			Detector:        "dangerous-shell",
 			DetectorVersion: "0.1.0",
+			Metadata: map[string]any{
+				"exchange_kind": "model",
+				"exchange_role": "primary_model_call",
+			},
 		}},
 		RawRefs: RawReferences{
 			CassettePath:  "trace.http",
@@ -89,8 +95,14 @@ func TestTraceObservationJSONRoundTrip(t *testing.T) {
 	if got.Tools.Calls[0].Owner != ToolOwnerModelRequested {
 		t.Fatalf("tool owner = %q", got.Tools.Calls[0].Owner)
 	}
+	if got.ExchangeKind != "model" || got.ExchangeRole != "primary_model_call" {
+		t.Fatalf("exchange scope = %q/%q, want model/primary_model_call", got.ExchangeKind, got.ExchangeRole)
+	}
 	if got.Findings[0].Severity != SeverityHigh {
 		t.Fatalf("finding severity = %q", got.Findings[0].Severity)
+	}
+	if got.Findings[0].Metadata["exchange_kind"] != "model" {
+		t.Fatalf("finding metadata = %+v", got.Findings[0].Metadata)
 	}
 }
 
