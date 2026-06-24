@@ -1,0 +1,3 @@
+[mcp_servers.tracelab-remote]
+url = "http://10.2.69.245:38081/mcp"
+bearer_token_env_var = "DGX_API_KEY"
