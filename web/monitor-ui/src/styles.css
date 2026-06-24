@@ -667,6 +667,10 @@ a {
   gap: 10px;
 }
 
+.responses-entry-exchange-summary {
+  align-items: flex-start;
+}
+
 .responses-audit-error,
 .responses-exchange-error {
   color: var(--danger);
@@ -683,7 +687,7 @@ a {
 .responses-exchange-head,
 .responses-exchange-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.2fr) minmax(120px, 0.85fr) minmax(120px, 0.85fr) minmax(74px, 0.42fr) minmax(150px, 0.85fr);
+  grid-template-columns: minmax(140px, 0.9fr) minmax(140px, 1fr) minmax(120px, 0.9fr) minmax(74px, 0.42fr) minmax(140px, 0.9fr) minmax(170px, 1.2fr) minmax(150px, 0.85fr);
   gap: 12px;
   align-items: center;
 }
@@ -707,6 +711,17 @@ a {
 .responses-exchange-row span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.responses-exchange-primary,
+.responses-exchange-subline {
+  display: block;
+}
+
+.responses-exchange-subline {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 
 .responses-exchange-row .responses-exchange-error {
