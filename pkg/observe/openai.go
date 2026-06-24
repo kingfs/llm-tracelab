@@ -62,6 +62,7 @@ func (p openAIParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 			TTFTMs:     input.Header.Meta.TTFTMs,
 		},
 	}
+	applyExchangeMetadata(input, &obs)
 	obs.Usage = ObservationUsage{
 		InputTokens:         input.Header.Usage.PromptTokens,
 		OutputTokens:        input.Header.Usage.CompletionTokens,

@@ -9,13 +9,19 @@ import (
 )
 
 type ParseInput struct {
-	TraceID      string
-	CassettePath string
-	Header       recordfile.RecordHeader
-	Events       []recordfile.RecordEvent
-	RequestBody  []byte
-	ResponseBody []byte
-	IsStream     bool
+	TraceID          string
+	CassettePath     string
+	Header           recordfile.RecordHeader
+	Events           []recordfile.RecordEvent
+	RequestBody      []byte
+	ResponseBody     []byte
+	IsStream         bool
+	ExchangeKind     string
+	ExchangeRole     string
+	ParentExchangeID string
+	SequenceIndex    int
+	RequestAuditID   string
+	ResponseID       string
 }
 
 type Parser interface {
@@ -40,6 +46,7 @@ func NewRegistry(parsers ...Parser) *Registry {
 
 func NewDefaultRegistry() *Registry {
 	return NewRegistry(
+		NewEntryParser(),
 		NewOpenAIParser(),
 		NewAnthropicParser(),
 		NewGeminiParser(),
@@ -80,4 +87,13 @@ func (r *Registry) Parse(ctx context.Context, input ParseInput) (TraceObservatio
 		return TraceObservation{}, fmt.Errorf("observe: no parser for provider=%q operation=%q endpoint=%q", input.Header.Meta.Provider, input.Header.Meta.Operation, input.Header.Meta.Endpoint)
 	}
 	return parser.Parse(ctx, input)
+}
+
+func applyExchangeMetadata(input ParseInput, obs *TraceObservation) {
+	obs.ExchangeKind = input.ExchangeKind
+	obs.ExchangeRole = input.ExchangeRole
+	obs.ParentExchangeID = input.ParentExchangeID
+	obs.SequenceIndex = input.SequenceIndex
+	obs.RequestAuditID = input.RequestAuditID
+	obs.ResponseID = input.ResponseID
 }

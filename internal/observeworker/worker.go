@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/store"
@@ -124,13 +126,77 @@ func ReparseTrace(ctx context.Context, st *store.Store, registry *observe.Regist
 		return observe.TraceObservation{}, err
 	}
 	_, reqBody, _, resBody := recordfile.ExtractSections(content, parsed)
+	exchange := parsed.Header.Meta
+	if indexed, err := st.GetTraceExchangeMetadata(entry.ID); err == nil {
+		mergeExchangeMetadata(&exchange, indexed)
+	}
+	applyExchangeFallbacks(&exchange, entry.LogPath)
 	return registry.Parse(ctx, observe.ParseInput{
-		TraceID:      entry.ID,
-		CassettePath: entry.LogPath,
-		Header:       parsed.Header,
-		Events:       parsed.Events,
-		RequestBody:  reqBody,
-		ResponseBody: resBody,
-		IsStream:     parsed.Header.Layout.IsStream,
+		TraceID:          entry.ID,
+		CassettePath:     entry.LogPath,
+		Header:           parsed.Header,
+		Events:           parsed.Events,
+		RequestBody:      reqBody,
+		ResponseBody:     resBody,
+		IsStream:         parsed.Header.Layout.IsStream,
+		ExchangeKind:     exchange.ExchangeKind,
+		ExchangeRole:     exchange.ExchangeRole,
+		ParentExchangeID: exchange.ParentExchangeID,
+		SequenceIndex:    exchange.SequenceIndex,
+		RequestAuditID:   exchange.RequestAuditID,
+		ResponseID:       exchange.ResponseID,
 	})
+}
+
+func mergeExchangeMetadata(dst *recordfile.MetaData, src recordfile.MetaData) {
+	if dst.ExchangeKind == "" {
+		dst.ExchangeKind = src.ExchangeKind
+	}
+	if dst.ExchangeRole == "" {
+		dst.ExchangeRole = src.ExchangeRole
+	}
+	if dst.ParentExchangeID == "" {
+		dst.ParentExchangeID = src.ParentExchangeID
+	}
+	if dst.SequenceIndex == 0 {
+		dst.SequenceIndex = src.SequenceIndex
+	}
+	if dst.RequestAuditID == "" {
+		dst.RequestAuditID = src.RequestAuditID
+	}
+	if dst.ResponseID == "" {
+		dst.ResponseID = src.ResponseID
+	}
+}
+
+func applyExchangeFallbacks(meta *recordfile.MetaData, cassettePath string) {
+	if meta.ExchangeKind == "" && isEntryExchangeHint(*meta, cassettePath) {
+		meta.ExchangeKind = "entry"
+	}
+	if meta.ExchangeKind == "" && isModelExchangeHint(*meta) {
+		meta.ExchangeKind = "model"
+	}
+	if meta.ExchangeRole == "" {
+		switch meta.ExchangeKind {
+		case "entry":
+			meta.ExchangeRole = "client_request"
+		case "model":
+			meta.ExchangeRole = "primary_model_call"
+		}
+	}
+}
+
+func isEntryExchangeHint(meta recordfile.MetaData, cassettePath string) bool {
+	if meta.ExchangeRole == "client_request" {
+		return true
+	}
+	lowerPath := strings.ToLower(filepath.ToSlash(cassettePath))
+	if strings.Contains(lowerPath, "/entry/") || strings.Contains(lowerPath, "_entry") || strings.Contains(lowerPath, "-entry") {
+		return true
+	}
+	return false
+}
+
+func isModelExchangeHint(meta recordfile.MetaData) bool {
+	return meta.Model != "" || meta.Provider != "" || meta.SelectedUpstreamID != "" || meta.SelectedUpstreamBaseURL != ""
 }

@@ -11,14 +11,19 @@ import (
 func TestTraceObservationJSONRoundTrip(t *testing.T) {
 	nodeID := StableNodeID("response", "$.output[0]", "message", 0)
 	obs := TraceObservation{
-		TraceID:       "trace-1",
-		Provider:      "openai_compatible",
-		Operation:     "responses",
-		Endpoint:      "/v1/responses",
-		Model:         "gpt-5.1",
-		Parser:        "openai-responses",
-		ParserVersion: "0.1.0",
-		Status:        ParseStatusParsed,
+		TraceID:        "trace-1",
+		Provider:       "openai_compatible",
+		Operation:      "responses",
+		Endpoint:       "/v1/responses",
+		Model:          "gpt-5.1",
+		ExchangeKind:   "model",
+		ExchangeRole:   "primary_model_call",
+		SequenceIndex:  1,
+		RequestAuditID: "audit-1",
+		ResponseID:     "resp-1",
+		Parser:         "openai-responses",
+		ParserVersion:  "0.1.0",
+		Status:         ParseStatusParsed,
 		Warnings: []ParseWarning{{
 			Code:    "unknown_output_item",
 			Message: "preserved unknown output item",
@@ -82,6 +87,9 @@ func TestTraceObservationJSONRoundTrip(t *testing.T) {
 	}
 	if got.TraceID != obs.TraceID {
 		t.Fatalf("TraceID = %q, want %q", got.TraceID, obs.TraceID)
+	}
+	if got.ExchangeKind != "model" || got.ExchangeRole != "primary_model_call" || got.SequenceIndex != 1 || got.RequestAuditID != "audit-1" || got.ResponseID != "resp-1" {
+		t.Fatalf("exchange fields = %+v", got)
 	}
 	if got.Response.Outputs[0].Children[0].Text != "hello" {
 		t.Fatalf("child text = %q", got.Response.Outputs[0].Children[0].Text)
@@ -147,6 +155,41 @@ func TestRegistrySelectsParser(t *testing.T) {
 	}
 	if obs.Parser != parser.name {
 		t.Fatalf("Parser = %q, want %q", obs.Parser, parser.name)
+	}
+}
+
+func TestDefaultRegistryUsesEntryParserForEntryExchange(t *testing.T) {
+	registry := NewDefaultRegistry()
+	input := ParseInput{
+		TraceID:      "trace-entry",
+		ExchangeKind: "entry",
+		ExchangeRole: "client_request",
+		ResponseID:   "resp-entry",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:   "openai_compatible",
+				Operation:  "responses",
+				Endpoint:   "/v1/responses",
+				Model:      "gpt-5.1",
+				StatusCode: 200,
+			},
+		},
+		RequestBody:  []byte(`{"model":"gpt-5.1","input":"hello"}`),
+		ResponseBody: []byte(`{"id":"resp-entry","status":"completed","output":[]}`),
+	}
+
+	obs, err := registry.Parse(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Parser != "entry" {
+		t.Fatalf("Parser = %q, want entry", obs.Parser)
+	}
+	if obs.ExchangeKind != "entry" || obs.ExchangeRole != "client_request" || obs.ResponseID != "resp-entry" {
+		t.Fatalf("exchange fields = %+v", obs)
+	}
+	if len(obs.Response.Nodes) == 0 {
+		t.Fatalf("entry response nodes empty")
 	}
 }
 
