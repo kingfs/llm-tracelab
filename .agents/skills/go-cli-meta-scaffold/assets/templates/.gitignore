@@ -1,6 +1,0 @@
-dist/
-coverage/
-*.log
-*.out
-*.test
-*.coverprofile
