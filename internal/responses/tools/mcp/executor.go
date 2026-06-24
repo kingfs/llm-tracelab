@@ -1,28 +1,36 @@
 package mcp
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/hosted"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const maxInlineSummaryBytes = 256
 
 var (
-	ErrDisabled       = errors.New("mcp hosted tool executor is disabled")
-	ErrMissingTool    = errors.New("mcp hosted tool call is missing tool name")
-	ErrToolDenied     = errors.New("mcp hosted tool is denied")
-	ErrToolNotAllowed = errors.New("mcp hosted tool is not allowed")
-	ErrUnknownServer  = errors.New("mcp hosted server is unknown")
-	ErrUnknownTool    = errors.New("mcp hosted tool is unknown")
+	ErrDisabled           = errors.New("mcp hosted tool executor is disabled")
+	ErrMissingTool        = errors.New("mcp hosted tool call is missing tool name")
+	ErrToolDenied         = errors.New("mcp hosted tool is denied")
+	ErrToolNotAllowed     = errors.New("mcp hosted tool is not allowed")
+	ErrUnknownServer      = errors.New("mcp hosted server is unknown")
+	ErrUnknownTool        = errors.New("mcp hosted tool is unknown")
+	ErrMissingBearerToken = errors.New("mcp hosted server bearer token is missing")
 )
 
 type Options struct {
@@ -31,12 +39,17 @@ type Options struct {
 }
 
 type ServerDescriptor struct {
-	ID           string
-	Label        string
-	Enabled      bool
-	AllowedTools []string
-	DeniedTools  []string
-	Tools        []ToolDescriptor
+	ID             string
+	Label          string
+	Enabled        bool
+	URL            string
+	BearerToken    string
+	BearerTokenEnv string
+	Timeout        time.Duration
+	MaxResultBytes int
+	AllowedTools   []string
+	DeniedTools    []string
+	Tools          []ToolDescriptor
 }
 
 type ToolDescriptor struct {
@@ -60,12 +73,17 @@ type Executor struct {
 }
 
 type serverRuntime struct {
-	id      string
-	label   string
-	enabled bool
-	allow   map[string]struct{}
-	deny    map[string]struct{}
-	tools   map[string]ToolDescriptor
+	id             string
+	label          string
+	enabled        bool
+	url            string
+	bearerToken    string
+	bearerTokenEnv string
+	timeout        time.Duration
+	maxResultBytes int
+	allow          map[string]struct{}
+	deny           map[string]struct{}
+	tools          map[string]ToolDescriptor
 }
 
 type callInput struct {
@@ -82,7 +100,21 @@ type Output struct {
 	ToolName         string         `json:"tool_name"`
 	Text             string         `json:"text,omitempty"`
 	StructuredResult any            `json:"structured_result,omitempty"`
+	IsError          bool           `json:"is_error,omitempty"`
 	Arguments        map[string]any `json:"arguments,omitempty"`
+}
+
+type ResultTooLargeError struct {
+	ToolName       string
+	MaxResultBytes int
+	ResultBytes    int
+}
+
+func (e ResultTooLargeError) Error() string {
+	if e.ToolName == "" {
+		return fmt.Sprintf("mcp hosted tool result is too large: %d bytes exceeds max_result_bytes %d", e.ResultBytes, e.MaxResultBytes)
+	}
+	return fmt.Sprintf("mcp hosted tool %q result is too large: %d bytes exceeds max_result_bytes %d", e.ToolName, e.ResultBytes, e.MaxResultBytes)
 }
 
 func NewExecutor(opts Options) *Executor {
@@ -92,12 +124,17 @@ func NewExecutor(opts Options) *Executor {
 	}
 	for _, server := range opts.Servers {
 		runtime := serverRuntime{
-			id:      strings.TrimSpace(server.ID),
-			label:   strings.TrimSpace(server.Label),
-			enabled: server.Enabled,
-			allow:   stringSet(server.AllowedTools),
-			deny:    stringSet(server.DeniedTools),
-			tools:   map[string]ToolDescriptor{},
+			id:             strings.TrimSpace(server.ID),
+			label:          strings.TrimSpace(server.Label),
+			enabled:        server.Enabled,
+			url:            strings.TrimSpace(server.URL),
+			bearerToken:    strings.TrimSpace(server.BearerToken),
+			bearerTokenEnv: strings.TrimSpace(server.BearerTokenEnv),
+			timeout:        server.Timeout,
+			maxResultBytes: server.MaxResultBytes,
+			allow:          stringSet(server.AllowedTools),
+			deny:           stringSet(server.DeniedTools),
+			tools:          map[string]ToolDescriptor{},
 		}
 		for _, tool := range server.Tools {
 			name := normalizeToolName(tool.Name)
@@ -165,6 +202,13 @@ func (e *Executor) ExecuteHostedTool(ctx context.Context, toolCtx hosted.ToolCon
 		return hosted.ToolResult{}, ErrToolNotAllowed
 	}
 
+	if server.url != "" {
+		if tool, ok := server.tools[toolName]; ok && !tool.Enabled {
+			return hosted.ToolResult{}, ErrDisabled
+		}
+		return e.executeRemoteTool(ctx, server, toolName, args, call.Arguments)
+	}
+
 	tool, ok := server.tools[toolName]
 	if !ok {
 		return hosted.ToolResult{}, ErrUnknownTool
@@ -194,6 +238,207 @@ func (e *Executor) ExecuteHostedTool(ctx context.Context, toolCtx hosted.ToolCon
 			}},
 		},
 	}, nil
+}
+
+func (e *Executor) executeRemoteTool(ctx context.Context, server serverRuntime, toolName string, args map[string]any, rawArgs json.RawMessage) (hosted.ToolResult, error) {
+	if server.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, server.timeout)
+		defer cancel()
+	}
+	token, err := bearerToken(server)
+	if err != nil {
+		return hosted.ToolResult{}, err
+	}
+	rpcResult, responseBytes, err := callRemoteTool(ctx, server, token, toolName, args)
+	if err != nil {
+		return hosted.ToolResult{}, sanitizeBearerError(err, token)
+	}
+	output := outputFromMCPResult(server, toolName, args, rpcResult)
+	if server.maxResultBytes > 0 {
+		encoded, err := json.Marshal(output)
+		if err != nil {
+			return hosted.ToolResult{}, err
+		}
+		if len(encoded) > server.maxResultBytes {
+			return hosted.ToolResult{}, ResultTooLargeError{
+				ToolName:       toolName,
+				MaxResultBytes: server.maxResultBytes,
+				ResultBytes:    len(encoded),
+			}
+		}
+	}
+	return hosted.ToolResult{
+		Output: output,
+		Status: hosted.StatusCompleted,
+		Summary: hosted.SafeSummary{
+			Arguments: hosted.RedactedValue{Value: summarizeJSON(rawArgs)},
+			Output: hosted.RedactedValue{Value: map[string]any{
+				"server_label":   server.label,
+				"tool_name":      toolName,
+				"has_text":       output.Text != "",
+				"has_struct":     output.StructuredResult != nil,
+				"is_error":       output.IsError,
+				"response_bytes": responseBytes,
+			}},
+		},
+	}, nil
+}
+
+func bearerToken(server serverRuntime) (string, error) {
+	if server.bearerToken != "" {
+		return server.bearerToken, nil
+	}
+	if server.bearerTokenEnv == "" {
+		return "", nil
+	}
+	token := strings.TrimSpace(os.Getenv(server.bearerTokenEnv))
+	if token == "" {
+		return "", fmt.Errorf("%w: %s", ErrMissingBearerToken, server.bearerTokenEnv)
+	}
+	return token, nil
+}
+
+type jsonRPCRequest struct {
+	JSONRPC string                `json:"jsonrpc"`
+	ID      int                   `json:"id"`
+	Method  string                `json:"method"`
+	Params  mcpsdk.CallToolParams `json:"params"`
+}
+
+type jsonRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      any             `json:"id,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *jsonRPCError   `json:"error,omitempty"`
+}
+
+type jsonRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+func callRemoteTool(ctx context.Context, server serverRuntime, token string, toolName string, args map[string]any) (*mcpsdk.CallToolResult, int, error) {
+	body, err := json.Marshal(jsonRPCRequest{
+		JSONRPC: "2.0",
+		ID:      1,
+		Method:  "tools/call",
+		Params: mcpsdk.CallToolParams{
+			Name:      toolName,
+			Arguments: args,
+		},
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server.url, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, fmt.Errorf("create mcp streamable http request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("call mcp streamable http server: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, 0, fmt.Errorf("mcp streamable http server returned status %d", resp.StatusCode)
+	}
+	raw, err := readLimited(resp.Body, server.maxResultBytes)
+	if err != nil {
+		return nil, 0, err
+	}
+	message := extractJSONRPCMessage(raw)
+	var rpcResp jsonRPCResponse
+	if err := json.Unmarshal(message, &rpcResp); err != nil {
+		return nil, len(raw), fmt.Errorf("decode mcp json-rpc response: %w", err)
+	}
+	if rpcResp.Error != nil {
+		return nil, len(raw), fmt.Errorf("mcp json-rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+	var result mcpsdk.CallToolResult
+	if err := json.Unmarshal(rpcResp.Result, &result); err != nil {
+		return nil, len(raw), fmt.Errorf("decode mcp tools/call result: %w", err)
+	}
+	return &result, len(raw), nil
+}
+
+func readLimited(r io.Reader, maxBytes int) ([]byte, error) {
+	if maxBytes <= 0 {
+		return io.ReadAll(r)
+	}
+	raw, err := io.ReadAll(io.LimitReader(r, int64(maxBytes)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxBytes {
+		return nil, ResultTooLargeError{MaxResultBytes: maxBytes, ResultBytes: len(raw)}
+	}
+	return raw, nil
+}
+
+func extractJSONRPCMessage(raw []byte) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if !bytes.HasPrefix(trimmed, []byte("event:")) && !bytes.HasPrefix(trimmed, []byte("data:")) {
+		return trimmed
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(trimmed))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if bytes.HasPrefix(line, []byte("data:")) {
+			return bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
+		}
+	}
+	return trimmed
+}
+
+func outputFromMCPResult(server serverRuntime, toolName string, args map[string]any, result *mcpsdk.CallToolResult) Output {
+	output := Output{
+		ServerID:         server.id,
+		ServerLabel:      server.label,
+		ToolName:         toolName,
+		StructuredResult: result.StructuredContent,
+		IsError:          result.IsError,
+		Arguments:        args,
+	}
+	var texts []string
+	var otherContent []any
+	for _, content := range result.Content {
+		switch c := content.(type) {
+		case *mcpsdk.TextContent:
+			texts = append(texts, c.Text)
+			if output.StructuredResult == nil {
+				var decoded any
+				if err := json.Unmarshal([]byte(c.Text), &decoded); err == nil {
+					output.StructuredResult = decoded
+				}
+			}
+		default:
+			if encoded, err := json.Marshal(c); err == nil {
+				var decoded any
+				if err := json.Unmarshal(encoded, &decoded); err == nil {
+					otherContent = append(otherContent, decoded)
+				}
+			}
+		}
+	}
+	output.Text = strings.Join(texts, "\n")
+	if output.StructuredResult == nil && len(otherContent) > 0 {
+		output.StructuredResult = map[string]any{"content": otherContent}
+	}
+	return output
+}
+
+func sanitizeBearerError(err error, token string) error {
+	if err == nil || token == "" {
+		return err
+	}
+	text := strings.ReplaceAll(err.Error(), token, "[redacted]")
+	return errors.New(text)
 }
 
 func DescriptorFromProtocolTool(tool protocol.Tool) Descriptor {
