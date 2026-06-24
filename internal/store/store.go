@@ -3118,6 +3118,11 @@ func (s *Store) initSchema() error {
 			session_source TEXT NOT NULL DEFAULT '',
 			window_id TEXT NOT NULL DEFAULT '',
 			client_request_id TEXT NOT NULL DEFAULT '',
+			exchange_id TEXT NOT NULL DEFAULT '',
+			exchange_kind TEXT NOT NULL DEFAULT '',
+			exchange_role TEXT NOT NULL DEFAULT '',
+			parent_exchange_id TEXT NOT NULL DEFAULT '',
+			sequence_index INTEGER NOT NULL DEFAULT 0,
 			selected_upstream_id TEXT NOT NULL DEFAULT '',
 			selected_upstream_base_url TEXT NOT NULL DEFAULT '',
 			selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
@@ -3500,6 +3505,11 @@ func (s *Store) initSchema() error {
 			response_id TEXT NULL,
 			request_audit_id TEXT NULL,
 			trace_id TEXT NULL,
+			exchange_id TEXT NULL,
+			exchange_kind TEXT NULL,
+			exchange_role TEXT NULL,
+			parent_exchange_id TEXT NULL,
+			sequence_index INTEGER NULL,
 			cassette_path TEXT NULL,
 			upstream_id TEXT NULL,
 			route_target TEXT NULL,
@@ -3513,6 +3523,8 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_response_id_started_at ON upstream_exchanges(response_id, started_at);`,
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_request_audit_id_started_at ON upstream_exchanges(request_audit_id, started_at);`,
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_trace_id ON upstream_exchanges(trace_id);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_exchange_id ON upstream_exchanges(exchange_id);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_parent_exchange_id ON upstream_exchanges(parent_exchange_id);`,
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_upstream_id_started_at ON upstream_exchanges(upstream_id, started_at);`,
 		`CREATE INDEX IF NOT EXISTS upstreamexchange_status_code_started_at ON upstream_exchanges(status_code, started_at);`,
 		`CREATE TABLE IF NOT EXISTS tool_call_audits (
@@ -3577,6 +3589,21 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("logs", "exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("logs", "selected_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -3596,6 +3623,27 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_kind", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_role", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "parent_exchange_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "sequence_index", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_exchange_id ON upstream_exchanges(exchange_id)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_parent_exchange_id ON upstream_exchanges(parent_exchange_id)`); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("analysis_jobs", "request_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
@@ -3836,6 +3884,11 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		session_source TEXT NOT NULL DEFAULT '',
 		window_id TEXT NOT NULL DEFAULT '',
 		client_request_id TEXT NOT NULL DEFAULT '',
+		exchange_id TEXT NOT NULL DEFAULT '',
+		exchange_kind TEXT NOT NULL DEFAULT '',
+		exchange_role TEXT NOT NULL DEFAULT '',
+		parent_exchange_id TEXT NOT NULL DEFAULT '',
+		sequence_index INTEGER NOT NULL DEFAULT 0,
 		selected_upstream_id TEXT NOT NULL DEFAULT '',
 		selected_upstream_base_url TEXT NOT NULL DEFAULT '',
 		selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
@@ -3852,6 +3905,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 		req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 		session_id, session_source, window_id, client_request_id,
+		exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 	)
@@ -3864,6 +3918,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		req_header_len, req_body_len, res_header_len, res_body_len,
 		CASE WHEN is_stream IN (1, '1', 'true', 'TRUE') THEN true ELSE false END,
 		session_id, session_source, window_id, client_request_id,
+		'', '', '', '', 0,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 	FROM logs_old`); err != nil {
@@ -4520,9 +4575,10 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -4555,6 +4611,11 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			session_source=excluded.session_source,
 			window_id=excluded.window_id,
 			client_request_id=excluded.client_request_id,
+			exchange_id=excluded.exchange_id,
+			exchange_kind=excluded.exchange_kind,
+			exchange_role=excluded.exchange_role,
+			parent_exchange_id=excluded.parent_exchange_id,
+			sequence_index=excluded.sequence_index,
 			selected_upstream_id=excluded.selected_upstream_id,
 			selected_upstream_base_url=excluded.selected_upstream_base_url,
 			selected_upstream_provider_preset=excluded.selected_upstream_provider_preset,
@@ -4595,6 +4656,11 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		grouping.SessionSource,
 		grouping.WindowID,
 		grouping.ClientRequestID,
+		header.Meta.ExchangeID,
+		header.Meta.ExchangeKind,
+		header.Meta.ExchangeRole,
+		header.Meta.ParentExchangeID,
+		header.Meta.SequenceIndex,
 		header.Meta.SelectedUpstreamID,
 		header.Meta.SelectedUpstreamBaseURL,
 		header.Meta.SelectedUpstreamProviderPreset,

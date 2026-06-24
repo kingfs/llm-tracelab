@@ -43,6 +43,12 @@ type MetaData struct {
 	ResponseID                     string    `json:"response_id,omitempty"`
 	ConversationID                 string    `json:"conversation_id,omitempty"`
 	ClientRequestID                string    `json:"client_request_id,omitempty"`
+	ExchangeID                     string    `json:"exchange_id,omitempty"`
+	ExchangeKind                   string    `json:"exchange_kind,omitempty"`
+	ExchangeRole                   string    `json:"exchange_role,omitempty"`
+	ParentExchangeID               string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex                  int       `json:"sequence_index,omitempty"`
+	TraceID                        string    `json:"trace_id,omitempty"`
 	Time                           time.Time `json:"time"`
 	Model                          string    `json:"model"`
 	Provider                       string    `json:"provider,omitempty"`

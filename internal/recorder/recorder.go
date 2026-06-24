@@ -47,6 +47,12 @@ type PrepareOptions struct {
 	RoutingScore                   float64
 	RoutingCandidateCount          int
 	RoutingFailureReason           string
+	ExchangeID                     string
+	ExchangeKind                   string
+	ExchangeRole                   string
+	ParentExchangeID               string
+	SequenceIndex                  int
+	TraceID                        string
 }
 
 type Recorder struct {
@@ -170,6 +176,12 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 			RequestID:                      fmt.Sprintf("%d", now.UnixNano()),
 			RequestAuditID:                 requestAuditIDFromRequest(req),
 			ClientRequestID:                req.Header.Get("X-Client-Request-Id"),
+			ExchangeID:                     opts.ExchangeID,
+			ExchangeKind:                   opts.ExchangeKind,
+			ExchangeRole:                   opts.ExchangeRole,
+			ParentExchangeID:               opts.ParentExchangeID,
+			SequenceIndex:                  opts.SequenceIndex,
+			TraceID:                        opts.TraceID,
 			Time:                           now,
 			Model:                          modelName,
 			Provider:                       semantics.Provider,

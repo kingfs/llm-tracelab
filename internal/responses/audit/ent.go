@@ -110,6 +110,21 @@ func (a *EntAuditor) RecordUpstreamExchange(ctx context.Context, entry UpstreamE
 	if entry.TraceID != "" {
 		create.SetTraceID(entry.TraceID)
 	}
+	if entry.ExchangeID != "" {
+		create.SetExchangeID(entry.ExchangeID)
+	}
+	if entry.ExchangeKind != "" {
+		create.SetExchangeKind(entry.ExchangeKind)
+	}
+	if entry.ExchangeRole != "" {
+		create.SetExchangeRole(entry.ExchangeRole)
+	}
+	if entry.ParentExchangeID != "" {
+		create.SetParentExchangeID(entry.ParentExchangeID)
+	}
+	if entry.SequenceIndex != 0 {
+		create.SetSequenceIndex(entry.SequenceIndex)
+	}
 	if entry.CassettePath != "" {
 		create.SetCassettePath(entry.CassettePath)
 	}

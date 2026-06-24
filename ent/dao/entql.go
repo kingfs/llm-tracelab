@@ -669,18 +669,23 @@ var schemaGraph = func() *sqlgraph.Schema {
 		},
 		Type: "UpstreamExchange",
 		Fields: map[string]*sqlgraph.FieldSpec{
-			upstreamexchange.FieldResponseID:     {Type: field.TypeString, Column: upstreamexchange.FieldResponseID},
-			upstreamexchange.FieldRequestAuditID: {Type: field.TypeString, Column: upstreamexchange.FieldRequestAuditID},
-			upstreamexchange.FieldTraceID:        {Type: field.TypeString, Column: upstreamexchange.FieldTraceID},
-			upstreamexchange.FieldCassettePath:   {Type: field.TypeString, Column: upstreamexchange.FieldCassettePath},
-			upstreamexchange.FieldUpstreamID:     {Type: field.TypeString, Column: upstreamexchange.FieldUpstreamID},
-			upstreamexchange.FieldRouteTarget:    {Type: field.TypeString, Column: upstreamexchange.FieldRouteTarget},
-			upstreamexchange.FieldModel:          {Type: field.TypeString, Column: upstreamexchange.FieldModel},
-			upstreamexchange.FieldEndpoint:       {Type: field.TypeString, Column: upstreamexchange.FieldEndpoint},
-			upstreamexchange.FieldStatusCode:     {Type: field.TypeInt, Column: upstreamexchange.FieldStatusCode},
-			upstreamexchange.FieldStartedAt:      {Type: field.TypeTime, Column: upstreamexchange.FieldStartedAt},
-			upstreamexchange.FieldCompletedAt:    {Type: field.TypeTime, Column: upstreamexchange.FieldCompletedAt},
-			upstreamexchange.FieldErrorText:      {Type: field.TypeString, Column: upstreamexchange.FieldErrorText},
+			upstreamexchange.FieldResponseID:       {Type: field.TypeString, Column: upstreamexchange.FieldResponseID},
+			upstreamexchange.FieldRequestAuditID:   {Type: field.TypeString, Column: upstreamexchange.FieldRequestAuditID},
+			upstreamexchange.FieldTraceID:          {Type: field.TypeString, Column: upstreamexchange.FieldTraceID},
+			upstreamexchange.FieldExchangeID:       {Type: field.TypeString, Column: upstreamexchange.FieldExchangeID},
+			upstreamexchange.FieldExchangeKind:     {Type: field.TypeString, Column: upstreamexchange.FieldExchangeKind},
+			upstreamexchange.FieldExchangeRole:     {Type: field.TypeString, Column: upstreamexchange.FieldExchangeRole},
+			upstreamexchange.FieldParentExchangeID: {Type: field.TypeString, Column: upstreamexchange.FieldParentExchangeID},
+			upstreamexchange.FieldSequenceIndex:    {Type: field.TypeInt, Column: upstreamexchange.FieldSequenceIndex},
+			upstreamexchange.FieldCassettePath:     {Type: field.TypeString, Column: upstreamexchange.FieldCassettePath},
+			upstreamexchange.FieldUpstreamID:       {Type: field.TypeString, Column: upstreamexchange.FieldUpstreamID},
+			upstreamexchange.FieldRouteTarget:      {Type: field.TypeString, Column: upstreamexchange.FieldRouteTarget},
+			upstreamexchange.FieldModel:            {Type: field.TypeString, Column: upstreamexchange.FieldModel},
+			upstreamexchange.FieldEndpoint:         {Type: field.TypeString, Column: upstreamexchange.FieldEndpoint},
+			upstreamexchange.FieldStatusCode:       {Type: field.TypeInt, Column: upstreamexchange.FieldStatusCode},
+			upstreamexchange.FieldStartedAt:        {Type: field.TypeTime, Column: upstreamexchange.FieldStartedAt},
+			upstreamexchange.FieldCompletedAt:      {Type: field.TypeTime, Column: upstreamexchange.FieldCompletedAt},
+			upstreamexchange.FieldErrorText:        {Type: field.TypeString, Column: upstreamexchange.FieldErrorText},
 		},
 	}
 	graph.Nodes[25] = &sqlgraph.Node{
@@ -3324,6 +3329,31 @@ func (f *UpstreamExchangeFilter) WhereRequestAuditID(p entql.StringP) {
 // WhereTraceID applies the entql string predicate on the trace_id field.
 func (f *UpstreamExchangeFilter) WhereTraceID(p entql.StringP) {
 	f.Where(p.Field(upstreamexchange.FieldTraceID))
+}
+
+// WhereExchangeID applies the entql string predicate on the exchange_id field.
+func (f *UpstreamExchangeFilter) WhereExchangeID(p entql.StringP) {
+	f.Where(p.Field(upstreamexchange.FieldExchangeID))
+}
+
+// WhereExchangeKind applies the entql string predicate on the exchange_kind field.
+func (f *UpstreamExchangeFilter) WhereExchangeKind(p entql.StringP) {
+	f.Where(p.Field(upstreamexchange.FieldExchangeKind))
+}
+
+// WhereExchangeRole applies the entql string predicate on the exchange_role field.
+func (f *UpstreamExchangeFilter) WhereExchangeRole(p entql.StringP) {
+	f.Where(p.Field(upstreamexchange.FieldExchangeRole))
+}
+
+// WhereParentExchangeID applies the entql string predicate on the parent_exchange_id field.
+func (f *UpstreamExchangeFilter) WhereParentExchangeID(p entql.StringP) {
+	f.Where(p.Field(upstreamexchange.FieldParentExchangeID))
+}
+
+// WhereSequenceIndex applies the entql int predicate on the sequence_index field.
+func (f *UpstreamExchangeFilter) WhereSequenceIndex(p entql.IntP) {
+	f.Where(p.Field(upstreamexchange.FieldSequenceIndex))
 }
 
 // WhereCassettePath applies the entql string predicate on the cassette_path field.
