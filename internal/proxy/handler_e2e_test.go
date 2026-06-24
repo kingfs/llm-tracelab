@@ -852,12 +852,13 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
-	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses?trace=entry", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Client-Request-Id", "client-audit-1")
+	req.Header.Set("X-Entry-Test", "preserve-me")
 
 	resp, err := proxyServer.Client().Do(req)
 	if err != nil {
@@ -898,7 +899,45 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 		t.Fatalf("first chat message = %#v, want user ping", messages[0])
 	}
 
-	recordPath := findRecordedHTTP(t, outputDir)
+	entryRecordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/responses", time.Second)
+	entryParsed, err := waitForRecordedPrelude(entryRecordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", entryRecordPath, err)
+	}
+	if entryParsed.Header.Meta.URL != "/v1/responses?trace=entry" || entryParsed.Header.Meta.Endpoint != "/v1/responses" {
+		t.Fatalf("entry recorded path endpoint = %q/%q, want /v1/responses?trace=entry / /v1/responses", entryParsed.Header.Meta.URL, entryParsed.Header.Meta.Endpoint)
+	}
+	if entryParsed.Header.Meta.StatusCode != http.StatusOK {
+		t.Fatalf("entry recorded status = %d, want 200", entryParsed.Header.Meta.StatusCode)
+	}
+	if entryParsed.Header.Layout.IsStream {
+		t.Fatalf("entry recorded IsStream = true, want false")
+	}
+	if entryParsed.Header.Meta.RequestAuditID != "" {
+		t.Fatalf("entry RequestAuditID = %q, want empty until entry recorder receives audit metadata", entryParsed.Header.Meta.RequestAuditID)
+	}
+	if !hasRecordEvent(entryParsed.Events, "responses.entry.target") || !hasRecordEvent(entryParsed.Events, "responses.entry.completed") {
+		t.Fatalf("entry recorded events missing target/completed: %+v", entryParsed.Events)
+	}
+	entryContent, err := os.ReadFile(entryRecordPath)
+	if err != nil {
+		t.Fatalf("read entry cassette: %v", err)
+	}
+	entryReqFull, entryReqBody, _, entryRespBody := recordfile.ExtractSections(entryContent, entryParsed)
+	if !strings.Contains(string(entryReqFull), "POST /v1/responses?trace=entry HTTP/1.1") {
+		t.Fatalf("entry request header missing original path/query:\n%s", string(entryReqFull))
+	}
+	if !strings.Contains(string(entryReqFull), "X-Entry-Test: preserve-me") {
+		t.Fatalf("entry request header missing client header:\n%s", string(entryReqFull))
+	}
+	if string(entryReqBody) != `{"model":"gpt-5","input":"ping"}` {
+		t.Fatalf("entry request body = %q, want original client body", string(entryReqBody))
+	}
+	if !strings.Contains(string(entryRespBody), `"object":"response"`) {
+		t.Fatalf("entry response body missing Responses JSON:\n%s", string(entryRespBody))
+	}
+
+	recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/chat/completions", time.Second)
 	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
 	if err != nil {
 		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
@@ -931,15 +970,19 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 		t.Fatalf("recorded usage = %+v, want prompt=3 completion=2 total=5", parsed.Header.Usage)
 	}
 
-	entries, err := waitForRecentEntries(st, 1, time.Second)
+	entries, err := waitForRecentEntries(st, 2, time.Second)
 	if err != nil {
 		t.Fatalf("waitForRecentEntries() error = %v", err)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("ListRecent() len = %d, want 1", len(entries))
+	if len(entries) != 2 {
+		t.Fatalf("ListRecent() len = %d, want 2", len(entries))
 	}
-	if entries[0].Header.Meta.Endpoint != "/v1/chat/completions" {
-		t.Fatalf("indexed endpoint = %q, want /v1/chat/completions", entries[0].Header.Meta.Endpoint)
+	indexedEndpoints := map[string]bool{}
+	for _, entry := range entries {
+		indexedEndpoints[entry.Header.Meta.Endpoint] = true
+	}
+	if !indexedEndpoints["/v1/responses"] || !indexedEndpoints["/v1/chat/completions"] {
+		t.Fatalf("indexed endpoints = %+v, want /v1/responses and /v1/chat/completions", indexedEndpoints)
 	}
 
 	audits, err := st.EntClient().RequestAudit.Query().
@@ -1378,7 +1421,24 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 		t.Fatal("upstream chat request stream = false, want true")
 	}
 
-	recordPath := findRecordedHTTP(t, outputDir)
+	entryRecordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/responses", time.Second)
+	entryParsed, err := waitForRecordedPrelude(entryRecordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", entryRecordPath, err)
+	}
+	if !entryParsed.Header.Layout.IsStream {
+		t.Fatalf("entry cassette IsStream = false, want true for local Responses SSE")
+	}
+	entryContent, err := os.ReadFile(entryRecordPath)
+	if err != nil {
+		t.Fatalf("read entry cassette: %v", err)
+	}
+	_, _, _, entryResponseBody := recordfile.ExtractSections(entryContent, entryParsed)
+	if !strings.Contains(string(entryResponseBody), "event: response.output_text.delta\n") {
+		t.Fatalf("entry recorded response body missing Responses SSE:\n%s", string(entryResponseBody))
+	}
+
+	recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/chat/completions", time.Second)
 	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
 	if err != nil {
 		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
@@ -5207,6 +5267,52 @@ func findRecordedHTTP(t *testing.T, root string) string {
 		t.Fatalf("no recorded .http file found under %q", root)
 	}
 	return found
+}
+
+func waitForRecordedHTTPByEndpoint(t *testing.T, root string, endpoint string, timeout time.Duration) string {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		var found string
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || filepath.Ext(path) != ".http" {
+				return nil
+			}
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				lastErr = readErr
+				return nil
+			}
+			parsed, parseErr := recordfile.ParsePrelude(content)
+			if parseErr != nil {
+				lastErr = parseErr
+				return nil
+			}
+			if parsed.Header.Meta.Endpoint == endpoint {
+				found = path
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("Walk(%q) error = %v", root, err)
+		}
+		if found != "" {
+			return found
+		}
+		if time.Now().After(deadline) {
+			if lastErr != nil {
+				t.Fatalf("no recorded .http file with endpoint %q under %q; last parse/read error: %v", endpoint, root, lastErr)
+			}
+			t.Fatalf("no recorded .http file with endpoint %q under %q", endpoint, root)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func hasRecordEvent(events []recordfile.RecordEvent, eventType string) bool {

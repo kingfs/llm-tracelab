@@ -323,17 +323,36 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 }
 
 func (h *Handler) serveLocalResponses(w http.ResponseWriter, r *http.Request) {
-	// Stage 3A intentionally does not record local /v1/responses server-mode calls.
-	// Stage 3B should wire this path into the recorder cassette pipeline.
 	if h.responsesHandler == nil {
 		http.NotFound(w, r)
 		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+
 	localReq := r.Clone(r.Context())
 	localReq.URL = cloneURL(r.URL)
 	localReq.URL.Path = h.localResponsesTargetPath(r.URL.Path)
 	localReq.URL.RawPath = ""
-	h.responsesHandler.ServeHTTP(w, localReq)
+	localReq.Body = io.NopCloser(bytes.NewReader(body))
+	localReq.ContentLength = int64(len(body))
+
+	entryRecorder, err := h.prepareLocalResponsesEntryRecording(r, body, localReq.URL.Path)
+	if err != nil {
+		slog.Error("Failed to prepare local Responses entry recording", "path", r.URL.Path, "err", err)
+		h.responsesHandler.ServeHTTP(w, localReq)
+		return
+	}
+
+	tee := newResponsesEntryRecordingResponseWriter(w, entryRecorder)
+	h.responsesHandler.ServeHTTP(tee, localReq)
+	tee.finalize()
 }
 
 func (h *Handler) localResponsesPath(path string) bool {
@@ -348,6 +367,184 @@ func (h *Handler) localResponsesTargetPath(path string) string {
 	base := strings.TrimRight(h.responsesPath, "/")
 	suffix := strings.TrimPrefix(path, base)
 	return "/v1/responses" + suffix
+}
+
+type responsesEntryRecorder struct {
+	recorder   *recorder.Recorder
+	logInfo    *recorder.LogInfo
+	startedAt  time.Time
+	targetPath string
+	pipeline   *llm.ResponsePipeline
+	finalized  bool
+}
+
+func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []byte, targetPath string) (*responsesEntryRecorder, error) {
+	if h == nil || h.recorder == nil {
+		return nil, fmt.Errorf("responses entry recorder is required")
+	}
+	recordReq := r.Clone(r.Context())
+	recordReq.URL = cloneURL(r.URL)
+	recordReq.Body = io.NopCloser(bytes.NewReader(body))
+	recordReq.ContentLength = int64(len(body))
+	recordReq.RequestURI = recordReq.URL.RequestURI()
+
+	startedAt := time.Now()
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(recordReq, recorder.PrepareOptions{
+		SiteURL: "http://llm-tracelab.local",
+	}, body)
+	if err != nil {
+		return nil, err
+	}
+	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
+		Type:   "responses.entry.target",
+		Time:   startedAt,
+		Method: r.Method,
+		URL:    recordReq.URL.RequestURI(),
+		Attributes: map[string]interface{}{
+			"target_path": targetPath,
+		},
+	})
+	return &responsesEntryRecorder{
+		recorder:   h.recorder,
+		logInfo:    logInfo,
+		startedAt:  startedAt,
+		targetPath: targetPath,
+	}, nil
+}
+
+func (r *responsesEntryRecorder) writeHeader(statusCode int, header http.Header) {
+	if r == nil || r.logInfo == nil || r.logInfo.File == nil {
+		return
+	}
+	if _, err := r.logInfo.File.Write([]byte("\n")); err != nil {
+		r.logInfo.Header.Meta.Error = "write responses entry response separator: " + err.Error()
+		return
+	}
+	status := fmt.Sprintf("%d %s", statusCode, http.StatusText(statusCode))
+	headerBuf := bytes.NewBufferString("HTTP/1.1 " + status + "\r\n")
+	header.Write(headerBuf)
+	headerBuf.WriteString("\r\n")
+	n, err := r.logInfo.File.Write(headerBuf.Bytes())
+	if err != nil {
+		r.logInfo.Header.Meta.Error = "write responses entry response header: " + err.Error()
+		return
+	}
+	r.logInfo.Header.Layout.ResHeaderLen = int64(n)
+	r.logInfo.Header.Meta.StatusCode = statusCode
+	isStream := llm.DetectStreamingResponse(header)
+	r.logInfo.Header.Layout.IsStream = isStream
+	r.pipeline = llm.NewResponsePipeline(r.logInfo.Header.Meta.Provider, r.logInfo.Header.Meta.Endpoint, isStream)
+}
+
+func (r *responsesEntryRecorder) writeBody(data []byte) {
+	if r == nil || r.logInfo == nil || r.logInfo.File == nil || len(data) == 0 {
+		return
+	}
+	if r.logInfo.Header.Meta.TTFTMs <= 0 && !r.startedAt.IsZero() {
+		r.logInfo.Header.Meta.TTFTMs = time.Since(r.startedAt).Milliseconds()
+	}
+	written, err := r.logInfo.File.Write(data)
+	if err != nil {
+		r.logInfo.Header.Meta.Error = "write responses entry response body: " + err.Error()
+		return
+	}
+	r.logInfo.Header.Layout.ResBodyLen += int64(written)
+	if r.pipeline != nil {
+		r.pipeline.Feed(data[:written])
+		if usage, ok := r.pipeline.Usage(); ok {
+			r.logInfo.Header.Usage = recorder.UsageInfo(usage)
+		}
+	}
+}
+
+func (r *responsesEntryRecorder) finalize(statusCode int) {
+	if r == nil || r.finalized || r.logInfo == nil {
+		return
+	}
+	r.finalized = true
+	if r.pipeline != nil {
+		r.pipeline.Finalize()
+		if usage, ok := r.pipeline.Usage(); ok {
+			r.logInfo.Header.Usage = recorder.UsageInfo(usage)
+		}
+		r.logInfo.Events = append(r.logInfo.Events, r.pipeline.Events()...)
+	}
+	duration := time.Since(r.startedAt)
+	r.logInfo.Header.Meta.DurationMs = duration.Milliseconds()
+	r.logInfo.Header.Meta.ContentLength = r.logInfo.Header.Layout.ResBodyLen
+	if r.logInfo.Header.Meta.StatusCode == 0 {
+		r.logInfo.Header.Meta.StatusCode = statusCode
+	}
+	r.logInfo.Events = append(r.logInfo.Events, recorder.RecordEvent{
+		Type:       "responses.entry.completed",
+		Time:       r.startedAt.Add(duration),
+		Method:     r.logInfo.Header.Meta.Method,
+		URL:        r.logInfo.Header.Meta.URL,
+		StatusCode: r.logInfo.Header.Meta.StatusCode,
+		IsStream:   r.logInfo.Header.Layout.IsStream,
+		Attributes: map[string]interface{}{
+			"target_path": r.targetPath,
+		},
+	})
+	if err := r.recorder.UpdateLogFile(r.logInfo); err != nil {
+		slog.Error("Failed to update local Responses entry recording", "path", r.logInfo.Path, "err", err)
+	}
+}
+
+type responsesEntryRecordingResponseWriter struct {
+	w           http.ResponseWriter
+	recorder    *responsesEntryRecorder
+	statusCode  int
+	wroteHeader bool
+}
+
+func newResponsesEntryRecordingResponseWriter(w http.ResponseWriter, recorder *responsesEntryRecorder) *responsesEntryRecordingResponseWriter {
+	return &responsesEntryRecordingResponseWriter{
+		w:          w,
+		recorder:   recorder,
+		statusCode: http.StatusOK,
+	}
+}
+
+func (w *responsesEntryRecordingResponseWriter) Header() http.Header {
+	return w.w.Header()
+}
+
+func (w *responsesEntryRecordingResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.statusCode = statusCode
+	w.recorder.writeHeader(statusCode, w.w.Header())
+	w.w.WriteHeader(statusCode)
+}
+
+func (w *responsesEntryRecordingResponseWriter) Write(data []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.w.Write(data)
+	if n > 0 {
+		w.recorder.writeBody(data[:n])
+	}
+	return n, err
+}
+
+func (w *responsesEntryRecordingResponseWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *responsesEntryRecordingResponseWriter) finalize() {
+	if !w.wroteHeader {
+		w.recorder.writeHeader(w.statusCode, w.w.Header())
+	}
+	w.recorder.finalize(w.statusCode)
 }
 
 func buildResponsesServerChatRequest(ctx context.Context, selection *router.Selection, body []byte) (*http.Request, *http.Request, error) {
