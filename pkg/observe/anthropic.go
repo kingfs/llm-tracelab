@@ -42,6 +42,8 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 		Operation:     input.Header.Meta.Operation,
 		Endpoint:      input.Header.Meta.Endpoint,
 		Model:         input.Header.Meta.Model,
+		ExchangeKind:  input.Header.Meta.ExchangeKind,
+		ExchangeRole:  input.Header.Meta.ExchangeRole,
 		Parser:        p.Name(),
 		ParserVersion: p.Version(),
 		Status:        ParseStatusParsed,

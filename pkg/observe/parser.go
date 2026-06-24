@@ -90,10 +90,33 @@ func (r *Registry) Parse(ctx context.Context, input ParseInput) (TraceObservatio
 }
 
 func applyExchangeMetadata(input ParseInput, obs *TraceObservation) {
-	obs.ExchangeKind = input.ExchangeKind
-	obs.ExchangeRole = input.ExchangeRole
-	obs.ParentExchangeID = input.ParentExchangeID
-	obs.SequenceIndex = input.SequenceIndex
-	obs.RequestAuditID = input.RequestAuditID
-	obs.ResponseID = input.ResponseID
+	obs.ExchangeKind = firstObservationNonEmpty(input.ExchangeKind, input.Header.Meta.ExchangeKind, obs.ExchangeKind)
+	obs.ExchangeRole = firstObservationNonEmpty(input.ExchangeRole, input.Header.Meta.ExchangeRole, obs.ExchangeRole)
+	obs.ParentExchangeID = firstObservationNonEmpty(input.ParentExchangeID, input.Header.Meta.ParentExchangeID, obs.ParentExchangeID)
+	if input.SequenceIndex != 0 {
+		obs.SequenceIndex = input.SequenceIndex
+	} else if input.Header.Meta.SequenceIndex != 0 {
+		obs.SequenceIndex = input.Header.Meta.SequenceIndex
+	}
+	obs.RequestAuditID = firstObservationNonEmpty(input.RequestAuditID, input.Header.Meta.RequestAuditID, obs.RequestAuditID)
+	obs.ResponseID = firstObservationNonEmpty(input.ResponseID, input.Header.Meta.ResponseID, obs.ResponseID)
+	if obs.ExchangeKind == "" {
+		obs.ExchangeKind = "model"
+	}
+	if obs.ExchangeRole == "" {
+		if obs.ExchangeKind == "entry" {
+			obs.ExchangeRole = "client_request"
+		} else {
+			obs.ExchangeRole = "primary_model_call"
+		}
+	}
+}
+
+func firstObservationNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

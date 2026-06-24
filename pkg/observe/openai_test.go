@@ -15,9 +15,11 @@ func TestOpenAIParserParsesChatCompletion(t *testing.T) {
 		TraceID: "trace-chat",
 		Header: recordfile.RecordHeader{
 			Meta: recordfile.MetaData{
-				Provider:  llm.ProviderOpenAICompatible,
-				Operation: llm.OperationChatCompletions,
-				Endpoint:  "/v1/chat/completions",
+				Provider:     llm.ProviderOpenAICompatible,
+				Operation:    llm.OperationChatCompletions,
+				Endpoint:     "/v1/chat/completions",
+				ExchangeKind: "model",
+				ExchangeRole: "primary_model_call",
 			},
 		},
 		RequestBody: []byte(`{
@@ -49,6 +51,9 @@ func TestOpenAIParserParsesChatCompletion(t *testing.T) {
 	}
 	if obs.Model != "gpt-4o" {
 		t.Fatalf("Model = %q", obs.Model)
+	}
+	if obs.ExchangeKind != "model" || obs.ExchangeRole != "primary_model_call" {
+		t.Fatalf("exchange scope = %q/%q, want model/primary_model_call", obs.ExchangeKind, obs.ExchangeRole)
 	}
 	if len(obs.Request.Messages) != 3 {
 		t.Fatalf("request messages = %d, want 3", len(obs.Request.Messages))

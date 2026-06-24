@@ -232,19 +232,20 @@ type SafetySignal struct {
 }
 
 type Finding struct {
-	ID              string    `json:"id"`
-	TraceID         string    `json:"trace_id,omitempty"`
-	Category        string    `json:"category"`
-	Severity        Severity  `json:"severity"`
-	Confidence      float64   `json:"confidence"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description,omitempty"`
-	EvidencePath    string    `json:"evidence_path"`
-	EvidenceExcerpt string    `json:"evidence_excerpt,omitempty"`
-	NodeID          string    `json:"node_id,omitempty"`
-	Detector        string    `json:"detector"`
-	DetectorVersion string    `json:"detector_version"`
-	CreatedAt       time.Time `json:"created_at,omitempty"`
+	ID              string         `json:"id"`
+	TraceID         string         `json:"trace_id,omitempty"`
+	Category        string         `json:"category"`
+	Severity        Severity       `json:"severity"`
+	Confidence      float64        `json:"confidence"`
+	Title           string         `json:"title"`
+	Description     string         `json:"description,omitempty"`
+	EvidencePath    string         `json:"evidence_path"`
+	EvidenceExcerpt string         `json:"evidence_excerpt,omitempty"`
+	NodeID          string         `json:"node_id,omitempty"`
+	Detector        string         `json:"detector"`
+	DetectorVersion string         `json:"detector_version"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	CreatedAt       time.Time      `json:"created_at,omitempty"`
 }
 
 type RawReferences struct {

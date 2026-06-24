@@ -7597,6 +7597,8 @@ func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
 		"tool_calls":     len(obs.Tools.Calls),
 		"tool_results":   len(obs.Tools.Results),
 		"findings":       len(obs.Findings),
+		"exchange_kind":  obs.ExchangeKind,
+		"exchange_role":  obs.ExchangeRole,
 	}
 }
 
