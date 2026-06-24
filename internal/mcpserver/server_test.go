@@ -422,6 +422,33 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if got := auditExchanges[0].(map[string]any)["trace_id"].(string); got != credentialEntry.ID {
 		t.Fatalf("responses_audit_trace exchange trace_id = %q, want %q", got, credentialEntry.ID)
 	}
+	modelExchanges := auditPayload["model_exchanges"].([]any)
+	if len(modelExchanges) != 1 {
+		t.Fatalf("len(responses_audit_trace.model_exchanges) = %d, want 1", len(modelExchanges))
+	}
+	modelExchange := modelExchanges[0].(map[string]any)
+	if got := modelExchange["trace_id"].(string); got != credentialEntry.ID {
+		t.Fatalf("responses_audit_trace model exchange trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+	if got := modelExchange["exchange_kind"].(string); got != "model" {
+		t.Fatalf("responses_audit_trace model exchange exchange_kind = %q, want model", got)
+	}
+	if got := modelExchange["exchange_role"].(string); got != "primary_model_call" {
+		t.Fatalf("responses_audit_trace model exchange exchange_role = %q, want primary_model_call", got)
+	}
+	if got := modelExchange["parent_exchange_id"].(string); got != "entry:reqaudit-mcp-1" {
+		t.Fatalf("responses_audit_trace model exchange parent_exchange_id = %q, want entry:reqaudit-mcp-1", got)
+	}
+	if got := int(modelExchange["sequence_index"].(float64)); got != 0 {
+		t.Fatalf("responses_audit_trace model exchange sequence_index = %d, want 0", got)
+	}
+	entryExchange := auditPayload["entry_exchange"].(map[string]any)
+	if got := entryExchange["exchange_kind"].(string); got != "entry" {
+		t.Fatalf("responses_audit_trace entry exchange exchange_kind = %q, want entry", got)
+	}
+	if got := entryExchange["exchange_role"].(string); got != "client_request" {
+		t.Fatalf("responses_audit_trace entry exchange exchange_role = %q, want client_request", got)
+	}
 	finalResponse := auditPayload["final_response"].(map[string]any)
 	if got := finalResponse["response_id"].(string); got != "resp-mcp-1" {
 		t.Fatalf("responses_audit_trace final response_id = %q, want resp-mcp-1", got)
@@ -436,6 +463,18 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	rawCassette := rawCassettes[0].(map[string]any)
 	if got := rawCassette["trace_id"].(string); got != credentialEntry.ID {
 		t.Fatalf("responses_audit_trace raw cassette trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+	if got := rawCassette["exchange_kind"].(string); got != "model" {
+		t.Fatalf("responses_audit_trace raw cassette exchange_kind = %q, want model", got)
+	}
+	if got := rawCassette["exchange_role"].(string); got != "primary_model_call" {
+		t.Fatalf("responses_audit_trace raw cassette exchange_role = %q, want primary_model_call", got)
+	}
+	if got := rawCassette["parent_exchange_id"].(string); got != "entry:reqaudit-mcp-1" {
+		t.Fatalf("responses_audit_trace raw cassette parent_exchange_id = %q, want entry:reqaudit-mcp-1", got)
+	}
+	if got := int(rawCassette["sequence_index"].(float64)); got != 0 {
+		t.Fatalf("responses_audit_trace raw cassette sequence_index = %d, want 0", got)
 	}
 	rawResponse := rawCassette["response"].(map[string]any)
 	if got, want := int(rawResponse["status_code"].(float64)), credentialEntry.Header.Meta.StatusCode; got != want {

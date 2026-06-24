@@ -16,7 +16,9 @@ type responsesAuditTraceOutput struct {
 	RequestAudit      *responsesRequestAuditView    `json:"request_audit,omitempty"`
 	FinalResponse     *responsesFinalResponseView   `json:"final_response,omitempty"`
 	Events            []responsesExecutionEventView `json:"events"`
-	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
+	EntryExchange     *responsesExchangeView        `json:"entry_exchange"`
+	ModelExchanges    []responsesExchangeView       `json:"model_exchanges"`
+	UpstreamExchanges []responsesExchangeView       `json:"upstream_exchanges"`
 	RawCassettes      []responsesRawCassetteView    `json:"raw_cassettes"`
 }
 
@@ -70,20 +72,25 @@ type responsesExecutionEventView struct {
 	OccurredAt     time.Time      `json:"occurred_at"`
 }
 
-type responsesUpstreamExchange struct {
-	ID             string    `json:"id"`
-	ResponseID     string    `json:"response_id,omitempty"`
-	RequestAuditID string    `json:"request_audit_id,omitempty"`
-	TraceID        string    `json:"trace_id,omitempty"`
-	CassettePath   string    `json:"cassette_path,omitempty"`
-	UpstreamID     string    `json:"upstream_id,omitempty"`
-	RouteTarget    string    `json:"route_target,omitempty"`
-	Model          string    `json:"model,omitempty"`
-	Endpoint       string    `json:"endpoint,omitempty"`
-	StatusCode     int       `json:"status_code,omitempty"`
-	StartedAt      time.Time `json:"started_at,omitempty"`
-	CompletedAt    time.Time `json:"completed_at,omitempty"`
-	ErrorText      string    `json:"error_text,omitempty"`
+type responsesExchangeView struct {
+	ID               string    `json:"id,omitempty"`
+	ResponseID       string    `json:"response_id,omitempty"`
+	RequestAuditID   string    `json:"request_audit_id,omitempty"`
+	ExchangeID       string    `json:"exchange_id,omitempty"`
+	ExchangeKind     string    `json:"exchange_kind"`
+	ExchangeRole     string    `json:"exchange_role"`
+	ParentExchangeID string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int       `json:"sequence_index"`
+	TraceID          string    `json:"trace_id,omitempty"`
+	CassettePath     string    `json:"cassette_path,omitempty"`
+	UpstreamID       string    `json:"upstream_id,omitempty"`
+	RouteTarget      string    `json:"route_target,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Endpoint         string    `json:"endpoint,omitempty"`
+	StatusCode       int       `json:"status_code,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+	ErrorText        string    `json:"error_text,omitempty"`
 }
 
 type responsesFinalResponseView struct {
@@ -100,14 +107,18 @@ type responsesFinalResponseView struct {
 }
 
 type responsesRawCassetteView struct {
-	ExchangeID   string                         `json:"exchange_id,omitempty"`
-	TraceID      string                         `json:"trace_id,omitempty"`
-	CassettePath string                         `json:"cassette_path,omitempty"`
-	ReadError    string                         `json:"read_error,omitempty"`
-	Header       recordfile.RecordHeader        `json:"header,omitempty"`
-	Events       []recordfile.RecordEvent       `json:"events,omitempty"`
-	Request      recordfile.HTTPRequestSummary  `json:"request,omitempty"`
-	Response     recordfile.HTTPResponseSummary `json:"response,omitempty"`
+	ExchangeID       string                         `json:"exchange_id,omitempty"`
+	ExchangeKind     string                         `json:"exchange_kind,omitempty"`
+	ExchangeRole     string                         `json:"exchange_role,omitempty"`
+	ParentExchangeID string                         `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    *int                           `json:"sequence_index,omitempty"`
+	TraceID          string                         `json:"trace_id,omitempty"`
+	CassettePath     string                         `json:"cassette_path,omitempty"`
+	ReadError        string                         `json:"read_error,omitempty"`
+	Header           recordfile.RecordHeader        `json:"header,omitempty"`
+	Events           []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request          recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response         recordfile.HTTPResponseSummary `json:"response,omitempty"`
 }
 
 type responsesToolCallAuditView struct {
@@ -156,7 +167,8 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 			RequestAuditID: requestAuditID,
 		},
 		Events:            []responsesExecutionEventView{},
-		UpstreamExchanges: []responsesUpstreamExchange{},
+		ModelExchanges:    []responsesExchangeView{},
+		UpstreamExchanges: []responsesExchangeView{},
 		RawCassettes:      []responsesRawCassetteView{},
 	}
 	if !found {
@@ -170,12 +182,15 @@ func (a *serverAPI) responsesAuditTrace(ctx context.Context, req *mcp.CallToolRe
 	for _, event := range trace.ExecutionEvents {
 		out.Events = append(out.Events, responsesExecutionEventFromAudit(event))
 	}
-	for _, exchange := range trace.UpstreamExchanges {
-		out.UpstreamExchanges = append(out.UpstreamExchanges, responsesUpstreamExchangeFromAudit(exchange))
-	}
 	for _, cassette := range trace.RawCassettes {
 		out.RawCassettes = append(out.RawCassettes, responsesRawCassetteFromAudit(cassette))
 	}
+	for _, exchange := range trace.UpstreamExchanges {
+		out.ModelExchanges = append(out.ModelExchanges, responsesModelExchangeFromAudit(exchange, out.RawCassettes, trace.RequestAudit.ID))
+	}
+	out.UpstreamExchanges = out.ModelExchanges
+	out.EntryExchange = responsesEntryExchangeFromAudit(trace.RequestAudit, trace.FinalResponse)
+	applyRawCassetteExchangeFallbacks(out.RawCassettes, out.ModelExchanges)
 	return nil, out, nil
 }
 
@@ -277,21 +292,57 @@ func responsesExecutionEventFromAudit(event responsesaudit.ExecutionEventView) r
 	}
 }
 
-func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchangeView) responsesUpstreamExchange {
-	return responsesUpstreamExchange{
-		ID:             exchange.ID,
-		ResponseID:     exchange.ResponseID,
-		RequestAuditID: exchange.RequestAuditID,
-		TraceID:        exchange.TraceID,
-		CassettePath:   exchange.CassettePath,
-		UpstreamID:     exchange.UpstreamID,
-		RouteTarget:    exchange.RouteTarget,
-		Model:          exchange.Model,
-		Endpoint:       exchange.Endpoint,
-		StatusCode:     exchange.StatusCode,
-		StartedAt:      exchange.StartedAt,
-		CompletedAt:    exchange.CompletedAt,
-		ErrorText:      exchange.ErrorText,
+func responsesModelExchangeFromAudit(exchange responsesaudit.UpstreamExchangeView, cassettes []responsesRawCassetteView, requestAuditID string) responsesExchangeView {
+	header := findRawCassetteHeader(cassettes, exchange)
+	out := responsesExchangeView{
+		ID:               exchange.ID,
+		ResponseID:       exchange.ResponseID,
+		RequestAuditID:   exchange.RequestAuditID,
+		ExchangeID:       firstNonEmpty(header.Meta.ExchangeID, exchange.ID),
+		ExchangeKind:     firstNonEmpty(header.Meta.ExchangeKind, "model"),
+		ExchangeRole:     firstNonEmpty(header.Meta.ExchangeRole, "primary_model_call"),
+		ParentExchangeID: firstNonEmpty(header.Meta.ParentExchangeID, entryExchangeID(requestAuditID)),
+		SequenceIndex:    header.Meta.SequenceIndex,
+		TraceID:          firstNonEmpty(exchange.TraceID, header.Meta.TraceID, header.Meta.RequestID),
+		CassettePath:     exchange.CassettePath,
+		UpstreamID:       exchange.UpstreamID,
+		RouteTarget:      exchange.RouteTarget,
+		Model:            firstNonEmpty(exchange.Model, header.Meta.Model),
+		Endpoint:         firstNonEmpty(exchange.Endpoint, header.Meta.Endpoint),
+		StatusCode:       exchange.StatusCode,
+		StartedAt:        firstNonZeroTime(exchange.StartedAt, header.Meta.Time),
+		CompletedAt:      exchange.CompletedAt,
+		ErrorText:        exchange.ErrorText,
+	}
+	if out.RequestAuditID == "" {
+		out.RequestAuditID = header.Meta.RequestAuditID
+	}
+	if out.ResponseID == "" {
+		out.ResponseID = header.Meta.ResponseID
+	}
+	if out.StatusCode == 0 {
+		out.StatusCode = header.Meta.StatusCode
+	}
+	return out
+}
+
+func responsesEntryExchangeFromAudit(request responsesaudit.RequestAuditView, final responsesaudit.FinalResponseView) *responsesExchangeView {
+	if request.ID == "" {
+		return nil
+	}
+	return &responsesExchangeView{
+		ID:             entryExchangeID(request.ID),
+		ResponseID:     firstNonEmpty(request.ResponseID, final.ResponseID),
+		RequestAuditID: request.ID,
+		ExchangeID:     entryExchangeID(request.ID),
+		ExchangeKind:   "entry",
+		ExchangeRole:   "client_request",
+		SequenceIndex:  0,
+		Model:          final.Model,
+		Endpoint:       firstNonEmpty(final.Endpoint, request.Path),
+		StatusCode:     final.StatusCode,
+		StartedAt:      request.CreatedAt,
+		CompletedAt:    final.CompletedAt,
 	}
 }
 
@@ -314,14 +365,89 @@ func responsesFinalResponseFromAudit(response responsesaudit.FinalResponseView) 
 }
 
 func responsesRawCassetteFromAudit(cassette responsesaudit.RawCassetteView) responsesRawCassetteView {
-	return responsesRawCassetteView{
-		ExchangeID:   cassette.ExchangeID,
-		TraceID:      cassette.TraceID,
-		CassettePath: cassette.CassettePath,
-		ReadError:    cassette.ReadError,
-		Header:       cassette.Header,
-		Events:       append([]recordfile.RecordEvent(nil), cassette.Events...),
-		Request:      cassette.Request,
-		Response:     cassette.Response,
+	out := responsesRawCassetteView{
+		ExchangeID:       firstNonEmpty(cassette.Header.Meta.ExchangeID, cassette.ExchangeID),
+		ExchangeKind:     cassette.Header.Meta.ExchangeKind,
+		ExchangeRole:     cassette.Header.Meta.ExchangeRole,
+		ParentExchangeID: cassette.Header.Meta.ParentExchangeID,
+		TraceID:          firstNonEmpty(cassette.TraceID, cassette.Header.Meta.TraceID, cassette.Header.Meta.RequestID),
+		CassettePath:     cassette.CassettePath,
+		ReadError:        cassette.ReadError,
+		Header:           cassette.Header,
+		Events:           append([]recordfile.RecordEvent(nil), cassette.Events...),
+		Request:          cassette.Request,
+		Response:         cassette.Response,
 	}
+	if cassette.Header.Meta.SequenceIndex != 0 {
+		out.SequenceIndex = intPtr(cassette.Header.Meta.SequenceIndex)
+	}
+	return out
+}
+
+func applyRawCassetteExchangeFallbacks(cassettes []responsesRawCassetteView, exchanges []responsesExchangeView) {
+	for i := range cassettes {
+		exchange, ok := findModelExchangeForCassette(exchanges, cassettes[i])
+		if !ok {
+			continue
+		}
+		if cassettes[i].ExchangeID == "" {
+			cassettes[i].ExchangeID = firstNonEmpty(exchange.ExchangeID, exchange.ID)
+		}
+		if cassettes[i].ExchangeKind == "" {
+			cassettes[i].ExchangeKind = exchange.ExchangeKind
+		}
+		if cassettes[i].ExchangeRole == "" {
+			cassettes[i].ExchangeRole = exchange.ExchangeRole
+		}
+		if cassettes[i].ParentExchangeID == "" {
+			cassettes[i].ParentExchangeID = exchange.ParentExchangeID
+		}
+		if cassettes[i].SequenceIndex == nil {
+			cassettes[i].SequenceIndex = intPtr(exchange.SequenceIndex)
+		}
+	}
+}
+
+func findRawCassetteHeader(cassettes []responsesRawCassetteView, exchange responsesaudit.UpstreamExchangeView) recordfile.RecordHeader {
+	for _, cassette := range cassettes {
+		if cassette.CassettePath != "" && exchange.CassettePath != "" && cassette.CassettePath == exchange.CassettePath {
+			return cassette.Header
+		}
+		if cassette.TraceID != "" && exchange.TraceID != "" && cassette.TraceID == exchange.TraceID {
+			return cassette.Header
+		}
+	}
+	return recordfile.RecordHeader{}
+}
+
+func findModelExchangeForCassette(exchanges []responsesExchangeView, cassette responsesRawCassetteView) (responsesExchangeView, bool) {
+	for _, exchange := range exchanges {
+		if cassette.CassettePath != "" && exchange.CassettePath == cassette.CassettePath {
+			return exchange, true
+		}
+		if cassette.TraceID != "" && exchange.TraceID == cassette.TraceID {
+			return exchange, true
+		}
+	}
+	return responsesExchangeView{}, false
+}
+
+func entryExchangeID(requestAuditID string) string {
+	if requestAuditID == "" {
+		return ""
+	}
+	return "entry:" + requestAuditID
+}
+
+func firstNonZeroTime(values ...time.Time) time.Time {
+	for _, value := range values {
+		if !value.IsZero() {
+			return value
+		}
+	}
+	return time.Time{}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
