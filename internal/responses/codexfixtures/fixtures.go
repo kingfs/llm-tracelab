@@ -172,6 +172,9 @@ func ValidateAll() error {
 	if err := requirePhase0HostedToolFixtures(seen); err != nil {
 		return err
 	}
+	if err := requireCodexCompatFixtures(seen); err != nil {
+		return err
+	}
 
 	for _, file := range files {
 		switch file.Kind {
@@ -212,6 +215,30 @@ func ValidateAll() error {
 		}
 	}
 
+	return nil
+}
+
+func requireCodexCompatFixtures(seen map[string]File) error {
+	const name = "codex_web_search_absent_tools_request.json"
+	if _, ok := seen[name]; !ok {
+		return fmt.Errorf("missing Codex compatibility request fixture %s", name)
+	}
+	req, err := Decode[protocol.CreateResponseRequest](name)
+	if err != nil {
+		return err
+	}
+	if req.Model == "" || req.Input == nil {
+		return fmt.Errorf("%s: request must include model and input", name)
+	}
+	if req.Store == nil || !*req.Store {
+		return fmt.Errorf("%s: request must set store=true", name)
+	}
+	if len(req.Tools) != 0 {
+		return fmt.Errorf("%s: tools must be absent in the raw Codex fixture", name)
+	}
+	if req.ToolChoice != nil {
+		return fmt.Errorf("%s: tool_choice must be absent in the raw Codex fixture", name)
+	}
 	return nil
 }
 

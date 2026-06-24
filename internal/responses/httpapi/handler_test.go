@@ -296,6 +296,140 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexCompatInjectsAvailableHostedToolWhenToolsAbsent(t *testing.T) {
+	rt := &fakeRuntime{
+		createResp: protocol.Response{
+			ID:     "resp_codex_compat",
+			Object: "response",
+			Status: "completed",
+			Model:  "gpt-test",
+		},
+	}
+	auditor := &fakeAuditor{}
+	body := `{"model":"gpt-test","input":"Search today's AI news."}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	NewHandler(rt,
+		WithRequestAuditor(auditor),
+		WithExecutionEventRecorder(auditor),
+		WithCodexCompat(CodexCompatOptions{
+			Enabled: true,
+			AvailableHostedTools: []protocol.Tool{{
+				Type:          "web_search",
+				MaxNumResults: 3,
+			}},
+		}),
+	).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(rt.createReq.Tools) != 1 || rt.createReq.Tools[0].Type != "web_search" || rt.createReq.Tools[0].MaxNumResults != 3 {
+		t.Fatalf("runtime tools = %#v, want injected web_search", rt.createReq.Tools)
+	}
+	if rt.createReq.ToolChoice != "auto" {
+		t.Fatalf("tool_choice = %#v, want auto", rt.createReq.ToolChoice)
+	}
+	var audited protocol.CreateResponseRequest
+	if err := json.Unmarshal([]byte(auditor.acceptedEntry.BodyPreview), &audited); err != nil {
+		t.Fatalf("decode audited normalized body: %v; body=%s", err, auditor.acceptedEntry.BodyPreview)
+	}
+	if len(audited.Tools) != 1 || audited.Tools[0].Type != "web_search" || audited.ToolChoice != "auto" {
+		t.Fatalf("audited request = %#v, want normalized tools and tool_choice", audited)
+	}
+	if len(auditor.events) == 0 {
+		t.Fatalf("missing execution events")
+	}
+	compat, ok := auditor.events[0].DetailsJSON["codex_compat"].(map[string]any)
+	if !ok || compat["tool_choice_defaulted"] != true {
+		t.Fatalf("codex compat event details = %#v, want injected detail", auditor.events[0].DetailsJSON)
+	}
+	types, ok := compat["injected_hosted_tools"].([]string)
+	if !ok || len(types) != 1 || types[0] != "web_search" {
+		t.Fatalf("injected_hosted_tools = %#v, want web_search", compat["injected_hosted_tools"])
+	}
+}
+
+func TestCodexCompatDisabledDoesNotInjectHostedTool(t *testing.T) {
+	rt := &fakeRuntime{
+		createResp: protocol.Response{
+			ID:     "resp_codex_compat_disabled",
+			Object: "response",
+			Status: "completed",
+			Model:  "gpt-test",
+		},
+	}
+	rec := httptest.NewRecorder()
+
+	NewHandler(rt, WithCodexCompat(CodexCompatOptions{
+		Enabled: true,
+		AvailableHostedTools: []protocol.Tool{{
+			Type: "mcp",
+		}},
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-test","input":"hello"}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(rt.createReq.Tools) != 0 || rt.createReq.ToolChoice != nil {
+		t.Fatalf("runtime request = %#v, want no injected tools", rt.createReq)
+	}
+
+	rt = &fakeRuntime{
+		createResp: protocol.Response{
+			ID:     "resp_codex_compat_disabled",
+			Object: "response",
+			Status: "completed",
+			Model:  "gpt-test",
+		},
+	}
+	rec = httptest.NewRecorder()
+	NewHandler(rt, WithCodexCompat(CodexCompatOptions{
+		AvailableHostedTools: []protocol.Tool{{
+			Type: "web_search",
+		}},
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-test","input":"hello"}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(rt.createReq.Tools) != 0 || rt.createReq.ToolChoice != nil {
+		t.Fatalf("runtime request = %#v, want no injected tools when disabled", rt.createReq)
+	}
+}
+
+func TestCodexCompatPreservesExistingClientTools(t *testing.T) {
+	rt := &fakeRuntime{
+		createResp: protocol.Response{
+			ID:     "resp_codex_compat_client_tools",
+			Object: "response",
+			Status: "completed",
+			Model:  "gpt-test",
+		},
+	}
+	body := `{"model":"gpt-test","input":"hello","tools":[{"type":"function","name":"read_file","parameters":{"type":"object"}}],"tool_choice":"auto"}`
+	rec := httptest.NewRecorder()
+
+	NewHandler(rt, WithCodexCompat(CodexCompatOptions{
+		Enabled:             true,
+		PreserveClientTools: true,
+		AvailableHostedTools: []protocol.Tool{{
+			Type: "web_search",
+		}},
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(rt.createReq.Tools) != 1 || rt.createReq.Tools[0].Type != "function" || rt.createReq.Tools[0].Name != "read_file" {
+		t.Fatalf("runtime tools = %#v, want preserved function tool", rt.createReq.Tools)
+	}
+	if rt.createReq.ToolChoice != "auto" {
+		t.Fatalf("tool_choice = %#v, want preserved auto", rt.createReq.ToolChoice)
+	}
+}
+
 func TestCreateResponseBadJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 	NewHandler(&fakeRuntime{}).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":`)))

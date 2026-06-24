@@ -23,6 +23,9 @@ Coverage:
   continuation using `previous_response_id`.
 - `ordinary_web_search_descriptor_request.json`: ordinary hosted web search
   descriptor accepted as compatibility input.
+- `codex_web_search_absent_tools_request.json`: raw Codex web search-shaped
+  request that omits `tools` and `tool_choice`; HTTP compatibility
+  normalization may inject an available hosted search descriptor.
 - `forced_web_search_request.json`: forced hosted web search descriptor,
   documenting the execution-or-stable-rejection contract.
 - `unsupported_mcp_request.json`, `unsupported_file_search_request.json`,

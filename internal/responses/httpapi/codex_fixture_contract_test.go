@@ -42,6 +42,7 @@ func TestCodexFixtureRunnerValidatesEveryCurrentFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"codex_web_search_absent_tools_request.json",
 		"forced_web_search_request.json",
 		"function_call_expected_response.json",
 		"function_call_output_continuation_request.json",
@@ -179,6 +180,22 @@ func TestCodexFixtureCreateRequestContracts(t *testing.T) {
 		}
 		requireStoreTrue(t, req)
 		requireCodexThread(t, req, "thread_fixture_web_search")
+	})
+
+	t.Run("Codex web search absent tools request shape", func(t *testing.T) {
+		req := decodeCodexFixture[protocol.CreateResponseRequest](t, "codex_web_search_absent_tools_request.json")
+
+		if req.Model != "local-test-model" {
+			t.Fatalf("model = %q, want local-test-model", req.Model)
+		}
+		if got, ok := req.Input.(string); !ok || !strings.Contains(got, "Search the web") {
+			t.Fatalf("input = %#v, want web search prompt", req.Input)
+		}
+		if len(req.Tools) != 0 || req.ToolChoice != nil {
+			t.Fatalf("raw Codex request must omit tools and tool_choice: tools=%#v tool_choice=%#v", req.Tools, req.ToolChoice)
+		}
+		requireStoreTrue(t, req)
+		requireCodexThread(t, req, "thread_fixture_web_search_absent_tools")
 	})
 
 	t.Run("forced web_search request shape", func(t *testing.T) {
