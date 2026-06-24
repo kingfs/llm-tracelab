@@ -7,7 +7,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { MultiLineChart } from "../components/common/Charts";
 import { Switch } from "../components/common/Controls";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL, deleteJSON, downloadBlob, patchJSON, postJSON } from "../lib/api";
+import { apiPaths, apiURL, deleteJSON, patchJSON, postJSON } from "../lib/api";
 import { buildProviderLink, formatCount, formatDateTime, formatTime, MONITOR_WINDOW_OPTIONS, normalizeAnalyticsWindow, setOrDeleteParam } from "../lib/monitor";
 
 const DEFAULT_FORM = {
@@ -38,11 +38,9 @@ export function ProvidersPage() {
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const [refreshTick, setRefreshTick] = useState(0);
   const [formOpen, setFormOpen] = useState(false);
-  const [secretTick, setSecretTick] = useState(0);
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const providers = useJSON(apiURL(apiPaths.providers, params), [windowValue, refreshTick]);
-  const secret = useJSON(apiPaths.localSecretKey, [secretTick]);
   const presets = useJSON(apiPaths.providerPresets, []);
   const items = providers.data?.items || [];
   const totals = useMemo(() => summarizeProviders(items), [items]);
@@ -63,10 +61,6 @@ export function ProvidersPage() {
           <h1>Providers</h1>
         </div>
         <div className="topbar-meta">
-          <button className="ghost-button active icon-text-button" type="button" onClick={() => setFormOpen(true)}>
-            <PlusIcon />
-            <span>New provider</span>
-          </button>
           <span className="badge">{providers.data?.refreshed_at ? formatTime(providers.data.refreshed_at) : "..."}</span>
         </div>
       </header>
@@ -105,15 +99,25 @@ export function ProvidersPage() {
         </div>
       </section>
 
-      <LocalSecretPanel data={secret.data} loading={secret.loading} error={secret.error} onRefresh={() => setSecretTick((tick) => tick + 1)} />
-
-      <ProviderProbeBatchPanel providers={items} onApplied={() => setRefreshTick((tick) => tick + 1)} />
-
       {providers.error ? <EmptyState title="Unable to load providers" detail={providers.error} tone="danger" /> : null}
       {providers.loading && !providers.data ? <EmptyState title="Loading providers" detail="Collecting provider configuration and usage summary." /> : null}
       {providers.data ? (
-        <section className="provider-grid">
-          {items.length ? items.map((item) => <ProviderCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title="No providers" detail="Create a provider from Monitor. YAML upstreams are only used as first-run bootstrap input." />}
+        <section className="panel">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Configured providers</p>
+              <h2>Provider cards</h2>
+            </div>
+            <div className="panel-head-actions">
+              <button className="ghost-button active icon-text-button" type="button" onClick={() => setFormOpen(true)}>
+                <PlusIcon />
+                <span>New provider</span>
+              </button>
+            </div>
+          </div>
+          <div className="provider-grid">
+            {items.length ? items.map((item) => <ProviderCard key={item.id} item={item} windowValue={windowValue} onRefresh={() => setRefreshTick((tick) => tick + 1)} />) : <EmptyState title="No providers" detail="Create a provider from Monitor. YAML upstreams are only used as first-run bootstrap input." />}
+          </div>
         </section>
       ) : null}
       {formOpen ? (
@@ -131,75 +135,6 @@ export function ProvidersPage() {
 }
 
 export const ChannelsPage = ProvidersPage;
-
-function ProviderProbeBatchPanel({ providers, onApplied }) {
-  const [report, setReport] = useState(null);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
-  const [applyResult, setApplyResult] = useState(null);
-  const providerMap = useMemo(() => new Map((providers || []).map((item) => [item.id, item])), [providers]);
-  const summary = useMemo(() => summarizeProbeBatchReport(report, providerMap), [report, providerMap]);
-
-  const previewReport = async () => {
-    setBusy("preview");
-    setError("");
-    setApplyResult(null);
-    try {
-      const nextReport = await postJSON(apiPaths.providerProbeReport, {});
-      setReport(nextReport);
-    } catch (err) {
-      setError(err.message || "Unable to preview provider probe report.");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const applyDetected = async () => {
-    if (!summary.applyable.length) {
-      return;
-    }
-    setBusy("apply");
-    setError("");
-    try {
-      const result = await postJSON(apiPaths.providerProbeApply, providerProbeBatchApplyPayload());
-      setApplyResult(result);
-      onApplied?.();
-    } catch (err) {
-      setError(err.message || "Unable to apply provider probe suggestions.");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  return (
-    <section className="panel provider-batch-probe-panel">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">Provider detection</p>
-          <h2>Batch probe and apply</h2>
-        </div>
-        <div className="panel-head-actions">
-          <button className="ghost-button" type="button" onClick={previewReport} disabled={busy === "preview" || !providers.length}>{busy === "preview" ? "Previewing" : "Preview batch probe"}</button>
-          <button className="ghost-button active" type="button" onClick={applyDetected} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? "Applying" : "Apply detected suggestions"}</button>
-        </div>
-      </div>
-      <p className="trace-subline">Preview runs a read-only provider probe report first. Apply only fills missing API type, missing protocol family, and capabilities that are not set; explicit configuration and false capabilities are preserved.</p>
-      <div className="detail-meta-strip">
-        <Metric label="detected" value={formatCount(summary.detected)} />
-        <Metric label="unknown" value={formatCount(summary.unknown)} />
-        <Metric label="errors" value={formatCount(summary.errors)} />
-        <Metric label="applyable" value={formatCount(summary.applyable.length)} />
-      </div>
-      {report ? (
-        <div className="provider-batch-report-list">
-          {summary.rows.length ? summary.rows.map((row) => <ProviderProbeBatchRow key={row.providerID || row.baseURL} row={row} />) : <EmptyState title="No probe targets" detail="No enabled provider with a base URL was returned by the report." compact />}
-        </div>
-      ) : null}
-      {applyResult ? <p className="trace-subline">Apply request accepted: {formatProviderProbeApplyResult(applyResult)}</p> : null}
-      {error ? <EmptyState title="Provider batch probe failed" detail={error} tone="danger" compact /> : null}
-    </section>
-  );
-}
 
 function ProviderProbeBatchRow({ row }) {
   return (
@@ -375,80 +310,10 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
   );
 }
 
-function LocalSecretPanel({ data, loading, error, onRefresh }) {
-  const [busy, setBusy] = useState("");
-  const [actionError, setActionError] = useState("");
-  const [confirmRotate, setConfirmRotate] = useState(false);
-
-  const downloadKey = async () => {
-    setBusy("download");
-    setActionError("");
-    try {
-      const blob = await downloadBlob(apiPaths.localSecretKeyExport);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `trace_index.secret.${data?.fingerprint || "backup"}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      setActionError(err.message || "Unable to download key backup.");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const rotateKey = async () => {
-    if (!confirmRotate) {
-      return;
-    }
-    setBusy("rotate");
-    setActionError("");
-    try {
-      await postJSON(apiPaths.localSecretKeyRotate, {});
-      setConfirmRotate(false);
-      onRefresh();
-    } catch (err) {
-      setActionError(err.message || "Unable to rotate local key.");
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const readable = data?.readable && !data?.error;
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <p className="eyebrow">Local secret key</p>
-          <h2>Provider secret storage</h2>
-        </div>
-        <div className="trace-tag-group">
-          <InlineTag tone={readable ? "green" : "danger"}>{loading && !data ? "loading" : readable ? "readable" : "attention"}</InlineTag>
-          {data?.mode ? <InlineTag tone="accent">{data.mode}</InlineTag> : null}
-        </div>
-      </div>
-      <div className="detail-meta-strip">
-        <Metric label="fingerprint" value={data?.fingerprint || "-"} />
-        <Metric label="exists" value={data ? String(Boolean(data.exists)) : "-"} />
-        <Metric label="readable" value={data ? String(Boolean(data.readable)) : "-"} />
-      </div>
-      {data?.key_path ? <p className="trace-subline mono">{data.key_path}</p> : null}
-      {error || data?.error || actionError ? <EmptyState title="Secret key action failed" detail={actionError || data?.error || error} tone="danger" compact /> : null}
-      <div className="provider-form-actions">
-        <button className="ghost-button" type="button" onClick={downloadKey} disabled={!readable || busy === "download"}>{busy === "download" ? "Downloading" : "Download backup"}</button>
-        <label className="provider-form-check"><input type="checkbox" checked={confirmRotate} onChange={(event) => setConfirmRotate(event.target.checked)} /> Confirm rotate</label>
-        <button className="ghost-button" type="button" onClick={rotateKey} disabled={!readable || !confirmRotate || busy === "rotate"}>{busy === "rotate" ? "Rotating" : "Rotate key"}</button>
-      </div>
-    </section>
-  );
-}
-
 function ProviderCard({ item, windowValue, onRefresh }) {
   const summary = item.summary || {};
   const [saving, setSaving] = useState(false);
+  const [probeOpen, setProbeOpen] = useState(false);
   const setEnabled = async (enabled, event) => {
     event?.preventDefault();
     event?.stopPropagation();
@@ -486,6 +351,17 @@ function ProviderCard({ item, windowValue, onRefresh }) {
           <button className="icon-button" type="button" onClick={deleteProvider} disabled={saving} title="Delete provider" aria-label={`Delete ${item.name || item.id}`}>
             <DeleteIcon />
           </button>
+          <button
+            className="ghost-button provider-card-probe-button"
+            type="button"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setProbeOpen(true);
+            }}
+          >
+            Probe
+          </button>
           <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(item.source)}</InlineTag>
           {item.secret_storage_mode ? <InlineTag tone={item.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{item.secret_storage_mode}</InlineTag> : null}
           {item.last_probe_status ? <InlineTag tone={item.last_probe_status === "success" ? "green" : "danger"}>{item.last_probe_status}</InlineTag> : null}
@@ -500,7 +376,82 @@ function ProviderCard({ item, windowValue, onRefresh }) {
         <span className="mono">{item.base_url}</span>
         <span>{formatDateTime(item.last_probe_at || item.updated_at)}</span>
       </div>
+      {probeOpen ? <ProviderProbeDialog provider={item} onClose={() => setProbeOpen(false)} onApplied={onRefresh} /> : null}
     </Link>
+  );
+}
+
+function ProviderProbeDialog({ provider, onClose, onApplied }) {
+  const [report, setReport] = useState(null);
+  const [busy, setBusy] = useState("preview");
+  const [error, setError] = useState("");
+  const [applyResult, setApplyResult] = useState(null);
+  const providerMap = useMemo(() => new Map([[provider.id, provider]]), [provider]);
+  const summary = useMemo(() => summarizeProbeBatchReport(report, providerMap), [report, providerMap]);
+  const row = summary.rows[0] || null;
+
+  const previewReport = async () => {
+    setBusy("preview");
+    setError("");
+    setApplyResult(null);
+    try {
+      const nextReport = await postJSON(apiPaths.providerProbeReport, providerProbeBatchApplyPayload(provider.id));
+      setReport(nextReport);
+    } catch (err) {
+      setError(err.message || "Unable to run provider probe.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const applyDetected = async () => {
+    if (!summary.applyable.length) {
+      return;
+    }
+    setBusy("apply");
+    setError("");
+    try {
+      const result = await postJSON(apiPaths.providerProbeApply, providerProbeBatchApplyPayload(provider.id));
+      setApplyResult(result);
+      onApplied?.();
+    } catch (err) {
+      setError(err.message || "Unable to apply provider probe suggestions.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  React.useEffect(() => {
+    previewReport();
+  }, []);
+
+  return createPortal(
+    <div className="nav-modal-backdrop" role="presentation" onClick={onClose}>
+      <div className="nav-modal provider-probe-modal" role="dialog" aria-modal="true" aria-labelledby="provider-probe-title" onClick={(event) => event.stopPropagation()}>
+        <div className="nav-modal-head">
+          <div>
+            <p className="eyebrow">{provider.provider_preset || "provider"}</p>
+            <h2 id="provider-probe-title">Provider probe</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Close">x</button>
+        </div>
+        <div className="provider-probe-dialog-summary">
+          <Metric label="provider" value={provider.name || provider.id} />
+          <Metric label="detected" value={formatCount(summary.detected)} />
+          <Metric label="applyable" value={formatCount(summary.applyable.length)} />
+        </div>
+        {busy === "preview" && !report ? <EmptyState title="Running provider probe" detail="Checking API surface, protocol family, and supported capabilities." compact /> : null}
+        {row ? <ProviderProbeBatchRow row={row} /> : null}
+        {report && !row ? <EmptyState title="No probe result" detail="The provider report did not return a row for this provider." compact /> : null}
+        {applyResult ? <p className="trace-subline">Apply request accepted: {formatProviderProbeApplyResult(applyResult)}</p> : null}
+        {error ? <EmptyState title="Provider probe failed" detail={error} tone="danger" compact /> : null}
+        <div className="nav-modal-actions">
+          <button className="ghost-button" type="button" onClick={previewReport} disabled={busy === "preview"}>{busy === "preview" ? "Probing" : "Run again"}</button>
+          <button className="ghost-button active" type="button" onClick={applyDetected} disabled={busy === "apply" || !summary.applyable.length}>{busy === "apply" ? "Applying" : "Apply suggestions"}</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

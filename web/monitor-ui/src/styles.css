@@ -1121,6 +1121,61 @@ a:focus-visible {
   gap: 16px;
 }
 
+.overview-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.overview-provider-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.overview-provider-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.overview-provider-card > div:nth-child(2) {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.overview-provider-card strong,
+.overview-provider-card span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-provider-card > .trace-tag-group,
+.overview-provider-card > .detail-meta-strip {
+  grid-column: 1 / -1;
+}
+
+.provider-logo-button {
+  width: 38px;
+  height: 38px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--text);
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
 .overview-attention-panel {
   min-width: 0;
   border: 1px solid var(--line);
@@ -1771,6 +1826,8 @@ a:focus-visible {
 :root[data-theme="light"] .upstream-card,
 :root[data-theme="light"] .channel-probe-card,
 :root[data-theme="light"] .provider-probe-card,
+:root[data-theme="light"] .overview-provider-card,
+:root[data-theme="light"] .provider-entry-card,
 :root[data-theme="light"] .usage-chart-panel,
 :root[data-theme="light"] .line-chart-card,
 :root[data-theme="light"] .empty-state {
@@ -1846,6 +1903,8 @@ a:focus-visible {
   :root[data-theme="system"] .upstream-card,
   :root[data-theme="system"] .channel-probe-card,
   :root[data-theme="system"] .provider-probe-card,
+  :root[data-theme="system"] .overview-provider-card,
+  :root[data-theme="system"] .provider-entry-card,
   :root[data-theme="system"] .usage-chart-panel,
   :root[data-theme="system"] .line-chart-card,
   :root[data-theme="system"] .empty-state {
@@ -3663,8 +3722,23 @@ a:focus-visible {
 
 .provider-entry-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 14px;
+}
+
+.provider-card-probe-button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.provider-probe-modal {
+  width: min(720px, 100%);
+}
+
+.provider-probe-dialog-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .provider-entry-card {
@@ -3812,7 +3886,9 @@ a:focus-visible {
   .trace-reading-grid,
   .upstream-grid,
   .channel-grid,
+  .provider-grid,
   .model-market-grid,
+  .overview-provider-grid,
   .overview-chart-grid,
   .overview-breakdown-grid,
   .overview-attention-grid,
@@ -3828,6 +3904,10 @@ a:focus-visible {
   .token-form,
   .token-table-head,
   .token-row {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-probe-dialog-summary {
     grid-template-columns: 1fr;
   }
 

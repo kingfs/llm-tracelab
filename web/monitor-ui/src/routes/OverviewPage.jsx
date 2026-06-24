@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { MultiLineChart } from "../components/common/Charts";
-import { InlineTag } from "../components/common/Badges";
+import { InlineTag, PlusIcon } from "../components/common/Badges";
 import { StatCard } from "../components/common/Display";
 import { EmptyState } from "../components/common/EmptyState";
 import { RequestList } from "../components/monitor/RequestList";
@@ -11,6 +11,8 @@ import { apiPaths, apiURL } from "../lib/api";
 import {
   buildRoutingLink,
   buildTraceLink,
+  buildProviderLink,
+  formatCount,
   formatDateTime,
   formatDuration,
   formatEndpointTag,
@@ -31,6 +33,7 @@ export function OverviewPage() {
   const [refreshTick, setRefreshTick] = useState(0);
   const { loading, data, error } = useJSON(apiURL(apiPaths.overview, { window: windowValue }), [windowValue, refreshTick]);
   const { data: eventSummary } = useJSON(apiURL(apiPaths.eventsSummary, { window: windowValue }), [windowValue, refreshTick]);
+  const { data: providerData } = useJSON(apiURL(apiPaths.providers, { window: windowValue }), [windowValue, refreshTick]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -44,6 +47,7 @@ export function OverviewPage() {
   const attention = data?.attention || {};
   const analysis = data?.analysis || {};
   const observation = data?.observation || {};
+  const providers = providerData?.items || [];
 
   const setWindow = (nextWindow) => {
     const next = new URLSearchParams(searchParams);
@@ -106,6 +110,45 @@ export function OverviewPage() {
         <div className="panel-foot-actions overview-events-link">
           <Link className="ghost-button active" to="/events">Open Events</Link>
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <p className="eyebrow">Providers</p>
+            <h2>Configured upstreams</h2>
+          </div>
+          <div className="panel-head-actions">
+            <Link className="ghost-button active icon-text-button" to="/providers">
+              <PlusIcon />
+              <span>New provider</span>
+            </Link>
+          </div>
+        </div>
+        {providers.length ? (
+          <div className="overview-provider-grid">
+            {providers.map((provider) => (
+              <Link className="overview-provider-card" key={provider.id} to={buildProviderLink(provider.id, windowValue)}>
+                <div className="provider-logo-button" aria-hidden="true">{providerLogoText(provider)}</div>
+                <div>
+                  <strong>{provider.name || provider.id}</strong>
+                  <span>{provider.provider_preset || "custom"}</span>
+                </div>
+                <div className="trace-tag-group">
+                  <InlineTag tone={provider.enabled ? "green" : "gold"}>{provider.enabled ? "enabled" : "disabled"}</InlineTag>
+                  {provider.last_probe_status ? <InlineTag tone={provider.last_probe_status === "success" ? "green" : "danger"}>{provider.last_probe_status}</InlineTag> : null}
+                </div>
+                <div className="detail-meta-strip">
+                  <OverviewProviderMetric label="models" value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
+                  <OverviewProviderMetric label="requests" value={formatCount(provider.summary?.request_count)} />
+                  <OverviewProviderMetric label="tokens" value={formatTokenCount(provider.summary?.total_tokens || 0)} />
+                </div>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No providers configured" detail="Add a provider before routing client traffic through TraceLab." compact />
+        )}
       </section>
 
       <section className="panel">
@@ -217,6 +260,27 @@ function AttentionPanel({ title, emptyTitle, children }) {
       <div className="breakdown-title">{title}</div>
       {children || <EmptyState title={emptyTitle} detail="No indexed records require attention in the current window." compact />}
     </section>
+  );
+}
+
+function providerLogoText(provider = {}) {
+  const source = provider.provider_preset || provider.name || provider.id || "AI";
+  const parts = String(source).replace(/[_-]+/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) {
+    return "AI";
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+}
+
+function OverviewProviderMetric({ label, value }) {
+  return (
+    <span className="detail-meta-pill">
+      <span className="detail-meta-label">{label}</span>
+      <strong>{value}</strong>
+    </span>
   );
 }
 

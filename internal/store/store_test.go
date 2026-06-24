@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
@@ -86,6 +87,52 @@ func TestNewInitializesAppSettingsSchema(t *testing.T) {
 	}
 	if name != "app_settings" {
 		t.Fatalf("sqlite table = %q, want app_settings", name)
+	}
+}
+
+func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	invalidText := string([]byte{'o', 'k', ' ', 0xe8})
+	invalidRaw := json.RawMessage([]byte{'{', '"', 't', 'e', 'x', 't', '"', ':', '"', 0xe8, '"', '}'})
+	if err := st.SaveObservation(observe.TraceObservation{
+		TraceID:       "trace-invalid-utf8",
+		Provider:      "openai_compatible",
+		Operation:     "chat.completions",
+		Model:         "gpt-test",
+		Parser:        "store-test",
+		ParserVersion: "1",
+		Status:        observe.ParseStatusParsed,
+		Response: observe.ObservationResponse{
+			Nodes: []observe.SemanticNode{{
+				ID:             "node-invalid-utf8",
+				ProviderType:   "message",
+				NormalizedType: observe.NodeMessage,
+				Path:           "$.choices[0].message",
+				Text:           invalidText,
+				Raw:            invalidRaw,
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("SaveObservation() error = %v", err)
+	}
+
+	nodes, err := st.ListSemanticNodes("trace-invalid-utf8")
+	if err != nil {
+		t.Fatalf("ListSemanticNodes() error = %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(nodes))
+	}
+	if !utf8.ValidString(nodes[0].Node.Text) {
+		t.Fatalf("node text is not valid UTF-8: %q", nodes[0].Node.Text)
+	}
+	if !utf8.Valid(nodes[0].Node.Raw) {
+		t.Fatalf("node raw is not valid UTF-8: %q", string(nodes[0].Node.Raw))
 	}
 }
 

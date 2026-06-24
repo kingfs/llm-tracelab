@@ -4860,7 +4860,7 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 			summary_json=excluded.summary_json,
 			warnings_json=excluded.warnings_json,
 			updated_at=excluded.updated_at
-	`, obs.TraceID, obs.Parser, obs.ParserVersion, string(obs.Status), obs.Provider, obs.Operation, obs.Model, string(summaryJSON), string(warningsJSON), now, now); err != nil {
+	`, sqlSafeText(obs.TraceID), sqlSafeText(obs.Parser), sqlSafeText(obs.ParserVersion), string(obs.Status), sqlSafeText(obs.Provider), sqlSafeText(obs.Operation), sqlSafeText(obs.Model), sqlSafeBytes(summaryJSON), sqlSafeBytes(warningsJSON), now, now); err != nil {
 		return err
 	}
 	if _, err := s.execTx(tx, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
@@ -4875,14 +4875,16 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 		if err != nil {
 			return err
 		}
+		nodeJSON = sqlSafeBytes(nodeJSON)
+		rawJSON = sqlSafeBytes(rawJSON)
 		if _, err := s.execTx(tx, `
 			INSERT INTO semantic_nodes (
 				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
 				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, obs.TraceID, row.Node.ID, row.ParentID, row.Node.ProviderType, string(row.Node.NormalizedType), row.Node.Role,
-			row.Node.Path, row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
+		`, sqlSafeText(obs.TraceID), sqlSafeText(row.Node.ID), sqlSafeText(row.ParentID), sqlSafeText(row.Node.ProviderType), string(row.Node.NormalizedType), sqlSafeText(row.Node.Role),
+			sqlSafeText(row.Node.Path), row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
 			return err
 		}
 	}
@@ -7266,9 +7268,20 @@ func dedupeFlatSemanticNodes(nodes []observe.FlatSemanticNode) []observe.FlatSem
 
 func textPreview(text string, limit int) string {
 	if limit <= 0 || len(text) <= limit {
-		return text
+		return sqlSafeText(text)
 	}
-	return text[:limit]
+	return sqlSafeText(text[:limit])
+}
+
+func sqlSafeText(text string) string {
+	return strings.ToValidUTF8(text, "\uFFFD")
+}
+
+func sqlSafeBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	return []byte(sqlSafeText(string(data)))
 }
 
 func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
