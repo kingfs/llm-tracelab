@@ -23,6 +23,16 @@ type UpstreamExchange struct {
 	RequestAuditID string `json:"request_audit_id,omitempty"`
 	// TraceID holds the value of the "trace_id" field.
 	TraceID string `json:"trace_id,omitempty"`
+	// ExchangeID holds the value of the "exchange_id" field.
+	ExchangeID string `json:"exchange_id,omitempty"`
+	// ExchangeKind holds the value of the "exchange_kind" field.
+	ExchangeKind string `json:"exchange_kind,omitempty"`
+	// ExchangeRole holds the value of the "exchange_role" field.
+	ExchangeRole string `json:"exchange_role,omitempty"`
+	// ParentExchangeID holds the value of the "parent_exchange_id" field.
+	ParentExchangeID string `json:"parent_exchange_id,omitempty"`
+	// SequenceIndex holds the value of the "sequence_index" field.
+	SequenceIndex int `json:"sequence_index,omitempty"`
 	// CassettePath holds the value of the "cassette_path" field.
 	CassettePath string `json:"cassette_path,omitempty"`
 	// UpstreamID holds the value of the "upstream_id" field.
@@ -49,9 +59,9 @@ func (*UpstreamExchange) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case upstreamexchange.FieldStatusCode:
+		case upstreamexchange.FieldSequenceIndex, upstreamexchange.FieldStatusCode:
 			values[i] = new(sql.NullInt64)
-		case upstreamexchange.FieldID, upstreamexchange.FieldResponseID, upstreamexchange.FieldRequestAuditID, upstreamexchange.FieldTraceID, upstreamexchange.FieldCassettePath, upstreamexchange.FieldUpstreamID, upstreamexchange.FieldRouteTarget, upstreamexchange.FieldModel, upstreamexchange.FieldEndpoint, upstreamexchange.FieldErrorText:
+		case upstreamexchange.FieldID, upstreamexchange.FieldResponseID, upstreamexchange.FieldRequestAuditID, upstreamexchange.FieldTraceID, upstreamexchange.FieldExchangeID, upstreamexchange.FieldExchangeKind, upstreamexchange.FieldExchangeRole, upstreamexchange.FieldParentExchangeID, upstreamexchange.FieldCassettePath, upstreamexchange.FieldUpstreamID, upstreamexchange.FieldRouteTarget, upstreamexchange.FieldModel, upstreamexchange.FieldEndpoint, upstreamexchange.FieldErrorText:
 			values[i] = new(sql.NullString)
 		case upstreamexchange.FieldStartedAt, upstreamexchange.FieldCompletedAt:
 			values[i] = new(sql.NullTime)
@@ -93,6 +103,36 @@ func (_m *UpstreamExchange) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field trace_id", values[i])
 			} else if value.Valid {
 				_m.TraceID = value.String
+			}
+		case upstreamexchange.FieldExchangeID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_id", values[i])
+			} else if value.Valid {
+				_m.ExchangeID = value.String
+			}
+		case upstreamexchange.FieldExchangeKind:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_kind", values[i])
+			} else if value.Valid {
+				_m.ExchangeKind = value.String
+			}
+		case upstreamexchange.FieldExchangeRole:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_role", values[i])
+			} else if value.Valid {
+				_m.ExchangeRole = value.String
+			}
+		case upstreamexchange.FieldParentExchangeID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field parent_exchange_id", values[i])
+			} else if value.Valid {
+				_m.ParentExchangeID = value.String
+			}
+		case upstreamexchange.FieldSequenceIndex:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field sequence_index", values[i])
+			} else if value.Valid {
+				_m.SequenceIndex = int(value.Int64)
 			}
 		case upstreamexchange.FieldCassettePath:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -192,6 +232,21 @@ func (_m *UpstreamExchange) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("trace_id=")
 	builder.WriteString(_m.TraceID)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_id=")
+	builder.WriteString(_m.ExchangeID)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_kind=")
+	builder.WriteString(_m.ExchangeKind)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_role=")
+	builder.WriteString(_m.ExchangeRole)
+	builder.WriteString(", ")
+	builder.WriteString("parent_exchange_id=")
+	builder.WriteString(_m.ParentExchangeID)
+	builder.WriteString(", ")
+	builder.WriteString("sequence_index=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SequenceIndex))
 	builder.WriteString(", ")
 	builder.WriteString("cassette_path=")
 	builder.WriteString(_m.CassettePath)

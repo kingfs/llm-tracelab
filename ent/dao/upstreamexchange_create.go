@@ -65,6 +65,76 @@ func (_c *UpstreamExchangeCreate) SetNillableTraceID(v *string) *UpstreamExchang
 	return _c
 }
 
+// SetExchangeID sets the "exchange_id" field.
+func (_c *UpstreamExchangeCreate) SetExchangeID(v string) *UpstreamExchangeCreate {
+	_c.mutation.SetExchangeID(v)
+	return _c
+}
+
+// SetNillableExchangeID sets the "exchange_id" field if the given value is not nil.
+func (_c *UpstreamExchangeCreate) SetNillableExchangeID(v *string) *UpstreamExchangeCreate {
+	if v != nil {
+		_c.SetExchangeID(*v)
+	}
+	return _c
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_c *UpstreamExchangeCreate) SetExchangeKind(v string) *UpstreamExchangeCreate {
+	_c.mutation.SetExchangeKind(v)
+	return _c
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_c *UpstreamExchangeCreate) SetNillableExchangeKind(v *string) *UpstreamExchangeCreate {
+	if v != nil {
+		_c.SetExchangeKind(*v)
+	}
+	return _c
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_c *UpstreamExchangeCreate) SetExchangeRole(v string) *UpstreamExchangeCreate {
+	_c.mutation.SetExchangeRole(v)
+	return _c
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_c *UpstreamExchangeCreate) SetNillableExchangeRole(v *string) *UpstreamExchangeCreate {
+	if v != nil {
+		_c.SetExchangeRole(*v)
+	}
+	return _c
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_c *UpstreamExchangeCreate) SetParentExchangeID(v string) *UpstreamExchangeCreate {
+	_c.mutation.SetParentExchangeID(v)
+	return _c
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_c *UpstreamExchangeCreate) SetNillableParentExchangeID(v *string) *UpstreamExchangeCreate {
+	if v != nil {
+		_c.SetParentExchangeID(*v)
+	}
+	return _c
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_c *UpstreamExchangeCreate) SetSequenceIndex(v int) *UpstreamExchangeCreate {
+	_c.mutation.SetSequenceIndex(v)
+	return _c
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_c *UpstreamExchangeCreate) SetNillableSequenceIndex(v *int) *UpstreamExchangeCreate {
+	if v != nil {
+		_c.SetSequenceIndex(*v)
+	}
+	return _c
+}
+
 // SetCassettePath sets the "cassette_path" field.
 func (_c *UpstreamExchangeCreate) SetCassettePath(v string) *UpstreamExchangeCreate {
 	_c.mutation.SetCassettePath(v)
@@ -285,6 +355,26 @@ func (_c *UpstreamExchangeCreate) createSpec() (*UpstreamExchange, *sqlgraph.Cre
 		_spec.SetField(upstreamexchange.FieldTraceID, field.TypeString, value)
 		_node.TraceID = value
 	}
+	if value, ok := _c.mutation.ExchangeID(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeID, field.TypeString, value)
+		_node.ExchangeID = value
+	}
+	if value, ok := _c.mutation.ExchangeKind(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeKind, field.TypeString, value)
+		_node.ExchangeKind = value
+	}
+	if value, ok := _c.mutation.ExchangeRole(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeRole, field.TypeString, value)
+		_node.ExchangeRole = value
+	}
+	if value, ok := _c.mutation.ParentExchangeID(); ok {
+		_spec.SetField(upstreamexchange.FieldParentExchangeID, field.TypeString, value)
+		_node.ParentExchangeID = value
+	}
+	if value, ok := _c.mutation.SequenceIndex(); ok {
+		_spec.SetField(upstreamexchange.FieldSequenceIndex, field.TypeInt, value)
+		_node.SequenceIndex = value
+	}
 	if value, ok := _c.mutation.CassettePath(); ok {
 		_spec.SetField(upstreamexchange.FieldCassettePath, field.TypeString, value)
 		_node.CassettePath = value
@@ -424,6 +514,102 @@ func (u *UpstreamExchangeUpsert) UpdateTraceID() *UpstreamExchangeUpsert {
 // ClearTraceID clears the value of the "trace_id" field.
 func (u *UpstreamExchangeUpsert) ClearTraceID() *UpstreamExchangeUpsert {
 	u.SetNull(upstreamexchange.FieldTraceID)
+	return u
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (u *UpstreamExchangeUpsert) SetExchangeID(v string) *UpstreamExchangeUpsert {
+	u.Set(upstreamexchange.FieldExchangeID, v)
+	return u
+}
+
+// UpdateExchangeID sets the "exchange_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsert) UpdateExchangeID() *UpstreamExchangeUpsert {
+	u.SetExcluded(upstreamexchange.FieldExchangeID)
+	return u
+}
+
+// ClearExchangeID clears the value of the "exchange_id" field.
+func (u *UpstreamExchangeUpsert) ClearExchangeID() *UpstreamExchangeUpsert {
+	u.SetNull(upstreamexchange.FieldExchangeID)
+	return u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *UpstreamExchangeUpsert) SetExchangeKind(v string) *UpstreamExchangeUpsert {
+	u.Set(upstreamexchange.FieldExchangeKind, v)
+	return u
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsert) UpdateExchangeKind() *UpstreamExchangeUpsert {
+	u.SetExcluded(upstreamexchange.FieldExchangeKind)
+	return u
+}
+
+// ClearExchangeKind clears the value of the "exchange_kind" field.
+func (u *UpstreamExchangeUpsert) ClearExchangeKind() *UpstreamExchangeUpsert {
+	u.SetNull(upstreamexchange.FieldExchangeKind)
+	return u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *UpstreamExchangeUpsert) SetExchangeRole(v string) *UpstreamExchangeUpsert {
+	u.Set(upstreamexchange.FieldExchangeRole, v)
+	return u
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsert) UpdateExchangeRole() *UpstreamExchangeUpsert {
+	u.SetExcluded(upstreamexchange.FieldExchangeRole)
+	return u
+}
+
+// ClearExchangeRole clears the value of the "exchange_role" field.
+func (u *UpstreamExchangeUpsert) ClearExchangeRole() *UpstreamExchangeUpsert {
+	u.SetNull(upstreamexchange.FieldExchangeRole)
+	return u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *UpstreamExchangeUpsert) SetParentExchangeID(v string) *UpstreamExchangeUpsert {
+	u.Set(upstreamexchange.FieldParentExchangeID, v)
+	return u
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsert) UpdateParentExchangeID() *UpstreamExchangeUpsert {
+	u.SetExcluded(upstreamexchange.FieldParentExchangeID)
+	return u
+}
+
+// ClearParentExchangeID clears the value of the "parent_exchange_id" field.
+func (u *UpstreamExchangeUpsert) ClearParentExchangeID() *UpstreamExchangeUpsert {
+	u.SetNull(upstreamexchange.FieldParentExchangeID)
+	return u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *UpstreamExchangeUpsert) SetSequenceIndex(v int) *UpstreamExchangeUpsert {
+	u.Set(upstreamexchange.FieldSequenceIndex, v)
+	return u
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsert) UpdateSequenceIndex() *UpstreamExchangeUpsert {
+	u.SetExcluded(upstreamexchange.FieldSequenceIndex)
+	return u
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *UpstreamExchangeUpsert) AddSequenceIndex(v int) *UpstreamExchangeUpsert {
+	u.Add(upstreamexchange.FieldSequenceIndex, v)
+	return u
+}
+
+// ClearSequenceIndex clears the value of the "sequence_index" field.
+func (u *UpstreamExchangeUpsert) ClearSequenceIndex() *UpstreamExchangeUpsert {
+	u.SetNull(upstreamexchange.FieldSequenceIndex)
 	return u
 }
 
@@ -703,6 +889,118 @@ func (u *UpstreamExchangeUpsertOne) UpdateTraceID() *UpstreamExchangeUpsertOne {
 func (u *UpstreamExchangeUpsertOne) ClearTraceID() *UpstreamExchangeUpsertOne {
 	return u.Update(func(s *UpstreamExchangeUpsert) {
 		s.ClearTraceID()
+	})
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (u *UpstreamExchangeUpsertOne) SetExchangeID(v string) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetExchangeID(v)
+	})
+}
+
+// UpdateExchangeID sets the "exchange_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertOne) UpdateExchangeID() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateExchangeID()
+	})
+}
+
+// ClearExchangeID clears the value of the "exchange_id" field.
+func (u *UpstreamExchangeUpsertOne) ClearExchangeID() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearExchangeID()
+	})
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *UpstreamExchangeUpsertOne) SetExchangeKind(v string) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetExchangeKind(v)
+	})
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertOne) UpdateExchangeKind() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateExchangeKind()
+	})
+}
+
+// ClearExchangeKind clears the value of the "exchange_kind" field.
+func (u *UpstreamExchangeUpsertOne) ClearExchangeKind() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearExchangeKind()
+	})
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *UpstreamExchangeUpsertOne) SetExchangeRole(v string) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetExchangeRole(v)
+	})
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertOne) UpdateExchangeRole() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateExchangeRole()
+	})
+}
+
+// ClearExchangeRole clears the value of the "exchange_role" field.
+func (u *UpstreamExchangeUpsertOne) ClearExchangeRole() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearExchangeRole()
+	})
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *UpstreamExchangeUpsertOne) SetParentExchangeID(v string) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetParentExchangeID(v)
+	})
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertOne) UpdateParentExchangeID() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateParentExchangeID()
+	})
+}
+
+// ClearParentExchangeID clears the value of the "parent_exchange_id" field.
+func (u *UpstreamExchangeUpsertOne) ClearParentExchangeID() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearParentExchangeID()
+	})
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *UpstreamExchangeUpsertOne) SetSequenceIndex(v int) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetSequenceIndex(v)
+	})
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *UpstreamExchangeUpsertOne) AddSequenceIndex(v int) *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.AddSequenceIndex(v)
+	})
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertOne) UpdateSequenceIndex() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateSequenceIndex()
+	})
+}
+
+// ClearSequenceIndex clears the value of the "sequence_index" field.
+func (u *UpstreamExchangeUpsertOne) ClearSequenceIndex() *UpstreamExchangeUpsertOne {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearSequenceIndex()
 	})
 }
 
@@ -1176,6 +1474,118 @@ func (u *UpstreamExchangeUpsertBulk) UpdateTraceID() *UpstreamExchangeUpsertBulk
 func (u *UpstreamExchangeUpsertBulk) ClearTraceID() *UpstreamExchangeUpsertBulk {
 	return u.Update(func(s *UpstreamExchangeUpsert) {
 		s.ClearTraceID()
+	})
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (u *UpstreamExchangeUpsertBulk) SetExchangeID(v string) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetExchangeID(v)
+	})
+}
+
+// UpdateExchangeID sets the "exchange_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertBulk) UpdateExchangeID() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateExchangeID()
+	})
+}
+
+// ClearExchangeID clears the value of the "exchange_id" field.
+func (u *UpstreamExchangeUpsertBulk) ClearExchangeID() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearExchangeID()
+	})
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *UpstreamExchangeUpsertBulk) SetExchangeKind(v string) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetExchangeKind(v)
+	})
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertBulk) UpdateExchangeKind() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateExchangeKind()
+	})
+}
+
+// ClearExchangeKind clears the value of the "exchange_kind" field.
+func (u *UpstreamExchangeUpsertBulk) ClearExchangeKind() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearExchangeKind()
+	})
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *UpstreamExchangeUpsertBulk) SetExchangeRole(v string) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetExchangeRole(v)
+	})
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertBulk) UpdateExchangeRole() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateExchangeRole()
+	})
+}
+
+// ClearExchangeRole clears the value of the "exchange_role" field.
+func (u *UpstreamExchangeUpsertBulk) ClearExchangeRole() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearExchangeRole()
+	})
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *UpstreamExchangeUpsertBulk) SetParentExchangeID(v string) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetParentExchangeID(v)
+	})
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertBulk) UpdateParentExchangeID() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateParentExchangeID()
+	})
+}
+
+// ClearParentExchangeID clears the value of the "parent_exchange_id" field.
+func (u *UpstreamExchangeUpsertBulk) ClearParentExchangeID() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearParentExchangeID()
+	})
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *UpstreamExchangeUpsertBulk) SetSequenceIndex(v int) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.SetSequenceIndex(v)
+	})
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *UpstreamExchangeUpsertBulk) AddSequenceIndex(v int) *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.AddSequenceIndex(v)
+	})
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *UpstreamExchangeUpsertBulk) UpdateSequenceIndex() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.UpdateSequenceIndex()
+	})
+}
+
+// ClearSequenceIndex clears the value of the "sequence_index" field.
+func (u *UpstreamExchangeUpsertBulk) ClearSequenceIndex() *UpstreamExchangeUpsertBulk {
+	return u.Update(func(s *UpstreamExchangeUpsert) {
+		s.ClearSequenceIndex()
 	})
 }
 

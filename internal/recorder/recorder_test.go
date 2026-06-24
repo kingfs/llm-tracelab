@@ -63,6 +63,35 @@ func TestPrepareLogFilePersistsResponsesAuditCorrelation(t *testing.T) {
 	}
 }
 
+func TestPrepareLogFilePersistsExchangeMetadata(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+
+	info, err := rec.PrepareLogFileWithOptions(req, PrepareOptions{
+		SiteURL:          "https://api.openai.com",
+		ExchangeID:       "exchange-model-1",
+		ExchangeKind:     "model",
+		ExchangeRole:     "main_model_call",
+		ParentExchangeID: "exchange-entry-1",
+		SequenceIndex:    3,
+		TraceID:          "trace-model-1",
+	})
+	if err != nil {
+		t.Fatalf("PrepareLogFileWithOptions() error = %v", err)
+	}
+	defer info.File.Close()
+
+	meta := info.Header.Meta
+	if meta.ExchangeID != "exchange-model-1" || meta.ExchangeKind != "model" || meta.ExchangeRole != "main_model_call" || meta.ParentExchangeID != "exchange-entry-1" || meta.SequenceIndex != 3 || meta.TraceID != "trace-model-1" {
+		t.Fatalf("exchange metadata = %+v, want configured values", meta)
+	}
+}
+
 func TestUpdateLogFilePersistsPipelineEvents(t *testing.T) {
 	dir := t.TempDir()
 	rec := New(dir, false, nil)

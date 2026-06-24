@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 )
 
 func TestEntAuditorCompletedPreservesExplicitExecutionEventResponseID(t *testing.T) {
@@ -119,5 +121,38 @@ func TestEntAuditorRecordAndQueryToolCallAudit(t *testing.T) {
 	}
 	if !record.StartedAt.Equal(base.Add(time.Second)) || !record.CompletedAt.Equal(base.Add(2*time.Second)) || !record.CreatedAt.Equal(base.Add(3*time.Second)) {
 		t.Fatalf("timestamps = %s/%s/%s, want seeded times", record.StartedAt, record.CompletedAt, record.CreatedAt)
+	}
+}
+
+func TestEntAuditorRecordUpstreamExchangePersistsExchangeMetadata(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	auditor := NewEntAuditor(client)
+	base := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+
+	if err := auditor.RecordUpstreamExchange(ctx, UpstreamExchange{
+		ResponseID:       "resp_exchange",
+		RequestAuditID:   "audit_exchange",
+		TraceID:          "trace_exchange",
+		ExchangeID:       "exchange_model_1",
+		ExchangeKind:     "model",
+		ExchangeRole:     "main_model_call",
+		ParentExchangeID: "exchange_entry_1",
+		SequenceIndex:    4,
+		CassettePath:     "/tmp/exchange.http",
+		StartedAt:        base,
+		CompletedAt:      base.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("RecordUpstreamExchange() error = %v", err)
+	}
+
+	record, err := client.UpstreamExchange.Query().
+		Where(upstreamexchange.ExchangeIDEQ("exchange_model_1")).
+		Only(ctx)
+	if err != nil {
+		t.Fatalf("query exchange: %v", err)
+	}
+	if record.ExchangeKind != "model" || record.ExchangeRole != "main_model_call" || record.ParentExchangeID != "exchange_entry_1" || record.SequenceIndex != 4 {
+		t.Fatalf("exchange metadata = %+v, want model/main_model_call/exchange_entry_1/4", record)
 	}
 }

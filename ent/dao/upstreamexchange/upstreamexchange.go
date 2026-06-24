@@ -17,6 +17,16 @@ const (
 	FieldRequestAuditID = "request_audit_id"
 	// FieldTraceID holds the string denoting the trace_id field in the database.
 	FieldTraceID = "trace_id"
+	// FieldExchangeID holds the string denoting the exchange_id field in the database.
+	FieldExchangeID = "exchange_id"
+	// FieldExchangeKind holds the string denoting the exchange_kind field in the database.
+	FieldExchangeKind = "exchange_kind"
+	// FieldExchangeRole holds the string denoting the exchange_role field in the database.
+	FieldExchangeRole = "exchange_role"
+	// FieldParentExchangeID holds the string denoting the parent_exchange_id field in the database.
+	FieldParentExchangeID = "parent_exchange_id"
+	// FieldSequenceIndex holds the string denoting the sequence_index field in the database.
+	FieldSequenceIndex = "sequence_index"
 	// FieldCassettePath holds the string denoting the cassette_path field in the database.
 	FieldCassettePath = "cassette_path"
 	// FieldUpstreamID holds the string denoting the upstream_id field in the database.
@@ -45,6 +55,11 @@ var Columns = []string{
 	FieldResponseID,
 	FieldRequestAuditID,
 	FieldTraceID,
+	FieldExchangeID,
+	FieldExchangeKind,
+	FieldExchangeRole,
+	FieldParentExchangeID,
+	FieldSequenceIndex,
 	FieldCassettePath,
 	FieldUpstreamID,
 	FieldRouteTarget,
@@ -92,6 +107,31 @@ func ByRequestAuditID(opts ...sql.OrderTermOption) OrderOption {
 // ByTraceID orders the results by the trace_id field.
 func ByTraceID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldTraceID, opts...).ToFunc()
+}
+
+// ByExchangeID orders the results by the exchange_id field.
+func ByExchangeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeID, opts...).ToFunc()
+}
+
+// ByExchangeKind orders the results by the exchange_kind field.
+func ByExchangeKind(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeKind, opts...).ToFunc()
+}
+
+// ByExchangeRole orders the results by the exchange_role field.
+func ByExchangeRole(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeRole, opts...).ToFunc()
+}
+
+// ByParentExchangeID orders the results by the parent_exchange_id field.
+func ByParentExchangeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldParentExchangeID, opts...).ToFunc()
+}
+
+// BySequenceIndex orders the results by the sequence_index field.
+func BySequenceIndex(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSequenceIndex, opts...).ToFunc()
 }
 
 // ByCassettePath orders the results by the cassette_path field.

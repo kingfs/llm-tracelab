@@ -51,18 +51,23 @@ type Failure struct {
 }
 
 type UpstreamExchange struct {
-	ResponseID     string
-	RequestAuditID string
-	TraceID        string
-	CassettePath   string
-	UpstreamID     string
-	RouteTarget    string
-	Model          string
-	Endpoint       string
-	StatusCode     int
-	StartedAt      time.Time
-	CompletedAt    time.Time
-	ErrorText      string
+	ResponseID       string
+	RequestAuditID   string
+	TraceID          string
+	ExchangeID       string
+	ExchangeKind     string
+	ExchangeRole     string
+	ParentExchangeID string
+	SequenceIndex    int
+	CassettePath     string
+	UpstreamID       string
+	RouteTarget      string
+	Model            string
+	Endpoint         string
+	StatusCode       int
+	StartedAt        time.Time
+	CompletedAt      time.Time
+	ErrorText        string
 }
 
 type ExecutionEvent struct {

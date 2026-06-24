@@ -79,6 +79,31 @@ func TraceID(v string) predicate.UpstreamExchange {
 	return predicate.UpstreamExchange(sql.FieldEQ(FieldTraceID, v))
 }
 
+// ExchangeID applies equality check predicate on the "exchange_id" field. It's identical to ExchangeIDEQ.
+func ExchangeID(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldExchangeID, v))
+}
+
+// ExchangeKind applies equality check predicate on the "exchange_kind" field. It's identical to ExchangeKindEQ.
+func ExchangeKind(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldExchangeKind, v))
+}
+
+// ExchangeRole applies equality check predicate on the "exchange_role" field. It's identical to ExchangeRoleEQ.
+func ExchangeRole(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldExchangeRole, v))
+}
+
+// ParentExchangeID applies equality check predicate on the "parent_exchange_id" field. It's identical to ParentExchangeIDEQ.
+func ParentExchangeID(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldParentExchangeID, v))
+}
+
+// SequenceIndex applies equality check predicate on the "sequence_index" field. It's identical to SequenceIndexEQ.
+func SequenceIndex(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldSequenceIndex, v))
+}
+
 // CassettePath applies equality check predicate on the "cassette_path" field. It's identical to CassettePathEQ.
 func CassettePath(v string) predicate.UpstreamExchange {
 	return predicate.UpstreamExchange(sql.FieldEQ(FieldCassettePath, v))
@@ -347,6 +372,356 @@ func TraceIDEqualFold(v string) predicate.UpstreamExchange {
 // TraceIDContainsFold applies the ContainsFold predicate on the "trace_id" field.
 func TraceIDContainsFold(v string) predicate.UpstreamExchange {
 	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldTraceID, v))
+}
+
+// ExchangeIDEQ applies the EQ predicate on the "exchange_id" field.
+func ExchangeIDEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldExchangeID, v))
+}
+
+// ExchangeIDNEQ applies the NEQ predicate on the "exchange_id" field.
+func ExchangeIDNEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNEQ(FieldExchangeID, v))
+}
+
+// ExchangeIDIn applies the In predicate on the "exchange_id" field.
+func ExchangeIDIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIn(FieldExchangeID, vs...))
+}
+
+// ExchangeIDNotIn applies the NotIn predicate on the "exchange_id" field.
+func ExchangeIDNotIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotIn(FieldExchangeID, vs...))
+}
+
+// ExchangeIDGT applies the GT predicate on the "exchange_id" field.
+func ExchangeIDGT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGT(FieldExchangeID, v))
+}
+
+// ExchangeIDGTE applies the GTE predicate on the "exchange_id" field.
+func ExchangeIDGTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGTE(FieldExchangeID, v))
+}
+
+// ExchangeIDLT applies the LT predicate on the "exchange_id" field.
+func ExchangeIDLT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLT(FieldExchangeID, v))
+}
+
+// ExchangeIDLTE applies the LTE predicate on the "exchange_id" field.
+func ExchangeIDLTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLTE(FieldExchangeID, v))
+}
+
+// ExchangeIDContains applies the Contains predicate on the "exchange_id" field.
+func ExchangeIDContains(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContains(FieldExchangeID, v))
+}
+
+// ExchangeIDHasPrefix applies the HasPrefix predicate on the "exchange_id" field.
+func ExchangeIDHasPrefix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasPrefix(FieldExchangeID, v))
+}
+
+// ExchangeIDHasSuffix applies the HasSuffix predicate on the "exchange_id" field.
+func ExchangeIDHasSuffix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasSuffix(FieldExchangeID, v))
+}
+
+// ExchangeIDIsNil applies the IsNil predicate on the "exchange_id" field.
+func ExchangeIDIsNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIsNull(FieldExchangeID))
+}
+
+// ExchangeIDNotNil applies the NotNil predicate on the "exchange_id" field.
+func ExchangeIDNotNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotNull(FieldExchangeID))
+}
+
+// ExchangeIDEqualFold applies the EqualFold predicate on the "exchange_id" field.
+func ExchangeIDEqualFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEqualFold(FieldExchangeID, v))
+}
+
+// ExchangeIDContainsFold applies the ContainsFold predicate on the "exchange_id" field.
+func ExchangeIDContainsFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldExchangeID, v))
+}
+
+// ExchangeKindEQ applies the EQ predicate on the "exchange_kind" field.
+func ExchangeKindEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldExchangeKind, v))
+}
+
+// ExchangeKindNEQ applies the NEQ predicate on the "exchange_kind" field.
+func ExchangeKindNEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNEQ(FieldExchangeKind, v))
+}
+
+// ExchangeKindIn applies the In predicate on the "exchange_kind" field.
+func ExchangeKindIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIn(FieldExchangeKind, vs...))
+}
+
+// ExchangeKindNotIn applies the NotIn predicate on the "exchange_kind" field.
+func ExchangeKindNotIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotIn(FieldExchangeKind, vs...))
+}
+
+// ExchangeKindGT applies the GT predicate on the "exchange_kind" field.
+func ExchangeKindGT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGT(FieldExchangeKind, v))
+}
+
+// ExchangeKindGTE applies the GTE predicate on the "exchange_kind" field.
+func ExchangeKindGTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGTE(FieldExchangeKind, v))
+}
+
+// ExchangeKindLT applies the LT predicate on the "exchange_kind" field.
+func ExchangeKindLT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLT(FieldExchangeKind, v))
+}
+
+// ExchangeKindLTE applies the LTE predicate on the "exchange_kind" field.
+func ExchangeKindLTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLTE(FieldExchangeKind, v))
+}
+
+// ExchangeKindContains applies the Contains predicate on the "exchange_kind" field.
+func ExchangeKindContains(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContains(FieldExchangeKind, v))
+}
+
+// ExchangeKindHasPrefix applies the HasPrefix predicate on the "exchange_kind" field.
+func ExchangeKindHasPrefix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasPrefix(FieldExchangeKind, v))
+}
+
+// ExchangeKindHasSuffix applies the HasSuffix predicate on the "exchange_kind" field.
+func ExchangeKindHasSuffix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasSuffix(FieldExchangeKind, v))
+}
+
+// ExchangeKindIsNil applies the IsNil predicate on the "exchange_kind" field.
+func ExchangeKindIsNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIsNull(FieldExchangeKind))
+}
+
+// ExchangeKindNotNil applies the NotNil predicate on the "exchange_kind" field.
+func ExchangeKindNotNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotNull(FieldExchangeKind))
+}
+
+// ExchangeKindEqualFold applies the EqualFold predicate on the "exchange_kind" field.
+func ExchangeKindEqualFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEqualFold(FieldExchangeKind, v))
+}
+
+// ExchangeKindContainsFold applies the ContainsFold predicate on the "exchange_kind" field.
+func ExchangeKindContainsFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldExchangeKind, v))
+}
+
+// ExchangeRoleEQ applies the EQ predicate on the "exchange_role" field.
+func ExchangeRoleEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldExchangeRole, v))
+}
+
+// ExchangeRoleNEQ applies the NEQ predicate on the "exchange_role" field.
+func ExchangeRoleNEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNEQ(FieldExchangeRole, v))
+}
+
+// ExchangeRoleIn applies the In predicate on the "exchange_role" field.
+func ExchangeRoleIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIn(FieldExchangeRole, vs...))
+}
+
+// ExchangeRoleNotIn applies the NotIn predicate on the "exchange_role" field.
+func ExchangeRoleNotIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotIn(FieldExchangeRole, vs...))
+}
+
+// ExchangeRoleGT applies the GT predicate on the "exchange_role" field.
+func ExchangeRoleGT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGT(FieldExchangeRole, v))
+}
+
+// ExchangeRoleGTE applies the GTE predicate on the "exchange_role" field.
+func ExchangeRoleGTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGTE(FieldExchangeRole, v))
+}
+
+// ExchangeRoleLT applies the LT predicate on the "exchange_role" field.
+func ExchangeRoleLT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLT(FieldExchangeRole, v))
+}
+
+// ExchangeRoleLTE applies the LTE predicate on the "exchange_role" field.
+func ExchangeRoleLTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLTE(FieldExchangeRole, v))
+}
+
+// ExchangeRoleContains applies the Contains predicate on the "exchange_role" field.
+func ExchangeRoleContains(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContains(FieldExchangeRole, v))
+}
+
+// ExchangeRoleHasPrefix applies the HasPrefix predicate on the "exchange_role" field.
+func ExchangeRoleHasPrefix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasPrefix(FieldExchangeRole, v))
+}
+
+// ExchangeRoleHasSuffix applies the HasSuffix predicate on the "exchange_role" field.
+func ExchangeRoleHasSuffix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasSuffix(FieldExchangeRole, v))
+}
+
+// ExchangeRoleIsNil applies the IsNil predicate on the "exchange_role" field.
+func ExchangeRoleIsNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIsNull(FieldExchangeRole))
+}
+
+// ExchangeRoleNotNil applies the NotNil predicate on the "exchange_role" field.
+func ExchangeRoleNotNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotNull(FieldExchangeRole))
+}
+
+// ExchangeRoleEqualFold applies the EqualFold predicate on the "exchange_role" field.
+func ExchangeRoleEqualFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEqualFold(FieldExchangeRole, v))
+}
+
+// ExchangeRoleContainsFold applies the ContainsFold predicate on the "exchange_role" field.
+func ExchangeRoleContainsFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldExchangeRole, v))
+}
+
+// ParentExchangeIDEQ applies the EQ predicate on the "parent_exchange_id" field.
+func ParentExchangeIDEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDNEQ applies the NEQ predicate on the "parent_exchange_id" field.
+func ParentExchangeIDNEQ(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNEQ(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDIn applies the In predicate on the "parent_exchange_id" field.
+func ParentExchangeIDIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIn(FieldParentExchangeID, vs...))
+}
+
+// ParentExchangeIDNotIn applies the NotIn predicate on the "parent_exchange_id" field.
+func ParentExchangeIDNotIn(vs ...string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotIn(FieldParentExchangeID, vs...))
+}
+
+// ParentExchangeIDGT applies the GT predicate on the "parent_exchange_id" field.
+func ParentExchangeIDGT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGT(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDGTE applies the GTE predicate on the "parent_exchange_id" field.
+func ParentExchangeIDGTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGTE(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDLT applies the LT predicate on the "parent_exchange_id" field.
+func ParentExchangeIDLT(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLT(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDLTE applies the LTE predicate on the "parent_exchange_id" field.
+func ParentExchangeIDLTE(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLTE(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDContains applies the Contains predicate on the "parent_exchange_id" field.
+func ParentExchangeIDContains(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContains(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDHasPrefix applies the HasPrefix predicate on the "parent_exchange_id" field.
+func ParentExchangeIDHasPrefix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasPrefix(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDHasSuffix applies the HasSuffix predicate on the "parent_exchange_id" field.
+func ParentExchangeIDHasSuffix(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldHasSuffix(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDIsNil applies the IsNil predicate on the "parent_exchange_id" field.
+func ParentExchangeIDIsNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIsNull(FieldParentExchangeID))
+}
+
+// ParentExchangeIDNotNil applies the NotNil predicate on the "parent_exchange_id" field.
+func ParentExchangeIDNotNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotNull(FieldParentExchangeID))
+}
+
+// ParentExchangeIDEqualFold applies the EqualFold predicate on the "parent_exchange_id" field.
+func ParentExchangeIDEqualFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEqualFold(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDContainsFold applies the ContainsFold predicate on the "parent_exchange_id" field.
+func ParentExchangeIDContainsFold(v string) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldContainsFold(FieldParentExchangeID, v))
+}
+
+// SequenceIndexEQ applies the EQ predicate on the "sequence_index" field.
+func SequenceIndexEQ(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldEQ(FieldSequenceIndex, v))
+}
+
+// SequenceIndexNEQ applies the NEQ predicate on the "sequence_index" field.
+func SequenceIndexNEQ(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNEQ(FieldSequenceIndex, v))
+}
+
+// SequenceIndexIn applies the In predicate on the "sequence_index" field.
+func SequenceIndexIn(vs ...int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIn(FieldSequenceIndex, vs...))
+}
+
+// SequenceIndexNotIn applies the NotIn predicate on the "sequence_index" field.
+func SequenceIndexNotIn(vs ...int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotIn(FieldSequenceIndex, vs...))
+}
+
+// SequenceIndexGT applies the GT predicate on the "sequence_index" field.
+func SequenceIndexGT(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGT(FieldSequenceIndex, v))
+}
+
+// SequenceIndexGTE applies the GTE predicate on the "sequence_index" field.
+func SequenceIndexGTE(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldGTE(FieldSequenceIndex, v))
+}
+
+// SequenceIndexLT applies the LT predicate on the "sequence_index" field.
+func SequenceIndexLT(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLT(FieldSequenceIndex, v))
+}
+
+// SequenceIndexLTE applies the LTE predicate on the "sequence_index" field.
+func SequenceIndexLTE(v int) predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldLTE(FieldSequenceIndex, v))
+}
+
+// SequenceIndexIsNil applies the IsNil predicate on the "sequence_index" field.
+func SequenceIndexIsNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldIsNull(FieldSequenceIndex))
+}
+
+// SequenceIndexNotNil applies the NotNil predicate on the "sequence_index" field.
+func SequenceIndexNotNil() predicate.UpstreamExchange {
+	return predicate.UpstreamExchange(sql.FieldNotNull(FieldSequenceIndex))
 }
 
 // CassettePathEQ applies the EQ predicate on the "cassette_path" field.

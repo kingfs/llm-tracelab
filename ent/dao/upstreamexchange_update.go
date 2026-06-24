@@ -90,6 +90,113 @@ func (_u *UpstreamExchangeUpdate) ClearTraceID() *UpstreamExchangeUpdate {
 	return _u
 }
 
+// SetExchangeID sets the "exchange_id" field.
+func (_u *UpstreamExchangeUpdate) SetExchangeID(v string) *UpstreamExchangeUpdate {
+	_u.mutation.SetExchangeID(v)
+	return _u
+}
+
+// SetNillableExchangeID sets the "exchange_id" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdate) SetNillableExchangeID(v *string) *UpstreamExchangeUpdate {
+	if v != nil {
+		_u.SetExchangeID(*v)
+	}
+	return _u
+}
+
+// ClearExchangeID clears the value of the "exchange_id" field.
+func (_u *UpstreamExchangeUpdate) ClearExchangeID() *UpstreamExchangeUpdate {
+	_u.mutation.ClearExchangeID()
+	return _u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_u *UpstreamExchangeUpdate) SetExchangeKind(v string) *UpstreamExchangeUpdate {
+	_u.mutation.SetExchangeKind(v)
+	return _u
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdate) SetNillableExchangeKind(v *string) *UpstreamExchangeUpdate {
+	if v != nil {
+		_u.SetExchangeKind(*v)
+	}
+	return _u
+}
+
+// ClearExchangeKind clears the value of the "exchange_kind" field.
+func (_u *UpstreamExchangeUpdate) ClearExchangeKind() *UpstreamExchangeUpdate {
+	_u.mutation.ClearExchangeKind()
+	return _u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_u *UpstreamExchangeUpdate) SetExchangeRole(v string) *UpstreamExchangeUpdate {
+	_u.mutation.SetExchangeRole(v)
+	return _u
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdate) SetNillableExchangeRole(v *string) *UpstreamExchangeUpdate {
+	if v != nil {
+		_u.SetExchangeRole(*v)
+	}
+	return _u
+}
+
+// ClearExchangeRole clears the value of the "exchange_role" field.
+func (_u *UpstreamExchangeUpdate) ClearExchangeRole() *UpstreamExchangeUpdate {
+	_u.mutation.ClearExchangeRole()
+	return _u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_u *UpstreamExchangeUpdate) SetParentExchangeID(v string) *UpstreamExchangeUpdate {
+	_u.mutation.SetParentExchangeID(v)
+	return _u
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdate) SetNillableParentExchangeID(v *string) *UpstreamExchangeUpdate {
+	if v != nil {
+		_u.SetParentExchangeID(*v)
+	}
+	return _u
+}
+
+// ClearParentExchangeID clears the value of the "parent_exchange_id" field.
+func (_u *UpstreamExchangeUpdate) ClearParentExchangeID() *UpstreamExchangeUpdate {
+	_u.mutation.ClearParentExchangeID()
+	return _u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_u *UpstreamExchangeUpdate) SetSequenceIndex(v int) *UpstreamExchangeUpdate {
+	_u.mutation.ResetSequenceIndex()
+	_u.mutation.SetSequenceIndex(v)
+	return _u
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdate) SetNillableSequenceIndex(v *int) *UpstreamExchangeUpdate {
+	if v != nil {
+		_u.SetSequenceIndex(*v)
+	}
+	return _u
+}
+
+// AddSequenceIndex adds value to the "sequence_index" field.
+func (_u *UpstreamExchangeUpdate) AddSequenceIndex(v int) *UpstreamExchangeUpdate {
+	_u.mutation.AddSequenceIndex(v)
+	return _u
+}
+
+// ClearSequenceIndex clears the value of the "sequence_index" field.
+func (_u *UpstreamExchangeUpdate) ClearSequenceIndex() *UpstreamExchangeUpdate {
+	_u.mutation.ClearSequenceIndex()
+	return _u
+}
+
 // SetCassettePath sets the "cassette_path" field.
 func (_u *UpstreamExchangeUpdate) SetCassettePath(v string) *UpstreamExchangeUpdate {
 	_u.mutation.SetCassettePath(v)
@@ -342,6 +449,39 @@ func (_u *UpstreamExchangeUpdate) sqlSave(ctx context.Context) (_node int, err e
 	if _u.mutation.TraceIDCleared() {
 		_spec.ClearField(upstreamexchange.FieldTraceID, field.TypeString)
 	}
+	if value, ok := _u.mutation.ExchangeID(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeID, field.TypeString, value)
+	}
+	if _u.mutation.ExchangeIDCleared() {
+		_spec.ClearField(upstreamexchange.FieldExchangeID, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExchangeKind(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeKind, field.TypeString, value)
+	}
+	if _u.mutation.ExchangeKindCleared() {
+		_spec.ClearField(upstreamexchange.FieldExchangeKind, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExchangeRole(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeRole, field.TypeString, value)
+	}
+	if _u.mutation.ExchangeRoleCleared() {
+		_spec.ClearField(upstreamexchange.FieldExchangeRole, field.TypeString)
+	}
+	if value, ok := _u.mutation.ParentExchangeID(); ok {
+		_spec.SetField(upstreamexchange.FieldParentExchangeID, field.TypeString, value)
+	}
+	if _u.mutation.ParentExchangeIDCleared() {
+		_spec.ClearField(upstreamexchange.FieldParentExchangeID, field.TypeString)
+	}
+	if value, ok := _u.mutation.SequenceIndex(); ok {
+		_spec.SetField(upstreamexchange.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedSequenceIndex(); ok {
+		_spec.AddField(upstreamexchange.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if _u.mutation.SequenceIndexCleared() {
+		_spec.ClearField(upstreamexchange.FieldSequenceIndex, field.TypeInt)
+	}
 	if value, ok := _u.mutation.CassettePath(); ok {
 		_spec.SetField(upstreamexchange.FieldCassettePath, field.TypeString, value)
 	}
@@ -480,6 +620,113 @@ func (_u *UpstreamExchangeUpdateOne) SetNillableTraceID(v *string) *UpstreamExch
 // ClearTraceID clears the value of the "trace_id" field.
 func (_u *UpstreamExchangeUpdateOne) ClearTraceID() *UpstreamExchangeUpdateOne {
 	_u.mutation.ClearTraceID()
+	return _u
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (_u *UpstreamExchangeUpdateOne) SetExchangeID(v string) *UpstreamExchangeUpdateOne {
+	_u.mutation.SetExchangeID(v)
+	return _u
+}
+
+// SetNillableExchangeID sets the "exchange_id" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdateOne) SetNillableExchangeID(v *string) *UpstreamExchangeUpdateOne {
+	if v != nil {
+		_u.SetExchangeID(*v)
+	}
+	return _u
+}
+
+// ClearExchangeID clears the value of the "exchange_id" field.
+func (_u *UpstreamExchangeUpdateOne) ClearExchangeID() *UpstreamExchangeUpdateOne {
+	_u.mutation.ClearExchangeID()
+	return _u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_u *UpstreamExchangeUpdateOne) SetExchangeKind(v string) *UpstreamExchangeUpdateOne {
+	_u.mutation.SetExchangeKind(v)
+	return _u
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdateOne) SetNillableExchangeKind(v *string) *UpstreamExchangeUpdateOne {
+	if v != nil {
+		_u.SetExchangeKind(*v)
+	}
+	return _u
+}
+
+// ClearExchangeKind clears the value of the "exchange_kind" field.
+func (_u *UpstreamExchangeUpdateOne) ClearExchangeKind() *UpstreamExchangeUpdateOne {
+	_u.mutation.ClearExchangeKind()
+	return _u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_u *UpstreamExchangeUpdateOne) SetExchangeRole(v string) *UpstreamExchangeUpdateOne {
+	_u.mutation.SetExchangeRole(v)
+	return _u
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdateOne) SetNillableExchangeRole(v *string) *UpstreamExchangeUpdateOne {
+	if v != nil {
+		_u.SetExchangeRole(*v)
+	}
+	return _u
+}
+
+// ClearExchangeRole clears the value of the "exchange_role" field.
+func (_u *UpstreamExchangeUpdateOne) ClearExchangeRole() *UpstreamExchangeUpdateOne {
+	_u.mutation.ClearExchangeRole()
+	return _u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_u *UpstreamExchangeUpdateOne) SetParentExchangeID(v string) *UpstreamExchangeUpdateOne {
+	_u.mutation.SetParentExchangeID(v)
+	return _u
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdateOne) SetNillableParentExchangeID(v *string) *UpstreamExchangeUpdateOne {
+	if v != nil {
+		_u.SetParentExchangeID(*v)
+	}
+	return _u
+}
+
+// ClearParentExchangeID clears the value of the "parent_exchange_id" field.
+func (_u *UpstreamExchangeUpdateOne) ClearParentExchangeID() *UpstreamExchangeUpdateOne {
+	_u.mutation.ClearParentExchangeID()
+	return _u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_u *UpstreamExchangeUpdateOne) SetSequenceIndex(v int) *UpstreamExchangeUpdateOne {
+	_u.mutation.ResetSequenceIndex()
+	_u.mutation.SetSequenceIndex(v)
+	return _u
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_u *UpstreamExchangeUpdateOne) SetNillableSequenceIndex(v *int) *UpstreamExchangeUpdateOne {
+	if v != nil {
+		_u.SetSequenceIndex(*v)
+	}
+	return _u
+}
+
+// AddSequenceIndex adds value to the "sequence_index" field.
+func (_u *UpstreamExchangeUpdateOne) AddSequenceIndex(v int) *UpstreamExchangeUpdateOne {
+	_u.mutation.AddSequenceIndex(v)
+	return _u
+}
+
+// ClearSequenceIndex clears the value of the "sequence_index" field.
+func (_u *UpstreamExchangeUpdateOne) ClearSequenceIndex() *UpstreamExchangeUpdateOne {
+	_u.mutation.ClearSequenceIndex()
 	return _u
 }
 
@@ -764,6 +1011,39 @@ func (_u *UpstreamExchangeUpdateOne) sqlSave(ctx context.Context) (_node *Upstre
 	}
 	if _u.mutation.TraceIDCleared() {
 		_spec.ClearField(upstreamexchange.FieldTraceID, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExchangeID(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeID, field.TypeString, value)
+	}
+	if _u.mutation.ExchangeIDCleared() {
+		_spec.ClearField(upstreamexchange.FieldExchangeID, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExchangeKind(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeKind, field.TypeString, value)
+	}
+	if _u.mutation.ExchangeKindCleared() {
+		_spec.ClearField(upstreamexchange.FieldExchangeKind, field.TypeString)
+	}
+	if value, ok := _u.mutation.ExchangeRole(); ok {
+		_spec.SetField(upstreamexchange.FieldExchangeRole, field.TypeString, value)
+	}
+	if _u.mutation.ExchangeRoleCleared() {
+		_spec.ClearField(upstreamexchange.FieldExchangeRole, field.TypeString)
+	}
+	if value, ok := _u.mutation.ParentExchangeID(); ok {
+		_spec.SetField(upstreamexchange.FieldParentExchangeID, field.TypeString, value)
+	}
+	if _u.mutation.ParentExchangeIDCleared() {
+		_spec.ClearField(upstreamexchange.FieldParentExchangeID, field.TypeString)
+	}
+	if value, ok := _u.mutation.SequenceIndex(); ok {
+		_spec.SetField(upstreamexchange.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedSequenceIndex(); ok {
+		_spec.AddField(upstreamexchange.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if _u.mutation.SequenceIndexCleared() {
+		_spec.ClearField(upstreamexchange.FieldSequenceIndex, field.TypeInt)
 	}
 	if value, ok := _u.mutation.CassettePath(); ok {
 		_spec.SetField(upstreamexchange.FieldCassettePath, field.TypeString, value)

@@ -79,6 +79,40 @@ func TestMarshalAndParsePreludeV3PreservesEventAttributes(t *testing.T) {
 	assert.Equal(t, float64(18), parsed.Events[0].Attributes["total_tokens"])
 }
 
+func TestMarshalAndParsePreludeV3PreservesExchangeMetadata(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: MetaData{
+			RequestID:        "req-exchange-1",
+			RequestAuditID:   "audit-exchange-1",
+			ExchangeID:       "exchange-entry-1",
+			ExchangeKind:     "entry",
+			ExchangeRole:     "responses_entry",
+			ParentExchangeID: "exchange-parent-1",
+			SequenceIndex:    2,
+			TraceID:          "trace-exchange-1",
+			Time:             time.Date(2026, 6, 24, 10, 0, 0, 0, time.UTC),
+			Model:            "gpt-5",
+			URL:              "/v1/responses",
+			Method:           "POST",
+			StatusCode:       200,
+		},
+	}
+
+	prelude, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+
+	parsed, err := ParsePrelude(prelude)
+	require.NoError(t, err)
+
+	assert.Equal(t, "exchange-entry-1", parsed.Header.Meta.ExchangeID)
+	assert.Equal(t, "entry", parsed.Header.Meta.ExchangeKind)
+	assert.Equal(t, "responses_entry", parsed.Header.Meta.ExchangeRole)
+	assert.Equal(t, "exchange-parent-1", parsed.Header.Meta.ParentExchangeID)
+	assert.Equal(t, 2, parsed.Header.Meta.SequenceIndex)
+	assert.Equal(t, "trace-exchange-1", parsed.Header.Meta.TraceID)
+}
+
 func TestSummarizeHTTPExchangePreservesCorrelationAndBoundsBodies(t *testing.T) {
 	header := RecordHeader{
 		Version: "LLM_PROXY_V3",

@@ -25824,26 +25824,32 @@ func (m *TraceObservationMutation) ResetEdge(name string) error {
 // UpstreamExchangeMutation represents an operation that mutates the UpstreamExchange nodes in the graph.
 type UpstreamExchangeMutation struct {
 	config
-	op               Op
-	typ              string
-	id               *string
-	response_id      *string
-	request_audit_id *string
-	trace_id         *string
-	cassette_path    *string
-	upstream_id      *string
-	route_target     *string
-	model            *string
-	endpoint         *string
-	status_code      *int
-	addstatus_code   *int
-	started_at       *time.Time
-	completed_at     *time.Time
-	error_text       *string
-	clearedFields    map[string]struct{}
-	done             bool
-	oldValue         func(context.Context) (*UpstreamExchange, error)
-	predicates       []predicate.UpstreamExchange
+	op                 Op
+	typ                string
+	id                 *string
+	response_id        *string
+	request_audit_id   *string
+	trace_id           *string
+	exchange_id        *string
+	exchange_kind      *string
+	exchange_role      *string
+	parent_exchange_id *string
+	sequence_index     *int
+	addsequence_index  *int
+	cassette_path      *string
+	upstream_id        *string
+	route_target       *string
+	model              *string
+	endpoint           *string
+	status_code        *int
+	addstatus_code     *int
+	started_at         *time.Time
+	completed_at       *time.Time
+	error_text         *string
+	clearedFields      map[string]struct{}
+	done               bool
+	oldValue           func(context.Context) (*UpstreamExchange, error)
+	predicates         []predicate.UpstreamExchange
 }
 
 var _ ent.Mutation = (*UpstreamExchangeMutation)(nil)
@@ -26095,6 +26101,272 @@ func (m *UpstreamExchangeMutation) TraceIDCleared() bool {
 func (m *UpstreamExchangeMutation) ResetTraceID() {
 	m.trace_id = nil
 	delete(m.clearedFields, upstreamexchange.FieldTraceID)
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (m *UpstreamExchangeMutation) SetExchangeID(s string) {
+	m.exchange_id = &s
+}
+
+// ExchangeID returns the value of the "exchange_id" field in the mutation.
+func (m *UpstreamExchangeMutation) ExchangeID() (r string, exists bool) {
+	v := m.exchange_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeID returns the old "exchange_id" field's value of the UpstreamExchange entity.
+// If the UpstreamExchange object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UpstreamExchangeMutation) OldExchangeID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeID: %w", err)
+	}
+	return oldValue.ExchangeID, nil
+}
+
+// ClearExchangeID clears the value of the "exchange_id" field.
+func (m *UpstreamExchangeMutation) ClearExchangeID() {
+	m.exchange_id = nil
+	m.clearedFields[upstreamexchange.FieldExchangeID] = struct{}{}
+}
+
+// ExchangeIDCleared returns if the "exchange_id" field was cleared in this mutation.
+func (m *UpstreamExchangeMutation) ExchangeIDCleared() bool {
+	_, ok := m.clearedFields[upstreamexchange.FieldExchangeID]
+	return ok
+}
+
+// ResetExchangeID resets all changes to the "exchange_id" field.
+func (m *UpstreamExchangeMutation) ResetExchangeID() {
+	m.exchange_id = nil
+	delete(m.clearedFields, upstreamexchange.FieldExchangeID)
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (m *UpstreamExchangeMutation) SetExchangeKind(s string) {
+	m.exchange_kind = &s
+}
+
+// ExchangeKind returns the value of the "exchange_kind" field in the mutation.
+func (m *UpstreamExchangeMutation) ExchangeKind() (r string, exists bool) {
+	v := m.exchange_kind
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeKind returns the old "exchange_kind" field's value of the UpstreamExchange entity.
+// If the UpstreamExchange object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UpstreamExchangeMutation) OldExchangeKind(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeKind is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeKind requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeKind: %w", err)
+	}
+	return oldValue.ExchangeKind, nil
+}
+
+// ClearExchangeKind clears the value of the "exchange_kind" field.
+func (m *UpstreamExchangeMutation) ClearExchangeKind() {
+	m.exchange_kind = nil
+	m.clearedFields[upstreamexchange.FieldExchangeKind] = struct{}{}
+}
+
+// ExchangeKindCleared returns if the "exchange_kind" field was cleared in this mutation.
+func (m *UpstreamExchangeMutation) ExchangeKindCleared() bool {
+	_, ok := m.clearedFields[upstreamexchange.FieldExchangeKind]
+	return ok
+}
+
+// ResetExchangeKind resets all changes to the "exchange_kind" field.
+func (m *UpstreamExchangeMutation) ResetExchangeKind() {
+	m.exchange_kind = nil
+	delete(m.clearedFields, upstreamexchange.FieldExchangeKind)
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (m *UpstreamExchangeMutation) SetExchangeRole(s string) {
+	m.exchange_role = &s
+}
+
+// ExchangeRole returns the value of the "exchange_role" field in the mutation.
+func (m *UpstreamExchangeMutation) ExchangeRole() (r string, exists bool) {
+	v := m.exchange_role
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeRole returns the old "exchange_role" field's value of the UpstreamExchange entity.
+// If the UpstreamExchange object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UpstreamExchangeMutation) OldExchangeRole(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeRole is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeRole requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeRole: %w", err)
+	}
+	return oldValue.ExchangeRole, nil
+}
+
+// ClearExchangeRole clears the value of the "exchange_role" field.
+func (m *UpstreamExchangeMutation) ClearExchangeRole() {
+	m.exchange_role = nil
+	m.clearedFields[upstreamexchange.FieldExchangeRole] = struct{}{}
+}
+
+// ExchangeRoleCleared returns if the "exchange_role" field was cleared in this mutation.
+func (m *UpstreamExchangeMutation) ExchangeRoleCleared() bool {
+	_, ok := m.clearedFields[upstreamexchange.FieldExchangeRole]
+	return ok
+}
+
+// ResetExchangeRole resets all changes to the "exchange_role" field.
+func (m *UpstreamExchangeMutation) ResetExchangeRole() {
+	m.exchange_role = nil
+	delete(m.clearedFields, upstreamexchange.FieldExchangeRole)
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (m *UpstreamExchangeMutation) SetParentExchangeID(s string) {
+	m.parent_exchange_id = &s
+}
+
+// ParentExchangeID returns the value of the "parent_exchange_id" field in the mutation.
+func (m *UpstreamExchangeMutation) ParentExchangeID() (r string, exists bool) {
+	v := m.parent_exchange_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldParentExchangeID returns the old "parent_exchange_id" field's value of the UpstreamExchange entity.
+// If the UpstreamExchange object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UpstreamExchangeMutation) OldParentExchangeID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldParentExchangeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldParentExchangeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldParentExchangeID: %w", err)
+	}
+	return oldValue.ParentExchangeID, nil
+}
+
+// ClearParentExchangeID clears the value of the "parent_exchange_id" field.
+func (m *UpstreamExchangeMutation) ClearParentExchangeID() {
+	m.parent_exchange_id = nil
+	m.clearedFields[upstreamexchange.FieldParentExchangeID] = struct{}{}
+}
+
+// ParentExchangeIDCleared returns if the "parent_exchange_id" field was cleared in this mutation.
+func (m *UpstreamExchangeMutation) ParentExchangeIDCleared() bool {
+	_, ok := m.clearedFields[upstreamexchange.FieldParentExchangeID]
+	return ok
+}
+
+// ResetParentExchangeID resets all changes to the "parent_exchange_id" field.
+func (m *UpstreamExchangeMutation) ResetParentExchangeID() {
+	m.parent_exchange_id = nil
+	delete(m.clearedFields, upstreamexchange.FieldParentExchangeID)
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (m *UpstreamExchangeMutation) SetSequenceIndex(i int) {
+	m.sequence_index = &i
+	m.addsequence_index = nil
+}
+
+// SequenceIndex returns the value of the "sequence_index" field in the mutation.
+func (m *UpstreamExchangeMutation) SequenceIndex() (r int, exists bool) {
+	v := m.sequence_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSequenceIndex returns the old "sequence_index" field's value of the UpstreamExchange entity.
+// If the UpstreamExchange object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UpstreamExchangeMutation) OldSequenceIndex(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSequenceIndex is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSequenceIndex requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSequenceIndex: %w", err)
+	}
+	return oldValue.SequenceIndex, nil
+}
+
+// AddSequenceIndex adds i to the "sequence_index" field.
+func (m *UpstreamExchangeMutation) AddSequenceIndex(i int) {
+	if m.addsequence_index != nil {
+		*m.addsequence_index += i
+	} else {
+		m.addsequence_index = &i
+	}
+}
+
+// AddedSequenceIndex returns the value that was added to the "sequence_index" field in this mutation.
+func (m *UpstreamExchangeMutation) AddedSequenceIndex() (r int, exists bool) {
+	v := m.addsequence_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSequenceIndex clears the value of the "sequence_index" field.
+func (m *UpstreamExchangeMutation) ClearSequenceIndex() {
+	m.sequence_index = nil
+	m.addsequence_index = nil
+	m.clearedFields[upstreamexchange.FieldSequenceIndex] = struct{}{}
+}
+
+// SequenceIndexCleared returns if the "sequence_index" field was cleared in this mutation.
+func (m *UpstreamExchangeMutation) SequenceIndexCleared() bool {
+	_, ok := m.clearedFields[upstreamexchange.FieldSequenceIndex]
+	return ok
+}
+
+// ResetSequenceIndex resets all changes to the "sequence_index" field.
+func (m *UpstreamExchangeMutation) ResetSequenceIndex() {
+	m.sequence_index = nil
+	m.addsequence_index = nil
+	delete(m.clearedFields, upstreamexchange.FieldSequenceIndex)
 }
 
 // SetCassettePath sets the "cassette_path" field.
@@ -26593,7 +26865,7 @@ func (m *UpstreamExchangeMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UpstreamExchangeMutation) Fields() []string {
-	fields := make([]string, 0, 12)
+	fields := make([]string, 0, 17)
 	if m.response_id != nil {
 		fields = append(fields, upstreamexchange.FieldResponseID)
 	}
@@ -26602,6 +26874,21 @@ func (m *UpstreamExchangeMutation) Fields() []string {
 	}
 	if m.trace_id != nil {
 		fields = append(fields, upstreamexchange.FieldTraceID)
+	}
+	if m.exchange_id != nil {
+		fields = append(fields, upstreamexchange.FieldExchangeID)
+	}
+	if m.exchange_kind != nil {
+		fields = append(fields, upstreamexchange.FieldExchangeKind)
+	}
+	if m.exchange_role != nil {
+		fields = append(fields, upstreamexchange.FieldExchangeRole)
+	}
+	if m.parent_exchange_id != nil {
+		fields = append(fields, upstreamexchange.FieldParentExchangeID)
+	}
+	if m.sequence_index != nil {
+		fields = append(fields, upstreamexchange.FieldSequenceIndex)
 	}
 	if m.cassette_path != nil {
 		fields = append(fields, upstreamexchange.FieldCassettePath)
@@ -26644,6 +26931,16 @@ func (m *UpstreamExchangeMutation) Field(name string) (ent.Value, bool) {
 		return m.RequestAuditID()
 	case upstreamexchange.FieldTraceID:
 		return m.TraceID()
+	case upstreamexchange.FieldExchangeID:
+		return m.ExchangeID()
+	case upstreamexchange.FieldExchangeKind:
+		return m.ExchangeKind()
+	case upstreamexchange.FieldExchangeRole:
+		return m.ExchangeRole()
+	case upstreamexchange.FieldParentExchangeID:
+		return m.ParentExchangeID()
+	case upstreamexchange.FieldSequenceIndex:
+		return m.SequenceIndex()
 	case upstreamexchange.FieldCassettePath:
 		return m.CassettePath()
 	case upstreamexchange.FieldUpstreamID:
@@ -26677,6 +26974,16 @@ func (m *UpstreamExchangeMutation) OldField(ctx context.Context, name string) (e
 		return m.OldRequestAuditID(ctx)
 	case upstreamexchange.FieldTraceID:
 		return m.OldTraceID(ctx)
+	case upstreamexchange.FieldExchangeID:
+		return m.OldExchangeID(ctx)
+	case upstreamexchange.FieldExchangeKind:
+		return m.OldExchangeKind(ctx)
+	case upstreamexchange.FieldExchangeRole:
+		return m.OldExchangeRole(ctx)
+	case upstreamexchange.FieldParentExchangeID:
+		return m.OldParentExchangeID(ctx)
+	case upstreamexchange.FieldSequenceIndex:
+		return m.OldSequenceIndex(ctx)
 	case upstreamexchange.FieldCassettePath:
 		return m.OldCassettePath(ctx)
 	case upstreamexchange.FieldUpstreamID:
@@ -26724,6 +27031,41 @@ func (m *UpstreamExchangeMutation) SetField(name string, value ent.Value) error 
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetTraceID(v)
+		return nil
+	case upstreamexchange.FieldExchangeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeID(v)
+		return nil
+	case upstreamexchange.FieldExchangeKind:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeKind(v)
+		return nil
+	case upstreamexchange.FieldExchangeRole:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeRole(v)
+		return nil
+	case upstreamexchange.FieldParentExchangeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetParentExchangeID(v)
+		return nil
+	case upstreamexchange.FieldSequenceIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSequenceIndex(v)
 		return nil
 	case upstreamexchange.FieldCassettePath:
 		v, ok := value.(string)
@@ -26796,6 +27138,9 @@ func (m *UpstreamExchangeMutation) SetField(name string, value ent.Value) error 
 // this mutation.
 func (m *UpstreamExchangeMutation) AddedFields() []string {
 	var fields []string
+	if m.addsequence_index != nil {
+		fields = append(fields, upstreamexchange.FieldSequenceIndex)
+	}
 	if m.addstatus_code != nil {
 		fields = append(fields, upstreamexchange.FieldStatusCode)
 	}
@@ -26807,6 +27152,8 @@ func (m *UpstreamExchangeMutation) AddedFields() []string {
 // was not set, or was not defined in the schema.
 func (m *UpstreamExchangeMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
+	case upstreamexchange.FieldSequenceIndex:
+		return m.AddedSequenceIndex()
 	case upstreamexchange.FieldStatusCode:
 		return m.AddedStatusCode()
 	}
@@ -26818,6 +27165,13 @@ func (m *UpstreamExchangeMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *UpstreamExchangeMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case upstreamexchange.FieldSequenceIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSequenceIndex(v)
+		return nil
 	case upstreamexchange.FieldStatusCode:
 		v, ok := value.(int)
 		if !ok {
@@ -26841,6 +27195,21 @@ func (m *UpstreamExchangeMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(upstreamexchange.FieldTraceID) {
 		fields = append(fields, upstreamexchange.FieldTraceID)
+	}
+	if m.FieldCleared(upstreamexchange.FieldExchangeID) {
+		fields = append(fields, upstreamexchange.FieldExchangeID)
+	}
+	if m.FieldCleared(upstreamexchange.FieldExchangeKind) {
+		fields = append(fields, upstreamexchange.FieldExchangeKind)
+	}
+	if m.FieldCleared(upstreamexchange.FieldExchangeRole) {
+		fields = append(fields, upstreamexchange.FieldExchangeRole)
+	}
+	if m.FieldCleared(upstreamexchange.FieldParentExchangeID) {
+		fields = append(fields, upstreamexchange.FieldParentExchangeID)
+	}
+	if m.FieldCleared(upstreamexchange.FieldSequenceIndex) {
+		fields = append(fields, upstreamexchange.FieldSequenceIndex)
 	}
 	if m.FieldCleared(upstreamexchange.FieldCassettePath) {
 		fields = append(fields, upstreamexchange.FieldCassettePath)
@@ -26892,6 +27261,21 @@ func (m *UpstreamExchangeMutation) ClearField(name string) error {
 	case upstreamexchange.FieldTraceID:
 		m.ClearTraceID()
 		return nil
+	case upstreamexchange.FieldExchangeID:
+		m.ClearExchangeID()
+		return nil
+	case upstreamexchange.FieldExchangeKind:
+		m.ClearExchangeKind()
+		return nil
+	case upstreamexchange.FieldExchangeRole:
+		m.ClearExchangeRole()
+		return nil
+	case upstreamexchange.FieldParentExchangeID:
+		m.ClearParentExchangeID()
+		return nil
+	case upstreamexchange.FieldSequenceIndex:
+		m.ClearSequenceIndex()
+		return nil
 	case upstreamexchange.FieldCassettePath:
 		m.ClearCassettePath()
 		return nil
@@ -26935,6 +27319,21 @@ func (m *UpstreamExchangeMutation) ResetField(name string) error {
 		return nil
 	case upstreamexchange.FieldTraceID:
 		m.ResetTraceID()
+		return nil
+	case upstreamexchange.FieldExchangeID:
+		m.ResetExchangeID()
+		return nil
+	case upstreamexchange.FieldExchangeKind:
+		m.ResetExchangeKind()
+		return nil
+	case upstreamexchange.FieldExchangeRole:
+		m.ResetExchangeRole()
+		return nil
+	case upstreamexchange.FieldParentExchangeID:
+		m.ResetParentExchangeID()
+		return nil
+	case upstreamexchange.FieldSequenceIndex:
+		m.ResetSequenceIndex()
 		return nil
 	case upstreamexchange.FieldCassettePath:
 		m.ResetCassettePath()
