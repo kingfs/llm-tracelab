@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/internal/appdbmigrate"
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
@@ -279,7 +280,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "analyze", "analyze repair-usage", "analyze reanalyze", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "analyze", "analyze repair-usage", "analyze backfill-exchanges", "analyze reanalyze", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -4489,6 +4490,116 @@ debug:
 	})
 	if code != 0 {
 		t.Fatalf("runAnalyzeReanalyze(session) = %d, want 0", code)
+	}
+}
+
+func TestAnalyzeBackfillExchangesDryRunDoesNotModifyIndex(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	dbPath := filepath.Join(dir, "llm_tracelab.sqlite3")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: ""
+database:
+  dsn: "file:` + dbPath + `?mode=rwc"
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	cassettePath := filepath.Join(dir, "trace-backfill-dry-run.http")
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:      "req-backfill-dry-run",
+			RequestAuditID: "audit-backfill-dry-run",
+			ResponseID:     "resp-backfill-dry-run",
+			ExchangeID:     "exchange-backfill-dry-run",
+			ExchangeKind:   "model",
+			ExchangeRole:   "primary_model_call",
+			SequenceIndex:  1,
+			TraceID:        "trace-backfill-dry-run",
+			Time:           time.Date(2026, 6, 24, 2, 0, 0, 0, time.UTC),
+			Model:          "gpt-5.1",
+			Provider:       "openai",
+			Operation:      "responses",
+			Endpoint:       "/v1/responses",
+			URL:            "/v1/responses",
+			Method:         "POST",
+			StatusCode:     200,
+		},
+	}
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	if err := os.WriteFile(cassettePath, []byte(string(prelude)+"POST /v1/responses HTTP/1.1\r\nHost: example.test\r\n\r\n{}\nHTTP/1.1 200 OK\r\n\r\n{}"), 0o644); err != nil {
+		t.Fatalf("WriteFile(cassette) error = %v", err)
+	}
+
+	st, err := store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase() error = %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	if err := auditor.RecordUpstreamExchange(context.Background(), responsesaudit.UpstreamExchange{
+		CassettePath: cassettePath,
+		Endpoint:     "/v1/responses",
+		Model:        "gpt-5.1",
+		StartedAt:    time.Date(2026, 6, 24, 2, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("RecordUpstreamExchange() error = %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "analyze", "backfill-exchanges", "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%q", err, out.String())
+	}
+	var envelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Scanned      int  `json:"scanned"`
+			UpdatedModel int  `json:"updated_model"`
+			DryRun       bool `json:"dry_run"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Result.Scanned != 1 || envelope.Result.UpdatedModel != 1 || !envelope.Result.DryRun {
+		t.Fatalf("envelope = %+v", envelope)
+	}
+
+	st, err = store.NewWithDatabase(dir, "sqlite", "file:"+dbPath+"?mode=rwc", 4, 4)
+	if err != nil {
+		t.Fatalf("NewWithDatabase(reopen) error = %v", err)
+	}
+	defer st.Close()
+	exchanges, err := st.EntClient().UpstreamExchange.Query().Where(upstreamexchange.CassettePathEQ(cassettePath)).All(context.Background())
+	if err != nil {
+		t.Fatalf("query upstream exchange error = %v", err)
+	}
+	if len(exchanges) != 1 {
+		t.Fatalf("exchanges = %d, want 1", len(exchanges))
+	}
+	if exchanges[0].ExchangeKind != "" || exchanges[0].ExchangeRole != "" || exchanges[0].RequestAuditID != "" || exchanges[0].ResponseID != "" {
+		t.Fatalf("dry-run modified exchange = %+v", exchanges[0])
 	}
 }
 

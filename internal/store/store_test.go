@@ -90,6 +90,143 @@ func TestNewInitializesAppSettingsSchema(t *testing.T) {
 	}
 }
 
+func TestBackfillExchangeMetadataUpdatesMissingModelFromV3Cassette(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	cassettePath := filepath.Join(dir, "trace-model.http")
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:        "req-backfill-model",
+			RequestAuditID:   "audit-backfill-model",
+			ResponseID:       "resp-backfill-model",
+			ExchangeID:       "exchange-model-1",
+			ExchangeKind:     "model",
+			ExchangeRole:     "primary_model_call",
+			ParentExchangeID: "entry:audit-backfill-model",
+			SequenceIndex:    2,
+			TraceID:          "trace-backfill-model",
+			Time:             time.Date(2026, 6, 24, 1, 0, 0, 0, time.UTC),
+			Model:            "gpt-5.1",
+			Provider:         "openai",
+			Operation:        "responses",
+			Endpoint:         "/v1/responses",
+			URL:              "/v1/responses",
+			Method:           "POST",
+			StatusCode:       200,
+		},
+	}
+	writeBackfillCassetteForTest(t, cassettePath, header)
+	if _, err := st.db.Exec(`
+		INSERT INTO upstream_exchanges (id, cassette_path, endpoint, model, started_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, "upex-backfill-model", cassettePath, "/v1/responses", "gpt-5.1", time.Now().UTC()); err != nil {
+		t.Fatalf("insert upstream_exchanges error = %v", err)
+	}
+
+	result, err := st.BackfillExchangeMetadata(context.Background(), ExchangeMetadataBackfillOptions{})
+	if err != nil {
+		t.Fatalf("BackfillExchangeMetadata() error = %v", err)
+	}
+	if result.Scanned != 1 || result.UpdatedModel != 1 || result.UpdatedEntry != 0 || result.Conflicts != 0 || result.MissingCassette != 0 || result.DryRun {
+		t.Fatalf("result = %+v", result)
+	}
+
+	var got struct {
+		responseID       string
+		requestAuditID   string
+		traceID          string
+		exchangeID       string
+		exchangeKind     string
+		exchangeRole     string
+		parentExchangeID string
+		sequenceIndex    int
+	}
+	if err := st.db.QueryRow(`
+		SELECT response_id, request_audit_id, trace_id, exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index
+		FROM upstream_exchanges
+		WHERE id = ?
+	`, "upex-backfill-model").Scan(&got.responseID, &got.requestAuditID, &got.traceID, &got.exchangeID, &got.exchangeKind, &got.exchangeRole, &got.parentExchangeID, &got.sequenceIndex); err != nil {
+		t.Fatalf("query upstream_exchanges error = %v", err)
+	}
+	if got.responseID != "resp-backfill-model" || got.requestAuditID != "audit-backfill-model" || got.traceID != "trace-backfill-model" ||
+		got.exchangeID != "exchange-model-1" || got.exchangeKind != "model" || got.exchangeRole != "primary_model_call" ||
+		got.parentExchangeID != "entry:audit-backfill-model" || got.sequenceIndex != 2 {
+		t.Fatalf("backfilled row = %+v", got)
+	}
+}
+
+func TestBackfillExchangeMetadataCountsMissingAndConflicts(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	conflictPath := filepath.Join(dir, "trace-conflict.http")
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     "req-backfill-conflict",
+			ExchangeKind:  "model",
+			ExchangeRole:  "primary_model_call",
+			Time:          time.Date(2026, 6, 24, 1, 5, 0, 0, time.UTC),
+			Model:         "gpt-5.1",
+			Provider:      "openai",
+			Operation:     "responses",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    200,
+			SequenceIndex: 1,
+		},
+	}
+	writeBackfillCassetteForTest(t, conflictPath, header)
+	if _, err := st.db.Exec(`
+		INSERT INTO upstream_exchanges (id, cassette_path, exchange_kind, endpoint, started_at)
+		VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)
+	`,
+		"upex-conflict", conflictPath, "entry", "/v1/responses", time.Now().UTC(),
+		"upex-missing", filepath.Join(dir, "missing.http"), "", "/v1/responses", time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("insert upstream_exchanges error = %v", err)
+	}
+
+	result, err := st.BackfillExchangeMetadata(context.Background(), ExchangeMetadataBackfillOptions{})
+	if err != nil {
+		t.Fatalf("BackfillExchangeMetadata() error = %v", err)
+	}
+	if result.Scanned != 2 || result.MissingCassette != 1 || result.Conflicts != 1 || result.UpdatedModel != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	var kind, role string
+	if err := st.db.QueryRow(`SELECT exchange_kind, COALESCE(exchange_role, '') FROM upstream_exchanges WHERE id = ?`, "upex-conflict").Scan(&kind, &role); err != nil {
+		t.Fatalf("query conflict row error = %v", err)
+	}
+	if kind != "entry" || role != "" {
+		t.Fatalf("conflict row kind/role = %q/%q, want entry/empty", kind, role)
+	}
+}
+
+func writeBackfillCassetteForTest(t *testing.T, path string, header recordfile.RecordHeader) {
+	t.Helper()
+	reqHead := "POST /v1/responses HTTP/1.1\r\nHost: example.test\r\n\r\n"
+	resHead := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	prelude, err := recordfile.MarshalPrelude(header, recordfile.BuildEvents(header))
+	if err != nil {
+		t.Fatalf("MarshalPrelude() error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(string(prelude)+reqHead+"{}\n"+resHead+`{"id":"resp"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(cassette) error = %v", err)
+	}
+}
+
 func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {

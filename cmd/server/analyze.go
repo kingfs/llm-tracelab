@@ -36,6 +36,13 @@ type analyzeRepairUsageOptions struct {
 	stdout          io.Writer
 }
 
+type analyzeBackfillExchangesOptions struct {
+	configPath string
+	dryRun     bool
+	format     string
+	stdout     io.Writer
+}
+
 type analyzeReanalyzeOptions struct {
 	configPath  string
 	traceID     string
@@ -67,6 +74,7 @@ func newAnalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.AddCommand(newAnalyzeReparseCommand(runtime))
 	cmd.AddCommand(newAnalyzeScanCommand(runtime))
 	cmd.AddCommand(newAnalyzeRepairUsageCommand(runtime))
+	cmd.AddCommand(newAnalyzeBackfillExchangesCommand(runtime))
 	cmd.AddCommand(newAnalyzeReanalyzeCommand(runtime))
 	cmd.AddCommand(newAnalyzeSessionCommand(runtime))
 	return cmd
@@ -150,6 +158,29 @@ func newAnalyzeRepairUsageCommand(runtime *cliRuntime) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&traceID, "trace-id", "", "Trace ID to repair")
 	cmd.Flags().BoolVar(&rewriteCassette, "rewrite-cassette", false, "Rewrite V3 cassette prelude with repaired usage")
+	return cmd
+}
+
+func newAnalyzeBackfillExchangesCommand(runtime *cliRuntime) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:           "backfill-exchanges",
+		Short:         "Backfill exchange metadata in the DB index without rewriting cassettes",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runAnalyzeBackfillExchanges(analyzeBackfillExchangesOptions{
+					configPath: runtime.configPath(),
+					dryRun:     dryRun,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+				})
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report exchange metadata backfill counts without updating the DB index")
 	return cmd
 }
 
@@ -292,6 +323,37 @@ func runAnalyzeRepairUsage(opts analyzeRepairUsageOptions) int {
 	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze repair-usage", output, func(w io.Writer) error {
 		_, err := fmt.Fprintf(w, "repaired usage for trace %s (total tokens %d, cassette rewrite %t)\n",
 			opts.traceID, result.Usage.After.TotalTokens, result.Usage.CassetteRewrote)
+		return err
+	}); err != nil {
+		slog.Error("Write command result failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func runAnalyzeBackfillExchanges(opts analyzeBackfillExchangesOptions) int {
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
+		return 1
+	}
+	traceStore, err := openApplicationDatabase(cfg)
+	if err != nil {
+		slog.Error("Failed to initialize trace store", "error", err)
+		return 1
+	}
+	defer traceStore.Close()
+
+	result, err := traceStore.BackfillExchangeMetadata(context.Background(), store.ExchangeMetadataBackfillOptions{
+		DryRun: opts.dryRun,
+	})
+	if err != nil {
+		slog.Error("Failed to backfill exchange metadata", "error", err)
+		return 1
+	}
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze backfill-exchanges", result, func(w io.Writer) error {
+		_, err := fmt.Fprintf(w, "backfilled exchange metadata: scanned=%d updated_model=%d updated_entry=%d legacy_or_unknown=%d missing_cassette=%d conflicts=%d dry_run=%t\n",
+			result.Scanned, result.UpdatedModel, result.UpdatedEntry, result.LegacyOrUnknown, result.MissingCassette, result.Conflicts, result.DryRun)
 		return err
 	}); err != nil {
 		slog.Error("Write command result failed", "error", err)
