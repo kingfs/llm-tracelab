@@ -113,19 +113,24 @@ type ExecutionEventView struct {
 }
 
 type UpstreamExchangeView struct {
-	ID             string
-	ResponseID     string
-	RequestAuditID string
-	TraceID        string
-	CassettePath   string
-	UpstreamID     string
-	RouteTarget    string
-	Model          string
-	Endpoint       string
-	StatusCode     int
-	StartedAt      time.Time
-	CompletedAt    time.Time
-	ErrorText      string
+	ID               string
+	ResponseID       string
+	RequestAuditID   string
+	TraceID          string
+	ExchangeID       string `json:"exchange_id,omitempty"`
+	ExchangeKind     string `json:"exchange_kind,omitempty"`
+	ExchangeRole     string `json:"exchange_role,omitempty"`
+	ParentExchangeID string `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int    `json:"sequence_index,omitempty"`
+	CassettePath     string
+	UpstreamID       string
+	RouteTarget      string
+	Model            string
+	Endpoint         string
+	StatusCode       int
+	StartedAt        time.Time
+	CompletedAt      time.Time
+	ErrorText        string
 }
 
 type FinalResponseView struct {
@@ -142,14 +147,18 @@ type FinalResponseView struct {
 }
 
 type RawCassetteView struct {
-	ExchangeID   string                         `json:"exchange_id,omitempty"`
-	TraceID      string                         `json:"trace_id,omitempty"`
-	CassettePath string                         `json:"cassette_path,omitempty"`
-	ReadError    string                         `json:"read_error,omitempty"`
-	Header       recordfile.RecordHeader        `json:"header,omitempty"`
-	Events       []recordfile.RecordEvent       `json:"events,omitempty"`
-	Request      recordfile.HTTPRequestSummary  `json:"request,omitempty"`
-	Response     recordfile.HTTPResponseSummary `json:"response,omitempty"`
+	ExchangeID       string                         `json:"exchange_id,omitempty"`
+	ExchangeKind     string                         `json:"exchange_kind,omitempty"`
+	ExchangeRole     string                         `json:"exchange_role,omitempty"`
+	ParentExchangeID string                         `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int                            `json:"sequence_index,omitempty"`
+	TraceID          string                         `json:"trace_id,omitempty"`
+	CassettePath     string                         `json:"cassette_path,omitempty"`
+	ReadError        string                         `json:"read_error,omitempty"`
+	Header           recordfile.RecordHeader        `json:"header,omitempty"`
+	Events           []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request          recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response         recordfile.HTTPResponseSummary `json:"response,omitempty"`
 }
 
 type ToolCallEventReference struct {
@@ -272,6 +281,8 @@ type CompactSummaryDiagnostic struct {
 type RequestAuditDiagnostics struct {
 	EventCount            int
 	UpstreamExchangeCount int
+	EntryExchangePresent  bool
+	ModelExchangeCount    int
 	ToolCallCount         int
 	LatestStatus          string
 	HasCancelled          bool
@@ -288,6 +299,8 @@ type RequestAuditTrace struct {
 	RequestAudit      RequestAuditView
 	FinalResponse     FinalResponseView
 	ExecutionEvents   []ExecutionEventView
+	EntryExchange     UpstreamExchangeView
+	ModelExchanges    []UpstreamExchangeView
 	UpstreamExchanges []UpstreamExchangeView
 	RawCassettes      []RawCassetteView
 	ToolCalls         []ToolCallView
@@ -507,13 +520,90 @@ func (s *QueryService) GetRequestAuditTrace(ctx context.Context, params GetReque
 	if err != nil {
 		return trace, false, err
 	}
+	entryExchange, modelExchanges := splitAuditExchanges(trace.RequestAudit, exchanges)
 	trace.ExecutionEvents = events
-	trace.UpstreamExchanges = exchanges
-	trace.FinalResponse = deriveFinalResponse(trace.RequestAudit, events, exchanges)
-	trace.RawCassettes = loadRawCassettes(exchanges, params.CassetteBodyLimit)
+	trace.EntryExchange = entryExchange
+	trace.ModelExchanges = modelExchanges
+	trace.UpstreamExchanges = modelExchanges
+	trace.FinalResponse = deriveFinalResponse(trace.RequestAudit, events, modelExchanges)
+	trace.RawCassettes = loadRawCassettes(append([]UpstreamExchangeView{entryExchange}, modelExchanges...), params.CassetteBodyLimit)
 	trace.ToolCalls = deriveToolCalls(events)
 	trace.Diagnostics = DeriveRequestAuditDiagnostics(trace.RequestAudit, trace.ExecutionEvents, trace.UpstreamExchanges, trace.ToolCalls)
 	return trace, true, nil
+}
+
+func splitAuditExchanges(audit RequestAuditView, exchanges []UpstreamExchangeView) (UpstreamExchangeView, []UpstreamExchangeView) {
+	entry := syntheticEntryExchange(audit)
+	models := make([]UpstreamExchangeView, 0, len(exchanges))
+	for _, exchange := range exchanges {
+		exchange = normalizeExchangeView(exchange)
+		switch exchange.ExchangeKind {
+		case "entry":
+			if entry.CassettePath == "" && exchange.CassettePath != "" {
+				entry.TraceID = exchange.TraceID
+				entry.CassettePath = exchange.CassettePath
+			}
+			if entry.ID == "" {
+				entry.ID = exchange.ID
+			}
+			if entry.ResponseID == "" {
+				entry.ResponseID = exchange.ResponseID
+			}
+			if entry.RequestAuditID == "" {
+				entry.RequestAuditID = exchange.RequestAuditID
+			}
+			if entry.StartedAt.IsZero() {
+				entry.StartedAt = exchange.StartedAt
+			}
+			if entry.CompletedAt.IsZero() {
+				entry.CompletedAt = exchange.CompletedAt
+			}
+		case "model":
+			models = append(models, exchange)
+		}
+	}
+	sort.SliceStable(models, func(i, j int) bool {
+		if models[i].SequenceIndex != models[j].SequenceIndex {
+			return models[i].SequenceIndex < models[j].SequenceIndex
+		}
+		if !models[i].StartedAt.Equal(models[j].StartedAt) {
+			return models[i].StartedAt.Before(models[j].StartedAt)
+		}
+		return models[i].ID < models[j].ID
+	})
+	return entry, models
+}
+
+func syntheticEntryExchange(audit RequestAuditView) UpstreamExchangeView {
+	return UpstreamExchangeView{
+		ID:             "entry:" + audit.ID,
+		ResponseID:     audit.ResponseID,
+		RequestAuditID: audit.ID,
+		ExchangeID:     "entry:" + audit.ID,
+		ExchangeKind:   "entry",
+		ExchangeRole:   "client_request",
+		SequenceIndex:  0,
+		Endpoint:       audit.Path,
+		StartedAt:      audit.CreatedAt,
+	}
+}
+
+func normalizeExchangeView(exchange UpstreamExchangeView) UpstreamExchangeView {
+	if exchange.ExchangeID == "" {
+		exchange.ExchangeID = exchange.ID
+	}
+	if exchange.ExchangeKind == "" {
+		exchange.ExchangeKind = "model"
+	}
+	if exchange.ExchangeRole == "" {
+		switch exchange.ExchangeKind {
+		case "entry":
+			exchange.ExchangeRole = "client_request"
+		case "model":
+			exchange.ExchangeRole = "primary_model_call"
+		}
+	}
+	return exchange
 }
 
 func deriveFinalResponse(audit RequestAuditView, events []ExecutionEventView, exchanges []UpstreamExchangeView) FinalResponseView {
@@ -583,9 +673,13 @@ func loadRawCassettes(exchanges []UpstreamExchangeView, bodyLimit int) []RawCass
 		}
 		seen[key] = struct{}{}
 		item := RawCassetteView{
-			ExchangeID:   exchange.ID,
-			TraceID:      exchange.TraceID,
-			CassettePath: exchange.CassettePath,
+			ExchangeID:       exchange.ExchangeID,
+			ExchangeKind:     exchange.ExchangeKind,
+			ExchangeRole:     exchange.ExchangeRole,
+			ParentExchangeID: exchange.ParentExchangeID,
+			SequenceIndex:    exchange.SequenceIndex,
+			TraceID:          exchange.TraceID,
+			CassettePath:     exchange.CassettePath,
 		}
 		content, err := os.ReadFile(exchange.CassettePath)
 		if err != nil {
@@ -637,6 +731,8 @@ func DeriveRequestAuditDiagnostics(audit RequestAuditView, events []ExecutionEve
 	diagnostics := RequestAuditDiagnostics{
 		EventCount:            len(events),
 		UpstreamExchangeCount: len(exchanges),
+		EntryExchangePresent:  audit.ID != "",
+		ModelExchangeCount:    len(exchanges),
 		ToolCallCount:         len(toolCalls),
 		LatestStatus:          audit.Status,
 		PendingToolCalls:      []PendingToolCallDiagnostic{},
@@ -774,7 +870,7 @@ func (s *QueryService) listUpstreamExchanges(ctx context.Context, requestAuditID
 		return nil, nil
 	}
 	query := s.client.UpstreamExchange.Query().
-		Order(upstreamexchange.ByStartedAt(), upstreamexchange.ByCompletedAt(), upstreamexchange.ByID()).
+		Order(upstreamexchange.BySequenceIndex(), upstreamexchange.ByStartedAt(), upstreamexchange.ByID()).
 		Limit(normalizeAuditQueryLimit(limit))
 	switch {
 	case requestAuditID != "" && responseID != "":
@@ -937,19 +1033,24 @@ func upstreamExchangeView(record *dao.UpstreamExchange) UpstreamExchangeView {
 		return UpstreamExchangeView{}
 	}
 	return UpstreamExchangeView{
-		ID:             record.ID,
-		ResponseID:     record.ResponseID,
-		RequestAuditID: record.RequestAuditID,
-		TraceID:        record.TraceID,
-		CassettePath:   record.CassettePath,
-		UpstreamID:     record.UpstreamID,
-		RouteTarget:    record.RouteTarget,
-		Model:          record.Model,
-		Endpoint:       record.Endpoint,
-		StatusCode:     record.StatusCode,
-		StartedAt:      record.StartedAt,
-		CompletedAt:    record.CompletedAt,
-		ErrorText:      record.ErrorText,
+		ID:               record.ID,
+		ResponseID:       record.ResponseID,
+		RequestAuditID:   record.RequestAuditID,
+		TraceID:          record.TraceID,
+		ExchangeID:       record.ExchangeID,
+		ExchangeKind:     record.ExchangeKind,
+		ExchangeRole:     record.ExchangeRole,
+		ParentExchangeID: record.ParentExchangeID,
+		SequenceIndex:    record.SequenceIndex,
+		CassettePath:     record.CassettePath,
+		UpstreamID:       record.UpstreamID,
+		RouteTarget:      record.RouteTarget,
+		Model:            record.Model,
+		Endpoint:         record.Endpoint,
+		StatusCode:       record.StatusCode,
+		StartedAt:        record.StartedAt,
+		CompletedAt:      record.CompletedAt,
+		ErrorText:        record.ErrorText,
 	}
 }
 

@@ -196,6 +196,125 @@ func TestQueryServiceGetRequestAuditTraceIncludesFinalResponseAndRawCassette(t *
 	}
 }
 
+func TestQueryServiceGetRequestAuditTraceReturnsEntryAndModelExchanges(t *testing.T) {
+	ctx := context.Background()
+	client := openAuditTestClient(t)
+	base := time.Date(2026, 6, 24, 9, 0, 0, 0, time.UTC)
+	entryCassettePath := writeAuditCassetteWithMeta(t, "trace-entry-audit", "audit_exchange", "resp_exchange", recordfile.MetaData{
+		ExchangeID:   "entry:audit_exchange",
+		ExchangeKind: "entry",
+		ExchangeRole: "client_request",
+		Endpoint:     "/v1/responses",
+		URL:          "/v1/responses",
+	})
+	modelCassettePath := writeAuditCassetteWithMeta(t, "trace-model-a", "audit_exchange", "resp_exchange", recordfile.MetaData{
+		ExchangeID:       "model_exchange_a",
+		ExchangeKind:     "model",
+		ExchangeRole:     "primary_model_call",
+		ParentExchangeID: "entry:audit_exchange",
+		SequenceIndex:    1,
+	})
+
+	mustCreateRequestAudit(t, client, requestAuditSeed{
+		id:              "audit_exchange",
+		responseID:      "resp_exchange",
+		conversationID:  "conv_exchange",
+		method:          "POST",
+		path:            "/v1/responses",
+		clientRequestID: "client_exchange",
+		status:          "completed",
+		createdAt:       base,
+	})
+	mustCreateUpstreamExchange(t, client, upstreamExchangeSeed{
+		id:             "upex_entry",
+		responseID:     "resp_exchange",
+		requestAuditID: "audit_exchange",
+		traceID:        "trace-entry-audit",
+		exchangeID:     "entry:audit_exchange",
+		exchangeKind:   "entry",
+		exchangeRole:   "client_request",
+		cassettePath:   entryCassettePath,
+		startedAt:      base,
+		completedAt:    base.Add(5 * time.Millisecond),
+	})
+	mustCreateUpstreamExchange(t, client, upstreamExchangeSeed{
+		id:               "upex_model_b",
+		responseID:       "resp_exchange",
+		requestAuditID:   "audit_exchange",
+		traceID:          "trace-model-b",
+		exchangeID:       "model_exchange_b",
+		exchangeKind:     "model",
+		exchangeRole:     "fallback_model_call",
+		parentExchangeID: "entry:audit_exchange",
+		sequenceIndex:    2,
+		model:            "gpt-5-mini",
+		endpoint:         "/v1/responses",
+		statusCode:       200,
+		startedAt:        base.Add(20 * time.Millisecond),
+		completedAt:      base.Add(40 * time.Millisecond),
+	})
+	mustCreateUpstreamExchange(t, client, upstreamExchangeSeed{
+		id:               "upex_model_a",
+		responseID:       "resp_exchange",
+		requestAuditID:   "audit_exchange",
+		traceID:          "trace-model-a",
+		exchangeID:       "model_exchange_a",
+		exchangeKind:     "model",
+		exchangeRole:     "primary_model_call",
+		parentExchangeID: "entry:audit_exchange",
+		sequenceIndex:    1,
+		cassettePath:     modelCassettePath,
+		model:            "gpt-5",
+		endpoint:         "/v1/responses",
+		statusCode:       200,
+		startedAt:        base.Add(30 * time.Millisecond),
+		completedAt:      base.Add(50 * time.Millisecond),
+	})
+
+	trace, found, err := NewQueryService(client).GetRequestAuditTrace(ctx, GetRequestAuditTraceParams{
+		RequestAuditID:        "audit_exchange",
+		UpstreamExchangeLimit: 10,
+		CassetteBodyLimit:     64,
+	})
+	if err != nil {
+		t.Fatalf("GetRequestAuditTrace() error = %v", err)
+	}
+	if !found {
+		t.Fatal("GetRequestAuditTrace() found = false, want true")
+	}
+	entry := trace.EntryExchange
+	if entry.ExchangeID != "entry:audit_exchange" || entry.ExchangeKind != "entry" || entry.ExchangeRole != "client_request" {
+		t.Fatalf("EntryExchange = %+v, want synthetic entry identity", entry)
+	}
+	if entry.TraceID != "trace-entry-audit" || entry.CassettePath != entryCassettePath {
+		t.Fatalf("EntryExchange cassette = %+v, want linked entry cassette", entry)
+	}
+	if got := upstreamExchangeIDs(trace.ModelExchanges); !reflect.DeepEqual(got, []string{"upex_model_a", "upex_model_b"}) {
+		t.Fatalf("ModelExchanges ids = %v, want sequence_index ordering", got)
+	}
+	if got := upstreamExchangeIDs(trace.UpstreamExchanges); !reflect.DeepEqual(got, []string{"upex_model_a", "upex_model_b"}) {
+		t.Fatalf("UpstreamExchanges ids = %v, want compatibility alias for model exchanges", got)
+	}
+	firstModel := trace.ModelExchanges[0]
+	if firstModel.ExchangeID != "model_exchange_a" || firstModel.ExchangeKind != "model" || firstModel.ExchangeRole != "primary_model_call" || firstModel.ParentExchangeID != "entry:audit_exchange" || firstModel.SequenceIndex != 1 {
+		t.Fatalf("first model exchange = %+v, want exchange metadata", firstModel)
+	}
+	if len(trace.RawCassettes) != 2 {
+		t.Fatalf("len(RawCassettes) = %d, want entry and model cassettes", len(trace.RawCassettes))
+	}
+	rawEntry := trace.RawCassettes[0]
+	if rawEntry.ExchangeID != "entry:audit_exchange" || rawEntry.ExchangeKind != "entry" || rawEntry.ExchangeRole != "client_request" || rawEntry.TraceID != "trace-entry-audit" {
+		t.Fatalf("entry RawCassette = %+v, want entry exchange metadata", rawEntry)
+	}
+	rawModel := trace.RawCassettes[1]
+	if rawModel.ExchangeID != "model_exchange_a" || rawModel.ExchangeKind != "model" || rawModel.ExchangeRole != "primary_model_call" || rawModel.ParentExchangeID != "entry:audit_exchange" || rawModel.SequenceIndex != 1 {
+		t.Fatalf("model RawCassette = %+v, want model exchange metadata", rawModel)
+	}
+	if !trace.Diagnostics.EntryExchangePresent || trace.Diagnostics.ModelExchangeCount != 2 || trace.Diagnostics.UpstreamExchangeCount != 2 {
+		t.Fatalf("Diagnostics = %+v, want entry present and two model exchanges", trace.Diagnostics)
+	}
+}
+
 func TestQueryServiceGetRequestAuditTraceFiltersByClientRequestAndConversation(t *testing.T) {
 	ctx := context.Background()
 	client := openAuditTestClient(t)
@@ -941,17 +1060,22 @@ func mustCreateExecutionEvent(t *testing.T, client *dao.Client, seed executionEv
 }
 
 type upstreamExchangeSeed struct {
-	id             string
-	responseID     string
-	requestAuditID string
-	traceID        string
-	cassettePath   string
-	upstreamID     string
-	model          string
-	endpoint       string
-	statusCode     int
-	startedAt      time.Time
-	completedAt    time.Time
+	id               string
+	responseID       string
+	requestAuditID   string
+	traceID          string
+	exchangeID       string
+	exchangeKind     string
+	exchangeRole     string
+	parentExchangeID string
+	sequenceIndex    int
+	cassettePath     string
+	upstreamID       string
+	model            string
+	endpoint         string
+	statusCode       int
+	startedAt        time.Time
+	completedAt      time.Time
 }
 
 func mustCreateUpstreamExchange(t *testing.T, client *dao.Client, seed upstreamExchangeSeed) {
@@ -965,6 +1089,21 @@ func mustCreateUpstreamExchange(t *testing.T, client *dao.Client, seed upstreamE
 	}
 	if seed.traceID != "" {
 		create.SetTraceID(seed.traceID)
+	}
+	if seed.exchangeID != "" {
+		create.SetExchangeID(seed.exchangeID)
+	}
+	if seed.exchangeKind != "" {
+		create.SetExchangeKind(seed.exchangeKind)
+	}
+	if seed.exchangeRole != "" {
+		create.SetExchangeRole(seed.exchangeRole)
+	}
+	if seed.parentExchangeID != "" {
+		create.SetParentExchangeID(seed.parentExchangeID)
+	}
+	if seed.sequenceIndex != 0 {
+		create.SetSequenceIndex(seed.sequenceIndex)
 	}
 	if seed.cassettePath != "" {
 		create.SetCassettePath(seed.cassettePath)
@@ -994,27 +1133,51 @@ func mustCreateUpstreamExchange(t *testing.T, client *dao.Client, seed upstreamE
 
 func writeAuditCassette(t *testing.T, traceID string, requestAuditID string, responseID string) string {
 	t.Helper()
+	return writeAuditCassetteWithMeta(t, traceID, requestAuditID, responseID, recordfile.MetaData{})
+}
+
+func writeAuditCassetteWithMeta(t *testing.T, traceID string, requestAuditID string, responseID string, meta recordfile.MetaData) string {
+	t.Helper()
 	requestBody := `{"model":"gpt-5","input":"hello"}`
 	responseBody := `{"id":"` + responseID + `","output_text":"hello"}`
 	requestHeader := "POST /v1/chat/completions HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\nAuthorization: Bearer cassette-secret\r\n\r\n"
 	responseHeader := "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"
+	if meta.ConversationID == "" {
+		meta.ConversationID = "thread-cassette-1"
+	}
+	if meta.ClientRequestID == "" {
+		meta.ClientRequestID = "client-cassette-1"
+	}
+	if meta.Time.IsZero() {
+		meta.Time = time.Date(2026, 6, 22, 10, 15, 0, 0, time.UTC)
+	}
+	if meta.Model == "" {
+		meta.Model = "gpt-5"
+	}
+	if meta.Provider == "" {
+		meta.Provider = "openai_compatible"
+	}
+	if meta.Operation == "" {
+		meta.Operation = "chat_completions"
+	}
+	if meta.Endpoint == "" {
+		meta.Endpoint = "/v1/chat/completions"
+	}
+	if meta.URL == "" {
+		meta.URL = "/v1/chat/completions"
+	}
+	if meta.Method == "" {
+		meta.Method = "POST"
+	}
+	if meta.StatusCode == 0 {
+		meta.StatusCode = 200
+	}
+	meta.RequestID = traceID
+	meta.RequestAuditID = requestAuditID
+	meta.ResponseID = responseID
 	header := recordfile.RecordHeader{
 		Version: "LLM_PROXY_V3",
-		Meta: recordfile.MetaData{
-			RequestID:       traceID,
-			RequestAuditID:  requestAuditID,
-			ResponseID:      responseID,
-			ConversationID:  "thread-cassette-1",
-			ClientRequestID: "client-cassette-1",
-			Time:            time.Date(2026, 6, 22, 10, 15, 0, 0, time.UTC),
-			Model:           "gpt-5",
-			Provider:        "openai_compatible",
-			Operation:       "chat_completions",
-			Endpoint:        "/v1/chat/completions",
-			URL:             "/v1/chat/completions",
-			Method:          "POST",
-			StatusCode:      200,
-		},
+		Meta:    meta,
 		Layout: recordfile.LayoutInfo{
 			ReqHeaderLen: int64(len(requestHeader)),
 			ReqBodyLen:   int64(len(requestBody)),
