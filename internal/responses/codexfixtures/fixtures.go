@@ -169,6 +169,9 @@ func ValidateAll() error {
 	if _, ok := seen["unsupported_hosted_tool_expected_error.json"]; !ok {
 		return fmt.Errorf("missing unsupported hosted tool expected error fixture")
 	}
+	if err := requirePhase0HostedToolFixtures(seen); err != nil {
+		return err
+	}
 
 	for _, file := range files {
 		switch file.Kind {
@@ -210,6 +213,92 @@ func ValidateAll() error {
 	}
 
 	return nil
+}
+
+type requiredRequestFixture struct {
+	Name       string
+	ToolType   string
+	ToolChoice string
+	Stream     bool
+}
+
+func requirePhase0HostedToolFixtures(seen map[string]File) error {
+	required := []requiredRequestFixture{
+		{Name: "ordinary_web_search_descriptor_request.json", ToolType: "web_search", ToolChoice: "auto", Stream: true},
+		{Name: "forced_web_search_request.json", ToolType: "web_search", ToolChoice: "web_search"},
+		{Name: "unsupported_mcp_request.json", ToolType: "mcp", ToolChoice: "mcp"},
+		{Name: "unsupported_file_search_request.json", ToolType: "file_search", ToolChoice: "file_search"},
+		{Name: "unsupported_code_interpreter_request.json", ToolType: "code_interpreter", ToolChoice: "code_interpreter"},
+		{Name: "unsupported_computer_use_preview_request.json", ToolType: "computer_use_preview", ToolChoice: "computer_use_preview"},
+	}
+	for _, fixture := range required {
+		if _, ok := seen[fixture.Name]; !ok {
+			return fmt.Errorf("missing Phase 0 hosted tool request fixture %s", fixture.Name)
+		}
+		req, err := Decode[protocol.CreateResponseRequest](fixture.Name)
+		if err != nil {
+			return err
+		}
+		if err := validateRequiredRequestFixture(fixture, req); err != nil {
+			return err
+		}
+	}
+
+	expected, err := Decode[ExpectedErrorFixture]("unsupported_hosted_tool_expected_error.json")
+	if err != nil {
+		return err
+	}
+	requiredUnsupported := map[string]bool{
+		"mcp":                  false,
+		"file_search":          false,
+		"code_interpreter":     false,
+		"computer_use_preview": false,
+	}
+	for _, req := range expected.RequestExamples {
+		if len(req.Tools) == 0 {
+			continue
+		}
+		if _, ok := requiredUnsupported[req.Tools[0].Type]; ok {
+			requiredUnsupported[req.Tools[0].Type] = true
+		}
+	}
+	for toolType, found := range requiredUnsupported {
+		if !found {
+			return fmt.Errorf("unsupported hosted tool expected error fixture missing %s example", toolType)
+		}
+	}
+	return nil
+}
+
+func validateRequiredRequestFixture(fixture requiredRequestFixture, req protocol.CreateResponseRequest) error {
+	if req.Model == "" || req.Input == nil {
+		return fmt.Errorf("%s: request must include model and input", fixture.Name)
+	}
+	if req.Store == nil || !*req.Store {
+		return fmt.Errorf("%s: request must set store=true", fixture.Name)
+	}
+	if len(req.Tools) != 1 || req.Tools[0].Type != fixture.ToolType {
+		return fmt.Errorf("%s: tools must contain exactly one %s descriptor", fixture.Name, fixture.ToolType)
+	}
+	if req.Stream != fixture.Stream {
+		return fmt.Errorf("%s: stream = %v, want %v", fixture.Name, req.Stream, fixture.Stream)
+	}
+	if got := toolChoiceType(req.ToolChoice); got != fixture.ToolChoice {
+		return fmt.Errorf("%s: tool_choice = %q, want %q", fixture.Name, got, fixture.ToolChoice)
+	}
+	return nil
+}
+
+func toolChoiceType(choice any) string {
+	switch typed := choice.(type) {
+	case string:
+		return typed
+	case map[string]any:
+		if value, _ := typed["type"].(string); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func fileKind(name string) (string, bool) {

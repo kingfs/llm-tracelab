@@ -1,0 +1,27 @@
+{
+  "model": "local-test-model",
+  "input": "List project files through an MCP hosted tool.",
+  "tools": [
+    {
+      "type": "mcp",
+      "server_label": "workspace",
+      "allowed_tools": [
+        "list_files"
+      ],
+      "require_approval": "never"
+    }
+  ],
+  "tool_choice": {
+    "type": "mcp",
+    "server_label": "workspace"
+  },
+  "store": true,
+  "metadata": {
+    "fixture": "codex_unsupported_mcp",
+    "expected_behavior": "unsupported hosted mcp must be rejected before execution or fabricated output",
+    "codex": {
+      "thread_id": "thread_fixture_unsupported_mcp",
+      "client_request_id": "turn_fixture_unsupported_mcp_1"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "model": "local-test-model",
+  "input": "Use hosted web search to find the current project release status.",
+  "tools": [
+    {
+      "type": "web_search",
+      "max_num_results": 3,
+      "user_location": {
+        "type": "approximate",
+        "country": "US"
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "web_search"
+  },
+  "store": true,
+  "metadata": {
+    "fixture": "codex_forced_web_search",
+    "expected_behavior": "forced hosted web_search must either execute through an explicitly configured provider or fail with a stable unsupported hosted tool error when unavailable",
+    "codex": {
+      "thread_id": "thread_fixture_forced_web_search",
+      "client_request_id": "turn_fixture_forced_web_search_1"
+    }
+  }
+}

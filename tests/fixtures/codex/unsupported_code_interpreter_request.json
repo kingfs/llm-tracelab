@@ -1,0 +1,24 @@
+{
+  "model": "local-test-model",
+  "input": "Run Python code to compute a checksum.",
+  "tools": [
+    {
+      "type": "code_interpreter",
+      "container": {
+        "type": "auto"
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "code_interpreter"
+  },
+  "store": true,
+  "metadata": {
+    "fixture": "codex_unsupported_code_interpreter",
+    "expected_behavior": "unsupported hosted code_interpreter must be rejected before execution or fabricated output",
+    "codex": {
+      "thread_id": "thread_fixture_unsupported_code_interpreter",
+      "client_request_id": "turn_fixture_unsupported_code_interpreter_1"
+    }
+  }
+}
