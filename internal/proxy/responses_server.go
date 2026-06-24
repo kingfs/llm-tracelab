@@ -90,14 +90,20 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		return runtime.ChatCompletionResponse{}, err
 	}
 
-	logInfo, err := a.recorder.PrepareLogFileWithOptionsAndBody(recordReq, recorder.PrepareOptions{
+	prepareOpts := recorder.PrepareOptions{
 		SiteURL:                        selection.Target.Upstream.BaseURL,
 		SelectedUpstreamID:             selection.Target.ID,
 		SelectedUpstreamProviderPreset: selection.Target.Upstream.ProviderPreset,
 		RoutingPolicy:                  a.routingPolicy,
 		RoutingScore:                   selection.Score,
 		RoutingCandidateCount:          selection.CandidateCount,
-	}, body)
+	}
+	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok {
+		prepareOpts.ExchangeKind = metadata.ExchangeKind
+		prepareOpts.ExchangeRole = metadata.ExchangeRole
+		prepareOpts.SequenceIndex = metadata.SequenceIndex
+	}
+	logInfo, err := a.recorder.PrepareLogFileWithOptionsAndBody(recordReq, prepareOpts, body)
 	if err != nil {
 		a.router.Complete(selection, router.Outcome{
 			Success:    false,
@@ -316,8 +322,13 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 		CompletedAt:    completedAt,
 		ErrorText:      logInfo.Header.Meta.Error,
 	}
-	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok && metadata.ResponseID != "" {
-		entry.ResponseID = metadata.ResponseID
+	if metadata, ok := runtime.ModelCallMetadataFromContext(ctx); ok {
+		entry.ExchangeKind = metadata.ExchangeKind
+		entry.ExchangeRole = metadata.ExchangeRole
+		entry.SequenceIndex = metadata.SequenceIndex
+		if metadata.ResponseID != "" {
+			entry.ResponseID = metadata.ResponseID
+		}
 	}
 	if err := a.auditor.RecordUpstreamExchange(context.WithoutCancel(ctx), entry); err != nil {
 		slog.Error("Failed to record responses upstream exchange", "request_audit_id", requestAuditID, "path", logInfo.Path, "err", err)
@@ -404,7 +415,9 @@ func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []by
 
 	startedAt := time.Now()
 	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(recordReq, recorder.PrepareOptions{
-		SiteURL: "http://llm-tracelab.local",
+		SiteURL:      "http://llm-tracelab.local",
+		ExchangeKind: "entry",
+		ExchangeRole: "client_request",
 	}, body)
 	if err != nil {
 		return nil, err
