@@ -63,6 +63,7 @@ func (p geminiParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 			CacheCreationTokens: 0,
 		},
 	}
+	applyExchangeMetadata(input, &obs)
 	req, err := decodeJSONObject(input.RequestBody)
 	if err != nil {
 		return obs, fmt.Errorf("parse gemini request: %w", err)

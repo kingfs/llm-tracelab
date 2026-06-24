@@ -712,17 +712,23 @@ type ExperimentRunRecord struct {
 }
 
 type ObservationSummary struct {
-	TraceID       string
-	Parser        string
-	ParserVersion string
-	Status        string
-	Provider      string
-	Operation     string
-	Model         string
-	SummaryJSON   string
-	WarningsJSON  string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	TraceID          string
+	Parser           string
+	ParserVersion    string
+	Status           string
+	Provider         string
+	Operation        string
+	Model            string
+	ExchangeKind     string
+	ExchangeRole     string
+	ParentExchangeID string
+	SequenceIndex    int
+	RequestAuditID   string
+	ResponseID       string
+	SummaryJSON      string
+	WarningsJSON     string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type ObservationMetadata struct {
@@ -3316,6 +3322,12 @@ func (s *Store) initSchema() error {
 			provider TEXT NOT NULL DEFAULT '',
 			operation TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '',
+			exchange_kind TEXT NOT NULL DEFAULT '',
+			exchange_role TEXT NOT NULL DEFAULT '',
+			parent_exchange_id TEXT NOT NULL DEFAULT '',
+			sequence_index INTEGER NOT NULL DEFAULT 0,
+			request_audit_id TEXT NOT NULL DEFAULT '',
+			response_id TEXT NOT NULL DEFAULT '',
 			summary_json TEXT NOT NULL DEFAULT '{}',
 			warnings_json TEXT NOT NULL DEFAULT '[]',
 			created_at datetime NOT NULL,
@@ -3638,6 +3650,24 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.ensureColumn("upstream_exchanges", "sequence_index", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "request_audit_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_exchange_id ON upstream_exchanges(exchange_id)`); err != nil {
@@ -5107,9 +5137,10 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	if _, err := s.execTx(tx, `
 		INSERT INTO trace_observations (
 			trace_id, parser, parser_version, status, provider, operation, model,
+			exchange_kind, exchange_role, parent_exchange_id, sequence_index, request_audit_id, response_id,
 			summary_json, warnings_json, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(trace_id) DO UPDATE SET
 			parser=excluded.parser,
 			parser_version=excluded.parser_version,
@@ -5117,10 +5148,18 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 			provider=excluded.provider,
 			operation=excluded.operation,
 			model=excluded.model,
+			exchange_kind=excluded.exchange_kind,
+			exchange_role=excluded.exchange_role,
+			parent_exchange_id=excluded.parent_exchange_id,
+			sequence_index=excluded.sequence_index,
+			request_audit_id=excluded.request_audit_id,
+			response_id=excluded.response_id,
 			summary_json=excluded.summary_json,
 			warnings_json=excluded.warnings_json,
 			updated_at=excluded.updated_at
-	`, sqlSafeText(obs.TraceID), sqlSafeText(obs.Parser), sqlSafeText(obs.ParserVersion), string(obs.Status), sqlSafeText(obs.Provider), sqlSafeText(obs.Operation), sqlSafeText(obs.Model), sqlSafeBytes(summaryJSON), sqlSafeBytes(warningsJSON), now, now); err != nil {
+	`, sqlSafeText(obs.TraceID), sqlSafeText(obs.Parser), sqlSafeText(obs.ParserVersion), string(obs.Status), sqlSafeText(obs.Provider), sqlSafeText(obs.Operation), sqlSafeText(obs.Model),
+		sqlSafeText(obs.ExchangeKind), sqlSafeText(obs.ExchangeRole), sqlSafeText(obs.ParentExchangeID), obs.SequenceIndex, sqlSafeText(obs.RequestAuditID), sqlSafeText(obs.ResponseID),
+		sqlSafeBytes(summaryJSON), sqlSafeBytes(warningsJSON), now, now); err != nil {
 		return err
 	}
 	if _, err := s.execTx(tx, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
@@ -5162,6 +5201,7 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 	var createdAt, updatedAt any
 	err := s.db.QueryRow(`
 		SELECT trace_id, parser, parser_version, status, provider, operation, model,
+			exchange_kind, exchange_role, parent_exchange_id, sequence_index, request_audit_id, response_id,
 			summary_json, warnings_json, created_at, updated_at
 		FROM trace_observations
 		WHERE trace_id = ?
@@ -5173,6 +5213,12 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 		&summary.Provider,
 		&summary.Operation,
 		&summary.Model,
+		&summary.ExchangeKind,
+		&summary.ExchangeRole,
+		&summary.ParentExchangeID,
+		&summary.SequenceIndex,
+		&summary.RequestAuditID,
+		&summary.ResponseID,
 		&summary.SummaryJSON,
 		&summary.WarningsJSON,
 		&createdAt,
@@ -5250,18 +5296,74 @@ func (s *Store) GetObservation(traceID string) (observe.TraceObservation, error)
 		_ = json.Unmarshal([]byte(summary.WarningsJSON), &warnings)
 	}
 	return observe.TraceObservation{
-		TraceID:       summary.TraceID,
-		Provider:      summary.Provider,
-		Operation:     summary.Operation,
-		Model:         summary.Model,
-		Parser:        summary.Parser,
-		ParserVersion: summary.ParserVersion,
-		Status:        observe.ParseStatus(summary.Status),
-		Warnings:      warnings,
+		TraceID:          summary.TraceID,
+		Provider:         summary.Provider,
+		Operation:        summary.Operation,
+		Model:            summary.Model,
+		ExchangeKind:     summary.ExchangeKind,
+		ExchangeRole:     summary.ExchangeRole,
+		ParentExchangeID: summary.ParentExchangeID,
+		SequenceIndex:    summary.SequenceIndex,
+		RequestAuditID:   summary.RequestAuditID,
+		ResponseID:       summary.ResponseID,
+		Parser:           summary.Parser,
+		ParserVersion:    summary.ParserVersion,
+		Status:           observe.ParseStatus(summary.Status),
+		Warnings:         warnings,
 		Response: observe.ObservationResponse{
 			Nodes: observe.RebuildNodeTree(nodes),
 		},
 	}, nil
+}
+
+func (s *Store) GetTraceExchangeMetadata(traceID string) (recordfile.MetaData, error) {
+	var meta recordfile.MetaData
+	var logKind, logRole, logParent string
+	var logSeq int
+	err := s.db.QueryRow(`
+		SELECT exchange_kind, exchange_role, parent_exchange_id, sequence_index
+		FROM logs
+		WHERE trace_id = ?
+	`, traceID).Scan(&logKind, &logRole, &logParent, &logSeq)
+	if err != nil && err != sql.ErrNoRows {
+		return recordfile.MetaData{}, err
+	}
+	meta.ExchangeKind = logKind
+	meta.ExchangeRole = logRole
+	meta.ParentExchangeID = logParent
+	meta.SequenceIndex = logSeq
+
+	var requestAuditID, responseID, upstreamKind, upstreamRole, upstreamParent sql.NullString
+	var upstreamSeq sql.NullInt64
+	err = s.db.QueryRow(`
+		SELECT request_audit_id, response_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index
+		FROM upstream_exchanges
+		WHERE trace_id = ?
+		ORDER BY started_at DESC, id DESC
+		LIMIT 1
+	`, traceID).Scan(&requestAuditID, &responseID, &upstreamKind, &upstreamRole, &upstreamParent, &upstreamSeq)
+	if err != nil && err != sql.ErrNoRows {
+		return recordfile.MetaData{}, err
+	}
+	if meta.ExchangeKind == "" {
+		meta.ExchangeKind = upstreamKind.String
+	}
+	if meta.ExchangeRole == "" {
+		meta.ExchangeRole = upstreamRole.String
+	}
+	if meta.ParentExchangeID == "" {
+		meta.ParentExchangeID = upstreamParent.String
+	}
+	if meta.SequenceIndex == 0 && upstreamSeq.Valid {
+		meta.SequenceIndex = int(upstreamSeq.Int64)
+	}
+	if requestAuditID.Valid {
+		meta.RequestAuditID = requestAuditID.String
+	}
+	if responseID.Valid {
+		meta.ResponseID = responseID.String
+	}
+	return meta, nil
 }
 
 func (s *Store) EnqueueParseJob(traceID string) error {
