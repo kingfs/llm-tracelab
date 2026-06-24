@@ -30,13 +30,22 @@ type streamingRuntime interface {
 }
 
 type Handler struct {
-	runtime      Runtime
-	maxBodyBytes int64
-	auditor      audit.RequestAuditor
-	events       audit.ExecutionEventRecorder
+	runtime           Runtime
+	maxBodyBytes      int64
+	auditor           audit.RequestAuditor
+	events            audit.ExecutionEventRecorder
+	codexCompat       CodexCompatOptions
+	codexCompatActive bool
 }
 
 type Option func(*Handler)
+
+type CodexCompatOptions struct {
+	Enabled              bool
+	PreserveClientTools  bool
+	AvailableHostedTools []protocol.Tool
+	DefaultToolChoice    any
+}
 
 func WithMaxBodyBytes(limit int64) Option {
 	return func(h *Handler) {
@@ -55,6 +64,13 @@ func WithRequestAuditor(auditor audit.RequestAuditor) Option {
 func WithExecutionEventRecorder(recorder audit.ExecutionEventRecorder) Option {
 	return func(h *Handler) {
 		h.events = recorder
+	}
+}
+
+func WithCodexCompat(options CodexCompatOptions) Option {
+	return func(h *Handler) {
+		h.codexCompat = options
+		h.codexCompatActive = true
 	}
 }
 
@@ -113,16 +129,35 @@ func (h *Handler) serveResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	auditID := h.auditAccepted(r, body)
+	normalizedBody := body
+	normalization := h.normalizeCodexCompatRequest(body, &req)
+	if normalization.Changed {
+		encoded, err := json.Marshal(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON request body: %v", err), "invalid_request_error", "invalid_json")
+			return
+		}
+		normalizedBody = encoded
+	}
+
+	auditID := h.auditAccepted(r, normalizedBody)
+	eventDetails := map[string]any{
+		"request_audit_id": auditID,
+		"method":           r.Method,
+		"path":             r.URL.Path,
+	}
+	if len(normalization.InjectedToolTypes) > 0 {
+		eventDetails["codex_compat"] = map[string]any{
+			"normalized":            true,
+			"injected_hosted_tools": normalization.InjectedToolTypes,
+			"tool_choice_defaulted": normalization.ToolChoiceDefaulted,
+		}
+	}
 	h.recordExecutionEvent(r, audit.ExecutionEvent{
-		EventType: "response.request",
-		Phase:     "request",
-		Status:    "accepted",
-		DetailsJSON: map[string]any{
-			"request_audit_id": auditID,
-			"method":           r.Method,
-			"path":             r.URL.Path,
-		},
+		EventType:   "response.request",
+		Phase:       "request",
+		Status:      "accepted",
+		DetailsJSON: eventDetails,
 	})
 	if req.Stream {
 		h.serveResponseStream(w, r, auditID, req)
@@ -706,6 +741,65 @@ func (h *Handler) auditAccepted(r *http.Request, body []byte) string {
 		return ""
 	}
 	return id
+}
+
+type codexCompatNormalization struct {
+	Changed             bool
+	InjectedToolTypes   []string
+	ToolChoiceDefaulted bool
+}
+
+func (h *Handler) normalizeCodexCompatRequest(body []byte, req *protocol.CreateResponseRequest) codexCompatNormalization {
+	if !h.codexCompatActive || !h.codexCompat.Enabled || req == nil || jsonObjectHasField(body, "tools") || len(req.Tools) > 0 {
+		return codexCompatNormalization{}
+	}
+
+	tool, ok := h.firstAvailableCodexHostedTool()
+	if !ok {
+		return codexCompatNormalization{}
+	}
+
+	req.Tools = []protocol.Tool{tool}
+	result := codexCompatNormalization{
+		Changed:           true,
+		InjectedToolTypes: []string{tool.Type},
+	}
+	if req.ToolChoice == nil {
+		choice := h.codexCompat.DefaultToolChoice
+		if choice == nil {
+			choice = "auto"
+		}
+		req.ToolChoice = choice
+		result.ToolChoiceDefaulted = true
+	}
+	return result
+}
+
+func (h *Handler) firstAvailableCodexHostedTool() (protocol.Tool, bool) {
+	for _, tool := range h.codexCompat.AvailableHostedTools {
+		if isCodexCompatHostedToolType(tool.Type) {
+			return tool, true
+		}
+	}
+	return protocol.Tool{}, false
+}
+
+func isCodexCompatHostedToolType(toolType string) bool {
+	switch toolType {
+	case "web_search", "web_search_preview":
+		return true
+	default:
+		return false
+	}
+}
+
+func jsonObjectHasField(body []byte, field string) bool {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return false
+	}
+	_, ok := raw[field]
+	return ok
 }
 
 func (h *Handler) auditCompleted(r *http.Request, id string, resp protocol.Response) {
