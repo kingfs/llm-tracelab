@@ -233,6 +233,7 @@ func SupportedResponsesFunctionExecutorTypes() []string {
 
 type ToolsConfig struct {
 	WebSearch WebSearchToolConfig `yaml:"web_search"`
+	MCP       MCPToolConfig       `yaml:"mcp"`
 }
 
 type WebSearchToolConfig struct {
@@ -242,6 +243,27 @@ type WebSearchToolConfig struct {
 	BaseURL    string `yaml:"base_url"`
 	TimeoutMS  int    `yaml:"timeout_ms"`
 	UserAgent  string `yaml:"user_agent"`
+}
+
+type MCPToolConfig struct {
+	Enabled          bool                  `yaml:"enabled"`
+	DefaultTimeoutMS int                   `yaml:"default_timeout_ms"`
+	MaxResultBytes   int                   `yaml:"max_result_bytes"`
+	Servers          []MCPToolServerConfig `yaml:"servers"`
+}
+
+type MCPToolServerConfig struct {
+	ID             string   `yaml:"id"`
+	Label          string   `yaml:"label"`
+	URL            string   `yaml:"url"`
+	BearerTokenEnv string   `yaml:"bearer_token_env"`
+	EnabledTools   []string `yaml:"enabled_tools"`
+	DisabledTools  []string `yaml:"disabled_tools"`
+	Enabled        *bool    `yaml:"enabled"`
+}
+
+func (s MCPToolServerConfig) EnabledOrDefault() bool {
+	return s.Enabled == nil || *s.Enabled
 }
 
 func (c LimitConfig) LocalConcurrencyEnabled() bool {
@@ -513,6 +535,21 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_USER_AGENT"); v != "" {
 		cfg.Tools.WebSearch.UserAgent = v
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_MCP_ENABLED"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Tools.MCP.Enabled = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.Tools.MCP.DefaultTimeoutMS = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.Tools.MCP.MaxResultBytes = parsed
+		}
 	}
 }
 
@@ -1129,6 +1166,29 @@ func (c Config) WebSearchConfig() WebSearchToolConfig {
 	cfg.UserAgent = strings.TrimSpace(cfg.UserAgent)
 	if cfg.UserAgent == "" {
 		cfg.UserAgent = "llm-tracelab web_search"
+	}
+	return cfg
+}
+
+func (c Config) MCPToolsEnabled() bool {
+	return c.MCPToolsConfig().Enabled
+}
+
+func (c Config) MCPToolsConfig() MCPToolConfig {
+	cfg := c.Tools.MCP
+	if cfg.DefaultTimeoutMS <= 0 {
+		cfg.DefaultTimeoutMS = 60000
+	}
+	if cfg.MaxResultBytes <= 0 {
+		cfg.MaxResultBytes = 65536
+	}
+	for i := range cfg.Servers {
+		cfg.Servers[i].ID = strings.TrimSpace(cfg.Servers[i].ID)
+		cfg.Servers[i].Label = strings.TrimSpace(cfg.Servers[i].Label)
+		cfg.Servers[i].URL = strings.TrimSpace(cfg.Servers[i].URL)
+		cfg.Servers[i].BearerTokenEnv = strings.TrimSpace(cfg.Servers[i].BearerTokenEnv)
+		cfg.Servers[i].EnabledTools = trimStringSlice(cfg.Servers[i].EnabledTools)
+		cfg.Servers[i].DisabledTools = trimStringSlice(cfg.Servers[i].DisabledTools)
 	}
 	return cfg
 }

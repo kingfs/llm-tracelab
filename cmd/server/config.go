@@ -89,12 +89,33 @@ type configInspectFunctionExecutors struct {
 
 type configInspectTools struct {
 	WebSearch configInspectWebSearch `json:"web_search"`
+	MCP       configInspectMCPTools  `json:"mcp"`
 }
 
 type configInspectWebSearch struct {
 	Enabled  bool   `json:"enabled"`
 	Provider string `json:"provider"`
 	BaseURL  string `json:"base_url"`
+}
+
+type configInspectMCPTools struct {
+	Enabled          bool                         `json:"enabled"`
+	DefaultTimeoutMS int                          `json:"default_timeout_ms"`
+	MaxResultBytes   int                          `json:"max_result_bytes"`
+	ServerCount      int                          `json:"server_count"`
+	EnabledServers   int                          `json:"enabled_servers"`
+	Servers          []configInspectMCPToolServer `json:"servers"`
+}
+
+type configInspectMCPToolServer struct {
+	ID                    string   `json:"id"`
+	Label                 string   `json:"label"`
+	URL                   string   `json:"url"`
+	BearerTokenEnv        string   `json:"bearer_token_env"`
+	BearerTokenConfigured bool     `json:"bearer_token_configured"`
+	EnabledTools          []string `json:"enabled_tools"`
+	DisabledTools         []string `json:"disabled_tools"`
+	Enabled               bool     `json:"enabled"`
 }
 
 type configInspectProviderProbe struct {
@@ -163,12 +184,20 @@ type configInspectResponsesSources struct {
 
 type configInspectToolsSources struct {
 	WebSearch configInspectWebSearchSources `json:"web_search"`
+	MCP       configInspectMCPToolsSources  `json:"mcp"`
 }
 
 type configInspectWebSearchSources struct {
 	Enabled  string `json:"enabled"`
 	Provider string `json:"provider"`
 	BaseURL  string `json:"base_url"`
+}
+
+type configInspectMCPToolsSources struct {
+	Enabled          string `json:"enabled"`
+	DefaultTimeoutMS string `json:"default_timeout_ms"`
+	MaxResultBytes   string `json:"max_result_bytes"`
+	Servers          string `json:"servers"`
 }
 
 type configInspectUpstreamsSourceSummary struct {
@@ -230,6 +259,7 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 	}
 	functionExecutors := cfg.ResponsesFunctionExecutorsConfig()
 	webSearch := cfg.WebSearchConfig()
+	mcpTools := cfg.MCPToolsConfig()
 	result := configInspectResult{
 		ConfigPath: configPath,
 		Server: configInspectServer{
@@ -273,6 +303,7 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 				Provider: webSearch.Provider,
 				BaseURL:  redactURLLike(webSearch.BaseURL),
 			},
+			MCP: inspectMCPTools(mcpTools),
 		},
 		ProviderProbe: configInspectProviderProbe{
 			StartupFill: cfg.ProviderProbeStartupFillEnabled(),
@@ -318,6 +349,12 @@ func buildConfigInspectSources(configPath string, cfg *appconfig.Config) configI
 				Enabled:  probe.boolFieldSource("tools.web_search.enabled", "LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"),
 				Provider: probe.defaultableStringFieldSource("tools.web_search.provider", cfg.Tools.WebSearch.Provider, "LLM_TRACELAB_TOOLS_WEB_SEARCH_PROVIDER"),
 				BaseURL:  probe.stringFieldSource("tools.web_search.base_url", cfg.Tools.WebSearch.BaseURL, "LLM_TRACELAB_TOOLS_WEB_SEARCH_BASE_URL"),
+			},
+			MCP: configInspectMCPToolsSources{
+				Enabled:          probe.boolFieldSource("tools.mcp.enabled", "LLM_TRACELAB_TOOLS_MCP_ENABLED"),
+				DefaultTimeoutMS: probe.intFieldSource("tools.mcp.default_timeout_ms", cfg.Tools.MCP.DefaultTimeoutMS, "LLM_TRACELAB_TOOLS_MCP_DEFAULT_TIMEOUT_MS"),
+				MaxResultBytes:   probe.intFieldSource("tools.mcp.max_result_bytes", cfg.Tools.MCP.MaxResultBytes, "LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES"),
+				Servers:          probe.listFieldSource("tools.mcp.servers", len(cfg.Tools.MCP.Servers)),
 			},
 		},
 		Upstreams: probe.upstreamsSourceSummary(cfg),
@@ -420,6 +457,29 @@ func (p configSourceProbe) pointerBoolFieldSource(path string, rawValue *bool, e
 		return configSourceConfigFile
 	}
 	if rawValue == nil {
+		return configSourceDefault
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) intFieldSource(path string, rawValue int, envNames ...string) string {
+	if anyStringEnvSet(envNames...) {
+		return configSourceEffective
+	}
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	if rawValue == 0 {
+		return configSourceDefault
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) listFieldSource(path string, rawLen int) string {
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	if rawLen == 0 {
 		return configSourceDefault
 	}
 	return configSourceEffective
@@ -549,6 +609,34 @@ func inspectUpstreamTarget(target appconfig.UpstreamTargetConfig) configInspectU
 	}
 }
 
+func inspectMCPTools(cfg appconfig.MCPToolConfig) configInspectMCPTools {
+	out := configInspectMCPTools{
+		Enabled:          cfg.Enabled,
+		DefaultTimeoutMS: cfg.DefaultTimeoutMS,
+		MaxResultBytes:   cfg.MaxResultBytes,
+		ServerCount:      len(cfg.Servers),
+		Servers:          make([]configInspectMCPToolServer, 0, len(cfg.Servers)),
+	}
+	for _, server := range cfg.Servers {
+		enabled := server.EnabledOrDefault()
+		if enabled {
+			out.EnabledServers++
+		}
+		bearerEnv := strings.TrimSpace(server.BearerTokenEnv)
+		out.Servers = append(out.Servers, configInspectMCPToolServer{
+			ID:                    strings.TrimSpace(server.ID),
+			Label:                 strings.TrimSpace(server.Label),
+			URL:                   redactURLLike(server.URL),
+			BearerTokenEnv:        bearerEnv,
+			BearerTokenConfigured: bearerEnv != "" && os.Getenv(bearerEnv) != "",
+			EnabledTools:          append([]string(nil), server.EnabledTools...),
+			DisabledTools:         append([]string(nil), server.DisabledTools...),
+			Enabled:               enabled,
+		})
+	}
+	return out
+}
+
 func redactURLLike(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -638,8 +726,27 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		result.Tools.WebSearch.Provider,
 		result.Tools.WebSearch.BaseURL,
 	)
+	fmt.Fprintf(w, "tools.mcp: enabled=%t default_timeout_ms=%d max_result_bytes=%d servers=%d enabled_servers=%d\n",
+		result.Tools.MCP.Enabled,
+		result.Tools.MCP.DefaultTimeoutMS,
+		result.Tools.MCP.MaxResultBytes,
+		result.Tools.MCP.ServerCount,
+		result.Tools.MCP.EnabledServers,
+	)
+	for _, server := range result.Tools.MCP.Servers {
+		fmt.Fprintf(w, "tools.mcp.server: id=%s label=%s enabled=%t url=%s bearer_token_env=%s bearer_token_configured=%t enabled_tools=%d disabled_tools=%d\n",
+			server.ID,
+			server.Label,
+			server.Enabled,
+			server.URL,
+			server.BearerTokenEnv,
+			server.BearerTokenConfigured,
+			len(server.EnabledTools),
+			len(server.DisabledTools),
+		)
+	}
 	fmt.Fprintf(w, "provider_probe: startup_fill=%t timeout=%s\n", result.ProviderProbe.StartupFill, result.ProviderProbe.Timeout)
-	fmt.Fprintf(w, "sources: config_path=%s server.port=%s monitor.port=%s database.driver=%s database.dsn=%s trace.output_dir=%s responses_server.default_model=%s tools.web_search.provider=%s upstreams.targets=%s upstreams.credentials=%s\n",
+	fmt.Fprintf(w, "sources: config_path=%s server.port=%s monitor.port=%s database.driver=%s database.dsn=%s trace.output_dir=%s responses_server.default_model=%s tools.web_search.provider=%s tools.mcp.enabled=%s tools.mcp.default_timeout_ms=%s tools.mcp.max_result_bytes=%s tools.mcp.servers=%s upstreams.targets=%s upstreams.credentials=%s\n",
 		result.Sources.ConfigPath,
 		result.Sources.Server.Port,
 		result.Sources.Monitor.Port,
@@ -648,6 +755,10 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		result.Sources.Trace.OutputDir,
 		result.Sources.ResponsesServer.DefaultModel,
 		result.Sources.Tools.WebSearch.Provider,
+		result.Sources.Tools.MCP.Enabled,
+		result.Sources.Tools.MCP.DefaultTimeoutMS,
+		result.Sources.Tools.MCP.MaxResultBytes,
+		result.Sources.Tools.MCP.Servers,
 		result.Sources.Upstreams.Targets,
 		result.Sources.Upstreams.Credentials,
 	)
