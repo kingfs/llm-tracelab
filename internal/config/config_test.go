@@ -487,6 +487,22 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 	if executors.MaxResultBytes != 64<<10 {
 		t.Fatalf("ResponsesFunctionExecutorsConfig().MaxResultBytes = %d, want %d", executors.MaxResultBytes, 64<<10)
 	}
+	codexCompat := cfg.ResponsesCodexCompatConfig()
+	if codexCompat.Enabled {
+		t.Fatalf("ResponsesCodexCompatConfig().Enabled = true, want false")
+	}
+	if len(codexCompat.AutoInjectHostedTools) != 0 {
+		t.Fatalf("ResponsesCodexCompatConfig().AutoInjectHostedTools = %v, want empty", codexCompat.AutoInjectHostedTools)
+	}
+	if codexCompat.InjectWhenToolsAbsent == nil || !*codexCompat.InjectWhenToolsAbsent {
+		t.Fatalf("ResponsesCodexCompatConfig().InjectWhenToolsAbsent = %v, want true", codexCompat.InjectWhenToolsAbsent)
+	}
+	if codexCompat.PreserveClientTools == nil || !*codexCompat.PreserveClientTools {
+		t.Fatalf("ResponsesCodexCompatConfig().PreserveClientTools = %v, want true", codexCompat.PreserveClientTools)
+	}
+	if codexCompat.DefaultToolChoice != "auto" {
+		t.Fatalf("ResponsesCodexCompatConfig().DefaultToolChoice = %#v, want auto", codexCompat.DefaultToolChoice)
+	}
 }
 
 func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
@@ -504,6 +520,12 @@ responses_server:
   path: "/v1/responses"
   auto_compact: true
   compact_history_item_threshold: 12
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: [" web_search ", "mcp"]
+    inject_when_tools_absent: false
+    preserve_client_tools: false
+    default_tool_choice: required
   function_executors:
     enabled: true
     timeout: 2s
@@ -571,6 +593,10 @@ responses_server:
 	}
 	if got := cfg.ResponsesCompactHistoryItemThreshold(); got != 12 {
 		t.Fatalf("ResponsesCompactHistoryItemThreshold() = %d, want 12", got)
+	}
+	codexCompat := cfg.ResponsesCodexCompatConfig()
+	if !codexCompat.Enabled || len(codexCompat.AutoInjectHostedTools) != 2 || codexCompat.AutoInjectHostedTools[0] != "web_search" || codexCompat.AutoInjectHostedTools[1] != "mcp" || codexCompat.InjectWhenToolsAbsent == nil || *codexCompat.InjectWhenToolsAbsent || codexCompat.PreserveClientTools == nil || *codexCompat.PreserveClientTools || codexCompat.DefaultToolChoice != "required" {
+		t.Fatalf("ResponsesCodexCompatConfig() = %+v, want YAML values", codexCompat)
 	}
 	profiles := cfg.ResponsesModelProfiles()
 	if len(profiles) != 2 {
@@ -858,6 +884,11 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_MAX_RESULT_BYTES", "256")
 	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_ARGUMENTS", "true")
 	t.Setenv("LLM_TRACELAB_RESPONSES_FUNCTION_EXECUTORS_REDACT_OUTPUT", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED", "true")
+	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS", " web_search, mcp ,,")
+	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT", "false")
+	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS", "false")
+	t.Setenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE", "required")
 
 	cfg := Config{}
 	cfg.ResponsesServer.DefaultModel = "yaml-model"
@@ -888,6 +919,10 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	executors := cfg.ResponsesFunctionExecutorsConfig()
 	if !executors.Enabled || executors.Timeout != 3*time.Second || executors.MaxResultBytes != 256 || !executors.Redaction.Arguments || !executors.Redaction.Output {
 		t.Fatalf("ResponsesFunctionExecutorsConfig() = %+v, want env overrides", executors)
+	}
+	codexCompat := cfg.ResponsesCodexCompatConfig()
+	if !codexCompat.Enabled || len(codexCompat.AutoInjectHostedTools) != 2 || codexCompat.AutoInjectHostedTools[0] != "web_search" || codexCompat.AutoInjectHostedTools[1] != "mcp" || codexCompat.InjectWhenToolsAbsent == nil || *codexCompat.InjectWhenToolsAbsent || codexCompat.PreserveClientTools == nil || *codexCompat.PreserveClientTools || codexCompat.DefaultToolChoice != "required" {
+		t.Fatalf("ResponsesCodexCompatConfig() = %+v, want env overrides", codexCompat)
 	}
 }
 

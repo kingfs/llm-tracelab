@@ -157,6 +157,15 @@ type ResponsesServerConfig struct {
 	ModelProfiles               []ResponsesModelProfileConfig   `yaml:"model_profiles"`
 	AdoptChannelModelProfiles   bool                            `yaml:"adopt_channel_model_profiles"`
 	FunctionExecutors           ResponsesFunctionExecutorConfig `yaml:"function_executors"`
+	CodexCompat                 ResponsesCodexCompatConfig      `yaml:"codex_compat"`
+}
+
+type ResponsesCodexCompatConfig struct {
+	Enabled               bool     `yaml:"enabled"`
+	AutoInjectHostedTools []string `yaml:"auto_inject_hosted_tools"`
+	InjectWhenToolsAbsent *bool    `yaml:"inject_when_tools_absent"`
+	PreserveClientTools   *bool    `yaml:"preserve_client_tools"`
+	DefaultToolChoice     any      `yaml:"default_tool_choice"`
 }
 
 type ResponsesModelProfileConfig struct {
@@ -511,6 +520,27 @@ func applyEnvOverrides(cfg *Config) {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.FunctionExecutors.Redaction.Output = parsed
 		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.CodexCompat.Enabled = parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"); v != "" {
+		cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = splitCommaEnv(v)
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.ResponsesServer.CodexCompat.PreserveClientTools = &parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"); v != "" {
+		cfg.ResponsesServer.CodexCompat.DefaultToolChoice = v
 	}
 	if v := os.Getenv("LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
@@ -924,6 +954,33 @@ func (c Config) ResponsesAdoptChannelModelProfilesEnabled() bool {
 	return c.ResponsesServer.AdoptChannelModelProfiles
 }
 
+func (c Config) ResponsesCodexCompatConfig() ResponsesCodexCompatConfig {
+	cfg := c.ResponsesServer.CodexCompat
+	cfg.AutoInjectHostedTools = trimStringSlice(cfg.AutoInjectHostedTools)
+	if cfg.InjectWhenToolsAbsent == nil {
+		value := true
+		cfg.InjectWhenToolsAbsent = &value
+	}
+	if cfg.PreserveClientTools == nil {
+		value := true
+		cfg.PreserveClientTools = &value
+	}
+	if cfg.DefaultToolChoice == nil {
+		cfg.DefaultToolChoice = "auto"
+	} else if value, ok := cfg.DefaultToolChoice.(string); ok {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			value = "auto"
+		}
+		cfg.DefaultToolChoice = value
+	}
+	return cfg
+}
+
+func (c Config) ResponsesCodexCompatEnabled() bool {
+	return c.ResponsesCodexCompatConfig().Enabled
+}
+
 func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMatch {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -1127,6 +1184,10 @@ func trimStringSlice(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func splitCommaEnv(value string) []string {
+	return trimStringSlice(strings.Split(value, ","))
 }
 
 func pathWithinAnyDir(path string, dirs []string) bool {

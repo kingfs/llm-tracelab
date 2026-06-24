@@ -174,6 +174,7 @@ func buildDoctorResult(opts doctorOptions) doctorResult {
 	result.Checks = append(result.Checks, checkDoctorResponsesModelProfiles(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesModelCatalogDrift(cfg))
 	result.Checks = append(result.Checks, checkDoctorResponsesCodexConfigDrift(cfg, opts.codexConfigPath))
+	result.Checks = append(result.Checks, checkDoctorResponsesCodexCompat(cfg))
 	result.Checks = append(result.Checks, checkDoctorWebSearch(cfg))
 	result.Checks = append(result.Checks, checkDoctorMCPTools(cfg))
 	result.Checks = append(result.Checks, checkDoctorProviderConfig(cfg))
@@ -890,6 +891,73 @@ func doctorCodexConfigDriftDetail(cfg *appconfig.Config, result modelsCodexConfi
 		"matched_profile":   result.Diagnostics.MatchedProfile,
 		"provider_base_url": redactURLLike(result.Provider.BaseURL),
 	}
+}
+
+func checkDoctorResponsesCodexCompat(cfg *appconfig.Config) doctorCheck {
+	compat := cfg.ResponsesCodexCompatConfig()
+	detail := map[string]any{
+		"enabled":                    compat.Enabled,
+		"auto_inject_hosted_tools":   append([]string(nil), compat.AutoInjectHostedTools...),
+		"inject_when_tools_absent":   compat.InjectWhenToolsAbsent != nil && *compat.InjectWhenToolsAbsent,
+		"preserve_client_tools":      compat.PreserveClientTools != nil && *compat.PreserveClientTools,
+		"default_tool_choice":        compat.DefaultToolChoice,
+		"tools_web_search_enabled":   cfg.WebSearchEnabled(),
+		"tools_mcp_enabled":          cfg.MCPToolsEnabled(),
+		"injectable_hosted_tool_cnt": 0,
+	}
+	if !compat.Enabled {
+		detail["skipped_reason"] = "responses_server.codex_compat.enabled is false"
+		return doctorCheck{Name: "responses_server.codex_compat", Status: doctorStatusPass, Message: "Codex compatibility injection is disabled", Detail: detail}
+	}
+
+	var warnings []string
+	injectable := 0
+	seen := map[string]struct{}{}
+	for _, tool := range compat.AutoInjectHostedTools {
+		normalized := strings.ToLower(strings.TrimSpace(tool))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		switch normalized {
+		case "web_search", "web_search_preview":
+			if cfg.WebSearchEnabled() {
+				injectable++
+			} else {
+				warnings = append(warnings, "web_search injection requested but tools.web_search.enabled is false")
+			}
+		case "mcp":
+			if cfg.MCPToolsEnabled() {
+				injectable++
+			} else {
+				warnings = append(warnings, "mcp injection requested but tools.mcp.enabled is false")
+			}
+		default:
+			warnings = append(warnings, fmt.Sprintf("unsupported hosted tool %q is configured for Codex compatibility injection", tool))
+		}
+	}
+	detail["injectable_hosted_tool_cnt"] = injectable
+	if len(warnings) > 0 {
+		detail["warnings"] = warnings
+	}
+	if len(compat.AutoInjectHostedTools) == 0 {
+		detail["warnings"] = append(warnings, "Codex compatibility is enabled but auto_inject_hosted_tools is empty")
+		return doctorCheck{Name: "responses_server.codex_compat", Status: doctorStatusWarn, Message: "Codex compatibility has no hosted tools to inject", Detail: detail}
+	}
+	if injectable == 0 {
+		if len(warnings) == 0 {
+			warnings = append(warnings, "Codex compatibility is enabled but no configured hosted tools are injectable")
+			detail["warnings"] = warnings
+		}
+		return doctorCheck{Name: "responses_server.codex_compat", Status: doctorStatusWarn, Message: "Codex compatibility has no injectable hosted tools", Detail: detail}
+	}
+	if len(warnings) > 0 {
+		return doctorCheck{Name: "responses_server.codex_compat", Status: doctorStatusWarn, Message: "Codex compatibility injection has warnings", Detail: detail}
+	}
+	return doctorCheck{Name: "responses_server.codex_compat", Status: doctorStatusPass, Message: "Codex compatibility injection configuration is valid", Detail: detail}
 }
 
 func checkDoctorWebSearch(cfg *appconfig.Config) doctorCheck {

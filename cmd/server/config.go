@@ -81,10 +81,19 @@ type configInspectResponses struct {
 	AutoCompact        bool                           `json:"auto_compact"`
 	ModelProfilesCount int                            `json:"model_profiles_count"`
 	FunctionExecutors  configInspectFunctionExecutors `json:"function_executors"`
+	CodexCompat        configInspectCodexCompat       `json:"codex_compat"`
 }
 
 type configInspectFunctionExecutors struct {
 	Enabled bool `json:"enabled"`
+}
+
+type configInspectCodexCompat struct {
+	Enabled               bool     `json:"enabled"`
+	AutoInjectHostedTools []string `json:"auto_inject_hosted_tools"`
+	InjectWhenToolsAbsent bool     `json:"inject_when_tools_absent"`
+	PreserveClientTools   bool     `json:"preserve_client_tools"`
+	DefaultToolChoice     any      `json:"default_tool_choice"`
 }
 
 type configInspectTools struct {
@@ -177,9 +186,18 @@ type configInspectTraceSources struct {
 }
 
 type configInspectResponsesSources struct {
-	Enabled      string `json:"enabled"`
-	Path         string `json:"path"`
-	DefaultModel string `json:"default_model"`
+	Enabled      string                          `json:"enabled"`
+	Path         string                          `json:"path"`
+	DefaultModel string                          `json:"default_model"`
+	CodexCompat  configInspectCodexCompatSources `json:"codex_compat"`
+}
+
+type configInspectCodexCompatSources struct {
+	Enabled               string `json:"enabled"`
+	AutoInjectHostedTools string `json:"auto_inject_hosted_tools"`
+	InjectWhenToolsAbsent string `json:"inject_when_tools_absent"`
+	PreserveClientTools   string `json:"preserve_client_tools"`
+	DefaultToolChoice     string `json:"default_tool_choice"`
 }
 
 type configInspectToolsSources struct {
@@ -258,6 +276,7 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 		cfg = &appconfig.Config{}
 	}
 	functionExecutors := cfg.ResponsesFunctionExecutorsConfig()
+	codexCompat := cfg.ResponsesCodexCompatConfig()
 	webSearch := cfg.WebSearchConfig()
 	mcpTools := cfg.MCPToolsConfig()
 	result := configInspectResult{
@@ -295,6 +314,13 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 			ModelProfilesCount: len(cfg.ResponsesModelProfiles()),
 			FunctionExecutors: configInspectFunctionExecutors{
 				Enabled: functionExecutors.Enabled,
+			},
+			CodexCompat: configInspectCodexCompat{
+				Enabled:               codexCompat.Enabled,
+				AutoInjectHostedTools: append([]string(nil), codexCompat.AutoInjectHostedTools...),
+				InjectWhenToolsAbsent: codexCompat.InjectWhenToolsAbsent != nil && *codexCompat.InjectWhenToolsAbsent,
+				PreserveClientTools:   codexCompat.PreserveClientTools != nil && *codexCompat.PreserveClientTools,
+				DefaultToolChoice:     codexCompat.DefaultToolChoice,
 			},
 		},
 		Tools: configInspectTools{
@@ -343,6 +369,13 @@ func buildConfigInspectSources(configPath string, cfg *appconfig.Config) configI
 			Enabled:      probe.boolFieldSource("responses_server.enabled", "LLM_TRACELAB_RESPONSES_ENABLED"),
 			Path:         probe.defaultableStringFieldSource("responses_server.path", cfg.ResponsesServer.Path, "LLM_TRACELAB_RESPONSES_PATH"),
 			DefaultModel: probe.stringFieldSource("responses_server.default_model", cfg.ResponsesDefaultModel(), "LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"),
+			CodexCompat: configInspectCodexCompatSources{
+				Enabled:               probe.boolFieldSource("responses_server.codex_compat.enabled", "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED"),
+				AutoInjectHostedTools: probe.listFieldSource("responses_server.codex_compat.auto_inject_hosted_tools", len(cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools), "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_AUTO_INJECT_HOSTED_TOOLS"),
+				InjectWhenToolsAbsent: probe.pointerBoolFieldSource("responses_server.codex_compat.inject_when_tools_absent", cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent, "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_INJECT_WHEN_TOOLS_ABSENT"),
+				PreserveClientTools:   probe.pointerBoolFieldSource("responses_server.codex_compat.preserve_client_tools", cfg.ResponsesServer.CodexCompat.PreserveClientTools, "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_PRESERVE_CLIENT_TOOLS"),
+				DefaultToolChoice:     probe.defaultableAnyStringFieldSource("responses_server.codex_compat.default_tool_choice", cfg.ResponsesServer.CodexCompat.DefaultToolChoice, "LLM_TRACELAB_RESPONSES_CODEX_COMPAT_DEFAULT_TOOL_CHOICE"),
+			},
 		},
 		Tools: configInspectToolsSources{
 			WebSearch: configInspectWebSearchSources{
@@ -475,11 +508,30 @@ func (p configSourceProbe) intFieldSource(path string, rawValue int, envNames ..
 	return configSourceEffective
 }
 
-func (p configSourceProbe) listFieldSource(path string, rawLen int) string {
+func (p configSourceProbe) listFieldSource(path string, rawLen int, envNames ...string) string {
+	if anyStringEnvSet(envNames...) {
+		return configSourceEffective
+	}
 	if p.has(path) {
 		return configSourceConfigFile
 	}
 	if rawLen == 0 {
+		return configSourceDefault
+	}
+	return configSourceEffective
+}
+
+func (p configSourceProbe) defaultableAnyStringFieldSource(path string, rawValue any, envNames ...string) string {
+	if anyStringEnvSet(envNames...) {
+		return configSourceEffective
+	}
+	if p.has(path) {
+		return configSourceConfigFile
+	}
+	if rawValue == nil {
+		return configSourceDefault
+	}
+	if value, ok := rawValue.(string); ok && strings.TrimSpace(value) == "" {
 		return configSourceDefault
 	}
 	return configSourceEffective
@@ -721,6 +773,13 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		result.ResponsesServer.ModelProfilesCount,
 		result.ResponsesServer.FunctionExecutors.Enabled,
 	)
+	fmt.Fprintf(w, "responses_server.codex_compat: enabled=%t auto_inject_hosted_tools=%s inject_when_tools_absent=%t preserve_client_tools=%t default_tool_choice=%v\n",
+		result.ResponsesServer.CodexCompat.Enabled,
+		strings.Join(result.ResponsesServer.CodexCompat.AutoInjectHostedTools, ","),
+		result.ResponsesServer.CodexCompat.InjectWhenToolsAbsent,
+		result.ResponsesServer.CodexCompat.PreserveClientTools,
+		result.ResponsesServer.CodexCompat.DefaultToolChoice,
+	)
 	fmt.Fprintf(w, "tools.web_search: enabled=%t provider=%s base_url=%s\n",
 		result.Tools.WebSearch.Enabled,
 		result.Tools.WebSearch.Provider,
@@ -746,7 +805,7 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		)
 	}
 	fmt.Fprintf(w, "provider_probe: startup_fill=%t timeout=%s\n", result.ProviderProbe.StartupFill, result.ProviderProbe.Timeout)
-	fmt.Fprintf(w, "sources: config_path=%s server.port=%s monitor.port=%s database.driver=%s database.dsn=%s trace.output_dir=%s responses_server.default_model=%s tools.web_search.provider=%s tools.mcp.enabled=%s tools.mcp.default_timeout_ms=%s tools.mcp.max_result_bytes=%s tools.mcp.servers=%s upstreams.targets=%s upstreams.credentials=%s\n",
+	fmt.Fprintf(w, "sources: config_path=%s server.port=%s monitor.port=%s database.driver=%s database.dsn=%s trace.output_dir=%s responses_server.default_model=%s responses_server.codex_compat.enabled=%s responses_server.codex_compat.auto_inject_hosted_tools=%s responses_server.codex_compat.inject_when_tools_absent=%s responses_server.codex_compat.preserve_client_tools=%s responses_server.codex_compat.default_tool_choice=%s tools.web_search.provider=%s tools.mcp.enabled=%s tools.mcp.default_timeout_ms=%s tools.mcp.max_result_bytes=%s tools.mcp.servers=%s upstreams.targets=%s upstreams.credentials=%s\n",
 		result.Sources.ConfigPath,
 		result.Sources.Server.Port,
 		result.Sources.Monitor.Port,
@@ -754,6 +813,11 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		result.Sources.Database.DSN,
 		result.Sources.Trace.OutputDir,
 		result.Sources.ResponsesServer.DefaultModel,
+		result.Sources.ResponsesServer.CodexCompat.Enabled,
+		result.Sources.ResponsesServer.CodexCompat.AutoInjectHostedTools,
+		result.Sources.ResponsesServer.CodexCompat.InjectWhenToolsAbsent,
+		result.Sources.ResponsesServer.CodexCompat.PreserveClientTools,
+		result.Sources.ResponsesServer.CodexCompat.DefaultToolChoice,
 		result.Sources.Tools.WebSearch.Provider,
 		result.Sources.Tools.MCP.Enabled,
 		result.Sources.Tools.MCP.DefaultTimeoutMS,
