@@ -6,5 +6,6 @@ search:
     - json
 
 server:
+  secret_key: "llm-tracelab-compose-secret-change-me"
   limiter: true
   image_proxy: true
