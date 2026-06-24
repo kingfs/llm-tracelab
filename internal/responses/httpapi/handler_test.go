@@ -314,7 +314,8 @@ func TestCodexCompatInjectsAvailableHostedToolWhenToolsAbsent(t *testing.T) {
 		WithRequestAuditor(auditor),
 		WithExecutionEventRecorder(auditor),
 		WithCodexCompat(CodexCompatOptions{
-			Enabled: true,
+			Enabled:               true,
+			InjectWhenToolsAbsent: true,
 			AvailableHostedTools: []protocol.Tool{{
 				Type:          "web_search",
 				MaxNumResults: 3,
@@ -399,6 +400,33 @@ func TestCodexCompatDisabledDoesNotInjectHostedTool(t *testing.T) {
 	}
 }
 
+func TestCodexCompatInjectWhenToolsAbsentFalseDoesNotInjectHostedTool(t *testing.T) {
+	rt := &fakeRuntime{
+		createResp: protocol.Response{
+			ID:     "resp_codex_compat_no_absent_injection",
+			Object: "response",
+			Status: "completed",
+			Model:  "gpt-test",
+		},
+	}
+	rec := httptest.NewRecorder()
+
+	NewHandler(rt, WithCodexCompat(CodexCompatOptions{
+		Enabled:               true,
+		InjectWhenToolsAbsent: false,
+		AvailableHostedTools: []protocol.Tool{{
+			Type: "web_search",
+		}},
+	})).ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-test","input":"hello"}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(rt.createReq.Tools) != 0 || rt.createReq.ToolChoice != nil {
+		t.Fatalf("runtime request = %#v, want no injected tools", rt.createReq)
+	}
+}
+
 func TestCodexCompatPreservesExistingClientTools(t *testing.T) {
 	rt := &fakeRuntime{
 		createResp: protocol.Response{
@@ -412,8 +440,9 @@ func TestCodexCompatPreservesExistingClientTools(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	NewHandler(rt, WithCodexCompat(CodexCompatOptions{
-		Enabled:             true,
-		PreserveClientTools: true,
+		Enabled:               true,
+		InjectWhenToolsAbsent: true,
+		PreserveClientTools:   true,
 		AvailableHostedTools: []protocol.Tool{{
 			Type: "web_search",
 		}},

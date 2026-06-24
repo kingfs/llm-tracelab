@@ -27,6 +27,7 @@ import (
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
+	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
 	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	mcptools "github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
@@ -477,6 +478,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()),
 			httpapi.WithRequestAuditor(requestAuditor),
 			httpapi.WithExecutionEventRecorder(executionEventRecorder),
+			httpapi.WithCodexCompat(responsesCodexCompatHTTPOptions(cfg)),
 		)
 	}
 
@@ -490,6 +492,53 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		responsesPath:    responsesPath,
 		responsesHandler: localResponses,
 	}, nil
+}
+
+func responsesCodexCompatHTTPOptions(cfg *config.Config) httpapi.CodexCompatOptions {
+	if cfg == nil {
+		return httpapi.CodexCompatOptions{}
+	}
+	compat := cfg.ResponsesCodexCompatConfig()
+	injectWhenToolsAbsent := compat.InjectWhenToolsAbsent != nil && *compat.InjectWhenToolsAbsent
+	preserveClientTools := compat.PreserveClientTools != nil && *compat.PreserveClientTools
+	return httpapi.CodexCompatOptions{
+		Enabled:               compat.Enabled,
+		InjectWhenToolsAbsent: injectWhenToolsAbsent,
+		PreserveClientTools:   preserveClientTools,
+		AvailableHostedTools:  responsesCodexCompatAvailableHostedTools(cfg, compat),
+		DefaultToolChoice:     compat.DefaultToolChoice,
+	}
+}
+
+func responsesCodexCompatAvailableHostedTools(cfg *config.Config, compat config.ResponsesCodexCompatConfig) []protocol.Tool {
+	if cfg == nil || !compat.Enabled {
+		return nil
+	}
+	tools := make([]protocol.Tool, 0, len(compat.AutoInjectHostedTools))
+	seen := map[string]struct{}{}
+	for _, toolType := range compat.AutoInjectHostedTools {
+		normalized := strings.ToLower(strings.TrimSpace(toolType))
+		if normalized == "web_search_preview" {
+			normalized = "web_search"
+		}
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		switch normalized {
+		case "web_search":
+			if cfg.WebSearchEnabled() {
+				tools = append(tools, protocol.Tool{
+					Type:          "web_search",
+					MaxNumResults: cfg.WebSearchConfig().MaxResults,
+				})
+			}
+		}
+	}
+	return tools
 }
 
 func responsesRuntimeModelProfiles(cfg *config.Config, st *store.Store) ([]responsesruntime.ModelProfile, error) {

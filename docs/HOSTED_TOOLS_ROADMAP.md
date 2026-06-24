@@ -722,10 +722,16 @@ Artifacts 不应放进 `.http` cassette。
 
 TraceLab 要做的是：
 
+- 已落地首切：`responses_server.codex_compat` 可在服务端显式启用，当 Codex/Responses 请求缺少 `tools` 时，TraceLab 可按 allowlist 自动注入当前已启用的 hosted `web_search` descriptor，并把 `tool_choice` 默认成 `auto`。该能力默认关闭，并通过 `config inspect` / `doctor` 暴露配置与诊断。
 - 当 Codex 或其它 Responses 客户端真的向 TraceLab `/v1/responses` 发送 `tools` 时，尽量兼容 OpenAI Responses hosted tool schema。
 - 维护 Codex fixture，记录真实 Codex 可能发送的 Responses 请求形状。
 - 对未知/暂未支持工具返回稳定 safe error，而不是静默忽略。
 - 输出 `models codex-config` 时继续提供 model/provider/profile 建议；工具支持能力通过文档和 diagnostics 表达，不伪造 Codex 不消费的动态 metadata。
+
+当前边界：
+
+- 自动注入只覆盖 `web_search` / `web_search_preview`。`mcp` descriptor 需要 server/tool/approval 语义，后续在 MCP descriptor compatibility 阶段补齐，不自动注入裸 `mcp`。
+- 默认不覆盖客户端已传入的 `tools`；第一版只处理 tools absent 的 Codex 请求。
 
 Codex/客户端要做的是：
 

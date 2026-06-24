@@ -41,10 +41,11 @@ type Handler struct {
 type Option func(*Handler)
 
 type CodexCompatOptions struct {
-	Enabled              bool
-	PreserveClientTools  bool
-	AvailableHostedTools []protocol.Tool
-	DefaultToolChoice    any
+	Enabled               bool
+	InjectWhenToolsAbsent bool
+	PreserveClientTools   bool
+	AvailableHostedTools  []protocol.Tool
+	DefaultToolChoice     any
 }
 
 func WithMaxBodyBytes(limit int64) Option {
@@ -750,7 +751,7 @@ type codexCompatNormalization struct {
 }
 
 func (h *Handler) normalizeCodexCompatRequest(body []byte, req *protocol.CreateResponseRequest) codexCompatNormalization {
-	if !h.codexCompatActive || !h.codexCompat.Enabled || req == nil || jsonObjectHasField(body, "tools") || len(req.Tools) > 0 {
+	if !h.codexCompatActive || !h.codexCompat.Enabled || !h.codexCompat.InjectWhenToolsAbsent || req == nil || jsonObjectHasField(body, "tools") || len(req.Tools) > 0 {
 		return codexCompatNormalization{}
 	}
 

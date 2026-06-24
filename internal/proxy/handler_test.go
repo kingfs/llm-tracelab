@@ -175,6 +175,51 @@ func TestMCPHostedExecutorOptionsDisabledWithoutEnabledServers(t *testing.T) {
 	}
 }
 
+func TestResponsesCodexCompatHTTPOptionsMapsEnabledWebSearch(t *testing.T) {
+	injectWhenAbsent := true
+	preserveClientTools := true
+	cfg := &config.Config{}
+	cfg.ResponsesServer.CodexCompat.Enabled = true
+	cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &injectWhenAbsent
+	cfg.ResponsesServer.CodexCompat.PreserveClientTools = &preserveClientTools
+	cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = []string{"web_search_preview", "web_search", "mcp"}
+	cfg.Tools.WebSearch.Enabled = true
+	cfg.Tools.WebSearch.Provider = "mock"
+	cfg.Tools.WebSearch.MaxResults = 7
+	cfg.Tools.MCP.Enabled = true
+
+	options := responsesCodexCompatHTTPOptions(cfg)
+
+	if !options.Enabled || !options.InjectWhenToolsAbsent || !options.PreserveClientTools || options.DefaultToolChoice != "auto" {
+		t.Fatalf("codex compat options = %+v", options)
+	}
+	if len(options.AvailableHostedTools) != 1 {
+		t.Fatalf("available hosted tools = %#v, want one web_search tool", options.AvailableHostedTools)
+	}
+	tool := options.AvailableHostedTools[0]
+	if tool.Type != "web_search" || tool.MaxNumResults != 7 {
+		t.Fatalf("available hosted tool = %#v, want web_search max_num_results=7", tool)
+	}
+}
+
+func TestResponsesCodexCompatHTTPOptionsDisabledWithoutWebSearch(t *testing.T) {
+	injectWhenAbsent := true
+	cfg := &config.Config{}
+	cfg.ResponsesServer.CodexCompat.Enabled = true
+	cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &injectWhenAbsent
+	cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = []string{"web_search"}
+	cfg.Tools.WebSearch.Enabled = false
+
+	options := responsesCodexCompatHTTPOptions(cfg)
+
+	if !options.Enabled || !options.InjectWhenToolsAbsent {
+		t.Fatalf("codex compat options = %+v", options)
+	}
+	if len(options.AvailableHostedTools) != 0 {
+		t.Fatalf("available hosted tools = %#v, want none when web_search is disabled", options.AvailableHostedTools)
+	}
+}
+
 func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	attrs := candidateEventAttributes([]router.CandidateDecision{{
 		ID:             "primary",
