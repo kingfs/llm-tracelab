@@ -234,6 +234,9 @@ func (s *Store) Login(ctx context.Context, username string, password string, ttl
 	if err := s.VerifyPassword(ctx, username, password); err != nil {
 		return TokenResult{}, err
 	}
+	if err := s.deleteTokensByName(ctx, username, "monitor-login"); err != nil {
+		return TokenResult{}, err
+	}
 	return s.CreateToken(ctx, username, "monitor-login", DefaultTokenScope, ttl)
 }
 
@@ -349,6 +352,18 @@ func (s *Store) DeleteToken(ctx context.Context, username string, tokenID int) e
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Store) deleteTokensByName(ctx context.Context, username string, name string) error {
+	username = normalizeUsername(username)
+	name = strings.TrimSpace(name)
+	if username == "" || name == "" {
+		return nil
+	}
+	_, err := s.client.APIToken.Delete().
+		Where(apitoken.NameEQ(name), apitoken.HasUserWith(user.UsernameEQ(username))).
+		Exec(ctx)
+	return err
 }
 
 func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool, error) {

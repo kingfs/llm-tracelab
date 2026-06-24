@@ -168,6 +168,60 @@ func TestStoreUserLoginAndTokenVerification(t *testing.T) {
 	}
 }
 
+func TestStoreLoginReplacesPreviousMonitorLoginToken(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("MigrateUp() error = %v", err)
+	}
+	st, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if _, err := st.CreateToken(ctx, "admin", "manual", "api", time.Hour); err != nil {
+		t.Fatalf("CreateToken(manual) error = %v", err)
+	}
+	first, err := st.Login(ctx, "admin", "change-me-123", time.Hour)
+	if err != nil {
+		t.Fatalf("first Login() error = %v", err)
+	}
+	second, err := st.Login(ctx, "admin", "change-me-123", time.Hour)
+	if err != nil {
+		t.Fatalf("second Login() error = %v", err)
+	}
+
+	if _, ok, err := st.VerifyToken(ctx, first.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(first login) = ok %v err %v, want old login token removed", ok, err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, second.Token); err != nil || !ok {
+		t.Fatalf("VerifyToken(second login) = ok %v err %v, want active token", ok, err)
+	}
+	tokens, err := st.ListTokens(ctx, "admin")
+	if err != nil {
+		t.Fatalf("ListTokens() error = %v", err)
+	}
+	var monitorLoginCount int
+	var manualCount int
+	for _, token := range tokens {
+		switch token.Name {
+		case "monitor-login":
+			monitorLoginCount++
+		case "manual":
+			manualCount++
+		}
+	}
+	if monitorLoginCount != 1 || manualCount != 1 {
+		t.Fatalf("token counts monitor-login=%d manual=%d tokens=%+v, want 1/1", monitorLoginCount, manualCount, tokens)
+	}
+}
+
 func TestStoreListsAndRevokesUserTokens(t *testing.T) {
 	t.Parallel()
 
