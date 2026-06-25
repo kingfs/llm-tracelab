@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
@@ -54,6 +55,30 @@ type analyzeReanalyzeOptions struct {
 	stdout      io.Writer
 }
 
+type analyzeBatchOptions struct {
+	configPath      string
+	traceIDs        []string
+	requestIDs      []string
+	sessionID       string
+	all             bool
+	query           string
+	provider        string
+	model           string
+	endpoint        string
+	upstream        string
+	status          string
+	observation     string
+	missingUsage    bool
+	limit           int
+	repairUsage     bool
+	reparse         bool
+	scan            bool
+	rewriteCassette bool
+	enqueue         bool
+	format          string
+	stdout          io.Writer
+}
+
 type analyzeSessionOptions struct {
 	configPath string
 	sessionID  string
@@ -76,6 +101,7 @@ func newAnalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.AddCommand(newAnalyzeRepairUsageCommand(runtime))
 	cmd.AddCommand(newAnalyzeBackfillExchangesCommand(runtime))
 	cmd.AddCommand(newAnalyzeReanalyzeCommand(runtime))
+	cmd.AddCommand(newAnalyzeBatchCommand(runtime))
 	cmd.AddCommand(newAnalyzeSessionCommand(runtime))
 	return cmd
 }
@@ -222,6 +248,57 @@ func newAnalyzeReanalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().BoolVar(&repairUsage, "repair-usage", false, "Repair usage before other selected trace work")
 	cmd.Flags().BoolVar(&reparse, "reparse", true, "Rebuild Observation IR")
 	cmd.Flags().BoolVar(&scan, "scan", true, "Run deterministic audit scan")
+	return cmd
+}
+
+func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
+	var opts analyzeBatchOptions
+	cmd := &cobra.Command{
+		Use:           "batch",
+		Short:         "Run repair, reparse, scan, or reanalyze work for many traces",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.configPath = runtime.configPath()
+			opts.format = runtime.outputFormat()
+			opts.stdout = cmd.OutOrStdout()
+			if opts.rewriteCassette && !opts.repairUsage {
+				return cliUsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
+			}
+			if opts.rewriteCassette && opts.enqueue {
+				return cliUsageError("--rewrite-cassette is only supported without --enqueue", "rewrite-cassette")
+			}
+			if !opts.repairUsage && !opts.reparse && !opts.scan {
+				opts.reparse = true
+				opts.scan = true
+			}
+			if !opts.all && len(opts.traceIDs) == 0 && len(opts.requestIDs) == 0 && opts.sessionID == "" && !analyzeBatchHasFilter(opts) {
+				return cliUsageError("one of --all, --trace-id, --request-id, --session-id, or a filter is required", "all")
+			}
+			return runCode(func() int {
+				return runAnalyzeBatch(opts)
+			})
+		},
+	}
+	cmd.Flags().StringArrayVar(&opts.traceIDs, "trace-id", nil, "Trace ID to process; may be repeated")
+	cmd.Flags().StringArrayVar(&opts.requestIDs, "request-id", nil, "Request ID to resolve and process; may be repeated")
+	cmd.Flags().StringVar(&opts.sessionID, "session-id", "", "Process traces in a session")
+	cmd.Flags().BoolVar(&opts.all, "all", false, "Process all client-visible traces up to --limit")
+	cmd.Flags().StringVarP(&opts.query, "query", "q", "", "Free-text trace filter")
+	cmd.Flags().StringVar(&opts.provider, "provider", "", "Provider filter")
+	cmd.Flags().StringVar(&opts.model, "model", "", "Model substring filter")
+	cmd.Flags().StringVar(&opts.endpoint, "endpoint", "", "Endpoint substring filter")
+	cmd.Flags().StringVar(&opts.upstream, "upstream", "", "Selected upstream substring filter")
+	cmd.Flags().StringVar(&opts.status, "status", "", "Status filter: success or error")
+	cmd.Flags().StringVar(&opts.observation, "observation", "", "Observation status filter: parsed, failed, queued, running, or unparsed")
+	cmd.Flags().BoolVar(&opts.missingUsage, "missing-usage", false, "Only process successful traces with missing token usage")
+	cmd.Flags().IntVar(&opts.limit, "limit", 1000, "Maximum traces selected by filters; 0 means no CLI cap")
+	cmd.Flags().BoolVar(&opts.repairUsage, "repair-usage", false, "Repair usage before other selected work")
+	cmd.Flags().BoolVar(&opts.reparse, "reparse", false, "Rebuild Observation IR")
+	cmd.Flags().BoolVar(&opts.scan, "scan", false, "Run deterministic audit scan")
+	cmd.Flags().BoolVar(&opts.rewriteCassette, "rewrite-cassette", false, "Rewrite V3 cassette prelude when repairing usage")
+	cmd.Flags().BoolVar(&opts.enqueue, "enqueue", false, "Create analysis jobs without executing them in this process")
 	return cmd
 }
 
@@ -440,6 +517,71 @@ func runAnalyzeReanalyze(opts analyzeReanalyzeOptions) int {
 	return 0
 }
 
+func runAnalyzeBatch(opts analyzeBatchOptions) int {
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
+		return 1
+	}
+	traceStore, err := openApplicationDatabase(cfg)
+	if err != nil {
+		slog.Error("Failed to initialize trace store", "error", err)
+		return 1
+	}
+	defer traceStore.Close()
+
+	traceIDs, err := resolveAnalyzeBatchTraceIDs(traceStore, opts)
+	if err != nil {
+		slog.Error("Failed to resolve batch traces", "error", err)
+		return 1
+	}
+	svc := reanalysis.New(traceStore, reanalysis.Options{})
+	results := make([]map[string]any, 0, len(traceIDs))
+	completed := 0
+	failed := 0
+	enqueued := 0
+	for _, traceID := range traceIDs {
+		row := map[string]any{"trace_id": traceID}
+		jobIDs, traceErr := runAnalyzeBatchTrace(context.Background(), svc, traceID, opts)
+		row["job_ids"] = jobIDs
+		if traceErr != nil {
+			failed++
+			row["status"] = "failed"
+			row["error"] = traceErr.Error()
+			slog.Error("Failed to process batch trace", "trace_id", traceID, "error", traceErr)
+		} else if opts.enqueue {
+			enqueued++
+			row["status"] = "queued"
+		} else {
+			completed++
+			row["status"] = "completed"
+		}
+		results = append(results, row)
+	}
+	output := map[string]any{
+		"trace_count":  len(traceIDs),
+		"completed":    completed,
+		"enqueued":     enqueued,
+		"failed":       failed,
+		"repair_usage": opts.repairUsage,
+		"reparse":      opts.reparse,
+		"scan":         opts.scan,
+		"results":      results,
+	}
+	writeErr := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze batch", output, func(w io.Writer) error {
+		_, err := fmt.Fprintf(w, "processed %d traces (completed=%d queued=%d failed=%d)\n", len(traceIDs), completed, enqueued, failed)
+		return err
+	})
+	if writeErr != nil {
+		slog.Error("Write command result failed", "error", writeErr)
+		return 1
+	}
+	if failed > 0 {
+		return 1
+	}
+	return 0
+}
+
 func runAnalyzeSession(opts analyzeSessionOptions) int {
 	cfg, err := config.Load(opts.configPath)
 	if err != nil {
@@ -508,6 +650,143 @@ func runAnalyzeSession(opts analyzeSessionOptions) int {
 		return 1
 	}
 	return 0
+}
+
+func analyzeBatchHasFilter(opts analyzeBatchOptions) bool {
+	return strings.TrimSpace(opts.query) != "" ||
+		strings.TrimSpace(opts.provider) != "" ||
+		strings.TrimSpace(opts.model) != "" ||
+		strings.TrimSpace(opts.endpoint) != "" ||
+		strings.TrimSpace(opts.upstream) != "" ||
+		strings.TrimSpace(opts.status) != "" ||
+		strings.TrimSpace(opts.observation) != "" ||
+		opts.missingUsage
+}
+
+func resolveAnalyzeBatchTraceIDs(st *store.Store, opts analyzeBatchOptions) ([]string, error) {
+	seen := map[string]struct{}{}
+	add := func(traceID string, out *[]string) {
+		traceID = strings.TrimSpace(traceID)
+		if traceID == "" {
+			return
+		}
+		if _, ok := seen[traceID]; ok {
+			return
+		}
+		seen[traceID] = struct{}{}
+		*out = append(*out, traceID)
+	}
+	var traceIDs []string
+	for _, traceID := range opts.traceIDs {
+		add(traceID, &traceIDs)
+	}
+	for _, requestID := range opts.requestIDs {
+		requestID = strings.TrimSpace(requestID)
+		if requestID == "" {
+			continue
+		}
+		entry, err := st.GetByRequestID(requestID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve request id %q: %w", requestID, err)
+		}
+		add(entry.ID, &traceIDs)
+	}
+	if sessionID := strings.TrimSpace(opts.sessionID); sessionID != "" {
+		entries, err := st.ListTracesBySession(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			add(entry.ID, &traceIDs)
+		}
+		return limitTraceIDs(traceIDs, opts.limit), nil
+	}
+	if len(traceIDs) > 0 {
+		return limitTraceIDs(traceIDs, opts.limit), nil
+	}
+	limit := opts.limit
+	if limit == 0 {
+		limit = 1<<31 - 1
+	}
+	return st.ListTraceIDs(store.ListFilter{
+		Query:             strings.TrimSpace(opts.query),
+		Provider:          strings.TrimSpace(opts.provider),
+		Model:             strings.TrimSpace(opts.model),
+		Endpoint:          strings.TrimSpace(opts.endpoint),
+		SelectedUpstream:  strings.TrimSpace(opts.upstream),
+		Status:            strings.TrimSpace(opts.status),
+		ObservationStatus: strings.TrimSpace(opts.observation),
+		MissingUsage:      opts.missingUsage,
+	}, limit)
+}
+
+func limitTraceIDs(traceIDs []string, limit int) []string {
+	if limit <= 0 || len(traceIDs) <= limit {
+		return traceIDs
+	}
+	return traceIDs[:limit]
+}
+
+func runAnalyzeBatchTrace(ctx context.Context, svc *reanalysis.Service, traceID string, opts analyzeBatchOptions) ([]int64, error) {
+	var jobIDs []int64
+	if opts.enqueue {
+		if opts.repairUsage {
+			job, err := svc.EnqueueTraceRepairUsage(traceID)
+			if err != nil {
+				return jobIDs, err
+			}
+			jobIDs = append(jobIDs, job.ID)
+		}
+		switch {
+		case opts.reparse && opts.scan:
+			job, err := svc.EnqueueTraceReanalyze(traceID)
+			if err != nil {
+				return jobIDs, err
+			}
+			jobIDs = append(jobIDs, job.ID)
+		case opts.reparse:
+			job, err := svc.EnqueueTraceReparse(traceID, reanalysis.TraceOptions{})
+			if err != nil {
+				return jobIDs, err
+			}
+			jobIDs = append(jobIDs, job.ID)
+		case opts.scan:
+			job, err := svc.EnqueueTraceRescan(traceID)
+			if err != nil {
+				return jobIDs, err
+			}
+			jobIDs = append(jobIDs, job.ID)
+		}
+		return jobIDs, nil
+	}
+	if opts.repairUsage {
+		result, err := svc.RepairTraceUsage(ctx, traceID, reanalysis.RepairUsageOptions{RewriteCassette: opts.rewriteCassette})
+		if err != nil {
+			return jobIDs, err
+		}
+		jobIDs = append(jobIDs, result.Job.ID)
+	}
+	switch {
+	case opts.reparse && opts.scan:
+		result, err := svc.ReanalyzeTrace(ctx, traceID)
+		if err != nil {
+			return jobIDs, err
+		}
+		jobIDs = append(jobIDs, result.Job.ID)
+	case opts.reparse:
+		result, err := svc.ReparseTrace(ctx, traceID, reanalysis.TraceOptions{})
+		if err != nil {
+			return jobIDs, err
+		}
+		jobIDs = append(jobIDs, result.Job.ID)
+	case opts.scan:
+		result, err := svc.RescanTrace(ctx, traceID)
+		if err != nil {
+			return jobIDs, err
+		}
+		jobIDs = append(jobIDs, result.Job.ID)
+	}
+	return jobIDs, nil
 }
 
 func runAnalyzeScan(opts analyzeScanOptions) int {
