@@ -264,12 +264,15 @@ func openAuthStore(cfg *config.Config) (*auth.Store, error) {
 func openAuthStoreWithAutoSchema(cfg *config.Config) (*auth.Store, error) {
 	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
 	switch driver {
-	case "sqlite", "postgres":
+	case "sqlite":
 		if cfg.DatabaseAutoMigrate() {
 			if err := authMigrateDatabaseUp(driver, cfg.DatabaseDSN(), 0); err != nil {
 				return nil, fmt.Errorf("migrate database: %w", err)
 			}
 		}
+	case "postgres":
+		// Postgres auth tables are owned by the application migration set, which
+		// serve applies before opening the auth store.
 	default:
 		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}

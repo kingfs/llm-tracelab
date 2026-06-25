@@ -17,9 +17,11 @@ workflows.
   checked-in `ent/postgres-migrations` SQL through `internal/appdbmigrate`
   because the current ent/Postgres schema includes both application and auth
   tables.
-- With `database.auto_migrate: true`, the auth store runs the explicit auth
-  migrator before opening the store. SQLite stays on the embedded SQLite
-  migration path; Postgres uses the versioned Postgres SQL path.
+- With `database.auto_migrate: true`, `serve` applies the application migration
+  set before opening stores. SQLite auth startup still uses the embedded
+  SQLite auth migration path for compatibility; Postgres auth startup does not
+  run an independent auth migrator because auth tables are owned by the shared
+  application Postgres migration set.
 - `internal/store.NewWithDatabase` remains the compatibility constructor and
   still initializes schema by default. Command/server paths use
   `NewWithDatabaseOptions(..., AutoMigrate:false)` after running the explicit

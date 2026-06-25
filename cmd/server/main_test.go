@@ -2530,7 +2530,7 @@ func TestOpenAuthStoreAutoMigrateSQLiteCreatesAuthSchemaAndInitUser(t *testing.T
 	}
 }
 
-func TestOpenAuthStoreAutoMigratePostgresUsesVersionedMigrator(t *testing.T) {
+func TestOpenAuthStoreAutoMigratePostgresSkipsAuthMigrator(t *testing.T) {
 	origMigrate := authMigrateDatabaseUp
 	origOpen := authOpenDatabase
 	t.Cleanup(func() {
@@ -2539,18 +2539,12 @@ func TestOpenAuthStoreAutoMigratePostgresUsesVersionedMigrator(t *testing.T) {
 	})
 
 	var migrated bool
-	var migratedDriver string
-	var migratedDSN string
-	var migratedSteps int
 	var openedDriver string
 	var openedDSN string
 	var openedMaxOpen int
 	var openedMaxIdle int
 	authMigrateDatabaseUp = func(driver string, dsn string, steps int) error {
 		migrated = true
-		migratedDriver = driver
-		migratedDSN = dsn
-		migratedSteps = steps
 		return nil
 	}
 	authOpenDatabase = func(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*auth.Store, error) {
@@ -2575,11 +2569,8 @@ func TestOpenAuthStoreAutoMigratePostgresUsesVersionedMigrator(t *testing.T) {
 	}
 	defer st.Close()
 
-	if !migrated {
-		t.Fatalf("Postgres auto schema did not call versioned migrator")
-	}
-	if migratedDriver != "postgres" || migratedDSN != cfg.Database.DSN || migratedSteps != 0 {
-		t.Fatalf("MigrateDatabaseUp args = driver=%q dsn=%q steps=%d", migratedDriver, migratedDSN, migratedSteps)
+	if migrated {
+		t.Fatalf("Postgres auth store called auth migrator; application migration should own auth tables")
 	}
 	if openedDriver != "postgres" || openedDSN != cfg.Database.DSN || openedMaxOpen != 7 || openedMaxIdle != 3 {
 		t.Fatalf("OpenDatabase args = driver=%q dsn=%q maxOpen=%d maxIdle=%d", openedDriver, openedDSN, openedMaxOpen, openedMaxIdle)
