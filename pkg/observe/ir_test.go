@@ -203,6 +203,38 @@ func TestDefaultRegistryUsesEntryParserForEntryExchange(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryRecordsEntryPlainTextHTTPError(t *testing.T) {
+	registry := NewDefaultRegistry()
+	obs, err := registry.Parse(context.Background(), ParseInput{
+		TraceID:      "trace-entry-proxy-error",
+		ExchangeKind: "entry",
+		ExchangeRole: "client_request",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:   "openai_compatible",
+				Operation:  "responses",
+				Endpoint:   "/v1/responses",
+				Model:      "qwen3.6-35b-a3b",
+				StatusCode: 502,
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-35b-a3b","input":"hi"}`),
+		ResponseBody: []byte(`Proxy Error: upstream returned status 404 for model "qwen3.6-35b-a3b"`),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Parser != "entry" || obs.Status != ParseStatusParsed {
+		t.Fatalf("observation = %+v", obs)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].ProviderType != "http_error" {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "http_error_response" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
 type fakeParser struct {
 	name    string
 	version string

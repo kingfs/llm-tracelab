@@ -443,3 +443,42 @@ func TestOpenAIParserParsesNonStreamProviderError(t *testing.T) {
 		t.Fatalf("outputs = %+v", obs.Response.Outputs)
 	}
 }
+
+func TestOpenAIParserRecordsPlainTextHTTPErrorWithoutLLMResponseParse(t *testing.T) {
+	parser := NewOpenAIParser()
+	body := `Proxy Error: upstream 3a4c1531-4540-4fa2-ae29-10ea554bbec3 returned status 404 for model "qwen3.6-35b-a3b"`
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-proxy-error",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:   llm.ProviderOpenAICompatible,
+				Operation:  llm.OperationChatCompletions,
+				Endpoint:   "/v1/chat/completions",
+				StatusCode: 502,
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-35b-a3b","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Status != ParseStatusParsed {
+		t.Fatalf("status = %q", obs.Status)
+	}
+	if len(obs.Request.Messages) != 1 {
+		t.Fatalf("request messages = %+v", obs.Request.Messages)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].NormalizedType != NodeError {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if !strings.Contains(obs.Response.Errors[0].Text, "Proxy Error") {
+		t.Fatalf("error text = %q", obs.Response.Errors[0].Text)
+	}
+	if len(obs.Response.Errors[0].Raw) != 0 {
+		t.Fatalf("plain text error should not be stored as raw JSON: %q", string(obs.Response.Errors[0].Raw))
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "http_error_response" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}

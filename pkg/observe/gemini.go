@@ -94,6 +94,9 @@ func (p geminiParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 	}
 	appendGeminiToolObservations(obs.Request.Messages, &obs)
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if input.IsStream {
 		parseGeminiStream(input.ResponseBody, &obs)
 		return obs, nil

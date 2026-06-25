@@ -92,6 +92,9 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 	}
 	appendAnthropicToolObservations(obs.Request.Messages, &obs)
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if input.Header.Meta.Endpoint == "/v1/messages/count_tokens" {
 		resp, err := decodeJSONObject(input.ResponseBody)
 		if err != nil {

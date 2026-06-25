@@ -86,6 +86,9 @@ func (p openAIParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 }
 
 func parseOpenAIModelsObservation(input ParseInput, obs TraceObservation) (TraceObservation, error) {
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
 		obs.Response.Errors = append(obs.Response.Errors, providerErr)
 		obs.Response.Nodes = append(obs.Response.Nodes, providerErr)
@@ -164,6 +167,9 @@ func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceOb
 		})
 	}
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if input.IsStream {
 		parseOpenAIChatStream(input.ResponseBody, &obs)
 		return obs, nil
@@ -221,6 +227,9 @@ func parseOpenAIResponsesObservation(input ParseInput, obs TraceObservation) (Tr
 		})
 	}
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if input.IsStream {
 		parseOpenAIResponsesStream(input.ResponseBody, &obs)
 		return obs, nil

@@ -91,6 +91,9 @@ func (p entryParser) Parse(ctx context.Context, input ParseInput) (TraceObservat
 		obs.Request.Nodes = append(obs.Request.Nodes, node)
 	}
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	resp, err := decodeJSONObject(input.ResponseBody)
 	if err != nil && len(input.ResponseBody) > 0 {
 		return obs, fmt.Errorf("parse entry response: %w", err)
