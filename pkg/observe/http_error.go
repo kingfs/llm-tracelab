@@ -25,6 +25,32 @@ func appendHTTPErrorResponseIfNonLLM(input ParseInput, obs *TraceObservation) bo
 	return true
 }
 
+func appendEmptyResponseIfMissing(input ParseInput, obs *TraceObservation) bool {
+	if len(bytes.TrimSpace(input.ResponseBody)) > 0 {
+		return false
+	}
+	node := SemanticNode{
+		ID:             StableNodeID("response", "$.empty_response", "empty_response", 0),
+		ProviderType:   "empty_response",
+		NormalizedType: NodeError,
+		Path:           "$.empty_response",
+		Text:           "empty response body",
+		Metadata: map[string]any{
+			"status_code": input.Header.Meta.StatusCode,
+			"endpoint":    input.Header.Meta.Endpoint,
+			"operation":   input.Header.Meta.Operation,
+		},
+	}
+	obs.Response.Errors = append(obs.Response.Errors, node)
+	obs.Response.Nodes = append(obs.Response.Nodes, node)
+	obs.Warnings = append(obs.Warnings, ParseWarning{
+		Code:    "empty_response",
+		Message: "response body is empty; recorded as incomplete or aborted exchange",
+		Path:    "$.empty_response",
+	})
+	return true
+}
+
 func appendHTTPErrorResponseNode(input ParseInput, obs *TraceObservation, text string, raw []byte) {
 	statusCode := input.Header.Meta.StatusCode
 	if text == "" {

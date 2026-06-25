@@ -3,6 +3,7 @@ package observe
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -200,6 +201,48 @@ func TestDefaultRegistryUsesEntryParserForEntryExchange(t *testing.T) {
 	}
 	if len(obs.Response.Nodes) == 0 {
 		t.Fatalf("entry response nodes empty")
+	}
+}
+
+func TestDefaultRegistryParsesEntryResponsesStream(t *testing.T) {
+	registry := NewDefaultRegistry()
+	body := strings.Join([]string{
+		`event: response.output_text.delta`,
+		`data: {"type":"response.output_text.delta","delta":"hello"}`,
+		``,
+		`event: response.completed`,
+		`data: {"type":"response.completed","response":{"id":"resp-entry","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}`,
+		``,
+	}, "\n")
+	obs, err := registry.Parse(context.Background(), ParseInput{
+		TraceID:      "trace-entry-stream",
+		ExchangeKind: "entry",
+		ExchangeRole: "client_request",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:   "openai_compatible",
+				Operation:  "responses",
+				Endpoint:   "/v1/responses",
+				Model:      "gpt-5.1",
+				StatusCode: 200,
+			},
+			Layout: recordfile.LayoutInfo{IsStream: true},
+		},
+		IsStream:     true,
+		RequestBody:  []byte(`{"model":"gpt-5.1","input":"hello","stream":true}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Parser != "entry" || obs.ExchangeKind != "entry" {
+		t.Fatalf("observation = %+v", obs)
+	}
+	if obs.Stream.AccumulatedText != "hello" {
+		t.Fatalf("stream text = %q", obs.Stream.AccumulatedText)
+	}
+	if obs.Usage.TotalTokens != 3 {
+		t.Fatalf("usage = %+v", obs.Usage)
 	}
 }
 

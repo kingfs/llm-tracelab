@@ -94,6 +94,29 @@ func (p entryParser) Parse(ctx context.Context, input ParseInput) (TraceObservat
 	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
 		return obs, nil
 	}
+	if appendEmptyResponseIfMissing(input, &obs) {
+		return obs, nil
+	}
+	if input.IsStream || looksLikeSSE(input.ResponseBody) {
+		if input.Header.Meta.Operation == "responses" {
+			parseOpenAIResponsesStream(input.ResponseBody, &obs)
+			return obs, nil
+		}
+		node := SemanticNode{
+			ID:             StableNodeID("entry_response", "$.stream", "client_response_stream", 0),
+			ProviderType:   "client_response_stream",
+			NormalizedType: NodeUnknown,
+			Path:           "$.stream",
+			Metadata: map[string]any{
+				"status_code":   input.Header.Meta.StatusCode,
+				"exchange_kind": obs.ExchangeKind,
+				"exchange_role": obs.ExchangeRole,
+			},
+		}
+		obs.Response.Outputs = append(obs.Response.Outputs, node)
+		obs.Response.Nodes = append(obs.Response.Nodes, node)
+		return obs, nil
+	}
 	resp, err := decodeJSONObject(input.ResponseBody)
 	if err != nil && len(input.ResponseBody) > 0 {
 		return obs, fmt.Errorf("parse entry response: %w", err)

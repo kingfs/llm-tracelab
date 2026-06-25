@@ -89,6 +89,9 @@ func parseOpenAIModelsObservation(input ParseInput, obs TraceObservation) (Trace
 	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
 		return obs, nil
 	}
+	if appendEmptyResponseIfMissing(input, &obs) {
+		return obs, nil
+	}
 	if providerErr := parseProviderErrorNode(input.ResponseBody, "response", "$"); providerErr.ID != "" {
 		obs.Response.Errors = append(obs.Response.Errors, providerErr)
 		obs.Response.Nodes = append(obs.Response.Nodes, providerErr)
@@ -170,7 +173,10 @@ func parseOpenAIChatObservation(input ParseInput, obs TraceObservation) (TraceOb
 	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
 		return obs, nil
 	}
-	if input.IsStream {
+	if appendEmptyResponseIfMissing(input, &obs) {
+		return obs, nil
+	}
+	if input.IsStream || looksLikeSSE(input.ResponseBody) {
 		parseOpenAIChatStream(input.ResponseBody, &obs)
 		return obs, nil
 	}
@@ -230,7 +236,10 @@ func parseOpenAIResponsesObservation(input ParseInput, obs TraceObservation) (Tr
 	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
 		return obs, nil
 	}
-	if input.IsStream {
+	if appendEmptyResponseIfMissing(input, &obs) {
+		return obs, nil
+	}
+	if input.IsStream || looksLikeSSE(input.ResponseBody) {
 		parseOpenAIResponsesStream(input.ResponseBody, &obs)
 		return obs, nil
 	}
@@ -1221,6 +1230,17 @@ func scanSSEData(body []byte, handle func(data string)) bool {
 		handle(data)
 	}
 	return sawDone
+}
+
+func looksLikeSSE(body []byte) bool {
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return false
+	}
+	if bytes.HasPrefix(body, []byte("data:")) || bytes.HasPrefix(body, []byte("event:")) {
+		return bytes.Contains(body, []byte("data:"))
+	}
+	return false
 }
 
 func streamEvent(index int, eventType string, providerType string, normalized NormalizedType, path string, delta string, raw json.RawMessage) StreamEvent {

@@ -371,6 +371,35 @@ func TestOpenAIParserMarksInterruptedChatStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIParserInfersChatStreamFromSSEBody(t *testing.T) {
+	parser := NewOpenAIParser()
+	body := joinSSE(
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"qwen3.6-27b","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"qwen3.6-27b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	)
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-stream-missing-flag",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Stream.AccumulatedText != "hello" {
+		t.Fatalf("stream text = %q", obs.Stream.AccumulatedText)
+	}
+	if len(obs.Warnings) != 0 {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
 func TestOpenAIParserParsesResponsesStream(t *testing.T) {
 	parser := NewOpenAIParser()
 	body := strings.Join([]string{
@@ -479,6 +508,31 @@ func TestOpenAIParserParsesNonStreamProviderError(t *testing.T) {
 	}
 	if len(obs.Response.Outputs) != 0 {
 		t.Fatalf("outputs = %+v", obs.Response.Outputs)
+	}
+}
+
+func TestOpenAIParserRecordsEmptyChatResponse(t *testing.T) {
+	parser := NewOpenAIParser()
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-empty-response",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: nil,
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].ProviderType != "empty_response" {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "empty_response" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
 	}
 }
 
