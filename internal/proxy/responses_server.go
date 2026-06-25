@@ -105,6 +105,9 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		prepareOpts.ExchangeRole = metadata.ExchangeRole
 		prepareOpts.SequenceIndex = metadata.SequenceIndex
 		prepareOpts.ResponseID = metadata.ResponseID
+		if metadata.ResponseID != "" {
+			prepareOpts.ParentExchangeID = "entry:" + metadata.ResponseID
+		}
 	}
 	logInfo, err := a.recorder.PrepareLogFileWithOptionsAndBody(recordReq, prepareOpts, body)
 	if err != nil {
@@ -273,6 +276,7 @@ func (a *responsesChatCompletionsAdapter) recordModelCallEvent(ctx context.Conte
 		details["sequence_index"] = metadata.SequenceIndex
 		if metadata.ResponseID != "" {
 			details["response_id"] = metadata.ResponseID
+			details["parent_exchange_id"] = "entry:" + metadata.ResponseID
 			if event.ResponseID == "" {
 				event.ResponseID = metadata.ResponseID
 			}
@@ -331,6 +335,7 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 		entry.SequenceIndex = metadata.SequenceIndex
 		if metadata.ResponseID != "" {
 			entry.ResponseID = metadata.ResponseID
+			entry.ParentExchangeID = "entry:" + metadata.ResponseID
 		}
 	}
 	if err := a.auditor.RecordUpstreamExchange(context.WithoutCancel(ctx), entry); err != nil {

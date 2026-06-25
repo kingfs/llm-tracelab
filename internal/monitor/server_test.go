@@ -3648,6 +3648,83 @@ func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
 	}
 }
 
+func TestTraceListAndDetailIncludeUpstreamCalls(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	responseID := "resp_trace_children"
+	writeTraceFixture(t, outputDir, "entry.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
+		`{"model":"gpt-5","input":"hello"}`,
+		`{"id":"`+responseID+`","object":"response","status":"completed"}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-entry-trace-children"
+			header.Meta.ResponseID = responseID
+			header.Meta.ExchangeID = "entry:" + responseID
+			header.Meta.ExchangeKind = "entry"
+			header.Meta.ExchangeRole = "client_request"
+			header.Meta.Operation = "responses"
+			header.Meta.Endpoint = "/v1/responses"
+			header.Meta.URL = "/v1/responses"
+		}))
+	writeTraceFixture(t, outputDir, "model.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/chat/completions", false, "200 OK", nil,
+		`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`,
+		`{"choices":[{"message":{"content":"done"}}]}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-model-trace-children"
+			header.Meta.ResponseID = responseID
+			header.Meta.RequestAuditID = "audit-trace-children"
+			header.Meta.ExchangeID = "model:" + responseID + ":0"
+			header.Meta.ExchangeKind = "model"
+			header.Meta.ExchangeRole = "primary_model_call"
+			header.Meta.ParentExchangeID = "entry:" + responseID
+			header.Meta.SequenceIndex = 0
+			header.Meta.Operation = "chat.completions"
+			header.Meta.Endpoint = "/v1/chat/completions"
+			header.Meta.URL = "/v1/chat/completions"
+		}))
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/traces?page=1&page_size=50", nil)
+	listRR := httptest.NewRecorder()
+	listAPIHandler(st).ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listRR.Code)
+	}
+	var listPayload listResponse
+	if err := json.Unmarshal(listRR.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if len(listPayload.Items) != 1 {
+		t.Fatalf("len(list items) = %d, want only entry", len(listPayload.Items))
+	}
+	if listPayload.Items[0].UpstreamCallCount != 1 {
+		t.Fatalf("upstream_call_count = %d, want 1", listPayload.Items[0].UpstreamCallCount)
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/traces/"+listPayload.Items[0].ID, nil)
+	detailRR := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(detailRR, detailReq)
+	if detailRR.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200", detailRR.Code)
+	}
+	var detailPayload detailResponse
+	if err := json.Unmarshal(detailRR.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("json.Unmarshal(detail) error = %v", err)
+	}
+	if len(detailPayload.UpstreamCalls) != 1 {
+		t.Fatalf("len(upstream_calls) = %d, want 1", len(detailPayload.UpstreamCalls))
+	}
+	if got := detailPayload.UpstreamCalls[0].ParentExchangeID; got != "entry:"+responseID {
+		t.Fatalf("child parent_exchange_id = %q, want entry:%s", got, responseID)
+	}
+}
+
 func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 	t.Parallel()
 

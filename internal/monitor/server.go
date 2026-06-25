@@ -365,35 +365,36 @@ type responsesToolCallAuditView struct {
 }
 
 type traceListItem struct {
-	ID               string              `json:"id"`
-	SessionID        string              `json:"session_id,omitempty"`
-	SessionSource    string              `json:"session_source,omitempty"`
-	RecordedAt       time.Time           `json:"recorded_at"`
-	Model            string              `json:"model"`
-	Provider         string              `json:"provider"`
-	SelectedUpstream string              `json:"selected_upstream_id,omitempty"`
-	Operation        string              `json:"operation"`
-	Endpoint         string              `json:"endpoint"`
-	Method           string              `json:"method"`
-	URL              string              `json:"url"`
-	StatusCode       int                 `json:"status_code"`
-	DurationMs       int64               `json:"duration_ms"`
-	TTFTMs           int64               `json:"ttft_ms"`
-	TotalTokens      int                 `json:"total_tokens"`
-	PromptTokens     int                 `json:"prompt_tokens"`
-	CompletionTokens int                 `json:"completion_tokens"`
-	CachedTokens     int                 `json:"cached_tokens"`
-	IsStream         bool                `json:"is_stream"`
-	Error            string              `json:"error,omitempty"`
-	RequestAuditID   string              `json:"request_audit_id,omitempty"`
-	ResponseID       string              `json:"response_id,omitempty"`
-	ExchangeID       string              `json:"exchange_id,omitempty"`
-	ExchangeKind     string              `json:"exchange_kind,omitempty"`
-	ExchangeRole     string              `json:"exchange_role,omitempty"`
-	ParentExchangeID string              `json:"parent_exchange_id,omitempty"`
-	SequenceIndex    int                 `json:"sequence_index,omitempty"`
-	UpstreamCalls    []traceListItem     `json:"upstream_calls,omitempty"`
-	Observation      observationListView `json:"observation"`
+	ID                string              `json:"id"`
+	SessionID         string              `json:"session_id,omitempty"`
+	SessionSource     string              `json:"session_source,omitempty"`
+	RecordedAt        time.Time           `json:"recorded_at"`
+	Model             string              `json:"model"`
+	Provider          string              `json:"provider"`
+	SelectedUpstream  string              `json:"selected_upstream_id,omitempty"`
+	Operation         string              `json:"operation"`
+	Endpoint          string              `json:"endpoint"`
+	Method            string              `json:"method"`
+	URL               string              `json:"url"`
+	StatusCode        int                 `json:"status_code"`
+	DurationMs        int64               `json:"duration_ms"`
+	TTFTMs            int64               `json:"ttft_ms"`
+	TotalTokens       int                 `json:"total_tokens"`
+	PromptTokens      int                 `json:"prompt_tokens"`
+	CompletionTokens  int                 `json:"completion_tokens"`
+	CachedTokens      int                 `json:"cached_tokens"`
+	IsStream          bool                `json:"is_stream"`
+	Error             string              `json:"error,omitempty"`
+	RequestAuditID    string              `json:"request_audit_id,omitempty"`
+	ResponseID        string              `json:"response_id,omitempty"`
+	ExchangeID        string              `json:"exchange_id,omitempty"`
+	ExchangeKind      string              `json:"exchange_kind,omitempty"`
+	ExchangeRole      string              `json:"exchange_role,omitempty"`
+	ParentExchangeID  string              `json:"parent_exchange_id,omitempty"`
+	SequenceIndex     int                 `json:"sequence_index,omitempty"`
+	UpstreamCallCount int                 `json:"upstream_call_count,omitempty"`
+	UpstreamCalls     []traceListItem     `json:"upstream_calls,omitempty"`
+	Observation       observationListView `json:"observation"`
 }
 
 type observationListView struct {
@@ -572,6 +573,7 @@ type detailResponse struct {
 	AIReasoning            string                   `json:"ai_reasoning"`
 	AIBlocks               []ContentBlock           `json:"ai_blocks"`
 	ToolCalls              []ToolCall               `json:"tool_calls"`
+	UpstreamCalls          []traceListItem          `json:"upstream_calls,omitempty"`
 	SelectedUpstreamHealth *traceUpstreamHealthView `json:"selected_upstream_health,omitempty"`
 	Performance            performanceView          `json:"performance"`
 }
@@ -4117,8 +4119,15 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 			},
 			RefreshedAt: time.Now().UTC(),
 		}
+		childrenByTrace, err := st.ListChildExchangesForEntries(result.Items)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query child exchanges: " + err.Error()})
+			return
+		}
 		for _, entry := range result.Items {
-			resp.Items = append(resp.Items, traceListItemFromEntry(entry))
+			item := traceListItemFromEntry(entry)
+			item.UpstreamCallCount = len(childrenByTrace[entry.ID])
+			resp.Items = append(resp.Items, item)
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
@@ -4240,6 +4249,7 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			for _, child := range children[entry.ID] {
 				item.UpstreamCalls = append(item.UpstreamCalls, traceListItemFromEntry(child))
 			}
+			item.UpstreamCallCount = len(item.UpstreamCalls)
 			resp.Traces = append(resp.Traces, item)
 		}
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
@@ -4751,6 +4761,14 @@ func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, 
 			ResponseID:     ref.ResponseID,
 			RequestAuditID: ref.RequestAuditID,
 		}
+	}
+	childrenByTrace, err := st.ListChildExchangesForEntries([]store.LogEntry{entry})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query child exchanges: " + err.Error()})
+		return
+	}
+	for _, child := range childrenByTrace[entry.ID] {
+		resp.UpstreamCalls = append(resp.UpstreamCalls, traceListItemFromEntry(child))
 	}
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)

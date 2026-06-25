@@ -984,6 +984,12 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	if parsed.Header.Meta.StatusCode != http.StatusOK {
 		t.Fatalf("recorded status = %d, want 200", parsed.Header.Meta.StatusCode)
 	}
+	if parsed.Header.Meta.ExchangeKind != "model" || parsed.Header.Meta.ExchangeRole != "primary_model_call" || parsed.Header.Meta.SequenceIndex != 0 {
+		t.Fatalf("recorded exchange metadata = %q/%q/%d, want model/primary_model_call/0", parsed.Header.Meta.ExchangeKind, parsed.Header.Meta.ExchangeRole, parsed.Header.Meta.SequenceIndex)
+	}
+	if parsed.Header.Meta.ParentExchangeID != "entry:"+responseID {
+		t.Fatalf("recorded parent_exchange_id = %q, want entry:%s", parsed.Header.Meta.ParentExchangeID, responseID)
+	}
 	if parsed.Header.Layout.IsStream {
 		t.Fatalf("recorded IsStream = true, want false")
 	}
@@ -1058,6 +1064,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if exchange.ResponseID != responseID {
 		t.Fatalf("upstream exchange response_id = %q, want %q", exchange.ResponseID, responseID)
+	}
+	if exchange.ParentExchangeID != "entry:"+responseID {
+		t.Fatalf("upstream exchange parent_exchange_id = %q, want entry:%s", exchange.ParentExchangeID, responseID)
 	}
 	if exchange.TraceID != parsed.Header.Meta.RequestID {
 		t.Fatalf("upstream exchange trace_id = %q, want recorder request_id %q", exchange.TraceID, parsed.Header.Meta.RequestID)
