@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
@@ -32,11 +34,19 @@ func newManagementMuxWithFunctionExecutorManager(
 	mux := http.NewServeMux()
 	var authStorePtr *auth.Store
 	var verifier auth.TokenVerifier
+	var monitorJWT *auth.JWTManager
+	var monitorVerifier auth.TokenVerifier
 	if len(authStore) > 0 {
 		authStorePtr = authStore[0]
 	}
 	if authStorePtr != nil {
 		verifier = authStorePtr
+		var err error
+		monitorJWT, err = newMonitorJWTManager(traceStore, cfg.AuthSessionTTL())
+		if err != nil {
+			panic(err)
+		}
+		monitorVerifier = monitorJWT
 	}
 	if cfg.MCP.Enabled {
 		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr})
@@ -53,6 +63,8 @@ func newManagementMuxWithFunctionExecutorManager(
 		Router:                           rtr,
 		ChannelService:                   channel.NewService(traceStore),
 		AuthVerifier:                     verifier,
+		MonitorAuthVerifier:              monitorVerifier,
+		MonitorJWT:                       monitorJWT,
 		AuthStore:                        authStorePtr,
 		SessionTTL:                       cfg.AuthSessionTTL(),
 		ResponsesFunctionExecutors:       functionExecutorConfig,
@@ -60,6 +72,18 @@ func newManagementMuxWithFunctionExecutorManager(
 		ResponsesFunctionExecutorManager: functionExecutorManager,
 	})
 	return mux
+}
+
+func newMonitorJWTManager(traceStore *store.Store, ttl time.Duration) (*auth.JWTManager, error) {
+	if traceStore == nil {
+		return auth.NewEphemeralJWTManager(ttl)
+	}
+	key, _, err := traceStore.ExportLocalSecretKey()
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(append([]byte("llm-tracelab-monitor-jwt:"), key...))
+	return auth.NewJWTManager(auth.JWTOptions{Secret: sum[:], TTL: ttl})
 }
 
 func effectiveMCPPath(cfg *config.Config) string {

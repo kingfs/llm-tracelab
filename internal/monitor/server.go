@@ -759,6 +759,8 @@ type RouteOptions struct {
 	Router                           *router.Router
 	ChannelService                   *channel.Service
 	AuthVerifier                     auth.TokenVerifier
+	MonitorAuthVerifier              auth.TokenVerifier
+	MonitorJWT                       *auth.JWTManager
 	AuthStore                        *auth.Store
 	SessionTTL                       time.Duration
 	ResponsesFunctionExecutors       config.ResponsesFunctionExecutorConfig
@@ -1404,6 +1406,10 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	monitorVerifier := opt.MonitorAuthVerifier
+	if monitorVerifier == nil {
+		monitorVerifier = opt.AuthVerifier
+	}
 	functionExecutorState := opt.ResponsesFunctionExecutorState
 	if functionExecutorState == nil {
 		stateOptions := []ResponsesFunctionExecutorStateOption{}
@@ -1419,46 +1425,46 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 		}
 		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors, stateOptions...)
 	}
-	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.SessionTTL))
-	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), opt.AuthVerifier))
-	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
-	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAuthRequired(analysisBatchReanalyzeAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
-	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
+	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(monitorVerifier))
+	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL))
+	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), monitorVerifier))
+	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), monitorVerifier))
+	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), monitorVerifier))
+	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), monitorVerifier))
+	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAuthRequired(analysisBatchReanalyzeAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	mux.Handle("/", appHandler())
 }
 
@@ -1468,7 +1474,7 @@ func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	}
 }
 
-func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerFunc {
+func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -1483,7 +1489,17 @@ func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerF
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid login payload"})
 			return
 		}
-		token, err := authStore.Login(r.Context(), req.Username, req.Password, ttl)
+		var token auth.TokenResult
+		var err error
+		if jwtManager != nil {
+			var principal auth.Principal
+			principal, err = authStore.AuthenticatePassword(r.Context(), req.Username, req.Password)
+			if err == nil {
+				token, err = jwtManager.IssueToken(principal)
+			}
+		} else {
+			token, err = authStore.Login(r.Context(), req.Username, req.Password, ttl)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
 			return
@@ -2764,7 +2780,7 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		authReq := r
-		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" {
+		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" && allowMonitorQueryAccessToken(r) {
 			authReq = r.Clone(r.Context())
 			authReq.Header = r.Header.Clone()
 			authReq.Header.Set("Authorization", "Bearer "+token)
@@ -2777,6 +2793,10 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 		}
 		next(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	}
+}
+
+func allowMonitorQueryAccessToken(r *http.Request) bool {
+	return r.Method == http.MethodGet && pathClean(r.URL.Path) == "/api/events/stream"
 }
 
 func appHandler() http.Handler {

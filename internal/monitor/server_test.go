@@ -31,6 +31,18 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
+func testJWTManager(t *testing.T, ttl time.Duration) *auth.JWTManager {
+	t.Helper()
+	manager, err := auth.NewJWTManager(auth.JWTOptions{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+		TTL:    ttl,
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
+	return manager
+}
+
 func TestEmbeddedMonitorUISmoke(t *testing.T) {
 	t.Parallel()
 
@@ -1292,13 +1304,28 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
-	token, err := authStore.CreateToken(context.Background(), "admin", "test", auth.DefaultTokenScope, time.Hour)
+	apiToken, err := authStore.CreateToken(context.Background(), "admin", "test", auth.DefaultTokenScope, time.Hour)
 	if err != nil {
 		t.Fatalf("CreateToken() error = %v", err)
 	}
+	jwtManager := testJWTManager(t, time.Hour)
+	jwtToken, err := jwtManager.IssueToken(auth.Principal{
+		UserID:   1,
+		Username: "admin",
+		Role:     "admin",
+		Scope:    auth.DefaultTokenScope,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken() error = %v", err)
+	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore})
+	RegisterRoutes(mux, nil, RouteOptions{
+		AuthStore:           authStore,
+		AuthVerifier:        authStore,
+		MonitorAuthVerifier: jwtManager,
+		MonitorJWT:          jwtManager,
+	})
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
 	statusRR := httptest.NewRecorder()
@@ -1315,11 +1342,26 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-	req.Header.Set("Authorization", "Bearer "+token.Token)
+	req.Header.Set("Authorization", "Bearer "+apiToken.Token)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("api token check code = %d, want 401", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken.Token)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("authenticated check code = %d, want 200", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/check?access_token="+jwtToken.Token, nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("query token check code = %d, want 401 outside event stream", rr.Code)
 	}
 }
 
@@ -1341,16 +1383,22 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	if _, err := authStore.CreateUser(context.Background(), "other", "change-me-123"); err != nil {
 		t.Fatalf("CreateUser(other) error = %v", err)
 	}
-	loginToken, err := authStore.CreateToken(context.Background(), "admin", "monitor-login", auth.DefaultTokenScope, time.Hour)
+	jwtManager := testJWTManager(t, time.Hour)
+	loginToken, err := jwtManager.IssueToken(auth.Principal{
+		UserID:   1,
+		Username: "admin",
+		Role:     "admin",
+		Scope:    auth.DefaultTokenScope,
+	})
 	if err != nil {
-		t.Fatalf("CreateToken(login) error = %v", err)
+		t.Fatalf("IssueToken(login) error = %v", err)
 	}
 	if _, err := authStore.CreateToken(context.Background(), "other", "other-token", auth.DefaultTokenScope, time.Hour); err != nil {
 		t.Fatalf("CreateToken(other) error = %v", err)
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore})
+	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, MonitorAuthVerifier: jwtManager, MonitorJWT: jwtManager})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/auth/tokens", strings.NewReader(`{"name":"local-dev","scope":"api","ttl":"24h"}`))
 	createReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
@@ -1378,8 +1426,8 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	if err := json.Unmarshal(listRR.Body.Bytes(), &list); err != nil {
 		t.Fatalf("json.Unmarshal(list) error = %v", err)
 	}
-	if list.Total != 2 {
-		t.Fatalf("list total = %d, want admin login + created token", list.Total)
+	if list.Total != 1 {
+		t.Fatalf("list total = %d, want created token only", list.Total)
 	}
 	var target tokenItem
 	for _, item := range list.Items {
@@ -1434,7 +1482,14 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, SessionTTL: time.Hour})
+	jwtManager := testJWTManager(t, time.Hour)
+	RegisterRoutes(mux, nil, RouteOptions{
+		AuthStore:           authStore,
+		AuthVerifier:        authStore,
+		MonitorAuthVerifier: jwtManager,
+		MonitorJWT:          jwtManager,
+		SessionTTL:          time.Hour,
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"admin","password":"change-me-123"}`))
 	rr := httptest.NewRecorder()
@@ -1448,6 +1503,12 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 	if payload.Token == "" {
 		t.Fatalf("login token missing")
+	}
+	if strings.HasPrefix(payload.Token, "llmtl_") {
+		t.Fatalf("login returned api token prefix, want jwt")
+	}
+	if strings.Count(payload.Token, ".") != 2 {
+		t.Fatalf("login token is not jwt-shaped: %q", payload.Token)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)

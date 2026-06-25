@@ -161,8 +161,9 @@ debug:
 
 - `database` 是统一的结构化数据存储，承载用户、API token、trace index、session、upstream、dataset、eval、Responses state 和 audit 元数据；生产默认使用 Postgres。
 - 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
-- Monitor UI 使用用户名密码登录；登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
-- 同一个个人 token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
+- Monitor UI 使用用户名密码登录；网页登录态使用 monitor-only JWT，不复用个人 API token。
+- 登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
+- 个人 API token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
 - Channels / Models 通过 Monitor Web 管理并写入应用数据库；YAML 不再作为长期渠道配置入口。
 
 ### MCP Server

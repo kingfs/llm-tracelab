@@ -231,7 +231,7 @@ func (s *Store) ResetPassword(ctx context.Context, username string, password str
 }
 
 func (s *Store) Login(ctx context.Context, username string, password string, ttl time.Duration) (TokenResult, error) {
-	if err := s.VerifyPassword(ctx, username, password); err != nil {
+	if _, err := s.AuthenticatePassword(ctx, username, password); err != nil {
 		return TokenResult{}, err
 	}
 	if err := s.deleteTokensByName(ctx, username, "monitor-login"); err != nil {
@@ -241,18 +241,28 @@ func (s *Store) Login(ctx context.Context, username string, password string, ttl
 }
 
 func (s *Store) VerifyPassword(ctx context.Context, username string, password string) error {
+	_, err := s.AuthenticatePassword(ctx, username, password)
+	return err
+}
+
+func (s *Store) AuthenticatePassword(ctx context.Context, username string, password string) (Principal, error) {
 	username = normalizeUsername(username)
 	row, err := s.client.User.Query().Where(user.UsernameEQ(username), user.EnabledEQ(true)).Only(ctx)
 	if err != nil {
-		return errors.New("invalid username or password")
+		return Principal{}, errors.New("invalid username or password")
 	}
 	if bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(password)) != nil {
-		return errors.New("invalid username or password")
+		return Principal{}, errors.New("invalid username or password")
 	}
 	if _, err := row.Update().SetLastLoginAt(time.Now().UTC()).Save(ctx); err != nil {
-		return err
+		return Principal{}, err
 	}
-	return nil
+	return Principal{
+		UserID:   row.ID,
+		Username: row.Username,
+		Role:     row.Role,
+		Scope:    DefaultTokenScope,
+	}, nil
 }
 
 func (s *Store) CreateToken(ctx context.Context, username string, name string, scope string, ttl time.Duration) (TokenResult, error) {

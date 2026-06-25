@@ -16,9 +16,12 @@ Monitor 是 TraceLab 的本地 Web 工作台。
 go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
-登录后在 `Tokens` 页面创建个人 token。
+Monitor UI 使用用户名密码登录，登录态由 monitor-only JWT 承载。JWT 只用于
+Monitor API，不用于 SDK、proxy 或 MCP。
 
-同一个 token 用于：
+登录后可在 `Tokens` 页面创建个人 API token。
+
+个人 API token 用于：
 
 - 代理 API：`Authorization: Bearer <token>`。
 - MCP：`Authorization: Bearer <token>`。

@@ -157,8 +157,9 @@ Access control notes:
 
 - `database` is the unified structured store for users, API tokens, trace index, sessions, upstream metadata, datasets, eval metadata, Responses state, and audit data. Production defaults to Postgres.
 - Initialize the first user with `go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`.
-- The Monitor UI uses username/password login. After login, use the `Tokens` page to generate a personal API token for the current user.
-- The same personal token works for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
+- The Monitor UI uses username/password login. The web login session uses a monitor-only JWT and does not reuse personal API tokens.
+- After login, use the `Tokens` page to generate a personal API token for the current user.
+- Personal API tokens work for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
 - Channels / Models are managed in Monitor Web and stored in the application database; YAML is no longer the long-lived channel configuration surface.
 
 Recommended compatibility pattern:

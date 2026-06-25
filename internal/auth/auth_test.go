@@ -45,6 +45,68 @@ func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 	}
 }
 
+func TestJWTManagerIssuesAndConstrainsMonitorTokens(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	manager, err := NewJWTManager(JWTOptions{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+		TTL:    time.Hour,
+		Now:    func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
+	token, err := manager.IssueToken(Principal{UserID: 7, Username: "admin", Role: "admin", Scope: DefaultTokenScope})
+	if err != nil {
+		t.Fatalf("IssueToken() error = %v", err)
+	}
+	if strings.Count(token.Token, ".") != 2 {
+		t.Fatalf("jwt token shape = %q", token.Token)
+	}
+	principal, ok, err := manager.VerifyToken(context.Background(), token.Token)
+	if err != nil || !ok {
+		t.Fatalf("VerifyToken(valid) ok=%v err=%v", ok, err)
+	}
+	if principal.UserID != 7 || principal.Username != "admin" || principal.Role != "admin" || principal.Scope != DefaultTokenScope {
+		t.Fatalf("principal = %+v", principal)
+	}
+
+	tampered := token.Token[:len(token.Token)-1] + "x"
+	if _, ok, err := manager.VerifyToken(context.Background(), tampered); err != nil || ok {
+		t.Fatalf("VerifyToken(tampered) ok=%v err=%v, want false nil", ok, err)
+	}
+
+	wrongAudience, err := NewJWTManager(JWTOptions{
+		Secret:   []byte("0123456789abcdef0123456789abcdef"),
+		Audience: "other-ui",
+		TTL:      time.Hour,
+		Now:      func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager(wrongAudience) error = %v", err)
+	}
+	if _, ok, err := wrongAudience.VerifyToken(context.Background(), token.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(wrong audience) ok=%v err=%v, want false nil", ok, err)
+	}
+
+	expired, err := NewJWTManager(JWTOptions{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+		TTL:    time.Hour,
+		Now:    func() time.Time { return now.Add(2 * time.Hour) },
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager(expired) error = %v", err)
+	}
+	if _, ok, err := expired.VerifyToken(context.Background(), token.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(expired) ok=%v err=%v, want false nil", ok, err)
+	}
+
+	if _, err := NewJWTManager(JWTOptions{Secret: []byte("too-short")}); !errors.Is(err, ErrJWTSecretTooShort) {
+		t.Fatalf("NewJWTManager(short secret) err=%v, want ErrJWTSecretTooShort", err)
+	}
+}
+
 func TestStoreRejectsExpiredTokensAndDisabledUsers(t *testing.T) {
 	t.Parallel()
 
