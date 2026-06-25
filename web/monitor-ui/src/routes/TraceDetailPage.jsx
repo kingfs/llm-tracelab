@@ -8,6 +8,7 @@ import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import {
   buildRoutingDecisionSummary,
   buildChannelLink,
+  buildTraceLink,
   buildTraceUpstreamHealthSummary,
   buildUpstreamLink,
   formatDateTime,
@@ -78,6 +79,7 @@ export function TraceDetailPage() {
   const selectedRouteIdentity = routingDecision.selectedRouteTargetID || selectedUpstreamID;
   const selectedChannelID = routingDecision.selectedChannelID || selectedUpstreamID;
   const responsesAuditLink = buildResponsesAuditLink(detail.data);
+  const upstreamCalls = Array.isArray(detail.data?.upstream_calls) ? detail.data.upstream_calls : [];
 
   const applyTraceFocus = (nextTab, nextFocus = "") => {
     const next = new URLSearchParams(searchParams);
@@ -398,6 +400,7 @@ export function TraceDetailPage() {
               <RoutingDecisionPanel decision={routingDecision} InlineTag={InlineTag} CodeBlock={CodeBlock} />
             </section>
           ) : null}
+          {upstreamCalls.length ? <RelatedUpstreamCallsPanel calls={upstreamCalls} currentTraceID={traceID} fromSessionID={fromSessionID || session?.session_id || ""} /> : null}
           <section className="panel">
             <div className="panel-head">
               <div>
@@ -474,6 +477,65 @@ export function TraceDetailPage() {
       {tab === "performance" ? <PerformancePanel performance={performance} /> : null}
       {tab === "raw" ? <RawProtocolPanel raw={raw} focusTarget={focusTarget} /> : null}
     </div>
+  );
+}
+
+function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessionID = "" }) {
+  return (
+    <section className="panel related-upstream-panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Related upstream calls</p>
+          <h2>{calls.length} model call{calls.length === 1 ? "" : "s"}</h2>
+        </div>
+        <InlineTag tone="gold">response server lineage</InlineTag>
+      </div>
+      <div className="related-upstream-list">
+        {calls.map((call, index) => {
+          const traceID = call.trace_id || call.id || "";
+          const statusCode = Number(call.status_code || 0);
+          const failed = statusCode >= 400 || Boolean(call.error_text);
+          return (
+            <article key={traceID || `${call.exchange_kind || "call"}-${index}`} className="related-upstream-card">
+              <div className="related-upstream-main">
+                <div>
+                  <strong className="trace-model-name">{call.model || "unknown-model"}</strong>
+                  <span className="trace-subline mono">{traceID || call.cassette_path || "-"}</span>
+                </div>
+                <div className="trace-tag-group">
+                  <InlineTag tone={failed ? "danger" : "green"}>{statusCode || (failed ? "error" : "ok")}</InlineTag>
+                  <InlineTag tone={call.exchange_kind === "model" ? "gold" : "default"}>{call.exchange_role || call.exchange_kind || "model"}</InlineTag>
+                  <InlineTag tone="accent">{formatEndpointTag(call.endpoint || call.operation)}</InlineTag>
+                  <InlineTag>{formatProviderTag(call.provider)}</InlineTag>
+                  {call.selected_upstream_id || call.upstream_id || call.route_target ? <InlineTag tone="green">{call.selected_upstream_id || call.upstream_id || call.route_target}</InlineTag> : null}
+                </div>
+              </div>
+              <div className="detail-meta-strip related-upstream-meta">
+                <DetailMetaPill label="sequence" value={formatSequence(call.sequence_index)} />
+                <DetailMetaPill label="duration" value={formatDuration(call.duration_ms || 0, { precise: true })} />
+                <DetailMetaPill label="ttft" value={formatDuration(call.ttft_ms || 0, { precise: true })} />
+                {call.response_id ? <DetailMetaPill label="response" value={call.response_id} mono /> : null}
+                {call.request_audit_id ? <DetailMetaPill label="audit" value={call.request_audit_id} mono /> : null}
+                {call.parent_exchange_id ? <DetailMetaPill label="parent" value={call.parent_exchange_id} mono /> : null}
+              </div>
+              {call.error_text ? <pre className="timeline-message responses-audit-error">{call.error_text}</pre> : null}
+              <div className="related-upstream-actions">
+                {traceID && traceID !== currentTraceID ? (
+                  <Link className="ghost-button active" to={buildTraceLink(traceID, "requests", fromSessionID, "", failed ? "failure" : "")}>
+                    Open child trace
+                  </Link>
+                ) : null}
+                {traceID ? (
+                  <Link className="ghost-button" to={buildTraceLink(traceID, "requests", fromSessionID, "raw", failed ? "response" : "")}>
+                    Raw
+                  </Link>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -795,6 +857,13 @@ function firstAuditIdentifier(trace, key) {
     }
   }
   return "";
+}
+
+function formatSequence(value) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return `#${value}`;
 }
 
 function PerformancePanel({ performance }) {
