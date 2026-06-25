@@ -1,4 +1,4 @@
-h1:RIaql8rGrAT86ffdOK8lQrbM0fCO9f6GfObU/NwaTbA=
+h1:sF8a9lEnykqV06vAbcEmLLo9tkqXwvTviWB989KyvuA=
 20260427035302_init_auth.down.sql h1:swc+7L5tpUhxhZ2NYA7SgVjsZm/Oa/xhSu51RHQF4Vw=
 20260427035302_init_auth.up.sql h1:cKXF30uUY3SaYaMOLXNNTJFU65GLDHrM3tk50XIvk/4=
 20260427060126_add_trace_store.down.sql h1:AAIPOh0eRd1p8qR7dqTuN6W3s7W0F/zNKOsq2gJPnCg=
@@ -15,3 +15,5 @@ h1:RIaql8rGrAT86ffdOK8lQrbM0fCO9f6GfObU/NwaTbA=
 20260624093000_add_exchange_metadata_fields.up.sql h1:+CeuEyRYWZAlHcVpTuD6DYyjcw6KegDzIDy21vqws5g=
 20260625120000_add_log_request_audit_fields.down.sql h1:ooY0nnCVd8/ApSU6ZfZDywOzs1Siwh+2XpuKqgEe2lk=
 20260625120000_add_log_request_audit_fields.up.sql h1:F70OrzF8A8MHTJERcXXzQvbAgBmha3VuCD4rxGHTI6M=
+20260625124500_add_log_exchange_fields.down.sql h1:Q/ACr0y98xLKQHCod6dvqJom1DSlL6ER+dsc1Z1TX54=
+20260625124500_add_log_exchange_fields.up.sql h1:zOiWd2tAmf6i5TraD9qWdyExZ8/i0ApdEuM5WWULK38=
