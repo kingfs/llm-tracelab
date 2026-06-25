@@ -14,6 +14,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,10 @@ import (
 type aggregatedModelListResponse struct {
 	Object string                     `json:"object,omitempty"`
 	Data   []aggregatedModelListEntry `json:"data"`
+}
+
+type ollamaShowRequest struct {
+	Name string `json:"name"`
 }
 
 type aggregatedModelListEntry struct {
@@ -684,6 +689,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isOpenAIModelDetailRequest(r) {
+		h.serveOpenAIModelDetail(w, r, start)
+		return
+	}
+	if isOllamaShowRequest(r) {
+		h.serveOllamaShow(w, r, start)
+		return
+	}
 	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
 		h.serveAggregatedModelList(w, r, start)
 		return
@@ -1615,6 +1628,87 @@ func isTransientRetryStatus(code int) bool {
 	}
 }
 
+func isOpenAIModelDetailRequest(r *http.Request) bool {
+	if r == nil || r.Method != http.MethodGet {
+		return false
+	}
+	model := llm.ModelFromPath(r.URL.Path)
+	return strings.HasPrefix(pathClean(r.URL.Path), "/v1/models/") && model != ""
+}
+
+func isOllamaShowRequest(r *http.Request) bool {
+	if r == nil || r.Method != http.MethodPost {
+		return false
+	}
+	return llm.NormalizeEndpoint(r.URL.Path) == "/api/show"
+}
+
+func pathClean(rawPath string) string {
+	clean := path.Clean(rawPath)
+	if clean == "." {
+		return "/"
+	}
+	if !strings.HasPrefix(clean, "/") {
+		clean = "/" + clean
+	}
+	return clean
+}
+
+func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request, start time.Time) {
+	model := llm.ModelFromPath(r.URL.Path)
+	body, err := json.Marshal(newAggregatedModelListEntry(model))
+	if err != nil {
+		http.Error(w, "failed to marshal model detail", http.StatusInternalServerError)
+		return
+	}
+	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
+		{
+			Type: "routing.model_detail",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"endpoint": "/v1/models",
+				"model":    model,
+			},
+		},
+	})
+}
+
+func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start time.Time) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	var payload ollamaShowRequest
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	model := strings.TrimSpace(payload.Name)
+	if model == "" {
+		http.Error(w, "missing model name", http.StatusBadRequest)
+		return
+	}
+
+	body, err := json.Marshal(newAggregatedModelListEntry(model))
+	if err != nil {
+		http.Error(w, "failed to marshal model detail", http.StatusInternalServerError)
+		return
+	}
+	h.serveSyntheticModelJSON(w, r, start, body, "/api/show", bodyBytes, []recorder.RecordEvent{
+		{
+			Type: "routing.model_show",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"endpoint": "/api/show",
+				"model":    model,
+			},
+		},
+	})
+}
+
 func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
 	var models []string
 	if h != nil && h.router != nil {
@@ -1632,28 +1726,38 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to marshal model list", http.StatusInternalServerError)
 		return
 	}
-
-	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
-		RoutingPolicy: h.routerPolicy(),
+	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
+		{
+			Type: "routing.aggregate",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"endpoint":    "/v1/models",
+				"model_count": len(models),
+			},
+		},
 	})
-	if err != nil {
-		slog.Error("Failed to prepare aggregated model-list log file", "err", err)
+}
+
+func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request, start time.Time, body []byte, endpoint string, requestBody []byte, events []recorder.RecordEvent) {
+	if h == nil || h.recorder == nil {
 		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
 		return
 	}
-	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
-		Type: "routing.aggregate",
-		Time: start,
-		Attributes: map[string]interface{}{
-			"endpoint":    "/v1/models",
-			"model_count": len(models),
-		},
-	})
+
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+		RoutingPolicy: h.routerPolicy(),
+	}, requestBody)
+	if err != nil {
+		slog.Error("Failed to prepare synthetic model-info log file", "err", err)
+		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
+		return
+	}
+	logInfo.Events = append(logInfo.Events, events...)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(body); err != nil {
-		slog.Error("Failed to write aggregated model-list response", "err", err)
+		slog.Error("Failed to write synthetic model-info response", "err", err)
 	}
 
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", http.StatusOK, http.StatusText(http.StatusOK)))
@@ -1661,31 +1765,33 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(body))
 	headerBuf.WriteString("\r\n")
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
-		slog.Error("Failed to write aggregated model-list separator", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to write synthetic model-info separator", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
 		return
 	}
 	nHead, err := logInfo.File.Write(headerBuf.Bytes())
 	if err != nil {
-		slog.Error("Failed to write aggregated model-list response header", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to write synthetic model-info response header", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
 		return
 	}
 	nBody, err := logInfo.File.Write(body)
 	if err != nil {
-		slog.Error("Failed to write aggregated model-list response body", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to write synthetic model-info response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
 		return
 	}
 
 	logInfo.Header.Meta.DurationMs = time.Since(start).Milliseconds()
 	logInfo.Header.Meta.StatusCode = http.StatusOK
+	logInfo.Header.Meta.Endpoint = endpoint
+	logInfo.Header.Meta.Operation = llm.OperationModels
 	logInfo.Header.Meta.ContentLength = int64(len(body))
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Header.Layout.IsStream = false
 	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
-		slog.Error("Failed to update aggregated model-list log file", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to update synthetic model-info log file", "path", logInfo.Path, "err", err)
 	}
 }
 

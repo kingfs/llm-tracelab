@@ -89,6 +89,9 @@ func NormalizeEndpoint(rawPath string) string {
 			return "/v1beta/models"
 		}
 	}
+	if strings.HasPrefix(clean, "/v1/models/") {
+		return "/v1/models"
+	}
 	for _, rule := range []struct {
 		canonical string
 		suffixes  []string
@@ -101,6 +104,7 @@ func NormalizeEndpoint(rawPath string) string {
 		{canonical: "/v1/messages", suffixes: []string{"/v1/messages", "/messages"}},
 		{canonical: "/v1/embeddings", suffixes: []string{"/v1/embeddings", "/embeddings"}},
 		{canonical: "/v1/models", suffixes: []string{"/v1/models", "/models"}},
+		{canonical: "/api/show", suffixes: []string{"/api/show"}},
 		{canonical: "/v1beta/models:generateContent", suffixes: []string{"/v1beta/models:generateContent"}},
 		{canonical: "/v1beta/models:streamGenerateContent", suffixes: []string{"/v1beta/models:streamGenerateContent"}},
 		{canonical: "/v1beta/models", suffixes: []string{"/v1beta/models"}},
@@ -166,6 +170,8 @@ func detectOperation(endpoint string, provider string) string {
 	case "/v1/embeddings":
 		return OperationEmbeddings
 	case "/v1/models":
+		return OperationModels
+	case "/api/show":
 		return OperationModels
 	case "/tokenize":
 		return OperationTokenize

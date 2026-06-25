@@ -107,6 +107,95 @@ func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
 	}
 }
 
+func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Trace.OutputDir = outputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/models/qwen3.6-35b-a3b", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/models/{model} status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var payload aggregatedModelListEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, rec.Body.String())
+	}
+	if payload.ID != "qwen3.6-35b-a3b" || payload.ContextLength != 262144 || payload.MaxOutput != 65536 {
+		t.Fatalf("payload = %+v, want enriched qwen3.6-35b-a3b metadata", payload)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Model != "qwen3.6-35b-a3b" {
+		t.Fatalf("recorded Model = %q, want qwen3.6-35b-a3b", parsed.Header.Meta.Model)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/models" || parsed.Header.Meta.Operation != llm.OperationModels {
+		t.Fatalf("recorded endpoint/operation = %q/%q, want /v1/models/%s", parsed.Header.Meta.Endpoint, parsed.Header.Meta.Operation, llm.OperationModels)
+	}
+}
+
+func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Trace.OutputDir = outputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/show", bytes.NewBufferString(`{"name":"qwen3.6-35b-a3b"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/show status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var payload aggregatedModelListEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, rec.Body.String())
+	}
+	if payload.ID != "qwen3.6-35b-a3b" || payload.MaxModelLen != 262144 {
+		t.Fatalf("payload = %+v, want enriched qwen3.6-35b-a3b metadata", payload)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Model != "qwen3.6-35b-a3b" {
+		t.Fatalf("recorded Model = %q, want qwen3.6-35b-a3b", parsed.Header.Meta.Model)
+	}
+	if parsed.Header.Meta.Endpoint != "/api/show" || parsed.Header.Meta.Operation != llm.OperationModels {
+		t.Fatalf("recorded endpoint/operation = %q/%q, want /api/show/%s", parsed.Header.Meta.Endpoint, parsed.Header.Meta.Operation, llm.OperationModels)
+	}
+}
+
 func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 	var usage recorder.UsageInfo
 	sniffer := UsageSniffer{

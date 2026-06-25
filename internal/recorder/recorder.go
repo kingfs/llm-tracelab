@@ -91,9 +91,12 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		} else {
 			var payload struct {
 				Model string `json:"model"`
+				Name  string `json:"name"`
 			}
 			if json.Unmarshal(bodyBytes, &payload) == nil && payload.Model != "" {
 				modelName = payload.Model
+			} else if payload.Name != "" {
+				modelName = payload.Name
 			}
 		}
 	}
