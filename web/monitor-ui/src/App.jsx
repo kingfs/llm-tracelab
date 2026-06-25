@@ -108,7 +108,7 @@ function App() {
 
   return (
     <AppShell user={auth.user} onLogout={logout}>
-      <MonitorErrorBoundary key={`${location.pathname}${location.search}`}>
+      <MonitorErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Navigate to="/overview" replace />} />
           <Route path="/overview" element={<OverviewPage />} />

@@ -5,16 +5,18 @@ export { monitorAuthHeaders, MONITOR_TOKEN_KEY };
 
 export function useJSON(url, deps = []) {
   const [state, setState] = useState({ loading: true, data: null, error: "" });
+  const requestKey = JSON.stringify([url, ...deps]);
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+    const requestURL = url;
 
     startTransition(() => {
       setState((current) => ({ ...current, loading: true, error: "" }));
     });
 
-    requestJSON(url, { signal: controller.signal })
+    requestJSON(requestURL, { signal: controller.signal })
       .then((data) => {
         if (cancelled) {
           return;
@@ -36,7 +38,7 @@ export function useJSON(url, deps = []) {
       cancelled = true;
       controller.abort();
     };
-  }, [url, ...deps]);
+  }, [requestKey, url]);
 
   return state;
 }

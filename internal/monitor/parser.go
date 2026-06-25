@@ -1301,11 +1301,17 @@ func parseResponsesStreamOutput(data []byte) (string, string, []ContentBlock, []
 					tc.Function.Arguments = envelope.Item.Arguments
 				}
 			case "message":
+				if envelope.Type != "response.output_item.done" {
+					continue
+				}
 				text := renderResponsesContent(envelope.Item.Content)
 				if text != "" && contentBuilder.Len() == 0 {
 					contentBuilder.WriteString(text)
 				}
 			case "reasoning":
+				if envelope.Type != "response.output_item.done" {
+					continue
+				}
 				text := renderResponsesContent(envelope.Item.Content)
 				if text != "" && reasoningBuilder.Len() == 0 {
 					reasoningBuilder.WriteString(text)

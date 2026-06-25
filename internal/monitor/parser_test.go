@@ -66,6 +66,24 @@ func TestParseLogFileResponsesRendersConversationAndToolCalls(t *testing.T) {
 	}
 }
 
+func TestParseLogFileResponsesStreamDoesNotDuplicateCompletedAddedMessage(t *testing.T) {
+	reqBody := `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}]}`
+	resBody := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer"}]}}`,
+		`data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"final answer"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer"}]}}`,
+	}, "\n")
+
+	content := buildRecordFixture(t, "/v1/responses", true, reqBody, resBody)
+	parsed, err := ParseLogFile(content)
+	if err != nil {
+		t.Fatalf("ParseLogFile() error = %v", err)
+	}
+	if parsed.AIContent != "final answer" {
+		t.Fatalf("AIContent = %q, want final answer", parsed.AIContent)
+	}
+}
+
 func TestParseLogFileResponsesRequestFallbackDoesNotLookLikeEmbedding(t *testing.T) {
 	reqBody := `{"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello from responses"}]}]}`
 	content := buildRecordFixture(t, "/v1/responses", false, reqBody, `{"output":[]}`)

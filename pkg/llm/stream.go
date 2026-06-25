@@ -263,6 +263,9 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 				call.Name = firstNonEmpty(envelope.Item.Name, envelope.Item.Type)
 				call.ArgsText = argsText
 			case "message":
+				if envelope.Type != "response.output_item.done" {
+					continue
+				}
 				if contentBuilder.Len() == 0 {
 					for _, part := range envelope.Item.Content {
 						text := responseContentText(OpenAIResponsesContentPart{
@@ -278,6 +281,9 @@ func (a openAIResponsesAdapter) ParseStreamResponse(body []byte) (LLMResponse, e
 					}
 				}
 			case "reasoning":
+				if envelope.Type != "response.output_item.done" {
+					continue
+				}
 				if reasoningBuilder.Len() == 0 {
 					for _, part := range envelope.Item.Content {
 						text := responseContentText(OpenAIResponsesContentPart{

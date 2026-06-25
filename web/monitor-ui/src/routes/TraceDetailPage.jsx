@@ -41,7 +41,7 @@ import {
 export function TraceDetailPage() {
   const { traceID = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState(() => normalizeTraceTab(searchParams.get("tab")));
+  const tab = normalizeTraceTab(searchParams.get("tab"));
   const [renderMarkdown, setRenderMarkdown] = useState(true);
   const [jobNotice, setJobNotice] = useState(null);
   const [jobBusy, setJobBusy] = useState("");
@@ -88,6 +88,10 @@ export function TraceDetailPage() {
     setSearchParams(next, { replace: true });
   };
 
+  const setTraceTab = (nextTab) => {
+    applyTraceFocus(nextTab, focusTarget);
+  };
+
   const downloadTrace = async () => {
     let blob;
     try {
@@ -121,20 +125,6 @@ export function TraceDetailPage() {
       setJobBusy("");
     }
   };
-
-  useEffect(() => {
-    const requestedTab = normalizeTraceTab(searchParams.get("tab"));
-    setTab((current) => (current === requestedTab ? current : requestedTab));
-  }, [searchParams]);
-
-  useEffect(() => {
-    const next = new URLSearchParams(searchParams);
-    setOrDeleteParam(next, "tab", tab === "conversation" ? "" : tab);
-    if (next.toString() === searchParams.toString()) {
-      return;
-    }
-    setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, tab]);
 
   useEffect(() => {
     if (focusTarget !== "failure" || !failureSummary || !failureSummaryRef.current) {
@@ -257,27 +247,27 @@ export function TraceDetailPage() {
             ) : null}
           </div>
           <div className="trace-reading-grid">
-            <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("conversation")}>
+            <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("conversation")}>
               <strong>Routing & Conversation</strong>
               <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : `${timelineCount} event record${timelineCount > 1 ? "s" : ""}`}</span>
               <p>Route selection, prompt messages, final output, and timeline events.</p>
             </button>
-            <button className={tab === "protocol" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("protocol")}>
+            <button className={tab === "protocol" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("protocol")}>
               <strong>Protocol</strong>
               <span>Observation IR</span>
               <p>Provider semantic nodes, normalized types, JSON paths, and raw payloads.</p>
             </button>
-            <button className={tab === "audit" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("audit")}>
+            <button className={tab === "audit" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("audit")}>
               <strong>Audit</strong>
               <span>Deterministic findings</span>
               <p>Dangerous tool calls, credential leaks, safety findings, and evidence paths.</p>
             </button>
-            <button className={tab === "performance" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("performance")}>
+            <button className={tab === "performance" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("performance")}>
               <strong>Performance</strong>
               <span>Latency and token speed</span>
               <p>Latency, TTFT, token throughput, cache ratio, status, and routing context.</p>
             </button>
-            <button className={tab === "raw" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("raw")}>
+            <button className={tab === "raw" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTraceTab("raw")}>
               <strong>Raw</strong>
               <span>Original HTTP exchange</span>
               <p>Exact request and response bytes, headers, and provider payloads.</p>
