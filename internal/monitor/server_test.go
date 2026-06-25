@@ -4044,6 +4044,34 @@ func TestBuildAggregatePerformanceUsesPositiveDecodeWindows(t *testing.T) {
 	}
 }
 
+func TestBuildTracePerformanceSuppressesUnreliableTinyTGWindow(t *testing.T) {
+	t.Parallel()
+
+	entry := store.LogEntry{
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				StatusCode: 200,
+				DurationMs: 2744,
+				TTFTMs:     2740,
+			},
+			Usage: recordfile.UsageInfo{
+				PromptTokens:     12932,
+				CompletionTokens: 45,
+				TotalTokens:      12977,
+			},
+			Layout: recordfile.LayoutInfo{IsStream: true},
+		},
+	}
+
+	perf := buildTracePerformance(entry)
+	if perf.PPTokensPerSec <= 0 {
+		t.Fatalf("pp rate = %+v, want positive", perf)
+	}
+	if perf.TGTokensPerSec != 0 || perf.GenerationTokensPerSec != 0 {
+		t.Fatalf("tg rate = %+v, want suppressed for 4ms generation window", perf)
+	}
+}
+
 func TestTraceDetailAPIHandlerIncludesSelectedUpstreamHealth(t *testing.T) {
 	t.Parallel()
 

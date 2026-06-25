@@ -592,6 +592,8 @@ type performanceResponse struct {
 	Performance performanceView `json:"performance"`
 }
 
+const minReliableGenerationWindowMs int64 = 10
+
 type performanceView struct {
 	RequestCount           int             `json:"request_count"`
 	SuccessRequest         int             `json:"success_request"`
@@ -5938,7 +5940,7 @@ func addTraceToPerformance(perf *performanceView, trace traceListItem) {
 	perf.PromptTokens += trace.PromptTokens
 	perf.CompletionTokens += trace.CompletionTokens
 	perf.CachedTokens += trace.CachedTokens
-	if decodeMs := trace.DurationMs - trace.TTFTMs; decodeMs > 0 {
+	if decodeMs := trace.DurationMs - trace.TTFTMs; decodeMs >= minReliableGenerationWindowMs {
 		perf.decodeDurationMs += decodeMs
 	}
 	if trace.StatusCode >= 200 && trace.StatusCode < 300 && strings.TrimSpace(trace.Error) == "" {
@@ -5976,7 +5978,7 @@ func addTraceToAccumulator(items map[string]*perfAccumulator, key string, trace 
 	acc.completionTokens += trace.CompletionTokens
 	acc.totalTTFT += trace.TTFTMs
 	acc.totalLatency += trace.DurationMs
-	if decodeMs := trace.DurationMs - trace.TTFTMs; decodeMs > 0 {
+	if decodeMs := trace.DurationMs - trace.TTFTMs; decodeMs >= minReliableGenerationWindowMs {
 		acc.totalDecode += decodeMs
 	}
 	if trace.StatusCode >= 200 && trace.StatusCode < 300 && strings.TrimSpace(trace.Error) == "" {
@@ -6017,7 +6019,11 @@ func tokensPerSec(tokens int, durationMs int64) float64 {
 }
 
 func generationTokensPerSec(tokens int, durationMs int64, ttftMs int64) float64 {
-	return tokensPerSec(tokens, durationMs-ttftMs)
+	generationMs := durationMs - ttftMs
+	if generationMs < minReliableGenerationWindowMs {
+		return 0
+	}
+	return tokensPerSec(tokens, generationMs)
 }
 
 func cacheRatio(cached int, prompt int) float64 {
