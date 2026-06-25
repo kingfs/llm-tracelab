@@ -47,7 +47,7 @@
 .nav-brand strong,
 .nav-brand span,
 .nav-chip {
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .nav-brand strong {
@@ -101,7 +101,7 @@
   border-radius: 999px;
   background: var(--danger);
   color: #ffffff;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
@@ -182,7 +182,7 @@
 .account-menu-item,
 .theme-option,
 .nav-field {
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .account-copy strong,
@@ -303,7 +303,7 @@
 .account-menu-label {
   padding: 0 4px;
   color: var(--muted);
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -502,7 +502,7 @@
 .preferences-row strong,
 .preferences-row span,
 .language-option {
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .preferences-row strong {

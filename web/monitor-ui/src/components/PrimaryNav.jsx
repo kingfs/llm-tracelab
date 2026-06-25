@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
-import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "../lib/api";
+import { apiPaths, apiURL, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "../lib/api";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 
@@ -43,7 +43,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
     let source = null;
     const refresh = async () => {
       try {
-        const payload = await requestJSON(apiPaths.eventsSummary);
+        const payload = await requestJSON(apiURL(apiPaths.eventsSummary, { window: "all" }));
         if (!cancelled) {
           setEventSummary(payload);
         }

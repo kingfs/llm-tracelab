@@ -9,6 +9,14 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/auth/status") {
       return route.fulfill({ json: { auth_required: false } });
     }
+    if (path === "/api/events/summary") {
+      return route.fulfill({ json: eventSummaryPayload() });
+    }
+    if (path === "/api/events") {
+      expect(url.searchParams.get("window")).toBe("all");
+      expect(url.searchParams.get("status")).toBe("unread");
+      return route.fulfill({ json: eventListPayload() });
+    }
     if (path === "/api/models") {
       return route.fulfill({ json: modelListPayload() });
     }
@@ -245,14 +253,28 @@ test("routing page renders selected route records", async ({ page }) => {
   await expect(page).not.toHaveURL(/status=error/);
 });
 
+test("events page opens the all-window unread inbox", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("llm-tracelab.monitor.language", "en");
+  });
+  await page.goto("/events");
+  await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "all", exact: true })).toHaveClass(/active/);
+  await expect(page.getByText("18").first()).toBeVisible();
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+});
+
 test("trace routing links to channel and upstream views", async ({ page }) => {
   await page.goto("/traces/trace-routed");
-  await expect(page.getByText("Routing decision")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/channels/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
   await expect(page.getByRole("link", { name: "Responses audit" })).toHaveAttribute("href", "/audit?response_id=resp+123%2Fencoded");
+  await expect(page.getByRole("button", { name: "Show all" })).toBeVisible();
+  await page.getByRole("button", { name: "Show all" }).click();
+  await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
   await page.getByRole("button", { name: "Reanalyze" }).click();
-  await expect(page.getByText(/Reanalysis job #301 completed/)).toBeVisible();
+  await expect(page.getByText(/job #301 completed/)).toBeVisible();
 });
 
 test("audit page renders responses audit trace", async ({ page }) => {
@@ -484,6 +506,47 @@ function localSecretPayload() {
   };
 }
 
+function eventSummaryPayload() {
+  return {
+    total: 163,
+    unread: 18,
+    critical: 0,
+    error: 16,
+    warning: 2,
+    last_seen_at: new Date().toISOString(),
+    by_source: [{ label: "analyzer", count: 136 }],
+    by_category: [{ label: "analysis_job_failure", count: 136 }],
+    window: "all",
+  };
+}
+
+function eventListPayload() {
+  return {
+    page: 1,
+    page_size: 50,
+    total: 18,
+    total_pages: 1,
+    window: "all",
+    refreshed_at: new Date().toISOString(),
+    items: [{
+      id: "event-analysis-1",
+      fingerprint: "analyzer:analysis_job_failure:demo",
+      source: "analyzer",
+      category: "analysis_job_failure",
+      severity: "error",
+      status: "unread",
+      title: "analysis job failed",
+      message: "semantic scan failed",
+      occurrence_count: 3,
+      first_seen_at: new Date(Date.now() - 60_000).toISOString(),
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      updated_at: new Date().toISOString(),
+      details_json: { job_id: 101 },
+    }],
+  };
+}
+
 function tracePayload() {
   return {
     header: {
@@ -508,10 +571,30 @@ function tracePayload() {
       usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
       layout: { is_stream: false },
     },
-    messages: [{ role: "user", content: "hello", message_type: "message" }],
+    messages: [
+      { role: "system", content: longSystemPrompt(), message_type: "message" },
+      { role: "user", content: "hello", message_type: "message" },
+    ],
     events: [],
     tools: [],
   };
+}
+
+function longSystemPrompt() {
+  return [
+    "You are operating inside a local trace review workflow.",
+    "Preserve exact user intent.",
+    "Prefer source-near evidence.",
+    "Do not call external services from replay tests.",
+    "Keep cassette files human inspectable.",
+    "Explain storage changes before changing schemas.",
+    "Handle OpenAI-compatible payloads without translation.",
+    "Treat replay compatibility as a hard requirement.",
+    "Keep derived indexes rebuildable.",
+    "Avoid mutating unrelated trace files.",
+    "This line should be hidden until the reviewer expands the prompt.",
+    "This final line verifies the expanded view keeps the full system prompt available.",
+  ].join("\n");
 }
 
 function traceListPayload() {

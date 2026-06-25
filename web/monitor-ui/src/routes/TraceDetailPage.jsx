@@ -190,7 +190,7 @@ export function TraceDetailPage() {
               {jobBusy === "repair" ? "Repairing" : "Repair stats"}
             </button>
             <button className="ghost-button active" type="button" disabled={jobBusy === "reanalyze"} onClick={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
-              {jobBusy === "reanalyze" ? "Refreshing" : "Refresh analysis"}
+              {jobBusy === "reanalyze" ? "Reanalyzing" : "Reanalyze"}
             </button>
           </div>
           <div className="detail-toolbar-tokens">
@@ -246,7 +246,7 @@ export function TraceDetailPage() {
           <div className="panel-head">
             <div>
               <p className="eyebrow">Reading guide</p>
-              <h2>Where to inspect this trace</h2>
+              <h2>Trace inspector</h2>
             </div>
             {responsesAuditLink ? (
               <div className="panel-head-actions">
@@ -260,27 +260,27 @@ export function TraceDetailPage() {
             <button className={tab === "conversation" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("conversation")}>
               <strong>Routing & Conversation</strong>
               <span>{conversation ? `${messageCount} captured message${messageCount > 1 ? "s" : ""}` : `${timelineCount} event record${timelineCount > 1 ? "s" : ""}`}</span>
-              <p>Use this for route candidates, selected upstream, conversation payloads, final output, and captured timeline events.</p>
+              <p>Route selection, prompt messages, final output, and timeline events.</p>
             </button>
             <button className={tab === "protocol" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("protocol")}>
               <strong>Protocol</strong>
               <span>Observation IR</span>
-              <p>Use this for provider-specific semantic nodes, normalized types, JSON paths, and raw node payloads.</p>
+              <p>Provider semantic nodes, normalized types, JSON paths, and raw payloads.</p>
             </button>
             <button className={tab === "audit" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("audit")}>
               <strong>Audit</strong>
               <span>Deterministic findings</span>
-              <p>Use this for dangerous tool calls, credential leaks, safety findings, and evidence paths.</p>
+              <p>Dangerous tool calls, credential leaks, safety findings, and evidence paths.</p>
             </button>
             <button className={tab === "performance" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("performance")}>
               <strong>Performance</strong>
               <span>Latency and token speed</span>
-              <p>Use this for latency, TTFT, token throughput, cache ratio, status, and routing context.</p>
+              <p>Latency, TTFT, token throughput, cache ratio, status, and routing context.</p>
             </button>
             <button className={tab === "raw" ? "trace-reading-card trace-reading-card-active" : "trace-reading-card"} onClick={() => setTab("raw")}>
               <strong>Raw</strong>
               <span>Original HTTP exchange</span>
-              <p>Use this when you need exact request or response bytes, headers, and provider-facing payloads.</p>
+              <p>Exact request and response bytes, headers, and provider payloads.</p>
             </button>
           </div>
         </section>

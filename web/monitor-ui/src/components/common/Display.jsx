@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { formatRawNumber } from "../../lib/monitor";
 
 export function CollapsibleCard({ title, subtitle, defaultOpen = false, children, bodyClassName = "" }) {
@@ -39,11 +39,49 @@ export function CodeBlock({ value }) {
   return <pre className="code-block">{value}</pre>;
 }
 
-export function MessageContent({ value, format, renderMarkdown, className = "" }) {
+export function MessageContent({ value, format, renderMarkdown, className = "", collapsedLines = 10 }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = useMemo(() => shouldCollapseContent(value, collapsedLines), [value, collapsedLines]);
+  const bodyClassName = [
+    className,
+    "message-content",
+    collapsible && !expanded ? "message-content-collapsed" : "",
+  ].filter(Boolean).join(" ");
+
   if (renderMarkdown && format === "markdown") {
-    return <MarkdownBlock value={value} className={className} />;
+    return (
+      <ExpandableContent expanded={expanded} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
+        <MarkdownBlock value={value} className={bodyClassName} />
+      </ExpandableContent>
+    );
   }
-  return <div className={`${className} prose-block`.trim()}>{value}</div>;
+  return (
+    <ExpandableContent expanded={expanded} collapsible={collapsible} onToggle={() => setExpanded((current) => !current)}>
+      <div className={`${bodyClassName} prose-block`.trim()}>{value}</div>
+    </ExpandableContent>
+  );
+}
+
+function ExpandableContent({ expanded, collapsible, onToggle, children }) {
+  return (
+    <div className={collapsible ? "message-content-wrap message-content-wrap-collapsible" : "message-content-wrap"}>
+      {children}
+      {collapsible ? (
+        <button className="message-expand-button" type="button" onClick={onToggle}>
+          {expanded ? "Show less" : "Show all"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function shouldCollapseContent(value, collapsedLines) {
+  const text = String(value || "");
+  if (!text.trim()) {
+    return false;
+  }
+  const lineCount = text.split(/\r\n|\r|\n/).length;
+  return lineCount > collapsedLines || text.length > 900;
 }
 
 function MarkdownBlock({ value, className = "" }) {
