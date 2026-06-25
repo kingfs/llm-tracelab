@@ -384,8 +384,6 @@ type traceListItem struct {
 	PromptTokens      int                 `json:"prompt_tokens"`
 	CompletionTokens  int                 `json:"completion_tokens"`
 	CachedTokens      int                 `json:"cached_tokens"`
-	PPTokensPerSec    float64             `json:"pp_tokens_per_sec"`
-	TGTokensPerSec    float64             `json:"tg_tokens_per_sec"`
 	IsStream          bool                `json:"is_stream"`
 	Error             string              `json:"error,omitempty"`
 	RequestAuditID    string              `json:"request_audit_id,omitempty"`
@@ -5445,8 +5443,6 @@ func sessionSummaryItem(summary store.SessionSummary) sessionListItem {
 }
 
 func traceListItemFromEntry(entry store.LogEntry) traceListItem {
-	pp := tokensPerSec(entry.Header.Usage.PromptTokens, entry.Header.Meta.TTFTMs)
-	tg := generationTokensPerSec(entry.Header.Usage.CompletionTokens, entry.Header.Meta.DurationMs, entry.Header.Meta.TTFTMs)
 	return traceListItem{
 		ID:               entry.ID,
 		SessionID:        entry.SessionID,
@@ -5467,8 +5463,6 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		PromptTokens:     entry.Header.Usage.PromptTokens,
 		CompletionTokens: entry.Header.Usage.CompletionTokens,
 		CachedTokens:     cachedTokens(entry),
-		PPTokensPerSec:   pp,
-		TGTokensPerSec:   tg,
 		IsStream:         entry.Header.Layout.IsStream,
 		Error:            entry.Header.Meta.Error,
 		RequestAuditID:   entry.Header.Meta.RequestAuditID,
