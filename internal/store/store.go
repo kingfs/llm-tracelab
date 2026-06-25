@@ -3073,13 +3073,15 @@ func (s *Store) initSchema() error {
 		if err := s.client.Schema.Create(context.Background()); err != nil {
 			return err
 		}
-		_, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS "app_settings" (
+		if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS "app_settings" (
 			"setting_key" character varying NOT NULL,
 			"value_json" character varying NOT NULL,
 			"updated_at" timestamptz NOT NULL,
 			PRIMARY KEY ("setting_key")
-		);`)
-		return err
+		);`); err != nil {
+			return err
+		}
+		return s.ensureLogExchangeColumns()
 	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
@@ -3605,19 +3607,7 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	if err := s.ensureColumn("logs", "exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("logs", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("logs", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("logs", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
-		return err
-	}
-	if err := s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+	if err := s.ensureLogExchangeColumns(); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("logs", "selected_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -4011,6 +4001,22 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 	return err
 }
 
+func (s *Store) ensureLogExchangeColumns() error {
+	if err := s.ensureColumn("logs", "exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0")
+}
+
 func (s *Store) hasColumn(table string, column string) (bool, error) {
 	typ, err := s.columnType(table, column)
 	if err != nil {
@@ -4020,6 +4026,24 @@ func (s *Store) hasColumn(table string, column string) (bool, error) {
 }
 
 func (s *Store) columnType(table string, column string) (string, error) {
+	if s != nil && s.driver == "postgres" {
+		var typ string
+		err := s.db.QueryRow(`
+			SELECT data_type
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = ?
+				AND column_name = ?
+		`, table, column).Scan(&typ)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		return typ, nil
+	}
+
 	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return "", err
