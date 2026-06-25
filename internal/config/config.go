@@ -704,9 +704,19 @@ func expandEnvString(raw string, path string) (string, error) {
 	}
 	value, ok := os.LookupEnv(name)
 	if !ok {
+		if optionalMissingEnvRef(name, path) {
+			return "", nil
+		}
 		return "", fmt.Errorf("environment variable %s referenced at %s is not set", name, path)
 	}
 	return value, nil
+}
+
+func optionalMissingEnvRef(name string, path string) bool {
+	if name != "LLM_API_KEY" {
+		return false
+	}
+	return path == "Upstream.ApiKey" || strings.HasSuffix(path, ".Upstream.ApiKey")
 }
 
 func (c Config) EffectiveUpstreams() []UpstreamTargetConfig {

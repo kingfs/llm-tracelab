@@ -288,6 +288,38 @@ upstreams:
 	}
 }
 
+func TestLoadAllowsMissingLegacyLLMAPIKeyReference(t *testing.T) {
+	oldValue, wasSet := os.LookupEnv("LLM_API_KEY")
+	if err := os.Unsetenv("LLM_API_KEY"); err != nil {
+		t.Fatalf("Unsetenv() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if wasSet {
+			_ = os.Setenv("LLM_API_KEY", oldValue)
+			return
+		}
+		_ = os.Unsetenv("LLM_API_KEY")
+	})
+	path := writeTempConfig(t, `
+server:
+  port: "8080"
+upstreams:
+  - id: "primary"
+    upstream:
+      base_url: "https://api.openai.com/v1"
+      api_key: "$env:LLM_API_KEY"
+      provider_preset: "openai"
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Upstreams[0].Upstream.ApiKey != "" {
+		t.Fatalf("api_key = %q, want empty", cfg.Upstreams[0].Upstream.ApiKey)
+	}
+}
+
 func TestLoadParsesUpstreamAPISurface(t *testing.T) {
 	path := writeTempConfig(t, `
 upstreams:
