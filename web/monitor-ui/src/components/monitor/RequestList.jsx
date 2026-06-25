@@ -81,7 +81,7 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
             <ExchangeTag item={item} />
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
-            {item.selected_upstream_id ? <InlineTag tone="green">{item.selected_upstream_id}</InlineTag> : null}
+            {item.selected_upstream_id ? <UpstreamTag item={item} /> : null}
             {!groupedChild && upstreamCallCount > 0 ? <InlineTag tone="gold">{upstreamCallCount} downstream call{upstreamCallCount === 1 ? "" : "s"}</InlineTag> : null}
             {item.session_id ? <InlineTag tone="green">{t("sessions.title")}</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
@@ -118,6 +118,23 @@ function ExchangeTag({ item }) {
   const label = role || kind;
   const tone = kind === "model" ? "gold" : kind === "entry" ? "green" : "default";
   return <InlineTag tone={tone}>{label}</InlineTag>;
+}
+
+function UpstreamTag({ item }) {
+  const id = String(item.selected_upstream_id || "").trim();
+  const preset = String(item.selected_upstream_provider_preset || "").trim();
+  const label = preset || compactUpstreamID(id);
+  return <span title={id}><InlineTag tone="green">{label}</InlineTag></span>;
+}
+
+function compactUpstreamID(value = "") {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    return "upstream";
+  }
+  if (value.length > 18) {
+    return `${value.slice(0, 10)}...`;
+  }
+  return value || "upstream";
 }
 
 function formatObservationStatus(status = "", t = (key) => key) {

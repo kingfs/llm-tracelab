@@ -152,7 +152,11 @@ export function TraceDetailPage() {
             <div className="trace-tag-group detail-tag-group">
               <InlineTag tone="accent">{formatEndpointTag(header?.endpoint || header?.operation)}</InlineTag>
               <InlineTag>{formatProviderTag(header?.provider)}</InlineTag>
-              {selectedUpstreamID ? <InlineTag tone="green">{selectedUpstreamID}</InlineTag> : null}
+              {selectedUpstreamID ? (
+                <span title={selectedUpstreamID}>
+                  <InlineTag tone="green">{selectedUpstreamProviderPreset || compactUpstreamID(selectedUpstreamID)}</InlineTag>
+                </span>
+              ) : null}
               {detail.data?.header?.layout?.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
               <InlineTag tone={header?.status_code >= 200 && header?.status_code < 300 ? "green" : "danger"}>{header?.status_code || 0}</InlineTag>
             </div>
@@ -1374,4 +1378,11 @@ function labelTraceAction(action) {
     default:
       return "Analysis";
   }
+}
+
+function compactUpstreamID(value = "") {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value))) {
+    return "upstream";
+  }
+  return String(value || "upstream").length > 18 ? `${String(value).slice(0, 10)}...` : String(value || "upstream");
 }

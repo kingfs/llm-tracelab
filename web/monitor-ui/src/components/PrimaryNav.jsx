@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink } from "react-router-dom";
-import { apiPaths, postJSON, requestJSON } from "../lib/api";
+import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "../lib/api";
 import { languageOptions, useI18n } from "../lib/i18n";
 import { applyTheme, currentTheme, THEME_KEY, themeOptions } from "../lib/theme";
 
@@ -40,6 +40,7 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
   useEffect(() => {
     let cancelled = false;
     let timer = 0;
+    let source = null;
     const refresh = async () => {
       try {
         const payload = await requestJSON(apiPaths.eventsSummary);
@@ -53,9 +54,34 @@ export function PrimaryNav({ user, onLogout, collapsed = false, onToggleCollapse
       }
     };
     refresh();
+    const onRefresh = () => refresh();
+    window.addEventListener("llm-tracelab:events-refresh", onRefresh);
+    if (typeof window.EventSource !== "undefined") {
+      const token = window.localStorage.getItem(MONITOR_TOKEN_KEY) || "";
+      const streamURL = token ? `${apiPaths.eventsStream}?access_token=${encodeURIComponent(token)}` : apiPaths.eventsStream;
+      source = new window.EventSource(streamURL);
+      const handleStream = (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          setEventSummary((current) => ({
+            ...(current || {}),
+            unread: Number(payload.unread || 0),
+          }));
+        } catch {
+          refresh();
+        }
+      };
+      source.addEventListener("system_event.summary", handleStream);
+      source.addEventListener("system_event.updated", handleStream);
+      source.onerror = () => refresh();
+    }
     timer = window.setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
+      window.removeEventListener("llm-tracelab:events-refresh", onRefresh);
+      if (source) {
+        source.close();
+      }
       window.clearInterval(timer);
     };
   }, []);

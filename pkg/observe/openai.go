@@ -281,7 +281,8 @@ func parseOpenAIChatStream(body []byte, obs *TraceObservation) {
 	toolCalls := map[int]*toolDelta{}
 	var toolOrder []int
 	eventIndex := 0
-	scanSSEData(body, func(data string) {
+	terminal := false
+	sawDone := scanSSEData(body, func(data string) {
 		if data == "[DONE]" {
 			return
 		}
@@ -292,6 +293,7 @@ func parseOpenAIChatStream(body []byte, obs *TraceObservation) {
 			return
 		}
 		if parseStreamErrorObject(obj, raw, obs, eventIndex) {
+			terminal = true
 			eventIndex++
 			return
 		}
@@ -315,7 +317,7 @@ func parseOpenAIChatStream(body []byte, obs *TraceObservation) {
 				obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, "chat.completion.delta", "content", NodeText, basePath+".delta.content", content, raw))
 				eventIndex++
 			}
-			if reasoning := stringField(deltaObj, "reasoning_content"); reasoning != "" {
+			if reasoning := firstNonEmpty(stringField(deltaObj, "reasoning_content"), stringField(deltaObj, "reasoning")); reasoning != "" {
 				obs.Stream.AccumulatedReasoning += reasoning
 				obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, "chat.completion.delta", "reasoning_content", NodeReasoning, basePath+".delta.reasoning_content", reasoning, raw))
 				eventIndex++
@@ -342,6 +344,9 @@ func parseOpenAIChatStream(body []byte, obs *TraceObservation) {
 					eventIndex++
 				}
 			}
+			if finishRaw, ok := choiceObj["finish_reason"]; ok && string(finishRaw) != "null" {
+				terminal = true
+			}
 			if finish := stringField(choiceObj, "finish_reason"); finish == "content_filter" {
 				node := SemanticNode{
 					ID:             StableNodeID("response", basePath+".finish_reason", "finish_reason", 0),
@@ -357,6 +362,9 @@ func parseOpenAIChatStream(body []byte, obs *TraceObservation) {
 			}
 		}
 	})
+	if !sawDone && !terminal {
+		appendStreamInterrupted(obs, eventIndex, "stream ended before chat completion finish signal")
+	}
 
 	if obs.Stream.AccumulatedText != "" {
 		node := SemanticNode{
@@ -410,7 +418,8 @@ func parseOpenAIResponsesStream(body []byte, obs *TraceObservation) {
 	toolNodes := map[string]*SemanticNode{}
 	var toolOrder []string
 	eventIndex := 0
-	scanSSEData(body, func(data string) {
+	terminal := false
+	sawDone := scanSSEData(body, func(data string) {
 		if data == "[DONE]" {
 			return
 		}
@@ -421,6 +430,7 @@ func parseOpenAIResponsesStream(body []byte, obs *TraceObservation) {
 			return
 		}
 		if parseStreamErrorObject(obj, raw, obs, eventIndex) {
+			terminal = true
 			eventIndex++
 			return
 		}
@@ -467,6 +477,7 @@ func parseOpenAIResponsesStream(body []byte, obs *TraceObservation) {
 				obs.Response.Nodes = append(obs.Response.Nodes, node)
 			}
 		case "response.completed":
+			terminal = true
 			if responseRaw := obj["response"]; len(responseRaw) > 0 {
 				responseObj, err := decodeJSONObject(responseRaw)
 				if err == nil {
@@ -476,6 +487,7 @@ func parseOpenAIResponsesStream(body []byte, obs *TraceObservation) {
 				}
 			}
 		case "response.failed", "response.incomplete":
+			terminal = true
 			obs.Warnings = append(obs.Warnings, ParseWarning{
 				Code:    "stream_response_status",
 				Message: eventType,
@@ -483,6 +495,9 @@ func parseOpenAIResponsesStream(body []byte, obs *TraceObservation) {
 			})
 		}
 	})
+	if !sawDone && !terminal {
+		appendStreamInterrupted(obs, eventIndex, "stream ended before responses completion signal")
+	}
 
 	if obs.Stream.AccumulatedText != "" {
 		normalized := NodeText
@@ -1187,8 +1202,10 @@ func cachedTokens(input ParseInput) int {
 	return input.Header.Usage.PromptTokenDetails.CachedTokens
 }
 
-func scanSSEData(body []byte, handle func(data string)) {
+func scanSSEData(body []byte, handle func(data string)) bool {
+	sawDone := false
 	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 0, 64*1024), max(len(body)+1, 1024*1024))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "data:") {
@@ -1198,8 +1215,12 @@ func scanSSEData(body []byte, handle func(data string)) {
 		if data == "" {
 			continue
 		}
+		if data == "[DONE]" {
+			sawDone = true
+		}
 		handle(data)
 	}
+	return sawDone
 }
 
 func streamEvent(index int, eventType string, providerType string, normalized NormalizedType, path string, delta string, raw json.RawMessage) StreamEvent {
@@ -1312,4 +1333,23 @@ func addStreamWarning(obs *TraceObservation, code string, path string, message s
 		Message: message,
 		Path:    path,
 	})
+}
+
+func appendStreamInterrupted(obs *TraceObservation, eventIndex int, message string) {
+	node := SemanticNode{
+		ID:             StableNodeID("response", "$.stream.interrupted", "stream_interrupted", eventIndex),
+		ProviderType:   "stream_interrupted",
+		NormalizedType: NodeError,
+		Path:           "$.stream.interrupted",
+		Index:          eventIndex,
+		Text:           message,
+		Metadata: map[string]any{
+			"interrupted": true,
+		},
+	}
+	obs.Stream.Errors = append(obs.Stream.Errors, node)
+	obs.Response.Errors = append(obs.Response.Errors, node)
+	obs.Response.Nodes = append(obs.Response.Nodes, node)
+	obs.Stream.Events = append(obs.Stream.Events, streamEvent(eventIndex, "stream.interrupted", "stream_interrupted", NodeError, node.Path, node.Text, nil))
+	addStreamWarning(obs, "stream_interrupted", node.Path, message)
 }

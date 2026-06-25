@@ -372,6 +372,7 @@ type traceListItem struct {
 	Model             string              `json:"model"`
 	Provider          string              `json:"provider"`
 	SelectedUpstream  string              `json:"selected_upstream_id,omitempty"`
+	SelectedPreset    string              `json:"selected_upstream_provider_preset,omitempty"`
 	Operation         string              `json:"operation"`
 	Endpoint          string              `json:"endpoint"`
 	Method            string              `json:"method"`
@@ -2762,7 +2763,13 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 		return next
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.VerifyRequest(r, verifier)
+		authReq := r
+		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" {
+			authReq = r.Clone(r.Context())
+			authReq.Header = r.Header.Clone()
+			authReq.Header.Set("Authorization", "Bearer "+token)
+		}
+		principal, ok := auth.VerifyRequest(authReq, verifier)
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-monitor"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -5414,6 +5421,7 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		Model:            entry.Header.Meta.Model,
 		Provider:         entry.Header.Meta.Provider,
 		SelectedUpstream: entry.Header.Meta.SelectedUpstreamID,
+		SelectedPreset:   entry.Header.Meta.SelectedUpstreamProviderPreset,
 		Operation:        entry.Header.Meta.Operation,
 		Endpoint:         entry.Header.Meta.Endpoint,
 		Method:           entry.Header.Meta.Method,

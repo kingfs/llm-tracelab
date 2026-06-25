@@ -333,6 +333,44 @@ func TestOpenAIParserParsesChatStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIParserMarksInterruptedChatStream(t *testing.T) {
+	parser := NewOpenAIParser()
+	body := joinSSE(
+		`data: {"id":"chatcmpl-a8333e055b613c64","object":"chat.completion.chunk","created":1782303858,"model":"qwen3.6-27b","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}],"usage":{"prompt_tokens":42105,"total_tokens":42105,"completion_tokens":0}}`,
+		`data: {"id":"chatcmpl-a8333e055b613c64","object":"chat.completion.chunk","created":1782303858,"model":"qwen3.6-27b","choices":[{"index":0,"delta":{"reasoning":"The"},"finish_reason":null}],"usage":{"prompt_tokens":42105,"total_tokens":42106,"completion_tokens":1}}`,
+	)
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-stream-interrupted",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+			Layout: recordfile.LayoutInfo{IsStream: true},
+		},
+		IsStream: true,
+		RequestBody: []byte(`{
+			"model":"qwen3.6-27b",
+			"messages":[{"role":"user","content":"hi"}],
+			"stream":true
+		}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Stream.AccumulatedReasoning != "The" {
+		t.Fatalf("stream reasoning = %q", obs.Stream.AccumulatedReasoning)
+	}
+	if len(obs.Stream.Errors) != 1 || obs.Stream.Errors[0].ProviderType != "stream_interrupted" {
+		t.Fatalf("stream errors = %+v", obs.Stream.Errors)
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "stream_interrupted" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
 func TestOpenAIParserParsesResponsesStream(t *testing.T) {
 	parser := NewOpenAIParser()
 	body := strings.Join([]string{
