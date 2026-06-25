@@ -50,7 +50,11 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 		RawRefs: RawReferences{
 			CassettePath: input.CassettePath,
 		},
-		Timings: observationTimings(input),
+		Timings: ObservationTimings{
+			StartedAt:  input.Header.Meta.Time,
+			DurationMs: input.Header.Meta.DurationMs,
+			TTFTMs:     input.Header.Meta.TTFTMs,
+		},
 		Usage: ObservationUsage{
 			InputTokens:         input.Header.Usage.PromptTokens,
 			OutputTokens:        input.Header.Usage.CompletionTokens,
