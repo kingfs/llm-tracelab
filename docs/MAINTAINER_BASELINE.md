@@ -147,9 +147,9 @@ system events 是 TraceLab 自身运行和派生管道异常，不是普通用�
 - ignored 事件保持 ignored。
 - read/resolved 事件复发时重新 unread。
 
-## Reanalysis
+## Analysis Refresh
 
-reanalysis 只基于本地 cassette 和 application DB 派生状态工作；生产写入 Postgres，SQLite 仅用于 legacy/dev/test fallback。
+analysis refresh 只基于本地 cassette 和 application DB 派生状态工作；生产写入 Postgres，SQLite 仅用于 legacy/dev/test fallback。用户面向入口应尽量收敛为“刷新分析”和“修复统计”；下面的 job 类型是审计和兼容层面的实现细节。
 
 任务必须写入 `analysis_jobs`，便于审计：
 

@@ -102,6 +102,7 @@ func newAnalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.AddCommand(newAnalyzeBackfillExchangesCommand(runtime))
 	cmd.AddCommand(newAnalyzeReanalyzeCommand(runtime))
 	cmd.AddCommand(newAnalyzeBatchCommand(runtime))
+	cmd.AddCommand(newAnalyzeRefreshCommand(runtime))
 	cmd.AddCommand(newAnalyzeSessionCommand(runtime))
 	return cmd
 }
@@ -111,6 +112,7 @@ func newAnalyzeReparseCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "reparse",
 		Short:         "Rebuild Observation IR for a recorded trace",
+		Hidden:        true,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -137,6 +139,7 @@ func newAnalyzeScanCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "scan",
 		Short:         "Run deterministic audit detectors for a parsed trace",
+		Hidden:        true,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -164,6 +167,7 @@ func newAnalyzeRepairUsageCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "repair-usage",
 		Short:         "Re-extract usage from a recorded trace and repair derived token metrics",
+		Hidden:        true,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -219,6 +223,7 @@ func newAnalyzeReanalyzeCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "reanalyze",
 		Short:         "Run composed reanalysis for a trace or session",
+		Hidden:        true,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -256,6 +261,7 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "batch",
 		Short:         "Run repair, reparse, scan, or reanalyze work for many traces",
+		Hidden:        true,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
@@ -297,6 +303,53 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.repairUsage, "repair-usage", false, "Repair usage before other selected work")
 	cmd.Flags().BoolVar(&opts.reparse, "reparse", false, "Rebuild Observation IR")
 	cmd.Flags().BoolVar(&opts.scan, "scan", false, "Run deterministic audit scan")
+	cmd.Flags().BoolVar(&opts.rewriteCassette, "rewrite-cassette", false, "Rewrite V3 cassette prelude when repairing usage")
+	cmd.Flags().BoolVar(&opts.enqueue, "enqueue", false, "Create analysis jobs without executing them in this process")
+	return cmd
+}
+
+func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
+	var opts analyzeBatchOptions
+	cmd := &cobra.Command{
+		Use:           "refresh",
+		Short:         "Refresh derived analysis for traces, sessions, or filtered request sets",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.configPath = runtime.configPath()
+			opts.format = runtime.outputFormat()
+			opts.stdout = cmd.OutOrStdout()
+			opts.reparse = true
+			opts.scan = true
+			if opts.rewriteCassette && !opts.repairUsage {
+				return cliUsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
+			}
+			if opts.rewriteCassette && opts.enqueue {
+				return cliUsageError("--rewrite-cassette is only supported without --enqueue", "rewrite-cassette")
+			}
+			if !opts.all && len(opts.traceIDs) == 0 && len(opts.requestIDs) == 0 && opts.sessionID == "" && !analyzeBatchHasFilter(opts) {
+				return cliUsageError("one of --all, --trace-id, --request-id, --session-id, or a filter is required", "all")
+			}
+			return runCode(func() int {
+				return runAnalyzeRefresh(opts)
+			})
+		},
+	}
+	cmd.Flags().StringArrayVar(&opts.traceIDs, "trace-id", nil, "Trace ID to refresh; may be repeated")
+	cmd.Flags().StringArrayVar(&opts.requestIDs, "request-id", nil, "Request ID to resolve and refresh; may be repeated")
+	cmd.Flags().StringVar(&opts.sessionID, "session-id", "", "Refresh all traces in a session and rebuild session analysis")
+	cmd.Flags().BoolVar(&opts.all, "all", false, "Refresh all client-visible traces up to --limit")
+	cmd.Flags().StringVarP(&opts.query, "query", "q", "", "Free-text trace filter")
+	cmd.Flags().StringVar(&opts.provider, "provider", "", "Provider filter")
+	cmd.Flags().StringVar(&opts.model, "model", "", "Model substring filter")
+	cmd.Flags().StringVar(&opts.endpoint, "endpoint", "", "Endpoint substring filter")
+	cmd.Flags().StringVar(&opts.upstream, "upstream", "", "Selected upstream substring filter")
+	cmd.Flags().StringVar(&opts.status, "status", "", "Status filter: success or error")
+	cmd.Flags().StringVar(&opts.observation, "observation", "", "Observation status filter: parsed, failed, queued, running, or unparsed")
+	cmd.Flags().BoolVar(&opts.missingUsage, "missing-usage", false, "Only refresh successful traces with missing token usage")
+	cmd.Flags().IntVar(&opts.limit, "limit", 1000, "Maximum traces selected by filters; 0 means no CLI cap")
+	cmd.Flags().BoolVar(&opts.repairUsage, "repair-usage", false, "Repair token usage before refreshing analysis")
 	cmd.Flags().BoolVar(&opts.rewriteCassette, "rewrite-cassette", false, "Rewrite V3 cassette prelude when repairing usage")
 	cmd.Flags().BoolVar(&opts.enqueue, "enqueue", false, "Create analysis jobs without executing them in this process")
 	return cmd
@@ -577,6 +630,79 @@ func runAnalyzeBatch(opts analyzeBatchOptions) int {
 		return 1
 	}
 	if failed > 0 {
+		return 1
+	}
+	return 0
+}
+
+func runAnalyzeRefresh(opts analyzeBatchOptions) int {
+	if strings.TrimSpace(opts.sessionID) == "" {
+		return runAnalyzeBatch(opts)
+	}
+	cfg, err := config.Load(opts.configPath)
+	if err != nil {
+		slog.Error("Failed to load config", "path", opts.configPath, "error", err)
+		return 1
+	}
+	traceStore, err := openApplicationDatabase(cfg)
+	if err != nil {
+		slog.Error("Failed to initialize trace store", "error", err)
+		return 1
+	}
+	defer traceStore.Close()
+	svc := reanalysis.New(traceStore, reanalysis.Options{})
+	if opts.enqueue {
+		job, err := svc.EnqueueSessionReanalyze(opts.sessionID, reanalysis.SessionOptions{Reparse: true, Scan: true})
+		if err != nil {
+			slog.Error("Failed to enqueue session refresh", "session_id", opts.sessionID, "error", err)
+			return 1
+		}
+		output := map[string]any{
+			"session_id": opts.sessionID,
+			"job_id":     job.ID,
+			"status":     job.Status,
+			"enqueued":   1,
+		}
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze refresh", output, func(w io.Writer) error {
+			_, err := fmt.Fprintf(w, "queued session refresh %s with job %d\n", opts.sessionID, job.ID)
+			return err
+		}); err != nil {
+			slog.Error("Write command result failed", "error", err)
+			return 1
+		}
+		return 0
+	}
+	if opts.repairUsage {
+		traceIDs, err := resolveAnalyzeBatchTraceIDs(traceStore, opts)
+		if err != nil {
+			slog.Error("Failed to resolve session traces for usage repair", "session_id", opts.sessionID, "error", err)
+			return 1
+		}
+		for _, traceID := range traceIDs {
+			if _, err := svc.RepairTraceUsage(context.Background(), traceID, reanalysis.RepairUsageOptions{RewriteCassette: opts.rewriteCassette}); err != nil {
+				slog.Error("Failed to repair usage before session refresh", "trace_id", traceID, "error", err)
+				return 1
+			}
+		}
+	}
+	result, err := svc.ReanalyzeSession(context.Background(), opts.sessionID, reanalysis.SessionOptions{Reparse: true, Scan: true})
+	if err != nil {
+		slog.Error("Failed to refresh session", "session_id", opts.sessionID, "error", err)
+		return 1
+	}
+	output := map[string]any{
+		"session_id":      opts.sessionID,
+		"job_id":          result.Job.ID,
+		"status":          result.Job.Status,
+		"trace_count":     result.Session.TraceCount,
+		"analysis_run_id": result.Session.AnalysisRunID,
+		"finding_refs":    result.Session.FindingRefs,
+	}
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "analyze refresh", output, func(w io.Writer) error {
+		_, err := fmt.Fprintf(w, "refreshed session %s (%d traces)\n", opts.sessionID, result.Session.TraceCount)
+		return err
+	}); err != nil {
+		slog.Error("Write command result failed", "error", err)
 		return 1
 	}
 	return 0

@@ -31,12 +31,16 @@ export function AnalysisPage() {
     }
   };
 
-  const runUnparsedBatch = async () => {
+  const runAnalysisRepairBatch = async () => {
     setBatchBusy(true);
     setJobNotice(null);
     try {
-      const response = await postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true });
-      setJobNotice({ tone: "green", text: `Batch reanalysis job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      const jobs = await Promise.all([
+        postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "failed", limit: 1000, reparse: true, scan: true }),
+        postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true }),
+      ]);
+      const jobIDs = jobs.map((response) => `#${response.job?.id || "-"}`).join(", ");
+      setJobNotice({ tone: "green", text: `Analysis refresh jobs ${jobIDs} queued` });
       setRefreshTick((value) => value + 1);
     } catch (error) {
       setJobNotice({ tone: "danger", text: error.message || "request failed" });
@@ -53,8 +57,8 @@ export function AnalysisPage() {
           <h1>{t("analysis.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runUnparsedBatch}>
-            {batchBusy ? t("analysis.queueing") : t("analysis.reparseUnparsed")}
+          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runAnalysisRepairBatch}>
+            {batchBusy ? t("analysis.queueing") : t("analysis.refreshProblemData")}
           </button>
           <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runMissingUsageBatch}>
             {batchBusy ? t("analysis.queueing") : t("analysis.repairMissingUsage")}

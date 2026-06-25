@@ -44,7 +44,7 @@ export function SessionDetailPage() {
     setJobNotice(null);
     try {
       const response = await postJSON(apiPaths.sessionReanalyze(sessionID), { mode: "async", reparse: true, scan: true });
-      setJobNotice({ tone: "green", text: `Session reanalysis job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      setJobNotice({ tone: "green", text: `Session analysis refresh job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
       setTab("analysis");
     } catch (error) {
       setJobNotice({ tone: "danger", text: error.message || "request failed" });
@@ -80,7 +80,7 @@ export function SessionDetailPage() {
               <HomeIcon />
             </Link>
             <button className="ghost-button active" type="button" disabled={jobBusy} onClick={reanalyzeSession}>
-              {jobBusy ? "Queueing" : "Reanalyze"}
+              {jobBusy ? "Queueing" : "Refresh analysis"}
             </button>
           </div>
           <div className="detail-toolbar-tokens">

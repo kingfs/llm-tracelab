@@ -159,10 +159,8 @@ TraceLab 自身事件收件箱。
 
 - trace/session analysis runs。
 - analysis jobs。
-- batch reanalysis。
-- usage repair。
-- reparse Observation IR。
-- rescan findings。
+- refresh analysis：重新生成本地派生分析数据。
+- repair token stats：从本地响应重新抽取 usage/token 统计。
 
 这些操作不调用上游模型。
 
@@ -187,10 +185,8 @@ trace detail 用于查看单条请求的完整上下文。
 
 可执行动作：
 
-- `Repair usage`：从本地响应重新抽取 usage。
-- `Reparse`：从 cassette 重建 Observation IR。
-- `Rescan`：对已有 Observation IR 重跑 deterministic detectors。
-- `Reanalyze`：重建 Observation IR 并重扫 findings。
+- `Refresh analysis`：从本地 cassette 重新生成 Observation 和 findings。仅在自动处理异常或结果明显不对时使用。
+- `Repair stats`：从本地响应重新抽取 usage/token 统计。仅在 token/cost 统计缺失或错误时使用。
 
 ## Deep Link
 
@@ -216,4 +212,4 @@ Trace detail 支持 query 参数定位：
 2. Routing 页面或 trace 中的 routing context。
 3. Events 页面是否有 parser/router/upstream 事件。
 4. Models/Channels 页面确认模型启用和渠道健康。
-5. 必要时运行 Reparse/Reanalyze。
+5. 只有在派生结果明显不对时运行 Refresh analysis；token 统计异常时运行 Repair stats。

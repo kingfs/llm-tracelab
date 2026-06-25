@@ -280,7 +280,7 @@ func TestRootCommandRegistersBaseCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := newRootCommand()
-	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "analyze", "analyze repair-usage", "analyze backfill-exchanges", "analyze reanalyze", "analyze batch", "version", "schema", "completion"} {
+	for _, want := range []string{"serve", "migrate", "db", "db secret", "db secret status", "db secret export", "db secret rotate", "config", "config inspect", "doctor", "provider", "provider probe", "provider probe-report", "provider probe-apply", "models", "models codex-config", "audit", "audit query", "audit tool-calls", "auth", "analyze", "analyze repair-usage", "analyze backfill-exchanges", "analyze reanalyze", "analyze batch", "analyze refresh", "version", "schema", "completion"} {
 		parts := strings.Fields(want)
 		found, _, err := cmd.Find(parts)
 		if err != nil || found.CommandPath() != cliName+" "+want {
@@ -4786,6 +4786,37 @@ debug:
 	}
 	if len(batchEnvelope.Result.Results) != 1 || batchEnvelope.Result.Results[0].TraceID != traceID || batchEnvelope.Result.Results[0].Status != "completed" || len(batchEnvelope.Result.Results[0].JobIDs) != 2 {
 		t.Fatalf("batch results = %+v", batchEnvelope.Result.Results)
+	}
+
+	cmd = newRootCommand()
+	out.Reset()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "analyze", "refresh", "--request-id", "req-reparse-command", "--repair-usage"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("refresh Execute() error = %v, output=%q", err, out.String())
+	}
+	var refreshEnvelope struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			TraceCount int `json:"trace_count"`
+			Completed  int `json:"completed"`
+			Failed     int `json:"failed"`
+			Results    []struct {
+				TraceID string  `json:"trace_id"`
+				Status  string  `json:"status"`
+				JobIDs  []int64 `json:"job_ids"`
+			} `json:"results"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &refreshEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(refresh) error = %v, output=%q", err, out.String())
+	}
+	if !refreshEnvelope.OK || refreshEnvelope.Result.TraceCount != 1 || refreshEnvelope.Result.Completed != 1 || refreshEnvelope.Result.Failed != 0 {
+		t.Fatalf("refresh envelope = %+v", refreshEnvelope)
+	}
+	if len(refreshEnvelope.Result.Results) != 1 || refreshEnvelope.Result.Results[0].TraceID != traceID || refreshEnvelope.Result.Results[0].Status != "completed" || len(refreshEnvelope.Result.Results[0].JobIDs) != 2 {
+		t.Fatalf("refresh results = %+v", refreshEnvelope.Result.Results)
 	}
 
 	cmd = newRootCommand()

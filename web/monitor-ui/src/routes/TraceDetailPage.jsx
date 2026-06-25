@@ -183,16 +183,10 @@ export function TraceDetailPage() {
           </div>
           <div className="detail-toolbar-actions trace-reanalysis-actions">
             <button className="ghost-button" type="button" disabled={jobBusy === "repair"} onClick={() => runTraceAction("repair", apiPaths.traceRepairUsage(traceID), { mode: "sync" })}>
-              {jobBusy === "repair" ? "Repairing" : "Repair usage"}
-            </button>
-            <button className="ghost-button" type="button" disabled={jobBusy === "reparse"} onClick={() => runTraceAction("reparse", apiPaths.traceReparse(traceID), { mode: "sync" })}>
-              {jobBusy === "reparse" ? "Reparsing" : "Reparse"}
-            </button>
-            <button className="ghost-button" type="button" disabled={jobBusy === "scan"} onClick={() => runTraceAction("scan", apiPaths.traceScan(traceID), { mode: "sync" })}>
-              {jobBusy === "scan" ? "Scanning" : "Rescan"}
+              {jobBusy === "repair" ? "Repairing" : "Repair stats"}
             </button>
             <button className="ghost-button active" type="button" disabled={jobBusy === "reanalyze"} onClick={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}>
-              {jobBusy === "reanalyze" ? "Running" : "Reanalyze"}
+              {jobBusy === "reanalyze" ? "Refreshing" : "Refresh analysis"}
             </button>
           </div>
           <div className="detail-toolbar-tokens">
@@ -469,8 +463,8 @@ export function TraceDetailPage() {
           observation={observation}
           CodeBlock={CodeBlock}
           InlineTag={InlineTag}
-          busy={jobBusy === "reparse"}
-          onReparse={() => runTraceAction("reparse", apiPaths.traceReparse(traceID), { mode: "sync" })}
+          busy={jobBusy === "reanalyze"}
+          onRefresh={() => runTraceAction("reanalyze", apiPaths.traceReanalyze(traceID), { mode: "sync" })}
         />
       ) : null}
       {tab === "audit" ? <AuditPanel findings={findings} InlineTag={InlineTag} CodeBlock={CodeBlock} /> : null}
@@ -658,7 +652,7 @@ function DeclaredToolsPanel({ tools, toolCalls = [], CodeBlock, InlineTag }) {
   );
 }
 
-function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onReparse }) {
+function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRefresh }) {
   if (observation.error) {
     return (
       <section className="panel protocol-panel">
@@ -667,8 +661,8 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRepa
             <p className="eyebrow">Observation IR</p>
             <h2>Protocol</h2>
           </div>
-          <button className="ghost-button active" type="button" disabled={busy} onClick={onReparse}>
-            {busy ? "Reparsing" : "Reparse"}
+          <button className="ghost-button active" type="button" disabled={busy} onClick={onRefresh}>
+            {busy ? "Refreshing" : "Refresh analysis"}
           </button>
         </div>
         <EmptyState title="Protocol observation unavailable" detail={observation.error} tone="danger" compact />
@@ -688,11 +682,11 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRepa
             <p className="eyebrow">Observation IR</p>
             <h2>Protocol</h2>
           </div>
-          <button className="ghost-button active" type="button" disabled={busy} onClick={onReparse}>
-            {busy ? "Reparsing" : "Reparse"}
+          <button className="ghost-button active" type="button" disabled={busy} onClick={onRefresh}>
+            {busy ? "Refreshing" : "Refresh analysis"}
           </button>
         </div>
-        <EmptyState title="No protocol observation" detail="Run reparse for this trace to build Observation IR." compact />
+        <EmptyState title="No protocol observation" detail="Refresh analysis for this trace to rebuild derived protocol data." compact />
       </section>
     );
   }
@@ -708,8 +702,8 @@ function ProtocolPanel({ observation, CodeBlock, InlineTag, busy = false, onRepa
           <InlineTag>{summary?.parser || "parser"}</InlineTag>
           <InlineTag>{summary?.provider || "provider"}</InlineTag>
         </div>
-        <button className="ghost-button" type="button" disabled={busy} onClick={onReparse}>
-          {busy ? "Reparsing" : "Reparse"}
+        <button className="ghost-button" type="button" disabled={busy} onClick={onRefresh}>
+          {busy ? "Refreshing" : "Refresh analysis"}
         </button>
       </div>
       <div className="detail-meta-strip">
@@ -1374,13 +1368,9 @@ function hasConversation(detail) {
 function labelTraceAction(action) {
   switch (action) {
     case "repair":
-      return "Usage repair";
-    case "reparse":
-      return "Reparse";
-    case "scan":
-      return "Rescan";
+      return "Stats repair";
     case "reanalyze":
-      return "Reanalysis";
+      return "Analysis refresh";
     default:
       return "Analysis";
   }
