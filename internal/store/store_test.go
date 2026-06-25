@@ -4278,6 +4278,13 @@ func TestSystemEventsListSummaryAndStatusActions(t *testing.T) {
 	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != parserEvent.ID {
 		t.Fatalf("page = %+v", page)
 	}
+	page, err = st.ListSystemEvents(SystemEventFilter{Status: SystemEventStatusUnread, Severity: "all", Source: "all", Category: "all", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(all filters) error = %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != parserEvent.ID {
+		t.Fatalf("page with all filters = %+v", page)
+	}
 	summary, err := st.SystemEventSummary(time.Time{})
 	if err != nil {
 		t.Fatalf("SystemEventSummary() error = %v", err)

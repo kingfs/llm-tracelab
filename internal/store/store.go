@@ -7971,19 +7971,19 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	var clauses []string
 	var args []any
-	if status := strings.ToLower(strings.TrimSpace(filter.Status)); status != "" && status != "all" {
+	if status := normalizedSystemEventFilterValue(filter.Status); status != "" {
 		clauses = append(clauses, `status = ?`)
 		args = append(args, status)
 	}
-	if severity := strings.ToLower(strings.TrimSpace(filter.Severity)); severity != "" {
+	if severity := normalizedSystemEventFilterValue(filter.Severity); severity != "" {
 		clauses = append(clauses, `severity = ?`)
 		args = append(args, severity)
 	}
-	if source := strings.ToLower(strings.TrimSpace(filter.Source)); source != "" {
+	if source := normalizedSystemEventFilterValue(filter.Source); source != "" {
 		clauses = append(clauses, `source = ?`)
 		args = append(args, source)
 	}
-	if category := strings.ToLower(strings.TrimSpace(filter.Category)); category != "" {
+	if category := normalizedSystemEventFilterValue(filter.Category); category != "" {
 		clauses = append(clauses, `category = ?`)
 		args = append(args, category)
 	}
@@ -8010,6 +8010,14 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 		return "1 = 1", nil
 	}
 	return strings.Join(clauses, " AND "), args
+}
+
+func normalizedSystemEventFilterValue(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || value == "all" {
+		return ""
+	}
+	return value
 }
 
 func (s *Store) getSystemEvent(whereSQL string, arg any) (SystemEvent, error) {
