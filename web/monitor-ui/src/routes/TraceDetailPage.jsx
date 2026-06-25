@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { CollapsibleCard, CodeBlock, MessageContent } from "../components/common/Display";
+import { CollapsibleCard, CodeBlock, MessageContent, StatCard } from "../components/common/Display";
 import { DetailMetaPill, DownloadIcon, HomeIcon, InlineTag, StackIcon, TokenBadge } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
@@ -484,9 +484,9 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
       <div className="panel-head">
         <div>
           <p className="eyebrow">Related upstream calls</p>
-          <h2>{calls.length} model call{calls.length === 1 ? "" : "s"}</h2>
+          <h2>{calls.length} child call{calls.length === 1 ? "" : "s"}</h2>
         </div>
-        <InlineTag tone="gold">response server lineage</InlineTag>
+        <InlineTag tone="gold">lineage</InlineTag>
       </div>
       <div className="related-upstream-list">
         {calls.map((call, index) => {
@@ -867,16 +867,16 @@ function formatSequence(value) {
 function exchangeLabel(value = "") {
   switch (String(value || "").trim()) {
     case "primary_model_call":
-      return "Primary";
+      return "Model";
     case "client_request":
-      return "Client";
+      return "Request";
     case "upstream_model_call":
     case "model_call":
       return "Model";
     case "model":
       return "Model";
     case "entry":
-      return "Client";
+      return "Request";
     default:
       return value || "Model";
   }

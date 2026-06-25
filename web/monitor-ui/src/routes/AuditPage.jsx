@@ -466,16 +466,16 @@ function formatSequence(value) {
 function exchangeLabel(value = "") {
   switch (String(value || "").trim()) {
     case "primary_model_call":
-      return "Primary";
+      return "Model";
     case "client_request":
-      return "Client";
+      return "Request";
     case "upstream_model_call":
     case "model_call":
       return "Model";
     case "model":
       return "Model";
     case "entry":
-      return "Client";
+      return "Request";
     case "-":
       return "-";
     default:
