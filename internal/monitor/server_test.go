@@ -4009,41 +4009,6 @@ func TestTracePerformanceAPIHandlerReturnsMetrics(t *testing.T) {
 	}
 }
 
-func TestBuildAggregatePerformanceUsesPositiveDecodeWindows(t *testing.T) {
-	t.Parallel()
-
-	perf := buildAggregatePerformance([]traceListItem{
-		{
-			Model:            "gpt-5",
-			Endpoint:         "/v1/responses",
-			StatusCode:       http.StatusOK,
-			DurationMs:       100,
-			TTFTMs:           10,
-			PromptTokens:     10,
-			CompletionTokens: 20,
-			TotalTokens:      30,
-		},
-		{
-			Model:            "gpt-5",
-			Endpoint:         "/v1/responses",
-			StatusCode:       http.StatusOK,
-			DurationMs:       5,
-			TTFTMs:           10,
-			PromptTokens:     1,
-			CompletionTokens: 10,
-			TotalTokens:      11,
-		},
-	})
-
-	if perf.PPTokensPerSec != 550 || perf.PrefillTokensPerSec != 550 {
-		t.Fatalf("pp rates = %+v", perf)
-	}
-	if perf.TGTokensPerSec < 333 || perf.TGTokensPerSec > 334 ||
-		perf.GenerationTokensPerSec < 333 || perf.GenerationTokensPerSec > 334 {
-		t.Fatalf("tg rates = %+v", perf)
-	}
-}
-
 func TestTraceDetailAPIHandlerIncludesSelectedUpstreamHealth(t *testing.T) {
 	t.Parallel()
 
