@@ -75,12 +75,26 @@ const (
 	FieldWindowID = "window_id"
 	// FieldClientRequestID holds the string denoting the client_request_id field in the database.
 	FieldClientRequestID = "client_request_id"
+	// FieldRequestAuditID holds the string denoting the request_audit_id field in the database.
+	FieldRequestAuditID = "request_audit_id"
+	// FieldResponseID holds the string denoting the response_id field in the database.
+	FieldResponseID = "response_id"
 	// FieldSelectedUpstreamID holds the string denoting the selected_upstream_id field in the database.
 	FieldSelectedUpstreamID = "selected_upstream_id"
 	// FieldSelectedUpstreamBaseURL holds the string denoting the selected_upstream_base_url field in the database.
 	FieldSelectedUpstreamBaseURL = "selected_upstream_base_url"
 	// FieldSelectedUpstreamProviderPreset holds the string denoting the selected_upstream_provider_preset field in the database.
 	FieldSelectedUpstreamProviderPreset = "selected_upstream_provider_preset"
+	// FieldExchangeID holds the string denoting the exchange_id field in the database.
+	FieldExchangeID = "exchange_id"
+	// FieldExchangeKind holds the string denoting the exchange_kind field in the database.
+	FieldExchangeKind = "exchange_kind"
+	// FieldExchangeRole holds the string denoting the exchange_role field in the database.
+	FieldExchangeRole = "exchange_role"
+	// FieldParentExchangeID holds the string denoting the parent_exchange_id field in the database.
+	FieldParentExchangeID = "parent_exchange_id"
+	// FieldSequenceIndex holds the string denoting the sequence_index field in the database.
+	FieldSequenceIndex = "sequence_index"
 	// FieldRoutingPolicy holds the string denoting the routing_policy field in the database.
 	FieldRoutingPolicy = "routing_policy"
 	// FieldRoutingScore holds the string denoting the routing_score field in the database.
@@ -127,9 +141,16 @@ var Columns = []string{
 	FieldSessionSource,
 	FieldWindowID,
 	FieldClientRequestID,
+	FieldRequestAuditID,
+	FieldResponseID,
 	FieldSelectedUpstreamID,
 	FieldSelectedUpstreamBaseURL,
 	FieldSelectedUpstreamProviderPreset,
+	FieldExchangeID,
+	FieldExchangeKind,
+	FieldExchangeRole,
+	FieldParentExchangeID,
+	FieldSequenceIndex,
 	FieldRoutingPolicy,
 	FieldRoutingScore,
 	FieldRoutingCandidateCount,
@@ -205,12 +226,26 @@ var (
 	DefaultWindowID string
 	// DefaultClientRequestID holds the default value on creation for the "client_request_id" field.
 	DefaultClientRequestID string
+	// DefaultRequestAuditID holds the default value on creation for the "request_audit_id" field.
+	DefaultRequestAuditID string
+	// DefaultResponseID holds the default value on creation for the "response_id" field.
+	DefaultResponseID string
 	// DefaultSelectedUpstreamID holds the default value on creation for the "selected_upstream_id" field.
 	DefaultSelectedUpstreamID string
 	// DefaultSelectedUpstreamBaseURL holds the default value on creation for the "selected_upstream_base_url" field.
 	DefaultSelectedUpstreamBaseURL string
 	// DefaultSelectedUpstreamProviderPreset holds the default value on creation for the "selected_upstream_provider_preset" field.
 	DefaultSelectedUpstreamProviderPreset string
+	// DefaultExchangeID holds the default value on creation for the "exchange_id" field.
+	DefaultExchangeID string
+	// DefaultExchangeKind holds the default value on creation for the "exchange_kind" field.
+	DefaultExchangeKind string
+	// DefaultExchangeRole holds the default value on creation for the "exchange_role" field.
+	DefaultExchangeRole string
+	// DefaultParentExchangeID holds the default value on creation for the "parent_exchange_id" field.
+	DefaultParentExchangeID string
+	// DefaultSequenceIndex holds the default value on creation for the "sequence_index" field.
+	DefaultSequenceIndex int
 	// DefaultRoutingPolicy holds the default value on creation for the "routing_policy" field.
 	DefaultRoutingPolicy string
 	// DefaultRoutingScore holds the default value on creation for the "routing_score" field.
@@ -386,6 +421,16 @@ func ByClientRequestID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldClientRequestID, opts...).ToFunc()
 }
 
+// ByRequestAuditID orders the results by the request_audit_id field.
+func ByRequestAuditID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestAuditID, opts...).ToFunc()
+}
+
+// ByResponseID orders the results by the response_id field.
+func ByResponseID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldResponseID, opts...).ToFunc()
+}
+
 // BySelectedUpstreamID orders the results by the selected_upstream_id field.
 func BySelectedUpstreamID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSelectedUpstreamID, opts...).ToFunc()
@@ -399,6 +444,31 @@ func BySelectedUpstreamBaseURL(opts ...sql.OrderTermOption) OrderOption {
 // BySelectedUpstreamProviderPreset orders the results by the selected_upstream_provider_preset field.
 func BySelectedUpstreamProviderPreset(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSelectedUpstreamProviderPreset, opts...).ToFunc()
+}
+
+// ByExchangeID orders the results by the exchange_id field.
+func ByExchangeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeID, opts...).ToFunc()
+}
+
+// ByExchangeKind orders the results by the exchange_kind field.
+func ByExchangeKind(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeKind, opts...).ToFunc()
+}
+
+// ByExchangeRole orders the results by the exchange_role field.
+func ByExchangeRole(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeRole, opts...).ToFunc()
+}
+
+// ByParentExchangeID orders the results by the parent_exchange_id field.
+func ByParentExchangeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldParentExchangeID, opts...).ToFunc()
+}
+
+// BySequenceIndex orders the results by the sequence_index field.
+func BySequenceIndex(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSequenceIndex, opts...).ToFunc()
 }
 
 // ByRoutingPolicy orders the results by the routing_policy field.

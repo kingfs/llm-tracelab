@@ -34,7 +34,7 @@ export function RoutingPage() {
   if (activeFilters.model) {
     summaryParams.set("model", activeFilters.model);
   }
-  const traces = useJSON(apiURL(apiPaths.traces, params), [refreshTick, windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
+  const traces = useJSON(apiURL(apiPaths.routingExchanges, params), [refreshTick, windowValue, ...FILTER_KEYS.map((key) => activeFilters[key])]);
   const routingSummary = useJSON(apiURL(apiPaths.routingSummary, summaryParams), [refreshTick, windowValue, activeFilters.model]);
   const routedItems = useMemo(() => filterByWindow(traces.data?.items || [], windowValue), [traces.data, windowValue]);
   const summary = useMemo(() => summarizeRouting(routedItems), [routedItems]);
@@ -149,13 +149,13 @@ function readRoutingFilters(searchParams) {
 
 function filterByWindow(items, windowValue) {
   if (windowValue === "all") {
-    return items.filter((item) => item.selected_upstream_id);
+    return items;
   }
   const now = new Date();
   const since = windowValue === "today"
     ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
     : Date.now() - (windowValue === "7d" ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000);
-  return items.filter((item) => item.selected_upstream_id && new Date(item.recorded_at).getTime() >= since);
+  return items.filter((item) => new Date(item.recorded_at).getTime() >= since);
 }
 
 function summarizeRouting(items) {

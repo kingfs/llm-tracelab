@@ -3377,6 +3377,110 @@ func TestListSessionPageAggregatesBySession(t *testing.T) {
 	}
 }
 
+func TestClientVisibleListsExcludeInternalModelExchanges(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	writeLog := func(name string, meta recordfile.MetaData, grouping GroupingInfo) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", path, err)
+		}
+		header := recordfile.RecordHeader{
+			Version: "LLM_PROXY_V3",
+			Meta:    meta,
+			Usage:   recordfile.UsageInfo{TotalTokens: 10},
+		}
+		if err := st.UpsertLogWithGrouping(path, header, grouping); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+		}
+	}
+
+	sessionID := "sess-codex"
+	auditID := "reqaudit-codex"
+	entryExchangeID := "entry:" + auditID
+	base := time.Date(2026, 6, 25, 9, 0, 0, 0, time.UTC)
+	writeLog("entry.http", recordfile.MetaData{
+		RequestID:      "req-entry",
+		RequestAuditID: auditID,
+		ResponseID:     "resp-entry",
+		ExchangeID:     entryExchangeID,
+		ExchangeKind:   "entry",
+		ExchangeRole:   "client_request",
+		Time:           base,
+		Model:          "codex",
+		Provider:       "openai",
+		Operation:      "responses",
+		Endpoint:       "/v1/responses",
+		URL:            "/v1/responses",
+		Method:         "POST",
+		StatusCode:     200,
+		DurationMs:     1000,
+	}, GroupingInfo{SessionID: sessionID, SessionSource: "header.session_id"})
+	writeLog("model.http", recordfile.MetaData{
+		RequestID:        "req-model",
+		RequestAuditID:   auditID,
+		ExchangeID:       "model:" + auditID + ":1",
+		ExchangeKind:     "model",
+		ExchangeRole:     "primary_model_call",
+		ParentExchangeID: entryExchangeID,
+		SequenceIndex:    1,
+		Time:             base.Add(time.Second),
+		Model:            "qwen3",
+		Provider:         "openai_compatible",
+		Operation:        "chat_completions",
+		Endpoint:         "/v1/chat/completions",
+		URL:              "/v1/chat/completions",
+		Method:           "POST",
+		StatusCode:       200,
+		DurationMs:       800,
+	}, GroupingInfo{SessionID: sessionID, SessionSource: "header.session_id"})
+
+	traces, err := st.ListPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListPage() error = %v", err)
+	}
+	if traces.Total != 1 || len(traces.Items) != 1 || traces.Items[0].Header.Meta.ExchangeKind != "entry" {
+		t.Fatalf("ListPage() = total %d items %#v, want only entry exchange", traces.Total, traces.Items)
+	}
+
+	routing, err := st.ListRoutingPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListRoutingPage() error = %v", err)
+	}
+	if routing.Total != 2 {
+		t.Fatalf("ListRoutingPage().Total = %d, want 2", routing.Total)
+	}
+
+	sessions, err := st.ListSessionPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage() error = %v", err)
+	}
+	if len(sessions.Items) != 1 || sessions.Items[0].RequestCount != 1 {
+		t.Fatalf("ListSessionPage() = %#v, want one client-visible request", sessions.Items)
+	}
+
+	sessionTraces, err := st.ListTracesBySession(sessionID)
+	if err != nil {
+		t.Fatalf("ListTracesBySession() error = %v", err)
+	}
+	children, err := st.ListChildExchangesForEntries(sessionTraces)
+	if err != nil {
+		t.Fatalf("ListChildExchangesForEntries() error = %v", err)
+	}
+	if len(sessionTraces) != 1 || len(children[sessionTraces[0].ID]) != 1 {
+		t.Fatalf("session traces = %#v children = %#v, want one entry with one child", sessionTraces, children)
+	}
+	if got := children[sessionTraces[0].ID][0].Header.Meta.ExchangeKind; got != "model" {
+		t.Fatalf("child exchange kind = %q, want model", got)
+	}
+}
+
 func TestListPageAppliesFilters(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)

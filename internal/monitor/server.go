@@ -385,6 +385,14 @@ type traceListItem struct {
 	CachedTokens     int                 `json:"cached_tokens"`
 	IsStream         bool                `json:"is_stream"`
 	Error            string              `json:"error,omitempty"`
+	RequestAuditID   string              `json:"request_audit_id,omitempty"`
+	ResponseID       string              `json:"response_id,omitempty"`
+	ExchangeID       string              `json:"exchange_id,omitempty"`
+	ExchangeKind     string              `json:"exchange_kind,omitempty"`
+	ExchangeRole     string              `json:"exchange_role,omitempty"`
+	ParentExchangeID string              `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int                 `json:"sequence_index,omitempty"`
+	UpstreamCalls    []traceListItem     `json:"upstream_calls,omitempty"`
 	Observation      observationListView `json:"observation"`
 }
 
@@ -1424,6 +1432,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), opt.AuthVerifier))
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), opt.AuthVerifier))
+	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
@@ -4115,6 +4124,36 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 	}
 }
 
+func routingExchangeListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+
+		page := parseInt(r.URL.Query().Get("page"), 1)
+		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
+		filter := parseListFilter(r)
+		result, err := st.ListRoutingPage(page, pageSize, filter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+
+		resp := listResponse{
+			Page:        result.Page,
+			PageSize:    result.PageSize,
+			Total:       result.Total,
+			TotalPages:  result.TotalPages,
+			RefreshedAt: time.Now().UTC(),
+		}
+		for _, entry := range result.Items {
+			resp.Items = append(resp.Items, traceListItemFromEntry(entry))
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
 func sessionListAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
@@ -4187,12 +4226,21 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
 		}
+		children, err := st.ListChildExchangesForEntries(traces)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query child exchanges: " + err.Error()})
+			return
+		}
 
 		resp := sessionDetailResponse{
 			Summary: sessionSummaryItem(summary),
 		}
 		for _, entry := range traces {
-			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
+			item := traceListItemFromEntry(entry)
+			for _, child := range children[entry.ID] {
+				item.UpstreamCalls = append(item.UpstreamCalls, traceListItemFromEntry(child))
+			}
+			resp.Traces = append(resp.Traces, item)
 		}
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		resp.Timeline = buildSessionTimeline(resp.Traces)
@@ -4840,7 +4888,7 @@ func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (
 	// ListPage does not expose a recorded_at filter, so stop once the descending
 	// index reaches traces older than the requested monitor window.
 	for page := 1; ; page++ {
-		result, err := st.ListPage(page, pageSize, filter)
+		result, err := st.ListRoutingPage(page, pageSize, filter)
 		if err != nil {
 			return routingSummaryResponse{}, err
 		}
@@ -5361,6 +5409,13 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		CachedTokens:     cachedTokens(entry),
 		IsStream:         entry.Header.Layout.IsStream,
 		Error:            entry.Header.Meta.Error,
+		RequestAuditID:   entry.Header.Meta.RequestAuditID,
+		ResponseID:       entry.Header.Meta.ResponseID,
+		ExchangeID:       entry.Header.Meta.ExchangeID,
+		ExchangeKind:     entry.Header.Meta.ExchangeKind,
+		ExchangeRole:     entry.Header.Meta.ExchangeRole,
+		ParentExchangeID: entry.Header.Meta.ParentExchangeID,
+		SequenceIndex:    entry.Header.Meta.SequenceIndex,
 		Observation:      observationListViewFromStore(entry.Observation),
 	}
 }

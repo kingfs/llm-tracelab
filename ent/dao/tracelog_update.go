@@ -562,6 +562,34 @@ func (_u *TraceLogUpdate) SetNillableClientRequestID(v *string) *TraceLogUpdate 
 	return _u
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_u *TraceLogUpdate) SetRequestAuditID(v string) *TraceLogUpdate {
+	_u.mutation.SetRequestAuditID(v)
+	return _u
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableRequestAuditID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetRequestAuditID(*v)
+	}
+	return _u
+}
+
+// SetResponseID sets the "response_id" field.
+func (_u *TraceLogUpdate) SetResponseID(v string) *TraceLogUpdate {
+	_u.mutation.SetResponseID(v)
+	return _u
+}
+
+// SetNillableResponseID sets the "response_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableResponseID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetResponseID(*v)
+	}
+	return _u
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (_u *TraceLogUpdate) SetSelectedUpstreamID(v string) *TraceLogUpdate {
 	_u.mutation.SetSelectedUpstreamID(v)
@@ -601,6 +629,83 @@ func (_u *TraceLogUpdate) SetNillableSelectedUpstreamProviderPreset(v *string) *
 	if v != nil {
 		_u.SetSelectedUpstreamProviderPreset(*v)
 	}
+	return _u
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (_u *TraceLogUpdate) SetExchangeID(v string) *TraceLogUpdate {
+	_u.mutation.SetExchangeID(v)
+	return _u
+}
+
+// SetNillableExchangeID sets the "exchange_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableExchangeID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetExchangeID(*v)
+	}
+	return _u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_u *TraceLogUpdate) SetExchangeKind(v string) *TraceLogUpdate {
+	_u.mutation.SetExchangeKind(v)
+	return _u
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableExchangeKind(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetExchangeKind(*v)
+	}
+	return _u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_u *TraceLogUpdate) SetExchangeRole(v string) *TraceLogUpdate {
+	_u.mutation.SetExchangeRole(v)
+	return _u
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableExchangeRole(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetExchangeRole(*v)
+	}
+	return _u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_u *TraceLogUpdate) SetParentExchangeID(v string) *TraceLogUpdate {
+	_u.mutation.SetParentExchangeID(v)
+	return _u
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableParentExchangeID(v *string) *TraceLogUpdate {
+	if v != nil {
+		_u.SetParentExchangeID(*v)
+	}
+	return _u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_u *TraceLogUpdate) SetSequenceIndex(v int) *TraceLogUpdate {
+	_u.mutation.ResetSequenceIndex()
+	_u.mutation.SetSequenceIndex(v)
+	return _u
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_u *TraceLogUpdate) SetNillableSequenceIndex(v *int) *TraceLogUpdate {
+	if v != nil {
+		_u.SetSequenceIndex(*v)
+	}
+	return _u
+}
+
+// AddSequenceIndex adds value to the "sequence_index" field.
+func (_u *TraceLogUpdate) AddSequenceIndex(v int) *TraceLogUpdate {
+	_u.mutation.AddSequenceIndex(v)
 	return _u
 }
 
@@ -874,6 +979,12 @@ func (_u *TraceLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.ClientRequestID(); ok {
 		_spec.SetField(tracelog.FieldClientRequestID, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.RequestAuditID(); ok {
+		_spec.SetField(tracelog.FieldRequestAuditID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ResponseID(); ok {
+		_spec.SetField(tracelog.FieldResponseID, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.SelectedUpstreamID(); ok {
 		_spec.SetField(tracelog.FieldSelectedUpstreamID, field.TypeString, value)
 	}
@@ -882,6 +993,24 @@ func (_u *TraceLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.SelectedUpstreamProviderPreset(); ok {
 		_spec.SetField(tracelog.FieldSelectedUpstreamProviderPreset, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeID(); ok {
+		_spec.SetField(tracelog.FieldExchangeID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeKind(); ok {
+		_spec.SetField(tracelog.FieldExchangeKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeRole(); ok {
+		_spec.SetField(tracelog.FieldExchangeRole, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ParentExchangeID(); ok {
+		_spec.SetField(tracelog.FieldParentExchangeID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SequenceIndex(); ok {
+		_spec.SetField(tracelog.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedSequenceIndex(); ok {
+		_spec.AddField(tracelog.FieldSequenceIndex, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.RoutingPolicy(); ok {
 		_spec.SetField(tracelog.FieldRoutingPolicy, field.TypeString, value)
@@ -1457,6 +1586,34 @@ func (_u *TraceLogUpdateOne) SetNillableClientRequestID(v *string) *TraceLogUpda
 	return _u
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_u *TraceLogUpdateOne) SetRequestAuditID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetRequestAuditID(v)
+	return _u
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableRequestAuditID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetRequestAuditID(*v)
+	}
+	return _u
+}
+
+// SetResponseID sets the "response_id" field.
+func (_u *TraceLogUpdateOne) SetResponseID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetResponseID(v)
+	return _u
+}
+
+// SetNillableResponseID sets the "response_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableResponseID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetResponseID(*v)
+	}
+	return _u
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (_u *TraceLogUpdateOne) SetSelectedUpstreamID(v string) *TraceLogUpdateOne {
 	_u.mutation.SetSelectedUpstreamID(v)
@@ -1496,6 +1653,83 @@ func (_u *TraceLogUpdateOne) SetNillableSelectedUpstreamProviderPreset(v *string
 	if v != nil {
 		_u.SetSelectedUpstreamProviderPreset(*v)
 	}
+	return _u
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (_u *TraceLogUpdateOne) SetExchangeID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetExchangeID(v)
+	return _u
+}
+
+// SetNillableExchangeID sets the "exchange_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableExchangeID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetExchangeID(*v)
+	}
+	return _u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_u *TraceLogUpdateOne) SetExchangeKind(v string) *TraceLogUpdateOne {
+	_u.mutation.SetExchangeKind(v)
+	return _u
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableExchangeKind(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetExchangeKind(*v)
+	}
+	return _u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_u *TraceLogUpdateOne) SetExchangeRole(v string) *TraceLogUpdateOne {
+	_u.mutation.SetExchangeRole(v)
+	return _u
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableExchangeRole(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetExchangeRole(*v)
+	}
+	return _u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_u *TraceLogUpdateOne) SetParentExchangeID(v string) *TraceLogUpdateOne {
+	_u.mutation.SetParentExchangeID(v)
+	return _u
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableParentExchangeID(v *string) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetParentExchangeID(*v)
+	}
+	return _u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_u *TraceLogUpdateOne) SetSequenceIndex(v int) *TraceLogUpdateOne {
+	_u.mutation.ResetSequenceIndex()
+	_u.mutation.SetSequenceIndex(v)
+	return _u
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_u *TraceLogUpdateOne) SetNillableSequenceIndex(v *int) *TraceLogUpdateOne {
+	if v != nil {
+		_u.SetSequenceIndex(*v)
+	}
+	return _u
+}
+
+// AddSequenceIndex adds value to the "sequence_index" field.
+func (_u *TraceLogUpdateOne) AddSequenceIndex(v int) *TraceLogUpdateOne {
+	_u.mutation.AddSequenceIndex(v)
 	return _u
 }
 
@@ -1799,6 +2033,12 @@ func (_u *TraceLogUpdateOne) sqlSave(ctx context.Context) (_node *TraceLog, err 
 	if value, ok := _u.mutation.ClientRequestID(); ok {
 		_spec.SetField(tracelog.FieldClientRequestID, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.RequestAuditID(); ok {
+		_spec.SetField(tracelog.FieldRequestAuditID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ResponseID(); ok {
+		_spec.SetField(tracelog.FieldResponseID, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.SelectedUpstreamID(); ok {
 		_spec.SetField(tracelog.FieldSelectedUpstreamID, field.TypeString, value)
 	}
@@ -1807,6 +2047,24 @@ func (_u *TraceLogUpdateOne) sqlSave(ctx context.Context) (_node *TraceLog, err 
 	}
 	if value, ok := _u.mutation.SelectedUpstreamProviderPreset(); ok {
 		_spec.SetField(tracelog.FieldSelectedUpstreamProviderPreset, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeID(); ok {
+		_spec.SetField(tracelog.FieldExchangeID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeKind(); ok {
+		_spec.SetField(tracelog.FieldExchangeKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeRole(); ok {
+		_spec.SetField(tracelog.FieldExchangeRole, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ParentExchangeID(); ok {
+		_spec.SetField(tracelog.FieldParentExchangeID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SequenceIndex(); ok {
+		_spec.SetField(tracelog.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedSequenceIndex(); ok {
+		_spec.AddField(tracelog.FieldSequenceIndex, field.TypeInt, value)
 	}
 	if value, ok := _u.mutation.RoutingPolicy(); ok {
 		_spec.SetField(tracelog.FieldRoutingPolicy, field.TypeString, value)

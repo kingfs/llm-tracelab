@@ -42,13 +42,25 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
           return (
             <React.Fragment key={row.key}>
               <FailureGroupRow group={row} isOpen={isOpen} onToggle={() => toggleGroup(row.key)} />
-              {isOpen ? row.items.map((item) => <RequestRow key={item.id} item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild />) : null}
+              {isOpen ? row.items.map((item) => <RequestRowGroup key={item.id} item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild />) : null}
             </React.Fragment>
           );
         }
-        return <RequestRow key={row.item.id} item={row.item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} />;
+        return <RequestRowGroup key={row.item.id} item={row.item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} />;
       })}
     </div>
+  );
+}
+
+function RequestRowGroup({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false }) {
+  const children = Array.isArray(item.upstream_calls) ? item.upstream_calls : [];
+  return (
+    <React.Fragment>
+      <RequestRow item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild={groupedChild} />
+      {children.map((child) => (
+        <RequestRow key={child.id} item={child} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild />
+      ))}
+    </React.Fragment>
   );
 }
 
@@ -63,6 +75,7 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
         <div className="trace-title-row">
           <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
+            <ExchangeTag item={item} />
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
             {item.selected_upstream_id ? <InlineTag tone="green">{item.selected_upstream_id}</InlineTag> : null}
@@ -90,6 +103,17 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
       <RowActions item={item} fromView={fromView} fromSessionID={fromSessionID} focus={focus} />
     </article>
   );
+}
+
+function ExchangeTag({ item }) {
+  const kind = String(item.exchange_kind || "").trim();
+  const role = String(item.exchange_role || "").trim();
+  if (!kind && !role) {
+    return <InlineTag>client</InlineTag>;
+  }
+  const label = role || kind;
+  const tone = kind === "model" ? "gold" : kind === "entry" ? "green" : "default";
+  return <InlineTag tone={tone}>{label}</InlineTag>;
 }
 
 function formatObservationStatus(status = "", t = (key) => key) {

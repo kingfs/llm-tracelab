@@ -1899,6 +1899,8 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
@@ -3908,6 +3910,8 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		session_source TEXT NOT NULL DEFAULT '',
 		window_id TEXT NOT NULL DEFAULT '',
 		client_request_id TEXT NOT NULL DEFAULT '',
+		request_audit_id TEXT NOT NULL DEFAULT '',
+		response_id TEXT NOT NULL DEFAULT '',
 		exchange_id TEXT NOT NULL DEFAULT '',
 		exchange_kind TEXT NOT NULL DEFAULT '',
 		exchange_role TEXT NOT NULL DEFAULT '',
@@ -3929,6 +3933,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 		req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 		session_id, session_source, window_id, client_request_id,
+		request_audit_id, response_id,
 		exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
@@ -3942,6 +3947,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		req_header_len, req_body_len, res_header_len, res_body_len,
 		CASE WHEN is_stream IN (1, '1', 'true', 'TRUE') THEN true ELSE false END,
 		session_id, session_source, window_id, client_request_id,
+		'', '',
 		'', '', '', '', 0,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
@@ -4002,6 +4008,12 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 }
 
 func (s *Store) ensureLogExchangeColumns() error {
+	if err := s.ensureColumn("logs", "request_audit_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("logs", "exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -4014,7 +4026,19 @@ func (s *Store) ensureLogExchangeColumns() error {
 	if err := s.ensureColumn("logs", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
-	return s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0")
+	if err := s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS tracelog_request_audit_id_recorded_at ON logs(request_audit_id, recorded_at)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_exchange_kind_recorded_at ON logs(exchange_kind, recorded_at)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_parent_exchange_id ON logs(parent_exchange_id)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) hasColumn(table string, column string) (bool, error) {
@@ -4633,10 +4657,11 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
 			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -4669,6 +4694,8 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			session_source=excluded.session_source,
 			window_id=excluded.window_id,
 			client_request_id=excluded.client_request_id,
+			request_audit_id=excluded.request_audit_id,
+			response_id=excluded.response_id,
 			exchange_id=excluded.exchange_id,
 			exchange_kind=excluded.exchange_kind,
 			exchange_role=excluded.exchange_role,
@@ -4714,6 +4741,8 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		grouping.SessionSource,
 		grouping.WindowID,
 		grouping.ClientRequestID,
+		header.Meta.RequestAuditID,
+		header.Meta.ResponseID,
 		header.Meta.ExchangeID,
 		header.Meta.ExchangeKind,
 		header.Meta.ExchangeRole,
@@ -4918,6 +4947,14 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 }
 
 func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
+	return s.listPage(page, pageSize, filter, true)
+}
+
+func (s *Store) ListRoutingPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
+	return s.listPage(page, pageSize, filter, false)
+}
+
+func (s *Store) listPage(page int, pageSize int, filter ListFilter, clientVisibleOnly bool) (ListPageResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -4927,6 +4964,9 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 
 	ctx := context.Background()
 	predicates := buildTraceLogPredicates(filter)
+	if clientVisibleOnly {
+		predicates = append(predicates, clientVisibleTraceLogPredicate())
+	}
 	total, err := s.client.TraceLog.Query().Where(predicates...).Count(ctx)
 	if err != nil {
 		return ListPageResult{}, err
@@ -5082,6 +5122,7 @@ func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
 		limit = 1000
 	}
 	whereSQL, whereArgs := buildLogFilterClause(filter, "")
+	whereSQL = andSQL(whereSQL, clientVisibleLogClause(""))
 	if whereSQL == "" {
 		whereSQL = "1 = 1"
 	}
@@ -6131,10 +6172,8 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 	}
 
 	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
-	sessionWhere := `s.session_id <> ''`
-	if whereSQL != "" {
-		sessionWhere += " AND " + whereSQL
-	}
+	sessionWhere := andSQL(`s.session_id <> ''`, clientVisibleLogClause("s"))
+	sessionWhere = andSQL(sessionWhere, whereSQL)
 	var total int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs s WHERE `+sessionWhere+` GROUP BY session_id)`, whereArgs...).Scan(&total); err != nil {
 		return SessionPageResult{}, err
@@ -6153,6 +6192,7 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 			COALESCE((
 				SELECT model FROM logs l2
 				WHERE l2.session_id = s.session_id
+					AND ` + clientVisibleLogClause("l2") + `
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
@@ -6211,6 +6251,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 			COALESCE((
 				SELECT model FROM logs l2
 				WHERE l2.session_id = s.session_id
+					AND `+clientVisibleLogClause("l2")+`
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
@@ -6225,7 +6266,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
 			COALESCE(SUM(`+s.boolCountCaseSQL("s.is_stream")+`), 0) AS stream_count
 		FROM logs s
-		WHERE s.session_id = ?
+		WHERE s.session_id = ? AND `+clientVisibleLogClause("s")+`
 		GROUP BY s.session_id
 	`, sessionID)
 	return scanSessionSummary(row)
@@ -6239,10 +6280,12 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
-		WHERE session_id = ?
+		WHERE session_id = ? AND `+clientVisibleLogClause("")+`
 		ORDER BY recorded_at DESC, trace_id DESC
 	`, sessionID)
 	if err != nil {
@@ -6264,6 +6307,85 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 	return entries, rows.Err()
 }
 
+func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]LogEntry, error) {
+	out := make(map[string][]LogEntry, len(parents))
+	if len(parents) == 0 {
+		return out, nil
+	}
+
+	parentByAudit := make(map[string]string, len(parents))
+	parentByExchange := make(map[string]string, len(parents))
+	var auditArgs []any
+	var exchangeArgs []any
+	for _, parent := range parents {
+		if auditID := strings.TrimSpace(parent.Header.Meta.RequestAuditID); auditID != "" {
+			parentByAudit[auditID] = parent.ID
+			auditArgs = append(auditArgs, auditID)
+		}
+		if exchangeID := strings.TrimSpace(parent.Header.Meta.ExchangeID); exchangeID != "" {
+			parentByExchange[exchangeID] = parent.ID
+			exchangeArgs = append(exchangeArgs, exchangeID)
+		}
+	}
+	if len(auditArgs) == 0 && len(exchangeArgs) == 0 {
+		return out, nil
+	}
+
+	var clauses []string
+	var args []any
+	if len(auditArgs) > 0 {
+		clauses = append(clauses, `request_audit_id IN (`+placeholders(len(auditArgs))+`)`)
+		args = append(args, auditArgs...)
+	}
+	if len(exchangeArgs) > 0 {
+		clauses = append(clauses, `parent_exchange_id IN (`+placeholders(len(exchangeArgs))+`)`)
+		args = append(args, exchangeArgs...)
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
+			duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		FROM logs
+		WHERE exchange_kind = 'model' AND (`+strings.Join(clauses, " OR ")+`)
+		ORDER BY sequence_index ASC, recorded_at ASC, trace_id ASC
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		parentID := parentByAudit[strings.TrimSpace(entry.Header.Meta.RequestAuditID)]
+		if parentID == "" {
+			parentID = parentByExchange[strings.TrimSpace(entry.Header.Meta.ParentExchangeID)]
+		}
+		if parentID == "" || parentID == entry.ID {
+			continue
+		}
+		out[parentID] = append(out[parentID], entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, children := range out {
+		if err := s.populateObservationMetadata(children); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) PathByID(traceID string) (string, error) {
 	path, err := s.client.TraceLog.Query().
 		Where(tracelog.TraceIDEQ(traceID)).
@@ -6276,13 +6398,14 @@ func (s *Store) PathByID(traceID string) (string, error) {
 
 func (s *Store) Stats() (Stats, error) {
 	ctx := context.Background()
-	total, err := s.client.TraceLog.Query().Count(ctx)
+	clientVisible := clientVisibleTraceLogPredicate()
+	total, err := s.client.TraceLog.Query().Where(clientVisible).Count(ctx)
 	if err != nil {
 		return Stats{}, err
 	}
 
 	successQuery := s.client.TraceLog.Query().
-		Where(tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
+		Where(clientVisible, tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
 	successCount, err := successQuery.Clone().Count(ctx)
 	if err != nil {
 		return Stats{}, err
@@ -6621,6 +6744,8 @@ func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy stri
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
@@ -6789,6 +6914,13 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	entry.Header.Meta.ClientIP = row.ClientIP
 	entry.Header.Meta.ContentLength = row.ContentLength
 	entry.Header.Meta.Error = row.ErrorText
+	entry.Header.Meta.RequestAuditID = row.RequestAuditID
+	entry.Header.Meta.ResponseID = row.ResponseID
+	entry.Header.Meta.ExchangeID = row.ExchangeID
+	entry.Header.Meta.ExchangeKind = row.ExchangeKind
+	entry.Header.Meta.ExchangeRole = row.ExchangeRole
+	entry.Header.Meta.ParentExchangeID = row.ParentExchangeID
+	entry.Header.Meta.SequenceIndex = row.SequenceIndex
 	entry.Header.Meta.SelectedUpstreamID = row.SelectedUpstreamID
 	entry.Header.Meta.SelectedUpstreamBaseURL = row.SelectedUpstreamBaseURL
 	entry.Header.Meta.SelectedUpstreamProviderPreset = row.SelectedUpstreamProviderPreset
@@ -7095,6 +7227,13 @@ func scanEntry(scanner interface {
 		&entry.SessionSource,
 		&entry.WindowID,
 		&entry.ClientRequestID,
+		&entry.Header.Meta.RequestAuditID,
+		&entry.Header.Meta.ResponseID,
+		&entry.Header.Meta.ExchangeID,
+		&entry.Header.Meta.ExchangeKind,
+		&entry.Header.Meta.ExchangeRole,
+		&entry.Header.Meta.ParentExchangeID,
+		&entry.Header.Meta.SequenceIndex,
 		&entry.Header.Meta.SelectedUpstreamID,
 		&entry.Header.Meta.SelectedUpstreamBaseURL,
 		&entry.Header.Meta.SelectedUpstreamProviderPreset,
@@ -7458,11 +7597,46 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	return predicates
 }
 
-func overviewLogWhere(since time.Time) (string, []any) {
-	if since.IsZero() {
-		return "1 = 1", nil
+func clientVisibleTraceLogPredicate() predicate.TraceLog {
+	return predicate.TraceLog(func(s *entsql.Selector) {
+		s.Where(entsql.ExprP(`COALESCE(` + s.C(tracelog.FieldExchangeKind) + `, '') IN ('', 'entry', 'proxy')`))
+	})
+}
+
+func clientVisibleLogClause(alias string) string {
+	column := "exchange_kind"
+	if alias != "" {
+		column = alias + "." + column
 	}
-	return "recorded_at >= ?", []any{since.UTC().Format(timeLayout)}
+	return `COALESCE(` + column + `, '') IN ('', 'entry', 'proxy')`
+}
+
+func andSQL(left string, right string) string {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	switch {
+	case left == "":
+		return right
+	case right == "":
+		return left
+	default:
+		return "(" + left + ") AND (" + right + ")"
+	}
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", count), ",")
+}
+
+func overviewLogWhere(since time.Time) (string, []any) {
+	visible := clientVisibleLogClause("")
+	if since.IsZero() {
+		return visible, nil
+	}
+	return andSQL("recorded_at >= ?", visible), []any{since.UTC().Format(timeLayout)}
 }
 
 func scanCountItems(rows *sql.Rows) ([]CountItem, error) {

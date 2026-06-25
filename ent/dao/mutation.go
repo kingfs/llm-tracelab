@@ -22193,9 +22193,17 @@ type TraceLogMutation struct {
 	session_source                    *string
 	window_id                         *string
 	client_request_id                 *string
+	request_audit_id                  *string
+	response_id                       *string
 	selected_upstream_id              *string
 	selected_upstream_base_url        *string
 	selected_upstream_provider_preset *string
+	exchange_id                       *string
+	exchange_kind                     *string
+	exchange_role                     *string
+	parent_exchange_id                *string
+	sequence_index                    *int
+	addsequence_index                 *int
 	routing_policy                    *string
 	routing_score                     *float64
 	addrouting_score                  *float64
@@ -23708,6 +23716,78 @@ func (m *TraceLogMutation) ResetClientRequestID() {
 	m.client_request_id = nil
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (m *TraceLogMutation) SetRequestAuditID(s string) {
+	m.request_audit_id = &s
+}
+
+// RequestAuditID returns the value of the "request_audit_id" field in the mutation.
+func (m *TraceLogMutation) RequestAuditID() (r string, exists bool) {
+	v := m.request_audit_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestAuditID returns the old "request_audit_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldRequestAuditID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestAuditID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestAuditID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestAuditID: %w", err)
+	}
+	return oldValue.RequestAuditID, nil
+}
+
+// ResetRequestAuditID resets all changes to the "request_audit_id" field.
+func (m *TraceLogMutation) ResetRequestAuditID() {
+	m.request_audit_id = nil
+}
+
+// SetResponseID sets the "response_id" field.
+func (m *TraceLogMutation) SetResponseID(s string) {
+	m.response_id = &s
+}
+
+// ResponseID returns the value of the "response_id" field in the mutation.
+func (m *TraceLogMutation) ResponseID() (r string, exists bool) {
+	v := m.response_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResponseID returns the old "response_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldResponseID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResponseID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResponseID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResponseID: %w", err)
+	}
+	return oldValue.ResponseID, nil
+}
+
+// ResetResponseID resets all changes to the "response_id" field.
+func (m *TraceLogMutation) ResetResponseID() {
+	m.response_id = nil
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (m *TraceLogMutation) SetSelectedUpstreamID(s string) {
 	m.selected_upstream_id = &s
@@ -23814,6 +23894,206 @@ func (m *TraceLogMutation) OldSelectedUpstreamProviderPreset(ctx context.Context
 // ResetSelectedUpstreamProviderPreset resets all changes to the "selected_upstream_provider_preset" field.
 func (m *TraceLogMutation) ResetSelectedUpstreamProviderPreset() {
 	m.selected_upstream_provider_preset = nil
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (m *TraceLogMutation) SetExchangeID(s string) {
+	m.exchange_id = &s
+}
+
+// ExchangeID returns the value of the "exchange_id" field in the mutation.
+func (m *TraceLogMutation) ExchangeID() (r string, exists bool) {
+	v := m.exchange_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeID returns the old "exchange_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldExchangeID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeID: %w", err)
+	}
+	return oldValue.ExchangeID, nil
+}
+
+// ResetExchangeID resets all changes to the "exchange_id" field.
+func (m *TraceLogMutation) ResetExchangeID() {
+	m.exchange_id = nil
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (m *TraceLogMutation) SetExchangeKind(s string) {
+	m.exchange_kind = &s
+}
+
+// ExchangeKind returns the value of the "exchange_kind" field in the mutation.
+func (m *TraceLogMutation) ExchangeKind() (r string, exists bool) {
+	v := m.exchange_kind
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeKind returns the old "exchange_kind" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldExchangeKind(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeKind is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeKind requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeKind: %w", err)
+	}
+	return oldValue.ExchangeKind, nil
+}
+
+// ResetExchangeKind resets all changes to the "exchange_kind" field.
+func (m *TraceLogMutation) ResetExchangeKind() {
+	m.exchange_kind = nil
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (m *TraceLogMutation) SetExchangeRole(s string) {
+	m.exchange_role = &s
+}
+
+// ExchangeRole returns the value of the "exchange_role" field in the mutation.
+func (m *TraceLogMutation) ExchangeRole() (r string, exists bool) {
+	v := m.exchange_role
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeRole returns the old "exchange_role" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldExchangeRole(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeRole is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeRole requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeRole: %w", err)
+	}
+	return oldValue.ExchangeRole, nil
+}
+
+// ResetExchangeRole resets all changes to the "exchange_role" field.
+func (m *TraceLogMutation) ResetExchangeRole() {
+	m.exchange_role = nil
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (m *TraceLogMutation) SetParentExchangeID(s string) {
+	m.parent_exchange_id = &s
+}
+
+// ParentExchangeID returns the value of the "parent_exchange_id" field in the mutation.
+func (m *TraceLogMutation) ParentExchangeID() (r string, exists bool) {
+	v := m.parent_exchange_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldParentExchangeID returns the old "parent_exchange_id" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldParentExchangeID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldParentExchangeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldParentExchangeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldParentExchangeID: %w", err)
+	}
+	return oldValue.ParentExchangeID, nil
+}
+
+// ResetParentExchangeID resets all changes to the "parent_exchange_id" field.
+func (m *TraceLogMutation) ResetParentExchangeID() {
+	m.parent_exchange_id = nil
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (m *TraceLogMutation) SetSequenceIndex(i int) {
+	m.sequence_index = &i
+	m.addsequence_index = nil
+}
+
+// SequenceIndex returns the value of the "sequence_index" field in the mutation.
+func (m *TraceLogMutation) SequenceIndex() (r int, exists bool) {
+	v := m.sequence_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSequenceIndex returns the old "sequence_index" field's value of the TraceLog entity.
+// If the TraceLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceLogMutation) OldSequenceIndex(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSequenceIndex is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSequenceIndex requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSequenceIndex: %w", err)
+	}
+	return oldValue.SequenceIndex, nil
+}
+
+// AddSequenceIndex adds i to the "sequence_index" field.
+func (m *TraceLogMutation) AddSequenceIndex(i int) {
+	if m.addsequence_index != nil {
+		*m.addsequence_index += i
+	} else {
+		m.addsequence_index = &i
+	}
+}
+
+// AddedSequenceIndex returns the value that was added to the "sequence_index" field in this mutation.
+func (m *TraceLogMutation) AddedSequenceIndex() (r int, exists bool) {
+	v := m.addsequence_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSequenceIndex resets all changes to the "sequence_index" field.
+func (m *TraceLogMutation) ResetSequenceIndex() {
+	m.sequence_index = nil
+	m.addsequence_index = nil
 }
 
 // SetRoutingPolicy sets the "routing_policy" field.
@@ -24034,7 +24314,7 @@ func (m *TraceLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TraceLogMutation) Fields() []string {
-	fields := make([]string, 0, 38)
+	fields := make([]string, 0, 45)
 	if m.trace_id != nil {
 		fields = append(fields, tracelog.FieldTraceID)
 	}
@@ -24128,6 +24408,12 @@ func (m *TraceLogMutation) Fields() []string {
 	if m.client_request_id != nil {
 		fields = append(fields, tracelog.FieldClientRequestID)
 	}
+	if m.request_audit_id != nil {
+		fields = append(fields, tracelog.FieldRequestAuditID)
+	}
+	if m.response_id != nil {
+		fields = append(fields, tracelog.FieldResponseID)
+	}
 	if m.selected_upstream_id != nil {
 		fields = append(fields, tracelog.FieldSelectedUpstreamID)
 	}
@@ -24136,6 +24422,21 @@ func (m *TraceLogMutation) Fields() []string {
 	}
 	if m.selected_upstream_provider_preset != nil {
 		fields = append(fields, tracelog.FieldSelectedUpstreamProviderPreset)
+	}
+	if m.exchange_id != nil {
+		fields = append(fields, tracelog.FieldExchangeID)
+	}
+	if m.exchange_kind != nil {
+		fields = append(fields, tracelog.FieldExchangeKind)
+	}
+	if m.exchange_role != nil {
+		fields = append(fields, tracelog.FieldExchangeRole)
+	}
+	if m.parent_exchange_id != nil {
+		fields = append(fields, tracelog.FieldParentExchangeID)
+	}
+	if m.sequence_index != nil {
+		fields = append(fields, tracelog.FieldSequenceIndex)
 	}
 	if m.routing_policy != nil {
 		fields = append(fields, tracelog.FieldRoutingPolicy)
@@ -24219,12 +24520,26 @@ func (m *TraceLogMutation) Field(name string) (ent.Value, bool) {
 		return m.WindowID()
 	case tracelog.FieldClientRequestID:
 		return m.ClientRequestID()
+	case tracelog.FieldRequestAuditID:
+		return m.RequestAuditID()
+	case tracelog.FieldResponseID:
+		return m.ResponseID()
 	case tracelog.FieldSelectedUpstreamID:
 		return m.SelectedUpstreamID()
 	case tracelog.FieldSelectedUpstreamBaseURL:
 		return m.SelectedUpstreamBaseURL()
 	case tracelog.FieldSelectedUpstreamProviderPreset:
 		return m.SelectedUpstreamProviderPreset()
+	case tracelog.FieldExchangeID:
+		return m.ExchangeID()
+	case tracelog.FieldExchangeKind:
+		return m.ExchangeKind()
+	case tracelog.FieldExchangeRole:
+		return m.ExchangeRole()
+	case tracelog.FieldParentExchangeID:
+		return m.ParentExchangeID()
+	case tracelog.FieldSequenceIndex:
+		return m.SequenceIndex()
 	case tracelog.FieldRoutingPolicy:
 		return m.RoutingPolicy()
 	case tracelog.FieldRoutingScore:
@@ -24304,12 +24619,26 @@ func (m *TraceLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldWindowID(ctx)
 	case tracelog.FieldClientRequestID:
 		return m.OldClientRequestID(ctx)
+	case tracelog.FieldRequestAuditID:
+		return m.OldRequestAuditID(ctx)
+	case tracelog.FieldResponseID:
+		return m.OldResponseID(ctx)
 	case tracelog.FieldSelectedUpstreamID:
 		return m.OldSelectedUpstreamID(ctx)
 	case tracelog.FieldSelectedUpstreamBaseURL:
 		return m.OldSelectedUpstreamBaseURL(ctx)
 	case tracelog.FieldSelectedUpstreamProviderPreset:
 		return m.OldSelectedUpstreamProviderPreset(ctx)
+	case tracelog.FieldExchangeID:
+		return m.OldExchangeID(ctx)
+	case tracelog.FieldExchangeKind:
+		return m.OldExchangeKind(ctx)
+	case tracelog.FieldExchangeRole:
+		return m.OldExchangeRole(ctx)
+	case tracelog.FieldParentExchangeID:
+		return m.OldParentExchangeID(ctx)
+	case tracelog.FieldSequenceIndex:
+		return m.OldSequenceIndex(ctx)
 	case tracelog.FieldRoutingPolicy:
 		return m.OldRoutingPolicy(ctx)
 	case tracelog.FieldRoutingScore:
@@ -24544,6 +24873,20 @@ func (m *TraceLogMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetClientRequestID(v)
 		return nil
+	case tracelog.FieldRequestAuditID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestAuditID(v)
+		return nil
+	case tracelog.FieldResponseID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResponseID(v)
+		return nil
 	case tracelog.FieldSelectedUpstreamID:
 		v, ok := value.(string)
 		if !ok {
@@ -24564,6 +24907,41 @@ func (m *TraceLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetSelectedUpstreamProviderPreset(v)
+		return nil
+	case tracelog.FieldExchangeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeID(v)
+		return nil
+	case tracelog.FieldExchangeKind:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeKind(v)
+		return nil
+	case tracelog.FieldExchangeRole:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeRole(v)
+		return nil
+	case tracelog.FieldParentExchangeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetParentExchangeID(v)
+		return nil
+	case tracelog.FieldSequenceIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSequenceIndex(v)
 		return nil
 	case tracelog.FieldRoutingPolicy:
 		v, ok := value.(string)
@@ -24643,6 +25021,9 @@ func (m *TraceLogMutation) AddedFields() []string {
 	if m.addres_body_len != nil {
 		fields = append(fields, tracelog.FieldResBodyLen)
 	}
+	if m.addsequence_index != nil {
+		fields = append(fields, tracelog.FieldSequenceIndex)
+	}
 	if m.addrouting_score != nil {
 		fields = append(fields, tracelog.FieldRoutingScore)
 	}
@@ -24685,6 +25066,8 @@ func (m *TraceLogMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedResHeaderLen()
 	case tracelog.FieldResBodyLen:
 		return m.AddedResBodyLen()
+	case tracelog.FieldSequenceIndex:
+		return m.AddedSequenceIndex()
 	case tracelog.FieldRoutingScore:
 		return m.AddedRoutingScore()
 	case tracelog.FieldRoutingCandidateCount:
@@ -24795,6 +25178,13 @@ func (m *TraceLogMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddResBodyLen(v)
+		return nil
+	case tracelog.FieldSequenceIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSequenceIndex(v)
 		return nil
 	case tracelog.FieldRoutingScore:
 		v, ok := value.(float64)
@@ -24930,6 +25320,12 @@ func (m *TraceLogMutation) ResetField(name string) error {
 	case tracelog.FieldClientRequestID:
 		m.ResetClientRequestID()
 		return nil
+	case tracelog.FieldRequestAuditID:
+		m.ResetRequestAuditID()
+		return nil
+	case tracelog.FieldResponseID:
+		m.ResetResponseID()
+		return nil
 	case tracelog.FieldSelectedUpstreamID:
 		m.ResetSelectedUpstreamID()
 		return nil
@@ -24938,6 +25334,21 @@ func (m *TraceLogMutation) ResetField(name string) error {
 		return nil
 	case tracelog.FieldSelectedUpstreamProviderPreset:
 		m.ResetSelectedUpstreamProviderPreset()
+		return nil
+	case tracelog.FieldExchangeID:
+		m.ResetExchangeID()
+		return nil
+	case tracelog.FieldExchangeKind:
+		m.ResetExchangeKind()
+		return nil
+	case tracelog.FieldExchangeRole:
+		m.ResetExchangeRole()
+		return nil
+	case tracelog.FieldParentExchangeID:
+		m.ResetParentExchangeID()
+		return nil
+	case tracelog.FieldSequenceIndex:
+		m.ResetSequenceIndex()
 		return nil
 	case tracelog.FieldRoutingPolicy:
 		m.ResetRoutingPolicy()

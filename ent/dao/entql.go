@@ -626,9 +626,16 @@ var schemaGraph = func() *sqlgraph.Schema {
 			tracelog.FieldSessionSource:                  {Type: field.TypeString, Column: tracelog.FieldSessionSource},
 			tracelog.FieldWindowID:                       {Type: field.TypeString, Column: tracelog.FieldWindowID},
 			tracelog.FieldClientRequestID:                {Type: field.TypeString, Column: tracelog.FieldClientRequestID},
+			tracelog.FieldRequestAuditID:                 {Type: field.TypeString, Column: tracelog.FieldRequestAuditID},
+			tracelog.FieldResponseID:                     {Type: field.TypeString, Column: tracelog.FieldResponseID},
 			tracelog.FieldSelectedUpstreamID:             {Type: field.TypeString, Column: tracelog.FieldSelectedUpstreamID},
 			tracelog.FieldSelectedUpstreamBaseURL:        {Type: field.TypeString, Column: tracelog.FieldSelectedUpstreamBaseURL},
 			tracelog.FieldSelectedUpstreamProviderPreset: {Type: field.TypeString, Column: tracelog.FieldSelectedUpstreamProviderPreset},
+			tracelog.FieldExchangeID:                     {Type: field.TypeString, Column: tracelog.FieldExchangeID},
+			tracelog.FieldExchangeKind:                   {Type: field.TypeString, Column: tracelog.FieldExchangeKind},
+			tracelog.FieldExchangeRole:                   {Type: field.TypeString, Column: tracelog.FieldExchangeRole},
+			tracelog.FieldParentExchangeID:               {Type: field.TypeString, Column: tracelog.FieldParentExchangeID},
+			tracelog.FieldSequenceIndex:                  {Type: field.TypeInt, Column: tracelog.FieldSequenceIndex},
 			tracelog.FieldRoutingPolicy:                  {Type: field.TypeString, Column: tracelog.FieldRoutingPolicy},
 			tracelog.FieldRoutingScore:                   {Type: field.TypeFloat64, Column: tracelog.FieldRoutingScore},
 			tracelog.FieldRoutingCandidateCount:          {Type: field.TypeInt, Column: tracelog.FieldRoutingCandidateCount},
@@ -3151,6 +3158,16 @@ func (f *TraceLogFilter) WhereClientRequestID(p entql.StringP) {
 	f.Where(p.Field(tracelog.FieldClientRequestID))
 }
 
+// WhereRequestAuditID applies the entql string predicate on the request_audit_id field.
+func (f *TraceLogFilter) WhereRequestAuditID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldRequestAuditID))
+}
+
+// WhereResponseID applies the entql string predicate on the response_id field.
+func (f *TraceLogFilter) WhereResponseID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldResponseID))
+}
+
 // WhereSelectedUpstreamID applies the entql string predicate on the selected_upstream_id field.
 func (f *TraceLogFilter) WhereSelectedUpstreamID(p entql.StringP) {
 	f.Where(p.Field(tracelog.FieldSelectedUpstreamID))
@@ -3164,6 +3181,31 @@ func (f *TraceLogFilter) WhereSelectedUpstreamBaseURL(p entql.StringP) {
 // WhereSelectedUpstreamProviderPreset applies the entql string predicate on the selected_upstream_provider_preset field.
 func (f *TraceLogFilter) WhereSelectedUpstreamProviderPreset(p entql.StringP) {
 	f.Where(p.Field(tracelog.FieldSelectedUpstreamProviderPreset))
+}
+
+// WhereExchangeID applies the entql string predicate on the exchange_id field.
+func (f *TraceLogFilter) WhereExchangeID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldExchangeID))
+}
+
+// WhereExchangeKind applies the entql string predicate on the exchange_kind field.
+func (f *TraceLogFilter) WhereExchangeKind(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldExchangeKind))
+}
+
+// WhereExchangeRole applies the entql string predicate on the exchange_role field.
+func (f *TraceLogFilter) WhereExchangeRole(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldExchangeRole))
+}
+
+// WhereParentExchangeID applies the entql string predicate on the parent_exchange_id field.
+func (f *TraceLogFilter) WhereParentExchangeID(p entql.StringP) {
+	f.Where(p.Field(tracelog.FieldParentExchangeID))
+}
+
+// WhereSequenceIndex applies the entql int predicate on the sequence_index field.
+func (f *TraceLogFilter) WhereSequenceIndex(p entql.IntP) {
+	f.Where(p.Field(tracelog.FieldSequenceIndex))
 }
 
 // WhereRoutingPolicy applies the entql string predicate on the routing_policy field.

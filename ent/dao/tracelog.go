@@ -79,12 +79,26 @@ type TraceLog struct {
 	WindowID string `json:"window_id,omitempty"`
 	// ClientRequestID holds the value of the "client_request_id" field.
 	ClientRequestID string `json:"client_request_id,omitempty"`
+	// RequestAuditID holds the value of the "request_audit_id" field.
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+	// ResponseID holds the value of the "response_id" field.
+	ResponseID string `json:"response_id,omitempty"`
 	// SelectedUpstreamID holds the value of the "selected_upstream_id" field.
 	SelectedUpstreamID string `json:"selected_upstream_id,omitempty"`
 	// SelectedUpstreamBaseURL holds the value of the "selected_upstream_base_url" field.
 	SelectedUpstreamBaseURL string `json:"selected_upstream_base_url,omitempty"`
 	// SelectedUpstreamProviderPreset holds the value of the "selected_upstream_provider_preset" field.
 	SelectedUpstreamProviderPreset string `json:"selected_upstream_provider_preset,omitempty"`
+	// ExchangeID holds the value of the "exchange_id" field.
+	ExchangeID string `json:"exchange_id,omitempty"`
+	// ExchangeKind holds the value of the "exchange_kind" field.
+	ExchangeKind string `json:"exchange_kind,omitempty"`
+	// ExchangeRole holds the value of the "exchange_role" field.
+	ExchangeRole string `json:"exchange_role,omitempty"`
+	// ParentExchangeID holds the value of the "parent_exchange_id" field.
+	ParentExchangeID string `json:"parent_exchange_id,omitempty"`
+	// SequenceIndex holds the value of the "sequence_index" field.
+	SequenceIndex int `json:"sequence_index,omitempty"`
 	// RoutingPolicy holds the value of the "routing_policy" field.
 	RoutingPolicy string `json:"routing_policy,omitempty"`
 	// RoutingScore holds the value of the "routing_score" field.
@@ -105,9 +119,9 @@ func (*TraceLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullBool)
 		case tracelog.FieldRoutingScore:
 			values[i] = new(sql.NullFloat64)
-		case tracelog.FieldModTimeNs, tracelog.FieldFileSize, tracelog.FieldStatusCode, tracelog.FieldDurationMs, tracelog.FieldTtftMs, tracelog.FieldContentLength, tracelog.FieldPromptTokens, tracelog.FieldCompletionTokens, tracelog.FieldTotalTokens, tracelog.FieldCachedTokens, tracelog.FieldReqHeaderLen, tracelog.FieldReqBodyLen, tracelog.FieldResHeaderLen, tracelog.FieldResBodyLen, tracelog.FieldRoutingCandidateCount:
+		case tracelog.FieldModTimeNs, tracelog.FieldFileSize, tracelog.FieldStatusCode, tracelog.FieldDurationMs, tracelog.FieldTtftMs, tracelog.FieldContentLength, tracelog.FieldPromptTokens, tracelog.FieldCompletionTokens, tracelog.FieldTotalTokens, tracelog.FieldCachedTokens, tracelog.FieldReqHeaderLen, tracelog.FieldReqBodyLen, tracelog.FieldResHeaderLen, tracelog.FieldResBodyLen, tracelog.FieldSequenceIndex, tracelog.FieldRoutingCandidateCount:
 			values[i] = new(sql.NullInt64)
-		case tracelog.FieldID, tracelog.FieldTraceID, tracelog.FieldVersion, tracelog.FieldRequestID, tracelog.FieldModel, tracelog.FieldProvider, tracelog.FieldOperation, tracelog.FieldEndpoint, tracelog.FieldURL, tracelog.FieldMethod, tracelog.FieldClientIP, tracelog.FieldErrorText, tracelog.FieldSessionID, tracelog.FieldSessionSource, tracelog.FieldWindowID, tracelog.FieldClientRequestID, tracelog.FieldSelectedUpstreamID, tracelog.FieldSelectedUpstreamBaseURL, tracelog.FieldSelectedUpstreamProviderPreset, tracelog.FieldRoutingPolicy, tracelog.FieldRoutingFailureReason:
+		case tracelog.FieldID, tracelog.FieldTraceID, tracelog.FieldVersion, tracelog.FieldRequestID, tracelog.FieldModel, tracelog.FieldProvider, tracelog.FieldOperation, tracelog.FieldEndpoint, tracelog.FieldURL, tracelog.FieldMethod, tracelog.FieldClientIP, tracelog.FieldErrorText, tracelog.FieldSessionID, tracelog.FieldSessionSource, tracelog.FieldWindowID, tracelog.FieldClientRequestID, tracelog.FieldRequestAuditID, tracelog.FieldResponseID, tracelog.FieldSelectedUpstreamID, tracelog.FieldSelectedUpstreamBaseURL, tracelog.FieldSelectedUpstreamProviderPreset, tracelog.FieldExchangeID, tracelog.FieldExchangeKind, tracelog.FieldExchangeRole, tracelog.FieldParentExchangeID, tracelog.FieldRoutingPolicy, tracelog.FieldRoutingFailureReason:
 			values[i] = new(sql.NullString)
 		case tracelog.FieldRecordedAt:
 			values[i] = new(sql.NullTime)
@@ -318,6 +332,18 @@ func (_m *TraceLog) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ClientRequestID = value.String
 			}
+		case tracelog.FieldRequestAuditID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field request_audit_id", values[i])
+			} else if value.Valid {
+				_m.RequestAuditID = value.String
+			}
+		case tracelog.FieldResponseID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field response_id", values[i])
+			} else if value.Valid {
+				_m.ResponseID = value.String
+			}
 		case tracelog.FieldSelectedUpstreamID:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field selected_upstream_id", values[i])
@@ -335,6 +361,36 @@ func (_m *TraceLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field selected_upstream_provider_preset", values[i])
 			} else if value.Valid {
 				_m.SelectedUpstreamProviderPreset = value.String
+			}
+		case tracelog.FieldExchangeID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_id", values[i])
+			} else if value.Valid {
+				_m.ExchangeID = value.String
+			}
+		case tracelog.FieldExchangeKind:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_kind", values[i])
+			} else if value.Valid {
+				_m.ExchangeKind = value.String
+			}
+		case tracelog.FieldExchangeRole:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_role", values[i])
+			} else if value.Valid {
+				_m.ExchangeRole = value.String
+			}
+		case tracelog.FieldParentExchangeID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field parent_exchange_id", values[i])
+			} else if value.Valid {
+				_m.ParentExchangeID = value.String
+			}
+		case tracelog.FieldSequenceIndex:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field sequence_index", values[i])
+			} else if value.Valid {
+				_m.SequenceIndex = int(value.Int64)
 			}
 		case tracelog.FieldRoutingPolicy:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -489,6 +545,12 @@ func (_m *TraceLog) String() string {
 	builder.WriteString("client_request_id=")
 	builder.WriteString(_m.ClientRequestID)
 	builder.WriteString(", ")
+	builder.WriteString("request_audit_id=")
+	builder.WriteString(_m.RequestAuditID)
+	builder.WriteString(", ")
+	builder.WriteString("response_id=")
+	builder.WriteString(_m.ResponseID)
+	builder.WriteString(", ")
 	builder.WriteString("selected_upstream_id=")
 	builder.WriteString(_m.SelectedUpstreamID)
 	builder.WriteString(", ")
@@ -497,6 +559,21 @@ func (_m *TraceLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("selected_upstream_provider_preset=")
 	builder.WriteString(_m.SelectedUpstreamProviderPreset)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_id=")
+	builder.WriteString(_m.ExchangeID)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_kind=")
+	builder.WriteString(_m.ExchangeKind)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_role=")
+	builder.WriteString(_m.ExchangeRole)
+	builder.WriteString(", ")
+	builder.WriteString("parent_exchange_id=")
+	builder.WriteString(_m.ParentExchangeID)
+	builder.WriteString(", ")
+	builder.WriteString("sequence_index=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SequenceIndex))
 	builder.WriteString(", ")
 	builder.WriteString("routing_policy=")
 	builder.WriteString(_m.RoutingPolicy)

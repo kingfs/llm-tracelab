@@ -1078,32 +1078,60 @@ func init() {
 	tracelogDescClientRequestID := tracelogFields[31].Descriptor()
 	// tracelog.DefaultClientRequestID holds the default value on creation for the client_request_id field.
 	tracelog.DefaultClientRequestID = tracelogDescClientRequestID.Default.(string)
+	// tracelogDescRequestAuditID is the schema descriptor for request_audit_id field.
+	tracelogDescRequestAuditID := tracelogFields[32].Descriptor()
+	// tracelog.DefaultRequestAuditID holds the default value on creation for the request_audit_id field.
+	tracelog.DefaultRequestAuditID = tracelogDescRequestAuditID.Default.(string)
+	// tracelogDescResponseID is the schema descriptor for response_id field.
+	tracelogDescResponseID := tracelogFields[33].Descriptor()
+	// tracelog.DefaultResponseID holds the default value on creation for the response_id field.
+	tracelog.DefaultResponseID = tracelogDescResponseID.Default.(string)
 	// tracelogDescSelectedUpstreamID is the schema descriptor for selected_upstream_id field.
-	tracelogDescSelectedUpstreamID := tracelogFields[32].Descriptor()
+	tracelogDescSelectedUpstreamID := tracelogFields[34].Descriptor()
 	// tracelog.DefaultSelectedUpstreamID holds the default value on creation for the selected_upstream_id field.
 	tracelog.DefaultSelectedUpstreamID = tracelogDescSelectedUpstreamID.Default.(string)
 	// tracelogDescSelectedUpstreamBaseURL is the schema descriptor for selected_upstream_base_url field.
-	tracelogDescSelectedUpstreamBaseURL := tracelogFields[33].Descriptor()
+	tracelogDescSelectedUpstreamBaseURL := tracelogFields[35].Descriptor()
 	// tracelog.DefaultSelectedUpstreamBaseURL holds the default value on creation for the selected_upstream_base_url field.
 	tracelog.DefaultSelectedUpstreamBaseURL = tracelogDescSelectedUpstreamBaseURL.Default.(string)
 	// tracelogDescSelectedUpstreamProviderPreset is the schema descriptor for selected_upstream_provider_preset field.
-	tracelogDescSelectedUpstreamProviderPreset := tracelogFields[34].Descriptor()
+	tracelogDescSelectedUpstreamProviderPreset := tracelogFields[36].Descriptor()
 	// tracelog.DefaultSelectedUpstreamProviderPreset holds the default value on creation for the selected_upstream_provider_preset field.
 	tracelog.DefaultSelectedUpstreamProviderPreset = tracelogDescSelectedUpstreamProviderPreset.Default.(string)
+	// tracelogDescExchangeID is the schema descriptor for exchange_id field.
+	tracelogDescExchangeID := tracelogFields[37].Descriptor()
+	// tracelog.DefaultExchangeID holds the default value on creation for the exchange_id field.
+	tracelog.DefaultExchangeID = tracelogDescExchangeID.Default.(string)
+	// tracelogDescExchangeKind is the schema descriptor for exchange_kind field.
+	tracelogDescExchangeKind := tracelogFields[38].Descriptor()
+	// tracelog.DefaultExchangeKind holds the default value on creation for the exchange_kind field.
+	tracelog.DefaultExchangeKind = tracelogDescExchangeKind.Default.(string)
+	// tracelogDescExchangeRole is the schema descriptor for exchange_role field.
+	tracelogDescExchangeRole := tracelogFields[39].Descriptor()
+	// tracelog.DefaultExchangeRole holds the default value on creation for the exchange_role field.
+	tracelog.DefaultExchangeRole = tracelogDescExchangeRole.Default.(string)
+	// tracelogDescParentExchangeID is the schema descriptor for parent_exchange_id field.
+	tracelogDescParentExchangeID := tracelogFields[40].Descriptor()
+	// tracelog.DefaultParentExchangeID holds the default value on creation for the parent_exchange_id field.
+	tracelog.DefaultParentExchangeID = tracelogDescParentExchangeID.Default.(string)
+	// tracelogDescSequenceIndex is the schema descriptor for sequence_index field.
+	tracelogDescSequenceIndex := tracelogFields[41].Descriptor()
+	// tracelog.DefaultSequenceIndex holds the default value on creation for the sequence_index field.
+	tracelog.DefaultSequenceIndex = tracelogDescSequenceIndex.Default.(int)
 	// tracelogDescRoutingPolicy is the schema descriptor for routing_policy field.
-	tracelogDescRoutingPolicy := tracelogFields[35].Descriptor()
+	tracelogDescRoutingPolicy := tracelogFields[42].Descriptor()
 	// tracelog.DefaultRoutingPolicy holds the default value on creation for the routing_policy field.
 	tracelog.DefaultRoutingPolicy = tracelogDescRoutingPolicy.Default.(string)
 	// tracelogDescRoutingScore is the schema descriptor for routing_score field.
-	tracelogDescRoutingScore := tracelogFields[36].Descriptor()
+	tracelogDescRoutingScore := tracelogFields[43].Descriptor()
 	// tracelog.DefaultRoutingScore holds the default value on creation for the routing_score field.
 	tracelog.DefaultRoutingScore = tracelogDescRoutingScore.Default.(float64)
 	// tracelogDescRoutingCandidateCount is the schema descriptor for routing_candidate_count field.
-	tracelogDescRoutingCandidateCount := tracelogFields[37].Descriptor()
+	tracelogDescRoutingCandidateCount := tracelogFields[44].Descriptor()
 	// tracelog.DefaultRoutingCandidateCount holds the default value on creation for the routing_candidate_count field.
 	tracelog.DefaultRoutingCandidateCount = tracelogDescRoutingCandidateCount.Default.(int)
 	// tracelogDescRoutingFailureReason is the schema descriptor for routing_failure_reason field.
-	tracelogDescRoutingFailureReason := tracelogFields[38].Descriptor()
+	tracelogDescRoutingFailureReason := tracelogFields[45].Descriptor()
 	// tracelog.DefaultRoutingFailureReason holds the default value on creation for the routing_failure_reason field.
 	tracelog.DefaultRoutingFailureReason = tracelogDescRoutingFailureReason.Default.(string)
 	// tracelogDescID is the schema descriptor for id field.
