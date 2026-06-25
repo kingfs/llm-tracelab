@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { apiPaths, MONITOR_TOKEN_KEY, postJSON, requestJSON } from "./lib/api";
 import { useI18n } from "./lib/i18n";
@@ -22,6 +22,7 @@ import { UpstreamDetailPage } from "./routes/UpstreamDetailPage";
 
 function App() {
   const { t } = useI18n();
+  const location = useLocation();
   const [auth, setAuth] = useState({ loading: true, required: false, authorized: false, error: "", user: null });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -107,30 +108,65 @@ function App() {
 
   return (
     <AppShell user={auth.user} onLogout={logout}>
-      <Routes>
-        <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route path="/overview" element={<OverviewPage />} />
-        <Route path="/events" element={<EventsPage />} />
-        <Route path="/requests" element={<RequestsPage />} />
-        <Route path="/traces" element={<RequestsPage />} />
-        <Route path="/sessions" element={<SessionsPage />} />
-        <Route path="/audit" element={<AuditPage />} />
-        <Route path="/models" element={<ModelsPage />} />
-        <Route path="/models/:model" element={<ModelDetailPage />} />
-        <Route path="/providers" element={<ChannelsPage />} />
-        <Route path="/providers/:providerID" element={<ChannelDetailPage />} />
-        <Route path="/channels" element={<Navigate to="/providers" replace />} />
-        <Route path="/channels/:channelID" element={<ChannelDetailPage />} />
-        <Route path="/connect" element={<ConnectPage />} />
-        <Route path="/routing" element={<RoutingPage />} />
-        <Route path="/analysis" element={<AnalysisPage />} />
-        <Route path="/tokens" element={<TokensPage />} />
-        <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
-        <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
-        <Route path="/traces/:traceID" element={<TraceDetailPage />} />
-      </Routes>
+      <MonitorErrorBoundary key={`${location.pathname}${location.search}`}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/overview" replace />} />
+          <Route path="/overview" element={<OverviewPage />} />
+          <Route path="/events" element={<EventsPage />} />
+          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/traces" element={<RequestsPage />} />
+          <Route path="/sessions" element={<SessionsPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/models" element={<ModelsPage />} />
+          <Route path="/models/:model" element={<ModelDetailPage />} />
+          <Route path="/providers" element={<ChannelsPage />} />
+          <Route path="/providers/:providerID" element={<ChannelDetailPage />} />
+          <Route path="/channels" element={<Navigate to="/providers" replace />} />
+          <Route path="/channels/:channelID" element={<ChannelDetailPage />} />
+          <Route path="/connect" element={<ConnectPage />} />
+          <Route path="/routing" element={<RoutingPage />} />
+          <Route path="/analysis" element={<AnalysisPage />} />
+          <Route path="/tokens" element={<TokensPage />} />
+          <Route path="/sessions/:sessionID" element={<SessionDetailPage />} />
+          <Route path="/upstreams/:upstreamID" element={<UpstreamDetailPage />} />
+          <Route path="/traces/:traceID" element={<TraceDetailPage />} />
+        </Routes>
+      </MonitorErrorBoundary>
     </AppShell>
   );
+}
+
+class MonitorErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error) {
+    console.error("Monitor page render failed", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="shell shell-list">
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <h2>Unable to render this page</h2>
+              </div>
+            </div>
+            <p className="event-message">{this.state.error.message || "The monitor UI hit a rendering error."}</p>
+          </section>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default App;

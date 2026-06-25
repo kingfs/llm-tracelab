@@ -502,7 +502,7 @@ function RelatedUpstreamCallsPanel({ calls = [], currentTraceID = "", fromSessio
                 </div>
                 <div className="trace-tag-group">
                   <InlineTag tone={failed ? "danger" : "green"}>{statusCode || (failed ? "error" : "ok")}</InlineTag>
-                  <InlineTag tone={call.exchange_kind === "model" ? "gold" : "default"}>{call.exchange_role || call.exchange_kind || "model"}</InlineTag>
+                  <InlineTag tone={call.exchange_kind === "model" ? "gold" : "default"}>{exchangeLabel(call.exchange_role || call.exchange_kind || "model")}</InlineTag>
                   <InlineTag tone="accent">{formatEndpointTag(call.endpoint || call.operation)}</InlineTag>
                   <InlineTag>{formatProviderTag(call.provider)}</InlineTag>
                   {call.selected_upstream_id || call.upstream_id || call.route_target ? <InlineTag tone="green">{call.selected_upstream_id || call.upstream_id || call.route_target}</InlineTag> : null}
@@ -781,7 +781,7 @@ function AuditPanel({ findings, InlineTag, CodeBlock }) {
   if (findings.loading && !findings.data) {
     return <EmptyState title="Loading findings" detail="Reading deterministic audit findings for this trace." />;
   }
-  const items = findings.data?.items || [];
+  const items = Array.isArray(findings.data?.items) ? findings.data.items : Array.isArray(findings.data) ? findings.data : [];
   return (
     <section className="panel audit-panel">
       <div className="panel-head">
@@ -862,6 +862,24 @@ function formatSequence(value) {
     return "-";
   }
   return `#${value}`;
+}
+
+function exchangeLabel(value = "") {
+  switch (String(value || "").trim()) {
+    case "primary_model_call":
+      return "Primary";
+    case "client_request":
+      return "Client";
+    case "upstream_model_call":
+    case "model_call":
+      return "Model";
+    case "model":
+      return "Model";
+    case "entry":
+      return "Client";
+    default:
+      return value || "Model";
+  }
 }
 
 function PerformancePanel({ performance }) {

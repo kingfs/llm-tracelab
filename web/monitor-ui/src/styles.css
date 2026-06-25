@@ -380,7 +380,7 @@ a {
 
 .shell {
   width: 100%;
-  max-width: 1600px;
+  max-width: none;
   margin: 0 auto;
   padding: 16px 20px 48px;
 }

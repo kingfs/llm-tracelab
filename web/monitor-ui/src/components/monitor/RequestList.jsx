@@ -77,12 +77,12 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
           {childRole === "upstream" ? <span className="trace-child-rail" aria-hidden="true" /> : null}
           <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
-            {childRole === "upstream" ? <InlineTag tone="gold">model call</InlineTag> : null}
+            {childRole === "upstream" ? <InlineTag tone="gold">Child</InlineTag> : null}
             <ExchangeTag item={item} />
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
             {item.selected_upstream_id ? <UpstreamTag item={item} /> : null}
-            {!groupedChild && upstreamCallCount > 0 ? <InlineTag tone="gold">{upstreamCallCount} downstream call{upstreamCallCount === 1 ? "" : "s"}</InlineTag> : null}
+            {!groupedChild && upstreamCallCount > 0 ? <InlineTag tone="gold">{upstreamCallCount} child</InlineTag> : null}
             {item.session_id ? <InlineTag tone="green">{t("sessions.title")}</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
             <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status, t)}</InlineTag>
@@ -115,9 +115,27 @@ function ExchangeTag({ item }) {
   if (!kind && !role) {
     return <InlineTag>client</InlineTag>;
   }
-  const label = role || kind;
+  const label = exchangeLabel(role || kind);
   const tone = kind === "model" ? "gold" : kind === "entry" ? "green" : "default";
   return <InlineTag tone={tone}>{label}</InlineTag>;
+}
+
+function exchangeLabel(value = "") {
+  switch (String(value || "").trim()) {
+    case "primary_model_call":
+      return "Primary";
+    case "client_request":
+      return "Client";
+    case "upstream_model_call":
+    case "model_call":
+      return "Model";
+    case "model":
+      return "Model";
+    case "entry":
+      return "Client";
+    default:
+      return value || "Client";
+  }
 }
 
 function UpstreamTag({ item }) {

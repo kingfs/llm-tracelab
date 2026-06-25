@@ -405,13 +405,13 @@ function ResponsesEntryExchangeSummary({ exchange }) {
       <div className="panel-head panel-head-compact">
         <div>
           <p className="eyebrow">Entry exchange</p>
-          <h2>{exchange.exchange_role || exchange.exchange_kind || "client request"}</h2>
+          <h2>{exchangeLabel(exchange.exchange_role || exchange.exchange_kind || "client request")}</h2>
         </div>
         <InlineTag tone={exchange.error_text || Number(exchange.status_code || 0) >= 400 ? "danger" : "green"}>{exchange.status_code || (exchange.error_text ? "error" : "entry")}</InlineTag>
       </div>
       <div className="detail-meta-strip responses-entry-exchange-summary">
-        <DetailMetaPill label="kind" value={exchange.exchange_kind || "entry"} />
-        <DetailMetaPill label="role" value={exchange.exchange_role || "-"} />
+        <DetailMetaPill label="kind" value={exchangeLabel(exchange.exchange_kind || "entry")} />
+        <DetailMetaPill label="role" value={exchangeLabel(exchange.exchange_role || "-")} />
         <DetailMetaPill label="sequence" value={formatSequence(exchange.sequence_index)} />
         <DetailMetaPill label="model" value={exchange.model || "-"} />
         <DetailMetaPill label="provider" value={exchange.provider || "-"} />
@@ -438,8 +438,8 @@ function ResponsesExchangeTable({ exchanges }) {
       {exchanges.map((exchange) => (
         <div className="responses-exchange-row" key={exchange.id || exchange.trace_id || `${exchange.exchange_role || "exchange"}-${exchange.sequence_index || 0}`}>
           <span>
-            <span className="responses-exchange-primary">{exchange.exchange_role || exchange.exchange_kind || "model"}</span>
-            <span className="responses-exchange-subline">{exchange.exchange_kind || "model"} / seq {formatSequence(exchange.sequence_index)}</span>
+            <span className="responses-exchange-primary">{exchangeLabel(exchange.exchange_role || exchange.exchange_kind || "model")}</span>
+            <span className="responses-exchange-subline">{exchangeLabel(exchange.exchange_kind || "model")} / seq {formatSequence(exchange.sequence_index)}</span>
           </span>
           <span>
             <span className="responses-exchange-primary">{exchange.model || "-"}</span>
@@ -461,6 +461,26 @@ function ResponsesExchangeTable({ exchanges }) {
 
 function formatSequence(value) {
   return Number.isFinite(Number(value)) && Number(value) !== 0 ? String(value) : "0";
+}
+
+function exchangeLabel(value = "") {
+  switch (String(value || "").trim()) {
+    case "primary_model_call":
+      return "Primary";
+    case "client_request":
+      return "Client";
+    case "upstream_model_call":
+    case "model_call":
+      return "Model";
+    case "model":
+      return "Model";
+    case "entry":
+      return "Client";
+    case "-":
+      return "-";
+    default:
+      return value || "-";
+  }
 }
 
 function formatJSON(value) {
