@@ -64,6 +64,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		return runtime.ChatCompletionResponse{}, fmt.Errorf("create chat completion routing request: %w", err)
 	}
 	routeReq.Header.Set("Content-Type", "application/json")
+	applyCorrelationHeaders(routeReq.Header, ctx)
 
 	selection, err := a.router.SelectWithBody(routeReq, body)
 	if err != nil {
@@ -611,6 +612,20 @@ func applyResponsesServerChatHeaders(req *http.Request, selection *router.Select
 		req.ContentLength = int64(len(body))
 	}
 	selection.Target.Upstream.ApplyAuthHeaders(req.Header)
+	applyCorrelationHeaders(req.Header, req.Context())
+}
+
+func applyCorrelationHeaders(dst http.Header, ctx context.Context) {
+	headers, ok := responsesaudit.CorrelationHeadersFromContext(ctx)
+	if !ok {
+		return
+	}
+	for key, values := range headers {
+		dst.Del(key)
+		for _, value := range values {
+			dst.Add(key, value)
+		}
+	}
 }
 
 func recordResponsesServerChatResponse(logInfo *recorder.LogInfo, resp *http.Response, startedAt time.Time) ([]byte, bool, error) {

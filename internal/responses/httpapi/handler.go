@@ -91,6 +91,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "runtime is required", "server_error", "server_error")
 		return
 	}
+	r = r.WithContext(audit.ContextWithCorrelationHeaders(r.Context(), r.Header))
 	switch {
 	case r.URL.Path == "/v1/responses":
 		h.serveResponses(w, r)

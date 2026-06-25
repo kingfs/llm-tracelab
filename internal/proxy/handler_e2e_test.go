@@ -803,10 +803,18 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 
 	var gotPath string
 	var gotAuth string
+	var gotSessionID string
+	var gotThreadID string
+	var gotClientRequestID string
+	var gotCodexMetadata string
 	var gotChatBody map[string]any
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
+		gotSessionID = r.Header.Get("Session-Id")
+		gotThreadID = r.Header.Get("Thread-Id")
+		gotClientRequestID = r.Header.Get("X-Client-Request-Id")
+		gotCodexMetadata = r.Header.Get("X-Codex-Turn-Metadata")
 		if r.URL.Path != "/v1/chat/completions" {
 			http.NotFound(w, r)
 			return
@@ -858,6 +866,10 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Client-Request-Id", "client-audit-1")
+	req.Header.Set("Session-Id", "session-audit-1")
+	req.Header.Set("Thread-Id", "thread-audit-1")
+	req.Header.Set("X-Codex-Window-Id", "session-audit-1:1")
+	req.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"session-audit-1","thread_id":"thread-audit-1"}`)
 	req.Header.Set("X-Entry-Test", "preserve-me")
 
 	resp, err := proxyServer.Client().Do(req)
@@ -886,6 +898,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if gotAuth != "Bearer upstream-secret" {
 		t.Fatalf("Authorization = %q, want Bearer upstream-secret", gotAuth)
+	}
+	if gotSessionID != "session-audit-1" || gotThreadID != "thread-audit-1" || gotClientRequestID != "client-audit-1" || gotCodexMetadata == "" {
+		t.Fatalf("upstream correlation headers session/thread/client/metadata = %q/%q/%q/%q", gotSessionID, gotThreadID, gotClientRequestID, gotCodexMetadata)
 	}
 	if gotChatBody["model"] != "gpt-5" {
 		t.Fatalf("chat body model = %v, want gpt-5; body=%+v", gotChatBody["model"], gotChatBody)
@@ -930,6 +945,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	if !strings.Contains(string(entryReqFull), "X-Entry-Test: preserve-me") {
 		t.Fatalf("entry request header missing client header:\n%s", string(entryReqFull))
 	}
+	if !strings.Contains(string(entryReqFull), "Session-Id: session-audit-1") {
+		t.Fatalf("entry request header missing codex session header:\n%s", string(entryReqFull))
+	}
 	if string(entryReqBody) != `{"model":"gpt-5","input":"ping"}` {
 		t.Fatalf("entry request body = %q, want original client body", string(entryReqBody))
 	}
@@ -965,6 +983,14 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if parsed.Header.Layout.IsStream {
 		t.Fatalf("recorded IsStream = true, want false")
+	}
+	recordContent, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read model call cassette: %v", err)
+	}
+	recordReqFull, _, _, _ := recordfile.ExtractSections(recordContent, parsed)
+	if !strings.Contains(string(recordReqFull), "Session-Id: session-audit-1") || !strings.Contains(string(recordReqFull), "Thread-Id: thread-audit-1") || !strings.Contains(string(recordReqFull), "X-Codex-Turn-Metadata: ") {
+		t.Fatalf("model call cassette missing codex correlation headers:\n%s", string(recordReqFull))
 	}
 	if parsed.Header.Usage.PromptTokens != 3 || parsed.Header.Usage.CompletionTokens != 2 || parsed.Header.Usage.TotalTokens != 5 {
 		t.Fatalf("recorded usage = %+v, want prompt=3 completion=2 total=5", parsed.Header.Usage)
@@ -1009,6 +1035,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	}
 	if audit.HeaderJSON["content-type"] != "application/json" || audit.HeaderJSON["x-client-request-id"] != "client-audit-1" {
 		t.Fatalf("request audit headers = %#v", audit.HeaderJSON)
+	}
+	if audit.HeaderJSON["session-id"] != "session-audit-1" || audit.HeaderJSON["thread-id"] != "thread-audit-1" || audit.HeaderJSON["x-codex-turn-metadata"] == "" {
+		t.Fatalf("request audit codex headers = %#v", audit.HeaderJSON)
 	}
 
 	exchanges, err := st.EntClient().UpstreamExchange.Query().

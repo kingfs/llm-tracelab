@@ -2808,7 +2808,7 @@ func TestSyncSkipsIncompleteHTTPFiles(t *testing.T) {
 }
 
 func TestExtractGroupingInfoPrefersSessionIDHeader(t *testing.T) {
-	req := []byte("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession_id: sess-123\r\nX-Codex-Window-Id: sess-123:0\r\nX-Client-Request-Id: req-123\r\n\r\n{}")
+	req := []byte("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nSession-Id: sess-123\r\nX-Codex-Window-Id: sess-123:0\r\nX-Client-Request-Id: req-123\r\n\r\n{}")
 	info, err := extractGroupingInfoFromRequest(req)
 	if err != nil {
 		t.Fatalf("extractGroupingInfoFromRequest() error = %v", err)

@@ -250,6 +250,10 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	req.Header.Set("User-Agent", "tracelab-test")
 	req.Header.Set("X-Client-Request-Id", "client-1")
 	req.Header.Set("X-Codex-Window-Id", "window-1")
+	req.Header.Set("Session-Id", "session-1")
+	req.Header.Set("Thread-Id", "thread-1")
+	req.Header.Set("Originator", "codex-tui")
+	req.Header.Set("X-Codex-Turn-Metadata", `{"session_id":"session-1","thread_id":"thread-1"}`)
 
 	rec := httptest.NewRecorder()
 	NewHandler(rt, WithRequestAuditor(auditor), WithExecutionEventRecorder(auditor)).ServeHTTP(rec, req)
@@ -267,7 +271,7 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	if entry.BodySha256 != audit.BodySHA256([]byte(body)) || entry.BodyPreview != body {
 		t.Fatalf("body audit mismatch: %#v", entry)
 	}
-	if entry.HeaderJSON["content-type"] != "application/json" || entry.HeaderJSON["user-agent"] != "tracelab-test" || entry.HeaderJSON["x-client-request-id"] != "client-1" || entry.HeaderJSON["x-codex-window-id"] != "window-1" {
+	if entry.HeaderJSON["content-type"] != "application/json" || entry.HeaderJSON["user-agent"] != "tracelab-test" || entry.HeaderJSON["x-client-request-id"] != "client-1" || entry.HeaderJSON["x-codex-window-id"] != "window-1" || entry.HeaderJSON["session-id"] != "session-1" || entry.HeaderJSON["thread-id"] != "thread-1" || entry.HeaderJSON["originator"] != "codex-tui" || entry.HeaderJSON["x-codex-turn-metadata"] != `{"session_id":"session-1","thread_id":"thread-1"}` {
 		t.Fatalf("header audit mismatch: %#v", entry.HeaderJSON)
 	}
 	if auditor.completedID != "audit_1" {
@@ -278,6 +282,9 @@ func TestCreateResponseAuditsAcceptedAndCompleted(t *testing.T) {
 	}
 	if auditID, ok := audit.RequestAuditIDFromContext(rt.createCtx); !ok || auditID != "audit_1" {
 		t.Fatalf("runtime context audit id = %q/%v, want audit_1/true", auditID, ok)
+	}
+	if headers, ok := audit.CorrelationHeadersFromContext(rt.createCtx); !ok || headers.Get("Session-Id") != "session-1" || headers.Get("Thread-Id") != "thread-1" || headers.Get("X-Codex-Turn-Metadata") == "" {
+		t.Fatalf("runtime context correlation headers = %#v/%v", headers, ok)
 	}
 	if auditor.rejectedID != "" {
 		t.Fatalf("unexpected rejected audit: id=%q failure=%#v", auditor.rejectedID, auditor.rejected)

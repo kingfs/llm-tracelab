@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
@@ -140,14 +141,37 @@ func AllowedHeaders(header http.Header) map[string]any {
 		headerName string
 	}{
 		{key: "content-type", headerName: "Content-Type"},
-		{key: "user-agent", headerName: "User-Agent"},
-		{key: "x-client-request-id", headerName: "X-Client-Request-Id"},
-		{key: "session_id", headerName: "session_id"},
-		{key: "x-codex-window-id", headerName: "X-Codex-Window-Id"},
 	} {
 		if value := headerValue(header, item.headerName); value != "" {
 			out[item.key] = value
 		}
+	}
+	for _, name := range correlationHeaderNames {
+		if value := headerValue(header, name); value != "" {
+			out[headerJSONKey(name)] = value
+		}
+	}
+	return out
+}
+
+func CorrelationHeaders(header http.Header) http.Header {
+	out := http.Header{}
+	for _, name := range correlationHeaderNames {
+		values := header.Values(name)
+		if len(values) == 0 {
+			if value := headerValue(header, name); value != "" {
+				values = []string{value}
+			}
+		}
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value != "" {
+				out.Add(name, value)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -177,6 +201,33 @@ func headerValue(header http.Header, name string) string {
 		return values[0]
 	}
 	return ""
+}
+
+func cloneHeader(in http.Header) http.Header {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(http.Header, len(in))
+	for key, values := range in {
+		out[key] = append([]string(nil), values...)
+	}
+	return out
+}
+
+func headerJSONKey(name string) string {
+	return strings.ToLower(name)
+}
+
+var correlationHeaderNames = []string{
+	"User-Agent",
+	"Originator",
+	"Session-Id",
+	"session_id",
+	"Thread-Id",
+	"X-Client-Request-Id",
+	"X-Codex-Beta-Features",
+	"X-Codex-Turn-Metadata",
+	"X-Codex-Window-Id",
 }
 
 func mergeInto(dst map[string]any, src map[string]any) {

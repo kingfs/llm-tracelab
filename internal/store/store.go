@@ -7256,7 +7256,7 @@ func extractGroupingInfoFromRequest(reqFull []byte) (GroupingInfo, error) {
 		WindowID:        strings.TrimSpace(headers.Get("X-Codex-Window-Id")),
 		ClientRequestID: strings.TrimSpace(headers.Get("X-Client-Request-Id")),
 	}
-	if sessionID := strings.TrimSpace(headers.Get("Session_id")); sessionID != "" {
+	if sessionID := firstHeaderValue(headers, "Session-Id", "Session_id"); sessionID != "" {
 		info.SessionID = sessionID
 		info.SessionSource = "header.session_id"
 		return info, nil
@@ -7305,6 +7305,15 @@ func parseRawRequestHeaders(reqFull []byte) textproto.MIMEHeader {
 		headers.Add(textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name)), strings.TrimSpace(value))
 	}
 	return headers
+}
+
+func firstHeaderValue(headers textproto.MIMEHeader, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func normalizeWindowSessionID(windowID string) string {
