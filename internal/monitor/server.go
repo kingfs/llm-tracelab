@@ -616,6 +616,8 @@ type performanceView struct {
 	Upstreams              []upstreamPerf  `json:"upstreams,omitempty"`
 	ByModel                []perfCountItem `json:"by_model,omitempty"`
 	ByEndpoint             []perfCountItem `json:"by_endpoint,omitempty"`
+
+	decodeDurationMs int64
 }
 
 type upstreamPerf struct {
@@ -5930,6 +5932,9 @@ func addTraceToPerformance(perf *performanceView, trace traceListItem) {
 	perf.PromptTokens += trace.PromptTokens
 	perf.CompletionTokens += trace.CompletionTokens
 	perf.CachedTokens += trace.CachedTokens
+	if decodeMs := trace.DurationMs - trace.TTFTMs; decodeMs > 0 {
+		perf.decodeDurationMs += decodeMs
+	}
 	if trace.StatusCode >= 200 && trace.StatusCode < 300 && strings.TrimSpace(trace.Error) == "" {
 		perf.SuccessRequest++
 	} else {
@@ -5947,7 +5952,7 @@ func finalizePerformance(perf *performanceView) {
 	}
 	perf.TokensPerSec = tokensPerSec(perf.TotalTokens, totalDuration)
 	perf.PPTokensPerSec = tokensPerSec(perf.PromptTokens, totalTTFT)
-	perf.TGTokensPerSec = tokensPerSec(perf.CompletionTokens, totalDuration-totalTTFT)
+	perf.TGTokensPerSec = tokensPerSec(perf.CompletionTokens, perf.decodeDurationMs)
 	perf.PrefillTokensPerSec = perf.PPTokensPerSec
 	perf.GenerationTokensPerSec = perf.TGTokensPerSec
 	perf.CacheRatio = cacheRatio(perf.CachedTokens, perf.PromptTokens)
