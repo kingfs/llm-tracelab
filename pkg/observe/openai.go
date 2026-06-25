@@ -58,11 +58,7 @@ func (p openAIParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 		RawRefs: RawReferences{
 			CassettePath: input.CassettePath,
 		},
-		Timings: ObservationTimings{
-			StartedAt:  input.Header.Meta.Time,
-			DurationMs: input.Header.Meta.DurationMs,
-			TTFTMs:     input.Header.Meta.TTFTMs,
-		},
+		Timings: observationTimings(input),
 	}
 	applyExchangeMetadata(input, &obs)
 	obs.Usage = ObservationUsage{

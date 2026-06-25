@@ -3999,6 +3999,11 @@ func TestTracePerformanceAPIHandlerReturnsMetrics(t *testing.T) {
 	if out.Performance.TotalTokens != 30 || out.Performance.TokensPerSec != 300 || out.Performance.CacheRatio != 0.4 {
 		t.Fatalf("performance = %+v", out.Performance)
 	}
+	if out.Performance.PPTokensPerSec != 1000 || out.Performance.PrefillTokensPerSec != 1000 ||
+		out.Performance.TGTokensPerSec < 222 || out.Performance.TGTokensPerSec > 223 ||
+		out.Performance.GenerationTokensPerSec < 222 || out.Performance.GenerationTokensPerSec > 223 {
+		t.Fatalf("performance rates = %+v", out.Performance)
+	}
 	if !out.Performance.IsStream || !out.Performance.RoutingFallback || out.Performance.SelectedUpstreamID != "openai-primary" {
 		t.Fatalf("routing performance = %+v", out.Performance)
 	}

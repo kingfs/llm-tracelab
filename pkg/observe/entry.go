@@ -45,11 +45,7 @@ func (p entryParser) Parse(ctx context.Context, input ParseInput) (TraceObservat
 		RawRefs: RawReferences{
 			CassettePath: input.CassettePath,
 		},
-		Timings: ObservationTimings{
-			StartedAt:  input.Header.Meta.Time,
-			DurationMs: input.Header.Meta.DurationMs,
-			TTFTMs:     input.Header.Meta.TTFTMs,
-		},
+		Timings: observationTimings(input),
 		Usage: ObservationUsage{
 			InputTokens:         input.Header.Usage.PromptTokens,
 			OutputTokens:        input.Header.Usage.CompletionTokens,

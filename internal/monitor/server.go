@@ -591,27 +591,31 @@ type performanceResponse struct {
 }
 
 type performanceView struct {
-	RequestCount       int             `json:"request_count"`
-	SuccessRequest     int             `json:"success_request"`
-	FailedRequest      int             `json:"failed_request"`
-	SuccessRate        float64         `json:"success_rate"`
-	DurationMs         int64           `json:"duration_ms"`
-	TTFTMs             int64           `json:"ttft_ms"`
-	TokensPerSec       float64         `json:"tokens_per_sec"`
-	TotalTokens        int             `json:"total_tokens"`
-	PromptTokens       int             `json:"prompt_tokens"`
-	CompletionTokens   int             `json:"completion_tokens"`
-	CachedTokens       int             `json:"cached_tokens"`
-	CacheRatio         float64         `json:"cache_ratio"`
-	StatusCode         int             `json:"status_code,omitempty"`
-	ProviderError      string          `json:"provider_error,omitempty"`
-	IsStream           bool            `json:"is_stream,omitempty"`
-	SelectedUpstreamID string          `json:"selected_upstream_id,omitempty"`
-	RoutingPolicy      string          `json:"routing_policy,omitempty"`
-	RoutingFallback    bool            `json:"routing_fallback,omitempty"`
-	Upstreams          []upstreamPerf  `json:"upstreams,omitempty"`
-	ByModel            []perfCountItem `json:"by_model,omitempty"`
-	ByEndpoint         []perfCountItem `json:"by_endpoint,omitempty"`
+	RequestCount           int             `json:"request_count"`
+	SuccessRequest         int             `json:"success_request"`
+	FailedRequest          int             `json:"failed_request"`
+	SuccessRate            float64         `json:"success_rate"`
+	DurationMs             int64           `json:"duration_ms"`
+	TTFTMs                 int64           `json:"ttft_ms"`
+	TokensPerSec           float64         `json:"tokens_per_sec"`
+	PPTokensPerSec         float64         `json:"pp_tokens_per_sec"`
+	TGTokensPerSec         float64         `json:"tg_tokens_per_sec"`
+	PrefillTokensPerSec    float64         `json:"prefill_tokens_per_sec"`
+	GenerationTokensPerSec float64         `json:"generation_tokens_per_sec"`
+	TotalTokens            int             `json:"total_tokens"`
+	PromptTokens           int             `json:"prompt_tokens"`
+	CompletionTokens       int             `json:"completion_tokens"`
+	CachedTokens           int             `json:"cached_tokens"`
+	CacheRatio             float64         `json:"cache_ratio"`
+	StatusCode             int             `json:"status_code,omitempty"`
+	ProviderError          string          `json:"provider_error,omitempty"`
+	IsStream               bool            `json:"is_stream,omitempty"`
+	SelectedUpstreamID     string          `json:"selected_upstream_id,omitempty"`
+	RoutingPolicy          string          `json:"routing_policy,omitempty"`
+	RoutingFallback        bool            `json:"routing_fallback,omitempty"`
+	Upstreams              []upstreamPerf  `json:"upstreams,omitempty"`
+	ByModel                []perfCountItem `json:"by_model,omitempty"`
+	ByEndpoint             []perfCountItem `json:"by_endpoint,omitempty"`
 }
 
 type upstreamPerf struct {
@@ -630,13 +634,17 @@ type upstreamPerf struct {
 }
 
 type perfCountItem struct {
-	Label        string  `json:"label"`
-	Count        int     `json:"count"`
-	TotalTokens  int     `json:"total_tokens"`
-	AvgDuration  int64   `json:"avg_duration_ms"`
-	AvgTTFT      int64   `json:"avg_ttft_ms"`
-	SuccessRate  float64 `json:"success_rate"`
-	TokensPerSec float64 `json:"tokens_per_sec"`
+	Label                  string  `json:"label"`
+	Count                  int     `json:"count"`
+	TotalTokens            int     `json:"total_tokens"`
+	AvgDuration            int64   `json:"avg_duration_ms"`
+	AvgTTFT                int64   `json:"avg_ttft_ms"`
+	SuccessRate            float64 `json:"success_rate"`
+	TokensPerSec           float64 `json:"tokens_per_sec"`
+	PPTokensPerSec         float64 `json:"pp_tokens_per_sec"`
+	TGTokensPerSec         float64 `json:"tg_tokens_per_sec"`
+	PrefillTokensPerSec    float64 `json:"prefill_tokens_per_sec"`
+	GenerationTokensPerSec float64 `json:"generation_tokens_per_sec"`
 }
 
 type traceUpstreamHealthView struct {
@@ -5835,25 +5843,31 @@ func buildTracePerformance(entry store.LogEntry) performanceView {
 	} else {
 		failed = 1
 	}
+	pp := tokensPerSec(item.PromptTokens, item.TTFTMs)
+	tg := generationTokensPerSec(item.CompletionTokens, item.DurationMs, item.TTFTMs)
 	return performanceView{
-		RequestCount:       1,
-		SuccessRequest:     success,
-		FailedRequest:      failed,
-		SuccessRate:        float64(success),
-		DurationMs:         item.DurationMs,
-		TTFTMs:             item.TTFTMs,
-		TokensPerSec:       tokensPerSec(item.TotalTokens, item.DurationMs),
-		TotalTokens:        item.TotalTokens,
-		PromptTokens:       item.PromptTokens,
-		CompletionTokens:   item.CompletionTokens,
-		CachedTokens:       item.CachedTokens,
-		CacheRatio:         cacheRatio(item.CachedTokens, item.PromptTokens),
-		StatusCode:         item.StatusCode,
-		ProviderError:      item.Error,
-		IsStream:           item.IsStream,
-		SelectedUpstreamID: entry.Header.Meta.SelectedUpstreamID,
-		RoutingPolicy:      entry.Header.Meta.RoutingPolicy,
-		RoutingFallback:    entry.Header.Meta.RoutingCandidateCount > 1,
+		RequestCount:           1,
+		SuccessRequest:         success,
+		FailedRequest:          failed,
+		SuccessRate:            float64(success),
+		DurationMs:             item.DurationMs,
+		TTFTMs:                 item.TTFTMs,
+		TokensPerSec:           tokensPerSec(item.TotalTokens, item.DurationMs),
+		PPTokensPerSec:         pp,
+		TGTokensPerSec:         tg,
+		PrefillTokensPerSec:    pp,
+		GenerationTokensPerSec: tg,
+		TotalTokens:            item.TotalTokens,
+		PromptTokens:           item.PromptTokens,
+		CompletionTokens:       item.CompletionTokens,
+		CachedTokens:           item.CachedTokens,
+		CacheRatio:             cacheRatio(item.CachedTokens, item.PromptTokens),
+		StatusCode:             item.StatusCode,
+		ProviderError:          item.Error,
+		IsStream:               item.IsStream,
+		SelectedUpstreamID:     entry.Header.Meta.SelectedUpstreamID,
+		RoutingPolicy:          entry.Header.Meta.RoutingPolicy,
+		RoutingFallback:        entry.Header.Meta.RoutingCandidateCount > 1,
 	}
 }
 
@@ -5899,11 +5913,14 @@ func buildUpstreamPerformance(item upstreamItem) performanceView {
 }
 
 type perfAccumulator struct {
-	count        int
-	success      int
-	totalTokens  int
-	totalTTFT    int64
-	totalLatency int64
+	count            int
+	success          int
+	totalTokens      int
+	promptTokens     int
+	completionTokens int
+	totalTTFT        int64
+	totalLatency     int64
+	totalDecode      int64
 }
 
 func addTraceToPerformance(perf *performanceView, trace traceListItem) {
@@ -5922,12 +5939,17 @@ func addTraceToPerformance(perf *performanceView, trace traceListItem) {
 
 func finalizePerformance(perf *performanceView) {
 	totalDuration := perf.DurationMs
+	totalTTFT := perf.TTFTMs
 	if perf.RequestCount > 0 {
 		perf.SuccessRate = float64(perf.SuccessRequest) / float64(perf.RequestCount)
 		perf.DurationMs = perf.DurationMs / int64(perf.RequestCount)
 		perf.TTFTMs = perf.TTFTMs / int64(perf.RequestCount)
 	}
 	perf.TokensPerSec = tokensPerSec(perf.TotalTokens, totalDuration)
+	perf.PPTokensPerSec = tokensPerSec(perf.PromptTokens, totalTTFT)
+	perf.TGTokensPerSec = tokensPerSec(perf.CompletionTokens, totalDuration-totalTTFT)
+	perf.PrefillTokensPerSec = perf.PPTokensPerSec
+	perf.GenerationTokensPerSec = perf.TGTokensPerSec
 	perf.CacheRatio = cacheRatio(perf.CachedTokens, perf.PromptTokens)
 }
 
@@ -5939,8 +5961,13 @@ func addTraceToAccumulator(items map[string]*perfAccumulator, key string, trace 
 	}
 	acc.count++
 	acc.totalTokens += trace.TotalTokens
+	acc.promptTokens += trace.PromptTokens
+	acc.completionTokens += trace.CompletionTokens
 	acc.totalTTFT += trace.TTFTMs
 	acc.totalLatency += trace.DurationMs
+	if decodeMs := trace.DurationMs - trace.TTFTMs; decodeMs > 0 {
+		acc.totalDecode += decodeMs
+	}
 	if trace.StatusCode >= 200 && trace.StatusCode < 300 && strings.TrimSpace(trace.Error) == "" {
 		acc.success++
 	}
@@ -5955,6 +5982,10 @@ func perfCountItems(items map[string]*perfAccumulator) []perfCountItem {
 			item.AvgTTFT = acc.totalTTFT / int64(acc.count)
 			item.SuccessRate = float64(acc.success) / float64(acc.count)
 			item.TokensPerSec = tokensPerSec(acc.totalTokens, acc.totalLatency)
+			item.PPTokensPerSec = tokensPerSec(acc.promptTokens, acc.totalTTFT)
+			item.TGTokensPerSec = tokensPerSec(acc.completionTokens, acc.totalDecode)
+			item.PrefillTokensPerSec = item.PPTokensPerSec
+			item.GenerationTokensPerSec = item.TGTokensPerSec
 		}
 		out = append(out, item)
 	}
@@ -5972,6 +6003,10 @@ func tokensPerSec(tokens int, durationMs int64) float64 {
 		return 0
 	}
 	return float64(tokens) * 1000 / float64(durationMs)
+}
+
+func generationTokensPerSec(tokens int, durationMs int64, ttftMs int64) float64 {
+	return tokensPerSec(tokens, durationMs-ttftMs)
 }
 
 func cacheRatio(cached int, prompt int) float64 {

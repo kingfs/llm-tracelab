@@ -207,11 +207,15 @@ type ObservationUsage struct {
 }
 
 type ObservationTimings struct {
-	StartedAt    time.Time `json:"started_at,omitempty"`
-	CompletedAt  time.Time `json:"completed_at,omitempty"`
-	DurationMs   int64     `json:"duration_ms,omitempty"`
-	TTFTMs       int64     `json:"ttft_ms,omitempty"`
-	TokensPerSec float64   `json:"tokens_per_sec,omitempty"`
+	StartedAt              time.Time `json:"started_at,omitempty"`
+	CompletedAt            time.Time `json:"completed_at,omitempty"`
+	DurationMs             int64     `json:"duration_ms,omitempty"`
+	TTFTMs                 int64     `json:"ttft_ms,omitempty"`
+	TokensPerSec           float64   `json:"tokens_per_sec,omitempty"`
+	PPTokensPerSec         float64   `json:"pp_tokens_per_sec,omitempty"`
+	TGTokensPerSec         float64   `json:"tg_tokens_per_sec,omitempty"`
+	PrefillTokensPerSec    float64   `json:"prefill_tokens_per_sec,omitempty"`
+	GenerationTokensPerSec float64   `json:"generation_tokens_per_sec,omitempty"`
 }
 
 type ObservationSafety struct {
