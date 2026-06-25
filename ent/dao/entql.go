@@ -653,16 +653,22 @@ var schemaGraph = func() *sqlgraph.Schema {
 		},
 		Type: "TraceObservation",
 		Fields: map[string]*sqlgraph.FieldSpec{
-			traceobservation.FieldParser:        {Type: field.TypeString, Column: traceobservation.FieldParser},
-			traceobservation.FieldParserVersion: {Type: field.TypeString, Column: traceobservation.FieldParserVersion},
-			traceobservation.FieldStatus:        {Type: field.TypeString, Column: traceobservation.FieldStatus},
-			traceobservation.FieldProvider:      {Type: field.TypeString, Column: traceobservation.FieldProvider},
-			traceobservation.FieldOperation:     {Type: field.TypeString, Column: traceobservation.FieldOperation},
-			traceobservation.FieldModel:         {Type: field.TypeString, Column: traceobservation.FieldModel},
-			traceobservation.FieldSummaryJSON:   {Type: field.TypeString, Column: traceobservation.FieldSummaryJSON},
-			traceobservation.FieldWarningsJSON:  {Type: field.TypeString, Column: traceobservation.FieldWarningsJSON},
-			traceobservation.FieldCreatedAt:     {Type: field.TypeTime, Column: traceobservation.FieldCreatedAt},
-			traceobservation.FieldUpdatedAt:     {Type: field.TypeTime, Column: traceobservation.FieldUpdatedAt},
+			traceobservation.FieldParser:           {Type: field.TypeString, Column: traceobservation.FieldParser},
+			traceobservation.FieldParserVersion:    {Type: field.TypeString, Column: traceobservation.FieldParserVersion},
+			traceobservation.FieldStatus:           {Type: field.TypeString, Column: traceobservation.FieldStatus},
+			traceobservation.FieldProvider:         {Type: field.TypeString, Column: traceobservation.FieldProvider},
+			traceobservation.FieldOperation:        {Type: field.TypeString, Column: traceobservation.FieldOperation},
+			traceobservation.FieldModel:            {Type: field.TypeString, Column: traceobservation.FieldModel},
+			traceobservation.FieldExchangeKind:     {Type: field.TypeString, Column: traceobservation.FieldExchangeKind},
+			traceobservation.FieldExchangeRole:     {Type: field.TypeString, Column: traceobservation.FieldExchangeRole},
+			traceobservation.FieldParentExchangeID: {Type: field.TypeString, Column: traceobservation.FieldParentExchangeID},
+			traceobservation.FieldSequenceIndex:    {Type: field.TypeInt, Column: traceobservation.FieldSequenceIndex},
+			traceobservation.FieldRequestAuditID:   {Type: field.TypeString, Column: traceobservation.FieldRequestAuditID},
+			traceobservation.FieldResponseID:       {Type: field.TypeString, Column: traceobservation.FieldResponseID},
+			traceobservation.FieldSummaryJSON:      {Type: field.TypeString, Column: traceobservation.FieldSummaryJSON},
+			traceobservation.FieldWarningsJSON:     {Type: field.TypeString, Column: traceobservation.FieldWarningsJSON},
+			traceobservation.FieldCreatedAt:        {Type: field.TypeTime, Column: traceobservation.FieldCreatedAt},
+			traceobservation.FieldUpdatedAt:        {Type: field.TypeTime, Column: traceobservation.FieldUpdatedAt},
 		},
 	}
 	graph.Nodes[24] = &sqlgraph.Node{
@@ -3296,6 +3302,36 @@ func (f *TraceObservationFilter) WhereOperation(p entql.StringP) {
 // WhereModel applies the entql string predicate on the model field.
 func (f *TraceObservationFilter) WhereModel(p entql.StringP) {
 	f.Where(p.Field(traceobservation.FieldModel))
+}
+
+// WhereExchangeKind applies the entql string predicate on the exchange_kind field.
+func (f *TraceObservationFilter) WhereExchangeKind(p entql.StringP) {
+	f.Where(p.Field(traceobservation.FieldExchangeKind))
+}
+
+// WhereExchangeRole applies the entql string predicate on the exchange_role field.
+func (f *TraceObservationFilter) WhereExchangeRole(p entql.StringP) {
+	f.Where(p.Field(traceobservation.FieldExchangeRole))
+}
+
+// WhereParentExchangeID applies the entql string predicate on the parent_exchange_id field.
+func (f *TraceObservationFilter) WhereParentExchangeID(p entql.StringP) {
+	f.Where(p.Field(traceobservation.FieldParentExchangeID))
+}
+
+// WhereSequenceIndex applies the entql int predicate on the sequence_index field.
+func (f *TraceObservationFilter) WhereSequenceIndex(p entql.IntP) {
+	f.Where(p.Field(traceobservation.FieldSequenceIndex))
+}
+
+// WhereRequestAuditID applies the entql string predicate on the request_audit_id field.
+func (f *TraceObservationFilter) WhereRequestAuditID(p entql.StringP) {
+	f.Where(p.Field(traceobservation.FieldRequestAuditID))
+}
+
+// WhereResponseID applies the entql string predicate on the response_id field.
+func (f *TraceObservationFilter) WhereResponseID(p entql.StringP) {
+	f.Where(p.Field(traceobservation.FieldResponseID))
 }
 
 // WhereSummaryJSON applies the entql string predicate on the summary_json field.

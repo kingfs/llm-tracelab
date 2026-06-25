@@ -931,6 +931,9 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	if entryParsed.Header.Meta.RequestAuditID != "" {
 		t.Fatalf("entry RequestAuditID = %q, want empty until entry recorder receives audit metadata", entryParsed.Header.Meta.RequestAuditID)
 	}
+	if entryParsed.Header.Meta.ResponseID != responseID {
+		t.Fatalf("entry ResponseID = %q, want %q", entryParsed.Header.Meta.ResponseID, responseID)
+	}
 	if !hasRecordEvent(entryParsed.Events, "responses.entry.target") || !hasRecordEvent(entryParsed.Events, "responses.entry.completed") {
 		t.Fatalf("entry recorded events missing target/completed: %+v", entryParsed.Events)
 	}

@@ -94,6 +94,36 @@ func Model(v string) predicate.TraceObservation {
 	return predicate.TraceObservation(sql.FieldEQ(FieldModel, v))
 }
 
+// ExchangeKind applies equality check predicate on the "exchange_kind" field. It's identical to ExchangeKindEQ.
+func ExchangeKind(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldExchangeKind, v))
+}
+
+// ExchangeRole applies equality check predicate on the "exchange_role" field. It's identical to ExchangeRoleEQ.
+func ExchangeRole(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldExchangeRole, v))
+}
+
+// ParentExchangeID applies equality check predicate on the "parent_exchange_id" field. It's identical to ParentExchangeIDEQ.
+func ParentExchangeID(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldParentExchangeID, v))
+}
+
+// SequenceIndex applies equality check predicate on the "sequence_index" field. It's identical to SequenceIndexEQ.
+func SequenceIndex(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldSequenceIndex, v))
+}
+
+// RequestAuditID applies equality check predicate on the "request_audit_id" field. It's identical to RequestAuditIDEQ.
+func RequestAuditID(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldRequestAuditID, v))
+}
+
+// ResponseID applies equality check predicate on the "response_id" field. It's identical to ResponseIDEQ.
+func ResponseID(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldResponseID, v))
+}
+
 // SummaryJSON applies equality check predicate on the "summary_json" field. It's identical to SummaryJSONEQ.
 func SummaryJSON(v string) predicate.TraceObservation {
 	return predicate.TraceObservation(sql.FieldEQ(FieldSummaryJSON, v))
@@ -502,6 +532,371 @@ func ModelEqualFold(v string) predicate.TraceObservation {
 // ModelContainsFold applies the ContainsFold predicate on the "model" field.
 func ModelContainsFold(v string) predicate.TraceObservation {
 	return predicate.TraceObservation(sql.FieldContainsFold(FieldModel, v))
+}
+
+// ExchangeKindEQ applies the EQ predicate on the "exchange_kind" field.
+func ExchangeKindEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldExchangeKind, v))
+}
+
+// ExchangeKindNEQ applies the NEQ predicate on the "exchange_kind" field.
+func ExchangeKindNEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNEQ(FieldExchangeKind, v))
+}
+
+// ExchangeKindIn applies the In predicate on the "exchange_kind" field.
+func ExchangeKindIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldIn(FieldExchangeKind, vs...))
+}
+
+// ExchangeKindNotIn applies the NotIn predicate on the "exchange_kind" field.
+func ExchangeKindNotIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNotIn(FieldExchangeKind, vs...))
+}
+
+// ExchangeKindGT applies the GT predicate on the "exchange_kind" field.
+func ExchangeKindGT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGT(FieldExchangeKind, v))
+}
+
+// ExchangeKindGTE applies the GTE predicate on the "exchange_kind" field.
+func ExchangeKindGTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGTE(FieldExchangeKind, v))
+}
+
+// ExchangeKindLT applies the LT predicate on the "exchange_kind" field.
+func ExchangeKindLT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLT(FieldExchangeKind, v))
+}
+
+// ExchangeKindLTE applies the LTE predicate on the "exchange_kind" field.
+func ExchangeKindLTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLTE(FieldExchangeKind, v))
+}
+
+// ExchangeKindContains applies the Contains predicate on the "exchange_kind" field.
+func ExchangeKindContains(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContains(FieldExchangeKind, v))
+}
+
+// ExchangeKindHasPrefix applies the HasPrefix predicate on the "exchange_kind" field.
+func ExchangeKindHasPrefix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasPrefix(FieldExchangeKind, v))
+}
+
+// ExchangeKindHasSuffix applies the HasSuffix predicate on the "exchange_kind" field.
+func ExchangeKindHasSuffix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasSuffix(FieldExchangeKind, v))
+}
+
+// ExchangeKindEqualFold applies the EqualFold predicate on the "exchange_kind" field.
+func ExchangeKindEqualFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEqualFold(FieldExchangeKind, v))
+}
+
+// ExchangeKindContainsFold applies the ContainsFold predicate on the "exchange_kind" field.
+func ExchangeKindContainsFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContainsFold(FieldExchangeKind, v))
+}
+
+// ExchangeRoleEQ applies the EQ predicate on the "exchange_role" field.
+func ExchangeRoleEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldExchangeRole, v))
+}
+
+// ExchangeRoleNEQ applies the NEQ predicate on the "exchange_role" field.
+func ExchangeRoleNEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNEQ(FieldExchangeRole, v))
+}
+
+// ExchangeRoleIn applies the In predicate on the "exchange_role" field.
+func ExchangeRoleIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldIn(FieldExchangeRole, vs...))
+}
+
+// ExchangeRoleNotIn applies the NotIn predicate on the "exchange_role" field.
+func ExchangeRoleNotIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNotIn(FieldExchangeRole, vs...))
+}
+
+// ExchangeRoleGT applies the GT predicate on the "exchange_role" field.
+func ExchangeRoleGT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGT(FieldExchangeRole, v))
+}
+
+// ExchangeRoleGTE applies the GTE predicate on the "exchange_role" field.
+func ExchangeRoleGTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGTE(FieldExchangeRole, v))
+}
+
+// ExchangeRoleLT applies the LT predicate on the "exchange_role" field.
+func ExchangeRoleLT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLT(FieldExchangeRole, v))
+}
+
+// ExchangeRoleLTE applies the LTE predicate on the "exchange_role" field.
+func ExchangeRoleLTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLTE(FieldExchangeRole, v))
+}
+
+// ExchangeRoleContains applies the Contains predicate on the "exchange_role" field.
+func ExchangeRoleContains(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContains(FieldExchangeRole, v))
+}
+
+// ExchangeRoleHasPrefix applies the HasPrefix predicate on the "exchange_role" field.
+func ExchangeRoleHasPrefix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasPrefix(FieldExchangeRole, v))
+}
+
+// ExchangeRoleHasSuffix applies the HasSuffix predicate on the "exchange_role" field.
+func ExchangeRoleHasSuffix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasSuffix(FieldExchangeRole, v))
+}
+
+// ExchangeRoleEqualFold applies the EqualFold predicate on the "exchange_role" field.
+func ExchangeRoleEqualFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEqualFold(FieldExchangeRole, v))
+}
+
+// ExchangeRoleContainsFold applies the ContainsFold predicate on the "exchange_role" field.
+func ExchangeRoleContainsFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContainsFold(FieldExchangeRole, v))
+}
+
+// ParentExchangeIDEQ applies the EQ predicate on the "parent_exchange_id" field.
+func ParentExchangeIDEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDNEQ applies the NEQ predicate on the "parent_exchange_id" field.
+func ParentExchangeIDNEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNEQ(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDIn applies the In predicate on the "parent_exchange_id" field.
+func ParentExchangeIDIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldIn(FieldParentExchangeID, vs...))
+}
+
+// ParentExchangeIDNotIn applies the NotIn predicate on the "parent_exchange_id" field.
+func ParentExchangeIDNotIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNotIn(FieldParentExchangeID, vs...))
+}
+
+// ParentExchangeIDGT applies the GT predicate on the "parent_exchange_id" field.
+func ParentExchangeIDGT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGT(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDGTE applies the GTE predicate on the "parent_exchange_id" field.
+func ParentExchangeIDGTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGTE(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDLT applies the LT predicate on the "parent_exchange_id" field.
+func ParentExchangeIDLT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLT(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDLTE applies the LTE predicate on the "parent_exchange_id" field.
+func ParentExchangeIDLTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLTE(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDContains applies the Contains predicate on the "parent_exchange_id" field.
+func ParentExchangeIDContains(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContains(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDHasPrefix applies the HasPrefix predicate on the "parent_exchange_id" field.
+func ParentExchangeIDHasPrefix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasPrefix(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDHasSuffix applies the HasSuffix predicate on the "parent_exchange_id" field.
+func ParentExchangeIDHasSuffix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasSuffix(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDEqualFold applies the EqualFold predicate on the "parent_exchange_id" field.
+func ParentExchangeIDEqualFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEqualFold(FieldParentExchangeID, v))
+}
+
+// ParentExchangeIDContainsFold applies the ContainsFold predicate on the "parent_exchange_id" field.
+func ParentExchangeIDContainsFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContainsFold(FieldParentExchangeID, v))
+}
+
+// SequenceIndexEQ applies the EQ predicate on the "sequence_index" field.
+func SequenceIndexEQ(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldSequenceIndex, v))
+}
+
+// SequenceIndexNEQ applies the NEQ predicate on the "sequence_index" field.
+func SequenceIndexNEQ(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNEQ(FieldSequenceIndex, v))
+}
+
+// SequenceIndexIn applies the In predicate on the "sequence_index" field.
+func SequenceIndexIn(vs ...int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldIn(FieldSequenceIndex, vs...))
+}
+
+// SequenceIndexNotIn applies the NotIn predicate on the "sequence_index" field.
+func SequenceIndexNotIn(vs ...int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNotIn(FieldSequenceIndex, vs...))
+}
+
+// SequenceIndexGT applies the GT predicate on the "sequence_index" field.
+func SequenceIndexGT(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGT(FieldSequenceIndex, v))
+}
+
+// SequenceIndexGTE applies the GTE predicate on the "sequence_index" field.
+func SequenceIndexGTE(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGTE(FieldSequenceIndex, v))
+}
+
+// SequenceIndexLT applies the LT predicate on the "sequence_index" field.
+func SequenceIndexLT(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLT(FieldSequenceIndex, v))
+}
+
+// SequenceIndexLTE applies the LTE predicate on the "sequence_index" field.
+func SequenceIndexLTE(v int) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLTE(FieldSequenceIndex, v))
+}
+
+// RequestAuditIDEQ applies the EQ predicate on the "request_audit_id" field.
+func RequestAuditIDEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDNEQ applies the NEQ predicate on the "request_audit_id" field.
+func RequestAuditIDNEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNEQ(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDIn applies the In predicate on the "request_audit_id" field.
+func RequestAuditIDIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldIn(FieldRequestAuditID, vs...))
+}
+
+// RequestAuditIDNotIn applies the NotIn predicate on the "request_audit_id" field.
+func RequestAuditIDNotIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNotIn(FieldRequestAuditID, vs...))
+}
+
+// RequestAuditIDGT applies the GT predicate on the "request_audit_id" field.
+func RequestAuditIDGT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGT(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDGTE applies the GTE predicate on the "request_audit_id" field.
+func RequestAuditIDGTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGTE(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDLT applies the LT predicate on the "request_audit_id" field.
+func RequestAuditIDLT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLT(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDLTE applies the LTE predicate on the "request_audit_id" field.
+func RequestAuditIDLTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLTE(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDContains applies the Contains predicate on the "request_audit_id" field.
+func RequestAuditIDContains(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContains(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDHasPrefix applies the HasPrefix predicate on the "request_audit_id" field.
+func RequestAuditIDHasPrefix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasPrefix(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDHasSuffix applies the HasSuffix predicate on the "request_audit_id" field.
+func RequestAuditIDHasSuffix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasSuffix(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDEqualFold applies the EqualFold predicate on the "request_audit_id" field.
+func RequestAuditIDEqualFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEqualFold(FieldRequestAuditID, v))
+}
+
+// RequestAuditIDContainsFold applies the ContainsFold predicate on the "request_audit_id" field.
+func RequestAuditIDContainsFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContainsFold(FieldRequestAuditID, v))
+}
+
+// ResponseIDEQ applies the EQ predicate on the "response_id" field.
+func ResponseIDEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEQ(FieldResponseID, v))
+}
+
+// ResponseIDNEQ applies the NEQ predicate on the "response_id" field.
+func ResponseIDNEQ(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNEQ(FieldResponseID, v))
+}
+
+// ResponseIDIn applies the In predicate on the "response_id" field.
+func ResponseIDIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldIn(FieldResponseID, vs...))
+}
+
+// ResponseIDNotIn applies the NotIn predicate on the "response_id" field.
+func ResponseIDNotIn(vs ...string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldNotIn(FieldResponseID, vs...))
+}
+
+// ResponseIDGT applies the GT predicate on the "response_id" field.
+func ResponseIDGT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGT(FieldResponseID, v))
+}
+
+// ResponseIDGTE applies the GTE predicate on the "response_id" field.
+func ResponseIDGTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldGTE(FieldResponseID, v))
+}
+
+// ResponseIDLT applies the LT predicate on the "response_id" field.
+func ResponseIDLT(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLT(FieldResponseID, v))
+}
+
+// ResponseIDLTE applies the LTE predicate on the "response_id" field.
+func ResponseIDLTE(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldLTE(FieldResponseID, v))
+}
+
+// ResponseIDContains applies the Contains predicate on the "response_id" field.
+func ResponseIDContains(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContains(FieldResponseID, v))
+}
+
+// ResponseIDHasPrefix applies the HasPrefix predicate on the "response_id" field.
+func ResponseIDHasPrefix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasPrefix(FieldResponseID, v))
+}
+
+// ResponseIDHasSuffix applies the HasSuffix predicate on the "response_id" field.
+func ResponseIDHasSuffix(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldHasSuffix(FieldResponseID, v))
+}
+
+// ResponseIDEqualFold applies the EqualFold predicate on the "response_id" field.
+func ResponseIDEqualFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldEqualFold(FieldResponseID, v))
+}
+
+// ResponseIDContainsFold applies the ContainsFold predicate on the "response_id" field.
+func ResponseIDContainsFold(v string) predicate.TraceObservation {
+	return predicate.TraceObservation(sql.FieldContainsFold(FieldResponseID, v))
 }
 
 // SummaryJSONEQ applies the EQ predicate on the "summary_json" field.

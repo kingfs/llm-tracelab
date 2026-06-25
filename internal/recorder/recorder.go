@@ -53,6 +53,7 @@ type PrepareOptions struct {
 	ParentExchangeID               string
 	SequenceIndex                  int
 	TraceID                        string
+	ResponseID                     string
 }
 
 type Recorder struct {
@@ -182,6 +183,7 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 			ParentExchangeID:               opts.ParentExchangeID,
 			SequenceIndex:                  opts.SequenceIndex,
 			TraceID:                        opts.TraceID,
+			ResponseID:                     opts.ResponseID,
 			Time:                           now,
 			Model:                          modelName,
 			Provider:                       semantics.Provider,

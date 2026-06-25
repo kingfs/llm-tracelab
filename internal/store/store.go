@@ -6315,19 +6315,25 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 
 	parentByAudit := make(map[string]string, len(parents))
 	parentByExchange := make(map[string]string, len(parents))
+	parentByResponse := make(map[string]string, len(parents))
 	var auditArgs []any
 	var exchangeArgs []any
+	var responseArgs []any
 	for _, parent := range parents {
 		if auditID := strings.TrimSpace(parent.Header.Meta.RequestAuditID); auditID != "" {
 			parentByAudit[auditID] = parent.ID
 			auditArgs = append(auditArgs, auditID)
+		}
+		if responseID := strings.TrimSpace(parent.Header.Meta.ResponseID); responseID != "" {
+			parentByResponse[responseID] = parent.ID
+			responseArgs = append(responseArgs, responseID)
 		}
 		if exchangeID := strings.TrimSpace(parent.Header.Meta.ExchangeID); exchangeID != "" {
 			parentByExchange[exchangeID] = parent.ID
 			exchangeArgs = append(exchangeArgs, exchangeID)
 		}
 	}
-	if len(auditArgs) == 0 && len(exchangeArgs) == 0 {
+	if len(auditArgs) == 0 && len(exchangeArgs) == 0 && len(responseArgs) == 0 {
 		return out, nil
 	}
 
@@ -6340,6 +6346,10 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 	if len(exchangeArgs) > 0 {
 		clauses = append(clauses, `parent_exchange_id IN (`+placeholders(len(exchangeArgs))+`)`)
 		args = append(args, exchangeArgs...)
+	}
+	if len(responseArgs) > 0 {
+		clauses = append(clauses, `response_id IN (`+placeholders(len(responseArgs))+`)`)
+		args = append(args, responseArgs...)
 	}
 	rows, err := s.db.Query(`
 		SELECT
@@ -6367,6 +6377,9 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 			return nil, err
 		}
 		parentID := parentByAudit[strings.TrimSpace(entry.Header.Meta.RequestAuditID)]
+		if parentID == "" {
+			parentID = parentByResponse[strings.TrimSpace(entry.Header.Meta.ResponseID)]
+		}
 		if parentID == "" {
 			parentID = parentByExchange[strings.TrimSpace(entry.Header.Meta.ParentExchangeID)]
 		}

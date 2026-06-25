@@ -25,6 +25,18 @@ const (
 	FieldOperation = "operation"
 	// FieldModel holds the string denoting the model field in the database.
 	FieldModel = "model"
+	// FieldExchangeKind holds the string denoting the exchange_kind field in the database.
+	FieldExchangeKind = "exchange_kind"
+	// FieldExchangeRole holds the string denoting the exchange_role field in the database.
+	FieldExchangeRole = "exchange_role"
+	// FieldParentExchangeID holds the string denoting the parent_exchange_id field in the database.
+	FieldParentExchangeID = "parent_exchange_id"
+	// FieldSequenceIndex holds the string denoting the sequence_index field in the database.
+	FieldSequenceIndex = "sequence_index"
+	// FieldRequestAuditID holds the string denoting the request_audit_id field in the database.
+	FieldRequestAuditID = "request_audit_id"
+	// FieldResponseID holds the string denoting the response_id field in the database.
+	FieldResponseID = "response_id"
 	// FieldSummaryJSON holds the string denoting the summary_json field in the database.
 	FieldSummaryJSON = "summary_json"
 	// FieldWarningsJSON holds the string denoting the warnings_json field in the database.
@@ -46,6 +58,12 @@ var Columns = []string{
 	FieldProvider,
 	FieldOperation,
 	FieldModel,
+	FieldExchangeKind,
+	FieldExchangeRole,
+	FieldParentExchangeID,
+	FieldSequenceIndex,
+	FieldRequestAuditID,
+	FieldResponseID,
 	FieldSummaryJSON,
 	FieldWarningsJSON,
 	FieldCreatedAt,
@@ -75,6 +93,18 @@ var (
 	DefaultOperation string
 	// DefaultModel holds the default value on creation for the "model" field.
 	DefaultModel string
+	// DefaultExchangeKind holds the default value on creation for the "exchange_kind" field.
+	DefaultExchangeKind string
+	// DefaultExchangeRole holds the default value on creation for the "exchange_role" field.
+	DefaultExchangeRole string
+	// DefaultParentExchangeID holds the default value on creation for the "parent_exchange_id" field.
+	DefaultParentExchangeID string
+	// DefaultSequenceIndex holds the default value on creation for the "sequence_index" field.
+	DefaultSequenceIndex int
+	// DefaultRequestAuditID holds the default value on creation for the "request_audit_id" field.
+	DefaultRequestAuditID string
+	// DefaultResponseID holds the default value on creation for the "response_id" field.
+	DefaultResponseID string
 	// DefaultSummaryJSON holds the default value on creation for the "summary_json" field.
 	DefaultSummaryJSON string
 	// DefaultWarningsJSON holds the default value on creation for the "warnings_json" field.
@@ -123,6 +153,36 @@ func ByOperation(opts ...sql.OrderTermOption) OrderOption {
 // ByModel orders the results by the model field.
 func ByModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldModel, opts...).ToFunc()
+}
+
+// ByExchangeKind orders the results by the exchange_kind field.
+func ByExchangeKind(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeKind, opts...).ToFunc()
+}
+
+// ByExchangeRole orders the results by the exchange_role field.
+func ByExchangeRole(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldExchangeRole, opts...).ToFunc()
+}
+
+// ByParentExchangeID orders the results by the parent_exchange_id field.
+func ByParentExchangeID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldParentExchangeID, opts...).ToFunc()
+}
+
+// BySequenceIndex orders the results by the sequence_index field.
+func BySequenceIndex(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldSequenceIndex, opts...).ToFunc()
+}
+
+// ByRequestAuditID orders the results by the request_audit_id field.
+func ByRequestAuditID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestAuditID, opts...).ToFunc()
+}
+
+// ByResponseID orders the results by the response_id field.
+func ByResponseID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldResponseID, opts...).ToFunc()
 }
 
 // BySummaryJSON orders the results by the summary_json field.

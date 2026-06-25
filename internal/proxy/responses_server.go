@@ -25,6 +25,7 @@ const (
 	responsesServerChatCompletionsPath      = "/v1/chat/completions"
 	responsesServerMaxChatErrorBodyBytes    = 4096
 	responsesServerAcceptEncodingNoCompress = "identity"
+	responsesEntryMaxCapturedBodyBytes      = 2 << 20
 )
 
 type responsesChatCompletionsAdapter struct {
@@ -103,6 +104,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 		prepareOpts.ExchangeKind = metadata.ExchangeKind
 		prepareOpts.ExchangeRole = metadata.ExchangeRole
 		prepareOpts.SequenceIndex = metadata.SequenceIndex
+		prepareOpts.ResponseID = metadata.ResponseID
 	}
 	logInfo, err := a.recorder.PrepareLogFileWithOptionsAndBody(recordReq, prepareOpts, body)
 	if err != nil {
@@ -401,6 +403,7 @@ type responsesEntryRecorder struct {
 	startedAt  time.Time
 	targetPath string
 	pipeline   *llm.ResponsePipeline
+	bodySample bytes.Buffer
 	finalized  bool
 }
 
@@ -483,6 +486,13 @@ func (r *responsesEntryRecorder) writeBody(data []byte) {
 			r.logInfo.Header.Usage = recorder.UsageInfo(usage)
 		}
 	}
+	if r.bodySample.Len() < responsesEntryMaxCapturedBodyBytes {
+		remaining := responsesEntryMaxCapturedBodyBytes - r.bodySample.Len()
+		if remaining > written {
+			remaining = written
+		}
+		_, _ = r.bodySample.Write(data[:remaining])
+	}
 }
 
 func (r *responsesEntryRecorder) finalize(statusCode int) {
@@ -503,6 +513,12 @@ func (r *responsesEntryRecorder) finalize(statusCode int) {
 	if r.logInfo.Header.Meta.StatusCode == 0 {
 		r.logInfo.Header.Meta.StatusCode = statusCode
 	}
+	if responseID := extractResponsesEntryResponseID(r.bodySample.Bytes(), r.logInfo.Header.Layout.IsStream); responseID != "" {
+		r.logInfo.Header.Meta.ResponseID = responseID
+		if r.logInfo.Header.Meta.ExchangeID == "" {
+			r.logInfo.Header.Meta.ExchangeID = "entry:" + responseID
+		}
+	}
 	r.logInfo.Events = append(r.logInfo.Events, recorder.RecordEvent{
 		Type:       "responses.entry.completed",
 		Time:       r.startedAt.Add(duration),
@@ -517,6 +533,47 @@ func (r *responsesEntryRecorder) finalize(statusCode int) {
 	if err := r.recorder.UpdateLogFile(r.logInfo); err != nil {
 		slog.Error("Failed to update local Responses entry recording", "path", r.logInfo.Path, "err", err)
 	}
+}
+
+func extractResponsesEntryResponseID(body []byte, isStream bool) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if !isStream {
+		var payload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(body, &payload); err == nil {
+			return strings.TrimSpace(payload.ID)
+		}
+		return ""
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "" || data == "[DONE]" {
+			continue
+		}
+		var event struct {
+			Response struct {
+				ID string `json:"id"`
+			} `json:"response"`
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			continue
+		}
+		if id := strings.TrimSpace(event.Response.ID); id != "" {
+			return id
+		}
+		if id := strings.TrimSpace(event.ID); strings.HasPrefix(id, "resp_") {
+			return id
+		}
+	}
+	return ""
 }
 
 type responsesEntryRecordingResponseWriter struct {

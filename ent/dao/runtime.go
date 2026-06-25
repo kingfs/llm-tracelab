@@ -1164,20 +1164,44 @@ func init() {
 	traceobservationDescModel := traceobservationFields[6].Descriptor()
 	// traceobservation.DefaultModel holds the default value on creation for the model field.
 	traceobservation.DefaultModel = traceobservationDescModel.Default.(string)
+	// traceobservationDescExchangeKind is the schema descriptor for exchange_kind field.
+	traceobservationDescExchangeKind := traceobservationFields[7].Descriptor()
+	// traceobservation.DefaultExchangeKind holds the default value on creation for the exchange_kind field.
+	traceobservation.DefaultExchangeKind = traceobservationDescExchangeKind.Default.(string)
+	// traceobservationDescExchangeRole is the schema descriptor for exchange_role field.
+	traceobservationDescExchangeRole := traceobservationFields[8].Descriptor()
+	// traceobservation.DefaultExchangeRole holds the default value on creation for the exchange_role field.
+	traceobservation.DefaultExchangeRole = traceobservationDescExchangeRole.Default.(string)
+	// traceobservationDescParentExchangeID is the schema descriptor for parent_exchange_id field.
+	traceobservationDescParentExchangeID := traceobservationFields[9].Descriptor()
+	// traceobservation.DefaultParentExchangeID holds the default value on creation for the parent_exchange_id field.
+	traceobservation.DefaultParentExchangeID = traceobservationDescParentExchangeID.Default.(string)
+	// traceobservationDescSequenceIndex is the schema descriptor for sequence_index field.
+	traceobservationDescSequenceIndex := traceobservationFields[10].Descriptor()
+	// traceobservation.DefaultSequenceIndex holds the default value on creation for the sequence_index field.
+	traceobservation.DefaultSequenceIndex = traceobservationDescSequenceIndex.Default.(int)
+	// traceobservationDescRequestAuditID is the schema descriptor for request_audit_id field.
+	traceobservationDescRequestAuditID := traceobservationFields[11].Descriptor()
+	// traceobservation.DefaultRequestAuditID holds the default value on creation for the request_audit_id field.
+	traceobservation.DefaultRequestAuditID = traceobservationDescRequestAuditID.Default.(string)
+	// traceobservationDescResponseID is the schema descriptor for response_id field.
+	traceobservationDescResponseID := traceobservationFields[12].Descriptor()
+	// traceobservation.DefaultResponseID holds the default value on creation for the response_id field.
+	traceobservation.DefaultResponseID = traceobservationDescResponseID.Default.(string)
 	// traceobservationDescSummaryJSON is the schema descriptor for summary_json field.
-	traceobservationDescSummaryJSON := traceobservationFields[7].Descriptor()
+	traceobservationDescSummaryJSON := traceobservationFields[13].Descriptor()
 	// traceobservation.DefaultSummaryJSON holds the default value on creation for the summary_json field.
 	traceobservation.DefaultSummaryJSON = traceobservationDescSummaryJSON.Default.(string)
 	// traceobservationDescWarningsJSON is the schema descriptor for warnings_json field.
-	traceobservationDescWarningsJSON := traceobservationFields[8].Descriptor()
+	traceobservationDescWarningsJSON := traceobservationFields[14].Descriptor()
 	// traceobservation.DefaultWarningsJSON holds the default value on creation for the warnings_json field.
 	traceobservation.DefaultWarningsJSON = traceobservationDescWarningsJSON.Default.(string)
 	// traceobservationDescCreatedAt is the schema descriptor for created_at field.
-	traceobservationDescCreatedAt := traceobservationFields[9].Descriptor()
+	traceobservationDescCreatedAt := traceobservationFields[15].Descriptor()
 	// traceobservation.DefaultCreatedAt holds the default value on creation for the created_at field.
 	traceobservation.DefaultCreatedAt = traceobservationDescCreatedAt.Default.(func() time.Time)
 	// traceobservationDescUpdatedAt is the schema descriptor for updated_at field.
-	traceobservationDescUpdatedAt := traceobservationFields[10].Descriptor()
+	traceobservationDescUpdatedAt := traceobservationFields[16].Descriptor()
 	// traceobservation.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	traceobservation.DefaultUpdatedAt = traceobservationDescUpdatedAt.Default.(func() time.Time)
 	// traceobservationDescID is the schema descriptor for id field.

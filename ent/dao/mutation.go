@@ -25417,23 +25417,30 @@ func (m *TraceLogMutation) ResetEdge(name string) error {
 // TraceObservationMutation represents an operation that mutates the TraceObservation nodes in the graph.
 type TraceObservationMutation struct {
 	config
-	op             Op
-	typ            string
-	id             *string
-	parser         *string
-	parser_version *string
-	status         *string
-	provider       *string
-	operation      *string
-	model          *string
-	summary_json   *string
-	warnings_json  *string
-	created_at     *time.Time
-	updated_at     *time.Time
-	clearedFields  map[string]struct{}
-	done           bool
-	oldValue       func(context.Context) (*TraceObservation, error)
-	predicates     []predicate.TraceObservation
+	op                 Op
+	typ                string
+	id                 *string
+	parser             *string
+	parser_version     *string
+	status             *string
+	provider           *string
+	operation          *string
+	model              *string
+	exchange_kind      *string
+	exchange_role      *string
+	parent_exchange_id *string
+	sequence_index     *int
+	addsequence_index  *int
+	request_audit_id   *string
+	response_id        *string
+	summary_json       *string
+	warnings_json      *string
+	created_at         *time.Time
+	updated_at         *time.Time
+	clearedFields      map[string]struct{}
+	done               bool
+	oldValue           func(context.Context) (*TraceObservation, error)
+	predicates         []predicate.TraceObservation
 }
 
 var _ ent.Mutation = (*TraceObservationMutation)(nil)
@@ -25756,6 +25763,242 @@ func (m *TraceObservationMutation) ResetModel() {
 	m.model = nil
 }
 
+// SetExchangeKind sets the "exchange_kind" field.
+func (m *TraceObservationMutation) SetExchangeKind(s string) {
+	m.exchange_kind = &s
+}
+
+// ExchangeKind returns the value of the "exchange_kind" field in the mutation.
+func (m *TraceObservationMutation) ExchangeKind() (r string, exists bool) {
+	v := m.exchange_kind
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeKind returns the old "exchange_kind" field's value of the TraceObservation entity.
+// If the TraceObservation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceObservationMutation) OldExchangeKind(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeKind is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeKind requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeKind: %w", err)
+	}
+	return oldValue.ExchangeKind, nil
+}
+
+// ResetExchangeKind resets all changes to the "exchange_kind" field.
+func (m *TraceObservationMutation) ResetExchangeKind() {
+	m.exchange_kind = nil
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (m *TraceObservationMutation) SetExchangeRole(s string) {
+	m.exchange_role = &s
+}
+
+// ExchangeRole returns the value of the "exchange_role" field in the mutation.
+func (m *TraceObservationMutation) ExchangeRole() (r string, exists bool) {
+	v := m.exchange_role
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExchangeRole returns the old "exchange_role" field's value of the TraceObservation entity.
+// If the TraceObservation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceObservationMutation) OldExchangeRole(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExchangeRole is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExchangeRole requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExchangeRole: %w", err)
+	}
+	return oldValue.ExchangeRole, nil
+}
+
+// ResetExchangeRole resets all changes to the "exchange_role" field.
+func (m *TraceObservationMutation) ResetExchangeRole() {
+	m.exchange_role = nil
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (m *TraceObservationMutation) SetParentExchangeID(s string) {
+	m.parent_exchange_id = &s
+}
+
+// ParentExchangeID returns the value of the "parent_exchange_id" field in the mutation.
+func (m *TraceObservationMutation) ParentExchangeID() (r string, exists bool) {
+	v := m.parent_exchange_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldParentExchangeID returns the old "parent_exchange_id" field's value of the TraceObservation entity.
+// If the TraceObservation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceObservationMutation) OldParentExchangeID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldParentExchangeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldParentExchangeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldParentExchangeID: %w", err)
+	}
+	return oldValue.ParentExchangeID, nil
+}
+
+// ResetParentExchangeID resets all changes to the "parent_exchange_id" field.
+func (m *TraceObservationMutation) ResetParentExchangeID() {
+	m.parent_exchange_id = nil
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (m *TraceObservationMutation) SetSequenceIndex(i int) {
+	m.sequence_index = &i
+	m.addsequence_index = nil
+}
+
+// SequenceIndex returns the value of the "sequence_index" field in the mutation.
+func (m *TraceObservationMutation) SequenceIndex() (r int, exists bool) {
+	v := m.sequence_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSequenceIndex returns the old "sequence_index" field's value of the TraceObservation entity.
+// If the TraceObservation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceObservationMutation) OldSequenceIndex(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSequenceIndex is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSequenceIndex requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSequenceIndex: %w", err)
+	}
+	return oldValue.SequenceIndex, nil
+}
+
+// AddSequenceIndex adds i to the "sequence_index" field.
+func (m *TraceObservationMutation) AddSequenceIndex(i int) {
+	if m.addsequence_index != nil {
+		*m.addsequence_index += i
+	} else {
+		m.addsequence_index = &i
+	}
+}
+
+// AddedSequenceIndex returns the value that was added to the "sequence_index" field in this mutation.
+func (m *TraceObservationMutation) AddedSequenceIndex() (r int, exists bool) {
+	v := m.addsequence_index
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSequenceIndex resets all changes to the "sequence_index" field.
+func (m *TraceObservationMutation) ResetSequenceIndex() {
+	m.sequence_index = nil
+	m.addsequence_index = nil
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (m *TraceObservationMutation) SetRequestAuditID(s string) {
+	m.request_audit_id = &s
+}
+
+// RequestAuditID returns the value of the "request_audit_id" field in the mutation.
+func (m *TraceObservationMutation) RequestAuditID() (r string, exists bool) {
+	v := m.request_audit_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestAuditID returns the old "request_audit_id" field's value of the TraceObservation entity.
+// If the TraceObservation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceObservationMutation) OldRequestAuditID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestAuditID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestAuditID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestAuditID: %w", err)
+	}
+	return oldValue.RequestAuditID, nil
+}
+
+// ResetRequestAuditID resets all changes to the "request_audit_id" field.
+func (m *TraceObservationMutation) ResetRequestAuditID() {
+	m.request_audit_id = nil
+}
+
+// SetResponseID sets the "response_id" field.
+func (m *TraceObservationMutation) SetResponseID(s string) {
+	m.response_id = &s
+}
+
+// ResponseID returns the value of the "response_id" field in the mutation.
+func (m *TraceObservationMutation) ResponseID() (r string, exists bool) {
+	v := m.response_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldResponseID returns the old "response_id" field's value of the TraceObservation entity.
+// If the TraceObservation object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TraceObservationMutation) OldResponseID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldResponseID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldResponseID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldResponseID: %w", err)
+	}
+	return oldValue.ResponseID, nil
+}
+
+// ResetResponseID resets all changes to the "response_id" field.
+func (m *TraceObservationMutation) ResetResponseID() {
+	m.response_id = nil
+}
+
 // SetSummaryJSON sets the "summary_json" field.
 func (m *TraceObservationMutation) SetSummaryJSON(s string) {
 	m.summary_json = &s
@@ -25934,7 +26177,7 @@ func (m *TraceObservationMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TraceObservationMutation) Fields() []string {
-	fields := make([]string, 0, 10)
+	fields := make([]string, 0, 16)
 	if m.parser != nil {
 		fields = append(fields, traceobservation.FieldParser)
 	}
@@ -25952,6 +26195,24 @@ func (m *TraceObservationMutation) Fields() []string {
 	}
 	if m.model != nil {
 		fields = append(fields, traceobservation.FieldModel)
+	}
+	if m.exchange_kind != nil {
+		fields = append(fields, traceobservation.FieldExchangeKind)
+	}
+	if m.exchange_role != nil {
+		fields = append(fields, traceobservation.FieldExchangeRole)
+	}
+	if m.parent_exchange_id != nil {
+		fields = append(fields, traceobservation.FieldParentExchangeID)
+	}
+	if m.sequence_index != nil {
+		fields = append(fields, traceobservation.FieldSequenceIndex)
+	}
+	if m.request_audit_id != nil {
+		fields = append(fields, traceobservation.FieldRequestAuditID)
+	}
+	if m.response_id != nil {
+		fields = append(fields, traceobservation.FieldResponseID)
 	}
 	if m.summary_json != nil {
 		fields = append(fields, traceobservation.FieldSummaryJSON)
@@ -25985,6 +26246,18 @@ func (m *TraceObservationMutation) Field(name string) (ent.Value, bool) {
 		return m.Operation()
 	case traceobservation.FieldModel:
 		return m.Model()
+	case traceobservation.FieldExchangeKind:
+		return m.ExchangeKind()
+	case traceobservation.FieldExchangeRole:
+		return m.ExchangeRole()
+	case traceobservation.FieldParentExchangeID:
+		return m.ParentExchangeID()
+	case traceobservation.FieldSequenceIndex:
+		return m.SequenceIndex()
+	case traceobservation.FieldRequestAuditID:
+		return m.RequestAuditID()
+	case traceobservation.FieldResponseID:
+		return m.ResponseID()
 	case traceobservation.FieldSummaryJSON:
 		return m.SummaryJSON()
 	case traceobservation.FieldWarningsJSON:
@@ -26014,6 +26287,18 @@ func (m *TraceObservationMutation) OldField(ctx context.Context, name string) (e
 		return m.OldOperation(ctx)
 	case traceobservation.FieldModel:
 		return m.OldModel(ctx)
+	case traceobservation.FieldExchangeKind:
+		return m.OldExchangeKind(ctx)
+	case traceobservation.FieldExchangeRole:
+		return m.OldExchangeRole(ctx)
+	case traceobservation.FieldParentExchangeID:
+		return m.OldParentExchangeID(ctx)
+	case traceobservation.FieldSequenceIndex:
+		return m.OldSequenceIndex(ctx)
+	case traceobservation.FieldRequestAuditID:
+		return m.OldRequestAuditID(ctx)
+	case traceobservation.FieldResponseID:
+		return m.OldResponseID(ctx)
 	case traceobservation.FieldSummaryJSON:
 		return m.OldSummaryJSON(ctx)
 	case traceobservation.FieldWarningsJSON:
@@ -26073,6 +26358,48 @@ func (m *TraceObservationMutation) SetField(name string, value ent.Value) error 
 		}
 		m.SetModel(v)
 		return nil
+	case traceobservation.FieldExchangeKind:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeKind(v)
+		return nil
+	case traceobservation.FieldExchangeRole:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExchangeRole(v)
+		return nil
+	case traceobservation.FieldParentExchangeID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetParentExchangeID(v)
+		return nil
+	case traceobservation.FieldSequenceIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSequenceIndex(v)
+		return nil
+	case traceobservation.FieldRequestAuditID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestAuditID(v)
+		return nil
+	case traceobservation.FieldResponseID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetResponseID(v)
+		return nil
 	case traceobservation.FieldSummaryJSON:
 		v, ok := value.(string)
 		if !ok {
@@ -26108,13 +26435,21 @@ func (m *TraceObservationMutation) SetField(name string, value ent.Value) error 
 // AddedFields returns all numeric fields that were incremented/decremented during
 // this mutation.
 func (m *TraceObservationMutation) AddedFields() []string {
-	return nil
+	var fields []string
+	if m.addsequence_index != nil {
+		fields = append(fields, traceobservation.FieldSequenceIndex)
+	}
+	return fields
 }
 
 // AddedField returns the numeric value that was incremented/decremented on a field
 // with the given name. The second boolean return value indicates that this field
 // was not set, or was not defined in the schema.
 func (m *TraceObservationMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case traceobservation.FieldSequenceIndex:
+		return m.AddedSequenceIndex()
+	}
 	return nil, false
 }
 
@@ -26123,6 +26458,13 @@ func (m *TraceObservationMutation) AddedField(name string) (ent.Value, bool) {
 // type.
 func (m *TraceObservationMutation) AddField(name string, value ent.Value) error {
 	switch name {
+	case traceobservation.FieldSequenceIndex:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSequenceIndex(v)
+		return nil
 	}
 	return fmt.Errorf("unknown TraceObservation numeric field %s", name)
 }
@@ -26167,6 +26509,24 @@ func (m *TraceObservationMutation) ResetField(name string) error {
 		return nil
 	case traceobservation.FieldModel:
 		m.ResetModel()
+		return nil
+	case traceobservation.FieldExchangeKind:
+		m.ResetExchangeKind()
+		return nil
+	case traceobservation.FieldExchangeRole:
+		m.ResetExchangeRole()
+		return nil
+	case traceobservation.FieldParentExchangeID:
+		m.ResetParentExchangeID()
+		return nil
+	case traceobservation.FieldSequenceIndex:
+		m.ResetSequenceIndex()
+		return nil
+	case traceobservation.FieldRequestAuditID:
+		m.ResetRequestAuditID()
+		return nil
+	case traceobservation.FieldResponseID:
+		m.ResetResponseID()
 		return nil
 	case traceobservation.FieldSummaryJSON:
 		m.ResetSummaryJSON()

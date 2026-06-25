@@ -83,6 +83,90 @@ func (_c *TraceObservationCreate) SetNillableModel(v *string) *TraceObservationC
 	return _c
 }
 
+// SetExchangeKind sets the "exchange_kind" field.
+func (_c *TraceObservationCreate) SetExchangeKind(v string) *TraceObservationCreate {
+	_c.mutation.SetExchangeKind(v)
+	return _c
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_c *TraceObservationCreate) SetNillableExchangeKind(v *string) *TraceObservationCreate {
+	if v != nil {
+		_c.SetExchangeKind(*v)
+	}
+	return _c
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_c *TraceObservationCreate) SetExchangeRole(v string) *TraceObservationCreate {
+	_c.mutation.SetExchangeRole(v)
+	return _c
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_c *TraceObservationCreate) SetNillableExchangeRole(v *string) *TraceObservationCreate {
+	if v != nil {
+		_c.SetExchangeRole(*v)
+	}
+	return _c
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_c *TraceObservationCreate) SetParentExchangeID(v string) *TraceObservationCreate {
+	_c.mutation.SetParentExchangeID(v)
+	return _c
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_c *TraceObservationCreate) SetNillableParentExchangeID(v *string) *TraceObservationCreate {
+	if v != nil {
+		_c.SetParentExchangeID(*v)
+	}
+	return _c
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_c *TraceObservationCreate) SetSequenceIndex(v int) *TraceObservationCreate {
+	_c.mutation.SetSequenceIndex(v)
+	return _c
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_c *TraceObservationCreate) SetNillableSequenceIndex(v *int) *TraceObservationCreate {
+	if v != nil {
+		_c.SetSequenceIndex(*v)
+	}
+	return _c
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_c *TraceObservationCreate) SetRequestAuditID(v string) *TraceObservationCreate {
+	_c.mutation.SetRequestAuditID(v)
+	return _c
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_c *TraceObservationCreate) SetNillableRequestAuditID(v *string) *TraceObservationCreate {
+	if v != nil {
+		_c.SetRequestAuditID(*v)
+	}
+	return _c
+}
+
+// SetResponseID sets the "response_id" field.
+func (_c *TraceObservationCreate) SetResponseID(v string) *TraceObservationCreate {
+	_c.mutation.SetResponseID(v)
+	return _c
+}
+
+// SetNillableResponseID sets the "response_id" field if the given value is not nil.
+func (_c *TraceObservationCreate) SetNillableResponseID(v *string) *TraceObservationCreate {
+	if v != nil {
+		_c.SetResponseID(*v)
+	}
+	return _c
+}
+
 // SetSummaryJSON sets the "summary_json" field.
 func (_c *TraceObservationCreate) SetSummaryJSON(v string) *TraceObservationCreate {
 	_c.mutation.SetSummaryJSON(v)
@@ -192,6 +276,30 @@ func (_c *TraceObservationCreate) defaults() {
 		v := traceobservation.DefaultModel
 		_c.mutation.SetModel(v)
 	}
+	if _, ok := _c.mutation.ExchangeKind(); !ok {
+		v := traceobservation.DefaultExchangeKind
+		_c.mutation.SetExchangeKind(v)
+	}
+	if _, ok := _c.mutation.ExchangeRole(); !ok {
+		v := traceobservation.DefaultExchangeRole
+		_c.mutation.SetExchangeRole(v)
+	}
+	if _, ok := _c.mutation.ParentExchangeID(); !ok {
+		v := traceobservation.DefaultParentExchangeID
+		_c.mutation.SetParentExchangeID(v)
+	}
+	if _, ok := _c.mutation.SequenceIndex(); !ok {
+		v := traceobservation.DefaultSequenceIndex
+		_c.mutation.SetSequenceIndex(v)
+	}
+	if _, ok := _c.mutation.RequestAuditID(); !ok {
+		v := traceobservation.DefaultRequestAuditID
+		_c.mutation.SetRequestAuditID(v)
+	}
+	if _, ok := _c.mutation.ResponseID(); !ok {
+		v := traceobservation.DefaultResponseID
+		_c.mutation.SetResponseID(v)
+	}
 	if _, ok := _c.mutation.SummaryJSON(); !ok {
 		v := traceobservation.DefaultSummaryJSON
 		_c.mutation.SetSummaryJSON(v)
@@ -244,6 +352,24 @@ func (_c *TraceObservationCreate) check() error {
 	}
 	if _, ok := _c.mutation.Model(); !ok {
 		return &ValidationError{Name: "model", err: errors.New(`dao: missing required field "TraceObservation.model"`)}
+	}
+	if _, ok := _c.mutation.ExchangeKind(); !ok {
+		return &ValidationError{Name: "exchange_kind", err: errors.New(`dao: missing required field "TraceObservation.exchange_kind"`)}
+	}
+	if _, ok := _c.mutation.ExchangeRole(); !ok {
+		return &ValidationError{Name: "exchange_role", err: errors.New(`dao: missing required field "TraceObservation.exchange_role"`)}
+	}
+	if _, ok := _c.mutation.ParentExchangeID(); !ok {
+		return &ValidationError{Name: "parent_exchange_id", err: errors.New(`dao: missing required field "TraceObservation.parent_exchange_id"`)}
+	}
+	if _, ok := _c.mutation.SequenceIndex(); !ok {
+		return &ValidationError{Name: "sequence_index", err: errors.New(`dao: missing required field "TraceObservation.sequence_index"`)}
+	}
+	if _, ok := _c.mutation.RequestAuditID(); !ok {
+		return &ValidationError{Name: "request_audit_id", err: errors.New(`dao: missing required field "TraceObservation.request_audit_id"`)}
+	}
+	if _, ok := _c.mutation.ResponseID(); !ok {
+		return &ValidationError{Name: "response_id", err: errors.New(`dao: missing required field "TraceObservation.response_id"`)}
 	}
 	if _, ok := _c.mutation.SummaryJSON(); !ok {
 		return &ValidationError{Name: "summary_json", err: errors.New(`dao: missing required field "TraceObservation.summary_json"`)}
@@ -322,6 +448,30 @@ func (_c *TraceObservationCreate) createSpec() (*TraceObservation, *sqlgraph.Cre
 	if value, ok := _c.mutation.Model(); ok {
 		_spec.SetField(traceobservation.FieldModel, field.TypeString, value)
 		_node.Model = value
+	}
+	if value, ok := _c.mutation.ExchangeKind(); ok {
+		_spec.SetField(traceobservation.FieldExchangeKind, field.TypeString, value)
+		_node.ExchangeKind = value
+	}
+	if value, ok := _c.mutation.ExchangeRole(); ok {
+		_spec.SetField(traceobservation.FieldExchangeRole, field.TypeString, value)
+		_node.ExchangeRole = value
+	}
+	if value, ok := _c.mutation.ParentExchangeID(); ok {
+		_spec.SetField(traceobservation.FieldParentExchangeID, field.TypeString, value)
+		_node.ParentExchangeID = value
+	}
+	if value, ok := _c.mutation.SequenceIndex(); ok {
+		_spec.SetField(traceobservation.FieldSequenceIndex, field.TypeInt, value)
+		_node.SequenceIndex = value
+	}
+	if value, ok := _c.mutation.RequestAuditID(); ok {
+		_spec.SetField(traceobservation.FieldRequestAuditID, field.TypeString, value)
+		_node.RequestAuditID = value
+	}
+	if value, ok := _c.mutation.ResponseID(); ok {
+		_spec.SetField(traceobservation.FieldResponseID, field.TypeString, value)
+		_node.ResponseID = value
 	}
 	if value, ok := _c.mutation.SummaryJSON(); ok {
 		_spec.SetField(traceobservation.FieldSummaryJSON, field.TypeString, value)
@@ -460,6 +610,84 @@ func (u *TraceObservationUpsert) SetModel(v string) *TraceObservationUpsert {
 // UpdateModel sets the "model" field to the value that was provided on create.
 func (u *TraceObservationUpsert) UpdateModel() *TraceObservationUpsert {
 	u.SetExcluded(traceobservation.FieldModel)
+	return u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *TraceObservationUpsert) SetExchangeKind(v string) *TraceObservationUpsert {
+	u.Set(traceobservation.FieldExchangeKind, v)
+	return u
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *TraceObservationUpsert) UpdateExchangeKind() *TraceObservationUpsert {
+	u.SetExcluded(traceobservation.FieldExchangeKind)
+	return u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *TraceObservationUpsert) SetExchangeRole(v string) *TraceObservationUpsert {
+	u.Set(traceobservation.FieldExchangeRole, v)
+	return u
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *TraceObservationUpsert) UpdateExchangeRole() *TraceObservationUpsert {
+	u.SetExcluded(traceobservation.FieldExchangeRole)
+	return u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *TraceObservationUpsert) SetParentExchangeID(v string) *TraceObservationUpsert {
+	u.Set(traceobservation.FieldParentExchangeID, v)
+	return u
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *TraceObservationUpsert) UpdateParentExchangeID() *TraceObservationUpsert {
+	u.SetExcluded(traceobservation.FieldParentExchangeID)
+	return u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *TraceObservationUpsert) SetSequenceIndex(v int) *TraceObservationUpsert {
+	u.Set(traceobservation.FieldSequenceIndex, v)
+	return u
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *TraceObservationUpsert) UpdateSequenceIndex() *TraceObservationUpsert {
+	u.SetExcluded(traceobservation.FieldSequenceIndex)
+	return u
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *TraceObservationUpsert) AddSequenceIndex(v int) *TraceObservationUpsert {
+	u.Add(traceobservation.FieldSequenceIndex, v)
+	return u
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *TraceObservationUpsert) SetRequestAuditID(v string) *TraceObservationUpsert {
+	u.Set(traceobservation.FieldRequestAuditID, v)
+	return u
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *TraceObservationUpsert) UpdateRequestAuditID() *TraceObservationUpsert {
+	u.SetExcluded(traceobservation.FieldRequestAuditID)
+	return u
+}
+
+// SetResponseID sets the "response_id" field.
+func (u *TraceObservationUpsert) SetResponseID(v string) *TraceObservationUpsert {
+	u.Set(traceobservation.FieldResponseID, v)
+	return u
+}
+
+// UpdateResponseID sets the "response_id" field to the value that was provided on create.
+func (u *TraceObservationUpsert) UpdateResponseID() *TraceObservationUpsert {
+	u.SetExcluded(traceobservation.FieldResponseID)
 	return u
 }
 
@@ -640,6 +868,97 @@ func (u *TraceObservationUpsertOne) SetModel(v string) *TraceObservationUpsertOn
 func (u *TraceObservationUpsertOne) UpdateModel() *TraceObservationUpsertOne {
 	return u.Update(func(s *TraceObservationUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *TraceObservationUpsertOne) SetExchangeKind(v string) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetExchangeKind(v)
+	})
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *TraceObservationUpsertOne) UpdateExchangeKind() *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateExchangeKind()
+	})
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *TraceObservationUpsertOne) SetExchangeRole(v string) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetExchangeRole(v)
+	})
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *TraceObservationUpsertOne) UpdateExchangeRole() *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateExchangeRole()
+	})
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *TraceObservationUpsertOne) SetParentExchangeID(v string) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetParentExchangeID(v)
+	})
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *TraceObservationUpsertOne) UpdateParentExchangeID() *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateParentExchangeID()
+	})
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *TraceObservationUpsertOne) SetSequenceIndex(v int) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetSequenceIndex(v)
+	})
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *TraceObservationUpsertOne) AddSequenceIndex(v int) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.AddSequenceIndex(v)
+	})
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *TraceObservationUpsertOne) UpdateSequenceIndex() *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateSequenceIndex()
+	})
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *TraceObservationUpsertOne) SetRequestAuditID(v string) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetRequestAuditID(v)
+	})
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *TraceObservationUpsertOne) UpdateRequestAuditID() *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateRequestAuditID()
+	})
+}
+
+// SetResponseID sets the "response_id" field.
+func (u *TraceObservationUpsertOne) SetResponseID(v string) *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetResponseID(v)
+	})
+}
+
+// UpdateResponseID sets the "response_id" field to the value that was provided on create.
+func (u *TraceObservationUpsertOne) UpdateResponseID() *TraceObservationUpsertOne {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateResponseID()
 	})
 }
 
@@ -995,6 +1314,97 @@ func (u *TraceObservationUpsertBulk) SetModel(v string) *TraceObservationUpsertB
 func (u *TraceObservationUpsertBulk) UpdateModel() *TraceObservationUpsertBulk {
 	return u.Update(func(s *TraceObservationUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *TraceObservationUpsertBulk) SetExchangeKind(v string) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetExchangeKind(v)
+	})
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *TraceObservationUpsertBulk) UpdateExchangeKind() *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateExchangeKind()
+	})
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *TraceObservationUpsertBulk) SetExchangeRole(v string) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetExchangeRole(v)
+	})
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *TraceObservationUpsertBulk) UpdateExchangeRole() *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateExchangeRole()
+	})
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *TraceObservationUpsertBulk) SetParentExchangeID(v string) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetParentExchangeID(v)
+	})
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *TraceObservationUpsertBulk) UpdateParentExchangeID() *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateParentExchangeID()
+	})
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *TraceObservationUpsertBulk) SetSequenceIndex(v int) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetSequenceIndex(v)
+	})
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *TraceObservationUpsertBulk) AddSequenceIndex(v int) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.AddSequenceIndex(v)
+	})
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *TraceObservationUpsertBulk) UpdateSequenceIndex() *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateSequenceIndex()
+	})
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *TraceObservationUpsertBulk) SetRequestAuditID(v string) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetRequestAuditID(v)
+	})
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *TraceObservationUpsertBulk) UpdateRequestAuditID() *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateRequestAuditID()
+	})
+}
+
+// SetResponseID sets the "response_id" field.
+func (u *TraceObservationUpsertBulk) SetResponseID(v string) *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.SetResponseID(v)
+	})
+}
+
+// UpdateResponseID sets the "response_id" field to the value that was provided on create.
+func (u *TraceObservationUpsertBulk) UpdateResponseID() *TraceObservationUpsertBulk {
+	return u.Update(func(s *TraceObservationUpsert) {
+		s.UpdateResponseID()
 	})
 }
 

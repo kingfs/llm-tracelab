@@ -27,6 +27,12 @@ func (TraceObservation) Fields() []ent.Field {
 		field.String("provider").Default(""),
 		field.String("operation").Default(""),
 		field.String("model").Default(""),
+		field.String("exchange_kind").Default(""),
+		field.String("exchange_role").Default(""),
+		field.String("parent_exchange_id").Default(""),
+		field.Int("sequence_index").Default(0),
+		field.String("request_audit_id").Default(""),
+		field.String("response_id").Default(""),
 		field.String("summary_json").Default("{}"),
 		field.String("warnings_json").Default("[]"),
 		field.Time("created_at").Default(time.Now),
@@ -37,5 +43,7 @@ func (TraceObservation) Fields() []ent.Field {
 func (TraceObservation) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("status", "updated_at"),
+		index.Fields("request_audit_id", "updated_at"),
+		index.Fields("response_id", "updated_at"),
 	}
 }

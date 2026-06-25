@@ -39,6 +39,47 @@ func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
 	}
 }
 
+func TestExtractResponsesEntryResponseID(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		stream   bool
+		expected string
+	}{
+		{
+			name:     "json",
+			body:     `{"id":"resp_json","object":"response","status":"completed"}`,
+			expected: "resp_json",
+		},
+		{
+			name: "sse response object",
+			body: strings.Join([]string{
+				`event: response.created`,
+				`data: {"type":"response.created","response":{"id":"resp_stream","status":"in_progress"}}`,
+				``,
+			}, "\n"),
+			stream:   true,
+			expected: "resp_stream",
+		},
+		{
+			name: "sse top level id",
+			body: strings.Join([]string{
+				`data: {"type":"response.completed","id":"resp_top_level"}`,
+				``,
+			}, "\n"),
+			stream:   true,
+			expected: "resp_top_level",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractResponsesEntryResponseID([]byte(tt.body), tt.stream); got != tt.expected {
+				t.Fatalf("extractResponsesEntryResponseID() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {

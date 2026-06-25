@@ -892,6 +892,12 @@ var (
 		{Name: "provider", Type: field.TypeString, Default: ""},
 		{Name: "operation", Type: field.TypeString, Default: ""},
 		{Name: "model", Type: field.TypeString, Default: ""},
+		{Name: "exchange_kind", Type: field.TypeString, Default: ""},
+		{Name: "exchange_role", Type: field.TypeString, Default: ""},
+		{Name: "parent_exchange_id", Type: field.TypeString, Default: ""},
+		{Name: "sequence_index", Type: field.TypeInt, Default: 0},
+		{Name: "request_audit_id", Type: field.TypeString, Default: ""},
+		{Name: "response_id", Type: field.TypeString, Default: ""},
 		{Name: "summary_json", Type: field.TypeString, Default: "{}"},
 		{Name: "warnings_json", Type: field.TypeString, Default: "[]"},
 		{Name: "created_at", Type: field.TypeTime},
@@ -906,7 +912,17 @@ var (
 			{
 				Name:    "traceobservation_status_updated_at",
 				Unique:  false,
-				Columns: []*schema.Column{TraceObservationsColumns[3], TraceObservationsColumns[10]},
+				Columns: []*schema.Column{TraceObservationsColumns[3], TraceObservationsColumns[16]},
+			},
+			{
+				Name:    "traceobservation_request_audit_id_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{TraceObservationsColumns[11], TraceObservationsColumns[16]},
+			},
+			{
+				Name:    "traceobservation_response_id_updated_at",
+				Unique:  false,
+				Columns: []*schema.Column{TraceObservationsColumns[12], TraceObservationsColumns[16]},
 			},
 		},
 	}

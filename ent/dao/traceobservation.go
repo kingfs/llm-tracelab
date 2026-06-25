@@ -29,6 +29,18 @@ type TraceObservation struct {
 	Operation string `json:"operation,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
+	// ExchangeKind holds the value of the "exchange_kind" field.
+	ExchangeKind string `json:"exchange_kind,omitempty"`
+	// ExchangeRole holds the value of the "exchange_role" field.
+	ExchangeRole string `json:"exchange_role,omitempty"`
+	// ParentExchangeID holds the value of the "parent_exchange_id" field.
+	ParentExchangeID string `json:"parent_exchange_id,omitempty"`
+	// SequenceIndex holds the value of the "sequence_index" field.
+	SequenceIndex int `json:"sequence_index,omitempty"`
+	// RequestAuditID holds the value of the "request_audit_id" field.
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+	// ResponseID holds the value of the "response_id" field.
+	ResponseID string `json:"response_id,omitempty"`
 	// SummaryJSON holds the value of the "summary_json" field.
 	SummaryJSON string `json:"summary_json,omitempty"`
 	// WarningsJSON holds the value of the "warnings_json" field.
@@ -45,7 +57,9 @@ func (*TraceObservation) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case traceobservation.FieldID, traceobservation.FieldParser, traceobservation.FieldParserVersion, traceobservation.FieldStatus, traceobservation.FieldProvider, traceobservation.FieldOperation, traceobservation.FieldModel, traceobservation.FieldSummaryJSON, traceobservation.FieldWarningsJSON:
+		case traceobservation.FieldSequenceIndex:
+			values[i] = new(sql.NullInt64)
+		case traceobservation.FieldID, traceobservation.FieldParser, traceobservation.FieldParserVersion, traceobservation.FieldStatus, traceobservation.FieldProvider, traceobservation.FieldOperation, traceobservation.FieldModel, traceobservation.FieldExchangeKind, traceobservation.FieldExchangeRole, traceobservation.FieldParentExchangeID, traceobservation.FieldRequestAuditID, traceobservation.FieldResponseID, traceobservation.FieldSummaryJSON, traceobservation.FieldWarningsJSON:
 			values[i] = new(sql.NullString)
 		case traceobservation.FieldCreatedAt, traceobservation.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -105,6 +119,42 @@ func (_m *TraceObservation) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field model", values[i])
 			} else if value.Valid {
 				_m.Model = value.String
+			}
+		case traceobservation.FieldExchangeKind:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_kind", values[i])
+			} else if value.Valid {
+				_m.ExchangeKind = value.String
+			}
+		case traceobservation.FieldExchangeRole:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field exchange_role", values[i])
+			} else if value.Valid {
+				_m.ExchangeRole = value.String
+			}
+		case traceobservation.FieldParentExchangeID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field parent_exchange_id", values[i])
+			} else if value.Valid {
+				_m.ParentExchangeID = value.String
+			}
+		case traceobservation.FieldSequenceIndex:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field sequence_index", values[i])
+			} else if value.Valid {
+				_m.SequenceIndex = int(value.Int64)
+			}
+		case traceobservation.FieldRequestAuditID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field request_audit_id", values[i])
+			} else if value.Valid {
+				_m.RequestAuditID = value.String
+			}
+		case traceobservation.FieldResponseID:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field response_id", values[i])
+			} else if value.Valid {
+				_m.ResponseID = value.String
 			}
 		case traceobservation.FieldSummaryJSON:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -183,6 +233,24 @@ func (_m *TraceObservation) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_kind=")
+	builder.WriteString(_m.ExchangeKind)
+	builder.WriteString(", ")
+	builder.WriteString("exchange_role=")
+	builder.WriteString(_m.ExchangeRole)
+	builder.WriteString(", ")
+	builder.WriteString("parent_exchange_id=")
+	builder.WriteString(_m.ParentExchangeID)
+	builder.WriteString(", ")
+	builder.WriteString("sequence_index=")
+	builder.WriteString(fmt.Sprintf("%v", _m.SequenceIndex))
+	builder.WriteString(", ")
+	builder.WriteString("request_audit_id=")
+	builder.WriteString(_m.RequestAuditID)
+	builder.WriteString(", ")
+	builder.WriteString("response_id=")
+	builder.WriteString(_m.ResponseID)
 	builder.WriteString(", ")
 	builder.WriteString("summary_json=")
 	builder.WriteString(_m.SummaryJSON)

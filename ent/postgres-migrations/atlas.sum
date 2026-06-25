@@ -1,4 +1,4 @@
-h1:xax6AR/gWv4BNTibmKrGW8YDpEKLhR0ZUuPjKmX8Yuo=
+h1:LqFthGQ4+wN25h+BqdUSeZ0W/Tp/Z6VTQkxuJsy5sbg=
 20260622122251_init_postgres_schema.down.sql h1:LDZWCeZJ5yiO8jBnKcM87tJqOMYUhHYKsVwhQVwsSuc=
 20260622122251_init_postgres_schema.up.sql h1:8KicYi0nWtTJEobvyfsT17Kdg0nkeez64rcdTEAxfuU=
 20260622130545_add_runtime_store_tables.down.sql h1:PdAZLs5hcIRBJTJYtqHZ2Q+g7nnhaNAxu/Xcba5G9xg=
@@ -15,3 +15,5 @@ h1:xax6AR/gWv4BNTibmKrGW8YDpEKLhR0ZUuPjKmX8Yuo=
 20260624093000_add_exchange_metadata_fields.up.sql h1:OaNURhLeRFm55tAJFp3eBUdnjMVdYZ21rhwNz5V3j9Q=
 20260625120000_add_log_request_audit_fields.down.sql h1:dIQ/Q5hNof3a9kZ4AvkGA1FAnTch4FRiW6Ic7j0qils=
 20260625120000_add_log_request_audit_fields.up.sql h1:7fMJB610LUDZbdekJ3Q/6UpGIe05jNOPJrA/AJWJrXo=
+20260625123000_add_trace_observation_exchange_fields.down.sql h1:B2SGr5xSvHaRVYvSofTHuPrRyAxC15VZ7HyVWC4iAJc=
+20260625123000_add_trace_observation_exchange_fields.up.sql h1:mf4KieGoqsaXq8VIk7kF6zooYWfB2i04BOWpLYi/ki8=

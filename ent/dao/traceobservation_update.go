@@ -114,6 +114,97 @@ func (_u *TraceObservationUpdate) SetNillableModel(v *string) *TraceObservationU
 	return _u
 }
 
+// SetExchangeKind sets the "exchange_kind" field.
+func (_u *TraceObservationUpdate) SetExchangeKind(v string) *TraceObservationUpdate {
+	_u.mutation.SetExchangeKind(v)
+	return _u
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_u *TraceObservationUpdate) SetNillableExchangeKind(v *string) *TraceObservationUpdate {
+	if v != nil {
+		_u.SetExchangeKind(*v)
+	}
+	return _u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_u *TraceObservationUpdate) SetExchangeRole(v string) *TraceObservationUpdate {
+	_u.mutation.SetExchangeRole(v)
+	return _u
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_u *TraceObservationUpdate) SetNillableExchangeRole(v *string) *TraceObservationUpdate {
+	if v != nil {
+		_u.SetExchangeRole(*v)
+	}
+	return _u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_u *TraceObservationUpdate) SetParentExchangeID(v string) *TraceObservationUpdate {
+	_u.mutation.SetParentExchangeID(v)
+	return _u
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_u *TraceObservationUpdate) SetNillableParentExchangeID(v *string) *TraceObservationUpdate {
+	if v != nil {
+		_u.SetParentExchangeID(*v)
+	}
+	return _u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_u *TraceObservationUpdate) SetSequenceIndex(v int) *TraceObservationUpdate {
+	_u.mutation.ResetSequenceIndex()
+	_u.mutation.SetSequenceIndex(v)
+	return _u
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_u *TraceObservationUpdate) SetNillableSequenceIndex(v *int) *TraceObservationUpdate {
+	if v != nil {
+		_u.SetSequenceIndex(*v)
+	}
+	return _u
+}
+
+// AddSequenceIndex adds value to the "sequence_index" field.
+func (_u *TraceObservationUpdate) AddSequenceIndex(v int) *TraceObservationUpdate {
+	_u.mutation.AddSequenceIndex(v)
+	return _u
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_u *TraceObservationUpdate) SetRequestAuditID(v string) *TraceObservationUpdate {
+	_u.mutation.SetRequestAuditID(v)
+	return _u
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_u *TraceObservationUpdate) SetNillableRequestAuditID(v *string) *TraceObservationUpdate {
+	if v != nil {
+		_u.SetRequestAuditID(*v)
+	}
+	return _u
+}
+
+// SetResponseID sets the "response_id" field.
+func (_u *TraceObservationUpdate) SetResponseID(v string) *TraceObservationUpdate {
+	_u.mutation.SetResponseID(v)
+	return _u
+}
+
+// SetNillableResponseID sets the "response_id" field if the given value is not nil.
+func (_u *TraceObservationUpdate) SetNillableResponseID(v *string) *TraceObservationUpdate {
+	if v != nil {
+		_u.SetResponseID(*v)
+	}
+	return _u
+}
+
 // SetSummaryJSON sets the "summary_json" field.
 func (_u *TraceObservationUpdate) SetSummaryJSON(v string) *TraceObservationUpdate {
 	_u.mutation.SetSummaryJSON(v)
@@ -258,6 +349,27 @@ func (_u *TraceObservationUpdate) sqlSave(ctx context.Context) (_node int, err e
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(traceobservation.FieldModel, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.ExchangeKind(); ok {
+		_spec.SetField(traceobservation.FieldExchangeKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeRole(); ok {
+		_spec.SetField(traceobservation.FieldExchangeRole, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ParentExchangeID(); ok {
+		_spec.SetField(traceobservation.FieldParentExchangeID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SequenceIndex(); ok {
+		_spec.SetField(traceobservation.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedSequenceIndex(); ok {
+		_spec.AddField(traceobservation.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RequestAuditID(); ok {
+		_spec.SetField(traceobservation.FieldRequestAuditID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ResponseID(); ok {
+		_spec.SetField(traceobservation.FieldResponseID, field.TypeString, value)
+	}
 	if value, ok := _u.mutation.SummaryJSON(); ok {
 		_spec.SetField(traceobservation.FieldSummaryJSON, field.TypeString, value)
 	}
@@ -374,6 +486,97 @@ func (_u *TraceObservationUpdateOne) SetModel(v string) *TraceObservationUpdateO
 func (_u *TraceObservationUpdateOne) SetNillableModel(v *string) *TraceObservationUpdateOne {
 	if v != nil {
 		_u.SetModel(*v)
+	}
+	return _u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_u *TraceObservationUpdateOne) SetExchangeKind(v string) *TraceObservationUpdateOne {
+	_u.mutation.SetExchangeKind(v)
+	return _u
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_u *TraceObservationUpdateOne) SetNillableExchangeKind(v *string) *TraceObservationUpdateOne {
+	if v != nil {
+		_u.SetExchangeKind(*v)
+	}
+	return _u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_u *TraceObservationUpdateOne) SetExchangeRole(v string) *TraceObservationUpdateOne {
+	_u.mutation.SetExchangeRole(v)
+	return _u
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_u *TraceObservationUpdateOne) SetNillableExchangeRole(v *string) *TraceObservationUpdateOne {
+	if v != nil {
+		_u.SetExchangeRole(*v)
+	}
+	return _u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_u *TraceObservationUpdateOne) SetParentExchangeID(v string) *TraceObservationUpdateOne {
+	_u.mutation.SetParentExchangeID(v)
+	return _u
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_u *TraceObservationUpdateOne) SetNillableParentExchangeID(v *string) *TraceObservationUpdateOne {
+	if v != nil {
+		_u.SetParentExchangeID(*v)
+	}
+	return _u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_u *TraceObservationUpdateOne) SetSequenceIndex(v int) *TraceObservationUpdateOne {
+	_u.mutation.ResetSequenceIndex()
+	_u.mutation.SetSequenceIndex(v)
+	return _u
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_u *TraceObservationUpdateOne) SetNillableSequenceIndex(v *int) *TraceObservationUpdateOne {
+	if v != nil {
+		_u.SetSequenceIndex(*v)
+	}
+	return _u
+}
+
+// AddSequenceIndex adds value to the "sequence_index" field.
+func (_u *TraceObservationUpdateOne) AddSequenceIndex(v int) *TraceObservationUpdateOne {
+	_u.mutation.AddSequenceIndex(v)
+	return _u
+}
+
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_u *TraceObservationUpdateOne) SetRequestAuditID(v string) *TraceObservationUpdateOne {
+	_u.mutation.SetRequestAuditID(v)
+	return _u
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_u *TraceObservationUpdateOne) SetNillableRequestAuditID(v *string) *TraceObservationUpdateOne {
+	if v != nil {
+		_u.SetRequestAuditID(*v)
+	}
+	return _u
+}
+
+// SetResponseID sets the "response_id" field.
+func (_u *TraceObservationUpdateOne) SetResponseID(v string) *TraceObservationUpdateOne {
+	_u.mutation.SetResponseID(v)
+	return _u
+}
+
+// SetNillableResponseID sets the "response_id" field if the given value is not nil.
+func (_u *TraceObservationUpdateOne) SetNillableResponseID(v *string) *TraceObservationUpdateOne {
+	if v != nil {
+		_u.SetResponseID(*v)
 	}
 	return _u
 }
@@ -551,6 +754,27 @@ func (_u *TraceObservationUpdateOne) sqlSave(ctx context.Context) (_node *TraceO
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(traceobservation.FieldModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeKind(); ok {
+		_spec.SetField(traceobservation.FieldExchangeKind, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ExchangeRole(); ok {
+		_spec.SetField(traceobservation.FieldExchangeRole, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ParentExchangeID(); ok {
+		_spec.SetField(traceobservation.FieldParentExchangeID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.SequenceIndex(); ok {
+		_spec.SetField(traceobservation.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedSequenceIndex(); ok {
+		_spec.AddField(traceobservation.FieldSequenceIndex, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.RequestAuditID(); ok {
+		_spec.SetField(traceobservation.FieldRequestAuditID, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ResponseID(); ok {
+		_spec.SetField(traceobservation.FieldResponseID, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.SummaryJSON(); ok {
 		_spec.SetField(traceobservation.FieldSummaryJSON, field.TypeString, value)
