@@ -53,32 +53,36 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
 }
 
 function RequestRowGroup({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false }) {
-  const children = Array.isArray(item.upstream_calls) ? item.upstream_calls : [];
+  const children = fromView === "routing" ? [] : (Array.isArray(item.upstream_calls) ? item.upstream_calls : []);
   return (
     <React.Fragment>
       <RequestRow item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild={groupedChild} />
       {children.map((child) => (
-        <RequestRow key={child.id} item={child} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild />
+        <RequestRow key={child.id || child.trace_id} item={child} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild childRole="upstream" />
       ))}
     </React.Fragment>
   );
 }
 
-function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false }) {
+function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false, childRole = "" }) {
   const { t } = useI18n();
   const failed = item.status_code < 200 || item.status_code >= 300;
   const focus = focusFailures && failed ? "failure" : "";
+  const upstreamCallCount = Number(item.upstream_call_count || 0);
 
   return (
     <article className={`${failed ? "trace-row trace-row-failed" : "trace-row"}${groupedChild ? " trace-row-grouped-child" : ""}`}>
       <div>
         <div className="trace-title-row">
+          {childRole === "upstream" ? <span className="trace-child-rail" aria-hidden="true" /> : null}
           <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
+            {childRole === "upstream" ? <InlineTag tone="gold">model call</InlineTag> : null}
             <ExchangeTag item={item} />
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
             {item.selected_upstream_id ? <InlineTag tone="green">{item.selected_upstream_id}</InlineTag> : null}
+            {!groupedChild && upstreamCallCount > 0 ? <InlineTag tone="gold">{upstreamCallCount} downstream call{upstreamCallCount === 1 ? "" : "s"}</InlineTag> : null}
             {item.session_id ? <InlineTag tone="green">{t("sessions.title")}</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
             <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status, t)}</InlineTag>
@@ -199,6 +203,7 @@ function TokenMetrics({ item }) {
 
 function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
   const { t } = useI18n();
+  const itemID = item.id || item.trace_id;
   return (
     <div className="action-group trace-row-actions">
       {item.session_id ? (
@@ -207,19 +212,19 @@ function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
         </Link>
       ) : null}
       {fromSessionID ? (
-        <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
+        <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
           {t("requests.timeline")}
         </Link>
       ) : null}
       {fromSessionID ? (
-        <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
+        <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
           {t("requests.raw")}
         </Link>
       ) : null}
-      <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID, "", focus)} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
+      <Link className="icon-button" to={buildTraceLink(itemID, fromView, fromSessionID, "", focus)} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
         <ViewIcon />
       </Link>
-      <a className="icon-button" href={apiPaths.traceDownload(item.id)} title={t("requests.downloadTrace")} aria-label={t("requests.downloadTrace")}>
+      <a className="icon-button" href={apiPaths.traceDownload(itemID)} title={t("requests.downloadTrace")} aria-label={t("requests.downloadTrace")}>
         <DownloadIcon />
       </a>
     </div>

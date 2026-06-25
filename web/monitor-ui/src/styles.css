@@ -730,6 +730,38 @@ a {
   font-size: 0.78rem;
 }
 
+.related-upstream-list {
+  display: grid;
+  gap: 12px;
+}
+
+.related-upstream-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.related-upstream-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.related-upstream-meta {
+  align-items: flex-start;
+}
+
+.related-upstream-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .semantic-node,
 .finding-card {
   display: grid;
@@ -2158,8 +2190,28 @@ a:focus-visible {
 }
 
 .trace-row-grouped-child {
-  padding-left: 30px;
+  position: relative;
+  padding-left: 42px;
   background: rgba(15, 23, 42, 0.36);
+}
+
+.trace-row-grouped-child::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(250, 204, 21, 0.28);
+}
+
+.trace-child-rail {
+  width: 14px;
+  height: 14px;
+  border-left: 2px solid rgba(250, 204, 21, 0.58);
+  border-bottom: 2px solid rgba(250, 204, 21, 0.58);
+  border-bottom-left-radius: 5px;
+  flex: 0 0 auto;
 }
 
 .trace-row strong,
