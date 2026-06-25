@@ -309,6 +309,14 @@ export function formatTokenRate(tokens = 0, durationMs = 0) {
   return `${formatCompactNumber(tokenCount / (ms / 1000))} tok/s`;
 }
 
+export function formatTokenRateValue(value = 0) {
+  const rate = Number(value || 0);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return "-";
+  }
+  return `${formatCompactNumber(rate)} tok/s`;
+}
+
 export function formatPrefillSpeed(promptTokens = 0, ttftMs = 0, durationMs = 0, isStream = false) {
   // stream: prefill ≈ ttft; non-stream: ttft == total, use total as denominator
   const ms = isStream ? Number(ttftMs || 0) : Number(durationMs || 0);
@@ -329,6 +337,20 @@ export function formatGenerationSpeed(completionTokens = 0, durationMs = 0, ttft
     return "-";
   }
   return `${formatCompactNumber(tokens / (genMs / 1000))} tok/s`;
+}
+
+export function formatPrefillSpeedForTrace(item = {}) {
+  if (Number(item.pp_tokens_per_sec || 0) > 0) {
+    return formatTokenRateValue(item.pp_tokens_per_sec);
+  }
+  return formatPrefillSpeed(item.prompt_tokens, item.ttft_ms, item.duration_ms, item.is_stream);
+}
+
+export function formatGenerationSpeedForTrace(item = {}) {
+  if (Number(item.tg_tokens_per_sec || 0) > 0) {
+    return formatTokenRateValue(item.tg_tokens_per_sec);
+  }
+  return formatGenerationSpeed(item.completion_tokens, item.duration_ms, item.ttft_ms, item.is_stream);
 }
 
 export function formatCacheRate(cachedTokens = 0, totalTokens = 0) {

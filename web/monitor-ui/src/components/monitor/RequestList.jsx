@@ -4,7 +4,7 @@ import { DownloadIcon, InlineTag, LatencyMetric, MiniToken, StackIcon, ViewIcon 
 import { EmptyState } from "../common/EmptyState";
 import { apiPaths } from "../../lib/api";
 import { useI18n } from "../../lib/i18n";
-import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatGenerationSpeed, formatPrefillSpeed, formatProviderTag } from "../../lib/monitor";
+import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatGenerationSpeedForTrace, formatPrefillSpeedForTrace, formatProviderTag } from "../../lib/monitor";
 
 export function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false, groupSessionFailures = false }) {
   const { t } = useI18n();
@@ -100,8 +100,8 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
       <div className="latency-metric-stack">
         <LatencyMetric label="total" value={formatDuration(item.duration_ms)} icon="duration" title={`${item.duration_ms || 0} ms`} />
         <LatencyMetric label="ttft" value={formatDuration(item.ttft_ms)} icon="ttft" title={`${item.ttft_ms || 0} ms`} />
-        <LatencyMetric label="pp" value={formatPrefillSpeed(item.prompt_tokens, item.ttft_ms, item.duration_ms, item.is_stream)} icon="pp" title={`prefill speed`} />
-        <LatencyMetric label="tg" value={formatGenerationSpeed(item.completion_tokens, item.duration_ms, item.ttft_ms, item.is_stream)} icon="tg" title={`generation speed`} />
+        <LatencyMetric label="pp" value={formatPrefillSpeedForTrace(item)} icon="pp" title={`prefill speed`} />
+        <LatencyMetric label="tg" value={formatGenerationSpeedForTrace(item)} icon="tg" title={`generation speed`} />
       </div>
       <TokenMetrics item={item} />
       <RowActions item={item} fromView={fromView} fromSessionID={fromSessionID} focus={focus} />
