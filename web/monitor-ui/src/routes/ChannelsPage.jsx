@@ -855,22 +855,22 @@ function providerProbeSuggestionPayload(form = {}, report = {}) {
   for (const capability of report.capabilities || []) {
     switch (capability) {
       case "responses":
-        capabilities.responses = true;
+        if (capabilities.responses === undefined) capabilities.responses = true;
         break;
       case "chat_completions":
-        capabilities.chat_completions = true;
+        if (capabilities.chat_completions === undefined) capabilities.chat_completions = true;
         break;
       case "tool_calling":
-        capabilities.tool_calling = true;
+        if (capabilities.tool_calling === undefined) capabilities.tool_calling = true;
         break;
       case "models":
-        capabilities.models = true;
+        if (capabilities.models === undefined) capabilities.models = true;
         break;
       case "embeddings":
-        capabilities.embeddings = true;
+        if (capabilities.embeddings === undefined) capabilities.embeddings = true;
         break;
       case "tokenize":
-        capabilities.tokenize = true;
+        if (capabilities.tokenize === undefined) capabilities.tokenize = true;
         break;
       default:
         break;
