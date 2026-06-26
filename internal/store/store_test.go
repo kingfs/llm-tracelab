@@ -426,6 +426,70 @@ func TestResponsesFunctionExecutorConfigSnapshotDoesNotPersistSensitiveFields(t 
 	}
 }
 
+func TestAppSettingJSONRoundTrip(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	type routingSetting struct {
+		ResponsesStrategy string `json:"responses_strategy"`
+		SelectionPolicy   string `json:"selection_policy"`
+	}
+	want := routingSetting{ResponsesStrategy: "auto", SelectionPolicy: "p2c"}
+	if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", want); err != nil {
+		t.Fatalf("SaveAppSettingJSON() error = %v", err)
+	}
+	var got routingSetting
+	found, err := st.LoadAppSettingJSON(context.Background(), "routing.settings", &got)
+	if err != nil {
+		t.Fatalf("LoadAppSettingJSON() error = %v", err)
+	}
+	if !found {
+		t.Fatal("LoadAppSettingJSON() found = false, want true")
+	}
+	if got != want {
+		t.Fatalf("loaded = %+v, want %+v", got, want)
+	}
+
+	want.SelectionPolicy = "first_available"
+	if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", want); err != nil {
+		t.Fatalf("SaveAppSettingJSON(update) error = %v", err)
+	}
+	got = routingSetting{}
+	found, err = st.LoadAppSettingJSON(context.Background(), "routing.settings", &got)
+	if err != nil {
+		t.Fatalf("LoadAppSettingJSON(update) error = %v", err)
+	}
+	if !found || got != want {
+		t.Fatalf("updated found=%v got=%+v, want %+v", found, got, want)
+	}
+}
+
+func TestAppSettingJSONMissingAndValidation(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	var got map[string]any
+	found, err := st.LoadAppSettingJSON(context.Background(), "missing.setting", &got)
+	if err != nil {
+		t.Fatalf("LoadAppSettingJSON(missing) error = %v", err)
+	}
+	if found {
+		t.Fatal("LoadAppSettingJSON(missing) found = true, want false")
+	}
+	if err := st.SaveAppSettingJSON(context.Background(), "", map[string]string{"x": "y"}); err == nil {
+		t.Fatal("SaveAppSettingJSON(empty key) error = nil")
+	}
+	if _, err := st.LoadAppSettingJSON(context.Background(), "routing.settings", nil); err == nil {
+		t.Fatal("LoadAppSettingJSON(nil out) error = nil")
+	}
+}
+
 func TestNewInitializesSQLiteApplicationSchemaMarker(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {
