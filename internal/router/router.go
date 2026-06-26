@@ -780,6 +780,40 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 	return r.selectTargets(req, body, nil)
 }
 
+func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil || req == nil {
+		return false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	model := features.ModelName
+	candidates := r.candidatesForRequest(rawPath, model, features)
+	now := time.Now()
+	for _, candidate := range candidates {
+		if candidate.canSelect(now, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil || req == nil {
+		return false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	model := features.ModelName
+	candidates := r.candidatesForRequest(rawPath, model, features)
+	now := time.Now()
+	for _, candidate := range candidates {
+		if candidate.Upstream.SupportsResponsesAPI() && candidate.canSelect(now, model) {
+			return true
+		}
+	}
+	return false
+}
+
 // selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
 func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
 	rawPath := req.URL.Path

@@ -369,6 +369,14 @@ func (h *Handler) serveLocalResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = r.Body.Close()
+	h.serveLocalResponsesWithBody(w, r, body)
+}
+
+func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Request, body []byte) {
+	if h.responsesHandler == nil {
+		http.NotFound(w, r)
+		return
+	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
 
