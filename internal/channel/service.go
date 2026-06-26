@@ -25,6 +25,7 @@ type Store interface {
 	UpsertChannelConfig(store.ChannelConfigRecord) (store.ChannelConfigRecord, error)
 	UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error
 	ListChannelModels(channelID string, enabledOnly bool) ([]store.ChannelModelRecord, error)
+	ListModelAliases(alias string, enabledOnly bool) ([]store.ModelAliasRecord, error)
 	ReplaceChannelModels(channelID string, records []store.ChannelModelRecord) error
 	UpsertChannelModel(channelID string, record store.ChannelModelRecord) (store.ChannelModelRecord, error)
 	UpsertModelCatalog(store.ModelCatalogRecord) error
@@ -203,6 +204,10 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	aliases, err := s.store.ListModelAliases("", true)
+	if err != nil {
+		return nil, err
+	}
 	targets := make([]config.UpstreamTargetConfig, 0, len(channels))
 	for _, channel := range channels {
 		if !channel.Enabled {
@@ -230,7 +235,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			Weight:               channel.Weight,
 			CapacityHint:         channel.CapacityHint,
 			ModelDiscovery:       channel.ModelDiscovery,
-			StaticModels:         channelModelNames(models),
+			StaticModels:         channelModelNamesWithAliases(models, aliases, channel.ID),
 			ConfiguredModelsOnly: true,
 			AllowUnknownModels:   &channel.AllowUnknownModels,
 			Upstream: config.UpstreamConfig{
@@ -730,6 +735,34 @@ func channelModelNames(models []store.ChannelModelRecord) []string {
 	out := make([]string, 0, len(models))
 	for _, model := range models {
 		out = append(out, model.Model)
+	}
+	return normalizeModels(out)
+}
+
+func channelModelNamesWithAliases(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) []string {
+	modelNames := channelModelNames(models)
+	if len(aliases) == 0 || len(modelNames) == 0 {
+		return modelNames
+	}
+	supported := make(map[string]struct{}, len(modelNames))
+	for _, model := range modelNames {
+		supported[model] = struct{}{}
+	}
+	out := append([]string(nil), modelNames...)
+	for _, alias := range aliases {
+		aliasName := strings.ToLower(strings.TrimSpace(alias.Alias))
+		targetModel := strings.ToLower(strings.TrimSpace(alias.TargetModel))
+		aliasChannelID := strings.TrimSpace(alias.ChannelID)
+		if aliasName == "" || targetModel == "" {
+			continue
+		}
+		if aliasChannelID != "" && aliasChannelID != channelID {
+			continue
+		}
+		if _, ok := supported[targetModel]; !ok {
+			continue
+		}
+		out = append(out, aliasName)
 	}
 	return normalizeModels(out)
 }
