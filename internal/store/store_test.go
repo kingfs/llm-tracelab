@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -4836,6 +4837,126 @@ func TestClassifyUpstreamFailureSeparatesRetryQueueSaturation(t *testing.T) {
 	got := classifyUpstreamFailure(http.StatusServiceUnavailable, "Proxy overloaded: upstream retry wait queue saturated")
 	if got != "retry_queue_saturated" {
 		t.Fatalf("classifyUpstreamFailure() = %q, want retry_queue_saturated", got)
+	}
+}
+
+func TestModelAliasStoreCRUD(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	created, err := st.UpsertModelAlias(ModelAliasRecord{
+		Alias:       "ABC",
+		TargetModel: "GPT-5.5",
+		Enabled:     true,
+		Description: "primary alias",
+	})
+	if err != nil {
+		t.Fatalf("UpsertModelAlias() error = %v", err)
+	}
+	if created.ID == "" || created.Alias != "abc" || created.TargetModel != "gpt-5.5" || !created.Enabled {
+		t.Fatalf("created alias = %+v", created)
+	}
+	if created.Source != "manual" {
+		t.Fatalf("source = %q, want manual", created.Source)
+	}
+
+	aliases, err := st.ListModelAliases("abc", true)
+	if err != nil {
+		t.Fatalf("ListModelAliases() error = %v", err)
+	}
+	if len(aliases) != 1 || aliases[0].ID != created.ID {
+		t.Fatalf("aliases = %+v, want created alias", aliases)
+	}
+
+	updated, err := st.UpsertModelAlias(ModelAliasRecord{
+		ID:          created.ID,
+		Alias:       "abc",
+		TargetModel: "gpt-5.5-preview",
+		Enabled:     true,
+		Description: "updated",
+		Source:      "manual",
+	})
+	if err != nil {
+		t.Fatalf("UpsertModelAlias(update) error = %v", err)
+	}
+	if updated.TargetModel != "gpt-5.5-preview" || updated.Description != "updated" || !updated.UpdatedAt.After(created.UpdatedAt.Add(-time.Nanosecond)) {
+		t.Fatalf("updated alias = %+v", updated)
+	}
+
+	if err := st.SetModelAliasEnabled(created.ID, false); err != nil {
+		t.Fatalf("SetModelAliasEnabled(false) error = %v", err)
+	}
+	enabled, err := st.ListModelAliases("abc", true)
+	if err != nil {
+		t.Fatalf("ListModelAliases(enabled) error = %v", err)
+	}
+	if len(enabled) != 0 {
+		t.Fatalf("enabled aliases = %+v, want none", enabled)
+	}
+
+	if err := st.DeleteModelAlias(created.ID); err != nil {
+		t.Fatalf("DeleteModelAlias() error = %v", err)
+	}
+	if _, err := st.GetModelAlias(created.ID); err == nil {
+		t.Fatal("GetModelAlias() error = nil after delete")
+	}
+}
+
+func TestModelAliasStoreChannelScoped(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	global, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "coder", TargetModel: "deepseek-chat", Enabled: true})
+	if err != nil {
+		t.Fatalf("UpsertModelAlias(global) error = %v", err)
+	}
+	scoped, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "coder", TargetModel: "gpt-5.5", ChannelID: "openai-main", Enabled: true})
+	if err != nil {
+		t.Fatalf("UpsertModelAlias(scoped) error = %v", err)
+	}
+	aliases, err := st.ListModelAliases("coder", true)
+	if err != nil {
+		t.Fatalf("ListModelAliases() error = %v", err)
+	}
+	if len(aliases) != 2 {
+		t.Fatalf("aliases len = %d, want 2: %+v", len(aliases), aliases)
+	}
+	byID := map[string]ModelAliasRecord{}
+	for _, alias := range aliases {
+		byID[alias.ID] = alias
+	}
+	if byID[global.ID].ChannelID != "" {
+		t.Fatalf("global channel = %q, want empty", byID[global.ID].ChannelID)
+	}
+	if byID[scoped.ID].ChannelID != "openai-main" {
+		t.Fatalf("scoped channel = %q, want openai-main", byID[scoped.ID].ChannelID)
+	}
+}
+
+func TestModelAliasStoreValidation(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{TargetModel: "gpt-5.5"}); err == nil {
+		t.Fatal("UpsertModelAlias() error = nil, want alias validation")
+	}
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "abc"}); err == nil {
+		t.Fatal("UpsertModelAlias() error = nil, want target validation")
+	}
+	if err := st.SetModelAliasEnabled("missing", false); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("SetModelAliasEnabled(missing) error = %v, want sql.ErrNoRows", err)
+	}
+	if err := st.DeleteModelAlias("missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("DeleteModelAlias(missing) error = %v, want sql.ErrNoRows", err)
 	}
 }
 
