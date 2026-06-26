@@ -5118,21 +5118,23 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 }
 
 func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
-	if limit <= 0 {
-		limit = 1000
-	}
 	whereSQL, whereArgs := buildLogFilterClause(filter, "")
 	whereSQL = andSQL(whereSQL, clientVisibleLogClause(""))
 	if whereSQL == "" {
 		whereSQL = "1 = 1"
 	}
-	rows, err := s.db.Query(`
+	query := `
 		SELECT trace_id
 		FROM logs
-		WHERE `+whereSQL+`
+		WHERE ` + whereSQL + `
 		ORDER BY recorded_at DESC, trace_id DESC
-		LIMIT ?
-	`, append(whereArgs, limit)...)
+	`
+	args := whereArgs
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

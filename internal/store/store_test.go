@@ -4730,6 +4730,14 @@ func TestListTraceIDsSupportsBatchFilters(t *testing.T) {
 	if len(ids) != 1 {
 		t.Fatalf("ids = %+v, want one missing-usage trace", ids)
 	}
+
+	ids, err = st.ListTraceIDs(ListFilter{Endpoint: "responses"}, 0)
+	if err != nil {
+		t.Fatalf("ListTraceIDs(no limit) error = %v", err)
+	}
+	if len(ids) != 2 {
+		t.Fatalf("ids = %+v, want all matching traces with no limit", ids)
+	}
 }
 
 func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {

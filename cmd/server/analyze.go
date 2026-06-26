@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
@@ -70,6 +72,8 @@ type analyzeBatchOptions struct {
 	observation     string
 	missingUsage    bool
 	limit           int
+	limitSet        bool
+	workers         int
 	repairUsage     bool
 	reparse         bool
 	scan            bool
@@ -269,6 +273,7 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 			opts.configPath = runtime.configPath()
 			opts.format = runtime.outputFormat()
 			opts.stdout = cmd.OutOrStdout()
+			opts.limitSet = cmd.Flags().Changed("limit")
 			if opts.rewriteCassette && !opts.repairUsage {
 				return cliUsageError("--rewrite-cassette requires --repair-usage", "rewrite-cassette")
 			}
@@ -290,7 +295,7 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.traceIDs, "trace-id", nil, "Trace ID to process; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.requestIDs, "request-id", nil, "Request ID to resolve and process; may be repeated")
 	cmd.Flags().StringVar(&opts.sessionID, "session-id", "", "Process traces in a session")
-	cmd.Flags().BoolVar(&opts.all, "all", false, "Process all client-visible traces up to --limit")
+	cmd.Flags().BoolVar(&opts.all, "all", false, "Process all client-visible traces; combine with --limit to cap selection")
 	cmd.Flags().StringVarP(&opts.query, "query", "q", "", "Free-text trace filter")
 	cmd.Flags().StringVar(&opts.provider, "provider", "", "Provider filter")
 	cmd.Flags().StringVar(&opts.model, "model", "", "Model substring filter")
@@ -300,6 +305,7 @@ func newAnalyzeBatchCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&opts.observation, "observation", "", "Observation status filter: parsed, failed, queued, running, or unparsed")
 	cmd.Flags().BoolVar(&opts.missingUsage, "missing-usage", false, "Only process successful traces with missing token usage")
 	cmd.Flags().IntVar(&opts.limit, "limit", 1000, "Maximum traces selected by filters; 0 means no CLI cap")
+	cmd.Flags().IntVar(&opts.workers, "workers", 0, "Concurrent trace workers for direct execution; 0 uses an automatic local default")
 	cmd.Flags().BoolVar(&opts.repairUsage, "repair-usage", false, "Repair usage before other selected work")
 	cmd.Flags().BoolVar(&opts.reparse, "reparse", false, "Rebuild Observation IR")
 	cmd.Flags().BoolVar(&opts.scan, "scan", false, "Run deterministic audit scan")
@@ -320,6 +326,7 @@ func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
 			opts.configPath = runtime.configPath()
 			opts.format = runtime.outputFormat()
 			opts.stdout = cmd.OutOrStdout()
+			opts.limitSet = cmd.Flags().Changed("limit")
 			opts.reparse = true
 			opts.scan = true
 			if opts.rewriteCassette && !opts.repairUsage {
@@ -339,7 +346,7 @@ func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringArrayVar(&opts.traceIDs, "trace-id", nil, "Trace ID to refresh; may be repeated")
 	cmd.Flags().StringArrayVar(&opts.requestIDs, "request-id", nil, "Request ID to resolve and refresh; may be repeated")
 	cmd.Flags().StringVar(&opts.sessionID, "session-id", "", "Refresh all traces in a session and rebuild session analysis")
-	cmd.Flags().BoolVar(&opts.all, "all", false, "Refresh all client-visible traces up to --limit")
+	cmd.Flags().BoolVar(&opts.all, "all", false, "Refresh all client-visible traces; combine with --limit to cap selection")
 	cmd.Flags().StringVarP(&opts.query, "query", "q", "", "Free-text trace filter")
 	cmd.Flags().StringVar(&opts.provider, "provider", "", "Provider filter")
 	cmd.Flags().StringVar(&opts.model, "model", "", "Model substring filter")
@@ -349,6 +356,7 @@ func newAnalyzeRefreshCommand(runtime *cliRuntime) *cobra.Command {
 	cmd.Flags().StringVar(&opts.observation, "observation", "", "Observation status filter: parsed, failed, queued, running, or unparsed")
 	cmd.Flags().BoolVar(&opts.missingUsage, "missing-usage", false, "Only refresh successful traces with missing token usage")
 	cmd.Flags().IntVar(&opts.limit, "limit", 1000, "Maximum traces selected by filters; 0 means no CLI cap")
+	cmd.Flags().IntVar(&opts.workers, "workers", 0, "Concurrent trace workers for direct execution; 0 uses an automatic local default")
 	cmd.Flags().BoolVar(&opts.repairUsage, "repair-usage", false, "Repair token usage before refreshing analysis")
 	cmd.Flags().BoolVar(&opts.rewriteCassette, "rewrite-cassette", false, "Rewrite V3 cassette prelude when repairing usage")
 	cmd.Flags().BoolVar(&opts.enqueue, "enqueue", false, "Create analysis jobs without executing them in this process")
@@ -589,28 +597,7 @@ func runAnalyzeBatch(opts analyzeBatchOptions) int {
 		return 1
 	}
 	svc := reanalysis.New(traceStore, reanalysis.Options{})
-	results := make([]map[string]any, 0, len(traceIDs))
-	completed := 0
-	failed := 0
-	enqueued := 0
-	for _, traceID := range traceIDs {
-		row := map[string]any{"trace_id": traceID}
-		jobIDs, traceErr := runAnalyzeBatchTrace(context.Background(), svc, traceID, opts)
-		row["job_ids"] = jobIDs
-		if traceErr != nil {
-			failed++
-			row["status"] = "failed"
-			row["error"] = traceErr.Error()
-			slog.Error("Failed to process batch trace", "trace_id", traceID, "error", traceErr)
-		} else if opts.enqueue {
-			enqueued++
-			row["status"] = "queued"
-		} else {
-			completed++
-			row["status"] = "completed"
-		}
-		results = append(results, row)
-	}
+	results, completed, enqueued, failed := runAnalyzeBatchTraces(context.Background(), svc, traceIDs, opts, normalizeAnalyzeWorkers(opts.workers, cfg.DatabaseMaxOpenConns()))
 	output := map[string]any{
 		"trace_count":  len(traceIDs),
 		"completed":    completed,
@@ -633,6 +620,100 @@ func runAnalyzeBatch(opts analyzeBatchOptions) int {
 		return 1
 	}
 	return 0
+}
+
+func runAnalyzeBatchTraces(ctx context.Context, svc *reanalysis.Service, traceIDs []string, opts analyzeBatchOptions, workers int) ([]map[string]any, int, int, int) {
+	if workers <= 1 || len(traceIDs) <= 1 {
+		return runAnalyzeBatchTracesSerial(ctx, svc, traceIDs, opts)
+	}
+	if workers > len(traceIDs) {
+		workers = len(traceIDs)
+	}
+	type item struct {
+		index   int
+		traceID string
+	}
+	jobs := make(chan item)
+	results := make([]map[string]any, len(traceIDs))
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				results[job.index] = runAnalyzeBatchTraceRow(ctx, svc, job.traceID, opts)
+			}
+		}()
+	}
+	for index, traceID := range traceIDs {
+		jobs <- item{index: index, traceID: traceID}
+	}
+	close(jobs)
+	wg.Wait()
+	completed, enqueued, failed := countAnalyzeBatchResults(results, opts.enqueue)
+	return results, completed, enqueued, failed
+}
+
+func runAnalyzeBatchTracesSerial(ctx context.Context, svc *reanalysis.Service, traceIDs []string, opts analyzeBatchOptions) ([]map[string]any, int, int, int) {
+	results := make([]map[string]any, 0, len(traceIDs))
+	for _, traceID := range traceIDs {
+		results = append(results, runAnalyzeBatchTraceRow(ctx, svc, traceID, opts))
+	}
+	completed, enqueued, failed := countAnalyzeBatchResults(results, opts.enqueue)
+	return results, completed, enqueued, failed
+}
+
+func runAnalyzeBatchTraceRow(ctx context.Context, svc *reanalysis.Service, traceID string, opts analyzeBatchOptions) map[string]any {
+	row := map[string]any{"trace_id": traceID}
+	jobIDs, traceErr := runAnalyzeBatchTrace(ctx, svc, traceID, opts)
+	row["job_ids"] = jobIDs
+	if traceErr != nil {
+		row["status"] = "failed"
+		row["error"] = traceErr.Error()
+		slog.Error("Failed to process batch trace", "trace_id", traceID, "error", traceErr)
+	} else if opts.enqueue {
+		row["status"] = "queued"
+	} else {
+		row["status"] = "completed"
+	}
+	return row
+}
+
+func countAnalyzeBatchResults(results []map[string]any, enqueuedStatus bool) (int, int, int) {
+	completed := 0
+	enqueued := 0
+	failed := 0
+	for _, row := range results {
+		switch row["status"] {
+		case "failed":
+			failed++
+		case "queued":
+			enqueued++
+		case "completed":
+			completed++
+		default:
+			if enqueuedStatus {
+				enqueued++
+			} else {
+				completed++
+			}
+		}
+	}
+	return completed, enqueued, failed
+}
+
+func normalizeAnalyzeWorkers(requested int, maxOpenConns int) int {
+	if requested > 0 {
+		return requested
+	}
+	workers := runtime.NumCPU()
+	if maxOpenConns > 0 && workers > maxOpenConns {
+		workers = maxOpenConns
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	return workers
 }
 
 func runAnalyzeRefresh(opts analyzeBatchOptions) int {
@@ -830,10 +911,7 @@ func resolveAnalyzeBatchTraceIDs(st *store.Store, opts analyzeBatchOptions) ([]s
 	if len(traceIDs) > 0 {
 		return limitTraceIDs(traceIDs, opts.limit), nil
 	}
-	limit := opts.limit
-	if limit == 0 {
-		limit = 1<<31 - 1
-	}
+	limit := analyzeSelectionLimit(opts)
 	return st.ListTraceIDs(store.ListFilter{
 		Query:             strings.TrimSpace(opts.query),
 		Provider:          strings.TrimSpace(opts.provider),
@@ -844,6 +922,13 @@ func resolveAnalyzeBatchTraceIDs(st *store.Store, opts analyzeBatchOptions) ([]s
 		ObservationStatus: strings.TrimSpace(opts.observation),
 		MissingUsage:      opts.missingUsage,
 	}, limit)
+}
+
+func analyzeSelectionLimit(opts analyzeBatchOptions) int {
+	if opts.all && !opts.limitSet {
+		return 0
+	}
+	return opts.limit
 }
 
 func limitTraceIDs(traceIDs []string, limit int) []string {

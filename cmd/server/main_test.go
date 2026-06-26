@@ -4859,6 +4859,27 @@ func mustTraceIDFromStore(t *testing.T, st *store.Store, path string) string {
 	return entry[0].ID
 }
 
+func TestAnalyzeSelectionLimitAllDefaultsToNoCap(t *testing.T) {
+	if got := analyzeSelectionLimit(analyzeBatchOptions{all: true, limit: 1000}); got != 0 {
+		t.Fatalf("analyzeSelectionLimit(--all default) = %d, want no cap", got)
+	}
+	if got := analyzeSelectionLimit(analyzeBatchOptions{all: true, limit: 25, limitSet: true}); got != 25 {
+		t.Fatalf("analyzeSelectionLimit(--all --limit 25) = %d, want 25", got)
+	}
+	if got := analyzeSelectionLimit(analyzeBatchOptions{limit: 1000}); got != 1000 {
+		t.Fatalf("analyzeSelectionLimit(default filtered) = %d, want 1000", got)
+	}
+}
+
+func TestNormalizeAnalyzeWorkers(t *testing.T) {
+	if got := normalizeAnalyzeWorkers(1, 4); got != 1 {
+		t.Fatalf("normalizeAnalyzeWorkers(explicit) = %d, want 1", got)
+	}
+	if got := normalizeAnalyzeWorkers(0, 2); got < 1 || got > 2 {
+		t.Fatalf("normalizeAnalyzeWorkers(auto, maxOpen=2) = %d, want 1..2", got)
+	}
+}
+
 func TestRunAuthInitUserAndCreateToken(t *testing.T) {
 	t.Parallel()
 
