@@ -339,6 +339,27 @@ type ChannelModelProfilePatch struct {
 	ProfileAdoptionStatus       *string
 }
 
+type ModelAliasRecord struct {
+	ID          string
+	Alias       string
+	TargetModel string
+	ChannelID   string
+	Enabled     bool
+	Description string
+	Source      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ModelAliasPatch struct {
+	Alias       *string
+	TargetModel *string
+	ChannelID   *string
+	Enabled     *bool
+	Description *string
+	Source      *string
+}
+
 type ModelCatalogRecord struct {
 	Model       string
 	DisplayName string
@@ -1027,6 +1048,182 @@ func (s *Store) ListAdoptedChannelModelProfiles() ([]ChannelModelRecord, error) 
 		out = append(out, channelModelRecordFromEnt(row))
 	}
 	return out, nil
+}
+
+func (s *Store) ListModelAliases(alias string, enabledOnly bool) ([]ModelAliasRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store is not initialized")
+	}
+	var args []any
+	where := "1=1"
+	if alias = strings.ToLower(strings.TrimSpace(alias)); alias != "" {
+		where += " AND alias = ?"
+		args = append(args, alias)
+	}
+	if enabledOnly {
+		where += " AND enabled = ?"
+		args = append(args, true)
+	}
+	rows, err := s.db.Query(`SELECT id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at
+		FROM model_aliases WHERE `+where+` ORDER BY alias, channel_id, target_model, id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelAliasRecord{}
+	for rows.Next() {
+		record, err := scanModelAlias(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpsertModelAlias(record ModelAliasRecord) (ModelAliasRecord, error) {
+	if s == nil || s.db == nil {
+		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
+	}
+	record = normalizeModelAliasRecord(record)
+	if record.Alias == "" {
+		return ModelAliasRecord{}, fmt.Errorf("alias is required")
+	}
+	if record.TargetModel == "" {
+		return ModelAliasRecord{}, fmt.Errorf("target model is required")
+	}
+	if record.ID == "" {
+		record.ID = stableModelAliasID(record)
+	}
+	now := time.Now().UTC()
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	if record.UpdatedAt.IsZero() {
+		record.UpdatedAt = now
+	}
+	if record.Source == "" {
+		record.Source = "manual"
+	}
+	_, err := s.db.Exec(`INSERT INTO model_aliases (id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			alias = excluded.alias,
+			target_model = excluded.target_model,
+			channel_id = excluded.channel_id,
+			enabled = excluded.enabled,
+			description = excluded.description,
+			source = excluded.source,
+			updated_at = excluded.updated_at`,
+		record.ID,
+		record.Alias,
+		record.TargetModel,
+		record.ChannelID,
+		record.Enabled,
+		record.Description,
+		record.Source,
+		record.CreatedAt,
+		record.UpdatedAt,
+	)
+	if err != nil {
+		return ModelAliasRecord{}, err
+	}
+	return s.GetModelAlias(record.ID)
+}
+
+func (s *Store) GetModelAlias(id string) (ModelAliasRecord, error) {
+	if s == nil || s.db == nil {
+		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ModelAliasRecord{}, fmt.Errorf("model alias id is required")
+	}
+	row := s.db.QueryRow(`SELECT id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at
+		FROM model_aliases WHERE id = ?`, id)
+	return scanModelAlias(row)
+}
+
+func (s *Store) SetModelAliasEnabled(id string, enabled bool) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("model alias id is required")
+	}
+	result, err := s.db.Exec(`UPDATE model_aliases SET enabled = ?, updated_at = ? WHERE id = ?`, enabled, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) DeleteModelAlias(id string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("model alias id is required")
+	}
+	result, err := s.db.Exec(`DELETE FROM model_aliases WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+type modelAliasScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanModelAlias(scanner modelAliasScanner) (ModelAliasRecord, error) {
+	var record ModelAliasRecord
+	if err := scanner.Scan(
+		&record.ID,
+		&record.Alias,
+		&record.TargetModel,
+		&record.ChannelID,
+		&record.Enabled,
+		&record.Description,
+		&record.Source,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return ModelAliasRecord{}, err
+	}
+	return record, nil
+}
+
+func normalizeModelAliasRecord(record ModelAliasRecord) ModelAliasRecord {
+	record.ID = strings.TrimSpace(record.ID)
+	record.Alias = strings.ToLower(strings.TrimSpace(record.Alias))
+	record.TargetModel = strings.ToLower(strings.TrimSpace(record.TargetModel))
+	record.ChannelID = strings.TrimSpace(record.ChannelID)
+	record.Description = strings.TrimSpace(record.Description)
+	record.Source = strings.TrimSpace(record.Source)
+	return record
+}
+
+func stableModelAliasID(record ModelAliasRecord) string {
+	key := record.Alias + "\x00" + record.ChannelID + "\x00" + record.TargetModel
+	sum := sha256.Sum256([]byte(key))
+	return "mal_" + hex.EncodeToString(sum[:8])
 }
 
 func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRecord) error {
@@ -3083,6 +3280,9 @@ func (s *Store) initSchema() error {
 		);`); err != nil {
 			return err
 		}
+		if err := s.ensureModelAliasesSchema(); err != nil {
+			return err
+		}
 		return s.ensureLogExchangeColumns()
 	}
 	stmts := []string{
@@ -3228,6 +3428,20 @@ func (s *Store) initSchema() error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS channelmodel_channel_id_model ON channel_models(channel_id, model);`,
 		`CREATE INDEX IF NOT EXISTS idx_channel_models_model ON channel_models(model);`,
 		`CREATE INDEX IF NOT EXISTS channelmodel_channel_id_enabled ON channel_models(channel_id, enabled);`,
+		`CREATE TABLE IF NOT EXISTS model_aliases (
+			id TEXT PRIMARY KEY,
+			alias TEXT NOT NULL,
+			target_model TEXT NOT NULL,
+			channel_id TEXT NOT NULL DEFAULT '',
+			enabled bool NOT NULL DEFAULT true,
+			description TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_alias ON model_aliases(alias);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_target ON model_aliases(target_model);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_channel ON model_aliases(channel_id);`,
 		`CREATE TABLE IF NOT EXISTS model_catalog (
 			model TEXT PRIMARY KEY,
 			display_name TEXT NOT NULL DEFAULT '',
@@ -4005,6 +4219,40 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 
 	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
 	return err
+}
+
+func (s *Store) ensureModelAliasesSchema() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	createdAtType := "datetime"
+	updatedAtType := "datetime"
+	if s.driver == "postgres" {
+		createdAtType = "timestamptz"
+		updatedAtType = "timestamptz"
+	}
+	stmts := []string{
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS model_aliases (
+			id TEXT PRIMARY KEY,
+			alias TEXT NOT NULL,
+			target_model TEXT NOT NULL,
+			channel_id TEXT NOT NULL DEFAULT '',
+			enabled bool NOT NULL DEFAULT true,
+			description TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			created_at %s NOT NULL,
+			updated_at %s NOT NULL
+		);`, createdAtType, updatedAtType),
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_alias ON model_aliases(alias);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_target ON model_aliases(target_model);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_channel ON model_aliases(channel_id);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) ensureLogExchangeColumns() error {
