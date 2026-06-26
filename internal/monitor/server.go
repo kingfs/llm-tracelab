@@ -1360,6 +1360,19 @@ type modelAliasUpsertRequest struct {
 	Source      string `json:"source"`
 }
 
+type modelAliasValidationResponse struct {
+	Valid       bool                       `json:"valid"`
+	Alias       modelAliasItem             `json:"alias"`
+	Errors      []string                   `json:"errors,omitempty"`
+	Warnings    []modelAliasValidationNote `json:"warnings,omitempty"`
+	RefreshedAt time.Time                  `json:"refreshed_at"`
+}
+
+type modelAliasValidationNote struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 type routingSettingsView struct {
 	ResponsesStrategy  string    `json:"responses_strategy"`
 	SelectionPolicy    string    `json:"selection_policy"`
@@ -1495,6 +1508,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(modelAliasListCreateAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/", monitorAuthRequired(modelAliasDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
@@ -3103,13 +3117,48 @@ func modelAliasListCreateAPIHandler(st *store.Store) http.HandlerFunc {
 			}
 			record, err := st.UpsertModelAlias(modelAliasRecordFromRequest(req, store.ModelAliasRecord{}))
 			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				writeAliasValidationError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
 		default:
 			http.NotFound(w, r)
 		}
+	}
+}
+
+func modelAliasValidateAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req modelAliasUpsertRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model alias payload"})
+			return
+		}
+		record := normalizeModelAliasPreview(modelAliasRecordFromRequest(req, store.ModelAliasRecord{}))
+		resp := modelAliasValidationResponse{
+			Valid:       true,
+			Alias:       modelAliasItemFromRecord(record),
+			RefreshedAt: time.Now().UTC(),
+		}
+		if err := st.ValidateModelAlias(record); err != nil {
+			resp.Valid = false
+			resp.Errors = []string{err.Error()}
+		}
+		warnings, err := modelAliasValidationWarnings(st, record)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		resp.Warnings = warnings
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -3146,7 +3195,7 @@ func modelAliasDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			req.ID = id
 			record, err := st.UpsertModelAlias(modelAliasRecordFromRequest(req, existing))
 			if err != nil {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				writeAliasValidationError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
@@ -3535,6 +3584,7 @@ func validateRoutingSettings(settings routingSettingsView) error {
 
 func modelAliasRecordFromRequest(req modelAliasUpsertRequest, existing store.ModelAliasRecord) store.ModelAliasRecord {
 	record := existing
+	isCreate := record.ID == ""
 	if strings.TrimSpace(req.ID) != "" {
 		record.ID = strings.TrimSpace(req.ID)
 	}
@@ -3547,7 +3597,7 @@ func modelAliasRecordFromRequest(req modelAliasUpsertRequest, existing store.Mod
 	record.ChannelID = strings.TrimSpace(req.ChannelID)
 	if req.Enabled != nil {
 		record.Enabled = *req.Enabled
-	} else if record.ID == "" {
+	} else if isCreate {
 		record.Enabled = true
 	}
 	if strings.TrimSpace(req.Description) != "" {
@@ -3557,6 +3607,73 @@ func modelAliasRecordFromRequest(req modelAliasUpsertRequest, existing store.Mod
 		record.Source = strings.TrimSpace(req.Source)
 	}
 	return record
+}
+
+func normalizeModelAliasPreview(record store.ModelAliasRecord) store.ModelAliasRecord {
+	record.ID = strings.TrimSpace(record.ID)
+	record.Alias = strings.ToLower(strings.TrimSpace(record.Alias))
+	record.TargetModel = strings.ToLower(strings.TrimSpace(record.TargetModel))
+	record.ChannelID = strings.TrimSpace(record.ChannelID)
+	record.Description = strings.TrimSpace(record.Description)
+	record.Source = strings.TrimSpace(record.Source)
+	return record
+}
+
+func modelAliasValidationWarnings(st *store.Store, record store.ModelAliasRecord) ([]modelAliasValidationNote, error) {
+	if strings.TrimSpace(record.TargetModel) == "" {
+		return nil, nil
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	models, err := st.ListChannelModels("", false)
+	if err != nil {
+		return nil, err
+	}
+	target := strings.ToLower(strings.TrimSpace(record.TargetModel))
+	enabledChannels := map[string]store.ChannelConfigRecord{}
+	allChannels := map[string]store.ChannelConfigRecord{}
+	for _, channel := range channels {
+		allChannels[channel.ID] = channel
+		if channel.Enabled {
+			enabledChannels[channel.ID] = channel
+		}
+	}
+	targetEnabledOnAnyChannel := false
+	targetEnabledByChannel := map[string]bool{}
+	for _, model := range models {
+		if strings.ToLower(strings.TrimSpace(model.Model)) != target || !model.Enabled {
+			continue
+		}
+		targetEnabledByChannel[model.ChannelID] = true
+		if _, ok := enabledChannels[model.ChannelID]; ok {
+			targetEnabledOnAnyChannel = true
+		}
+	}
+	warnings := []modelAliasValidationNote{}
+	if !targetEnabledOnAnyChannel {
+		warnings = append(warnings, modelAliasValidationNote{
+			Code:    "target_model_not_enabled",
+			Message: "target model is not enabled on any enabled channel",
+		})
+	}
+	if record.ChannelID != "" {
+		channel, ok := allChannels[record.ChannelID]
+		if !ok || !channel.Enabled {
+			warnings = append(warnings, modelAliasValidationNote{
+				Code:    "scoped_channel_disabled",
+				Message: "scoped channel is disabled or missing",
+			})
+		}
+		if !targetEnabledByChannel[record.ChannelID] {
+			warnings = append(warnings, modelAliasValidationNote{
+				Code:    "scoped_channel_target_model_not_enabled",
+				Message: "scoped channel does not have the target model enabled",
+			})
+		}
+	}
+	return warnings, nil
 }
 
 func modelAliasItemFromRecord(record store.ModelAliasRecord) modelAliasItem {
@@ -3579,6 +3696,14 @@ func writeAliasError(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+func writeAliasValidationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrModelAliasConflict) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 }
 
 func routingInspectPlanInput(st *store.Store, req routingInspectRequest, settings routingSettingsView) (routeplan.Request, []routeplan.UpstreamCandidate, error) {

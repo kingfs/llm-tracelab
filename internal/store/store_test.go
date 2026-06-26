@@ -5016,6 +5016,21 @@ func TestModelAliasStoreValidation(t *testing.T) {
 	if _, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "abc"}); err == nil {
 		t.Fatal("UpsertModelAlias() error = nil, want target validation")
 	}
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "abc", TargetModel: "abc", Enabled: true}); err == nil {
+		t.Fatal("UpsertModelAlias() error = nil, want self-alias validation")
+	}
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "a", TargetModel: "b", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias(a->b) error = %v", err)
+	}
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{Alias: "b", TargetModel: "a", Enabled: true}); err == nil {
+		t.Fatal("UpsertModelAlias(b->a) error = nil, want direct cycle validation")
+	}
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{ID: "custom-duplicate", Alias: "a", TargetModel: "b", Enabled: true}); !errors.Is(err, ErrModelAliasConflict) {
+		t.Fatalf("UpsertModelAlias(duplicate) error = %v, want ErrModelAliasConflict", err)
+	}
+	if _, err := st.UpsertModelAlias(ModelAliasRecord{ID: "disabled-duplicate", Alias: "a", TargetModel: "b", Enabled: false}); err != nil {
+		t.Fatalf("UpsertModelAlias(disabled duplicate) error = %v", err)
+	}
 	if err := st.SetModelAliasEnabled("missing", false); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("SetModelAliasEnabled(missing) error = %v, want sql.ErrNoRows", err)
 	}
