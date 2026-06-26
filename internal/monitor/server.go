@@ -2222,14 +2222,14 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
 			return
 		}
-		relativePath := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/models/"), "/")
+		relativePath := strings.Trim(strings.TrimPrefix(pathClean(r.URL.EscapedPath()), "/api/models/"), "/")
 		if relativePath == "" {
 			http.NotFound(w, r)
 			return
 		}
 		if strings.HasSuffix(relativePath, "/spec-lookup") {
-			model := strings.TrimSuffix(relativePath, "/spec-lookup")
-			if model == "" || strings.Contains(model, "/") {
+			model, err := url.PathUnescape(strings.TrimSuffix(relativePath, "/spec-lookup"))
+			if err != nil || strings.TrimSpace(model) == "" {
 				http.NotFound(w, r)
 				return
 			}
@@ -2240,8 +2240,8 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, modelSpecLookup(model))
 			return
 		}
-		model := relativePath
-		if model == "" || strings.Contains(model, "/") {
+		model, err := url.PathUnescape(relativePath)
+		if err != nil || strings.TrimSpace(model) == "" {
 			http.NotFound(w, r)
 			return
 		}
@@ -2814,7 +2814,7 @@ func appHandler() http.Handler {
 			return
 		}
 
-		clean := strings.TrimPrefix(pathClean(r.URL.Path), "/")
+		clean := strings.TrimPrefix(pathClean(r.URL.EscapedPath()), "/")
 		if clean == "" {
 			serveEmbeddedIndex(distFS, w, r)
 			return

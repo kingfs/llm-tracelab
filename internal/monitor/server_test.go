@@ -50,6 +50,7 @@ func TestEmbeddedMonitorUISmoke(t *testing.T) {
 	routes := []string{
 		"/",
 		"/overview",
+		"/models/dev%2Fgpt-5.5",
 		"/traces",
 		"/sessions",
 		"/audit",
@@ -2914,6 +2915,7 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
 		{Model: "gpt-5", Source: "manual", Enabled: true, ContextWindow: intPtr(272000), MaxOutputTokens: intPtr(128000), ProfileAdoptionStatus: "adopted"},
+		{Model: "dev/gpt-5.5", Source: "manual", Enabled: true, ContextWindow: intPtr(128000), MaxOutputTokens: intPtr(16000)},
 		{Model: "gpt-zero", Source: "manual", Enabled: true},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
@@ -2939,6 +2941,28 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if err := st.UpsertLog(path, header); err != nil {
 		t.Fatalf("UpsertLog() error = %v", err)
+	}
+	slashedPath := filepath.Join(dir, "model-slashed-api.http")
+	if err := os.WriteFile(slashedPath, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(slashed) error = %v", err)
+	}
+	slashedHeader := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          "model-slashed-api",
+			Time:               time.Now().UTC(),
+			Model:              "dev/gpt-5.5",
+			URL:                "/v1/responses",
+			Method:             "POST",
+			StatusCode:         200,
+			DurationMs:         100,
+			TTFTMs:             10,
+			SelectedUpstreamID: "openai-primary",
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: 11},
+	}
+	if err := st.UpsertLog(slashedPath, slashedHeader); err != nil {
+		t.Fatalf("UpsertLog(slashed) error = %v", err)
 	}
 	traceOnlyPath := filepath.Join(dir, "model-trace-only-api.http")
 	if err := os.WriteFile(traceOnlyPath, []byte("test"), 0o644); err != nil {
@@ -2973,11 +2997,15 @@ func TestModelCatalogAPI(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("json.Unmarshal(list) error = %v", err)
 	}
-	if len(list.Items) != 2 || list.Items[0].Model != "gpt-5" || list.Items[0].Summary.TotalTokens != 42 {
+	itemsByModel := map[string]modelItem{}
+	for _, item := range list.Items {
+		itemsByModel[item.Model] = item
+	}
+	if len(list.Items) != 3 || itemsByModel["gpt-5"].Summary.TotalTokens != 42 || itemsByModel["dev/gpt-5.5"].Summary.TotalTokens != 11 {
 		t.Fatalf("model list = %+v", list)
 	}
-	if list.Items[1].Model != "qwen3.6-27b" || list.Items[1].ChannelCount != 1 || len(list.Items[1].Channels) != 1 || list.Items[1].Channels[0] != "openai-primary" {
-		t.Fatalf("trace-only model list item = %+v", list.Items[1])
+	if itemsByModel["qwen3.6-27b"].ChannelCount != 1 || len(itemsByModel["qwen3.6-27b"].Channels) != 1 || itemsByModel["qwen3.6-27b"].Channels[0] != "openai-primary" {
+		t.Fatalf("trace-only model list item = %+v", itemsByModel["qwen3.6-27b"])
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/models/gpt-5?window=24h", nil)
@@ -2995,6 +3023,20 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if detail.Channels[0].ContextWindow == nil || *detail.Channels[0].ContextWindow != 272000 || detail.Channels[0].ProfileAdoptionStatus != "adopted" {
 		t.Fatalf("model detail channel profile = %+v", detail.Channels[0])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/dev%2Fgpt-5.5?window=24h", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("slashed model detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var slashedDetail modelDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &slashedDetail); err != nil {
+		t.Fatalf("json.Unmarshal(slashedDetail) error = %v", err)
+	}
+	if slashedDetail.Model.Model != "dev/gpt-5.5" || len(slashedDetail.Channels) != 1 || slashedDetail.Channels[0].ContextWindow == nil || *slashedDetail.Channels[0].ContextWindow != 128000 {
+		t.Fatalf("slashed model detail = %+v", slashedDetail)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/models/qwen3.6-27b?window=24h", nil)
@@ -3037,6 +3079,20 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if !spec.Matched || spec.Suggestion == nil || spec.Suggestion.ContextWindow != 262144 {
 		t.Fatalf("model spec lookup = %+v", spec)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/dev%2Fgpt-5.5/spec-lookup", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("slashed model spec lookup status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var slashedSpec modelSpecLookupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &slashedSpec); err != nil {
+		t.Fatalf("json.Unmarshal(slashedSpec) error = %v", err)
+	}
+	if slashedSpec.Query != "dev/gpt-5.5" {
+		t.Fatalf("slashed model spec lookup query = %q, want dev/gpt-5.5", slashedSpec.Query)
 	}
 }
 

@@ -708,6 +708,65 @@ func TestHandlerAggregatesModelListAcrossUpstreams(t *testing.T) {
 	}
 }
 
+func TestHandlerModelListUsesConfiguredEnabledModelsNotUpstreamDiscovery(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-enabled"},{"id":"gpt-disabled"},{"id":"gpt-upstream-only"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				ModelDiscovery: router.ModelDiscoveryListModels,
+				StaticModels:   []string{"gpt-enabled"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Trace.OutputDir = outputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://proxy.local/v1/models", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/models status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, rec.Body.String())
+	}
+	if len(payload.Data) != 1 || payload.Data[0].ID != "gpt-enabled" {
+		t.Fatalf("model list = %+v, want only gpt-enabled; body=%s", payload.Data, rec.Body.String())
+	}
+}
+
 func TestHandlerAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

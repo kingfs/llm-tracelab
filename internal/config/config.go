@@ -95,16 +95,17 @@ type UpstreamCapabilitiesConfig struct {
 }
 
 type UpstreamTargetConfig struct {
-	ID                 string             `yaml:"id"`
-	Enabled            *bool              `yaml:"enabled"`
-	Priority           int                `yaml:"priority"`
-	Weight             float64            `yaml:"weight"`
-	CapacityHint       float64            `yaml:"capacity_hint"`
-	ModelDiscovery     string             `yaml:"model_discovery"`
-	StaticModels       []string           `yaml:"static_models"`
-	AllowUnknownModels *bool              `yaml:"allow_unknown_models"`
-	Upstream           UpstreamConfig     `yaml:"upstream"`
-	Credentials        []CredentialConfig `yaml:"credentials"`
+	ID                   string             `yaml:"id"`
+	Enabled              *bool              `yaml:"enabled"`
+	Priority             int                `yaml:"priority"`
+	Weight               float64            `yaml:"weight"`
+	CapacityHint         float64            `yaml:"capacity_hint"`
+	ModelDiscovery       string             `yaml:"model_discovery"`
+	StaticModels         []string           `yaml:"static_models"`
+	ConfiguredModelsOnly bool               `yaml:"-"`
+	AllowUnknownModels   *bool              `yaml:"allow_unknown_models"`
+	Upstream             UpstreamConfig     `yaml:"upstream"`
+	Credentials          []CredentialConfig `yaml:"credentials"`
 }
 
 type ProviderProbeConfig struct {

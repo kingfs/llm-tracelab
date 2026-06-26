@@ -128,18 +128,19 @@ func (r *Router) HealthThresholds() HealthThresholds {
 }
 
 type Target struct {
-	ID             string
-	RouteTargetID  string
-	ChannelID      string
-	CredentialID   string
-	CredentialHint string
-	Enabled        bool
-	Priority       int
-	Weight         float64
-	CapacityHint   float64
-	ModelDiscovery string
-	StaticModels   []string
-	Upstream       upstream.ResolvedUpstream
+	ID                   string
+	RouteTargetID        string
+	ChannelID            string
+	CredentialID         string
+	CredentialHint       string
+	Enabled              bool
+	Priority             int
+	Weight               float64
+	CapacityHint         float64
+	ModelDiscovery       string
+	StaticModels         []string
+	configuredModelsOnly bool
+	Upstream             upstream.ResolvedUpstream
 
 	allowUnknownModels bool
 
@@ -441,26 +442,27 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 
 func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstream.ResolvedUpstream, id string, routeTargetID string, channelID string, credentialID string, credentialHint string, singleConfiguredTarget bool) *Target {
 	return &Target{
-		ID:                 id,
-		RouteTargetID:      routeTargetID,
-		ChannelID:          channelID,
-		CredentialID:       credentialID,
-		CredentialHint:     credentialHint,
-		Enabled:            true,
-		Priority:           targetCfg.Priority,
-		Weight:             defaultFloat(targetCfg.Weight, 1),
-		CapacityHint:       defaultFloat(targetCfg.CapacityHint, 1),
-		ModelDiscovery:     normalizeDiscoveryMode(targetCfg.ModelDiscovery),
-		StaticModels:       normalizeModels(targetCfg.StaticModels),
-		Upstream:           resolved,
-		allowUnknownModels: allowUnknownModels(targetCfg, singleConfiguredTarget),
-		models:             map[string]struct{}{},
-		ttftFastMs:         500,
-		ttftSlowMs:         500,
-		reqLatencyFastMs:   800,
-		reqLatencySlowMs:   800,
-		healthState:        HealthHealthy,
-		modelHealth:        map[string]*modelHealthState{},
+		ID:                   id,
+		RouteTargetID:        routeTargetID,
+		ChannelID:            channelID,
+		CredentialID:         credentialID,
+		CredentialHint:       credentialHint,
+		Enabled:              true,
+		Priority:             targetCfg.Priority,
+		Weight:               defaultFloat(targetCfg.Weight, 1),
+		CapacityHint:         defaultFloat(targetCfg.CapacityHint, 1),
+		ModelDiscovery:       normalizeDiscoveryMode(targetCfg.ModelDiscovery),
+		StaticModels:         normalizeModels(targetCfg.StaticModels),
+		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
+		Upstream:             resolved,
+		allowUnknownModels:   allowUnknownModels(targetCfg, singleConfiguredTarget),
+		models:               map[string]struct{}{},
+		ttftFastMs:           500,
+		ttftSlowMs:           500,
+		reqLatencyFastMs:     800,
+		reqLatencySlowMs:     800,
+		healthState:          HealthHealthy,
+		modelHealth:          map[string]*modelHealthState{},
 	}
 }
 
@@ -699,6 +701,19 @@ func (r *Router) AggregatedModels() []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
 	for _, target := range targets {
+		if target.configuredModelsOnly || len(target.StaticModels) > 0 {
+			for _, model := range normalizeModels(target.StaticModels) {
+				if model == "" {
+					continue
+				}
+				if _, ok := seen[model]; ok {
+					continue
+				}
+				seen[model] = struct{}{}
+				out = append(out, model)
+			}
+			continue
+		}
 		target.mu.Lock()
 		for model := range target.models {
 			if model == "" {

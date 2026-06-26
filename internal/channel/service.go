@@ -224,14 +224,15 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		}
 		enabled := true
 		target := config.UpstreamTargetConfig{
-			ID:                 channel.ID,
-			Enabled:            &enabled,
-			Priority:           channel.Priority,
-			Weight:             channel.Weight,
-			CapacityHint:       channel.CapacityHint,
-			ModelDiscovery:     channel.ModelDiscovery,
-			StaticModels:       channelModelNames(models),
-			AllowUnknownModels: &channel.AllowUnknownModels,
+			ID:                   channel.ID,
+			Enabled:              &enabled,
+			Priority:             channel.Priority,
+			Weight:               channel.Weight,
+			CapacityHint:         channel.CapacityHint,
+			ModelDiscovery:       channel.ModelDiscovery,
+			StaticModels:         channelModelNames(models),
+			ConfiguredModelsOnly: true,
+			AllowUnknownModels:   &channel.AllowUnknownModels,
 			Upstream: config.UpstreamConfig{
 				BaseURL:        channel.BaseURL,
 				ApiKey:         string(channel.APIKeyCiphertext),

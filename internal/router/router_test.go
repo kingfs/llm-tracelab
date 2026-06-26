@@ -3,6 +3,7 @@ package router
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -1316,6 +1317,85 @@ func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
 		if models[i] != want[i] {
 			t.Fatalf("models[%d] = %q, want %q (all=%v)", i, models[i], want[i], models)
 		}
+	}
+}
+
+func TestRouterAggregatedModelsPreferConfiguredModelsOverDiscoveredCatalog(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-enabled"},{"id":"gpt-disabled"},{"id":"gpt-upstream-only"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				ModelDiscovery: ModelDiscoveryListModels,
+				StaticModels:   []string{"gpt-enabled"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	models := rtr.AggregatedModels()
+	if len(models) != 1 || models[0] != "gpt-enabled" {
+		t.Fatalf("AggregatedModels() = %#v, want only configured enabled model", models)
+	}
+}
+
+func TestRouterAggregatedModelsHidesDiscoveredCatalogForConfiguredModelsOnlyTarget(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-disabled"},{"id":"gpt-upstream-only"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:                   "primary",
+				Enabled:              boolPtr(true),
+				ModelDiscovery:       ModelDiscoveryListModels,
+				ConfiguredModelsOnly: true,
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	if models := rtr.AggregatedModels(); len(models) != 0 {
+		t.Fatalf("AggregatedModels() = %#v, want empty configured model list", models)
 	}
 }
 

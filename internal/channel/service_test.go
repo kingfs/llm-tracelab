@@ -648,4 +648,7 @@ func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
 	if len(targets[0].StaticModels) != 1 || targets[0].StaticModels[0] != "gpt-5" {
 		t.Fatalf("StaticModels = %#v", targets[0].StaticModels)
 	}
+	if !targets[0].ConfiguredModelsOnly {
+		t.Fatalf("ConfiguredModelsOnly = false, want true for channel runtime target")
+	}
 }
