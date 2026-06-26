@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -3155,6 +3156,179 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 	if _, err := rtr.Select(selectReq); err == nil {
 		t.Fatalf("Select(gpt-5) error = nil, want no supporting target after reload")
 	}
+}
+
+func TestChannelCapabilityPatchReloadsRouter(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	falseValue := false
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{ChatCompletions: &falseValue})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          "https://api.openai.com/v1",
+		ProviderPreset:   "openai",
+		APIType:          "responses",
+		CapabilitiesJSON: string(capabilitiesJSON),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	selectReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[]}`))
+	selectReq.Header.Set("Content-Type", "application/json")
+	if _, err := rtr.Select(selectReq); err == nil {
+		t.Fatalf("Select(/v1/chat/completions) error = nil, want explicit unsupported before reload")
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary", strings.NewReader(`{"capabilities":{"chat_completions":true}}`))
+	rr := httptest.NewRecorder()
+	channelDetailAPIHandler(st, rtr, channel.NewService(st)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch channel status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var updated channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("json.Unmarshal(updated) error = %v", err)
+	}
+	if updated.Capabilities.ChatCompletions == nil || !*updated.Capabilities.ChatCompletions {
+		t.Fatalf("updated.Capabilities.ChatCompletions = %#v, want true", updated.Capabilities.ChatCompletions)
+	}
+	if _, err := rtr.Select(selectReq); err != nil {
+		t.Fatalf("Select(/v1/chat/completions) after capability reload error = %v", err)
+	}
+}
+
+func TestProviderProbeReportApplyReloadsRouterCapabilities(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://probe.local/v1",
+		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	selectReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	selectReq.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(selectReq)
+	if err != nil {
+		t.Fatalf("Select(/v1/responses) before apply error = %v", err)
+	}
+	if selection.Target.Upstream.APIType != "chat_completions" {
+		t.Fatalf("selected APIType before apply = %q, want chat_completions", selection.Target.Upstream.APIType)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe/report/apply", strings.NewReader(`{"channel_id":"openai-primary"}`))
+	rr := httptest.NewRecorder()
+	probeClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		status := http.StatusNotFound
+		switch req.URL.Path {
+		case "/v1/models":
+			status = http.StatusOK
+		case "/v1/responses":
+			status = http.StatusBadRequest
+		}
+		return &http.Response{
+			StatusCode: status,
+			Status:     http.StatusText(status),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Request:    req,
+		}, nil
+	})}
+	providerProbeReportApplyAPIHandler(st, rtr, channel.NewService(st).WithHTTPClient(probeClient)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe report apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var result channel.ProviderProbeApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if len(result.Applied) != 1 || !result.Applied[0].Applied {
+		t.Fatalf("result.Applied = %#v", result.Applied)
+	}
+	if !slices.Contains(result.Applied[0].AppliedFields, "capabilities.responses") {
+		t.Fatalf("AppliedFields = %#v, want capabilities.responses", result.Applied[0].AppliedFields)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" {
+		t.Fatalf("record.APIType = %q, want preserved chat_completions", record.APIType)
+	}
+	selection, err = rtr.Select(selectReq)
+	if err != nil {
+		t.Fatalf("Select(/v1/responses) after apply reload error = %v", err)
+	}
+	if selection.Target.Upstream.APIType != "chat_completions" {
+		t.Fatalf("selected APIType after apply = %q, want preserved chat_completions", selection.Target.Upstream.APIType)
+	}
+	if enabled, configured := selection.Target.Upstream.Capability(upstream.CapabilityResponses); !configured || !enabled {
+		t.Fatalf("responses capability after apply = enabled %v configured %v, want true/true", enabled, configured)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 func intPtr(value int) *int {
