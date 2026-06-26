@@ -414,6 +414,9 @@ func TestHandlerSelectionFailureIsRecorded(t *testing.T) {
 	}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
+	if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": "prefer_local_server"}); err != nil {
+		t.Fatalf("SaveAppSettingJSON() error = %v", err)
+	}
 
 	handler, err := NewHandler(cfg, st)
 	if err != nil {
@@ -1221,12 +1224,29 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	_, err = NewHandler(cfg, st)
-	if err == nil {
-		t.Fatal("NewHandler() error = nil, want local Responses server backend validation error")
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
 	}
-	if !strings.Contains(err.Error(), router.LocalResponsesServerBackendRequiredError) {
-		t.Fatalf("NewHandler() error = %q, want contain %q", err.Error(), router.LocalResponsesServerBackendRequiredError)
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gemini-2.5-pro","input":"ping"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "no matching Responses route") {
+		t.Fatalf("body = %q, want no matching route", body)
 	}
 }
 
@@ -1307,6 +1327,9 @@ func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(
 	}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
+	if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": "prefer_local_server"}); err != nil {
+		t.Fatalf("SaveAppSettingJSON() error = %v", err)
+	}
 
 	handler, err := NewHandler(cfg, st)
 	if err != nil {
@@ -1356,6 +1379,133 @@ func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(
 	}
 }
 
+func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T) {
+	tests := []struct {
+		name             string
+		strategy         string
+		includeNative    bool
+		includeChat      bool
+		wantStatus       int
+		wantNativeCalls  int32
+		wantChatCalls    int32
+		wantErrorContain string
+	}{
+		{name: "auto_prefers_native", strategy: "auto", includeNative: true, includeChat: true, wantStatus: http.StatusOK, wantNativeCalls: 1},
+		{name: "auto_falls_back_to_chat", strategy: "auto", includeChat: true, wantStatus: http.StatusOK, wantChatCalls: 1},
+		{name: "prefer_local_uses_chat", strategy: "prefer_local_server", includeNative: true, includeChat: true, wantStatus: http.StatusOK, wantChatCalls: 1},
+		{name: "native_only_rejects_chat_only", strategy: "native_only", includeChat: true, wantStatus: http.StatusBadGateway, wantErrorContain: "native_only"},
+		{name: "local_only_rejects_native_only", strategy: "local_server_only", includeNative: true, wantStatus: http.StatusBadGateway, wantErrorContain: "local_server_only"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+			if err := st.SaveAppSettingJSON(context.Background(), "routing.settings", map[string]string{"responses_strategy": tt.strategy}); err != nil {
+				t.Fatalf("SaveAppSettingJSON() error = %v", err)
+			}
+
+			var nativeCalls atomic.Int32
+			nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				nativeCalls.Add(1)
+				if r.URL.Path != "/v1/responses" {
+					t.Fatalf("native path = %q, want /v1/responses", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"resp_native","object":"response","status":"completed","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`)
+			}))
+			defer nativeServer.Close()
+
+			var chatCalls atomic.Int32
+			chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				chatCalls.Add(1)
+				if r.URL.Path != "/v1/chat/completions" {
+					t.Fatalf("chat path = %q, want /v1/chat/completions", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"chatcmpl_auto","model":"gpt-5","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+			}))
+			defer chatServer.Close()
+
+			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{Enabled: true}}
+			if tt.includeNative {
+				cfg.Upstreams = append(cfg.Upstreams, config.UpstreamTargetConfig{
+					ID:             "native-responses",
+					Enabled:        boolPtr(true),
+					Priority:       200,
+					ModelDiscovery: router.ModelDiscoveryStaticOnly,
+					StaticModels:   []string{"gpt-5"},
+					Upstream: config.UpstreamConfig{
+						BaseURL:        nativeServer.URL + "/v1",
+						ProviderPreset: "openai",
+						APIType:        "responses_native",
+						Mode:           "proxy",
+						Capabilities: config.UpstreamCapabilitiesConfig{
+							Responses:       boolPtr(true),
+							ChatCompletions: boolPtr(false),
+						},
+					},
+				})
+			}
+			if tt.includeChat {
+				cfg.Upstreams = append(cfg.Upstreams, config.UpstreamTargetConfig{
+					ID:             "chat-backend",
+					Enabled:        boolPtr(true),
+					Priority:       100,
+					ModelDiscovery: router.ModelDiscoveryStaticOnly,
+					StaticModels:   []string{"gpt-5"},
+					Upstream: config.UpstreamConfig{
+						BaseURL:        chatServer.URL + "/v1",
+						ProviderPreset: "openai",
+						APIType:        "chat_completions",
+						Mode:           "responses_server",
+						Capabilities: config.UpstreamCapabilitiesConfig{
+							ChatCompletions: boolPtr(true),
+						},
+					},
+				})
+			}
+			cfg.Debug.OutputDir = outputDir
+			cfg.Debug.MaskKey = true
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			proxyServer := httptest.NewServer(handler)
+			defer proxyServer.Close()
+
+			req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"ping"}`))
+			if err != nil {
+				t.Fatalf("http.NewRequest() error = %v", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := proxyServer.Client().Do(req)
+			if err != nil {
+				t.Fatalf("client.Do() error = %v", err)
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", resp.StatusCode, tt.wantStatus, body)
+			}
+			if tt.wantErrorContain != "" && !strings.Contains(string(body), tt.wantErrorContain) {
+				t.Fatalf("body = %q, want contain %q", body, tt.wantErrorContain)
+			}
+			if got := nativeCalls.Load(); got != tt.wantNativeCalls {
+				t.Fatalf("native calls = %d, want %d", got, tt.wantNativeCalls)
+			}
+			if got := chatCalls.Load(); got != tt.wantChatCalls {
+				t.Fatalf("chat calls = %d, want %d", got, tt.wantChatCalls)
+			}
+		})
+	}
+}
+
 func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
@@ -1390,12 +1540,8 @@ func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing
 	}
 	cfg.Debug.OutputDir = outputDir
 
-	_, err = NewHandler(cfg, st)
-	if err == nil {
-		t.Fatal("NewHandler() error = nil, want local Responses server backend validation error")
-	}
-	if !strings.Contains(err.Error(), router.LocalResponsesServerBackendRequiredError) {
-		t.Fatalf("NewHandler() error = %q, want contain %q", err.Error(), router.LocalResponsesServerBackendRequiredError)
+	if _, err := NewHandler(cfg, st); err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
 	}
 }
 

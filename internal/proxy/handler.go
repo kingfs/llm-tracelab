@@ -32,6 +32,7 @@ import (
 	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
 	mcptools "github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
 	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
+	"github.com/kingfs/llm-tracelab/internal/routeplan"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -102,6 +103,17 @@ type limitDecision struct {
 	Key      string
 	Identity router.CredentialDecisionInfo
 }
+
+type responsesRouteDecision struct {
+	useLocal     bool
+	rejectReason string
+}
+
+type proxyRoutingSettings struct {
+	ResponsesStrategy string `json:"responses_strategy"`
+}
+
+const proxyRoutingSettingsKey = "routing.settings"
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
@@ -304,6 +316,7 @@ type Handler struct {
 	router       *router.Router
 	authVerifier auth.TokenVerifier
 	limiter      *limit.Limiter
+	store        *store.Store
 
 	responsesPath    string
 	responsesHandler http.Handler
@@ -428,9 +441,6 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 	var localResponses http.Handler
 	responsesPath := cfg.ResponsesServerPath()
 	if cfg.ResponsesServerEnabled() {
-		if rtr != nil && len(rtr.Targets()) > 0 && !rtr.HasLocalResponsesServerBackend() {
-			return nil, router.LocalResponsesServerBackendRequired()
-		}
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
 		var requestAuditor responsesaudit.RequestAuditor
 		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder
@@ -525,6 +535,7 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		chaosManager:     cm,
 		cfg:              cfg,
 		router:           rtr,
+		store:            st,
 		limiter:          localLimiter,
 		responsesPath:    responsesPath,
 		responsesHandler: localResponses,
@@ -711,11 +722,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.responsesHandler != nil && h.localResponsesPath(r.URL.Path) {
-		h.serveLocalResponses(w, r)
-		return
-	}
-
 	if isOpenAIModelDetailRequest(r) {
 		h.serveOpenAIModelDetail(w, r, start)
 		return
@@ -744,6 +750,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Failed to read request body", "error", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
+	}
+	if h.responsesHandler != nil && h.localResponsesPath(r.URL.Path) {
+		decision := h.responsesRoutingDecision(r, bodyBytes)
+		if decision.useLocal {
+			h.serveLocalResponsesWithBody(w, r, bodyBytes)
+			return
+		}
+		if decision.rejectReason != "" {
+			selectErr := &router.SelectionError{
+				Reason:  router.SelectionFailureNoSupportingTarget,
+				Message: decision.rejectReason,
+			}
+			h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, nil)
+			http.Error(w, selectErr.Error(), http.StatusBadGateway)
+			return
+		}
 	}
 	if h.limiter != nil {
 		if decision, ok := h.preSelectionLimitDecision(r); ok {
@@ -996,6 +1018,77 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes, retryEvents)
 	}
 	http.Error(w, "Proxy Error: "+lastErr.Error(), http.StatusBadGateway)
+}
+
+func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) responsesRouteDecision {
+	strategy := h.responsesStrategy(r.Context())
+	nativeAvailable := h.router != nil && h.router.HasSelectableNativeResponsesCandidateWithBody(r, bodyBytes)
+	localAvailable := h.responsesHandler != nil && h.responsesChatBackendAvailable(r, bodyBytes)
+
+	switch strategy {
+	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative:
+		if nativeAvailable {
+			return responsesRouteDecision{}
+		}
+		if localAvailable {
+			return responsesRouteDecision{useLocal: true}
+		}
+	case routeplan.ResponsesStrategyPreferLocalServer:
+		if localAvailable {
+			return responsesRouteDecision{useLocal: true}
+		}
+		if nativeAvailable {
+			return responsesRouteDecision{}
+		}
+	case routeplan.ResponsesStrategyNativeOnly:
+		if nativeAvailable {
+			return responsesRouteDecision{}
+		}
+		return responsesRouteDecision{rejectReason: "responses_strategy native_only requires a matching native Responses upstream"}
+	case routeplan.ResponsesStrategyLocalServerOnly:
+		if localAvailable {
+			return responsesRouteDecision{useLocal: true}
+		}
+		return responsesRouteDecision{rejectReason: "responses_strategy local_server_only requires a matching chat completions backend"}
+	default:
+		if nativeAvailable {
+			return responsesRouteDecision{}
+		}
+		if localAvailable {
+			return responsesRouteDecision{useLocal: true}
+		}
+	}
+	return responsesRouteDecision{rejectReason: "no matching Responses route is available for the requested model and strategy"}
+}
+
+func (h *Handler) responsesStrategy(ctx context.Context) routeplan.ResponsesStrategy {
+	strategy := routeplan.ResponsesStrategyAuto
+	if h == nil || h.store == nil {
+		return strategy
+	}
+	var settings proxyRoutingSettings
+	found, err := h.store.LoadAppSettingJSON(ctx, proxyRoutingSettingsKey, &settings)
+	if err != nil || !found {
+		return strategy
+	}
+	switch routeplan.ResponsesStrategy(strings.TrimSpace(settings.ResponsesStrategy)) {
+	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative, routeplan.ResponsesStrategyPreferLocalServer, routeplan.ResponsesStrategyNativeOnly, routeplan.ResponsesStrategyLocalServerOnly:
+		return routeplan.ResponsesStrategy(strings.TrimSpace(settings.ResponsesStrategy))
+	default:
+		return strategy
+	}
+}
+
+func (h *Handler) responsesChatBackendAvailable(r *http.Request, bodyBytes []byte) bool {
+	if h == nil || h.router == nil || r == nil {
+		return false
+	}
+	chatReq := r.Clone(r.Context())
+	chatReq.URL = cloneURL(r.URL)
+	chatReq.URL.Path = "/v1/chat/completions"
+	chatReq.URL.RawPath = ""
+	chatReq.RequestURI = chatReq.URL.RequestURI()
+	return h.router.HasSelectableCandidateWithBody(chatReq, bodyBytes)
 }
 
 func sleepBeforeRetry(ctx context.Context, delay time.Duration) bool {
