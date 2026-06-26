@@ -360,6 +360,8 @@ type ModelAliasPatch struct {
 	Source      *string
 }
 
+var ErrModelAliasConflict = errors.New("model alias conflict")
+
 type ModelCatalogRecord struct {
 	Model       string
 	DisplayName string
@@ -1086,11 +1088,8 @@ func (s *Store) UpsertModelAlias(record ModelAliasRecord) (ModelAliasRecord, err
 		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
 	}
 	record = normalizeModelAliasRecord(record)
-	if record.Alias == "" {
-		return ModelAliasRecord{}, fmt.Errorf("alias is required")
-	}
-	if record.TargetModel == "" {
-		return ModelAliasRecord{}, fmt.Errorf("target model is required")
+	if err := s.ValidateModelAlias(record); err != nil {
+		return ModelAliasRecord{}, err
 	}
 	if record.ID == "" {
 		record.ID = stableModelAliasID(record)
@@ -1129,6 +1128,60 @@ func (s *Store) UpsertModelAlias(record ModelAliasRecord) (ModelAliasRecord, err
 		return ModelAliasRecord{}, err
 	}
 	return s.GetModelAlias(record.ID)
+}
+
+func (s *Store) ValidateModelAlias(record ModelAliasRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	record = normalizeModelAliasRecord(record)
+	if record.Alias == "" {
+		return fmt.Errorf("alias is required")
+	}
+	if record.TargetModel == "" {
+		return fmt.Errorf("target model is required")
+	}
+	if record.Alias == record.TargetModel {
+		return fmt.Errorf("model alias cannot target itself")
+	}
+	if record.ID == "" {
+		record.ID = stableModelAliasID(record)
+	}
+	if err := s.ensureNoDirectAliasCycle(record); err != nil {
+		return err
+	}
+	if record.Enabled {
+		if err := s.ensureNoDuplicateActiveModelAlias(record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureNoDirectAliasCycle(record ModelAliasRecord) error {
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM model_aliases
+		WHERE alias = ? AND target_model = ? AND id <> ? LIMIT 1`, record.TargetModel, record.Alias, record.ID).Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("direct model alias cycle with %s", existingID)
+}
+
+func (s *Store) ensureNoDuplicateActiveModelAlias(record ModelAliasRecord) error {
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM model_aliases
+		WHERE alias = ? AND target_model = ? AND channel_id = ? AND enabled = ? AND id <> ? LIMIT 1`, record.Alias, record.TargetModel, record.ChannelID, true, record.ID).Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: active alias %q already targets %q on channel %q", ErrModelAliasConflict, record.Alias, record.TargetModel, record.ChannelID)
 }
 
 func (s *Store) GetModelAlias(id string) (ModelAliasRecord, error) {

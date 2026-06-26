@@ -5349,6 +5349,100 @@ func TestModelAliasAPIHandlerCRUD(t *testing.T) {
 	}
 }
 
+func TestModelAliasAPIHandlerValidationFailures(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	handler := modelAliasListCreateAPIHandler(st)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "self alias", body: `{"alias":"abc","target_model":"abc"}`},
+		{name: "direct cycle", body: `{"alias":"b","target_model":"a"}`},
+	} {
+		if tc.name == "direct cycle" {
+			if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "a", TargetModel: "b", Enabled: true}); err != nil {
+				t.Fatalf("seed alias error = %v", err)
+			}
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/model-aliases", strings.NewReader(tc.body))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d body=%s", tc.name, rr.Code, rr.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/model-aliases", strings.NewReader(`{"id":"custom-duplicate","alias":"a","target_model":"b"}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("duplicate status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestModelAliasValidateAPIHandlerWarnings(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channel := range []store.ChannelConfigRecord{
+		{ID: "enabled", Name: "Enabled", BaseURL: "https://enabled.example/v1", Enabled: true},
+		{ID: "disabled", Name: "Disabled", BaseURL: "https://disabled.example/v1", Enabled: false},
+		{ID: "empty", Name: "Empty", BaseURL: "https://empty.example/v1", Enabled: true},
+	} {
+		if _, err := st.UpsertChannelConfig(channel); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channel.ID, err)
+		}
+	}
+	if _, err := st.UpsertChannelModel("enabled", store.ChannelModelRecord{Model: "gpt-5", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel(enabled) error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("disabled", store.ChannelModelRecord{Model: "gpt-5", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel(disabled) error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("enabled", store.ChannelModelRecord{Model: "other-model", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel(other) error = %v", err)
+	}
+
+	handler := modelAliasValidateAPIHandler(st)
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantCodes []string
+	}{
+		{name: "missing target model", body: `{"alias":"missing","target_model":"missing-model"}`, wantCodes: []string{"target_model_not_enabled"}},
+		{name: "disabled scoped channel", body: `{"alias":"scoped","target_model":"gpt-5","channel_id":"disabled"}`, wantCodes: []string{"scoped_channel_disabled"}},
+		{name: "scoped channel lacks target", body: `{"alias":"scoped","target_model":"gpt-5","channel_id":"empty"}`, wantCodes: []string{"scoped_channel_target_model_not_enabled"}},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/model-aliases/validate", strings.NewReader(tc.body))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", tc.name, rr.Code, rr.Body.String())
+		}
+		var resp modelAliasValidationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode %s response: %v", tc.name, err)
+		}
+		got := map[string]bool{}
+		for _, warning := range resp.Warnings {
+			got[warning.Code] = true
+		}
+		for _, code := range tc.wantCodes {
+			if !got[code] {
+				t.Fatalf("%s warnings = %+v, want code %s", tc.name, resp.Warnings, code)
+			}
+		}
+	}
+}
+
 func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {
