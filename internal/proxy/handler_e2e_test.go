@@ -4475,6 +4475,73 @@ func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 	}
 }
 
+func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var upstreamModel string
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("upstream path = %q, want /v1/chat/completions", r.URL.Path)
+		}
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode upstream body: %v", err)
+		}
+		upstreamModel, _ = body["model"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"chatcmpl_alias","object":"chat.completion","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "openai-primary",
+				Enabled:        boolPtr(true),
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"abc", "gpt-5.5"},
+				ModelAliases:   map[string]string{"abc": "gpt-5.5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/chat/completions", bytes.NewBufferString(`{"model":"abc","messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("proxy request error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d, body = %s", resp.StatusCode, body)
+	}
+	if upstreamModel != "gpt-5.5" {
+		t.Fatalf("upstream model = %q, want gpt-5.5", upstreamModel)
+	}
+}
+
 func TestHandlerRetryOnUpstream500(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

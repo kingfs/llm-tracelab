@@ -176,6 +176,33 @@ func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
 	return bodyBytes
 }
 
+func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]byte, bool) {
+	if len(bodyBytes) == 0 || selection == nil || selection.Target == nil {
+		return bodyBytes, false
+	}
+	requestedModel := strings.TrimSpace(selection.Request.ModelName)
+	if requestedModel == "" {
+		return bodyBytes, false
+	}
+	upstreamModel := selection.Target.ResolveModelAlias(requestedModel)
+	if upstreamModel == "" || strings.EqualFold(upstreamModel, requestedModel) {
+		return bodyBytes, false
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		return bodyBytes, false
+	}
+	if _, ok := payload["model"]; !ok {
+		return bodyBytes, false
+	}
+	payload["model"] = upstreamModel
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return rewritten, true
+}
+
 // UsageSniffer 纯粹的嗅探器，不再做估算
 type UsageSniffer struct {
 	Source   io.ReadCloser
@@ -816,6 +843,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		triedIDs = append(triedIDs, selection.Target.ID)
+		upstreamBodyBytes := bodyBytes
+		if rewrittenBody, rewritten := rewriteRequestModelAlias(bodyBytes, selection); rewritten {
+			upstreamBodyBytes = rewrittenBody
+		}
 
 		// 准备日志
 		logInfo, err = h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
@@ -825,7 +856,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RoutingPolicy:                  h.routerPolicy(),
 			RoutingScore:                   selection.Score,
 			RoutingCandidateCount:          selection.CandidateCount,
-		}, bodyBytes)
+		}, upstreamBodyBytes)
 		if err != nil {
 			slog.Error("Failed to prepare log file", "err", err)
 			h.router.Complete(selection, router.Outcome{
@@ -859,7 +890,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 发送请求到上游
-		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, bodyBytes)
+		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, upstreamBodyBytes)
 		if reqErr != nil {
 			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
 			logInfo.Header.Meta.Error = reqErr.Error()

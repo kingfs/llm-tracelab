@@ -102,6 +102,7 @@ type UpstreamTargetConfig struct {
 	CapacityHint         float64            `yaml:"capacity_hint"`
 	ModelDiscovery       string             `yaml:"model_discovery"`
 	StaticModels         []string           `yaml:"static_models"`
+	ModelAliases         map[string]string  `yaml:"-"`
 	ConfiguredModelsOnly bool               `yaml:"-"`
 	AllowUnknownModels   *bool              `yaml:"allow_unknown_models"`
 	Upstream             UpstreamConfig     `yaml:"upstream"`

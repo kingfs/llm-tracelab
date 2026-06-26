@@ -139,6 +139,7 @@ type Target struct {
 	CapacityHint         float64
 	ModelDiscovery       string
 	StaticModels         []string
+	ModelAliases         map[string]string
 	configuredModelsOnly bool
 	Upstream             upstream.ResolvedUpstream
 
@@ -453,6 +454,7 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		CapacityHint:         defaultFloat(targetCfg.CapacityHint, 1),
 		ModelDiscovery:       normalizeDiscoveryMode(targetCfg.ModelDiscovery),
 		StaticModels:         normalizeModels(targetCfg.StaticModels),
+		ModelAliases:         normalizeModelAliases(targetCfg.ModelAliases),
 		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
 		Upstream:             resolved,
 		allowUnknownModels:   allowUnknownModels(targetCfg, singleConfiguredTarget),
@@ -464,6 +466,13 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		healthState:          HealthHealthy,
 		modelHealth:          map[string]*modelHealthState{},
 	}
+}
+
+func (t *Target) ResolveModelAlias(model string) string {
+	if t == nil || len(t.ModelAliases) == 0 {
+		return ""
+	}
+	return t.ModelAliases[strings.ToLower(strings.TrimSpace(model))]
 }
 
 func appendTarget(targets *[]*Target, seenIDs map[string]struct{}, target *Target) error {
@@ -1826,6 +1835,25 @@ func normalizeModels(models []string) []string {
 		out = append(out, model)
 	}
 	slices.Sort(out)
+	return out
+}
+
+func normalizeModelAliases(aliases map[string]string) map[string]string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for alias, targetModel := range aliases {
+		alias = strings.ToLower(strings.TrimSpace(alias))
+		targetModel = strings.ToLower(strings.TrimSpace(targetModel))
+		if alias == "" || targetModel == "" {
+			continue
+		}
+		out[alias] = targetModel
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 

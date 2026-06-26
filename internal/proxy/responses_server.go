@@ -71,6 +71,9 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 	if err != nil {
 		return runtime.ChatCompletionResponse{}, err
 	}
+	if rewrittenBody, rewritten := rewriteRequestModelAlias(body, selection); rewritten {
+		body = rewrittenBody
+	}
 
 	start := time.Now()
 	completed := false
