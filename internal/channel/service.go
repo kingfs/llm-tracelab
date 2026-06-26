@@ -236,6 +236,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			CapacityHint:         channel.CapacityHint,
 			ModelDiscovery:       channel.ModelDiscovery,
 			StaticModels:         channelModelNamesWithAliases(models, aliases, channel.ID),
+			ModelAliases:         channelModelAliases(models, aliases, channel.ID),
 			ConfiguredModelsOnly: true,
 			AllowUnknownModels:   &channel.AllowUnknownModels,
 			Upstream: config.UpstreamConfig{
@@ -765,4 +766,35 @@ func channelModelNamesWithAliases(models []store.ChannelModelRecord, aliases []s
 		out = append(out, aliasName)
 	}
 	return normalizeModels(out)
+}
+
+func channelModelAliases(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]string {
+	modelNames := channelModelNames(models)
+	if len(aliases) == 0 || len(modelNames) == 0 {
+		return nil
+	}
+	supported := make(map[string]struct{}, len(modelNames))
+	for _, model := range modelNames {
+		supported[model] = struct{}{}
+	}
+	out := map[string]string{}
+	for _, alias := range aliases {
+		aliasName := strings.ToLower(strings.TrimSpace(alias.Alias))
+		targetModel := strings.ToLower(strings.TrimSpace(alias.TargetModel))
+		aliasChannelID := strings.TrimSpace(alias.ChannelID)
+		if aliasName == "" || targetModel == "" {
+			continue
+		}
+		if aliasChannelID != "" && aliasChannelID != channelID {
+			continue
+		}
+		if _, ok := supported[targetModel]; !ok {
+			continue
+		}
+		out[aliasName] = targetModel
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
