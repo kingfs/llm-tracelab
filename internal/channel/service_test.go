@@ -652,3 +652,94 @@ func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
 		t.Fatalf("ConfiguredModelsOnly = false, want true for channel runtime target")
 	}
 }
+
+func TestRuntimeTargetsProjectsEnabledModelAliases(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channelID := range []string{"primary", "secondary"} {
+		if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+			ID:             channelID,
+			Name:           channelID,
+			BaseURL:        "https://" + channelID + ".example.com/v1",
+			ProviderPreset: "openai",
+			HeadersJSON:    "{}",
+			Enabled:        true,
+		}); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channelID, err)
+		}
+		if err := st.ReplaceChannelModels(channelID, []store.ChannelModelRecord{
+			{Model: "gpt-5.5", Source: "manual", Enabled: true},
+		}); err != nil {
+			t.Fatalf("ReplaceChannelModels(%s) error = %v", channelID, err)
+		}
+	}
+
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "abc", TargetModel: "gpt-5.5", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias(global) error = %v", err)
+	}
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "disabled", TargetModel: "gpt-5.5", Enabled: false}); err != nil {
+		t.Fatalf("UpsertModelAlias(disabled) error = %v", err)
+	}
+
+	targets, err := NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(targets))
+	}
+	for _, target := range targets {
+		if !slices.Equal(target.StaticModels, []string{"abc", "gpt-5.5"}) {
+			t.Fatalf("target %s StaticModels = %#v", target.ID, target.StaticModels)
+		}
+	}
+}
+
+func TestRuntimeTargetsProjectsChannelScopedModelAliases(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channelID := range []string{"primary", "secondary"} {
+		if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+			ID:             channelID,
+			Name:           channelID,
+			BaseURL:        "https://" + channelID + ".example.com/v1",
+			ProviderPreset: "openai",
+			HeadersJSON:    "{}",
+			Enabled:        true,
+		}); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channelID, err)
+		}
+		if err := st.ReplaceChannelModels(channelID, []store.ChannelModelRecord{
+			{Model: "gpt-5.5", Source: "manual", Enabled: true},
+		}); err != nil {
+			t.Fatalf("ReplaceChannelModels(%s) error = %v", channelID, err)
+		}
+	}
+
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "coder", TargetModel: "gpt-5.5", ChannelID: "primary", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias(scoped) error = %v", err)
+	}
+
+	targets, err := NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	modelsByTarget := map[string][]string{}
+	for _, target := range targets {
+		modelsByTarget[target.ID] = target.StaticModels
+	}
+	if !slices.Equal(modelsByTarget["primary"], []string{"coder", "gpt-5.5"}) {
+		t.Fatalf("primary StaticModels = %#v", modelsByTarget["primary"])
+	}
+	if !slices.Equal(modelsByTarget["secondary"], []string{"gpt-5.5"}) {
+		t.Fatalf("secondary StaticModels = %#v", modelsByTarget["secondary"])
+	}
+}
