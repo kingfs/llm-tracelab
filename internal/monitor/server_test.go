@@ -25,8 +25,10 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/internal/routeplan"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
@@ -5257,4 +5259,128 @@ func parseStatusCode(status string) int {
 		return 200
 	}
 	return code
+}
+
+func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	handler := routingSettingsAPIHandler(st)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/routing", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got routingSettingsView
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if got.ResponsesStrategy != "auto" || got.SelectionPolicy != router.PolicyP2C {
+		t.Fatalf("default settings = %+v", got)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/settings/routing", strings.NewReader(`{"responses_strategy":"prefer_local_server","selection_policy":"first_available","missing_model_policy":"fallback"}`))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	got = routingSettingsView{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode PATCH response: %v", err)
+	}
+	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyFirstAvailable || got.MissingModelPolicy != "fallback" {
+		t.Fatalf("patched settings = %+v", got)
+	}
+}
+
+func TestModelAliasAPIHandlerCRUD(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	listHandler := modelAliasListCreateAPIHandler(st)
+	req := httptest.NewRequest(http.MethodPost, "/api/model-aliases", strings.NewReader(`{"alias":"abc","target_model":"gpt-5.5","channel_id":"openai-main"}`))
+	rr := httptest.NewRecorder()
+	listHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var created modelAliasItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created alias: %v", err)
+	}
+	if created.ID == "" || created.Alias != "abc" || created.TargetModel != "gpt-5.5" || created.ChannelID != "openai-main" || !created.Enabled {
+		t.Fatalf("created alias = %+v", created)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/model-aliases?alias=abc&enabled_only=true", nil)
+	rr = httptest.NewRecorder()
+	listHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var list modelAliasListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].ID != created.ID {
+		t.Fatalf("list = %+v, want created", list.Items)
+	}
+
+	detailHandler := modelAliasDetailAPIHandler(st)
+	req = httptest.NewRequest(http.MethodPatch, "/api/model-aliases/"+created.ID, strings.NewReader(`{"alias":"abc","target_model":"gpt-5.5","enabled":false}`))
+	rr = httptest.NewRecorder()
+	detailHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/model-aliases/"+created.ID, nil)
+	rr = httptest.NewRecorder()
+	detailHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://deepseek.example/v1", APIType: upstream.APITypeChatCompletions, Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("deepseek", store.ChannelModelRecord{Model: "deepseek-chat", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel() error = %v", err)
+	}
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "coder", TargetModel: "deepseek-chat", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias() error = %v", err)
+	}
+
+	handler := routingInspectAPIHandler(st)
+	req := httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(`{"endpoint":"responses","model":"coder"}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("inspect status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp routingInspectResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode inspect response: %v", err)
+	}
+	if resp.Error != "" || resp.Result == nil {
+		t.Fatalf("inspect response = %+v", resp)
+	}
+	if resp.Result.Plan.ExecutionMode != routeplan.ExecutionModeResponsesServer || resp.Result.Plan.UpstreamModel != "deepseek-chat" {
+		t.Fatalf("inspect plan = %+v, want responses_server deepseek-chat", resp.Result.Plan)
+	}
 }

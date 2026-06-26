@@ -26,6 +26,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
 	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
+	"github.com/kingfs/llm-tracelab/internal/routeplan"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -1332,6 +1333,55 @@ type channelModelCreateRequest struct {
 	Enabled     *bool  `json:"enabled"`
 }
 
+type modelAliasListResponse struct {
+	Items       []modelAliasItem `json:"items"`
+	RefreshedAt time.Time        `json:"refreshed_at"`
+}
+
+type modelAliasItem struct {
+	ID          string    `json:"id"`
+	Alias       string    `json:"alias"`
+	TargetModel string    `json:"target_model"`
+	ChannelID   string    `json:"channel_id,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	Description string    `json:"description,omitempty"`
+	Source      string    `json:"source,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type modelAliasUpsertRequest struct {
+	ID          string `json:"id"`
+	Alias       string `json:"alias"`
+	TargetModel string `json:"target_model"`
+	ChannelID   string `json:"channel_id"`
+	Enabled     *bool  `json:"enabled"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+type routingSettingsView struct {
+	ResponsesStrategy  string    `json:"responses_strategy"`
+	SelectionPolicy    string    `json:"selection_policy"`
+	MissingModelPolicy string    `json:"missing_model_policy"`
+	RoutePlanLogLevel  string    `json:"route_plan_log_level,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+}
+
+type routingInspectRequest struct {
+	Endpoint string `json:"endpoint"`
+	Model    string `json:"model"`
+	Stream   bool   `json:"stream"`
+	Tools    bool   `json:"tools"`
+}
+
+type routingInspectResponse struct {
+	Request     routingInspectRequest `json:"request"`
+	Result      *routeplan.Result     `json:"result,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	RefreshedAt time.Time             `json:"refreshed_at"`
+}
+
 type usageSummaryView struct {
 	RequestCount     int       `json:"request_count"`
 	SuccessRequest   int       `json:"success_request"`
@@ -1442,7 +1492,11 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(modelAliasListCreateAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases/", monitorAuthRequired(modelAliasDetailAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
@@ -2978,6 +3032,174 @@ func decodeChannelProbeRequest(r *http.Request) (channelProbeRequest, error) {
 	return req, nil
 }
 
+const routingSettingsKey = "routing.settings"
+
+func routingSettingsAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			settings, err := loadRoutingSettings(r.Context(), st)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, settings)
+		case http.MethodPatch:
+			settings, err := loadRoutingSettings(r.Context(), st)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			var req routingSettingsView
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid routing settings payload"})
+				return
+			}
+			settings = mergeRoutingSettings(settings, req)
+			if err := validateRoutingSettings(settings); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			settings.UpdatedAt = time.Now().UTC()
+			if err := st.SaveAppSettingJSON(r.Context(), routingSettingsKey, settings); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, settings)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func modelAliasListCreateAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			enabledOnly := parseBoolQuery(r.URL.Query().Get("enabled_only"), false)
+			aliases, err := st.ListModelAliases(r.URL.Query().Get("alias"), enabledOnly)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			items := make([]modelAliasItem, 0, len(aliases))
+			for _, alias := range aliases {
+				items = append(items, modelAliasItemFromRecord(alias))
+			}
+			writeJSON(w, http.StatusOK, modelAliasListResponse{Items: items, RefreshedAt: time.Now().UTC()})
+		case http.MethodPost:
+			var req modelAliasUpsertRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model alias payload"})
+				return
+			}
+			record, err := st.UpsertModelAlias(modelAliasRecordFromRequest(req, store.ModelAliasRecord{}))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func modelAliasDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		id, err := url.PathUnescape(strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/model-aliases/"), "/"))
+		if err != nil || strings.TrimSpace(id) == "" || strings.Contains(id, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			record, err := st.GetModelAlias(id)
+			if err != nil {
+				writeAliasError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
+		case http.MethodPatch:
+			existing, err := st.GetModelAlias(id)
+			if err != nil {
+				writeAliasError(w, err)
+				return
+			}
+			var req modelAliasUpsertRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model alias payload"})
+				return
+			}
+			req.ID = id
+			record, err := st.UpsertModelAlias(modelAliasRecordFromRequest(req, existing))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
+		case http.MethodDelete:
+			if err := st.DeleteModelAlias(id); err != nil {
+				writeAliasError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func routingInspectAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		var req routingInspectRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid routing inspect payload"})
+			return
+		}
+		settings, err := loadRoutingSettings(r.Context(), st)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		planReq, upstreams, err := routingInspectPlanInput(st, req, settings)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		result, planErr := routeplan.Plan(planReq, upstreams)
+		resp := routingInspectResponse{Request: req, RefreshedAt: time.Now().UTC()}
+		if planErr != nil {
+			resp.Error = planErr.Error()
+			resp.Result = &result
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		resp.Result = &result
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
 func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string) {
 	switch r.Method {
 	case http.MethodGet:
@@ -3238,6 +3460,282 @@ func normalizeModelList(models []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func defaultRoutingSettings() routingSettingsView {
+	return routingSettingsView{
+		ResponsesStrategy:  "auto",
+		SelectionPolicy:    router.PolicyP2C,
+		MissingModelPolicy: router.FallbackReject,
+		RoutePlanLogLevel:  "normal",
+	}
+}
+
+func loadRoutingSettings(ctx context.Context, st *store.Store) (routingSettingsView, error) {
+	settings := defaultRoutingSettings()
+	if st == nil {
+		return settings, nil
+	}
+	var persisted routingSettingsView
+	found, err := st.LoadAppSettingJSON(ctx, routingSettingsKey, &persisted)
+	if err != nil {
+		return routingSettingsView{}, err
+	}
+	if found {
+		settings = mergeRoutingSettings(settings, persisted)
+	}
+	if err := validateRoutingSettings(settings); err != nil {
+		return defaultRoutingSettings(), nil
+	}
+	return settings, nil
+}
+
+func mergeRoutingSettings(base routingSettingsView, patch routingSettingsView) routingSettingsView {
+	if strings.TrimSpace(patch.ResponsesStrategy) != "" {
+		base.ResponsesStrategy = strings.TrimSpace(patch.ResponsesStrategy)
+	}
+	if strings.TrimSpace(patch.SelectionPolicy) != "" {
+		base.SelectionPolicy = strings.TrimSpace(patch.SelectionPolicy)
+	}
+	if strings.TrimSpace(patch.MissingModelPolicy) != "" {
+		base.MissingModelPolicy = strings.TrimSpace(patch.MissingModelPolicy)
+	}
+	if strings.TrimSpace(patch.RoutePlanLogLevel) != "" {
+		base.RoutePlanLogLevel = strings.TrimSpace(patch.RoutePlanLogLevel)
+	}
+	if !patch.UpdatedAt.IsZero() {
+		base.UpdatedAt = patch.UpdatedAt
+	}
+	return base
+}
+
+func validateRoutingSettings(settings routingSettingsView) error {
+	switch routeplan.ResponsesStrategy(settings.ResponsesStrategy) {
+	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative, routeplan.ResponsesStrategyPreferLocalServer, routeplan.ResponsesStrategyNativeOnly, routeplan.ResponsesStrategyLocalServerOnly:
+	default:
+		return fmt.Errorf("unsupported responses_strategy %q", settings.ResponsesStrategy)
+	}
+	switch settings.SelectionPolicy {
+	case router.PolicyP2C, router.PolicyFirstAvailable:
+	default:
+		return fmt.Errorf("unsupported selection_policy %q", settings.SelectionPolicy)
+	}
+	switch settings.MissingModelPolicy {
+	case router.FallbackReject, "fallback":
+	default:
+		return fmt.Errorf("unsupported missing_model_policy %q", settings.MissingModelPolicy)
+	}
+	switch settings.RoutePlanLogLevel {
+	case "", "normal", "verbose":
+	default:
+		return fmt.Errorf("unsupported route_plan_log_level %q", settings.RoutePlanLogLevel)
+	}
+	return nil
+}
+
+func modelAliasRecordFromRequest(req modelAliasUpsertRequest, existing store.ModelAliasRecord) store.ModelAliasRecord {
+	record := existing
+	if strings.TrimSpace(req.ID) != "" {
+		record.ID = strings.TrimSpace(req.ID)
+	}
+	if strings.TrimSpace(req.Alias) != "" {
+		record.Alias = strings.TrimSpace(req.Alias)
+	}
+	if strings.TrimSpace(req.TargetModel) != "" {
+		record.TargetModel = strings.TrimSpace(req.TargetModel)
+	}
+	record.ChannelID = strings.TrimSpace(req.ChannelID)
+	if req.Enabled != nil {
+		record.Enabled = *req.Enabled
+	} else if record.ID == "" {
+		record.Enabled = true
+	}
+	if strings.TrimSpace(req.Description) != "" {
+		record.Description = strings.TrimSpace(req.Description)
+	}
+	if strings.TrimSpace(req.Source) != "" {
+		record.Source = strings.TrimSpace(req.Source)
+	}
+	return record
+}
+
+func modelAliasItemFromRecord(record store.ModelAliasRecord) modelAliasItem {
+	return modelAliasItem{
+		ID:          record.ID,
+		Alias:       record.Alias,
+		TargetModel: record.TargetModel,
+		ChannelID:   record.ChannelID,
+		Enabled:     record.Enabled,
+		Description: record.Description,
+		Source:      record.Source,
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+	}
+}
+
+func writeAliasError(w http.ResponseWriter, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "model alias not found"})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+func routingInspectPlanInput(st *store.Store, req routingInspectRequest, settings routingSettingsView) (routeplan.Request, []routeplan.UpstreamCandidate, error) {
+	entrypoint, err := routingInspectEntrypoint(req.Endpoint)
+	if err != nil {
+		return routeplan.Request{}, nil, err
+	}
+	model := strings.TrimSpace(req.Model)
+	resolved, err := resolvedModelCandidatesForInspect(st, model)
+	if err != nil {
+		return routeplan.Request{}, nil, err
+	}
+	upstreams, err := upstreamCandidatesForInspect(st)
+	if err != nil {
+		return routeplan.Request{}, nil, err
+	}
+	return routeplan.Request{
+		Entrypoint:              entrypoint,
+		RequestedModel:          model,
+		ResolvedModelCandidates: resolved,
+		ResponsesStrategy:       routeplan.ResponsesStrategy(settings.ResponsesStrategy),
+		HasTools:                req.Tools,
+		Stream:                  req.Stream,
+	}, upstreams, nil
+}
+
+func routingInspectEntrypoint(value string) (routeplan.ClientEntrypoint, error) {
+	switch strings.TrimSpace(value) {
+	case "", "responses", "/v1/responses":
+		return routeplan.EntrypointResponses, nil
+	case "chat_completions", "/v1/chat/completions":
+		return routeplan.EntrypointChatCompletions, nil
+	case "anthropic_messages", "/v1/messages":
+		return routeplan.EntrypointAnthropicMessage, nil
+	default:
+		return "", fmt.Errorf("unsupported endpoint %q", value)
+	}
+}
+
+func resolvedModelCandidatesForInspect(st *store.Store, model string) ([]routeplan.ResolvedModelCandidate, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, nil
+	}
+	out := []routeplan.ResolvedModelCandidate{{Model: model, Source: "request"}}
+	aliases, err := st.ListModelAliases(model, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, alias := range aliases {
+		out = append(out, routeplan.ResolvedModelCandidate{
+			Model:     alias.TargetModel,
+			Alias:     alias.Alias,
+			ChannelID: alias.ChannelID,
+			Source:    alias.Source,
+		})
+	}
+	return out, nil
+}
+
+func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidate, error) {
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	models, err := st.ListChannelModels("", true)
+	if err != nil {
+		return nil, err
+	}
+	modelsByChannel := map[string][]string{}
+	modelCapsByChannel := map[string]store.ChannelModelRecord{}
+	for _, model := range models {
+		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model.Model)
+		if _, ok := modelCapsByChannel[model.ChannelID]; !ok {
+			modelCapsByChannel[model.ChannelID] = model
+		}
+	}
+	out := make([]routeplan.UpstreamCandidate, 0, len(channels))
+	for _, channel := range channels {
+		caps := upstreamCapabilitiesFromChannel(channel)
+		if modelCaps, ok := modelCapsByChannel[channel.ID]; ok {
+			applyChannelModelCapabilities(&caps, modelCaps)
+		}
+		out = append(out, routeplan.UpstreamCandidate{
+			ID:                        channel.ID,
+			RouteTargetID:             channel.ID,
+			ChannelID:                 channel.ID,
+			Enabled:                   channel.Enabled,
+			Priority:                  channel.Priority,
+			Weight:                    channel.Weight,
+			Models:                    modelsByChannel[channel.ID],
+			SupportsChatCompletions:   caps.chatCompletions,
+			SupportsResponses:         caps.responses,
+			SupportsAnthropicMessages: caps.anthropicMessages,
+			SupportsToolCalling:       caps.toolCalling,
+		})
+	}
+	return out, nil
+}
+
+type inspectCapabilities struct {
+	chatCompletions   bool
+	responses         bool
+	anthropicMessages bool
+	toolCalling       bool
+}
+
+func upstreamCapabilitiesFromChannel(channel store.ChannelConfigRecord) inspectCapabilities {
+	var configured config.UpstreamCapabilitiesConfig
+	capabilitiesJSON := strings.TrimSpace(channel.CapabilitiesJSON)
+	if capabilitiesJSON == "" {
+		capabilitiesJSON = "{}"
+	}
+	_ = json.Unmarshal([]byte(capabilitiesJSON), &configured)
+	caps := inspectCapabilities{toolCalling: true}
+	if configured.ChatCompletions != nil {
+		caps.chatCompletions = *configured.ChatCompletions
+	}
+	if configured.Responses != nil {
+		caps.responses = *configured.Responses
+	}
+	if configured.ToolCalling != nil {
+		caps.toolCalling = *configured.ToolCalling
+	}
+	switch strings.TrimSpace(channel.APIType) {
+	case upstream.APITypeChatCompletions, "":
+		if configured.ChatCompletions == nil {
+			caps.chatCompletions = true
+		}
+	case upstream.APITypeResponses, upstream.APITypeResponsesNative:
+		if configured.Responses == nil {
+			caps.responses = true
+		}
+	case upstream.APITypeMessages:
+		caps.anthropicMessages = true
+	}
+	return caps
+}
+
+func applyChannelModelCapabilities(caps *inspectCapabilities, model store.ChannelModelRecord) {
+	if model.SupportsChatCompletions != nil {
+		caps.chatCompletions = *model.SupportsChatCompletions != 0
+	}
+	if model.SupportsResponses != nil {
+		caps.responses = *model.SupportsResponses != 0
+	}
+}
+
+func parseBoolQuery(value string, fallback bool) bool {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func routerReloadAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
