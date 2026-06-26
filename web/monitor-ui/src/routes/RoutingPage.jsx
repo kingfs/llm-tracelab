@@ -260,20 +260,126 @@ function ModelAliasesPanel() {
   const [refreshTick, setRefreshTick] = useState(0);
   const aliases = useJSON(apiPaths.modelAliases, [refreshTick]);
   const [form, setForm] = useState({ alias: "", target_model: "", channel_id: "" });
+  const [validation, setValidation] = useState(emptyAliasValidationState());
+  const [editID, setEditID] = useState("");
+  const [editForm, setEditForm] = useState(null);
+  const [editValidation, setEditValidation] = useState(emptyAliasValidationState());
   const [submitError, setSubmitError] = useState("");
   const items = Array.isArray(aliases.data?.items) ? aliases.data.items : [];
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const updateEdit = (key, value) => setEditForm((current) => ({ ...current, [key]: value }));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!shouldValidateAlias(form)) {
+      setValidation(emptyAliasValidationState());
+      return () => {
+        cancelled = true;
+      };
+    }
+    setValidation((current) => ({ ...current, loading: true, error: "" }));
+    const timer = window.setTimeout(() => {
+      validateAlias(form)
+        .then((data) => {
+          if (!cancelled) {
+            setValidation({ loading: false, data, error: "" });
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setValidation({ loading: false, data: null, error: error.message });
+          }
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!editID || !editForm || !shouldValidateAlias(editForm)) {
+      setEditValidation(emptyAliasValidationState());
+      return () => {
+        cancelled = true;
+      };
+    }
+    setEditValidation((current) => ({ ...current, loading: true, error: "" }));
+    const timer = window.setTimeout(() => {
+      validateAlias(editForm)
+        .then((data) => {
+          if (!cancelled) {
+            setEditValidation({ loading: false, data, error: "" });
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setEditValidation({ loading: false, data: null, error: error.message });
+          }
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [editID, editForm]);
+
   const create = async (event) => {
     event.preventDefault();
     setSubmitError("");
     try {
+      const checked = await validateAlias(form);
+      setValidation({ loading: false, data: checked, error: "" });
+      if (!checked.valid) {
+        setSubmitError("Resolve alias validation errors before saving.");
+        return;
+      }
       await postJSON(apiPaths.modelAliases, form);
       setForm({ alias: "", target_model: "", channel_id: "" });
+      setValidation(emptyAliasValidationState());
       setRefreshTick((tick) => tick + 1);
     } catch (error) {
       setSubmitError(error.message);
     }
   };
+  const startEdit = (item) => {
+    setSubmitError("");
+    setEditID(item.id || "");
+    setEditForm({
+      id: item.id || "",
+      alias: item.alias || "",
+      target_model: item.target_model || "",
+      channel_id: item.channel_id || "",
+      enabled: item.enabled !== false,
+      description: item.description || "",
+      source: item.source || "",
+    });
+  };
+  const cancelEdit = () => {
+    setEditID("");
+    setEditForm(null);
+    setEditValidation(emptyAliasValidationState());
+  };
+  const saveEdit = async (event) => {
+    event.preventDefault();
+    setSubmitError("");
+    try {
+      const checked = await validateAlias(editForm);
+      setEditValidation({ loading: false, data: checked, error: "" });
+      if (!checked.valid) {
+        setSubmitError("Resolve alias validation errors before saving.");
+        return;
+      }
+      await patchJSON(apiPaths.modelAlias(editID), editForm);
+      cancelEdit();
+      setRefreshTick((tick) => tick + 1);
+    } catch (error) {
+      setSubmitError(error.message);
+    }
+  };
+  const createDisabled = isAliasSaveDisabled(form, validation);
+  const editDisabled = isAliasSaveDisabled(editForm || {}, editValidation);
 
   return (
     <section className="panel">
@@ -289,17 +395,40 @@ function ModelAliasesPanel() {
         <input className="filter-input" placeholder="Alias, e.g. abc" value={form.alias} onChange={(event) => update("alias", event.target.value)} />
         <input className="filter-input" placeholder="Target model, e.g. gpt-5.5" value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
         <input className="filter-input" placeholder="Optional channel" value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
-        <button className="ghost-button" type="submit">Create</button>
+        <button className="ghost-button" type="submit" disabled={createDisabled}>Create</button>
       </form>
+      <AliasValidationMessages state={validation} />
       {submitError ? <p className="event-message">{submitError}</p> : null}
       {items.length ? (
         <div className="session-breakdown-grid">
           {items.map((item) => (
-            <div className="metric-card" key={item.id || `${item.alias}:${item.channel_id}:${item.target_model}`}>
-              <span>{item.channel_id || "global"}</span>
-              <strong>{item.alias} to {item.target_model}</strong>
-              <small>{item.enabled === false ? "disabled" : "enabled"}</small>
-            </div>
+            <section className="breakdown-card" key={item.id || `${item.alias}:${item.channel_id}:${item.target_model}`}>
+              {editID === item.id && editForm ? (
+                <form className="routing-summary-stack" onSubmit={saveEdit}>
+                  <div className="breakdown-title">Edit alias</div>
+                  <input className="filter-input" placeholder="Alias" value={editForm.alias} onChange={(event) => updateEdit("alias", event.target.value)} />
+                  <input className="filter-input" placeholder="Target model" value={editForm.target_model} onChange={(event) => updateEdit("target_model", event.target.value)} />
+                  <input className="filter-input" placeholder="Optional channel" value={editForm.channel_id} onChange={(event) => updateEdit("channel_id", event.target.value)} />
+                  <label className="checkbox-row"><input type="checkbox" checked={editForm.enabled !== false} onChange={(event) => updateEdit("enabled", event.target.checked)} /> enabled</label>
+                  <AliasValidationMessages state={editValidation} compact />
+                  <div className="trace-tag-group">
+                    <button className="ghost-button" type="submit" disabled={editDisabled}>Save</button>
+                    <button className="ghost-button" type="button" onClick={cancelEdit}>Cancel</button>
+                  </div>
+                </form>
+              ) : (
+                <div className="routing-summary-stack">
+                  <div className="breakdown-title">{item.channel_id || "global"}</div>
+                  <strong className="trace-model-name">{item.alias} to {item.target_model}</strong>
+                  <div className="trace-tag-group">
+                    <InlineTag tone={item.enabled === false ? "gold" : "green"}>{item.enabled === false ? "disabled" : "enabled"}</InlineTag>
+                    {item.source ? <InlineTag>{item.source}</InlineTag> : null}
+                  </div>
+                  {item.description ? <span className="trace-subline">{item.description}</span> : null}
+                  <button className="ghost-button" type="button" onClick={() => startEdit(item)}>Edit</button>
+                </div>
+              )}
+            </section>
           ))}
         </div>
       ) : !aliases.error ? <EmptyState title="No aliases configured" detail="Create aliases here once the backend API is enabled." compact /> : null}
@@ -343,10 +472,168 @@ function RouteInspectorPanel() {
         <button className="ghost-button" type="submit">Inspect</button>
       </form>
       {error ? <EmptyState title="Route inspector API unavailable" detail={error} compact /> : null}
-      {result ? <pre className="trace-json-block">{JSON.stringify(result, null, 2)}</pre> : null}
+      {result ? <RouteInspectorResult result={result} /> : null}
       {!result && !error ? <EmptyState title="No dry run yet" detail="Submit endpoint and model to preview the planned route." compact /> : null}
     </section>
   );
+}
+
+function RouteInspectorResult({ result }) {
+  const plan = result?.result?.plan || {};
+  const candidates = Array.isArray(result?.result?.candidates) ? result.result.candidates : [];
+  const hasPlan = Boolean(plan.execution_mode || plan.selected_candidate_id || plan.upstream_endpoint || plan.upstream_model);
+  return (
+    <div className="routing-summary-stack">
+      {result.error ? <EmptyState title="No executable route" detail={result.error} tone="danger" compact /> : null}
+      {hasPlan ? (
+        <div className="session-breakdown-grid">
+          <section className="breakdown-card">
+            <div className="breakdown-title">Execution</div>
+            <strong className="trace-model-name">{formatInspectValue(plan.execution_mode)}</strong>
+            <span className="trace-subline">{formatInspectValue(plan.reason || "selected")}</span>
+          </section>
+          <section className="breakdown-card">
+            <div className="breakdown-title">Upstream</div>
+            <strong className="trace-model-name">{formatInspectValue(plan.upstream_endpoint)}</strong>
+            <span className="trace-subline mono">{formatInspectValue(plan.upstream_model)}</span>
+          </section>
+          <section className="breakdown-card">
+            <div className="breakdown-title">Selected target</div>
+            <strong className="trace-model-name">{formatInspectValue(plan.selected_route_target_id || plan.selected_candidate_id)}</strong>
+            <span className="trace-subline mono">channel {formatInspectValue(plan.selected_channel_id)}</span>
+          </section>
+          <section className="breakdown-card">
+            <div className="breakdown-title">Request model</div>
+            <strong className="trace-model-name">{formatInspectValue(plan.requested_model || result?.request?.model)}</strong>
+            <span className="trace-subline">{formatCount(plan.resolved_model_candidates?.length || 0)} resolved candidate(s)</span>
+          </section>
+        </div>
+      ) : null}
+      {plan.resolved_model_candidates?.length ? (
+        <section className="breakdown-card">
+          <div className="breakdown-title">Resolved models</div>
+          <div className="routing-candidate-list">
+            {plan.resolved_model_candidates.map((candidate, index) => (
+              <article className="routing-candidate-card routing-candidate-card-active" key={`${candidate.channel_id || "global"}-${candidate.model}-${index}`}>
+                <div className="routing-candidate-head">
+                  <div>
+                    <strong>{candidate.model || "unknown model"}</strong>
+                    <span className="trace-subline mono">{candidate.alias ? `alias ${candidate.alias}` : candidate.source || "request"}</span>
+                  </div>
+                  <div className="trace-tag-group">
+                    {candidate.channel_id ? <InlineTag tone="accent">{candidate.channel_id}</InlineTag> : <InlineTag>global</InlineTag>}
+                    {candidate.source ? <InlineTag>{candidate.source}</InlineTag> : null}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {candidates.length ? <RouteInspectorCandidates candidates={candidates} selectedID={plan.selected_candidate_id} /> : null}
+      <details className="breakdown-card">
+        <summary className="breakdown-title">Raw inspector response</summary>
+        <pre className="trace-json-block">{JSON.stringify(result, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
+function RouteInspectorCandidates({ candidates, selectedID }) {
+  return (
+    <section className="breakdown-card">
+      <div className="breakdown-title">Candidate reasons</div>
+      <div className="routing-candidate-list">
+        {candidates.map((candidate, index) => {
+          const selected = candidate.selectable && candidate.candidate_id === selectedID;
+          return (
+            <article className={candidate.selectable ? "routing-candidate-card routing-candidate-card-active" : "routing-candidate-card"} key={`${candidate.candidate_id || "candidate"}-${candidate.execution_mode}-${candidate.upstream_endpoint}-${index}`}>
+              <div className="routing-candidate-head">
+                <div>
+                  <strong>{candidate.route_target_id || candidate.candidate_id || "unknown target"}</strong>
+                  <span className="trace-subline mono">{formatInspectValue(candidate.execution_mode)} via {formatInspectValue(candidate.upstream_endpoint)}</span>
+                </div>
+                <div className="trace-tag-group">
+                  <InlineTag tone={candidate.selectable ? "green" : "gold"}>{selected ? "selected" : candidate.selectable ? "selectable" : "filtered"}</InlineTag>
+                  <InlineTag>{formatInspectValue(candidate.reason)}</InlineTag>
+                  {candidate.channel_id ? <InlineTag tone="accent">{candidate.channel_id}</InlineTag> : null}
+                </div>
+              </div>
+              <div className="detail-meta-strip">
+                <DetailMeta label="model" value={candidate.upstream_model || "-"} mono />
+                <DetailMeta label="rank" value={candidate.rank ?? "-"} />
+                <DetailMeta label="candidate" value={candidate.candidate_id || "-"} mono />
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function DetailMeta({ label, value, mono = false }) {
+  return (
+    <span className={mono ? "mono" : ""}>
+      <small>{label}</small>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function AliasValidationMessages({ state, compact = false }) {
+  const data = state?.data;
+  const errors = Array.isArray(data?.errors) ? data.errors : [];
+  const warnings = Array.isArray(data?.warnings) ? data.warnings : [];
+  if (!state?.loading && !state?.error && !errors.length && !warnings.length) {
+    return null;
+  }
+  return (
+    <div className={compact ? "routing-summary-stack" : "routing-summary-stack"}>
+      {state.loading ? <p className="trace-subline">Validating alias...</p> : null}
+      {state.error ? <p className="event-message">Alias validation unavailable: {state.error}</p> : null}
+      {errors.map((error) => <p className="event-message" key={error}>{error}</p>)}
+      {warnings.map((warning) => (
+        <p className="trace-subline" key={`${warning.code}:${warning.message}`}>
+          Warning {warning.code}: {warning.message}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function emptyAliasValidationState() {
+  return { loading: false, data: null, error: "" };
+}
+
+function shouldValidateAlias(form = {}) {
+  return Boolean(String(form.alias || "").trim() || String(form.target_model || "").trim() || String(form.channel_id || "").trim());
+}
+
+async function validateAlias(form = {}) {
+  return postJSON(apiPaths.modelAliasValidate, {
+    id: form.id || "",
+    alias: form.alias || "",
+    target_model: form.target_model || "",
+    channel_id: form.channel_id || "",
+    enabled: form.enabled,
+    description: form.description || "",
+    source: form.source || "",
+  });
+}
+
+function isAliasSaveDisabled(form = {}, validation = emptyAliasValidationState()) {
+  if (!String(form.alias || "").trim() || !String(form.target_model || "").trim()) {
+    return true;
+  }
+  if (validation.loading || validation.error) {
+    return true;
+  }
+  return validation.data?.valid === false;
+}
+
+function formatInspectValue(value) {
+  return value === undefined || value === null || value === "" ? "-" : String(value);
 }
 
 function normalizeRoutingWindow(value) {
