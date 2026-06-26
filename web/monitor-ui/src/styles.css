@@ -2704,6 +2704,14 @@ a:focus-visible {
   gap: 12px;
 }
 
+.route-plan-candidates {
+  grid-column: 1 / -1;
+}
+
+.routing-candidate-list-compact {
+  margin-top: 4px;
+}
+
 .routing-candidate-card {
   display: grid;
   gap: 12px;
