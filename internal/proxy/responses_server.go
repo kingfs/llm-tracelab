@@ -135,6 +135,7 @@ func (a *responsesChatCompletionsAdapter) chatCompletion(ctx context.Context, ch
 			"candidate_targets": selection.Candidates,
 		},
 	})
+	logInfo.Events = append(logInfo.Events, routePlanEventForSelection(routeReq, selection, start, a.routingPolicy, "responses_server"))
 	logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
 	a.recordModelCallEvent(ctx, logInfo, responsesaudit.ExecutionEvent{
 		EventType: "response.model_call",
@@ -451,6 +452,9 @@ func (h *Handler) prepareLocalResponsesEntryRecording(r *http.Request, body []by
 			"target_path": targetPath,
 		},
 	})
+	if event, ok := routePlanEventFromContext(r.Context()); ok {
+		logInfo.Events = append(logInfo.Events, event)
+	}
 	return &responsesEntryRecorder{
 		recorder:   h.recorder,
 		logInfo:    logInfo,

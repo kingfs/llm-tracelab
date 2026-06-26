@@ -1389,12 +1389,13 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 		wantNativeCalls  int32
 		wantChatCalls    int32
 		wantErrorContain string
+		wantMode         string
 	}{
-		{name: "auto_prefers_native", strategy: "auto", includeNative: true, includeChat: true, wantStatus: http.StatusOK, wantNativeCalls: 1},
-		{name: "auto_falls_back_to_chat", strategy: "auto", includeChat: true, wantStatus: http.StatusOK, wantChatCalls: 1},
-		{name: "prefer_local_uses_chat", strategy: "prefer_local_server", includeNative: true, includeChat: true, wantStatus: http.StatusOK, wantChatCalls: 1},
-		{name: "native_only_rejects_chat_only", strategy: "native_only", includeChat: true, wantStatus: http.StatusBadGateway, wantErrorContain: "native_only"},
-		{name: "local_only_rejects_native_only", strategy: "local_server_only", includeNative: true, wantStatus: http.StatusBadGateway, wantErrorContain: "local_server_only"},
+		{name: "auto_prefers_native", strategy: "auto", includeNative: true, includeChat: true, wantStatus: http.StatusOK, wantNativeCalls: 1, wantMode: "proxy_pass"},
+		{name: "auto_falls_back_to_chat", strategy: "auto", includeChat: true, wantStatus: http.StatusOK, wantChatCalls: 1, wantMode: "responses_server"},
+		{name: "prefer_local_uses_chat", strategy: "prefer_local_server", includeNative: true, includeChat: true, wantStatus: http.StatusOK, wantChatCalls: 1, wantMode: "responses_server"},
+		{name: "native_only_rejects_chat_only", strategy: "native_only", includeChat: true, wantStatus: http.StatusBadGateway, wantErrorContain: "native_only", wantMode: "responses_server"},
+		{name: "local_only_rejects_native_only", strategy: "local_server_only", includeNative: true, wantStatus: http.StatusBadGateway, wantErrorContain: "local_server_only", wantMode: "responses_server"},
 	}
 
 	for _, tt := range tests {
@@ -1501,6 +1502,25 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 			}
 			if got := chatCalls.Load(); got != tt.wantChatCalls {
 				t.Fatalf("chat calls = %d, want %d", got, tt.wantChatCalls)
+			}
+
+			recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/responses", time.Second)
+			parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+			}
+			plan := routePlanAttrsFromPrelude(t, parsed)
+			if plan["client_entrypoint"] != "/v1/responses" || plan["requested_model"] != "gpt-5" {
+				t.Fatalf("route plan entry/model = %q/%q, want /v1/responses/gpt-5", plan["client_entrypoint"], plan["requested_model"])
+			}
+			if plan["execution_mode"] != tt.wantMode {
+				t.Fatalf("route plan execution_mode = %q, want %q", plan["execution_mode"], tt.wantMode)
+			}
+			if tt.strategy != "auto" && plan["strategy"] != tt.strategy {
+				t.Fatalf("route plan strategy = %q, want %q", plan["strategy"], tt.strategy)
+			}
+			if tt.wantErrorContain != "" && !strings.Contains(fmt.Sprint(plan["failure_reason"]), tt.wantErrorContain) {
+				t.Fatalf("route plan failure_reason = %q, want contain %q", plan["failure_reason"], tt.wantErrorContain)
 			}
 		})
 	}
@@ -4686,6 +4706,22 @@ func TestHandlerRewritesModelAliasForSelectedUpstream(t *testing.T) {
 	if upstreamModel != "gpt-5.5" {
 		t.Fatalf("upstream model = %q, want gpt-5.5", upstreamModel)
 	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	plan := routePlanAttrsFromPrelude(t, parsed)
+	if plan["client_entrypoint"] != "/v1/chat/completions" || plan["execution_mode"] != "proxy_pass" {
+		t.Fatalf("route plan entry/mode = %q/%q, want /v1/chat/completions/proxy_pass", plan["client_entrypoint"], plan["execution_mode"])
+	}
+	if plan["requested_model"] != "abc" || plan["upstream_model"] != "gpt-5.5" {
+		t.Fatalf("route plan models = %q/%q, want abc/gpt-5.5", plan["requested_model"], plan["upstream_model"])
+	}
+	if plan["selected_upstream_id"] != "openai-primary" {
+		t.Fatalf("route plan selected_upstream_id = %q, want openai-primary", plan["selected_upstream_id"])
+	}
 }
 
 func TestHandlerRetryOnUpstream500(t *testing.T) {
@@ -5661,4 +5697,18 @@ func hasRecordEvent(events []recordfile.RecordEvent, eventType string) bool {
 		}
 	}
 	return false
+}
+
+func routePlanAttrsFromPrelude(t *testing.T, parsed *recordfile.ParsedPrelude) map[string]interface{} {
+	t.Helper()
+	if parsed == nil {
+		t.Fatal("parsed prelude is nil")
+	}
+	for _, event := range parsed.Events {
+		if event.Type == "routing.route_plan" {
+			return event.Attributes
+		}
+	}
+	t.Fatalf("routing.route_plan event missing: %+v", parsed.Events)
+	return nil
 }

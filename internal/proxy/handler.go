@@ -105,8 +105,11 @@ type limitDecision struct {
 }
 
 type responsesRouteDecision struct {
-	useLocal     bool
-	rejectReason string
+	strategy        routeplan.ResponsesStrategy
+	useLocal        bool
+	nativeAvailable bool
+	localAvailable  bool
+	rejectReason    string
 }
 
 type proxyRoutingSettings struct {
@@ -754,6 +757,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.responsesHandler != nil && h.localResponsesPath(r.URL.Path) {
 		decision := h.responsesRoutingDecision(r, bodyBytes)
 		if decision.useLocal {
+			r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
 			h.serveLocalResponsesWithBody(w, r, bodyBytes)
 			return
 		}
@@ -762,7 +766,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Reason:  router.SelectionFailureNoSupportingTarget,
 				Message: decision.rejectReason,
 			}
-			h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, nil)
+			h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, []recorder.RecordEvent{
+				routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
+			})
 			http.Error(w, selectErr.Error(), http.StatusBadGateway)
 			return
 		}
@@ -901,6 +907,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"candidate_targets": selection.Candidates,
 			},
 		})
+		logInfo.Events = append(logInfo.Events, routePlanEventForSelection(r, selection, start, h.routerPolicy(), h.routePlanStrategy(r)))
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
 
 		// Chaos
@@ -1024,41 +1031,49 @@ func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) re
 	strategy := h.responsesStrategy(r.Context())
 	nativeAvailable := h.router != nil && h.router.HasSelectableNativeResponsesCandidateWithBody(r, bodyBytes)
 	localAvailable := h.responsesHandler != nil && h.responsesChatBackendAvailable(r, bodyBytes)
+	decision := responsesRouteDecision{strategy: strategy, nativeAvailable: nativeAvailable, localAvailable: localAvailable}
 
 	switch strategy {
 	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative:
 		if nativeAvailable {
-			return responsesRouteDecision{}
+			return decision
 		}
 		if localAvailable {
-			return responsesRouteDecision{useLocal: true}
+			decision.useLocal = true
+			return decision
 		}
 	case routeplan.ResponsesStrategyPreferLocalServer:
 		if localAvailable {
-			return responsesRouteDecision{useLocal: true}
+			decision.useLocal = true
+			return decision
 		}
 		if nativeAvailable {
-			return responsesRouteDecision{}
+			return decision
 		}
 	case routeplan.ResponsesStrategyNativeOnly:
 		if nativeAvailable {
-			return responsesRouteDecision{}
+			return decision
 		}
-		return responsesRouteDecision{rejectReason: "responses_strategy native_only requires a matching native Responses upstream"}
+		decision.rejectReason = "responses_strategy native_only requires a matching native Responses upstream"
+		return decision
 	case routeplan.ResponsesStrategyLocalServerOnly:
 		if localAvailable {
-			return responsesRouteDecision{useLocal: true}
+			decision.useLocal = true
+			return decision
 		}
-		return responsesRouteDecision{rejectReason: "responses_strategy local_server_only requires a matching chat completions backend"}
+		decision.rejectReason = "responses_strategy local_server_only requires a matching chat completions backend"
+		return decision
 	default:
 		if nativeAvailable {
-			return responsesRouteDecision{}
+			return decision
 		}
 		if localAvailable {
-			return responsesRouteDecision{useLocal: true}
+			decision.useLocal = true
+			return decision
 		}
 	}
-	return responsesRouteDecision{rejectReason: "no matching Responses route is available for the requested model and strategy"}
+	decision.rejectReason = "no matching Responses route is available for the requested model and strategy"
+	return decision
 }
 
 func (h *Handler) responsesStrategy(ctx context.Context) routeplan.ResponsesStrategy {
@@ -1077,6 +1092,17 @@ func (h *Handler) responsesStrategy(ctx context.Context) routeplan.ResponsesStra
 	default:
 		return strategy
 	}
+}
+
+func (h *Handler) routePlanStrategy(r *http.Request) string {
+	if clientEntrypoint(r) != "/v1/responses" {
+		return ""
+	}
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
+	}
+	return string(h.responsesStrategy(ctx))
 }
 
 func (h *Handler) responsesChatBackendAvailable(r *http.Request, bodyBytes []byte) bool {
@@ -1276,6 +1302,163 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 		})
 	}
 	return events
+}
+
+type routePlanEventContextKey struct{}
+
+func requestWithRoutePlanEvent(r *http.Request, event recorder.RecordEvent) *http.Request {
+	if r == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), routePlanEventContextKey{}, event))
+}
+
+func routePlanEventFromContext(ctx context.Context) (recorder.RecordEvent, bool) {
+	if ctx == nil {
+		return recorder.RecordEvent{}, false
+	}
+	event, ok := ctx.Value(routePlanEventContextKey{}).(recorder.RecordEvent)
+	return event, ok
+}
+
+func routePlanEventForSelection(r *http.Request, selection *router.Selection, eventTime time.Time, policy string, strategy string) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"client_entrypoint": clientEntrypoint(r),
+		"execution_mode":    "proxy_pass",
+		"routing_policy":    policy,
+	}
+	if strategy != "" {
+		attrs["strategy"] = strategy
+	}
+	if selection != nil {
+		attrs["requested_model"] = selection.Request.ModelName
+		attrs["upstream_model"] = upstreamModelForSelection(selection)
+		attrs["selected_route_target_id"] = selection.Credential.RouteTargetID
+		attrs["selected_channel_id"] = selection.Credential.ChannelID
+		attrs["routing_score"] = selection.Score
+		attrs["candidate_count"] = selection.CandidateCount
+		if selection.Target != nil {
+			attrs["selected_upstream_id"] = selection.Target.ID
+			attrs["upstream_endpoint"] = redaction.DisplayURL(selection.Target.Upstream.BaseURL)
+			if selection.Target.Upstream.APIType != "" {
+				attrs["api_type"] = selection.Target.Upstream.APIType
+			}
+			if selection.Target.Upstream.Mode != "" {
+				attrs["mode"] = selection.Target.Upstream.Mode
+			}
+		}
+		if selection.Decision != nil {
+			attrs["candidate_summary"] = routePlanCandidateSummary(selection.Decision.Candidates)
+		}
+	}
+	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
+}
+
+func routePlanEventForDecision(r *http.Request, bodyBytes []byte, decision *router.DecisionTrace, eventTime time.Time, policy string, failureReason string) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"client_entrypoint": clientEntrypoint(r),
+		"execution_mode":    "proxy_pass",
+		"routing_policy":    policy,
+		"requested_model":   requestModelFromBody(r, bodyBytes),
+	}
+	if decision != nil {
+		attrs["requested_model"] = decision.ModelName
+		attrs["upstream_model"] = decision.ModelName
+		attrs["upstream_endpoint"] = decision.Endpoint
+		attrs["candidate_summary"] = routePlanCandidateSummary(decision.Candidates)
+		if failureReason == "" {
+			failureReason = decision.FailureReason
+		}
+	}
+	if failureReason != "" {
+		attrs["failure_reason"] = failureReason
+	}
+	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
+}
+
+func routePlanEventForLocalResponsesEntry(r *http.Request, bodyBytes []byte, decision responsesRouteDecision, policy string, eventTime time.Time) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"client_entrypoint": clientEntrypoint(r),
+		"execution_mode":    "responses_server",
+		"requested_model":   requestModelFromBody(r, bodyBytes),
+		"upstream_model":    requestModelFromBody(r, bodyBytes),
+		"upstream_endpoint": "/v1/responses",
+		"strategy":          string(decision.strategy),
+		"routing_policy":    policy,
+		"local_available":   decision.localAvailable,
+		"native_available":  decision.nativeAvailable,
+	}
+	if decision.rejectReason != "" {
+		attrs["failure_reason"] = decision.rejectReason
+	}
+	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
+}
+
+func upstreamModelForSelection(selection *router.Selection) string {
+	if selection == nil {
+		return ""
+	}
+	requestedModel := strings.TrimSpace(selection.Request.ModelName)
+	if selection.Target != nil {
+		if upstreamModel := selection.Target.ResolveModelAlias(requestedModel); upstreamModel != "" {
+			return upstreamModel
+		}
+	}
+	return requestedModel
+}
+
+func routePlanCandidateSummary(candidates []router.CandidateDecision) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(candidates))
+	for _, candidate := range candidates {
+		attrs := map[string]interface{}{
+			"id":             candidate.ID,
+			"selectable":     candidate.Selectable,
+			"supports_path":  candidate.SupportsPath,
+			"supports_model": candidate.SupportsModel,
+		}
+		if candidate.RouteTargetID != "" {
+			attrs["route_target_id"] = candidate.RouteTargetID
+		}
+		if candidate.ChannelID != "" {
+			attrs["channel_id"] = candidate.ChannelID
+		}
+		if candidate.FilterReason != "" {
+			attrs["filter_reason"] = candidate.FilterReason
+		}
+		if candidate.APIType != "" {
+			attrs["api_type"] = candidate.APIType
+		}
+		if candidate.Mode != "" {
+			attrs["mode"] = candidate.Mode
+		}
+		out = append(out, attrs)
+	}
+	return out
+}
+
+func clientEntrypoint(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	return llm.NormalizeEndpoint(r.URL.Path)
+}
+
+func requestModelFromBody(r *http.Request, bodyBytes []byte) string {
+	if len(bodyBytes) > 0 {
+		if parsed, err := llm.ParseRequestForPath(clientEntrypoint(r), "", bodyBytes); err == nil && strings.TrimSpace(parsed.Model) != "" {
+			return strings.TrimSpace(parsed.Model)
+		}
+	}
+	return ""
+}
+
+func hasRoutePlanEvent(events []recorder.RecordEvent) bool {
+	for _, event := range events {
+		if event.Type == "routing.route_plan" {
+			return true
+		}
+	}
+	return false
 }
 
 func stickyKeyFingerprint(key string) string {
@@ -1980,7 +2163,12 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Events = append(logInfo.Events, retryEvents...)
 	if decision := router.SelectionDecision(selectErr); decision != nil {
+		if !hasRoutePlanEvent(logInfo.Events) {
+			logInfo.Events = append(logInfo.Events, routePlanEventForDecision(r, bodyBytes, decision, start, h.routerPolicy(), reason))
+		}
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(decision, start)...)
+	} else if !hasRoutePlanEvent(logInfo.Events) {
+		logInfo.Events = append(logInfo.Events, routePlanEventForDecision(r, bodyBytes, nil, start, h.routerPolicy(), reason))
 	}
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
 		Type:    "routing.failure",

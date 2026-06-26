@@ -521,6 +521,40 @@ func TestRoutingOutcomeEventRedactsCredentialError(t *testing.T) {
 	}
 }
 
+func TestRoutePlanEventForDecisionIncludesFailureReason(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"missing-model"}`))
+	decision := &router.DecisionTrace{
+		ModelName:     "missing-model",
+		Endpoint:      "/v1/chat/completions",
+		Policy:        router.PolicyFirstAvailable,
+		FailureReason: router.SelectionFailureNoSupportingTarget,
+		Candidates: []router.CandidateDecision{{
+			ID:            "openai-primary",
+			SupportsPath:  true,
+			SupportsModel: false,
+			Selectable:    false,
+			FilterReason:  "model_not_supported",
+			RouteTargetID: "route-a",
+			ChannelID:     "channel-a",
+			APIType:       "chat_completions",
+			Mode:          "proxy",
+		}},
+	}
+
+	event := routePlanEventForDecision(req, []byte(`{"model":"missing-model"}`), decision, time.Now(), router.PolicyFirstAvailable, "")
+	attrs := event.Attributes
+	if event.Type != "routing.route_plan" || attrs["failure_reason"] != router.SelectionFailureNoSupportingTarget {
+		t.Fatalf("route plan failure attrs = %+v", attrs)
+	}
+	if attrs["client_entrypoint"] != "/v1/chat/completions" || attrs["requested_model"] != "missing-model" {
+		t.Fatalf("route plan request attrs = %+v", attrs)
+	}
+	summary, ok := attrs["candidate_summary"].([]map[string]interface{})
+	if !ok || len(summary) != 1 || summary[0]["filter_reason"] != "model_not_supported" {
+		t.Fatalf("route plan candidate_summary = %#v", attrs["candidate_summary"])
+	}
+}
+
 func TestLimitDecisionScopes(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	req.Header.Set("X-Limit-Bucket", "raw-secret-bucket")
