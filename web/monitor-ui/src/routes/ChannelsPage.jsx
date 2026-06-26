@@ -317,6 +317,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
 function ProviderCard({ item, windowValue, onRefresh }) {
   const { t } = useI18n();
   const summary = item.summary || {};
+  const modeTag = providerModeTag(item.mode);
   const [saving, setSaving] = useState(false);
   const [probeOpen, setProbeOpen] = useState(false);
   const setEnabled = async (enabled, event) => {
@@ -367,6 +368,7 @@ function ProviderCard({ item, windowValue, onRefresh }) {
           >
             {t("providers.probe")}
           </button>
+          <InlineTag tone={modeTag.tone}>{modeTag.label(t)}</InlineTag>
           <InlineTag tone={item.source === "bootstrap" ? "gold" : "green"}>{providerSourceLabel(item.source)}</InlineTag>
           {item.secret_storage_mode ? <InlineTag tone={item.secret_storage_mode === "plaintext-local" ? "gold" : "green"}>{item.secret_storage_mode}</InlineTag> : null}
           {item.last_probe_status ? <InlineTag tone={item.last_probe_status === "success" ? "green" : "danger"}>{item.last_probe_status}</InlineTag> : null}
@@ -471,6 +473,21 @@ function providerSourceLabel(source) {
       return "web-managed";
     default:
       return source;
+  }
+}
+
+function providerModeTag(mode = "") {
+  switch (mode) {
+    case "responses_server":
+      return { tone: "accent", label: (t) => t("providers.modeResponsesServer") };
+    case "proxy":
+      return { tone: "green", label: (t) => t("providers.modePureProxy") };
+    case "record_only":
+      return { tone: "gold", label: (t) => t("providers.modeRecordOnly") };
+    case "server":
+      return { tone: "accent", label: (t) => t("providers.modeServer") };
+    default:
+      return { tone: "default", label: () => mode || "mode unknown" };
   }
 }
 
