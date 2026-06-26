@@ -64,6 +64,10 @@ export const apiPaths = {
   localSecretKeyRotate: "/api/secrets/local-key?rotate=1",
   routingExchanges: "/api/routing/exchanges",
   routingSummary: "/api/routing/summary",
+  routingInspect: "/api/routing/inspect",
+  routingSettings: "/api/settings/routing",
+  modelAliases: "/api/model-aliases",
+  modelAlias: (aliasID) => `/api/model-aliases/${encodeURIComponent(aliasID)}`,
   upstreams: "/api/upstreams",
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };

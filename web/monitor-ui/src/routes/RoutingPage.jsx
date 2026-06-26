@@ -6,18 +6,20 @@ import { InlineTag } from "../components/common/Badges";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, apiURL } from "../lib/api";
+import { apiPaths, apiURL, patchJSON, postJSON, requestJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { formatCount, formatTime, MONITOR_WINDOW_OPTIONS, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
 const WINDOW_OPTIONS = MONITOR_WINDOW_OPTIONS;
 const FILTER_KEYS = ["model", "upstream", "status", "min_duration_ms", "max_duration_ms", "min_ttft_ms", "max_ttft_ms", "min_tokens", "max_tokens"];
+const ROUTING_TABS = ["decisions", "settings", "aliases", "inspect"];
 
 export function RoutingPage() {
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeRoutingWindow(searchParams.get("window"));
+  const activeTab = normalizeRoutingTab(searchParams.get("tab"));
   const activeFilters = readRoutingFilters(searchParams);
   const [refreshTick, setRefreshTick] = useState(0);
   const [filters, setFilters] = useState(activeFilters);
@@ -54,6 +56,11 @@ export function RoutingPage() {
     setOrDeleteParam(next, "window", nextWindow === "today" ? "" : nextWindow);
     setSearchParams(next);
   };
+  const setTab = (nextTab) => {
+    const next = new URLSearchParams(searchParams);
+    setOrDeleteParam(next, "tab", nextTab === "decisions" ? "" : nextTab);
+    setSearchParams(next);
+  };
   const applyFilters = (event) => {
     event.preventDefault();
     const next = new URLSearchParams(searchParams);
@@ -84,20 +91,42 @@ export function RoutingPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Decision log</p>
-            <h2>{t("routing.recent")}</h2>
-          </div>
-          <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label={t("routing.window")}>
-              {WINDOW_OPTIONS.map((window) => (
-                <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
-                  {window}
-                </button>
-              ))}
-            </div>
+            <p className="eyebrow">Gateway routing</p>
+            <h2>Workspace</h2>
           </div>
         </div>
-        <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
+        <div className="view-toggle routing-mode-toggle" role="tablist" aria-label="Routing workspace">
+          {ROUTING_TABS.map((tab) => (
+            <button key={tab} className={activeTab === tab ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setTab(tab)}>
+              {routingTabLabel(tab)}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {activeTab === "settings" ? <RoutingSettingsPanel /> : null}
+      {activeTab === "aliases" ? <ModelAliasesPanel /> : null}
+      {activeTab === "inspect" ? <RouteInspectorPanel /> : null}
+
+      {activeTab === "decisions" ? (
+        <>
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Decision log</p>
+                <h2>{t("routing.recent")}</h2>
+              </div>
+              <div className="panel-head-actions">
+                <div className="view-toggle" role="tablist" aria-label={t("routing.window")}>
+                  {WINDOW_OPTIONS.map((window) => (
+                    <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
+                      {window}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <form className="filter-bar routing-filter-bar" onSubmit={applyFilters}>
           <input className="filter-input" type="search" name="routing_model" placeholder={t("routing.model")} value={filters.model} onChange={(event) => updateFilter("model", event.target.value)} />
           <input className="filter-input" type="search" name="routing_upstream" placeholder={t("routing.channelUpstream")} value={filters.upstream} onChange={(event) => updateFilter("upstream", event.target.value)} />
           <select className="filter-input" name="routing_status" aria-label="Routing status" value={filters.status} onChange={(event) => updateFilter("status", event.target.value)}>
@@ -120,14 +149,203 @@ export function RoutingPage() {
           <StatCard label={t("common.errors")} value={formatCount(summary.errors)} accent={summary.errors ? "accent-red" : ""} />
           <StatCard label={t("common.tokens")} value={formatCount(summary.tokens)} detail={usageCoverageDetail(summary.missing, t)} />
         </div>
-      </section>
+          </section>
 
-      {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
-      {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
-      {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
-      {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
-      {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
+          {traces.error ? <EmptyState title={t("routing.loadError")} detail={traces.error} tone="danger" /> : null}
+          {routingSummary.error ? <EmptyState title={t("routing.summaryError")} detail={routingSummary.error} tone="danger" compact /> : null}
+          {traces.loading && !traces.data ? <EmptyState title={t("routing.loading")} detail={t("routing.loadingDetail")} /> : null}
+          {routingSummary.data ? <CredentialRoutingSummaryPanel summary={credentialSummary} windowValue={windowValue} /> : null}
+          {traces.data ? <RequestList items={routedItems} fromView="routing" focusFailures /> : null}
+        </>
+      ) : null}
     </div>
+  );
+}
+
+function normalizeRoutingTab(value) {
+  return ROUTING_TABS.includes(value) ? value : "decisions";
+}
+
+function routingTabLabel(tab) {
+  switch (tab) {
+    case "settings":
+      return "Settings";
+    case "aliases":
+      return "Aliases";
+    case "inspect":
+      return "Inspector";
+    default:
+      return "Decisions";
+  }
+}
+
+function RoutingSettingsPanel() {
+  const [settings, setSettings] = useState({ responses_strategy: "auto", selection_policy: "p2c", missing_model_policy: "reject" });
+  const [status, setStatus] = useState({ loading: true, error: "", saved: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    requestJSON(apiPaths.routingSettings)
+      .then((payload) => {
+        if (!cancelled) {
+          setSettings({ ...settings, ...payload });
+          setStatus({ loading: false, error: "", saved: false });
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStatus({ loading: false, error: error.message, saved: false });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const save = async (event) => {
+    event.preventDefault();
+    setStatus({ loading: false, error: "", saved: false });
+    try {
+      const payload = await patchJSON(apiPaths.routingSettings, settings);
+      setSettings({ ...settings, ...payload });
+      setStatus({ loading: false, error: "", saved: true });
+    } catch (error) {
+      setStatus({ loading: false, error: error.message, saved: false });
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">System policy</p>
+          <h2>Routing settings</h2>
+        </div>
+        {status.saved ? <InlineTag tone="green">Saved</InlineTag> : null}
+      </div>
+      {status.error ? <EmptyState title="Routing settings API unavailable" detail={status.error} compact /> : null}
+      <form className="filter-bar routing-filter-bar" onSubmit={save}>
+        <label className="filter-label">
+          Responses strategy
+          <select className="filter-input" value={settings.responses_strategy || "auto"} onChange={(event) => update("responses_strategy", event.target.value)}>
+            <option value="auto">auto</option>
+            <option value="prefer_native">prefer_native</option>
+            <option value="prefer_local_server">prefer_local_server</option>
+            <option value="native_only">native_only</option>
+            <option value="local_server_only">local_server_only</option>
+          </select>
+        </label>
+        <label className="filter-label">
+          Selection policy
+          <select className="filter-input" value={settings.selection_policy || "p2c"} onChange={(event) => update("selection_policy", event.target.value)}>
+            <option value="p2c">p2c</option>
+            <option value="first_available">first_available</option>
+          </select>
+        </label>
+        <label className="filter-label">
+          Missing model
+          <select className="filter-input" value={settings.missing_model_policy || "reject"} onChange={(event) => update("missing_model_policy", event.target.value)}>
+            <option value="reject">reject</option>
+            <option value="fallback">fallback</option>
+          </select>
+        </label>
+        <button className="ghost-button" type="submit">Save</button>
+      </form>
+    </section>
+  );
+}
+
+function ModelAliasesPanel() {
+  const [refreshTick, setRefreshTick] = useState(0);
+  const aliases = useJSON(apiPaths.modelAliases, [refreshTick]);
+  const [form, setForm] = useState({ alias: "", target_model: "", channel_id: "" });
+  const [submitError, setSubmitError] = useState("");
+  const items = Array.isArray(aliases.data?.items) ? aliases.data.items : [];
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const create = async (event) => {
+    event.preventDefault();
+    setSubmitError("");
+    try {
+      await postJSON(apiPaths.modelAliases, form);
+      setForm({ alias: "", target_model: "", channel_id: "" });
+      setRefreshTick((tick) => tick + 1);
+    } catch (error) {
+      setSubmitError(error.message);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Model resolution</p>
+          <h2>Model aliases</h2>
+        </div>
+        <InlineTag>{formatCount(items.length)} aliases</InlineTag>
+      </div>
+      {aliases.error ? <EmptyState title="Model aliases API unavailable" detail={aliases.error} compact /> : null}
+      <form className="filter-bar routing-filter-bar" onSubmit={create}>
+        <input className="filter-input" placeholder="Alias, e.g. abc" value={form.alias} onChange={(event) => update("alias", event.target.value)} />
+        <input className="filter-input" placeholder="Target model, e.g. gpt-5.5" value={form.target_model} onChange={(event) => update("target_model", event.target.value)} />
+        <input className="filter-input" placeholder="Optional channel" value={form.channel_id} onChange={(event) => update("channel_id", event.target.value)} />
+        <button className="ghost-button" type="submit">Create</button>
+      </form>
+      {submitError ? <p className="event-message">{submitError}</p> : null}
+      {items.length ? (
+        <div className="session-breakdown-grid">
+          {items.map((item) => (
+            <div className="metric-card" key={item.id || `${item.alias}:${item.channel_id}:${item.target_model}`}>
+              <span>{item.channel_id || "global"}</span>
+              <strong>{item.alias} to {item.target_model}</strong>
+              <small>{item.enabled === false ? "disabled" : "enabled"}</small>
+            </div>
+          ))}
+        </div>
+      ) : !aliases.error ? <EmptyState title="No aliases configured" detail="Create aliases here once the backend API is enabled." compact /> : null}
+    </section>
+  );
+}
+
+function RouteInspectorPanel() {
+  const [form, setForm] = useState({ endpoint: "responses", model: "", stream: false, tools: false });
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
+  const inspect = async (event) => {
+    event.preventDefault();
+    setError("");
+    setResult(null);
+    try {
+      setResult(await postJSON(apiPaths.routingInspect, form));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Dry run</p>
+          <h2>Route inspector</h2>
+        </div>
+      </div>
+      <form className="filter-bar routing-filter-bar" onSubmit={inspect}>
+        <select className="filter-input" value={form.endpoint} onChange={(event) => update("endpoint", event.target.value)}>
+          <option value="chat_completions">chat_completions</option>
+          <option value="responses">responses</option>
+          <option value="anthropic_messages">anthropic_messages</option>
+        </select>
+        <input className="filter-input" placeholder="Model" value={form.model} onChange={(event) => update("model", event.target.value)} />
+        <label className="checkbox-row"><input type="checkbox" checked={form.stream} onChange={(event) => update("stream", event.target.checked)} /> stream</label>
+        <label className="checkbox-row"><input type="checkbox" checked={form.tools} onChange={(event) => update("tools", event.target.checked)} /> tools</label>
+        <button className="ghost-button" type="submit">Inspect</button>
+      </form>
+      {error ? <EmptyState title="Route inspector API unavailable" detail={error} compact /> : null}
+      {result ? <pre className="trace-json-block">{JSON.stringify(result, null, 2)}</pre> : null}
+      {!result && !error ? <EmptyState title="No dry run yet" detail="Submit endpoint and model to preview the planned route." compact /> : null}
+    </section>
   );
 }
 
