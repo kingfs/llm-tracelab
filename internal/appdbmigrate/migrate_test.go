@@ -229,6 +229,7 @@ func TestMigrateUpPostgresIntegration(t *testing.T) {
 		"experiment_runs",
 		"logs",
 		"model_catalog",
+		"model_aliases",
 		"parse_jobs",
 		"parser_versions",
 		"request_audits",
