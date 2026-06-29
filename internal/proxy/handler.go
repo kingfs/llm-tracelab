@@ -108,6 +108,7 @@ type responsesRouteDecision struct {
 	strategy        routeplan.ResponsesStrategy
 	useLocal        bool
 	nativeAvailable bool
+	nativePresent   bool
 	localAvailable  bool
 	rejectReason    string
 }
@@ -1030,12 +1031,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) responsesRouteDecision {
 	strategy := h.responsesStrategy(r.Context())
 	nativeAvailable := h.router != nil && h.router.HasSelectableNativeResponsesCandidateWithBody(r, bodyBytes)
+	nativePresent := h.router != nil && h.router.HasNativeResponsesTargetWithBody(r, bodyBytes)
 	localAvailable := h.responsesHandler != nil && h.responsesChatBackendAvailable(r, bodyBytes)
-	decision := responsesRouteDecision{strategy: strategy, nativeAvailable: nativeAvailable, localAvailable: localAvailable}
+	decision := responsesRouteDecision{strategy: strategy, nativeAvailable: nativeAvailable, nativePresent: nativePresent, localAvailable: localAvailable}
 
 	switch strategy {
 	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative:
 		if nativeAvailable {
+			return decision
+		}
+		if nativePresent {
+			decision.rejectReason = "native Responses upstream exists but is not selectable for this request"
 			return decision
 		}
 		if localAvailable {
@@ -1387,6 +1393,7 @@ func routePlanEventForLocalResponsesEntry(r *http.Request, bodyBytes []byte, dec
 		"routing_policy":    policy,
 		"local_available":   decision.localAvailable,
 		"native_available":  decision.nativeAvailable,
+		"native_present":    decision.nativePresent,
 	}
 	if decision.rejectReason != "" {
 		attrs["failure_reason"] = decision.rejectReason

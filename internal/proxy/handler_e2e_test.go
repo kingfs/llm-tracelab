@@ -1526,6 +1526,115 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 	}
 }
 
+func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	var nativeCalls atomic.Int32
+	nativeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nativeCalls.Add(1)
+		http.Error(w, "native should not receive filtered model", http.StatusTeapot)
+	}))
+	defer nativeServer.Close()
+
+	var chatCalls atomic.Int32
+	chatServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		chatCalls.Add(1)
+		http.Error(w, "local responses fallback must not be used", http.StatusTeapot)
+	}))
+	defer chatServer.Close()
+
+	cfg := &config.Config{
+		ResponsesServer: config.ResponsesServerConfig{Enabled: true},
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "native-responses",
+				Enabled:        boolPtr(true),
+				Priority:       200,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-enabled"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        nativeServer.URL + "/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses",
+					Mode:           "proxy",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       boolPtr(true),
+						ChatCompletions: boolPtr(false),
+					},
+				},
+			},
+			{
+				ID:             "chat-backend",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: router.ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-filtered"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        chatServer.URL + "/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "responses_server",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ChatCompletions: boolPtr(true),
+					},
+				},
+			},
+		},
+	}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+	proxyServer := httptest.NewServer(handler)
+	defer proxyServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-filtered","input":"ping"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := proxyServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("client.Do() error = %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502; body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "native Responses upstream exists but is not selectable") {
+		t.Fatalf("body = %q, want native filtered rejection", body)
+	}
+	if got := nativeCalls.Load(); got != 0 {
+		t.Fatalf("native calls = %d, want 0", got)
+	}
+	if got := chatCalls.Load(); got != 0 {
+		t.Fatalf("chat calls = %d, want 0", got)
+	}
+
+	recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/responses", time.Second)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	plan := routePlanAttrsFromPrelude(t, parsed)
+	if plan["execution_mode"] != "responses_server" || plan["native_present"] != true || plan["native_available"] != false {
+		t.Fatalf("route plan attrs = %+v, want rejected local route with native_present true/native_available false", plan)
+	}
+	if !strings.Contains(fmt.Sprint(plan["failure_reason"]), "native Responses upstream exists but is not selectable") {
+		t.Fatalf("failure_reason = %q, want native filtered rejection", plan["failure_reason"])
+	}
+}
+
 func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing.T) {
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)

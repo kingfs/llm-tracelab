@@ -814,6 +814,28 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	return false
 }
 
+func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte) bool {
+	if r == nil || req == nil {
+		return false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	if llm.NormalizeEndpoint(rawPath) != "/v1/responses" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, target := range r.targets {
+		if target == nil || !target.Upstream.SupportsResponsesAPI() {
+			continue
+		}
+		if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+			return true
+		}
+	}
+	return false
+}
+
 // selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
 func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
 	rawPath := req.URL.Path
