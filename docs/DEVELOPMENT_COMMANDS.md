@@ -121,11 +121,13 @@ llm-tracelab -c config/config.yaml --format json db secret status
 
 ```bash
 llm-tracelab -c config/config.yaml db migrate status --check-db
+llm-tracelab -c config/config.yaml db migrate optimize-indexes --dry-run
 llm-tracelab -c config/config.yaml auth migrate status --check-db
 llm-tracelab -c config/config.yaml analyze backfill-exchanges --dry-run
 ```
 
 - `db migrate status --check-db`：只读检查 application schema migration 状态。
+- `db migrate optimize-indexes --dry-run`：预览非事务 PostgreSQL concurrent index 优化语句；确认后去掉 `--dry-run` 执行。
 - `auth migrate status --check-db`：只读检查 auth-owned 表和共享 application migration namespace 状态。
 - `analyze backfill-exchanges --dry-run`：只报告 exchange metadata 回填扫描/冲突，不更新 DB，不重写 `.http` cassette。
 - 新增生产索引、summary、回填或灰度读路径时，先按 runbook 保存 `pg_stat_statements` 基线和 `EXPLAIN (ANALYZE, BUFFERS)`，再选择代码测试命令。

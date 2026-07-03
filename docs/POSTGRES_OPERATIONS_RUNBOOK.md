@@ -128,6 +128,15 @@ LIMIT 30;
 
 ### 生产 DDL 模板
 
+llm-tracelab 内置的当前安全索引优化入口是：
+
+```bash
+llm-tracelab -c config/config.yaml db migrate optimize-indexes --dry-run
+llm-tracelab -c config/config.yaml db migrate optimize-indexes
+```
+
+该命令逐条执行非事务 `CREATE INDEX CONCURRENTLY IF NOT EXISTS`，用于当前已知的 `logs` 热点查询。上线前先运行 `--dry-run` 审阅语句；只有在基线和变更窗口确认后再执行实际命令。
+
 大表索引默认使用：
 
 ```sql
