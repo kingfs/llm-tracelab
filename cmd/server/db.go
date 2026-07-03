@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -56,6 +57,7 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "up", "Apply application database migrations"))
 	migrateCmd.AddCommand(newAppDBMigrateDirectionCommand(runtime, "down", "Roll back application database migrations"))
 	migrateCmd.AddCommand(newAppDBMigrateStatusCommand(runtime))
+	migrateCmd.AddCommand(newAppDBMigrateOptimizeIndexesCommand(runtime))
 	cmd.AddCommand(migrateCmd)
 	cmd.AddCommand(newDBSecretCommand(runtime))
 	return cmd
@@ -100,6 +102,31 @@ func newAppDBMigrateDirectionCommand(runtime *cliRuntime, direction string, shor
 	if direction == "down" {
 		cmd.Flags().BoolVar(&all, "all", false, "Roll back all migrations")
 	}
+	return cmd
+}
+
+func newAppDBMigrateOptimizeIndexesCommand(runtime *cliRuntime) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "optimize-indexes",
+		Short: "Apply non-transactional PostgreSQL index optimizations",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := appDBMigrateOptions{
+				configPath: runtime.configPath(),
+				direction:  "optimize-indexes",
+				dryRun:     dryRun,
+				format:     runtime.outputFormat(),
+				stdout:     cmd.OutOrStdout(),
+			}
+			code := runAppDBMigrateWithOptions(opts)
+			if code == 0 {
+				return nil
+			}
+			return cliExitErrorFromCode(code)
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview index optimizations without changing the database")
 	return cmd
 }
 
@@ -248,6 +275,28 @@ func runAppDBMigrateWithOptions(opts appDBMigrateOptions) int {
 			return 1
 		}
 		return 0
+	case "optimize-indexes":
+		optimization, err := optimizeApplicationDatabaseIndexes(cfg)
+		if err != nil {
+			slog.Error("Application database index optimization failed", "error", err)
+			return 1
+		}
+		result["mutated"] = optimization.Applied
+		result["index_optimization_applied"] = optimization.Applied
+		result["index_optimization_statement_count"] = len(optimization.Statements)
+		if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.migrate.optimize-indexes", result, func(w io.Writer) error {
+			if optimization.Applied {
+				fmt.Fprintf(w, "application database index optimizations applied\n")
+			} else {
+				fmt.Fprintf(w, "application database index optimizations not applicable\n")
+			}
+			writeAppDBMigrationReportText(w, result)
+			return nil
+		}); err != nil {
+			slog.Error("Write db migrate optimize-indexes result failed", "error", err)
+			return 1
+		}
+		return 0
 	case "down":
 		fmt.Fprintln(os.Stderr, appDBMigrateDownUnsupportedMessage)
 		return 2
@@ -305,6 +354,20 @@ func appDBMigrationReport(cfg *config.Config, direction string, steps int, all b
 		result["sqlite_schema_strategy"] = appdbmigrate.SQLiteSchemaStrategy
 		result["sqlite_versioned_migration_status"] = appdbmigrate.SQLiteVersionedMigrationStatus
 		result["sqlite_migration_advice"] = appdbmigrate.SQLiteMigrationAdvice
+	}
+	if direction == "optimize-indexes" {
+		statements := appdbmigrate.PostgresIndexOptimizationStatements()
+		result["index_optimization_authority"] = appdbmigrate.PostgresIndexOptimizationAuthority
+		result["index_optimization_non_transactional"] = true
+		result["index_optimization_concurrent"] = true
+		result["index_optimization_applicable"] = driver == "postgres"
+		result["index_optimization_statement_count"] = len(statements)
+		if driver == "postgres" {
+			result["index_optimization_statements"] = statements
+		} else {
+			result["index_optimization_statement_count"] = 0
+			result["index_optimization_status"] = "not_applicable"
+		}
 	}
 	return result
 }
@@ -402,6 +465,16 @@ func writeAppDBMigrationReportText(w io.Writer, result map[string]any) {
 	if result["database_status_advice"] != nil {
 		fmt.Fprintf(w, "database_status_advice: %s\n", result["database_status_advice"])
 	}
+	if result["index_optimization_authority"] != nil {
+		fmt.Fprintf(w, "index_optimization_authority: %s\n", result["index_optimization_authority"])
+		fmt.Fprintf(w, "index_optimization_applicable: %v\n", result["index_optimization_applicable"])
+		fmt.Fprintf(w, "index_optimization_non_transactional: %v\n", result["index_optimization_non_transactional"])
+		fmt.Fprintf(w, "index_optimization_concurrent: %v\n", result["index_optimization_concurrent"])
+		fmt.Fprintf(w, "index_optimization_statement_count: %v\n", result["index_optimization_statement_count"])
+		if result["index_optimization_status"] != nil {
+			fmt.Fprintf(w, "index_optimization_status: %s\n", result["index_optimization_status"])
+		}
+	}
 	fmt.Fprintf(w, "rollback_supported: %v\n", result["rollback_supported"])
 	fmt.Fprintf(w, "auth_migration_scope: %s (%s)\n", result["auth_migration_scope"], result["auth_migration_command"])
 }
@@ -415,6 +488,16 @@ func migrateApplicationDatabaseUp(cfg *config.Config, steps int) error {
 		return err
 	}
 	return st.Close()
+}
+
+func optimizeApplicationDatabaseIndexes(cfg *config.Config) (appdbmigrate.IndexOptimizationResult, error) {
+	if appDBMigrationMode(cfg.DatabaseDriver()) != "versioned-sql" {
+		return appdbmigrate.IndexOptimizationResult{
+			Driver:  normalizeAuthStoreDriver(cfg.DatabaseDriver()),
+			Applied: false,
+		}, nil
+	}
+	return appdbmigrate.OptimizeIndexes(context.Background(), cfg.DatabaseDriver(), cfg.DatabaseDSN())
 }
 
 func appDBMigrationMode(driver string) string {
