@@ -540,6 +540,7 @@ type SystemEventFilter struct {
 	Category string
 	Query    string
 	Since    time.Time
+	After    string
 	Page     int
 	PageSize int
 }
@@ -550,6 +551,21 @@ type SystemEventPageResult struct {
 	Page       int
 	PageSize   int
 	TotalPages int
+	NextCursor string
+	HasMore    bool
+}
+
+const systemEventCursorVersion = 1
+
+type systemEventCursor struct {
+	Version    int    `json:"v"`
+	LastSeenAt string `json:"last_seen_at"`
+	ID         string `json:"id"`
+}
+
+type systemEventCursorPosition struct {
+	LastSeenAt time.Time
+	ID         string
 }
 
 type SystemEventSummary struct {
@@ -6140,7 +6156,21 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 		return SystemEventPageResult{}, err
 	}
 	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
+	offsetSQL := ` OFFSET ?`
+	if strings.TrimSpace(filter.After) != "" {
+		cursor, err := decodeSystemEventCursor(filter.After)
+		if err != nil {
+			return SystemEventPageResult{}, err
+		}
+		whereSQL += ` AND (last_seen_at < ? OR (last_seen_at = ? AND id < ?))`
+		cursorLastSeen := cursor.LastSeenAt.UTC()
+		queryArgs = append(queryArgs, cursorLastSeen, cursorLastSeen, cursor.ID)
+		offsetSQL = ``
+	}
+	queryArgs = append(queryArgs, pageSize+1)
+	if offsetSQL != "" {
+		queryArgs = append(queryArgs, (page-1)*pageSize)
+	}
 	rows, err := s.db.Query(`
 		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
@@ -6148,7 +6178,7 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 		FROM system_events
 		WHERE `+whereSQL+`
 		ORDER BY last_seen_at DESC, id DESC
-		LIMIT ? OFFSET ?
+		LIMIT ?`+offsetSQL+`
 	`, queryArgs...)
 	if err != nil {
 		return SystemEventPageResult{}, err
@@ -6158,12 +6188,25 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 	if err != nil {
 		return SystemEventPageResult{}, err
 	}
+	hasMore := len(items) > pageSize
+	if hasMore {
+		items = items[:pageSize]
+	}
+	nextCursor := ""
+	if hasMore && len(items) > 0 {
+		nextCursor, err = encodeSystemEventCursor(items[len(items)-1])
+		if err != nil {
+			return SystemEventPageResult{}, err
+		}
+	}
 	return SystemEventPageResult{
 		Items:      items,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
 		TotalPages: totalPages(total, pageSize),
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
 	}, nil
 }
 
@@ -9045,6 +9088,50 @@ func normalizePage(page int, pageSize int) (int, int) {
 		pageSize = 200
 	}
 	return page, pageSize
+}
+
+func encodeSystemEventCursor(event SystemEvent) (string, error) {
+	event.ID = strings.TrimSpace(event.ID)
+	if event.ID == "" || event.LastSeenAt.IsZero() {
+		return "", fmt.Errorf("encode system event cursor: missing sort key")
+	}
+	payload := systemEventCursor{
+		Version:    systemEventCursorVersion,
+		LastSeenAt: event.LastSeenAt.UTC().Format(timeLayout),
+		ID:         event.ID,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeSystemEventCursor(value string) (systemEventCursorPosition, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: cursor is empty")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid encoding")
+	}
+	var payload systemEventCursor
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid payload")
+	}
+	if payload.Version != systemEventCursorVersion {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: unsupported version %d", payload.Version)
+	}
+	payload.ID = strings.TrimSpace(payload.ID)
+	if payload.ID == "" {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: id is required")
+	}
+	lastSeenAt, err := timeParse(payload.LastSeenAt)
+	if err != nil || lastSeenAt.IsZero() {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid last_seen_at")
+	}
+	return systemEventCursorPosition{LastSeenAt: lastSeenAt.UTC(), ID: payload.ID}, nil
 }
 
 func totalPages(total int, pageSize int) int {

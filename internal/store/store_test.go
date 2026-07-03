@@ -4566,6 +4566,87 @@ func TestSystemEventsListSummaryAndStatusActions(t *testing.T) {
 	}
 }
 
+func TestListSystemEventsCursorPagination(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	for _, event := range []SystemEvent{
+		{ID: "event-001", Fingerprint: "cursor:event-001", LastSeenAt: base.Add(time.Minute)},
+		{ID: "event-003", Fingerprint: "cursor:event-003", LastSeenAt: base.Add(2 * time.Minute)},
+		{ID: "event-002", Fingerprint: "cursor:event-002", LastSeenAt: base.Add(2 * time.Minute)},
+		{ID: "event-000", Fingerprint: "cursor:event-000", LastSeenAt: base},
+	} {
+		event.Source = "store_test"
+		event.Category = "cursor"
+		event.Severity = "error"
+		event.Title = event.ID
+		if _, err := st.UpsertSystemEvent(event); err != nil {
+			t.Fatalf("UpsertSystemEvent(%s) error = %v", event.ID, err)
+		}
+	}
+
+	first, err := st.ListSystemEvents(SystemEventFilter{Source: "store_test", Category: "cursor", PageSize: 2})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(first) error = %v", err)
+	}
+	if got, want := systemEventIDs(first.Items), []string{"event-003", "event-002"}; !stringSlicesEqual(got, want) {
+		t.Fatalf("first ids = %+v, want %+v", got, want)
+	}
+	if first.Total != 4 || first.Page != 1 || first.PageSize != 2 || first.TotalPages != 2 || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page metadata = %+v, want total/page metadata with next cursor", first)
+	}
+
+	next, err := st.ListSystemEvents(SystemEventFilter{Source: "store_test", Category: "cursor", PageSize: 2, After: first.NextCursor})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(next) error = %v", err)
+	}
+	if got, want := systemEventIDs(next.Items), []string{"event-001", "event-000"}; !stringSlicesEqual(got, want) {
+		t.Fatalf("next ids = %+v, want %+v", got, want)
+	}
+	if next.Total != 4 || next.Page != 1 || next.PageSize != 2 || next.TotalPages != 2 || next.HasMore || next.NextCursor != "" {
+		t.Fatalf("next page metadata = %+v, want final cursor page", next)
+	}
+
+	offsetPage, err := st.ListSystemEvents(SystemEventFilter{Source: "store_test", Category: "cursor", Page: 2, PageSize: 2})
+	if err != nil {
+		t.Fatalf("ListSystemEvents(offset page 2) error = %v", err)
+	}
+	if got, want := systemEventIDs(offsetPage.Items), []string{"event-001", "event-000"}; !stringSlicesEqual(got, want) {
+		t.Fatalf("offset page ids = %+v, want %+v", got, want)
+	}
+	if offsetPage.Total != 4 || offsetPage.Page != 2 || offsetPage.PageSize != 2 || offsetPage.TotalPages != 2 {
+		t.Fatalf("offset page metadata = %+v, want legacy page metadata unchanged", offsetPage)
+	}
+
+	if _, err := st.ListSystemEvents(SystemEventFilter{Source: "store_test", Category: "cursor", After: "not-a-cursor"}); err == nil {
+		t.Fatal("ListSystemEvents(invalid cursor) error = nil, want error")
+	}
+}
+
+func systemEventIDs(events []SystemEvent) []string {
+	ids := make([]string, 0, len(events))
+	for _, event := range events {
+		ids = append(ids, event.ID)
+	}
+	return ids
+}
+
+func stringSlicesEqual(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestMarkParseJobFailedCreatesSystemEvent(t *testing.T) {
 	st, err := New(t.TempDir())
 	if err != nil {
