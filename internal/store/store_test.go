@@ -3575,6 +3575,44 @@ func TestRebuildSessionSummariesFromLogs(t *testing.T) {
 	}
 }
 
+func TestSessionSummaryRebuildStatsAreReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	writeSessionSummaryTestLog(t, st, dir, "stats-a.http", "sess-stats-a", base, http.StatusOK, 10, 0, true)
+	writeSessionSummaryTestLog(t, st, dir, "stats-b.http", "sess-stats-b", base.Add(time.Minute), http.StatusOK, 20, 0, false)
+
+	if _, err := st.db.Exec(`DELETE FROM session_summaries WHERE session_id = ?`, "sess-stats-b"); err != nil {
+		t.Fatalf("delete one summary error = %v", err)
+	}
+	stats, err := st.SessionSummaryRebuildStats("")
+	if err != nil {
+		t.Fatalf("SessionSummaryRebuildStats(all) error = %v", err)
+	}
+	if stats.CandidateCount != 2 || stats.ExistingCount != 1 || !stats.WouldDeleteAll {
+		t.Fatalf("all stats = %+v, want candidates 2 existing 1 delete all", stats)
+	}
+	single, err := st.SessionSummaryRebuildStats("sess-stats-b")
+	if err != nil {
+		t.Fatalf("SessionSummaryRebuildStats(single) error = %v", err)
+	}
+	if single.CandidateCount != 1 || single.ExistingCount != 0 || !single.WouldDeleteOne {
+		t.Fatalf("single stats = %+v, want candidates 1 existing 0 delete one", single)
+	}
+	var summaryRows int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaryRows); err != nil {
+		t.Fatalf("count session_summaries error = %v", err)
+	}
+	if summaryRows != 1 {
+		t.Fatalf("summaryRows after stats = %d, want 1", summaryRows)
+	}
+}
+
 func writeSessionSummaryTestLog(t *testing.T, st *Store, dir string, name string, sessionID string, recordedAt time.Time, statusCode int, ttftMs int64, totalTokens int, stream bool) {
 	t.Helper()
 	path := filepath.Join(dir, name)

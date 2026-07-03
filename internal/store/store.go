@@ -249,6 +249,16 @@ type SessionPageResult struct {
 	TotalPages int
 }
 
+type SessionSummaryRebuildStats struct {
+	SessionID      string `json:"session_id,omitempty"`
+	CandidateCount int    `json:"candidate_count"`
+	ExistingCount  int    `json:"existing_count"`
+	WouldDeleteAll bool   `json:"would_delete_all"`
+	WouldDeleteOne bool   `json:"would_delete_one"`
+	RebuiltAll     bool   `json:"rebuilt_all"`
+	RebuiltOne     bool   `json:"rebuilt_one"`
+}
+
 type UpstreamTargetRecord struct {
 	ID                string
 	BaseURL           string
@@ -2837,9 +2847,44 @@ func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpen
 			_ = st.Close()
 			return nil, err
 		}
+		if driver == "postgres" {
+			if err := st.requirePostgresApplicationMigrations(); err != nil {
+				_ = st.Close()
+				return nil, err
+			}
+		}
 	}
 
 	return st, nil
+}
+
+func (s *Store) requirePostgresApplicationMigrations() error {
+	if s.driver != "postgres" {
+		return nil
+	}
+	var migrationTableExists bool
+	if err := s.db.QueryRow(`SELECT EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+	)`).Scan(&migrationTableExists); err != nil {
+		return fmt.Errorf("check postgres application migrations: %w", err)
+	}
+	if !migrationTableExists {
+		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `llm-tracelab db migrate up` with the same config before starting with database.auto_migrate=false")
+	}
+	var sessionSummariesExists bool
+	if err := s.db.QueryRow(`SELECT EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = 'session_summaries'
+	)`).Scan(&sessionSummariesExists); err != nil {
+		return fmt.Errorf("check postgres session_summaries migration: %w", err)
+	}
+	if !sessionSummariesExists {
+		return errors.New("postgres application schema is missing session_summaries; run `llm-tracelab db migrate up` to apply ent/postgres-migrations before enabling service traffic")
+	}
+	return nil
 }
 
 func (s *Store) ping() error {
@@ -5235,6 +5280,29 @@ func (s *Store) RebuildSessionSummary(sessionID string) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+func (s *Store) SessionSummaryRebuildStats(sessionID string) (SessionSummaryRebuildStats, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	stats := SessionSummaryRebuildStats{SessionID: sessionID}
+	if sessionID == "" {
+		stats.WouldDeleteAll = true
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&stats.ExistingCount); err != nil {
+			return stats, err
+		}
+		if err := s.db.QueryRow(`SELECT COUNT(DISTINCT session_id) FROM logs s WHERE s.session_id <> '' AND ` + clientVisibleLogClause("s")).Scan(&stats.CandidateCount); err != nil {
+			return stats, err
+		}
+		return stats, nil
+	}
+	stats.WouldDeleteOne = true
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries WHERE session_id = ?`, sessionID).Scan(&stats.ExistingCount); err != nil {
+		return stats, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(DISTINCT session_id) FROM logs s WHERE s.session_id = ? AND `+clientVisibleLogClause("s"), sessionID).Scan(&stats.CandidateCount); err != nil {
+		return stats, err
+	}
+	return stats, nil
 }
 
 func (s *Store) RebuildSessionSummaries() error {
