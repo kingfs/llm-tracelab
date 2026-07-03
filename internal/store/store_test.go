@@ -91,6 +91,185 @@ func TestNewInitializesAppSettingsSchema(t *testing.T) {
 	}
 }
 
+func TestNewInitializesOverviewMetricBucketSchema(t *testing.T) {
+	st, err := New(t.TempDir())
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, table := range []string{"overview_metric_buckets", "overview_metric_bucket_members"} {
+		t.Run(table, func(t *testing.T) {
+			var name string
+			if err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
+				t.Fatalf("query sqlite_master table %q error = %v", table, err)
+			}
+			if name != table {
+				t.Fatalf("sqlite table = %q, want %q", name, table)
+			}
+		})
+	}
+}
+
+func TestOverviewMetricBucketsTrackLogUpsertDeltas(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	recordPath := filepath.Join(dir, "overview-delta.http")
+	if err := os.WriteFile(recordPath, []byte("# delta\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(record) error = %v", err)
+	}
+	firstHour := time.Date(2026, 7, 3, 8, 15, 0, 0, time.UTC)
+	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+	header.Meta.RequestID = "req-overview-delta-1"
+	header.Meta.Time = firstHour
+	header.Meta.URL = "https://api.openai.com/v1/chat/completions"
+	header.Meta.Method = http.MethodPost
+	header.Meta.StatusCode = http.StatusOK
+	header.Meta.Model = "gpt-overview"
+	header.Meta.ExchangeKind = "entry"
+	header.Meta.TTFTMs = 120
+	header.Meta.DurationMs = 900
+	header.Usage.TotalTokens = 42
+	header.Layout.IsStream = true
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(first) error = %v", err)
+	}
+
+	firstBucket := readOverviewMetricBucketForTest(t, st, firstHour.Truncate(time.Hour))
+	if firstBucket.requestCount != 1 || firstBucket.successRequest != 1 || firstBucket.failedRequest != 0 ||
+		firstBucket.totalTokens != 42 || firstBucket.ttftSum != 120 || firstBucket.ttftCount != 1 ||
+		firstBucket.durationSum != 900 || firstBucket.durationCount != 1 || firstBucket.streamCount != 1 {
+		t.Fatalf("first bucket = %+v", firstBucket)
+	}
+
+	secondHour := firstHour.Add(time.Hour)
+	header.Meta.RequestID = "req-overview-delta-2"
+	header.Meta.Time = secondHour
+	header.Meta.StatusCode = http.StatusInternalServerError
+	header.Meta.Error = "upstream failed"
+	header.Meta.TTFTMs = 0
+	header.Meta.DurationMs = 300
+	header.Usage.TotalTokens = 7
+	header.Layout.IsStream = false
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(second) error = %v", err)
+	}
+
+	firstBucket = readOverviewMetricBucketForTest(t, st, firstHour.Truncate(time.Hour))
+	if firstBucket.requestCount != 0 || firstBucket.successRequest != 0 || firstBucket.totalTokens != 0 ||
+		firstBucket.ttftSum != 0 || firstBucket.streamCount != 0 {
+		t.Fatalf("first bucket after overwrite = %+v, want old contribution removed", firstBucket)
+	}
+	secondBucket := readOverviewMetricBucketForTest(t, st, secondHour.Truncate(time.Hour))
+	if secondBucket.requestCount != 1 || secondBucket.successRequest != 0 || secondBucket.failedRequest != 1 ||
+		secondBucket.totalTokens != 7 || secondBucket.ttftCount != 0 ||
+		secondBucket.durationSum != 300 || secondBucket.durationCount != 1 || secondBucket.streamCount != 0 {
+		t.Fatalf("second bucket = %+v", secondBucket)
+	}
+}
+
+func TestOverviewMetricBucketsRefreshAfterUsageUpdate(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	recordPath := filepath.Join(dir, "overview-usage.http")
+	if err := os.WriteFile(recordPath, []byte("# usage\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(record) error = %v", err)
+	}
+	recordedAt := time.Date(2026, 7, 3, 9, 5, 0, 0, time.UTC)
+	header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+	header.Meta.RequestID = "req-overview-usage"
+	header.Meta.Time = recordedAt
+	header.Meta.URL = "https://api.openai.com/v1/responses"
+	header.Meta.Method = http.MethodPost
+	header.Meta.StatusCode = http.StatusOK
+	header.Meta.Model = "gpt-overview"
+	header.Meta.ExchangeKind = "entry"
+	header.Usage.TotalTokens = 1
+	if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping() error = %v", err)
+	}
+
+	var traceID string
+	if err := st.db.QueryRow(`SELECT trace_id FROM logs WHERE path = ?`, recordPath).Scan(&traceID); err != nil {
+		t.Fatalf("query trace_id error = %v", err)
+	}
+	if err := st.UpdateLogUsage(traceID, recordfile.UsageInfo{PromptTokens: 10, CompletionTokens: 15, TotalTokens: 25}); err != nil {
+		t.Fatalf("UpdateLogUsage() error = %v", err)
+	}
+
+	bucket := readOverviewMetricBucketForTest(t, st, recordedAt.Truncate(time.Hour))
+	if bucket.requestCount != 1 || bucket.totalTokens != 25 {
+		t.Fatalf("bucket after usage update = %+v, want one request and refreshed token total", bucket)
+	}
+}
+
+func TestRebuildOverviewMetricBucketsFromLogs(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name         string
+		statusCode   int
+		errorText    string
+		totalTokens  int
+		exchangeKind string
+	}{
+		{name: "success", statusCode: http.StatusOK, totalTokens: 11, exchangeKind: "entry"},
+		{name: "failed", statusCode: http.StatusTooManyRequests, errorText: "rate limited", totalTokens: 3, exchangeKind: "proxy"},
+		{name: "child-model", statusCode: http.StatusOK, totalTokens: 99, exchangeKind: "model"},
+	} {
+		recordPath := filepath.Join(dir, tc.name+".http")
+		if err := os.WriteFile(recordPath, []byte("# "+tc.name+"\n"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", tc.name, err)
+		}
+		header := recordfile.RecordHeader{Version: "LLM_PROXY_V3"}
+		header.Meta.RequestID = "req-overview-rebuild-" + tc.name
+		header.Meta.Time = base.Add(5 * time.Minute)
+		header.Meta.URL = "https://api.openai.com/v1/chat/completions"
+		header.Meta.Method = http.MethodPost
+		header.Meta.StatusCode = tc.statusCode
+		header.Meta.Error = tc.errorText
+		header.Meta.Model = "gpt-overview"
+		header.Meta.ExchangeKind = tc.exchangeKind
+		header.Meta.TTFTMs = 50
+		header.Meta.DurationMs = 100
+		header.Usage.TotalTokens = tc.totalTokens
+		if err := st.UpsertLogWithGrouping(recordPath, header, GroupingInfo{}); err != nil {
+			t.Fatalf("UpsertLogWithGrouping(%q) error = %v", tc.name, err)
+		}
+	}
+	if _, err := st.db.Exec(`DELETE FROM overview_metric_bucket_members`); err != nil {
+		t.Fatalf("delete members error = %v", err)
+	}
+	if _, err := st.db.Exec(`DELETE FROM overview_metric_buckets`); err != nil {
+		t.Fatalf("delete buckets error = %v", err)
+	}
+
+	if err := st.RebuildOverviewMetricBuckets(); err != nil {
+		t.Fatalf("RebuildOverviewMetricBuckets() error = %v", err)
+	}
+	bucket := readOverviewMetricBucketForTest(t, st, base)
+	if bucket.requestCount != 2 || bucket.successRequest != 1 || bucket.failedRequest != 1 ||
+		bucket.totalTokens != 14 || bucket.ttftCount != 2 || bucket.durationCount != 2 {
+		t.Fatalf("rebuilt bucket = %+v", bucket)
+	}
+}
+
 func TestBackfillExchangeMetadataUpdatesMissingModelFromV3Cassette(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
@@ -226,6 +405,42 @@ func writeBackfillCassetteForTest(t *testing.T, path string, header recordfile.R
 	if err := os.WriteFile(path, []byte(string(prelude)+reqHead+"{}\n"+resHead+`{"id":"resp"}`), 0o644); err != nil {
 		t.Fatalf("WriteFile(cassette) error = %v", err)
 	}
+}
+
+type overviewMetricBucketForTest struct {
+	requestCount   int64
+	successRequest int64
+	failedRequest  int64
+	totalTokens    int64
+	ttftSum        int64
+	ttftCount      int64
+	durationSum    int64
+	durationCount  int64
+	streamCount    int64
+}
+
+func readOverviewMetricBucketForTest(t *testing.T, st *Store, bucketStart time.Time) overviewMetricBucketForTest {
+	t.Helper()
+	var bucket overviewMetricBucketForTest
+	if err := st.db.QueryRow(`
+		SELECT request_count, success_request, failed_request, total_tokens,
+			ttft_sum, ttft_count, duration_sum, duration_count, stream_count
+		FROM overview_metric_buckets
+		WHERE bucket_start = ? AND bucket_size_seconds = ?
+	`, bucketStart.UTC().Format(timeLayout), int(overviewMetricBucketSize/time.Second)).Scan(
+		&bucket.requestCount,
+		&bucket.successRequest,
+		&bucket.failedRequest,
+		&bucket.totalTokens,
+		&bucket.ttftSum,
+		&bucket.ttftCount,
+		&bucket.durationSum,
+		&bucket.durationCount,
+		&bucket.streamCount,
+	); err != nil {
+		t.Fatalf("query overview_metric_buckets at %s error = %v", bucketStart.Format(timeLayout), err)
+	}
+	return bucket
 }
 
 func TestSaveObservationSanitizesInvalidUTF8(t *testing.T) {
@@ -697,6 +912,17 @@ func TestPostgresStoreRuntimeSQLIntegration(t *testing.T) {
 	}
 	if stats.TotalRequest == 0 || stats.SuccessRequest == 0 {
 		t.Fatalf("Stats(postgres) = %+v, want successful smoke request included", stats)
+	}
+	var bucketRequests int
+	if err := st.db.QueryRow(`
+		SELECT request_count
+		FROM overview_metric_buckets
+		WHERE bucket_start = ? AND bucket_size_seconds = ?
+	`, header.Meta.Time.UTC().Truncate(time.Hour).Format(timeLayout), int(overviewMetricBucketSize/time.Second)).Scan(&bucketRequests); err != nil {
+		t.Fatalf("query overview_metric_buckets(postgres) error = %v", err)
+	}
+	if bucketRequests == 0 {
+		t.Fatalf("overview_metric_buckets(postgres) request_count = 0, want smoke request included")
 	}
 	page, err := st.ListPage(1, 10, ListFilter{
 		Provider:          "openai_compatible",

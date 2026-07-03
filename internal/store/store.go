@@ -69,6 +69,23 @@ type Stats struct {
 	SuccessRate    float64
 }
 
+const overviewMetricBucketSize = time.Hour
+
+type overviewMetricContribution struct {
+	Path              string
+	BucketStart       time.Time
+	BucketSizeSeconds int
+	RequestCount      int64
+	SuccessRequest    int64
+	FailedRequest     int64
+	TotalTokens       int64
+	TTFTSum           int64
+	TTFTCount         int64
+	DurationSum       int64
+	DurationCount     int64
+	StreamCount       int64
+}
+
 type Store struct {
 	db                    *rebindingDB
 	client                *dao.Client
@@ -3406,6 +3423,9 @@ func (s *Store) initSchema() error {
 		if err := s.ensureLogExchangeColumns(); err != nil {
 			return err
 		}
+		if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
+			return err
+		}
 		return nil
 	}
 	stmts := []string{
@@ -3441,6 +3461,38 @@ func (s *Store) initSchema() error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model);`,
+		`CREATE TABLE IF NOT EXISTS overview_metric_buckets (
+			bucket_start datetime NOT NULL,
+			bucket_size_seconds INTEGER NOT NULL,
+			request_count INTEGER NOT NULL DEFAULT 0,
+			success_request INTEGER NOT NULL DEFAULT 0,
+			failed_request INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			ttft_sum INTEGER NOT NULL DEFAULT 0,
+			ttft_count INTEGER NOT NULL DEFAULT 0,
+			duration_sum INTEGER NOT NULL DEFAULT 0,
+			duration_count INTEGER NOT NULL DEFAULT 0,
+			stream_count INTEGER NOT NULL DEFAULT 0,
+			updated_at datetime NOT NULL,
+			PRIMARY KEY (bucket_start, bucket_size_seconds)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_buckets_start ON overview_metric_buckets(bucket_start);`,
+		`CREATE TABLE IF NOT EXISTS overview_metric_bucket_members (
+			path TEXT PRIMARY KEY,
+			bucket_start datetime NOT NULL,
+			bucket_size_seconds INTEGER NOT NULL,
+			request_count INTEGER NOT NULL DEFAULT 0,
+			success_request INTEGER NOT NULL DEFAULT 0,
+			failed_request INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			ttft_sum INTEGER NOT NULL DEFAULT 0,
+			ttft_count INTEGER NOT NULL DEFAULT 0,
+			duration_sum INTEGER NOT NULL DEFAULT 0,
+			duration_count INTEGER NOT NULL DEFAULT 0,
+			stream_count INTEGER NOT NULL DEFAULT 0,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_bucket_members_bucket ON overview_metric_bucket_members(bucket_start, bucket_size_seconds);`,
 		`CREATE TABLE IF NOT EXISTS logs (
 			path TEXT PRIMARY KEY,
 			trace_id TEXT NOT NULL DEFAULT '',
@@ -4061,6 +4113,9 @@ func (s *Store) initSchema() error {
 	if err := s.ensureSessionSummariesSchema(); err != nil {
 		return err
 	}
+	if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
+		return err
+	}
 	if err := s.backfillTraceIDs(); err != nil {
 		return err
 	}
@@ -4104,6 +4159,56 @@ func (s *Store) initSchema() error {
 			source = excluded.source,
 			updated_at = excluded.updated_at`); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureOverviewMetricBucketsSchema() error {
+	timeType := "datetime"
+	if s.driver == "postgres" {
+		timeType = "timestamptz"
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS overview_metric_buckets (
+		bucket_start %s NOT NULL,
+		bucket_size_seconds INTEGER NOT NULL,
+		request_count BIGINT NOT NULL DEFAULT 0,
+		success_request BIGINT NOT NULL DEFAULT 0,
+		failed_request BIGINT NOT NULL DEFAULT 0,
+		total_tokens BIGINT NOT NULL DEFAULT 0,
+		ttft_sum BIGINT NOT NULL DEFAULT 0,
+		ttft_count BIGINT NOT NULL DEFAULT 0,
+		duration_sum BIGINT NOT NULL DEFAULT 0,
+		duration_count BIGINT NOT NULL DEFAULT 0,
+		stream_count BIGINT NOT NULL DEFAULT 0,
+		updated_at %s NOT NULL,
+		PRIMARY KEY (bucket_start, bucket_size_seconds)
+	)`, timeType, timeType)); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS overview_metric_bucket_members (
+		path TEXT PRIMARY KEY,
+		bucket_start %s NOT NULL,
+		bucket_size_seconds INTEGER NOT NULL,
+		request_count BIGINT NOT NULL DEFAULT 0,
+		success_request BIGINT NOT NULL DEFAULT 0,
+		failed_request BIGINT NOT NULL DEFAULT 0,
+		total_tokens BIGINT NOT NULL DEFAULT 0,
+		ttft_sum BIGINT NOT NULL DEFAULT 0,
+		ttft_count BIGINT NOT NULL DEFAULT 0,
+		duration_sum BIGINT NOT NULL DEFAULT 0,
+		duration_count BIGINT NOT NULL DEFAULT 0,
+		stream_count BIGINT NOT NULL DEFAULT 0,
+		updated_at %s NOT NULL
+	)`, timeType, timeType)); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_buckets_start ON overview_metric_buckets(bucket_start)`,
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_bucket_members_bucket ON overview_metric_bucket_members(bucket_start, bucket_size_seconds)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -5213,6 +5318,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
+	s.refreshOverviewMetricBucketForPathBestEffort(path)
 	s.refreshSessionSummariesBestEffort(previousSessionID, grouping.SessionID)
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
@@ -5234,6 +5340,7 @@ func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error
 	if err != nil {
 		return err
 	}
+	s.refreshOverviewMetricBucketForTraceIDBestEffort(traceID)
 	s.refreshSessionSummariesBestEffort(s.sessionIDForTraceID(traceID))
 	return nil
 }
@@ -5277,6 +5384,281 @@ func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
 			fmt.Fprintf(os.Stderr, "llm-tracelab: refresh session summary %q failed: %v\n", sessionID, err)
 		}
 	}
+}
+
+func (s *Store) refreshOverviewMetricBucketForTraceIDBestEffort(traceID string) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return
+	}
+	var path string
+	if err := s.db.QueryRow(`SELECT path FROM logs WHERE trace_id = ?`, traceID).Scan(&path); err != nil {
+		return
+	}
+	s.refreshOverviewMetricBucketForPathBestEffort(path)
+}
+
+func (s *Store) refreshOverviewMetricBucketForPathBestEffort(path string) {
+	if err := s.RefreshOverviewMetricBucketForPath(path); err != nil {
+		fmt.Fprintf(os.Stderr, "llm-tracelab: refresh overview metric bucket for %q failed: %v\n", path, err)
+	}
+}
+
+func (s *Store) RefreshOverviewMetricBucketForPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	contribution, ok, err := s.overviewMetricContributionForPath(path)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.applyOverviewMetricContributionTx(tx, path, contribution, ok); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RebuildOverviewMetricBuckets() error {
+	rows, err := s.db.Query(`
+		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
+		FROM logs
+		WHERE ` + clientVisibleLogClause("") + `
+		ORDER BY recorded_at ASC, path ASC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var contributions []overviewMetricContribution
+	for rows.Next() {
+		contribution, err := s.scanOverviewMetricContribution(rows)
+		if err != nil {
+			return err
+		}
+		contributions = append(contributions, contribution)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members`); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, `DELETE FROM overview_metric_buckets`); err != nil {
+		return err
+	}
+	for _, contribution := range contributions {
+		if err := s.insertOverviewMetricContributionTx(tx, contribution); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) overviewMetricContributionForPath(path string) (overviewMetricContribution, bool, error) {
+	row := s.db.QueryRow(`
+		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
+		FROM logs
+		WHERE path = ? AND `+clientVisibleLogClause("")+`
+	`, path)
+	contribution, err := s.scanOverviewMetricContribution(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return overviewMetricContribution{}, false, nil
+	}
+	if err != nil {
+		return overviewMetricContribution{}, false, err
+	}
+	return contribution, true, nil
+}
+
+type overviewMetricContributionScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) scanOverviewMetricContribution(scanner overviewMetricContributionScanner) (overviewMetricContribution, error) {
+	var (
+		contribution overviewMetricContribution
+		recordedAt   any
+		statusCode   int
+		errorText    string
+		totalTokens  int64
+		ttftMs       int64
+		durationMs   int64
+		isStream     any
+	)
+	if err := scanner.Scan(
+		&contribution.Path,
+		&recordedAt,
+		&statusCode,
+		&errorText,
+		&totalTokens,
+		&ttftMs,
+		&durationMs,
+		&isStream,
+	); err != nil {
+		return overviewMetricContribution{}, err
+	}
+	recorded, err := timeParseValue(recordedAt)
+	if err != nil {
+		return overviewMetricContribution{}, err
+	}
+	contribution.BucketStart = recorded.UTC().Truncate(overviewMetricBucketSize)
+	contribution.BucketSizeSeconds = int(overviewMetricBucketSize / time.Second)
+	contribution.RequestCount = 1
+	if statusCode >= 200 && statusCode < 300 && strings.TrimSpace(errorText) == "" {
+		contribution.SuccessRequest = 1
+	} else {
+		contribution.FailedRequest = 1
+	}
+	contribution.TotalTokens = totalTokens
+	if ttftMs > 0 {
+		contribution.TTFTSum = ttftMs
+		contribution.TTFTCount = 1
+	}
+	if durationMs > 0 {
+		contribution.DurationSum = durationMs
+		contribution.DurationCount = 1
+	}
+	if boolValue(isStream) {
+		contribution.StreamCount = 1
+	}
+	return contribution, nil
+}
+
+func (s *Store) applyOverviewMetricContributionTx(tx *sql.Tx, path string, contribution overviewMetricContribution, hasContribution bool) error {
+	previous, ok, err := s.overviewMetricMemberTx(tx, path)
+	if err != nil {
+		return err
+	}
+	if ok {
+		previous.RequestCount = -previous.RequestCount
+		previous.SuccessRequest = -previous.SuccessRequest
+		previous.FailedRequest = -previous.FailedRequest
+		previous.TotalTokens = -previous.TotalTokens
+		previous.TTFTSum = -previous.TTFTSum
+		previous.TTFTCount = -previous.TTFTCount
+		previous.DurationSum = -previous.DurationSum
+		previous.DurationCount = -previous.DurationCount
+		previous.StreamCount = -previous.StreamCount
+		if err := s.addOverviewMetricBucketTx(tx, previous); err != nil {
+			return err
+		}
+		if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members WHERE path = ?`, path); err != nil {
+			return err
+		}
+	}
+	if !hasContribution {
+		return nil
+	}
+	return s.insertOverviewMetricContributionTx(tx, contribution)
+}
+
+func (s *Store) overviewMetricMemberTx(tx *sql.Tx, path string) (overviewMetricContribution, bool, error) {
+	var contribution overviewMetricContribution
+	var bucketStart any
+	err := tx.QueryRow(s.db.rebind(`
+		SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
+		FROM overview_metric_bucket_members
+		WHERE path = ?
+	`), path).Scan(
+		&contribution.Path,
+		&bucketStart,
+		&contribution.BucketSizeSeconds,
+		&contribution.RequestCount,
+		&contribution.SuccessRequest,
+		&contribution.FailedRequest,
+		&contribution.TotalTokens,
+		&contribution.TTFTSum,
+		&contribution.TTFTCount,
+		&contribution.DurationSum,
+		&contribution.DurationCount,
+		&contribution.StreamCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return overviewMetricContribution{}, false, nil
+	}
+	if err != nil {
+		return overviewMetricContribution{}, false, err
+	}
+	parsed, err := timeParseValue(bucketStart)
+	if err != nil {
+		return overviewMetricContribution{}, false, err
+	}
+	contribution.BucketStart = parsed.UTC()
+	return contribution, true, nil
+}
+
+func (s *Store) insertOverviewMetricContributionTx(tx *sql.Tx, contribution overviewMetricContribution) error {
+	now := time.Now().UTC().Format(timeLayout)
+	if _, err := s.execTx(tx, `
+		INSERT INTO overview_metric_bucket_members (
+			path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, contribution.Path,
+		contribution.BucketStart.UTC().Format(timeLayout),
+		contribution.BucketSizeSeconds,
+		contribution.RequestCount,
+		contribution.SuccessRequest,
+		contribution.FailedRequest,
+		contribution.TotalTokens,
+		contribution.TTFTSum,
+		contribution.TTFTCount,
+		contribution.DurationSum,
+		contribution.DurationCount,
+		contribution.StreamCount,
+		now,
+	); err != nil {
+		return err
+	}
+	return s.addOverviewMetricBucketTx(tx, contribution)
+}
+
+func (s *Store) addOverviewMetricBucketTx(tx *sql.Tx, contribution overviewMetricContribution) error {
+	now := time.Now().UTC().Format(timeLayout)
+	_, err := s.execTx(tx, `
+		INSERT INTO overview_metric_buckets (
+			bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(bucket_start, bucket_size_seconds) DO UPDATE SET
+			request_count = overview_metric_buckets.request_count + excluded.request_count,
+			success_request = overview_metric_buckets.success_request + excluded.success_request,
+			failed_request = overview_metric_buckets.failed_request + excluded.failed_request,
+			total_tokens = overview_metric_buckets.total_tokens + excluded.total_tokens,
+			ttft_sum = overview_metric_buckets.ttft_sum + excluded.ttft_sum,
+			ttft_count = overview_metric_buckets.ttft_count + excluded.ttft_count,
+			duration_sum = overview_metric_buckets.duration_sum + excluded.duration_sum,
+			duration_count = overview_metric_buckets.duration_count + excluded.duration_count,
+			stream_count = overview_metric_buckets.stream_count + excluded.stream_count,
+			updated_at = excluded.updated_at
+	`, contribution.BucketStart.UTC().Format(timeLayout),
+		contribution.BucketSizeSeconds,
+		contribution.RequestCount,
+		contribution.SuccessRequest,
+		contribution.FailedRequest,
+		contribution.TotalTokens,
+		contribution.TTFTSum,
+		contribution.TTFTCount,
+		contribution.DurationSum,
+		contribution.DurationCount,
+		contribution.StreamCount,
+		now,
+	)
+	return err
 }
 
 func (s *Store) RebuildSessionSummary(sessionID string) error {
