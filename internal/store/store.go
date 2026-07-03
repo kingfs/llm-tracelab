@@ -70,20 +70,22 @@ type Stats struct {
 }
 
 type Store struct {
-	db        *rebindingDB
-	client    *dao.Client
-	outputDir string
-	dbPath    string
-	driver    string
-	secrets   *secretBox
-	syncMu    sync.Mutex
-	eventMu   sync.Mutex
-	eventSeq  uint64
-	eventSubs map[chan SystemEventNotification]struct{}
+	db                    *rebindingDB
+	client                *dao.Client
+	outputDir             string
+	dbPath                string
+	driver                string
+	secrets               *secretBox
+	useSessionSummaryRead bool
+	syncMu                sync.Mutex
+	eventMu               sync.Mutex
+	eventSeq              uint64
+	eventSubs             map[chan SystemEventNotification]struct{}
 }
 
 type DatabaseOptions struct {
-	AutoMigrate bool
+	AutoMigrate           bool
+	UseSessionSummaryRead bool
 }
 
 type rebindingDB struct {
@@ -2815,12 +2817,13 @@ func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpen
 	}
 
 	st := &Store{
-		db:        &rebindingDB{DB: db, driver: driver},
-		client:    dao.NewClient(dao.Driver(entsql.OpenDB(entDialect, db))),
-		outputDir: outputDir,
-		dbPath:    dbPath,
-		driver:    driver,
-		secrets:   secrets,
+		db:                    &rebindingDB{DB: db, driver: driver},
+		client:                dao.NewClient(dao.Driver(entsql.OpenDB(entDialect, db))),
+		outputDir:             outputDir,
+		dbPath:                dbPath,
+		driver:                driver,
+		secrets:               secrets,
+		useSessionSummaryRead: opts.UseSessionSummaryRead,
 	}
 	if opts.AutoMigrate {
 		if err := st.initSchema(); err != nil {
@@ -3333,6 +3336,9 @@ func (s *Store) initSchema() error {
 		);`); err != nil {
 			return err
 		}
+		if err := s.ensureSessionSummariesSchema(); err != nil {
+			return err
+		}
 		if err := s.ensureModelAliasesSchema(); err != nil {
 			return err
 		}
@@ -3355,6 +3361,25 @@ func (s *Store) initSchema() error {
 			value_json TEXT NOT NULL,
 			updated_at datetime NOT NULL
 		);`,
+		`CREATE TABLE IF NOT EXISTS session_summaries (
+			session_id TEXT PRIMARY KEY,
+			session_source TEXT NOT NULL DEFAULT '',
+			request_count INTEGER NOT NULL DEFAULT 0,
+			first_seen datetime NOT NULL,
+			last_seen datetime NOT NULL,
+			last_model TEXT NOT NULL DEFAULT '',
+			providers TEXT NOT NULL DEFAULT '',
+			success_request INTEGER NOT NULL DEFAULT 0,
+			failed_request INTEGER NOT NULL DEFAULT 0,
+			success_rate REAL NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			avg_ttft REAL NOT NULL DEFAULT 0,
+			total_duration INTEGER NOT NULL DEFAULT 0,
+			stream_count INTEGER NOT NULL DEFAULT 0,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model);`,
 		`CREATE TABLE IF NOT EXISTS logs (
 			path TEXT PRIMARY KEY,
 			trace_id TEXT NOT NULL DEFAULT '',
@@ -3972,6 +3997,9 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("channel_models", "profile_adoption_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureSessionSummariesSchema(); err != nil {
+		return err
+	}
 	if err := s.backfillTraceIDs(); err != nil {
 		return err
 	}
@@ -4015,6 +4043,41 @@ func (s *Store) initSchema() error {
 			source = excluded.source,
 			updated_at = excluded.updated_at`); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureSessionSummariesSchema() error {
+	timeType := "datetime"
+	if s.driver == "postgres" {
+		timeType = "timestamptz"
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS session_summaries (
+		session_id TEXT PRIMARY KEY,
+		session_source TEXT NOT NULL DEFAULT '',
+		request_count INTEGER NOT NULL DEFAULT 0,
+		first_seen %s NOT NULL,
+		last_seen %s NOT NULL,
+		last_model TEXT NOT NULL DEFAULT '',
+		providers TEXT NOT NULL DEFAULT '',
+		success_request INTEGER NOT NULL DEFAULT 0,
+		failed_request INTEGER NOT NULL DEFAULT 0,
+		success_rate REAL NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		avg_ttft REAL NOT NULL DEFAULT 0,
+		total_duration INTEGER NOT NULL DEFAULT 0,
+		stream_count INTEGER NOT NULL DEFAULT 0,
+		updated_at %s NOT NULL
+	)`, timeType, timeType, timeType)); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -4960,6 +5023,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
+	previousSessionID := s.sessionIDForPath(path)
 
 	cachedTokens := 0
 	if header.Usage.PromptTokenDetails != nil {
@@ -5088,6 +5152,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
+	s.refreshSessionSummariesBestEffort(previousSessionID, grouping.SessionID)
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
 
@@ -5105,7 +5170,123 @@ func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error
 		SET prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?
 		WHERE trace_id = ?
 	`, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, cachedTokens, traceID)
-	return err
+	if err != nil {
+		return err
+	}
+	s.refreshSessionSummariesBestEffort(s.sessionIDForTraceID(traceID))
+	return nil
+}
+
+func (s *Store) sessionIDForPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	var sessionID string
+	if err := s.db.QueryRow(`SELECT session_id FROM logs WHERE path = ?`, path).Scan(&sessionID); err != nil {
+		return ""
+	}
+	return sessionID
+}
+
+func (s *Store) sessionIDForTraceID(traceID string) string {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return ""
+	}
+	var sessionID string
+	if err := s.db.QueryRow(`SELECT session_id FROM logs WHERE trace_id = ?`, traceID).Scan(&sessionID); err != nil {
+		return ""
+	}
+	return sessionID
+}
+
+func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
+	seen := map[string]struct{}{}
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if _, ok := seen[sessionID]; ok {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		if err := s.RebuildSessionSummary(sessionID); err != nil {
+			fmt.Fprintf(os.Stderr, "llm-tracelab: refresh session summary %q failed: %v\n", sessionID, err)
+		}
+	}
+}
+
+func (s *Store) RebuildSessionSummary(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.execTx(tx, `DELETE FROM session_summaries WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, s.insertSessionSummaryFromLogsSQL(`s.session_id = ? AND `+clientVisibleLogClause("s")), sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RebuildSessionSummaries() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.execTx(tx, `DELETE FROM session_summaries`); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, s.insertSessionSummaryFromLogsSQL(clientVisibleLogClause("s"))); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) insertSessionSummaryFromLogsSQL(whereSQL string) string {
+	whereSQL = andSQL(`s.session_id <> ''`, whereSQL)
+	return `
+		INSERT INTO session_summaries (
+			session_id, session_source, request_count, first_seen, last_seen, last_model, providers,
+			success_request, failed_request, success_rate, total_tokens, avg_ttft, total_duration, stream_count, updated_at
+		)
+		SELECT
+			s.session_id,
+			MIN(s.session_source) AS session_source,
+			COUNT(*) AS request_count,
+			MIN(s.recorded_at) AS first_seen,
+			MAX(s.recorded_at) AS last_seen,
+			COALESCE((
+				SELECT model FROM logs l2
+				WHERE l2.session_id = s.session_id
+					AND ` + clientVisibleLogClause("l2") + `
+				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
+				LIMIT 1
+			), '') AS last_model,
+			` + s.sessionProvidersAggregateSQL() + ` AS providers,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
+				100.0 * SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+			END AS success_rate,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
+			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
+			COALESCE(SUM(` + s.boolCountCaseSQL("s.is_stream") + `), 0) AS stream_count,
+			CURRENT_TIMESTAMP AS updated_at
+		FROM logs s
+		WHERE ` + whereSQL + `
+		GROUP BY s.session_id
+	`
 }
 
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
@@ -6493,12 +6674,147 @@ func (s *Store) MarkAnalysisJobCanceled(id int64) error {
 	return err
 }
 
+func sessionSummaryFilterSupported(filter ListFilter) bool {
+	return strings.TrimSpace(filter.Endpoint) == "" &&
+		strings.TrimSpace(filter.SelectedUpstream) == "" &&
+		strings.TrimSpace(filter.ObservationStatus) == "" &&
+		!filter.MissingUsage &&
+		filter.MinDurationMs == 0 &&
+		filter.MaxDurationMs == 0 &&
+		filter.MinTTFTMs == 0 &&
+		filter.MaxTTFTMs == 0 &&
+		filter.MinTokens == 0 &&
+		filter.MaxTokens == 0
+}
+
+func (s *Store) listSessionPageFromSummaries(page int, pageSize int, filter ListFilter) (SessionPageResult, bool, error) {
+	var summaryRows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaryRows); err != nil {
+		return SessionPageResult{}, false, err
+	}
+	if summaryRows == 0 {
+		return SessionPageResult{}, false, nil
+	}
+
+	whereSQL, whereArgs := buildSessionSummaryFilterClause(filter)
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries s WHERE `+whereSQL, whereArgs...).Scan(&total); err != nil {
+		return SessionPageResult{}, false, err
+	}
+	offset := (page - 1) * pageSize
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, pageSize, offset)
+	rows, err := s.db.Query(`
+		SELECT
+			s.session_id,
+			s.session_source,
+			s.request_count,
+			s.first_seen,
+			s.last_seen,
+			s.last_model,
+			s.providers,
+			s.success_request,
+			s.failed_request,
+			s.success_rate,
+			s.total_tokens,
+			s.avg_ttft,
+			s.total_duration,
+			s.stream_count
+		FROM session_summaries s
+		WHERE `+whereSQL+`
+		ORDER BY s.last_seen DESC, s.session_id DESC
+		LIMIT ? OFFSET ?
+	`, queryArgs...)
+	if err != nil {
+		return SessionPageResult{}, false, err
+	}
+	defer rows.Close()
+
+	result := SessionPageResult{
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+	}
+	for rows.Next() {
+		summary, err := scanSessionSummary(rows)
+		if err != nil {
+			return SessionPageResult{}, false, err
+		}
+		result.Items = append(result.Items, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return SessionPageResult{}, false, err
+	}
+	if total > 0 {
+		result.TotalPages = int(math.Ceil(float64(total) / float64(pageSize)))
+	}
+	return result, true, nil
+}
+
+func (s *Store) getSessionFromSummary(sessionID string) (SessionSummary, error) {
+	row := s.db.QueryRow(`
+		SELECT
+			session_id,
+			session_source,
+			request_count,
+			first_seen,
+			last_seen,
+			last_model,
+			providers,
+			success_request,
+			failed_request,
+			success_rate,
+			total_tokens,
+			avg_ttft,
+			total_duration,
+			stream_count
+		FROM session_summaries
+		WHERE session_id = ?
+	`, sessionID)
+	return scanSessionSummary(row)
+}
+
+func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
+	var clauses []string
+	var args []any
+	if query := strings.TrimSpace(filter.Query); query != "" {
+		like := "%" + escapeLike(query) + "%"
+		clauses = append(clauses, `(LOWER(s.session_id) LIKE LOWER(?) ESCAPE '\' OR LOWER(s.last_model) LIKE LOWER(?) ESCAPE '\' OR LOWER(s.providers) LIKE LOWER(?) ESCAPE '\')`)
+		args = append(args, like, like, like)
+	}
+	if provider := strings.TrimSpace(filter.Provider); provider != "" {
+		like := "%" + escapeLike(provider) + "%"
+		clauses = append(clauses, `LOWER(s.providers) LIKE LOWER(?) ESCAPE '\'`)
+		args = append(args, like)
+	}
+	if model := strings.TrimSpace(filter.Model); model != "" {
+		clauses = append(clauses, `LOWER(s.last_model) LIKE LOWER(?) ESCAPE '\'`)
+		args = append(args, "%"+escapeLike(model)+"%")
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
+	case "success":
+		clauses = append(clauses, `s.failed_request = 0`)
+	case "failed", "error":
+		clauses = append(clauses, `s.failed_request > 0`)
+	}
+	if len(clauses) == 0 {
+		return "1=1", nil
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
 func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
 	if page < 1 {
 		page = 1
 	}
 	if pageSize <= 0 {
 		pageSize = 50
+	}
+	if s.useSessionSummaryRead && sessionSummaryFilterSupported(filter) {
+		result, ok, err := s.listSessionPageFromSummaries(page, pageSize, filter)
+		if err == nil && ok {
+			return result, nil
+		}
 	}
 
 	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
@@ -6618,6 +6934,12 @@ func (s *Store) listSessionPageIDs(sessionWhere string, whereArgs []any, page in
 }
 
 func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
+	if s.useSessionSummaryRead {
+		summary, err := s.getSessionFromSummary(sessionID)
+		if err == nil {
+			return summary, nil
+		}
+	}
 	row := s.db.QueryRow(`
 		SELECT
 			s.session_id,
