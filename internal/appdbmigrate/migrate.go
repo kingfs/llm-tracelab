@@ -1,6 +1,7 @@
 package appdbmigrate
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -30,6 +31,47 @@ const SQLiteVersionedMigrationStatus = "not_implemented"
 const SQLiteStorageRole = "legacy_dev_test_compatibility"
 const SQLiteStorageContract = "sqlite_startup_schema_fallback_for_legacy_dev_test_only"
 const SQLiteMigrationAdvice = "SQLite application DB uses startup schema fallback for legacy/dev/test compatibility; run startup or db migrate up for idempotent schema initialization, and use Postgres for versioned production migrations."
+const PostgresIndexOptimizationAuthority = "non-transactional PostgreSQL concurrent indexes via db migrate optimize-indexes"
+
+type IndexOptimizationStatement struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SQL         string `json:"sql"`
+}
+
+type IndexOptimizationResult struct {
+	Driver     string                       `json:"driver"`
+	Applied    bool                         `json:"applied"`
+	Statements []IndexOptimizationStatement `json:"statements"`
+}
+
+var postgresIndexOptimizationStatements = []IndexOptimizationStatement{
+	{
+		Name:        "tracelog_recent_client_visible_idx",
+		Description: "latest logs and paged trace lists ordered by recorded_at desc",
+		SQL:         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "tracelog_recent_client_visible_idx" ON "logs" ("recorded_at" DESC, "trace_id" DESC) WHERE COALESCE("exchange_kind", '') IN ('', 'entry', 'proxy')`,
+	},
+	{
+		Name:        "tracelog_session_recent_client_visible_idx",
+		Description: "session detail pages and latest trace lookup per session",
+		SQL:         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "tracelog_session_recent_client_visible_idx" ON "logs" ("session_id", "recorded_at" DESC, "trace_id" DESC) WHERE "session_id" <> '' AND COALESCE("exchange_kind", '') IN ('', 'entry', 'proxy')`,
+	},
+	{
+		Name:        "tracelog_failure_recent_client_visible_idx",
+		Description: "recent failed trace lists and overview attention failures",
+		SQL:         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "tracelog_failure_recent_client_visible_idx" ON "logs" ("recorded_at" DESC, "trace_id" DESC) WHERE COALESCE("exchange_kind", '') IN ('', 'entry', 'proxy') AND ("status_code" < 200 OR "status_code" >= 300 OR "error_text" <> '')`,
+	},
+	{
+		Name:        "tracelog_routing_failure_recent_client_visible_idx",
+		Description: "routing failure analytics and recent routing failure lists",
+		SQL:         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "tracelog_routing_failure_recent_client_visible_idx" ON "logs" ("recorded_at" DESC, "trace_id" DESC) WHERE "routing_failure_reason" <> '' AND COALESCE("exchange_kind", '') IN ('', 'entry', 'proxy')`,
+	},
+	{
+		Name:        "tracelog_duration_slow_client_visible_idx",
+		Description: "slow trace lists ordered by duration desc",
+		SQL:         `CREATE INDEX CONCURRENTLY IF NOT EXISTS "tracelog_duration_slow_client_visible_idx" ON "logs" ("duration_ms" DESC, "recorded_at" DESC, "trace_id" DESC) WHERE COALESCE("exchange_kind", '') IN ('', 'entry', 'proxy')`,
+	},
+}
 
 var sqliteApplicationRequiredTables = []string{
 	"logs",
@@ -64,6 +106,42 @@ func MigrateDown(driver string, dsn string, steps int, all bool) error {
 		return ErrSQLiteUsesStoreInit
 	default:
 		return fmt.Errorf("application database driver %q is not supported by versioned migrations yet", driver)
+	}
+}
+
+func PostgresIndexOptimizationStatements() []IndexOptimizationStatement {
+	return append([]IndexOptimizationStatement(nil), postgresIndexOptimizationStatements...)
+}
+
+func OptimizeIndexes(ctx context.Context, driver string, dsn string) (IndexOptimizationResult, error) {
+	driver = normalizeDriver(driver)
+	result := IndexOptimizationResult{Driver: driver}
+	switch driver {
+	case "postgres":
+		result.Statements = PostgresIndexOptimizationStatements()
+		if strings.TrimSpace(dsn) == "" {
+			return result, fmt.Errorf("postgres application database dsn is required")
+		}
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return result, err
+		}
+		defer db.Close()
+		if err := db.PingContext(ctx); err != nil {
+			return result, err
+		}
+		for _, statement := range result.Statements {
+			if _, err := db.ExecContext(ctx, statement.SQL); err != nil {
+				return result, fmt.Errorf("apply postgres index optimization %s: %w", statement.Name, err)
+			}
+		}
+		result.Applied = true
+		return result, nil
+	case "sqlite":
+		result.Statements = nil
+		return result, ErrSQLiteUsesStoreInit
+	default:
+		return result, fmt.Errorf("application database driver %q is not supported by index optimization", driver)
 	}
 }
 

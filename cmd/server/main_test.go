@@ -1962,6 +1962,107 @@ func TestDBMigrateUpDryRunJSONReportsSQLitePlan(t *testing.T) {
 	}
 }
 
+func TestDBMigrateOptimizeIndexesDryRunJSONReportsConcurrentPostgresStatements(t *testing.T) {
+	t.Parallel()
+
+	configPath := writePostgresDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "optimize-indexes", "--dry-run"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun                      bool `json:"dry_run"`
+			Mutated                     bool `json:"mutated"`
+			Applicable                  bool `json:"index_optimization_applicable"`
+			NonTransactional            bool `json:"index_optimization_non_transactional"`
+			Concurrent                  bool `json:"index_optimization_concurrent"`
+			StatementCount              int  `json:"index_optimization_statement_count"`
+			IndexOptimizationStatements []struct {
+				Name string `json:"name"`
+				SQL  string `json:"sql"`
+			} `json:"index_optimization_statements"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.optimize-indexes" {
+		t.Fatalf("envelope command = %+v, want db.migrate.optimize-indexes", envelope)
+	}
+	if !envelope.Result.DryRun || envelope.Result.Mutated || !envelope.Result.Applicable || !envelope.Result.NonTransactional || !envelope.Result.Concurrent {
+		t.Fatalf("optimize-indexes dry-run result = %+v", envelope.Result)
+	}
+	if envelope.Result.StatementCount < 5 || len(envelope.Result.IndexOptimizationStatements) != envelope.Result.StatementCount {
+		t.Fatalf("statements = %d/%d, want at least 5", len(envelope.Result.IndexOptimizationStatements), envelope.Result.StatementCount)
+	}
+	seen := map[string]bool{}
+	for _, statement := range envelope.Result.IndexOptimizationStatements {
+		if !strings.Contains(statement.SQL, "CREATE INDEX CONCURRENTLY IF NOT EXISTS") {
+			t.Fatalf("statement %s missing concurrent idempotent create: %s", statement.Name, statement.SQL)
+		}
+		seen[statement.Name] = true
+	}
+	for _, name := range []string{
+		"tracelog_recent_client_visible_idx",
+		"tracelog_session_recent_client_visible_idx",
+		"tracelog_failure_recent_client_visible_idx",
+		"tracelog_routing_failure_recent_client_visible_idx",
+		"tracelog_duration_slow_client_visible_idx",
+	} {
+		if !seen[name] {
+			t.Fatalf("missing optimization statement %q in %+v", name, envelope.Result.IndexOptimizationStatements)
+		}
+	}
+}
+
+func TestDBMigrateOptimizeIndexesSQLiteNoops(t *testing.T) {
+	t.Parallel()
+
+	configPath := writeSQLiteDBMigrateConfig(t)
+	cmd := newRootCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"-c", configPath, "--format", "json", "db", "migrate", "optimize-indexes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute() error = %v, output=%s", err, out.String())
+	}
+
+	var envelope struct {
+		OK      bool   `json:"ok"`
+		Command string `json:"command"`
+		Result  struct {
+			DryRun         bool   `json:"dry_run"`
+			Mutated        bool   `json:"mutated"`
+			Driver         string `json:"driver"`
+			Applicable     bool   `json:"index_optimization_applicable"`
+			Status         string `json:"index_optimization_status"`
+			StatementCount int    `json:"index_optimization_statement_count"`
+			SQLiteAdvice   string `json:"sqlite_migration_advice"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v, output=%q", err, out.String())
+	}
+	if !envelope.OK || envelope.Command != "db.migrate.optimize-indexes" {
+		t.Fatalf("envelope command = %+v, want db.migrate.optimize-indexes", envelope)
+	}
+	if envelope.Result.DryRun || envelope.Result.Mutated || envelope.Result.Driver != "sqlite" || envelope.Result.Applicable || envelope.Result.Status != "not_applicable" || envelope.Result.StatementCount != 0 {
+		t.Fatalf("sqlite optimize-indexes result = %+v", envelope.Result)
+	}
+	if !strings.Contains(envelope.Result.SQLiteAdvice, "startup schema fallback") {
+		t.Fatalf("sqlite optimize-indexes advice = %q", envelope.Result.SQLiteAdvice)
+	}
+}
+
 func TestDBMigrateUpDryRunTextReportsSQLitePlan(t *testing.T) {
 	t.Parallel()
 
