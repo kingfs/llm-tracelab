@@ -2906,16 +2906,18 @@ func (s *Store) requirePostgresApplicationMigrations() error {
 	if !migrationTableExists {
 		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `llm-tracelab db migrate up` with the same config before starting with database.auto_migrate=false")
 	}
-	var sessionSummariesExists bool
-	if err := s.db.QueryRow(`SELECT EXISTS (
-		SELECT 1
-		FROM information_schema.tables
-		WHERE table_schema = current_schema() AND table_name = 'session_summaries'
-	)`).Scan(&sessionSummariesExists); err != nil {
-		return fmt.Errorf("check postgres session_summaries migration: %w", err)
-	}
-	if !sessionSummariesExists {
-		return errors.New("postgres application schema is missing session_summaries; run `llm-tracelab db migrate up` to apply ent/postgres-migrations before enabling service traffic")
+	for _, table := range []string{"session_summaries", "overview_metric_buckets", "overview_metric_bucket_members"} {
+		var exists bool
+		if err := s.db.QueryRow(`SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = current_schema() AND table_name = ?
+		)`, table).Scan(&exists); err != nil {
+			return fmt.Errorf("check postgres %s migration: %w", table, err)
+		}
+		if !exists {
+			return fmt.Errorf("postgres application schema is missing %s; run `llm-tracelab db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
+		}
 	}
 	return nil
 }

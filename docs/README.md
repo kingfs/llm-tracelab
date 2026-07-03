@@ -21,6 +21,7 @@
 - [项目基线](./PROJECT_BASELINE.md)
 - [维护基线](./MAINTAINER_BASELINE.md)
 - [PostgreSQL 长期运行优化 Runbook](./POSTGRES_OPERATIONS_RUNBOOK.md)
+- [PostgreSQL Baseline SQL](./POSTGRES_BASELINE_SQL.md)
 - [上游 Provider 与协议族](./UPSTREAM_PROVIDERS.md)
 - [Provider 协议入口](./PROVIDER_PROTOCOL_ENTRYPOINTS.md)
 - [协议参考](./protocol-reference/README.md)
@@ -45,6 +46,7 @@
 - [代理使用示例](./PROXY_USAGE_EXAMPLES.md)
 - [凭据路由操作指南](./CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)
 - [PostgreSQL 长期运行优化 Runbook](./POSTGRES_OPERATIONS_RUNBOOK.md)
+- [PostgreSQL Baseline SQL](./POSTGRES_BASELINE_SQL.md)
 - [Codex MCP 本地配置](./CODEX_MCP_LOCAL_CONFIG.md)
 - [集成测试诊断指南](./INTEGRATION_TEST_RUNBOOK.md)
 
@@ -53,6 +55,7 @@
 - [开发命令](./DEVELOPMENT_COMMANDS.md)
 - [维护基线](./MAINTAINER_BASELINE.md)
 - [PostgreSQL 长期运行优化 Runbook](./POSTGRES_OPERATIONS_RUNBOOK.md)
+- [PostgreSQL Baseline SQL](./POSTGRES_BASELINE_SQL.md)
 - [协议参考](./protocol-reference/README.md)
 
 ## v1 文档

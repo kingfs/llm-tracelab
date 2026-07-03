@@ -2,6 +2,8 @@
 
 本文档面向生产或准生产环境的 llm-tracelab application database 运维。目标是把长期运行优化做成可执行流程，而不是临时 SQL 调参。
 
+可直接运行的基线采集 SQL 见 [PostgreSQL Baseline SQL](./POSTGRES_BASELINE_SQL.md)。
+
 适用范围：
 
 - Postgres production application DB。
