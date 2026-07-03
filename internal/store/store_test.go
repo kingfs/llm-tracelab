@@ -3440,6 +3440,20 @@ func TestListSessionPageAggregatesBySession(t *testing.T) {
 	if result.Items[1].TotalTokens != 10 {
 		t.Fatalf("TotalTokens = %d, want 10", result.Items[1].TotalTokens)
 	}
+	firstPage, err := st.ListSessionPage(1, 1, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage(first page) error = %v", err)
+	}
+	if firstPage.Total != 2 || firstPage.TotalPages != 2 || len(firstPage.Items) != 1 || firstPage.Items[0].SessionID != "sess-b" {
+		t.Fatalf("first page = %+v, want sess-b with total 2 and 2 pages", firstPage)
+	}
+	secondPage, err := st.ListSessionPage(2, 1, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage(second page) error = %v", err)
+	}
+	if secondPage.Total != 2 || secondPage.TotalPages != 2 || len(secondPage.Items) != 1 || secondPage.Items[0].SessionID != "sess-a" {
+		t.Fatalf("second page = %+v, want sess-a with total 2 and 2 pages", secondPage)
+	}
 }
 
 func TestClientVisibleListsExcludeInternalModelExchanges(t *testing.T) {
@@ -4865,6 +4879,13 @@ func TestListTraceIDsAppliesObservationStatusFilter(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != unparsedEntry.ID {
 		t.Fatalf("ids = %+v, want unparsed trace %s", ids, unparsedEntry.ID)
+	}
+	overview, err := st.Overview(OverviewOptions{Limit: 5, BucketCount: 1, BucketSize: time.Hour})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if overview.Observation.Unparsed != 1 || overview.Observation.Parsed != 1 || overview.Observation.TotalObservations != 1 {
+		t.Fatalf("overview observation = %+v, want one parsed observation and one unparsed log", overview.Observation)
 	}
 }
 
