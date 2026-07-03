@@ -124,6 +124,7 @@ llm-tracelab -c config/config.yaml db migrate status --check-db
 llm-tracelab -c config/config.yaml db migrate optimize-indexes --dry-run
 llm-tracelab -c config/config.yaml db summary rebuild sessions --dry-run
 llm-tracelab -c config/config.yaml db summary rebuild sessions --session-id <session_id>
+LLM_TRACELAB_DATABASE_DSN='postgres://...' scripts/postgres-baseline.sh /tmp/tracelab-postgres-baseline.txt
 llm-tracelab -c config/config.yaml auth migrate status --check-db
 llm-tracelab -c config/config.yaml analyze backfill-exchanges --dry-run
 ```
@@ -132,6 +133,7 @@ llm-tracelab -c config/config.yaml analyze backfill-exchanges --dry-run
 - `db migrate optimize-indexes --dry-run`：预览非事务 PostgreSQL concurrent index 优化语句；确认后去掉 `--dry-run` 执行。
 - `db summary rebuild sessions --dry-run`：只读统计将从 `logs` 重建的 session summary 数量，不更新 `session_summaries`。
 - `db summary rebuild sessions --session-id <session_id>`：只重建单个 session；不带 `--session-id` 时会安全地全量重建 `session_summaries`。
+- `scripts/postgres-baseline.sh`：运行只读 PostgreSQL 基线 SQL，并将所有采集信息写入一个输出文件。
 - `auth migrate status --check-db`：只读检查 auth-owned 表和共享 application migration namespace 状态。
 - `analyze backfill-exchanges --dry-run`：只报告 exchange metadata 回填扫描/冲突，不更新 DB，不重写 `.http` cassette。
 - `database.use_session_summary_read: true` 或 `LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ=true` 可让服务读取 `session_summaries`；默认关闭。PostgreSQL 生产路径在 `database.auto_migrate: false` 下必须先执行 `db migrate up`，否则服务启动会报出缺失 migration/table 的明确错误。
