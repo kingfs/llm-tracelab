@@ -3442,6 +3442,163 @@ func TestListSessionPageAggregatesBySession(t *testing.T) {
 	}
 }
 
+func TestSessionSummariesMaintainedAndReadBehindFlag(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	var tableName string
+	if err := st.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_summaries'`).Scan(&tableName); err != nil {
+		t.Fatalf("query session_summaries table error = %v", err)
+	}
+	if tableName != "session_summaries" {
+		t.Fatalf("tableName = %q, want session_summaries", tableName)
+	}
+
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	writeSessionSummaryTestLog(t, st, dir, "summary-a.http", "sess-summary", base, http.StatusOK, 20, 100, true)
+	writeSessionSummaryTestLog(t, st, dir, "summary-b.http", "sess-summary", base.Add(time.Minute), http.StatusInternalServerError, 30, 999, false)
+
+	var requestCount int
+	var failedRequest int
+	var totalTokens int
+	if err := st.db.QueryRow(`SELECT request_count, failed_request, total_tokens FROM session_summaries WHERE session_id = ?`, "sess-summary").Scan(&requestCount, &failedRequest, &totalTokens); err != nil {
+		t.Fatalf("query session summary error = %v", err)
+	}
+	if requestCount != 2 || failedRequest != 1 || totalTokens != 100 {
+		t.Fatalf("summary row = requests:%d failed:%d tokens:%d, want 2/1/100", requestCount, failedRequest, totalTokens)
+	}
+
+	if _, err := st.db.Exec(`UPDATE session_summaries SET request_count = 99 WHERE session_id = ?`, "sess-summary"); err != nil {
+		t.Fatalf("poison summary row error = %v", err)
+	}
+	defaultPage, err := st.ListSessionPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage(default) error = %v", err)
+	}
+	if len(defaultPage.Items) != 1 || defaultPage.Items[0].RequestCount != 2 {
+		t.Fatalf("default ListSessionPage = %#v, want logs fallback count 2", defaultPage.Items)
+	}
+
+	st.useSessionSummaryRead = true
+	summaryPage, err := st.ListSessionPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage(summary read) error = %v", err)
+	}
+	if len(summaryPage.Items) != 1 || summaryPage.Items[0].RequestCount != 99 {
+		t.Fatalf("summary ListSessionPage = %#v, want cached count 99", summaryPage.Items)
+	}
+
+	if _, err := st.db.Exec(`DELETE FROM session_summaries`); err != nil {
+		t.Fatalf("delete session_summaries error = %v", err)
+	}
+	fallbackPage, err := st.ListSessionPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage(empty summary fallback) error = %v", err)
+	}
+	if len(fallbackPage.Items) != 1 || fallbackPage.Items[0].RequestCount != 2 {
+		t.Fatalf("empty summary fallback = %#v, want logs count 2", fallbackPage.Items)
+	}
+}
+
+func TestRebuildSessionSummariesFromLogs(t *testing.T) {
+	dir := t.TempDir()
+	st, err := New(dir)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 4, 16, 8, 0, 0, 0, time.UTC)
+	writeSessionSummaryTestLog(t, st, dir, "rebuild-a.http", "sess-rebuild-a", base, http.StatusOK, 10, 0, true)
+	writeSessionSummaryTestLog(t, st, dir, "rebuild-b.http", "sess-rebuild-b", base.Add(time.Minute), http.StatusOK, 20, 0, false)
+
+	entry, err := st.GetByRequestID("rebuild-a.http")
+	if err != nil {
+		t.Fatalf("GetByRequestID() error = %v", err)
+	}
+	if err := st.UpdateLogUsage(entry.ID, recordfile.UsageInfo{TotalTokens: 42}); err != nil {
+		t.Fatalf("UpdateLogUsage() error = %v", err)
+	}
+	var totalTokens int
+	if err := st.db.QueryRow(`SELECT total_tokens FROM session_summaries WHERE session_id = ?`, "sess-rebuild-a").Scan(&totalTokens); err != nil {
+		t.Fatalf("query refreshed total_tokens error = %v", err)
+	}
+	if totalTokens != 42 {
+		t.Fatalf("totalTokens after UpdateLogUsage = %d, want 42", totalTokens)
+	}
+
+	if _, err := st.db.Exec(`DELETE FROM session_summaries`); err != nil {
+		t.Fatalf("delete session_summaries error = %v", err)
+	}
+	if err := st.RebuildSessionSummaries(); err != nil {
+		t.Fatalf("RebuildSessionSummaries() error = %v", err)
+	}
+
+	st.useSessionSummaryRead = true
+	result, err := st.ListSessionPage(1, 10, ListFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionPage(summary read) error = %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("len(result.Items) = %d, want 2", len(result.Items))
+	}
+	if result.Items[1].SessionID != "sess-rebuild-a" || result.Items[1].TotalTokens != 42 {
+		t.Fatalf("rebuilt summary for sess-rebuild-a = %#v, want total_tokens 42", result.Items)
+	}
+
+	if _, err := st.db.Exec(`UPDATE logs SET session_id = ? WHERE request_id = ?`, "sess-rebuild-b", "rebuild-a.http"); err != nil {
+		t.Fatalf("move log session error = %v", err)
+	}
+	if err := st.RebuildSessionSummary("sess-rebuild-a"); err != nil {
+		t.Fatalf("RebuildSessionSummary(stale) error = %v", err)
+	}
+	if _, err := st.getSessionFromSummary("sess-rebuild-a"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("get stale session error = %v, want sql.ErrNoRows", err)
+	}
+}
+
+func writeSessionSummaryTestLog(t *testing.T, st *Store, dir string, name string, sessionID string, recordedAt time.Time, statusCode int, ttftMs int64, totalTokens int, stream bool) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	header := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:     name,
+			Time:          recordedAt,
+			Model:         "gpt-test",
+			Provider:      "openai_compatible",
+			Operation:     "responses",
+			Endpoint:      "/v1/responses",
+			URL:           "/v1/responses",
+			Method:        "POST",
+			StatusCode:    statusCode,
+			DurationMs:    ttftMs + 200,
+			TTFTMs:        ttftMs,
+			ClientIP:      "127.0.0.1",
+			ContentLength: 4,
+		},
+		Layout: recordfile.LayoutInfo{
+			IsStream: stream,
+		},
+		Usage: recordfile.UsageInfo{
+			TotalTokens: totalTokens,
+		},
+	}
+	if err := st.UpsertLogWithGrouping(path, header, GroupingInfo{
+		SessionID:     sessionID,
+		SessionSource: "header.session_id",
+	}); err != nil {
+		t.Fatalf("UpsertLogWithGrouping(%q) error = %v", path, err)
+	}
+}
+
 func TestClientVisibleListsExcludeInternalModelExchanges(t *testing.T) {
 	dir := t.TempDir()
 	st, err := New(dir)
