@@ -3336,7 +3336,10 @@ func (s *Store) initSchema() error {
 		if err := s.ensureModelAliasesSchema(); err != nil {
 			return err
 		}
-		return s.ensureLogExchangeColumns()
+		if err := s.ensureLogExchangeColumns(); err != nil {
+			return err
+		}
+		return s.ensureHotpathIndexes()
 	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
@@ -3980,7 +3983,12 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS tracelog_recorded_at ON logs(recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS tracelog_model_recorded_at ON logs(model, recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS tracelog_session_id_recorded_at ON logs(session_id, recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_recorded_trace ON logs(session_id, recorded_at DESC, trace_id DESC) WHERE session_id <> '';`,
 		`CREATE INDEX IF NOT EXISTS tracelog_request_id ON logs(request_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status_trace ON parse_jobs(status, trace_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_last_seen_id ON system_events(last_seen_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen_id ON system_events(status, last_seen_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category_last_seen_id ON system_events(source, category, last_seen_at DESC, id DESC);`,
 	}
 	for _, stmt := range postColumnStmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -3994,6 +4002,9 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.backfillGrouping(); err != nil {
+		return err
+	}
+	if err := s.ensureHotpathIndexes(); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`INSERT INTO app_schema_status (namespace, version, mode, source, updated_at)
@@ -4334,6 +4345,22 @@ func (s *Store) ensureLogExchangeColumns() error {
 		`CREATE INDEX IF NOT EXISTS tracelog_request_audit_id_recorded_at ON logs(request_audit_id, recorded_at)`,
 		`CREATE INDEX IF NOT EXISTS tracelog_exchange_kind_recorded_at ON logs(exchange_kind, recorded_at)`,
 		`CREATE INDEX IF NOT EXISTS tracelog_parent_exchange_id ON logs(parent_exchange_id)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureHotpathIndexes() error {
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_logs_trace_id_hotpath ON logs(trace_id)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_recorded_trace ON logs(session_id, recorded_at DESC, trace_id DESC) WHERE session_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status_trace ON parse_jobs(status, trace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_last_seen_id ON system_events(last_seen_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen_id ON system_events(status, last_seen_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category_last_seen_id ON system_events(source, category, last_seen_at DESC, id DESC)`,
 	} {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
@@ -6477,14 +6504,28 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
 	sessionWhere := andSQL(`s.session_id <> ''`, clientVisibleLogClause("s"))
 	sessionWhere = andSQL(sessionWhere, whereSQL)
-	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs s WHERE `+sessionWhere+` GROUP BY session_id)`, whereArgs...).Scan(&total); err != nil {
+	sessionIDs, total, err := s.listSessionPageIDs(sessionWhere, whereArgs, page, pageSize)
+	if err != nil {
 		return SessionPageResult{}, err
 	}
 
-	offset := (page - 1) * pageSize
+	result := SessionPageResult{
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+	}
+	if total == 0 {
+		return result, nil
+	}
+	result.TotalPages = totalPages(total, pageSize)
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+
 	queryArgs := append([]any{}, whereArgs...)
-	queryArgs = append(queryArgs, pageSize, offset)
+	for _, sessionID := range sessionIDs {
+		queryArgs = append(queryArgs, sessionID)
+	}
 	listSQL := `
 		SELECT
 			s.session_id,
@@ -6510,10 +6551,8 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
 			COALESCE(SUM(` + s.boolCountCaseSQL("s.is_stream") + `), 0) AS stream_count
 		FROM logs s
-		WHERE ` + sessionWhere + `
+		WHERE ` + sessionWhere + ` AND s.session_id IN (` + placeholders(len(sessionIDs)) + `)
 		GROUP BY s.session_id
-		ORDER BY MAX(s.recorded_at) DESC
-		LIMIT ? OFFSET ?
 	`
 	rows, err := s.db.Query(listSQL, queryArgs...)
 	if err != nil {
@@ -6521,26 +6560,61 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 	}
 	defer rows.Close()
 
-	result := SessionPageResult{
-		Page:     page,
-		PageSize: pageSize,
-		Total:    total,
-	}
+	bySessionID := make(map[string]SessionSummary, len(sessionIDs))
 	for rows.Next() {
 		summary, err := scanSessionSummary(rows)
 		if err != nil {
 			return SessionPageResult{}, err
 		}
-		result.Items = append(result.Items, summary)
+		bySessionID[summary.SessionID] = summary
 	}
 	if err := rows.Err(); err != nil {
 		return SessionPageResult{}, err
 	}
-	if total == 0 {
-		return result, nil
+	for _, sessionID := range sessionIDs {
+		if summary, ok := bySessionID[sessionID]; ok {
+			result.Items = append(result.Items, summary)
+		}
 	}
-	result.TotalPages = int(math.Ceil(float64(total) / float64(pageSize)))
 	return result, nil
+}
+
+func (s *Store) listSessionPageIDs(sessionWhere string, whereArgs []any, page int, pageSize int) ([]string, int, error) {
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(DISTINCT s.session_id) FROM logs s WHERE `+sessionWhere, whereArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+	offset := (page - 1) * pageSize
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, pageSize, offset)
+	rows, err := s.db.Query(`
+		SELECT s.session_id
+		FROM logs s
+		WHERE `+sessionWhere+`
+		GROUP BY s.session_id
+		ORDER BY MAX(s.recorded_at) DESC
+		LIMIT ? OFFSET ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			return nil, 0, err
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return sessionIDs, total, nil
 }
 
 func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
@@ -7174,7 +7248,15 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 	`).Scan(&summary.Failed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE trace_id NOT IN (SELECT trace_id FROM trace_observations)`).Scan(&summary.Unparsed); err != nil {
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM logs l
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM trace_observations o
+			WHERE o.trace_id = l.trace_id
+		)
+	`).Scan(&summary.Unparsed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
