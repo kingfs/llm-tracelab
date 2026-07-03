@@ -61,6 +61,7 @@ type configInspectDatabase struct {
 	Driver                  string `json:"driver"`
 	DSN                     string `json:"dsn"`
 	AutoMigrate             bool   `json:"auto_migrate"`
+	UseSessionSummaryRead   bool   `json:"use_session_summary_read"`
 	MigrationMode           string `json:"migration_mode"`
 	ProductionStorageDriver string `json:"production_storage_driver"`
 	ProductionReady         bool   `json:"production_ready"`
@@ -295,6 +296,7 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 			Driver:                  cfg.DatabaseDriver(),
 			DSN:                     redactConfigInspectDSN(cfg.DatabaseDSN()),
 			AutoMigrate:             cfg.DatabaseAutoMigrate(),
+			UseSessionSummaryRead:   cfg.DatabaseUseSessionSummaryRead(),
 			MigrationMode:           appDBMigrationMode(cfg.DatabaseDriver()),
 			ProductionStorageDriver: appdbmigrate.ProductionStorageDriver,
 			ProductionReady:         normalizeAuthStoreDriver(cfg.DatabaseDriver()) == appdbmigrate.ProductionStorageDriver,

@@ -127,6 +127,39 @@ provider_probe:
 	}
 }
 
+func TestDatabaseUseSessionSummaryReadDefaultsOffAndLoadsConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+database:
+  use_session_summary_read: true
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	defaultCfg := Config{}
+	if defaultCfg.DatabaseUseSessionSummaryRead() {
+		t.Fatal("DatabaseUseSessionSummaryRead() default = true, want false")
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.DatabaseUseSessionSummaryRead() {
+		t.Fatal("DatabaseUseSessionSummaryRead() = false, want true")
+	}
+}
+
+func TestDatabaseUseSessionSummaryReadEnvOverride(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ", "true")
+
+	cfg := Config{}
+	applyEnvOverrides(&cfg)
+	if !cfg.DatabaseUseSessionSummaryRead() {
+		t.Fatal("DatabaseUseSessionSummaryRead() = false, want env override true")
+	}
+}
+
 func TestProviderProbeConfigEnvOverrides(t *testing.T) {
 	t.Setenv("LLM_TRACELAB_PROVIDER_PROBE_STARTUP_FILL", "true")
 	t.Setenv("LLM_TRACELAB_PROVIDER_PROBE_TIMEOUT", "3s")

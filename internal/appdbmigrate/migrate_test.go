@@ -55,6 +55,7 @@ func TestCheckStatusSQLiteReportsApplicationSchemaMarker(t *testing.T) {
 		`CREATE TABLE execution_events (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE upstream_exchanges (id TEXT PRIMARY KEY)`,
 		`CREATE TABLE tool_call_audits (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE session_summaries (session_id TEXT PRIMARY KEY)`,
 		`CREATE TABLE app_schema_status (
 			namespace TEXT PRIMARY KEY,
 			version INTEGER NOT NULL,

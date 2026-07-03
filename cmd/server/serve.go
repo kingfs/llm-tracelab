@@ -97,7 +97,10 @@ func runServeWithConfig(configPath string) int {
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
-		store.DatabaseOptions{AutoMigrate: false},
+		store.DatabaseOptions{
+			AutoMigrate:           false,
+			UseSessionSummaryRead: cfg.DatabaseUseSessionSummaryRead(),
+		},
 	)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)

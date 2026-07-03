@@ -32,11 +32,12 @@ type Config struct {
 	} `yaml:"auth"`
 
 	Database struct {
-		Driver       string `yaml:"driver"`
-		DSN          string `yaml:"dsn"`
-		MaxOpenConns int    `yaml:"max_open_conns"`
-		MaxIdleConns int    `yaml:"max_idle_conns"`
-		AutoMigrate  *bool  `yaml:"auto_migrate"`
+		Driver                string `yaml:"driver"`
+		DSN                   string `yaml:"dsn"`
+		MaxOpenConns          int    `yaml:"max_open_conns"`
+		MaxIdleConns          int    `yaml:"max_idle_conns"`
+		AutoMigrate           *bool  `yaml:"auto_migrate"`
+		UseSessionSummaryRead *bool  `yaml:"use_session_summary_read"`
 	} `yaml:"database"`
 
 	Trace struct {
@@ -361,6 +362,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_DATABASE_AUTO_MIGRATE"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Database.AutoMigrate = &parsed
+		}
+	}
+	if v := os.Getenv("LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ"); v != "" {
+		if parsed, err := strconv.ParseBool(v); err == nil {
+			cfg.Database.UseSessionSummaryRead = &parsed
 		}
 	}
 	if v := os.Getenv("LLM_TRACELAB_UPSTREAM_BASE_URL"); v != "" {
@@ -888,6 +894,13 @@ func (c Config) DatabaseAutoMigrate() bool {
 		return *c.Database.AutoMigrate
 	}
 	return true
+}
+
+func (c Config) DatabaseUseSessionSummaryRead() bool {
+	if c.Database.UseSessionSummaryRead != nil {
+		return *c.Database.UseSessionSummaryRead
+	}
+	return false
 }
 
 func (c Config) DatabaseMaxOpenConns() int {

@@ -33,6 +33,14 @@ type appDBMigrateOptions struct {
 	stdout     io.Writer
 }
 
+type dbSummaryRebuildOptions struct {
+	configPath string
+	sessionID  string
+	dryRun     bool
+	format     string
+	stdout     io.Writer
+}
+
 const appDBMigrateDownUnsupportedMessage = "db migrate down is unsupported for the production Postgres migration contract; restore from backup or use a reviewed manual migration plan"
 
 func newDBCommand(runtime *cliRuntime) *cobra.Command {
@@ -59,7 +67,56 @@ func newDBCommand(runtime *cliRuntime) *cobra.Command {
 	migrateCmd.AddCommand(newAppDBMigrateStatusCommand(runtime))
 	migrateCmd.AddCommand(newAppDBMigrateOptimizeIndexesCommand(runtime))
 	cmd.AddCommand(migrateCmd)
+	cmd.AddCommand(newDBSummaryCommand(runtime))
 	cmd.AddCommand(newDBSecretCommand(runtime))
+	return cmd
+}
+
+func newDBSummaryCommand(runtime *cliRuntime) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:           "summary",
+		Short:         "Maintain derived summary tables",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return requireSubcommand(cmd)
+		},
+	}
+	rebuildCmd := &cobra.Command{
+		Use:           "rebuild",
+		Short:         "Rebuild derived summaries",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return requireSubcommand(cmd)
+		},
+	}
+	rebuildCmd.AddCommand(newDBSummaryRebuildSessionsCommand(runtime))
+	cmd.AddCommand(rebuildCmd)
+	return cmd
+}
+
+func newDBSummaryRebuildSessionsCommand(runtime *cliRuntime) *cobra.Command {
+	var dryRun bool
+	var sessionID string
+	cmd := &cobra.Command{
+		Use:   "sessions",
+		Short: "Rebuild session_summaries from logs",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCode(func() int {
+				return runDBSummaryRebuildSessionsWithOptions(dbSummaryRebuildOptions{
+					configPath: runtime.configPath(),
+					sessionID:  sessionID,
+					dryRun:     dryRun,
+					format:     runtime.outputFormat(),
+					stdout:     cmd.OutOrStdout(),
+				})
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview rebuild without changing session_summaries")
+	cmd.Flags().StringVar(&sessionID, "session-id", "", "Rebuild only one session_id")
 	return cmd
 }
 
@@ -521,7 +578,10 @@ func openApplicationDatabase(cfg *config.Config) (*store.Store, error) {
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
-		store.DatabaseOptions{AutoMigrate: false},
+		store.DatabaseOptions{
+			AutoMigrate:           false,
+			UseSessionSummaryRead: cfg.DatabaseUseSessionSummaryRead(),
+		},
 	)
 }
 
@@ -533,6 +593,76 @@ func initializeApplicationDatabase(cfg *config.Config) (*store.Store, error) {
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
 	)
+}
+
+func runDBSummaryRebuildSessionsWithOptions(opts dbSummaryRebuildOptions) int {
+	st, closeStore, code := openTraceStoreForCommand(opts.configPath)
+	if code != 0 {
+		return code
+	}
+	defer closeStore()
+
+	sessionID := strings.TrimSpace(opts.sessionID)
+	stats, err := st.SessionSummaryRebuildStats(sessionID)
+	if err != nil {
+		slog.Error("Inspect session summary rebuild candidates failed", "error", err)
+		return 1
+	}
+	result := map[string]any{
+		"dry_run":          opts.dryRun,
+		"mutated":          false,
+		"scope":            "all",
+		"candidate_count":  stats.CandidateCount,
+		"existing_count":   stats.ExistingCount,
+		"would_delete_all": stats.WouldDeleteAll,
+		"would_delete_one": stats.WouldDeleteOne,
+	}
+	if sessionID != "" {
+		result["scope"] = "session"
+		result["session_id"] = sessionID
+	}
+	if opts.dryRun {
+		if opts.format != "json" {
+			fmt.Fprintf(stdoutOrDefault(opts.stdout), "dry-run db.summary.rebuild.sessions: no changes will be applied\n")
+			writeDBSummaryRebuildSessionsText(stdoutOrDefault(opts.stdout), result)
+			return 0
+		}
+		return writeDryRunResult(opts.stdout, opts.format, "db.summary.rebuild.sessions", result)
+	}
+
+	if sessionID != "" {
+		if err := st.RebuildSessionSummary(sessionID); err != nil {
+			slog.Error("Rebuild session summary failed", "session_id", sessionID, "error", err)
+			return 1
+		}
+		result["rebuilt_one"] = true
+	} else {
+		if err := st.RebuildSessionSummaries(); err != nil {
+			slog.Error("Rebuild session summaries failed", "error", err)
+			return 1
+		}
+		result["rebuilt_all"] = true
+	}
+	result["mutated"] = true
+	if err := writeCLIResult(stdoutOrDefault(opts.stdout), opts.format, "db.summary.rebuild.sessions", result, func(w io.Writer) error {
+		fmt.Fprintf(w, "session summaries rebuilt\n")
+		writeDBSummaryRebuildSessionsText(w, result)
+		return nil
+	}); err != nil {
+		slog.Error("Write session summary rebuild result failed", "error", err)
+		return 1
+	}
+	return 0
+}
+
+func writeDBSummaryRebuildSessionsText(w io.Writer, result map[string]any) {
+	fmt.Fprintf(w, "scope: %s\n", result["scope"])
+	if result["session_id"] != nil {
+		fmt.Fprintf(w, "session_id: %s\n", result["session_id"])
+	}
+	fmt.Fprintf(w, "candidate_count: %v\n", result["candidate_count"])
+	fmt.Fprintf(w, "existing_count: %v\n", result["existing_count"])
+	fmt.Fprintf(w, "mutated: %v\n", result["mutated"])
 }
 
 func runDBSecretStatusWithOptions(opts dbSecretOptions) int {
