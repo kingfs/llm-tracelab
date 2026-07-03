@@ -3345,7 +3345,7 @@ func (s *Store) initSchema() error {
 		if err := s.ensureLogExchangeColumns(); err != nil {
 			return err
 		}
-		return s.ensureHotpathIndexes()
+		return nil
 	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
