@@ -5,12 +5,14 @@ import { EmptyState } from "../components/common/EmptyState";
 import { SessionList } from "../components/monitor/SessionList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { formatTime, setOrDeleteParam, summarizeSessionItems } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
 
 export function SessionsPage() {
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const query = searchParams.get("q") || "";
@@ -75,36 +77,36 @@ export function SessionsPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Local First LLM Replay Proxy</p>
-          <h1>Sessions</h1>
+          <h1>{t("sessions.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <span className="badge badge-live">refresh / 60s</span>
+          <span className="badge badge-live">{t("common.refresh60")}</span>
           <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
       <section className="hero-grid">
-        <StatCard label="Sessions" value={sessionStats.totalSessions} />
-        <StatCard label="Requests" value={sessionStats.totalRequests} />
-        <StatCard label="Tokens" value={sessionStats.totalTokens} accent="accent-gold" />
-        <StatCard label="Avg Success" value={`${sessionStats.avgSuccessRate.toFixed(1)}%`} accent="accent-green" />
+        <StatCard label={t("sessions.title")} value={sessionStats.totalSessions} />
+        <StatCard label={t("common.requests")} value={sessionStats.totalRequests} />
+        <StatCard label={t("common.tokens")} value={sessionStats.totalTokens} accent="accent-gold" />
+        <StatCard label={t("sessions.avgSuccess")} value={`${sessionStats.avgSuccessRate.toFixed(1)}%`} accent="accent-green" />
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Recent sessions</p>
-            <h2>Latest 50 sessions</h2>
+            <h2>{t("sessions.latest")}</h2>
           </div>
           <div className="panel-head-actions">
             <div className="pager">
               <button className="ghost-button" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-                Previous
+                {t("common.previous")}
               </button>
               <span className="pager-label">
                 {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
               </span>
               <button className="ghost-button" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
-                Next
+                {t("common.next")}
               </button>
             </div>
           </div>
@@ -113,34 +115,34 @@ export function SessionsPage() {
           <input
             className="filter-input filter-input-wide"
             type="search"
-            placeholder="Search session id, model, provider"
+            placeholder={t("sessions.search")}
             value={filters.query}
             onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
           />
           <input
             className="filter-input"
             type="text"
-            placeholder="provider"
+            placeholder={t("sessions.provider")}
             value={filters.provider}
             onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
           />
           <input
             className="filter-input"
             type="text"
-            placeholder="model"
+            placeholder={t("sessions.model")}
             value={filters.model}
             onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
           />
           <button className="ghost-button" type="submit">
-            Apply
+            {t("common.apply")}
           </button>
           <button className="ghost-button" type="button" onClick={resetFilters}>
-            Reset
+            {t("common.reset")}
           </button>
         </form>
 
-        {error ? <EmptyState title="Unable to load sessions" detail={error} tone="danger" /> : null}
-        {loading && !data ? <EmptyState title="Loading sessions" detail="Rebuilding the latest session view from the indexed trace store." /> : null}
+        {error ? <EmptyState title={t("sessions.loadError")} detail={error} tone="danger" /> : null}
+        {loading && !data ? <EmptyState title={t("sessions.loading")} detail={t("sessions.loadingDetail")} /> : null}
 
         <SessionList items={items} />
       </section>

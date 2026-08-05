@@ -36,7 +36,6 @@ type Store struct {
 	client *dao.Client
 	db     *sql.DB
 	path   string
-	driver string
 }
 
 type TokenResult struct {
@@ -65,33 +64,10 @@ func Open(path string) (*Store, error) {
 
 func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
 	driver = normalizeDriver(driver)
-	var (
-		db             *sql.DB
-		err            error
-		path           string
-		entDialectName string
-	)
-	switch driver {
-	case "sqlite":
-		path = config.SQLitePathFromDSN(dsn)
-		if strings.TrimSpace(path) == "" {
-			return nil, errors.New("auth database path is required")
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, err
-		}
-		db, err = sql.Open("sqlite", sqliteDSN(path))
-		entDialectName = dialect.SQLite
-	case "postgres", "postgresql":
-		if strings.TrimSpace(dsn) == "" {
-			return nil, errors.New("auth postgres dsn is required")
-		}
-		db, err = sql.Open("postgres", dsn)
-		path = dsn
-		entDialectName = dialect.Postgres
-	default:
+	if driver != "sqlite" && driver != "postgres" {
 		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
+	db, path, entDialect, err := openAuthDatabase(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -101,21 +77,53 @@ func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int)
 	if maxIdleConns > 0 {
 		db.SetMaxIdleConns(maxIdleConns)
 	}
-	drv := entsql.OpenDB(entDialectName, db)
+	drv := entsql.OpenDB(entDialect, db)
 	return &Store{
 		client: dao.NewClient(dao.Driver(drv)),
 		db:     db,
 		path:   path,
-		driver: driver,
 	}, nil
 }
 
 func normalizeDriver(driver string) string {
 	driver = strings.ToLower(strings.TrimSpace(driver))
-	if driver == "" {
+	switch driver {
+	case "":
 		return "sqlite"
+	case "postgresql":
+		return "postgres"
+	default:
+		return driver
 	}
-	return driver
+}
+
+func openAuthDatabase(driver string, dsn string) (*sql.DB, string, string, error) {
+	switch driver {
+	case "sqlite":
+		path := config.SQLitePathFromDSN(dsn)
+		if strings.TrimSpace(path) == "" {
+			return nil, "", "", errors.New("auth database path is required")
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, "", "", err
+		}
+		db, err := sql.Open("sqlite", sqliteDSN(path))
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, path, dialect.SQLite, nil
+	case "postgres":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, "", "", errors.New("postgres auth database dsn is required")
+		}
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, dsn, dialect.Postgres, nil
+	default:
+		return nil, "", "", fmt.Errorf("auth store driver %q is not supported yet", driver)
+	}
 }
 
 func sqliteDSN(dbPath string) string {
@@ -223,25 +231,38 @@ func (s *Store) ResetPassword(ctx context.Context, username string, password str
 }
 
 func (s *Store) Login(ctx context.Context, username string, password string, ttl time.Duration) (TokenResult, error) {
-	if err := s.VerifyPassword(ctx, username, password); err != nil {
+	if _, err := s.AuthenticatePassword(ctx, username, password); err != nil {
+		return TokenResult{}, err
+	}
+	if err := s.deleteTokensByName(ctx, username, "monitor-login"); err != nil {
 		return TokenResult{}, err
 	}
 	return s.CreateToken(ctx, username, "monitor-login", DefaultTokenScope, ttl)
 }
 
 func (s *Store) VerifyPassword(ctx context.Context, username string, password string) error {
+	_, err := s.AuthenticatePassword(ctx, username, password)
+	return err
+}
+
+func (s *Store) AuthenticatePassword(ctx context.Context, username string, password string) (Principal, error) {
 	username = normalizeUsername(username)
 	row, err := s.client.User.Query().Where(user.UsernameEQ(username), user.EnabledEQ(true)).Only(ctx)
 	if err != nil {
-		return errors.New("invalid username or password")
+		return Principal{}, errors.New("invalid username or password")
 	}
 	if bcrypt.CompareHashAndPassword([]byte(row.PasswordHash), []byte(password)) != nil {
-		return errors.New("invalid username or password")
+		return Principal{}, errors.New("invalid username or password")
 	}
 	if _, err := row.Update().SetLastLoginAt(time.Now().UTC()).Save(ctx); err != nil {
-		return err
+		return Principal{}, err
 	}
-	return nil
+	return Principal{
+		UserID:   row.ID,
+		Username: row.Username,
+		Role:     row.Role,
+		Scope:    DefaultTokenScope,
+	}, nil
 }
 
 func (s *Store) CreateToken(ctx context.Context, username string, name string, scope string, ttl time.Duration) (TokenResult, error) {
@@ -341,6 +362,18 @@ func (s *Store) DeleteToken(ctx context.Context, username string, tokenID int) e
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Store) deleteTokensByName(ctx context.Context, username string, name string) error {
+	username = normalizeUsername(username)
+	name = strings.TrimSpace(name)
+	if username == "" || name == "" {
+		return nil
+	}
+	_, err := s.client.APIToken.Delete().
+		Where(apitoken.NameEQ(name), apitoken.HasUserWith(user.UsernameEQ(username))).
+		Exec(ctx)
+	return err
 }
 
 func (s *Store) VerifyToken(ctx context.Context, token string) (Principal, bool, error) {

@@ -17,6 +17,25 @@ const (
 	ProtocolFamilyGoogleGenAI       = "google_genai"
 	ProtocolFamilyVertexNative      = "vertex_native"
 
+	APITypeChatCompletions = "chat_completions"
+	APITypeResponses       = "responses"
+	APITypeResponsesNative = "responses_native"
+	APITypeMessages        = "messages"
+	APITypeGemini          = "gemini_generate_content"
+	APIModeProxy           = "proxy"
+	APIModeRecordOnly      = "record_only"
+	APIModeServer          = "server"
+	APIModeResponsesServer = "responses_server"
+
+	CapabilityResponses       = "responses"
+	CapabilityChatCompletions = "chat_completions"
+	CapabilityToolCalling     = "tool_calling"
+	CapabilityEmbeddings      = "embeddings"
+	CapabilityModels          = "models"
+	CapabilityTokenize        = "tokenize"
+	CapabilityMessages        = "messages"
+	CapabilityGenerateContent = "gemini_generate_content"
+
 	RoutingProfileOpenAIDefault     = "openai_default"
 	RoutingProfileAzureOpenAIV1     = "azure_openai_v1"
 	RoutingProfileAzureOpenAIDeploy = "azure_openai_deployment"
@@ -72,6 +91,9 @@ type ResolvedUpstream struct {
 	BaseURL        string
 	APIKey         string
 	ProviderPreset string
+	APIType        string
+	Mode           string
+	Capabilities   config.UpstreamCapabilitiesConfig
 	ProtocolFamily string
 	RoutingProfile string
 	APIVersion     string
@@ -102,6 +124,9 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		BaseURL:        strings.TrimRight(parsed.String(), "/"),
 		APIKey:         cfg.ApiKey,
 		ProviderPreset: normalizeSlug(cfg.ProviderPreset),
+		APIType:        normalizeSlug(cfg.APIType),
+		Mode:           normalizeSlug(cfg.Mode),
+		Capabilities:   cfg.Capabilities,
 		ProtocolFamily: normalizeSlug(cfg.ProtocolFamily),
 		RoutingProfile: normalizeSlug(cfg.RoutingProfile),
 		APIVersion:     strings.TrimSpace(cfg.APIVersion),
@@ -121,6 +146,12 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 
 	if resolved.ProtocolFamily == "" {
 		resolved.ProtocolFamily = ProtocolFamilyOpenAICompatible
+	}
+	if resolved.APIType == "" {
+		resolved.APIType = defaultAPITypeForProtocolFamily(resolved.ProtocolFamily)
+	}
+	if err := validateAPISurface(resolved); err != nil {
+		return ResolvedUpstream{}, err
 	}
 	if err := validateResolvedPreset(resolved); err != nil {
 		return ResolvedUpstream{}, err
@@ -415,6 +446,76 @@ func (u ResolvedUpstream) StartupDiagnostics() (StartupDiagnostics, error) {
 	}, nil
 }
 
+func (u ResolvedUpstream) Capability(name string) (bool, bool) {
+	switch normalizeSlug(name) {
+	case CapabilityResponses:
+		return capabilityValue(u.Capabilities.Responses)
+	case CapabilityChatCompletions:
+		return capabilityValue(u.Capabilities.ChatCompletions)
+	case CapabilityToolCalling:
+		return capabilityValue(u.Capabilities.ToolCalling)
+	case CapabilityEmbeddings:
+		return capabilityValue(u.Capabilities.Embeddings)
+	case CapabilityModels:
+		return capabilityValue(u.Capabilities.Models)
+	case CapabilityTokenize:
+		return capabilityValue(u.Capabilities.Tokenize)
+	default:
+		return false, false
+	}
+}
+
+func (u ResolvedUpstream) NativeResponsesServerMode() bool {
+	enabled, configured := u.Capability(CapabilityResponses)
+	return isResponsesAPIType(u.APIType) && isServerMode(u.Mode) && (!configured || enabled)
+}
+
+func (u ResolvedUpstream) ChatCompletionsServerMode() bool {
+	enabled, configured := u.Capability(CapabilityChatCompletions)
+	return u.SupportsChatCompletionsAPI() && isServerMode(u.Mode) && (!configured || enabled)
+}
+
+func (u ResolvedUpstream) SupportsChatCompletionsAPI() bool {
+	enabled, configured := u.Capability(CapabilityChatCompletions)
+	if configured && !enabled {
+		return false
+	}
+	if u.APIType == APITypeChatCompletions {
+		return true
+	}
+	return configured && enabled
+}
+
+func (u ResolvedUpstream) SupportsResponsesAPI() bool {
+	enabled, configured := u.Capability(CapabilityResponses)
+	if configured && !enabled {
+		return false
+	}
+	if isResponsesAPIType(u.APIType) {
+		return true
+	}
+	return configured && enabled
+}
+
+func (u ResolvedUpstream) SupportsToolCalling() bool {
+	enabled, configured := u.Capability(CapabilityToolCalling)
+	if configured {
+		return enabled
+	}
+	return true
+}
+
+func (u ResolvedUpstream) SupportsEndpoint(endpoint string) bool {
+	switch llm.NormalizeEndpoint(endpoint) {
+	case "/v1/chat/completions":
+		return u.SupportsChatCompletionsAPI()
+	case "/v1/responses":
+		return u.SupportsResponsesAPI() || u.APIType == APITypeChatCompletions
+	default:
+		return true
+	}
+}
+
 func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	spec, ok := providerPresetRegistry[resolved.ProviderPreset]
 	if !ok {
@@ -525,6 +626,56 @@ func cloneStringMap(input map[string]string) map[string]string {
 	return out
 }
 
+func capabilityValue(value *bool) (bool, bool) {
+	if value == nil {
+		return false, false
+	}
+	return *value, true
+}
+
+func defaultAPITypeForProtocolFamily(protocolFamily string) string {
+	switch protocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		return APITypeMessages
+	case ProtocolFamilyGoogleGenAI, ProtocolFamilyVertexNative:
+		return APITypeGemini
+	default:
+		return APITypeChatCompletions
+	}
+}
+
+func validateAPISurface(resolved ResolvedUpstream) error {
+	switch resolved.APIType {
+	case APITypeChatCompletions, APITypeResponses, APITypeResponsesNative, APITypeMessages, APITypeGemini:
+	default:
+		return fmt.Errorf("unsupported upstream.api_type %q", resolved.APIType)
+	}
+	switch resolved.Mode {
+	case "", APIModeProxy, APIModeRecordOnly, APIModeServer, APIModeResponsesServer:
+	default:
+		return fmt.Errorf("unsupported upstream.mode %q", resolved.Mode)
+	}
+	switch resolved.ProtocolFamily {
+	case ProtocolFamilyAnthropicMessages:
+		if resolved.APIType != APITypeMessages {
+			return fmt.Errorf("upstream.api_type=%q is incompatible with protocol_family=%q", resolved.APIType, resolved.ProtocolFamily)
+		}
+	case ProtocolFamilyGoogleGenAI, ProtocolFamilyVertexNative:
+		if resolved.APIType != APITypeGemini {
+			return fmt.Errorf("upstream.api_type=%q is incompatible with protocol_family=%q", resolved.APIType, resolved.ProtocolFamily)
+		}
+	}
+	return nil
+}
+
+func isResponsesAPIType(apiType string) bool {
+	return apiType == APITypeResponses || apiType == APITypeResponsesNative
+}
+
+func isServerMode(mode string) bool {
+	return mode == APIModeServer || mode == APIModeResponsesServer
+}
+
 func validateOpenAIBasePath(resolved ResolvedUpstream) error {
 	parsed, err := url.Parse(resolved.BaseURL)
 	if err != nil {
@@ -579,6 +730,12 @@ func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstre
 	}
 	if resolved.ProtocolFamily == ProtocolFamilyOpenAICompatible {
 		trimmedReqPath := stripOpenAIVersionPrefix(reqPath)
+		if resolved.RoutingProfile == RoutingProfileVLLMOpenAI {
+			switch llm.NormalizeEndpoint(trimmedReqPath) {
+			case "/tokenize", "/detokenize":
+				return llm.NormalizeEndpoint(trimmedReqPath)
+			}
+		}
 		if llm.NormalizeEndpoint(basePath) == llm.NormalizeEndpoint(reqPath) {
 			return basePath
 		}

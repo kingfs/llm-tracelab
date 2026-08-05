@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,10 +17,16 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
 	"github.com/kingfs/llm-tracelab/internal/proxy"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+)
+
+var (
+	authMigrateDatabaseUp = auth.MigrateDatabaseUp
+	authOpenDatabase      = auth.OpenDatabase
 )
 
 func newServeCommand(runtime *cliRuntime) *cobra.Command {
@@ -59,9 +66,20 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Failed to load config", "path", configPath, "error", err)
 		return 1
 	}
+	if err := applyStartupProviderProbeSuggestions(context.Background(), cfg, nil); err != nil {
+		slog.Error("Startup provider probe failed", "error", err)
+		return 1
+	}
 	if err := validateServeConfig(cfg); err != nil {
 		slog.Error("Invalid serve config", "error", err)
 		return 1
+	}
+
+	if cfg.DatabaseAutoMigrate() {
+		if err := migrateApplicationDatabaseUp(cfg, 0); err != nil {
+			slog.Error("Failed to migrate application database", "error", err)
+			return 1
+		}
 	}
 
 	slog.Info("Starting LLM Proxy...", "version", Version, "go_version", "1.25+")
@@ -73,12 +91,16 @@ func runServeWithConfig(configPath string) int {
 	}
 	defer authStore.Close()
 
-	traceStore, err := store.NewWithDatabase(
+	traceStore, err := store.NewWithDatabaseOptions(
 		cfg.TraceOutputDir(),
 		cfg.DatabaseDriver(),
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
+		store.DatabaseOptions{
+			AutoMigrate:           false,
+			UseSessionSummaryRead: cfg.DatabaseUseSessionSummaryRead(),
+		},
 	)
 	if err != nil {
 		slog.Error("Failed to initialize trace store", "error", err)
@@ -117,6 +139,10 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 	slog.Info("Resolved router config source", "source", source)
+	if err := validateServeRouterConfig(cfg, routerCfg); err != nil {
+		slog.Error("Invalid serve config", "error", err)
+		return 1
+	}
 
 	rtr, err := router.New(routerCfg, traceStore)
 	if err != nil {
@@ -131,9 +157,15 @@ func runServeWithConfig(configPath string) int {
 	rtr.StartBackgroundRefresh()
 	logResolvedTargets(rtr)
 
+	functionExecutorManager, err := buildResponsesFunctionExecutorManager(context.Background(), cfg, traceStore)
+	if err != nil {
+		slog.Error("Failed to initialize responses function executor registry", "error", err)
+		return 1
+	}
+
 	if cfg.Monitor.Port != "" {
 		go func() {
-			mux := newManagementMux(traceStore, rtr, cfg, authStore)
+			mux := newManagementMuxWithFunctionExecutorManager(traceStore, rtr, cfg, functionExecutorManager, authStore)
 
 			addr := ":" + cfg.Monitor.Port
 			srv := &http.Server{
@@ -151,7 +183,7 @@ func runServeWithConfig(configPath string) int {
 		}()
 	}
 
-	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore)
+	handler, err := proxy.NewHandlerWithAuth(cfg, traceStore, rtr, authStore, functionExecutorManager)
 	if err != nil {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1
@@ -175,6 +207,21 @@ func runServeWithConfig(configPath string) int {
 		return 1
 	}
 	return 0
+}
+
+func buildResponsesFunctionExecutorManager(ctx context.Context, cfg *config.Config, traceStore *store.Store) (*functionexec.Manager, error) {
+	base := cfg.ResponsesFunctionExecutorsConfig()
+	if traceStore != nil {
+		snapshot, ok, err := traceStore.LoadResponsesFunctionExecutorConfigSnapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			base = functionexec.ApplySafeOverlay(base, snapshot)
+			slog.Info("Loaded persisted responses function executor overlay")
+		}
+	}
+	return functionexec.NewManager(base)
 }
 
 func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store, interval time.Duration, wg *sync.WaitGroup) {
@@ -215,13 +262,27 @@ func startTraceStoreBackgroundSync(ctx context.Context, traceStore *store.Store,
 }
 
 func openAuthStore(cfg *config.Config) (*auth.Store, error) {
-	if cfg.DatabaseAutoMigrate() {
-		if err := auth.MigrateDatabaseUp(cfg.DatabaseDriver(), cfg.DatabaseDSN(), 0); err != nil {
-			return nil, fmt.Errorf("migrate database: %w", err)
+	return openAuthStoreWithAutoSchema(cfg)
+}
+
+func openAuthStoreWithAutoSchema(cfg *config.Config) (*auth.Store, error) {
+	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
+	switch driver {
+	case "sqlite":
+		if cfg.DatabaseAutoMigrate() {
+			if err := authMigrateDatabaseUp(driver, cfg.DatabaseDSN(), 0); err != nil {
+				return nil, fmt.Errorf("migrate database: %w", err)
+			}
 		}
+	case "postgres":
+		// Postgres auth tables are owned by the application migration set, which
+		// serve applies before opening the auth store.
+	default:
+		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
-	st, err := auth.OpenDatabase(
-		cfg.DatabaseDriver(),
+
+	st, err := authOpenDatabase(
+		driver,
 		cfg.DatabaseDSN(),
 		cfg.DatabaseMaxOpenConns(),
 		cfg.DatabaseMaxIdleConns(),
@@ -230,6 +291,18 @@ func openAuthStore(cfg *config.Config) (*auth.Store, error) {
 		return nil, err
 	}
 	return st, nil
+}
+
+func normalizeAuthStoreDriver(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	switch driver {
+	case "":
+		return "sqlite"
+	case "postgresql":
+		return "postgres"
+	default:
+		return driver
+	}
 }
 
 func validateServeConfig(cfg *config.Config) error {
@@ -247,6 +320,42 @@ func validateServeConfig(cfg *config.Config) error {
 		}
 	}
 	return nil
+}
+
+func validateServeRouterConfig(cfg *config.Config, routerCfg *config.Config) error {
+	if cfg != nil && cfg.ResponsesServerEnabled() {
+		if err := router.ValidateLocalResponsesServerBackendConfig(routerCfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type responsesServerAssemblyConfig struct {
+	Enabled             bool
+	DefaultModel        string
+	ForceStore          bool
+	MaxRequestBodyBytes int64
+	Path                string
+	FunctionExecutors   config.ResponsesFunctionExecutorConfig
+}
+
+func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAssemblyConfig {
+	if cfg == nil {
+		return responsesServerAssemblyConfig{
+			MaxRequestBodyBytes: (config.Config{}).ResponsesMaxRequestBodyBytes(),
+			Path:                (config.Config{}).ResponsesServerPath(),
+			FunctionExecutors:   (config.Config{}).ResponsesFunctionExecutorsConfig(),
+		}
+	}
+	return responsesServerAssemblyConfig{
+		Enabled:             cfg.ResponsesServerEnabled(),
+		DefaultModel:        cfg.ResponsesDefaultModel(),
+		ForceStore:          cfg.ResponsesForceStore(),
+		MaxRequestBodyBytes: cfg.ResponsesMaxRequestBodyBytes(),
+		Path:                cfg.ResponsesServerPath(),
+		FunctionExecutors:   cfg.ResponsesFunctionExecutorsConfig(),
+	}
 }
 
 func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {

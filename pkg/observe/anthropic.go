@@ -42,6 +42,8 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 		Operation:     input.Header.Meta.Operation,
 		Endpoint:      input.Header.Meta.Endpoint,
 		Model:         input.Header.Meta.Model,
+		ExchangeKind:  input.Header.Meta.ExchangeKind,
+		ExchangeRole:  input.Header.Meta.ExchangeRole,
 		Parser:        p.Name(),
 		ParserVersion: p.Version(),
 		Status:        ParseStatusParsed,
@@ -61,6 +63,7 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 			CacheCreationTokens: 0,
 		},
 	}
+	applyExchangeMetadata(input, &obs)
 	req, err := decodeJSONObject(input.RequestBody)
 	if err != nil {
 		return obs, fmt.Errorf("parse anthropic messages request: %w", err)
@@ -89,6 +92,9 @@ func (p anthropicParser) Parse(ctx context.Context, input ParseInput) (TraceObse
 	}
 	appendAnthropicToolObservations(obs.Request.Messages, &obs)
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if input.Header.Meta.Endpoint == "/v1/messages/count_tokens" {
 		resp, err := decodeJSONObject(input.ResponseBody)
 		if err != nil {

@@ -1,0 +1,14 @@
+{
+  "model": "local-test-model",
+  "input": "搜索今日新闻，并用中文简要总结最重要的一条。",
+  "stream": true,
+  "store": true,
+  "metadata": {
+    "fixture": "codex_chinese_news_stream_absent_tools",
+    "expected_behavior": "raw Codex request asks for today's news in Chinese, sets stream=true, and omits tools/tool_choice; compatibility normalization may inject hosted web search when available",
+    "codex": {
+      "thread_id": "thread_fixture_chinese_news_stream_absent_tools",
+      "client_request_id": "turn_fixture_chinese_news_stream_absent_tools_1"
+    }
+  }
+}

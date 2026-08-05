@@ -69,17 +69,104 @@ type Stats struct {
 	SuccessRate    float64
 }
 
+const overviewMetricBucketSize = time.Hour
+
+type overviewMetricContribution struct {
+	Path              string
+	BucketStart       time.Time
+	BucketSizeSeconds int
+	RequestCount      int64
+	SuccessRequest    int64
+	FailedRequest     int64
+	TotalTokens       int64
+	TTFTSum           int64
+	TTFTCount         int64
+	DurationSum       int64
+	DurationCount     int64
+	StreamCount       int64
+}
+
 type Store struct {
-	db        *sql.DB
-	client    *dao.Client
-	outputDir string
-	dbPath    string
-	driver    string
-	secrets   *secretBox
-	syncMu    sync.Mutex
-	eventMu   sync.Mutex
-	eventSeq  uint64
-	eventSubs map[chan SystemEventNotification]struct{}
+	db                    *rebindingDB
+	client                *dao.Client
+	outputDir             string
+	dbPath                string
+	driver                string
+	secrets               *secretBox
+	useSessionSummaryRead bool
+	syncMu                sync.Mutex
+	eventMu               sync.Mutex
+	eventSeq              uint64
+	eventSubs             map[chan SystemEventNotification]struct{}
+}
+
+type DatabaseOptions struct {
+	AutoMigrate           bool
+	UseSessionSummaryRead bool
+}
+
+type rebindingDB struct {
+	*sql.DB
+	driver string
+}
+
+func (db *rebindingDB) Exec(query string, args ...any) (sql.Result, error) {
+	return db.DB.Exec(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return db.DB.ExecContext(ctx, db.rebind(query), args...)
+}
+
+func (db *rebindingDB) Query(query string, args ...any) (*sql.Rows, error) {
+	return db.DB.Query(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	return db.DB.QueryContext(ctx, db.rebind(query), args...)
+}
+
+func (db *rebindingDB) QueryRow(query string, args ...any) *sql.Row {
+	return db.DB.QueryRow(db.rebind(query), args...)
+}
+
+func (db *rebindingDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return db.DB.QueryRowContext(ctx, db.rebind(query), args...)
+}
+
+func (db *rebindingDB) rebind(query string) string {
+	if db == nil || db.driver != "postgres" {
+		return query
+	}
+	return rebindPostgresPlaceholders(query)
+}
+
+func rebindPostgresPlaceholders(query string) string {
+	var b strings.Builder
+	b.Grow(len(query) + 8)
+	arg := 1
+	inSingleQuote := false
+	for i := 0; i < len(query); i++ {
+		ch := query[i]
+		if ch == '\'' {
+			b.WriteByte(ch)
+			if inSingleQuote && i+1 < len(query) && query[i+1] == '\'' {
+				i++
+				b.WriteByte(query[i])
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if ch == '?' && !inSingleQuote {
+			b.WriteByte('$')
+			fmt.Fprint(&b, arg)
+			arg++
+			continue
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
 }
 
 const (
@@ -179,6 +266,16 @@ type SessionPageResult struct {
 	TotalPages int
 }
 
+type SessionSummaryRebuildStats struct {
+	SessionID      string `json:"session_id,omitempty"`
+	CandidateCount int    `json:"candidate_count"`
+	ExistingCount  int    `json:"existing_count"`
+	WouldDeleteAll bool   `json:"would_delete_all"`
+	WouldDeleteOne bool   `json:"would_delete_one"`
+	RebuiltAll     bool   `json:"rebuilt_all"`
+	RebuiltOne     bool   `json:"rebuilt_one"`
+}
+
 type UpstreamTargetRecord struct {
 	ID                string
 	BaseURL           string
@@ -208,6 +305,9 @@ type ChannelConfigRecord struct {
 	Source             string
 	BaseURL            string
 	ProviderPreset     string
+	APIType            string
+	Mode               string
+	CapabilitiesJSON   string
 	ProtocolFamily     string
 	RoutingProfile     string
 	APIVersion         string
@@ -232,22 +332,64 @@ type ChannelConfigRecord struct {
 }
 
 type ChannelModelRecord struct {
-	ChannelID               string
-	Model                   string
-	DisplayName             string
-	Source                  string
-	Enabled                 bool
-	SupportsResponses       *int
-	SupportsChatCompletions *int
-	SupportsEmbeddings      *int
-	ContextWindow           *int
-	InputModalitiesJSON     string
-	OutputModalitiesJSON    string
-	RawModelJSON            string
-	FirstSeenAt             time.Time
-	LastSeenAt              time.Time
-	LastProbeAt             time.Time
+	ChannelID                   string
+	Model                       string
+	DisplayName                 string
+	Source                      string
+	Enabled                     bool
+	SupportsResponses           *int
+	SupportsChatCompletions     *int
+	SupportsEmbeddings          *int
+	ContextWindow               *int
+	MaxOutputTokens             *int
+	CompactHistoryItemThreshold *int
+	UpstreamModel               string
+	ProfileSource               string
+	ProfileAdoptionStatus       string
+	InputModalitiesJSON         string
+	OutputModalitiesJSON        string
+	RawModelJSON                string
+	FirstSeenAt                 time.Time
+	LastSeenAt                  time.Time
+	LastProbeAt                 time.Time
 }
+
+type ChannelModelProfilePatch struct {
+	DisplayName                 *string
+	Enabled                     *bool
+	SupportsResponses           *bool
+	SupportsChatCompletions     *bool
+	SupportsEmbeddings          *bool
+	ContextWindow               *int
+	MaxOutputTokens             *int
+	CompactHistoryItemThreshold *int
+	UpstreamModel               *string
+	ProfileSource               *string
+	ProfileAdoptionStatus       *string
+}
+
+type ModelAliasRecord struct {
+	ID          string
+	Alias       string
+	TargetModel string
+	ChannelID   string
+	Enabled     bool
+	Description string
+	Source      string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ModelAliasPatch struct {
+	Alias       *string
+	TargetModel *string
+	ChannelID   *string
+	Enabled     *bool
+	Description *string
+	Source      *string
+}
+
+var ErrModelAliasConflict = errors.New("model alias conflict")
 
 type ModelCatalogRecord struct {
 	Model       string
@@ -425,6 +567,7 @@ type SystemEventFilter struct {
 	Category string
 	Query    string
 	Since    time.Time
+	After    string
 	Page     int
 	PageSize int
 }
@@ -435,6 +578,21 @@ type SystemEventPageResult struct {
 	Page       int
 	PageSize   int
 	TotalPages int
+	NextCursor string
+	HasMore    bool
+}
+
+const systemEventCursorVersion = 1
+
+type systemEventCursor struct {
+	Version    int    `json:"v"`
+	LastSeenAt string `json:"last_seen_at"`
+	ID         string `json:"id"`
+}
+
+type systemEventCursorPosition struct {
+	LastSeenAt time.Time
+	ID         string
 }
 
 type SystemEventSummary struct {
@@ -626,17 +784,23 @@ type ExperimentRunRecord struct {
 }
 
 type ObservationSummary struct {
-	TraceID       string
-	Parser        string
-	ParserVersion string
-	Status        string
-	Provider      string
-	Operation     string
-	Model         string
-	SummaryJSON   string
-	WarningsJSON  string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	TraceID          string
+	Parser           string
+	ParserVersion    string
+	Status           string
+	Provider         string
+	Operation        string
+	Model            string
+	ExchangeKind     string
+	ExchangeRole     string
+	ParentExchangeID string
+	SequenceIndex    int
+	RequestAuditID   string
+	ResponseID       string
+	SummaryJSON      string
+	WarningsJSON     string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type ObservationMetadata struct {
@@ -773,6 +937,9 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 	if strings.TrimSpace(record.HeadersJSON) == "" {
 		record.HeadersJSON = "{}"
 	}
+	if strings.TrimSpace(record.CapabilitiesJSON) == "" {
+		record.CapabilitiesJSON = "{}"
+	}
 	if strings.TrimSpace(record.ModelDiscovery) == "" {
 		record.ModelDiscovery = "list_models"
 	}
@@ -806,6 +973,9 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 		SetSource(strings.TrimSpace(record.Source)).
 		SetBaseURL(record.BaseURL).
 		SetProviderPreset(strings.TrimSpace(record.ProviderPreset)).
+		SetAPIType(strings.TrimSpace(record.APIType)).
+		SetMode(strings.TrimSpace(record.Mode)).
+		SetCapabilitiesJSON(strings.TrimSpace(record.CapabilitiesJSON)).
 		SetProtocolFamily(strings.TrimSpace(record.ProtocolFamily)).
 		SetRoutingProfile(strings.TrimSpace(record.RoutingProfile)).
 		SetAPIVersion(strings.TrimSpace(record.APIVersion)).
@@ -889,6 +1059,271 @@ func (s *Store) ListChannelModels(channelID string, enabledOnly bool) ([]Channel
 	return out, nil
 }
 
+func (s *Store) ListAdoptedChannelModelProfiles() ([]ChannelModelRecord, error) {
+	channelRows, err := s.client.ChannelConfig.Query().
+		Where(channelconfig.EnabledEQ(true)).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	enabledChannels := make(map[string]struct{}, len(channelRows))
+	for _, row := range channelRows {
+		enabledChannels[row.ID] = struct{}{}
+	}
+	if len(enabledChannels) == 0 {
+		return nil, nil
+	}
+
+	rows, err := s.client.ChannelModel.Query().
+		Where(
+			channelmodel.EnabledEQ(true),
+			channelmodel.ProfileAdoptionStatusEQ("adopted"),
+		).
+		Order(channelmodel.ByModel(), channelmodel.ByChannelID()).
+		All(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ChannelModelRecord, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := enabledChannels[row.ChannelID]; !ok {
+			continue
+		}
+		if row.SupportsChatCompletions != nil && *row.SupportsChatCompletions == 0 {
+			continue
+		}
+		out = append(out, channelModelRecordFromEnt(row))
+	}
+	return out, nil
+}
+
+func (s *Store) ListModelAliases(alias string, enabledOnly bool) ([]ModelAliasRecord, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("store is not initialized")
+	}
+	var args []any
+	where := "1=1"
+	if alias = strings.ToLower(strings.TrimSpace(alias)); alias != "" {
+		where += " AND alias = ?"
+		args = append(args, alias)
+	}
+	if enabledOnly {
+		where += " AND enabled = ?"
+		args = append(args, true)
+	}
+	rows, err := s.db.Query(`SELECT id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at
+		FROM model_aliases WHERE `+where+` ORDER BY alias, channel_id, target_model, id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ModelAliasRecord{}
+	for rows.Next() {
+		record, err := scanModelAlias(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpsertModelAlias(record ModelAliasRecord) (ModelAliasRecord, error) {
+	if s == nil || s.db == nil {
+		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
+	}
+	record = normalizeModelAliasRecord(record)
+	if err := s.ValidateModelAlias(record); err != nil {
+		return ModelAliasRecord{}, err
+	}
+	if record.ID == "" {
+		record.ID = stableModelAliasID(record)
+	}
+	now := time.Now().UTC()
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	if record.UpdatedAt.IsZero() {
+		record.UpdatedAt = now
+	}
+	if record.Source == "" {
+		record.Source = "manual"
+	}
+	_, err := s.db.Exec(`INSERT INTO model_aliases (id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			alias = excluded.alias,
+			target_model = excluded.target_model,
+			channel_id = excluded.channel_id,
+			enabled = excluded.enabled,
+			description = excluded.description,
+			source = excluded.source,
+			updated_at = excluded.updated_at`,
+		record.ID,
+		record.Alias,
+		record.TargetModel,
+		record.ChannelID,
+		record.Enabled,
+		record.Description,
+		record.Source,
+		record.CreatedAt,
+		record.UpdatedAt,
+	)
+	if err != nil {
+		return ModelAliasRecord{}, err
+	}
+	return s.GetModelAlias(record.ID)
+}
+
+func (s *Store) ValidateModelAlias(record ModelAliasRecord) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	record = normalizeModelAliasRecord(record)
+	if record.Alias == "" {
+		return fmt.Errorf("alias is required")
+	}
+	if record.TargetModel == "" {
+		return fmt.Errorf("target model is required")
+	}
+	if record.Alias == record.TargetModel {
+		return fmt.Errorf("model alias cannot target itself")
+	}
+	if record.ID == "" {
+		record.ID = stableModelAliasID(record)
+	}
+	if err := s.ensureNoDirectAliasCycle(record); err != nil {
+		return err
+	}
+	if record.Enabled {
+		if err := s.ensureNoDuplicateActiveModelAlias(record); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureNoDirectAliasCycle(record ModelAliasRecord) error {
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM model_aliases
+		WHERE alias = ? AND target_model = ? AND id <> ? LIMIT 1`, record.TargetModel, record.Alias, record.ID).Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("direct model alias cycle with %s", existingID)
+}
+
+func (s *Store) ensureNoDuplicateActiveModelAlias(record ModelAliasRecord) error {
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM model_aliases
+		WHERE alias = ? AND target_model = ? AND channel_id = ? AND enabled = ? AND id <> ? LIMIT 1`, record.Alias, record.TargetModel, record.ChannelID, true, record.ID).Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: active alias %q already targets %q on channel %q", ErrModelAliasConflict, record.Alias, record.TargetModel, record.ChannelID)
+}
+
+func (s *Store) GetModelAlias(id string) (ModelAliasRecord, error) {
+	if s == nil || s.db == nil {
+		return ModelAliasRecord{}, fmt.Errorf("store is not initialized")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ModelAliasRecord{}, fmt.Errorf("model alias id is required")
+	}
+	row := s.db.QueryRow(`SELECT id, alias, target_model, channel_id, enabled, description, source, created_at, updated_at
+		FROM model_aliases WHERE id = ?`, id)
+	return scanModelAlias(row)
+}
+
+func (s *Store) SetModelAliasEnabled(id string, enabled bool) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("model alias id is required")
+	}
+	result, err := s.db.Exec(`UPDATE model_aliases SET enabled = ?, updated_at = ? WHERE id = ?`, enabled, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) DeleteModelAlias(id string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("store is not initialized")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("model alias id is required")
+	}
+	result, err := s.db.Exec(`DELETE FROM model_aliases WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+type modelAliasScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanModelAlias(scanner modelAliasScanner) (ModelAliasRecord, error) {
+	var record ModelAliasRecord
+	if err := scanner.Scan(
+		&record.ID,
+		&record.Alias,
+		&record.TargetModel,
+		&record.ChannelID,
+		&record.Enabled,
+		&record.Description,
+		&record.Source,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return ModelAliasRecord{}, err
+	}
+	return record, nil
+}
+
+func normalizeModelAliasRecord(record ModelAliasRecord) ModelAliasRecord {
+	record.ID = strings.TrimSpace(record.ID)
+	record.Alias = strings.ToLower(strings.TrimSpace(record.Alias))
+	record.TargetModel = strings.ToLower(strings.TrimSpace(record.TargetModel))
+	record.ChannelID = strings.TrimSpace(record.ChannelID)
+	record.Description = strings.TrimSpace(record.Description)
+	record.Source = strings.TrimSpace(record.Source)
+	return record
+}
+
+func stableModelAliasID(record ModelAliasRecord) string {
+	key := record.Alias + "\x00" + record.ChannelID + "\x00" + record.TargetModel
+	sum := sha256.Sum256([]byte(key))
+	return "mal_" + hex.EncodeToString(sum[:8])
+}
+
 func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRecord) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
@@ -931,6 +1366,11 @@ func (s *Store) ReplaceChannelModels(channelID string, records []ChannelModelRec
 			SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
 			SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
 			SetNillableContextWindow(record.ContextWindow).
+			SetNillableMaxOutputTokens(record.MaxOutputTokens).
+			SetNillableCompactHistoryItemThreshold(record.CompactHistoryItemThreshold).
+			SetUpstreamModel(strings.TrimSpace(record.UpstreamModel)).
+			SetProfileSource(strings.TrimSpace(record.ProfileSource)).
+			SetProfileAdoptionStatus(strings.TrimSpace(record.ProfileAdoptionStatus)).
 			SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 			SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 			SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
@@ -982,6 +1422,11 @@ func (s *Store) UpsertChannelModel(channelID string, record ChannelModelRecord) 
 		SetNillableSupportsChatCompletions(record.SupportsChatCompletions).
 		SetNillableSupportsEmbeddings(record.SupportsEmbeddings).
 		SetNillableContextWindow(record.ContextWindow).
+		SetNillableMaxOutputTokens(record.MaxOutputTokens).
+		SetNillableCompactHistoryItemThreshold(record.CompactHistoryItemThreshold).
+		SetUpstreamModel(strings.TrimSpace(record.UpstreamModel)).
+		SetProfileSource(strings.TrimSpace(record.ProfileSource)).
+		SetProfileAdoptionStatus(strings.TrimSpace(record.ProfileAdoptionStatus)).
 		SetInputModalitiesJSON(defaultJSON(record.InputModalitiesJSON, "[]")).
 		SetOutputModalitiesJSON(defaultJSON(record.OutputModalitiesJSON, "[]")).
 		SetRawModelJSON(defaultJSON(record.RawModelJSON, "{}")).
@@ -1022,12 +1467,96 @@ func (s *Store) SetChannelModelEnabled(channelID string, model string, enabled b
 	if model == "" {
 		return fmt.Errorf("model is required")
 	}
-	_, err := s.client.ChannelModel.Update().
+	affected, err := s.client.ChannelModel.Update().
 		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
 		SetEnabled(enabled).
 		SetLastSeenAt(time.Now().UTC()).
 		Save(context.Background())
-	return err
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch ChannelModelProfilePatch) (ChannelModelRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	model = strings.ToLower(strings.TrimSpace(model))
+	if channelID == "" {
+		return ChannelModelRecord{}, fmt.Errorf("channel id is required")
+	}
+	if model == "" {
+		return ChannelModelRecord{}, fmt.Errorf("model is required")
+	}
+	update := s.client.ChannelModel.Update().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		SetLastSeenAt(time.Now().UTC())
+	if patch.DisplayName != nil {
+		update.SetDisplayName(strings.TrimSpace(*patch.DisplayName))
+	}
+	if patch.Enabled != nil {
+		update.SetEnabled(*patch.Enabled)
+	}
+	if patch.SupportsResponses != nil {
+		update.SetSupportsResponses(boolToCapabilityInt(*patch.SupportsResponses))
+	}
+	if patch.SupportsChatCompletions != nil {
+		update.SetSupportsChatCompletions(boolToCapabilityInt(*patch.SupportsChatCompletions))
+	}
+	if patch.SupportsEmbeddings != nil {
+		update.SetSupportsEmbeddings(boolToCapabilityInt(*patch.SupportsEmbeddings))
+	}
+	if patch.ContextWindow != nil {
+		update.SetContextWindow(*patch.ContextWindow)
+	}
+	if patch.MaxOutputTokens != nil {
+		update.SetMaxOutputTokens(*patch.MaxOutputTokens)
+	}
+	if patch.CompactHistoryItemThreshold != nil {
+		update.SetCompactHistoryItemThreshold(*patch.CompactHistoryItemThreshold)
+	}
+	if patch.UpstreamModel != nil {
+		update.SetUpstreamModel(strings.TrimSpace(*patch.UpstreamModel))
+	}
+	if patch.ProfileSource != nil {
+		update.SetProfileSource(strings.TrimSpace(*patch.ProfileSource))
+	}
+	if patch.ProfileAdoptionStatus != nil {
+		update.SetProfileAdoptionStatus(strings.TrimSpace(*patch.ProfileAdoptionStatus))
+	}
+	if _, err := update.Save(context.Background()); err != nil {
+		return ChannelModelRecord{}, err
+	}
+	row, err := s.client.ChannelModel.Query().
+		Where(channelmodel.ChannelIDEQ(channelID), channelmodel.ModelEQ(model)).
+		Only(context.Background())
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return ChannelModelRecord{}, sql.ErrNoRows
+		}
+		return ChannelModelRecord{}, err
+	}
+	record := channelModelRecordFromEnt(row)
+	if record.DisplayName != "" {
+		if err := s.UpsertModelCatalog(ModelCatalogRecord{
+			Model:       record.Model,
+			DisplayName: record.DisplayName,
+			FirstSeenAt: record.FirstSeenAt,
+			LastSeenAt:  record.LastSeenAt,
+		}); err != nil {
+			return ChannelModelRecord{}, err
+		}
+	}
+	return record, nil
+}
+
+func boolToCapabilityInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (s *Store) DeleteChannelModel(channelID string, model string) error {
@@ -1079,6 +1608,21 @@ func (s *Store) UpsertModelCatalog(record ModelCatalogRecord) error {
 		OnConflictColumns(modelcatalog.FieldID).
 		UpdateNewValues().
 		Exec(context.Background())
+}
+
+func (s *Store) GetModelCatalog(model string) (ModelCatalogRecord, error) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return ModelCatalogRecord{}, fmt.Errorf("model is required")
+	}
+	row, err := s.client.ModelCatalog.Get(context.Background(), model)
+	if err != nil {
+		if dao.IsNotFound(err) {
+			return ModelCatalogRecord{}, sql.ErrNoRows
+		}
+		return ModelCatalogRecord{}, err
+	}
+	return modelCatalogRecordFromEnt(row), nil
 }
 
 func (s *Store) CreateChannelProbeRun(record ChannelProbeRunRecord) (ChannelProbeRunRecord, error) {
@@ -1191,12 +1735,27 @@ func (s *Store) ListModelCatalogAnalytics(since time.Time, todaySince time.Time)
 	if err != nil {
 		return nil, err
 	}
+	logModelChannels, err := s.logModelChannels(since)
+	if err != nil {
+		return nil, err
+	}
 	for _, model := range logModels {
 		if !isUsageModelName(model) {
 			continue
 		}
 		if modelSet[model] == nil {
 			modelSet[model] = &ModelCatalogAnalyticsRecord{Model: model}
+		}
+		if providersByModel[model] == nil {
+			providersByModel[model] = map[string]struct{}{}
+			channelsByModel[model] = map[string]struct{}{}
+			enabledChannelsByModel[model] = map[string]struct{}{}
+		}
+		for channelID := range logModelChannels[model] {
+			channelsByModel[model][channelID] = struct{}{}
+			if provider := providerByChannel[channelID]; provider != "" {
+				providersByModel[model][provider] = struct{}{}
+			}
 		}
 	}
 	for _, record := range modelSet {
@@ -1258,10 +1817,12 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 	if err != nil {
 		return ModelDetailAnalyticsRecord{}, err
 	}
+	seenChannels := map[string]struct{}{}
 	for _, channelModel := range channelModels {
 		if strings.ToLower(channelModel.Model) != model || !isUsageModelName(model) {
 			continue
 		}
+		seenChannels[channelModel.ChannelID] = struct{}{}
 		summary, err := s.usageSummary("model = ? AND selected_upstream_id = ?", []any{model, channelModel.ChannelID}, since)
 		if err != nil {
 			return ModelDetailAnalyticsRecord{}, err
@@ -1271,6 +1832,25 @@ func (s *Store) GetModelDetailAnalytics(model string, since time.Time, todaySinc
 			Model:     model,
 			Enabled:   channelModel.Enabled,
 			Source:    channelModel.Source,
+			Summary:   summary,
+		})
+	}
+	logChannels, err := s.modelLogChannels(model, since)
+	if err != nil {
+		return ModelDetailAnalyticsRecord{}, err
+	}
+	for _, channelID := range logChannels {
+		if _, ok := seenChannels[channelID]; ok {
+			continue
+		}
+		summary, err := s.usageSummary("model = ? AND selected_upstream_id = ?", []any{model, channelID}, since)
+		if err != nil {
+			return ModelDetailAnalyticsRecord{}, err
+		}
+		detail.Channels = append(detail.Channels, ChannelModelAnalyticsRecord{
+			ChannelID: channelID,
+			Model:     model,
+			Source:    "trace",
 			Summary:   summary,
 		})
 	}
@@ -1376,7 +1956,7 @@ func (s *Store) GetChannelRecentFailures(channelID string, since time.Time, limi
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT
 			selected_upstream_id,
 			COUNT(*) AS request_count,
@@ -1460,13 +2040,13 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	}
 
 	var analytics RoutingFailureAnalytics
-	if err := s.queryRow(`SELECT COUNT(*) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&analytics.Total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&analytics.Total); err != nil {
 		return RoutingFailureAnalytics{}, err
 	}
 
 	reasonArgs := append([]any{}, whereArgs...)
 	reasonArgs = append(reasonArgs, limitReasons)
-	reasonRows, err := s.query(`
+	reasonRows, err := s.db.Query(`
 		SELECT routing_failure_reason, COUNT(*) AS count
 		FROM logs
 		WHERE `+baseWhere+`
@@ -1491,7 +2071,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 
 	recentArgs := append([]any{}, whereArgs...)
 	recentArgs = append(recentArgs, limitRecent)
-	recentRows, err := s.query(`
+	recentRows, err := s.db.Query(`
 		SELECT trace_id, model, endpoint, recorded_at, routing_failure_reason, error_text, status_code
 		FROM logs
 		WHERE `+baseWhere+`
@@ -1521,20 +2101,18 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	}
 
 	referenceTime := time.Now().UTC()
-	var latestRecordedAt string
-	if err := s.queryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
+	var latestRecordedAt any
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
 		return RoutingFailureAnalytics{}, err
 	}
-	if strings.TrimSpace(latestRecordedAt) != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return RoutingFailureAnalytics{}, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return RoutingFailureAnalytics{}, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	timelineArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
-	timelineRows, err := s.query(`
+	timelineRows, err := s.db.Query(`
 		SELECT recorded_at
 		FROM logs
 		WHERE recorded_at >= ? AND `+baseWhere+`
@@ -1609,13 +2187,15 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	queryArgs := append([]any{upstreamID}, whereArgs...)
 	queryArgs = append(queryArgs, traceLimit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
@@ -1654,28 +2234,26 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	}
 
 	timelineArgs := append([]any{upstreamID}, whereArgs...)
-	var latestRecordedAt string
-	err = s.queryRow(`
-		SELECT COALESCE(MAX(recorded_at), '')
-		FROM logs
-		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL,
+	var latestRecordedAt any
+	err = s.db.QueryRow(`
+			SELECT MAX(recorded_at)
+			FROM logs
+			WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL,
 		timelineArgs...,
 	).Scan(&latestRecordedAt)
 	if err != nil {
 		return UpstreamDetail{}, err
 	}
 	referenceTime := time.Now().UTC()
-	if latestRecordedAt != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return UpstreamDetail{}, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return UpstreamDetail{}, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	buckets := make(map[time.Time]int, bucketCount)
 	failureTimelineArgs := append([]any{upstreamID}, whereArgs...)
-	timelineRows, err := s.query(`
+	timelineRows, err := s.db.Query(`
 		SELECT recorded_at
 		FROM logs
 		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL+`
@@ -1727,7 +2305,7 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.T
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT model, COUNT(*) AS count
 		FROM logs
 		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
@@ -1755,7 +2333,7 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.T
 
 	var lastModel string
 	lastModelArgs := append([]any{upstreamID}, whereArgs...)
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
 		SELECT model
 		FROM logs
 		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
@@ -1775,7 +2353,7 @@ func (s *Store) upstreamRecentErrors(upstreamID string, limit int, since time.Ti
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT error_text, status_code, endpoint
 		FROM logs
 		WHERE selected_upstream_id = ?
@@ -1818,7 +2396,7 @@ func (s *Store) upstreamRecentFailures(upstreamID string, limit int, since time.
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT trace_id, model, endpoint, status_code, recorded_at, error_text
 		FROM logs
 		WHERE selected_upstream_id = ?
@@ -1857,7 +2435,7 @@ func (s *Store) upstreamFailureReasons(upstreamID string, limit int, since time.
 	}
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT status_code, error_text
 		FROM logs
 		WHERE selected_upstream_id = ?
@@ -1915,6 +2493,20 @@ func classifyUpstreamFailure(statusCode int, errorText string) string {
 	}
 }
 
+func (s *Store) boolCountCaseSQL(column string) string {
+	if s != nil && s.driver == "postgres" {
+		return "CASE WHEN " + column + " THEN 1 ELSE 0 END"
+	}
+	return "CASE WHEN " + column + " = 1 THEN 1 ELSE 0 END"
+}
+
+func (s *Store) sessionProvidersAggregateSQL() string {
+	if s != nil && s.driver == "postgres" {
+		return "COALESCE(string_agg(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END, ','), '')"
+	}
+	return "COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '')"
+}
+
 func buildUpstreamAnalyticsWhere(since time.Time, modelFilter string) (string, []any) {
 	var (
 		clauses []string
@@ -1941,7 +2533,7 @@ func (s *Store) listLogModels(since time.Time) ([]string, error) {
 		where += " AND recorded_at >= ?"
 		args = append(args, since.UTC().Format(timeLayout))
 	}
-	rows, err := s.query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
+	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1966,7 +2558,7 @@ func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, e
 		where += " AND recorded_at >= ?"
 		args = append(args, since.UTC().Format(timeLayout))
 	}
-	rows, err := s.query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
+	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1984,6 +2576,66 @@ func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, e
 	return out, rows.Err()
 }
 
+func (s *Store) modelLogChannels(model string, since time.Time) ([]string, error) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return nil, fmt.Errorf("model is required")
+	}
+	where := "LOWER(model) = ? AND selected_upstream_id <> ''"
+	args := []any{model}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT selected_upstream_id FROM logs WHERE `+where+` ORDER BY selected_upstream_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var channelID string
+		if err := rows.Scan(&channelID); err != nil {
+			return nil, err
+		}
+		if channelID = strings.TrimSpace(channelID); channelID != "" {
+			out = append(out, channelID)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) logModelChannels(since time.Time) (map[string]map[string]struct{}, error) {
+	where := "model <> '' AND LOWER(model) <> 'list_models' AND selected_upstream_id <> ''"
+	args := []any{}
+	if !since.IsZero() {
+		where += " AND recorded_at >= ?"
+		args = append(args, since.UTC().Format(timeLayout))
+	}
+	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model), selected_upstream_id FROM logs WHERE `+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]map[string]struct{}{}
+	for rows.Next() {
+		var model, channelID string
+		if err := rows.Scan(&model, &channelID); err != nil {
+			return nil, err
+		}
+		model = strings.TrimSpace(model)
+		channelID = strings.TrimSpace(channelID)
+		if model == "" || channelID == "" {
+			continue
+		}
+		if out[model] == nil {
+			out[model] = map[string]struct{}{}
+		}
+		out[model][channelID] = struct{}{}
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) (UsageSummaryRecord, error) {
 	where := strings.TrimSpace(baseWhere)
 	if where == "" {
@@ -1995,13 +2647,13 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 		args = append(args, since.UTC().Format(timeLayout))
 	}
 	var (
-		record       UsageSummaryRecord
-		avgTTFT      float64
-		avgDuration  float64
-		successRate  float64
-		lastSeenText string
+		record        UsageSummaryRecord
+		avgTTFT       float64
+		avgDuration   float64
+		successRate   float64
+		lastSeenValue any
 	)
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
 		SELECT
 			COUNT(*) AS request_count,
 			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
@@ -2014,7 +2666,7 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 			COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
 			COALESCE(AVG(ttft_ms), 0) AS avg_ttft,
 			COALESCE(AVG(duration_ms), 0) AS avg_duration_ms,
-			COALESCE(MAX(recorded_at), '') AS last_seen
+				MAX(recorded_at) AS last_seen
 		FROM logs
 		WHERE `+where, args...).Scan(
 		&record.RequestCount,
@@ -2028,18 +2680,16 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 		&record.CachedTokens,
 		&avgTTFT,
 		&avgDuration,
-		&lastSeenText,
+		&lastSeenValue,
 	); err != nil {
 		return UsageSummaryRecord{}, err
 	}
 	record.SuccessRate = successRate
 	record.AvgTTFT = int(math.Round(avgTTFT))
 	record.AvgDurationMs = int64(math.Round(avgDuration))
-	if strings.TrimSpace(lastSeenText) != "" {
-		lastSeen, err := timeParse(lastSeenText)
-		if err != nil {
-			return UsageSummaryRecord{}, err
-		}
+	if lastSeen, err := timeParseNullableValue(lastSeenValue); err != nil {
+		return UsageSummaryRecord{}, err
+	} else if !lastSeen.IsZero() {
 		record.LastSeen = lastSeen
 	}
 	return record, nil
@@ -2058,15 +2708,13 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	}
 	args := append([]any(nil), baseArgs...)
 	referenceTime := time.Now().UTC()
-	var latestRecordedAt string
-	if err := s.queryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
+	var latestRecordedAt any
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(latestRecordedAt) != "" {
-		latestTime, err := timeParse(latestRecordedAt)
-		if err != nil {
-			return nil, err
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return nil, err
+	} else if !latestTime.IsZero() {
 		referenceTime = latestTime.UTC()
 	}
 	if !since.IsZero() {
@@ -2076,7 +2724,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	queryArgs := append([]any(nil), args...)
 	queryArgs = append(queryArgs, bucketStart.Format(timeLayout))
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT recorded_at, status_code, total_tokens, prompt_tokens, completion_tokens, model
 		FROM logs
 		WHERE `+where+` AND recorded_at >= ?
@@ -2184,6 +2832,10 @@ func New(outputDir string) (*Store, error) {
 }
 
 func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
+	return NewWithDatabaseOptions(outputDir, driver, dsn, maxOpenConns, maxIdleConns, DatabaseOptions{AutoMigrate: true})
+}
+
+func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpenConns int, maxIdleConns int, opts DatabaseOptions) (*Store, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -2191,38 +2843,12 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	if err != nil {
 		return nil, err
 	}
-	driver = strings.ToLower(strings.TrimSpace(driver))
-	if driver == "" {
-		driver = "sqlite"
-	}
-	var (
-		db             *sql.DB
-		dbPath         string
-		entDialectName string
-	)
-	switch driver {
-	case "sqlite":
-		dbPath = config.SQLitePathFromDSN(dsn)
-		if strings.TrimSpace(dbPath) == "" {
-			dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
-		}
-		if dbPath != ":memory:" {
-			if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-				return nil, err
-			}
-		}
-		db, err = sql.Open("sqlite", sqliteDSN(dbPath))
-		entDialectName = dialect.SQLite
-	case "postgres", "postgresql":
-		if strings.TrimSpace(dsn) == "" {
-			return nil, fmt.Errorf("postgres dsn is required")
-		}
-		db, err = sql.Open("postgres", dsn)
-		dbPath = dsn
-		entDialectName = dialect.Postgres
-	default:
+	driver = normalizeDatabaseDriver(driver)
+	if driver != "sqlite" && driver != "postgres" {
 		return nil, fmt.Errorf("store driver %q is not supported yet", driver)
 	}
+
+	db, dbPath, entDialect, err := openStoreDatabase(outputDir, driver, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -2234,128 +2860,116 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	}
 
 	st := &Store{
-		db:        db,
-		client:    dao.NewClient(dao.Driver(entsql.OpenDB(entDialectName, db))),
-		outputDir: outputDir,
-		dbPath:    dbPath,
-		driver:    driver,
-		secrets:   secrets,
+		db:                    &rebindingDB{DB: db, driver: driver},
+		client:                dao.NewClient(dao.Driver(entsql.OpenDB(entDialect, db))),
+		outputDir:             outputDir,
+		dbPath:                dbPath,
+		driver:                driver,
+		secrets:               secrets,
+		useSessionSummaryRead: opts.UseSessionSummaryRead,
 	}
-	if driver == "sqlite" {
-		err = st.initSchema()
-	} else {
-		err = st.ensurePostgresSchema()
+	if opts.AutoMigrate {
+		if err := st.initSchema(); err != nil {
+			_ = st.Close()
+			return nil, err
+		}
 	}
-	if err != nil {
-		_ = st.Close()
-		return nil, err
+
+	if !opts.AutoMigrate {
+		if err := st.ping(); err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+		if driver == "postgres" {
+			if err := st.requirePostgresApplicationMigrations(); err != nil {
+				_ = st.Close()
+				return nil, err
+			}
+		}
 	}
 
 	return st, nil
 }
 
-func (s *Store) ensurePostgresSchema() error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("postgres store is not configured")
+func (s *Store) requirePostgresApplicationMigrations() error {
+	if s.driver != "postgres" {
+		return nil
 	}
-	if err := s.db.Ping(); err != nil {
-		return err
+	var migrationTableExists bool
+	if err := s.db.QueryRow(`SELECT EXISTS (
+		SELECT 1
+		FROM information_schema.tables
+		WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+	)`).Scan(&migrationTableExists); err != nil {
+		return fmt.Errorf("check postgres application migrations: %w", err)
 	}
-	requiredTables := []string{
-		"logs",
-		"users",
-		"api_tokens",
-		"channel_configs",
-		"channel_models",
-		"upstream_targets",
-		"upstream_models",
-		"model_catalog",
-		"system_events",
+	if !migrationTableExists {
+		return errors.New("postgres application schema is not initialized: schema_migrations table is missing; run `llm-tracelab db migrate up` with the same config before starting with database.auto_migrate=false")
 	}
-	for _, table := range requiredTables {
+	for _, table := range []string{"session_summaries", "overview_metric_buckets", "overview_metric_bucket_members"} {
 		var exists bool
-		if err := s.queryRow(`
-			SELECT EXISTS (
-				SELECT 1
-				FROM information_schema.tables
-				WHERE table_schema = 'public' AND table_name = $1
-			)
-		`, table).Scan(&exists); err != nil {
-			return err
+		if err := s.db.QueryRow(`SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = current_schema() AND table_name = ?
+		)`, table).Scan(&exists); err != nil {
+			return fmt.Errorf("check postgres %s migration: %w", table, err)
 		}
 		if !exists {
-			return fmt.Errorf("postgres schema is missing required table %q; run migrations before starting", table)
+			return fmt.Errorf("postgres application schema is missing %s; run `llm-tracelab db migrate up` to apply ent/postgres-migrations before enabling service traffic", table)
 		}
 	}
 	return nil
 }
 
-type execer interface {
-	Exec(query string, args ...any) (sql.Result, error)
+func (s *Store) ping() error {
+	if s.db == nil {
+		return nil
+	}
+	return s.db.Ping()
 }
 
-type queryer interface {
-	Query(query string, args ...any) (*sql.Rows, error)
-}
-
-type queryRower interface {
-	QueryRow(query string, args ...any) *sql.Row
-}
-
-func (s *Store) exec(query string, args ...any) (sql.Result, error) {
-	return execSQL(s.db, s.driver, query, args...)
-}
-
-func (s *Store) query(query string, args ...any) (*sql.Rows, error) {
-	return querySQL(s.db, s.driver, query, args...)
-}
-
-func (s *Store) queryRow(query string, args ...any) *sql.Row {
-	return queryRowSQL(s.db, s.driver, query, args...)
-}
-
-func execSQL(db execer, driver string, query string, args ...any) (sql.Result, error) {
-	return db.Exec(rebindPlaceholders(driver, query), args...)
-}
-
-func querySQL(db queryer, driver string, query string, args ...any) (*sql.Rows, error) {
-	return db.Query(rebindPlaceholders(driver, query), args...)
-}
-
-func queryRowSQL(db queryRower, driver string, query string, args ...any) *sql.Row {
-	return db.QueryRow(rebindPlaceholders(driver, query), args...)
-}
-
-func rebindPlaceholders(driver string, query string) string {
+func normalizeDatabaseDriver(driver string) string {
 	driver = strings.ToLower(strings.TrimSpace(driver))
-	if driver != "postgres" && driver != "postgresql" {
-		return query
+	switch driver {
+	case "":
+		return "sqlite"
+	case "postgresql":
+		return "postgres"
+	default:
+		return driver
 	}
-	var b strings.Builder
-	b.Grow(len(query) + 8)
-	inSingleQuote := false
-	argIndex := 1
-	for i := 0; i < len(query); i++ {
-		ch := query[i]
-		if ch == '\'' {
-			b.WriteByte(ch)
-			if inSingleQuote && i+1 < len(query) && query[i+1] == '\'' {
-				i++
-				b.WriteByte(query[i])
-				continue
+}
+
+func openStoreDatabase(outputDir string, driver string, dsn string) (*sql.DB, string, string, error) {
+	switch driver {
+	case "sqlite":
+		dbPath := config.SQLitePathFromDSN(dsn)
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
+		}
+		if dbPath != ":memory:" {
+			if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+				return nil, "", "", err
 			}
-			inSingleQuote = !inSingleQuote
-			continue
 		}
-		if ch == '?' && !inSingleQuote {
-			b.WriteByte('$')
-			fmt.Fprint(&b, argIndex)
-			argIndex++
-			continue
+		db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+		if err != nil {
+			return nil, "", "", err
 		}
-		b.WriteByte(ch)
+		return db, dbPath, dialect.SQLite, nil
+	case "postgres":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, "", "", errors.New("postgres store dsn is required")
+		}
+		db, err := sql.Open("postgres", dsn)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return db, dsn, dialect.Postgres, nil
+	default:
+		return nil, "", "", fmt.Errorf("store driver %q is not supported yet", driver)
 	}
-	return b.String()
 }
 
 func newLocalSecretBox(outputDir string) (*secretBox, error) {
@@ -2604,12 +3218,12 @@ func (s *Store) applyRotatedChannelSecrets(items []rotatedChannelSecret) error {
 	defer tx.Rollback()
 	for _, item := range items {
 		if item.hasAPIKey {
-			if _, err := execSQL(tx, s.driver, `UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+			if _, err := s.execTx(tx, `UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := execSQL(tx, s.driver, `UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+		if _, err := s.execTx(tx, `UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
 			return err
 		}
 	}
@@ -2777,9 +3391,110 @@ func (s *Store) Close() error {
 	return nil
 }
 
+// EntClient returns the generated ent client backing this store.
+func (s *Store) EntClient() *dao.Client {
+	return s.client
+}
+
+func (s *Store) execTx(tx *sql.Tx, query string, args ...any) (sql.Result, error) {
+	if s == nil || s.db == nil {
+		return tx.Exec(query, args...)
+	}
+	return tx.Exec(s.db.rebind(query), args...)
+}
+
 func (s *Store) initSchema() error {
+	if s.driver == "postgres" {
+		if err := s.client.Schema.Create(context.Background()); err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`CREATE TABLE IF NOT EXISTS "app_settings" (
+			"setting_key" character varying NOT NULL,
+			"value_json" character varying NOT NULL,
+			"updated_at" timestamptz NOT NULL,
+			PRIMARY KEY ("setting_key")
+		);`); err != nil {
+			return err
+		}
+		if err := s.ensureSessionSummariesSchema(); err != nil {
+			return err
+		}
+		if err := s.ensureModelAliasesSchema(); err != nil {
+			return err
+		}
+		if err := s.ensureLogExchangeColumns(); err != nil {
+			return err
+		}
+		if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
+			return err
+		}
+		return nil
+	}
 	stmts := []string{
 		`PRAGMA journal_mode=WAL;`,
+		`CREATE TABLE IF NOT EXISTS app_schema_status (
+			namespace TEXT PRIMARY KEY,
+			version INTEGER NOT NULL,
+			mode TEXT NOT NULL,
+			source TEXT NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS app_settings (
+			setting_key TEXT PRIMARY KEY,
+			value_json TEXT NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE TABLE IF NOT EXISTS session_summaries (
+			session_id TEXT PRIMARY KEY,
+			session_source TEXT NOT NULL DEFAULT '',
+			request_count INTEGER NOT NULL DEFAULT 0,
+			first_seen datetime NOT NULL,
+			last_seen datetime NOT NULL,
+			last_model TEXT NOT NULL DEFAULT '',
+			providers TEXT NOT NULL DEFAULT '',
+			success_request INTEGER NOT NULL DEFAULT 0,
+			failed_request INTEGER NOT NULL DEFAULT 0,
+			success_rate REAL NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			avg_ttft REAL NOT NULL DEFAULT 0,
+			total_duration INTEGER NOT NULL DEFAULT 0,
+			stream_count INTEGER NOT NULL DEFAULT 0,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model);`,
+		`CREATE TABLE IF NOT EXISTS overview_metric_buckets (
+			bucket_start datetime NOT NULL,
+			bucket_size_seconds INTEGER NOT NULL,
+			request_count INTEGER NOT NULL DEFAULT 0,
+			success_request INTEGER NOT NULL DEFAULT 0,
+			failed_request INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			ttft_sum INTEGER NOT NULL DEFAULT 0,
+			ttft_count INTEGER NOT NULL DEFAULT 0,
+			duration_sum INTEGER NOT NULL DEFAULT 0,
+			duration_count INTEGER NOT NULL DEFAULT 0,
+			stream_count INTEGER NOT NULL DEFAULT 0,
+			updated_at datetime NOT NULL,
+			PRIMARY KEY (bucket_start, bucket_size_seconds)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_buckets_start ON overview_metric_buckets(bucket_start);`,
+		`CREATE TABLE IF NOT EXISTS overview_metric_bucket_members (
+			path TEXT PRIMARY KEY,
+			bucket_start datetime NOT NULL,
+			bucket_size_seconds INTEGER NOT NULL,
+			request_count INTEGER NOT NULL DEFAULT 0,
+			success_request INTEGER NOT NULL DEFAULT 0,
+			failed_request INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			ttft_sum INTEGER NOT NULL DEFAULT 0,
+			ttft_count INTEGER NOT NULL DEFAULT 0,
+			duration_sum INTEGER NOT NULL DEFAULT 0,
+			duration_count INTEGER NOT NULL DEFAULT 0,
+			stream_count INTEGER NOT NULL DEFAULT 0,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_bucket_members_bucket ON overview_metric_bucket_members(bucket_start, bucket_size_seconds);`,
 		`CREATE TABLE IF NOT EXISTS logs (
 			path TEXT PRIMARY KEY,
 			trace_id TEXT NOT NULL DEFAULT '',
@@ -2813,6 +3528,11 @@ func (s *Store) initSchema() error {
 			session_source TEXT NOT NULL DEFAULT '',
 			window_id TEXT NOT NULL DEFAULT '',
 			client_request_id TEXT NOT NULL DEFAULT '',
+			exchange_id TEXT NOT NULL DEFAULT '',
+			exchange_kind TEXT NOT NULL DEFAULT '',
+			exchange_role TEXT NOT NULL DEFAULT '',
+			parent_exchange_id TEXT NOT NULL DEFAULT '',
+			sequence_index INTEGER NOT NULL DEFAULT 0,
 			selected_upstream_id TEXT NOT NULL DEFAULT '',
 			selected_upstream_base_url TEXT NOT NULL DEFAULT '',
 			selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
@@ -2851,6 +3571,9 @@ func (s *Store) initSchema() error {
 			source TEXT NOT NULL DEFAULT 'manual',
 			base_url TEXT NOT NULL,
 			provider_preset TEXT NOT NULL DEFAULT '',
+			api_type TEXT NOT NULL DEFAULT '',
+			mode TEXT NOT NULL DEFAULT '',
+			capabilities_json TEXT NOT NULL DEFAULT '{}',
 			protocol_family TEXT NOT NULL DEFAULT '',
 			routing_profile TEXT NOT NULL DEFAULT '',
 			api_version TEXT NOT NULL DEFAULT '',
@@ -2886,6 +3609,11 @@ func (s *Store) initSchema() error {
 			supports_chat_completions INTEGER NULL,
 			supports_embeddings INTEGER NULL,
 			context_window INTEGER NULL,
+			max_output_tokens INTEGER NULL,
+			compact_history_item_threshold INTEGER NULL,
+			upstream_model TEXT NOT NULL DEFAULT '',
+			profile_source TEXT NOT NULL DEFAULT '',
+			profile_adoption_status TEXT NOT NULL DEFAULT '',
 			input_modalities_json TEXT NOT NULL DEFAULT '[]',
 			output_modalities_json TEXT NOT NULL DEFAULT '[]',
 			raw_model_json TEXT NOT NULL DEFAULT '{}',
@@ -2896,6 +3624,20 @@ func (s *Store) initSchema() error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS channelmodel_channel_id_model ON channel_models(channel_id, model);`,
 		`CREATE INDEX IF NOT EXISTS idx_channel_models_model ON channel_models(model);`,
 		`CREATE INDEX IF NOT EXISTS channelmodel_channel_id_enabled ON channel_models(channel_id, enabled);`,
+		`CREATE TABLE IF NOT EXISTS model_aliases (
+			id TEXT PRIMARY KEY,
+			alias TEXT NOT NULL,
+			target_model TEXT NOT NULL,
+			channel_id TEXT NOT NULL DEFAULT '',
+			enabled bool NOT NULL DEFAULT true,
+			description TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_alias ON model_aliases(alias);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_target ON model_aliases(target_model);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_channel ON model_aliases(channel_id);`,
 		`CREATE TABLE IF NOT EXISTS model_catalog (
 			model TEXT PRIMARY KEY,
 			display_name TEXT NOT NULL DEFAULT '',
@@ -2998,6 +3740,12 @@ func (s *Store) initSchema() error {
 			provider TEXT NOT NULL DEFAULT '',
 			operation TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '',
+			exchange_kind TEXT NOT NULL DEFAULT '',
+			exchange_role TEXT NOT NULL DEFAULT '',
+			parent_exchange_id TEXT NOT NULL DEFAULT '',
+			sequence_index INTEGER NOT NULL DEFAULT 0,
+			request_audit_id TEXT NOT NULL DEFAULT '',
+			response_id TEXT NOT NULL DEFAULT '',
 			summary_json TEXT NOT NULL DEFAULT '{}',
 			warnings_json TEXT NOT NULL DEFAULT '[]',
 			created_at datetime NOT NULL,
@@ -3118,14 +3866,136 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen ON system_events(status, last_seen_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category ON system_events(source, category, last_seen_at DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_system_events_trace_id ON system_events(trace_id, last_seen_at DESC) WHERE trace_id <> '';`,
+		`CREATE TABLE IF NOT EXISTS responses (
+			id TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL DEFAULT '',
+			previous_response_id TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'queued',
+			model TEXT NOT NULL,
+			history_item_ids json NULL,
+			output_item_ids json NULL,
+			effective_tools json NULL,
+			metadata json NULL,
+			usage json NULL,
+			error json NULL,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS response_conversation_id_created_at ON responses(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS response_previous_response_id ON responses(previous_response_id);`,
+		`CREATE INDEX IF NOT EXISTS response_status_created_at ON responses(status, created_at);`,
+		`CREATE TABLE IF NOT EXISTS response_items (
+			id TEXT PRIMARY KEY,
+			kind TEXT NOT NULL,
+			response_id TEXT NOT NULL DEFAULT '',
+			conversation_id TEXT NOT NULL DEFAULT '',
+			payload json NOT NULL,
+			created_at datetime NOT NULL,
+			updated_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS responseitem_conversation_id_created_at ON response_items(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS responseitem_response_id_kind ON response_items(response_id, kind);`,
+		`CREATE TABLE IF NOT EXISTS request_audits (
+			id TEXT PRIMARY KEY,
+			response_id TEXT NULL,
+			conversation_id TEXT NULL,
+			method TEXT NOT NULL,
+			path TEXT NOT NULL,
+			client_request_id TEXT NULL,
+			header_json json NULL,
+			body_preview TEXT NULL,
+			body_sha256 TEXT NULL,
+			redaction_json json NULL,
+			status TEXT NOT NULL DEFAULT '',
+			error_text TEXT NULL,
+			created_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS requestaudit_response_id_created_at ON request_audits(response_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS requestaudit_conversation_id_created_at ON request_audits(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS requestaudit_client_request_id ON request_audits(client_request_id);`,
+		`CREATE INDEX IF NOT EXISTS requestaudit_status_created_at ON request_audits(status, created_at);`,
+		`CREATE TABLE IF NOT EXISTS execution_events (
+			id TEXT PRIMARY KEY,
+			response_id TEXT NULL,
+			request_audit_id TEXT NULL,
+			conversation_id TEXT NULL,
+			event_type TEXT NOT NULL,
+			phase TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			message TEXT NULL,
+			details_json json NULL,
+			occurred_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS executionevent_response_id_occurred_at ON execution_events(response_id, occurred_at);`,
+		`CREATE INDEX IF NOT EXISTS executionevent_conversation_id_occurred_at ON execution_events(conversation_id, occurred_at);`,
+		`CREATE INDEX IF NOT EXISTS executionevent_event_type_occurred_at ON execution_events(event_type, occurred_at);`,
+		`CREATE INDEX IF NOT EXISTS executionevent_phase_status_occurred_at ON execution_events(phase, status, occurred_at);`,
+		`CREATE TABLE IF NOT EXISTS upstream_exchanges (
+			id TEXT PRIMARY KEY,
+			response_id TEXT NULL,
+			request_audit_id TEXT NULL,
+			trace_id TEXT NULL,
+			exchange_id TEXT NULL,
+			exchange_kind TEXT NULL,
+			exchange_role TEXT NULL,
+			parent_exchange_id TEXT NULL,
+			sequence_index INTEGER NULL,
+			cassette_path TEXT NULL,
+			upstream_id TEXT NULL,
+			route_target TEXT NULL,
+			model TEXT NULL,
+			endpoint TEXT NULL,
+			status_code INTEGER NULL,
+			started_at datetime NULL,
+			completed_at datetime NULL,
+			error_text TEXT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_response_id_started_at ON upstream_exchanges(response_id, started_at);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_request_audit_id_started_at ON upstream_exchanges(request_audit_id, started_at);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_trace_id ON upstream_exchanges(trace_id);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_exchange_id ON upstream_exchanges(exchange_id);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_parent_exchange_id ON upstream_exchanges(parent_exchange_id);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_upstream_id_started_at ON upstream_exchanges(upstream_id, started_at);`,
+		`CREATE INDEX IF NOT EXISTS upstreamexchange_status_code_started_at ON upstream_exchanges(status_code, started_at);`,
+		`CREATE TABLE IF NOT EXISTS tool_call_audits (
+			id TEXT PRIMARY KEY,
+			response_id TEXT NULL,
+			request_audit_id TEXT NULL,
+			conversation_id TEXT NULL,
+			call_id TEXT NOT NULL,
+			tool_type TEXT NOT NULL,
+			tool_name TEXT NULL,
+			executor TEXT NULL,
+			status TEXT NOT NULL DEFAULT '',
+			phase TEXT NOT NULL DEFAULT 'tool_call',
+			input_json json NULL,
+			output_json json NULL,
+			error_text TEXT NULL,
+			metadata_json json NULL,
+			started_at datetime NULL,
+			completed_at datetime NULL,
+			created_at datetime NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_request_audit_id_created_at ON tool_call_audits(request_audit_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_response_id_created_at ON tool_call_audits(response_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_conversation_id_created_at ON tool_call_audits(conversation_id, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_call_id ON tool_call_audits(call_id);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_tool_name_status_created_at ON tool_call_audits(tool_name, status, created_at);`,
+		`CREATE INDEX IF NOT EXISTS toolcallaudit_status_created_at ON tool_call_audits(status, created_at);`,
 	}
 
 	for _, stmt := range stmts {
-		if _, err := s.exec(stmt); err != nil {
+		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
 	if err := s.ensureColumn("logs", "trace_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("execution_events", "request_audit_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS executionevent_request_audit_id_occurred_at ON execution_events(request_audit_id, occurred_at)`); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("logs", "provider", "TEXT NOT NULL DEFAULT ''"); err != nil {
@@ -3149,6 +4019,9 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("logs", "client_request_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureLogExchangeColumns(); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("logs", "selected_upstream_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -3170,10 +4043,79 @@ func (s *Store) initSchema() error {
 	if err := s.ensureColumn("logs", "routing_failure_reason", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_kind", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "exchange_role", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "parent_exchange_id", "TEXT NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("upstream_exchanges", "sequence_index", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "request_audit_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trace_observations", "response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_exchange_id ON upstream_exchanges(exchange_id)`); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS upstreamexchange_parent_exchange_id ON upstream_exchanges(parent_exchange_id)`); err != nil {
+		return err
+	}
 	if err := s.ensureColumn("analysis_jobs", "request_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn("channel_configs", "source", "TEXT NOT NULL DEFAULT 'manual'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "api_type", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_configs", "capabilities_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "max_output_tokens", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "compact_history_item_threshold", "INTEGER NULL"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "upstream_model", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "profile_source", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("channel_models", "profile_adoption_status", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureSessionSummariesSchema(); err != nil {
+		return err
+	}
+	if err := s.ensureOverviewMetricBucketsSchema(); err != nil {
 		return err
 	}
 	if err := s.backfillTraceIDs(); err != nil {
@@ -3187,10 +4129,15 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS tracelog_recorded_at ON logs(recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS tracelog_model_recorded_at ON logs(model, recorded_at);`,
 		`CREATE INDEX IF NOT EXISTS tracelog_session_id_recorded_at ON logs(session_id, recorded_at);`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_recorded_trace ON logs(session_id, recorded_at DESC, trace_id DESC) WHERE session_id <> '';`,
 		`CREATE INDEX IF NOT EXISTS tracelog_request_id ON logs(request_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status_trace ON parse_jobs(status, trace_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_last_seen_id ON system_events(last_seen_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen_id ON system_events(status, last_seen_at DESC, id DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category_last_seen_id ON system_events(source, category, last_seen_at DESC, id DESC);`,
 	}
 	for _, stmt := range postColumnStmts {
-		if _, err := s.exec(stmt); err != nil {
+		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
@@ -3199,6 +4146,106 @@ func (s *Store) initSchema() error {
 	}
 	if err := s.backfillSemantics(); err != nil {
 		return err
+	}
+	if err := s.backfillGrouping(); err != nil {
+		return err
+	}
+	if err := s.ensureHotpathIndexes(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`INSERT INTO app_schema_status (namespace, version, mode, source, updated_at)
+		VALUES ('application', 1, 'schema-init', 'internal/store raw DDL startup initialization', CURRENT_TIMESTAMP)
+		ON CONFLICT(namespace) DO UPDATE SET
+			version = excluded.version,
+			mode = excluded.mode,
+			source = excluded.source,
+			updated_at = excluded.updated_at`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) ensureOverviewMetricBucketsSchema() error {
+	timeType := "datetime"
+	if s.driver == "postgres" {
+		timeType = "timestamptz"
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS overview_metric_buckets (
+		bucket_start %s NOT NULL,
+		bucket_size_seconds INTEGER NOT NULL,
+		request_count BIGINT NOT NULL DEFAULT 0,
+		success_request BIGINT NOT NULL DEFAULT 0,
+		failed_request BIGINT NOT NULL DEFAULT 0,
+		total_tokens BIGINT NOT NULL DEFAULT 0,
+		ttft_sum BIGINT NOT NULL DEFAULT 0,
+		ttft_count BIGINT NOT NULL DEFAULT 0,
+		duration_sum BIGINT NOT NULL DEFAULT 0,
+		duration_count BIGINT NOT NULL DEFAULT 0,
+		stream_count BIGINT NOT NULL DEFAULT 0,
+		updated_at %s NOT NULL,
+		PRIMARY KEY (bucket_start, bucket_size_seconds)
+	)`, timeType, timeType)); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS overview_metric_bucket_members (
+		path TEXT PRIMARY KEY,
+		bucket_start %s NOT NULL,
+		bucket_size_seconds INTEGER NOT NULL,
+		request_count BIGINT NOT NULL DEFAULT 0,
+		success_request BIGINT NOT NULL DEFAULT 0,
+		failed_request BIGINT NOT NULL DEFAULT 0,
+		total_tokens BIGINT NOT NULL DEFAULT 0,
+		ttft_sum BIGINT NOT NULL DEFAULT 0,
+		ttft_count BIGINT NOT NULL DEFAULT 0,
+		duration_sum BIGINT NOT NULL DEFAULT 0,
+		duration_count BIGINT NOT NULL DEFAULT 0,
+		stream_count BIGINT NOT NULL DEFAULT 0,
+		updated_at %s NOT NULL
+	)`, timeType, timeType)); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_buckets_start ON overview_metric_buckets(bucket_start)`,
+		`CREATE INDEX IF NOT EXISTS idx_overview_metric_bucket_members_bucket ON overview_metric_bucket_members(bucket_start, bucket_size_seconds)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureSessionSummariesSchema() error {
+	timeType := "datetime"
+	if s.driver == "postgres" {
+		timeType = "timestamptz"
+	}
+	if _, err := s.db.Exec(fmt.Sprintf(`CREATE TABLE IF NOT EXISTS session_summaries (
+		session_id TEXT PRIMARY KEY,
+		session_source TEXT NOT NULL DEFAULT '',
+		request_count INTEGER NOT NULL DEFAULT 0,
+		first_seen %s NOT NULL,
+		last_seen %s NOT NULL,
+		last_model TEXT NOT NULL DEFAULT '',
+		providers TEXT NOT NULL DEFAULT '',
+		success_request INTEGER NOT NULL DEFAULT 0,
+		failed_request INTEGER NOT NULL DEFAULT 0,
+		success_rate REAL NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		avg_ttft REAL NOT NULL DEFAULT 0,
+		total_duration INTEGER NOT NULL DEFAULT 0,
+		stream_count INTEGER NOT NULL DEFAULT 0,
+		updated_at %s NOT NULL
+	)`, timeType, timeType, timeType)); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_seen ON session_summaries(last_seen DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_summaries_last_model ON session_summaries(last_model)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -3264,10 +4311,10 @@ func (s *Store) ensureUpstreamTargetsEntTable() error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := execSQL(tx, s.driver, `ALTER TABLE upstream_targets RENAME TO upstream_targets_old`); err != nil {
+	if _, err := tx.Exec(`ALTER TABLE upstream_targets RENAME TO upstream_targets_old`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `CREATE TABLE upstream_targets (
+	if _, err := tx.Exec(`CREATE TABLE upstream_targets (
 		id TEXT PRIMARY KEY,
 		base_url TEXT NOT NULL DEFAULT '',
 		provider_preset TEXT NOT NULL DEFAULT '',
@@ -3283,7 +4330,7 @@ func (s *Store) ensureUpstreamTargetsEntTable() error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `INSERT INTO upstream_targets (
+	if _, err := tx.Exec(`INSERT INTO upstream_targets (
 		id, base_url, provider_preset, protocol_family, routing_profile, enabled,
 		priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
 	)
@@ -3296,7 +4343,7 @@ func (s *Store) ensureUpstreamTargetsEntTable() error {
 	FROM upstream_targets_old`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `DROP TABLE upstream_targets_old`); err != nil {
+	if _, err := tx.Exec(`DROP TABLE upstream_targets_old`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3326,7 +4373,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		`DROP INDEX IF EXISTS tracelog_session_id_recorded_at`,
 		`DROP INDEX IF EXISTS tracelog_request_id`,
 	} {
-		if _, err := s.exec(stmt); err != nil {
+		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
@@ -3336,10 +4383,10 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := execSQL(tx, s.driver, `ALTER TABLE logs RENAME TO logs_old`); err != nil {
+	if _, err := tx.Exec(`ALTER TABLE logs RENAME TO logs_old`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `CREATE TABLE logs (
+	if _, err := tx.Exec(`CREATE TABLE logs (
 		path TEXT PRIMARY KEY,
 		trace_id TEXT NOT NULL DEFAULT '',
 		mod_time_ns INTEGER NOT NULL,
@@ -3372,6 +4419,13 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		session_source TEXT NOT NULL DEFAULT '',
 		window_id TEXT NOT NULL DEFAULT '',
 		client_request_id TEXT NOT NULL DEFAULT '',
+		request_audit_id TEXT NOT NULL DEFAULT '',
+		response_id TEXT NOT NULL DEFAULT '',
+		exchange_id TEXT NOT NULL DEFAULT '',
+		exchange_kind TEXT NOT NULL DEFAULT '',
+		exchange_role TEXT NOT NULL DEFAULT '',
+		parent_exchange_id TEXT NOT NULL DEFAULT '',
+		sequence_index INTEGER NOT NULL DEFAULT 0,
 		selected_upstream_id TEXT NOT NULL DEFAULT '',
 		selected_upstream_base_url TEXT NOT NULL DEFAULT '',
 		selected_upstream_provider_preset TEXT NOT NULL DEFAULT '',
@@ -3382,12 +4436,14 @@ func (s *Store) ensureLogsDatetimeTable() error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `INSERT INTO logs (
+	if _, err := tx.Exec(`INSERT INTO logs (
 		path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
 		status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
 		prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 		req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 		session_id, session_source, window_id, client_request_id,
+		request_audit_id, response_id,
+		exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 	)
@@ -3400,12 +4456,14 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		req_header_len, req_body_len, res_header_len, res_body_len,
 		CASE WHEN is_stream IN (1, '1', 'true', 'TRUE') THEN true ELSE false END,
 		session_id, session_source, window_id, client_request_id,
+		'', '',
+		'', '', '', '', 0,
 		selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 		routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 	FROM logs_old`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `DROP TABLE logs_old`); err != nil {
+	if _, err := tx.Exec(`DROP TABLE logs_old`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3425,20 +4483,20 @@ func (s *Store) ensureAutoIDTable(table string, createSQL string, copySQL string
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := execSQL(tx, s.driver, `ALTER TABLE `+table+` RENAME TO `+table+`_old`); err != nil {
+	if _, err := tx.Exec(`ALTER TABLE ` + table + ` RENAME TO ` + table + `_old`); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, createSQL); err != nil {
+	if _, err := tx.Exec(createSQL); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, copySQL); err != nil {
+	if _, err := tx.Exec(copySQL); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `DROP TABLE `+table+`_old`); err != nil {
+	if _, err := tx.Exec(`DROP TABLE ` + table + `_old`); err != nil {
 		return err
 	}
 	for _, stmt := range indexes {
-		if _, err := execSQL(tx, s.driver, stmt); err != nil {
+		if _, err := tx.Exec(stmt); err != nil {
 			return err
 		}
 	}
@@ -3454,8 +4512,92 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 		return nil
 	}
 
-	_, err = s.exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
 	return err
+}
+
+func (s *Store) ensureModelAliasesSchema() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	createdAtType := "datetime"
+	updatedAtType := "datetime"
+	if s.driver == "postgres" {
+		createdAtType = "timestamptz"
+		updatedAtType = "timestamptz"
+	}
+	stmts := []string{
+		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS model_aliases (
+			id TEXT PRIMARY KEY,
+			alias TEXT NOT NULL,
+			target_model TEXT NOT NULL,
+			channel_id TEXT NOT NULL DEFAULT '',
+			enabled bool NOT NULL DEFAULT true,
+			description TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL DEFAULT 'manual',
+			created_at %s NOT NULL,
+			updated_at %s NOT NULL
+		);`, createdAtType, updatedAtType),
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_alias ON model_aliases(alias);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_target ON model_aliases(target_model);`,
+		`CREATE INDEX IF NOT EXISTS idx_model_aliases_channel ON model_aliases(channel_id);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureLogExchangeColumns() error {
+	if err := s.ensureColumn("logs", "request_audit_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "response_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "exchange_role", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "parent_exchange_id", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("logs", "sequence_index", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS tracelog_request_audit_id_recorded_at ON logs(request_audit_id, recorded_at)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_exchange_kind_recorded_at ON logs(exchange_kind, recorded_at)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_parent_exchange_id ON logs(parent_exchange_id)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureHotpathIndexes() error {
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_logs_trace_id_hotpath ON logs(trace_id)`,
+		`CREATE INDEX IF NOT EXISTS tracelog_session_recorded_trace ON logs(session_id, recorded_at DESC, trace_id DESC) WHERE session_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_parse_jobs_status_trace ON parse_jobs(status, trace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_last_seen_id ON system_events(last_seen_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_status_last_seen_id ON system_events(status, last_seen_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_events_source_category_last_seen_id ON system_events(source, category, last_seen_at DESC, id DESC)`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) hasColumn(table string, column string) (bool, error) {
@@ -3467,7 +4609,25 @@ func (s *Store) hasColumn(table string, column string) (bool, error) {
 }
 
 func (s *Store) columnType(table string, column string) (string, error) {
-	rows, err := s.query(`PRAGMA table_info(` + table + `)`)
+	if s != nil && s.driver == "postgres" {
+		var typ string
+		err := s.db.QueryRow(`
+			SELECT data_type
+			FROM information_schema.columns
+			WHERE table_schema = current_schema()
+				AND table_name = ?
+				AND column_name = ?
+		`, table, column).Scan(&typ)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		return typ, nil
+	}
+
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return "", err
 	}
@@ -3496,7 +4656,7 @@ func (s *Store) columnType(table string, column string) (string, error) {
 }
 
 func (s *Store) backfillTraceIDs() error {
-	rows, err := s.query(`SELECT path FROM logs WHERE trace_id = '' OR trace_id IS NULL`)
+	rows, err := s.db.Query(`SELECT path FROM logs WHERE trace_id = '' OR trace_id IS NULL`)
 	if err != nil {
 		return err
 	}
@@ -3515,7 +4675,7 @@ func (s *Store) backfillTraceIDs() error {
 	}
 
 	for _, path := range paths {
-		if _, err := s.exec(`UPDATE logs SET trace_id = ? WHERE path = ?`, uuid.NewString(), path); err != nil {
+		if _, err := s.db.Exec(`UPDATE logs SET trace_id = ? WHERE path = ?`, uuid.NewString(), path); err != nil {
 			return err
 		}
 	}
@@ -3523,7 +4683,7 @@ func (s *Store) backfillTraceIDs() error {
 }
 
 func (s *Store) backfillSemantics() error {
-	rows, err := s.query(`SELECT path, url, provider, operation, endpoint FROM logs WHERE provider = '' OR operation = '' OR endpoint = ''`)
+	rows, err := s.db.Query(`SELECT path, url, provider, operation, endpoint FROM logs`)
 	if err != nil {
 		return err
 	}
@@ -3556,7 +4716,7 @@ func (s *Store) backfillSemantics() error {
 	}
 
 	for _, update := range updates {
-		if _, err := s.exec(
+		if _, err := s.db.Exec(
 			`UPDATE logs SET provider = ?, operation = ?, endpoint = ? WHERE path = ?`,
 			update.provider,
 			update.operation,
@@ -4031,6 +5191,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
+	previousSessionID := s.sessionIDForPath(path)
 
 	cachedTokens := 0
 	if header.Usage.PromptTokenDetails != nil {
@@ -4049,16 +5210,18 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		}
 	}
 
-	_, err = s.exec(`
+	_, err = s.db.Exec(`
 		INSERT INTO logs (
 			path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
 			status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET
 			trace_id=CASE WHEN logs.trace_id = '' THEN excluded.trace_id ELSE logs.trace_id END,
 			mod_time_ns=excluded.mod_time_ns,
@@ -4091,6 +5254,13 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 			session_source=excluded.session_source,
 			window_id=excluded.window_id,
 			client_request_id=excluded.client_request_id,
+			request_audit_id=excluded.request_audit_id,
+			response_id=excluded.response_id,
+			exchange_id=excluded.exchange_id,
+			exchange_kind=excluded.exchange_kind,
+			exchange_role=excluded.exchange_role,
+			parent_exchange_id=excluded.parent_exchange_id,
+			sequence_index=excluded.sequence_index,
 			selected_upstream_id=excluded.selected_upstream_id,
 			selected_upstream_base_url=excluded.selected_upstream_base_url,
 			selected_upstream_provider_preset=excluded.selected_upstream_provider_preset,
@@ -4126,11 +5296,18 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Layout.ReqBodyLen,
 		header.Layout.ResHeaderLen,
 		header.Layout.ResBodyLen,
-		s.boolValue(header.Layout.IsStream),
+		header.Layout.IsStream,
 		grouping.SessionID,
 		grouping.SessionSource,
 		grouping.WindowID,
 		grouping.ClientRequestID,
+		header.Meta.RequestAuditID,
+		header.Meta.ResponseID,
+		header.Meta.ExchangeID,
+		header.Meta.ExchangeKind,
+		header.Meta.ExchangeRole,
+		header.Meta.ParentExchangeID,
+		header.Meta.SequenceIndex,
 		header.Meta.SelectedUpstreamID,
 		header.Meta.SelectedUpstreamBaseURL,
 		header.Meta.SelectedUpstreamProviderPreset,
@@ -4143,6 +5320,8 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 	if err != nil {
 		return err
 	}
+	s.refreshOverviewMetricBucketForPathBestEffort(path)
+	s.refreshSessionSummariesBestEffort(previousSessionID, grouping.SessionID)
 	return s.upsertSystemEventsForLog(traceID, header, grouping)
 }
 
@@ -4155,12 +5334,427 @@ func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error
 	if usage.PromptTokenDetails != nil {
 		cachedTokens = usage.PromptTokenDetails.CachedTokens
 	}
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE logs
 		SET prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?
 		WHERE trace_id = ?
 	`, usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, cachedTokens, traceID)
+	if err != nil {
+		return err
+	}
+	s.refreshOverviewMetricBucketForTraceIDBestEffort(traceID)
+	s.refreshSessionSummariesBestEffort(s.sessionIDForTraceID(traceID))
+	return nil
+}
+
+func (s *Store) sessionIDForPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	var sessionID string
+	if err := s.db.QueryRow(`SELECT session_id FROM logs WHERE path = ?`, path).Scan(&sessionID); err != nil {
+		return ""
+	}
+	return sessionID
+}
+
+func (s *Store) sessionIDForTraceID(traceID string) string {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return ""
+	}
+	var sessionID string
+	if err := s.db.QueryRow(`SELECT session_id FROM logs WHERE trace_id = ?`, traceID).Scan(&sessionID); err != nil {
+		return ""
+	}
+	return sessionID
+}
+
+func (s *Store) refreshSessionSummariesBestEffort(sessionIDs ...string) {
+	seen := map[string]struct{}{}
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if _, ok := seen[sessionID]; ok {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		if err := s.RebuildSessionSummary(sessionID); err != nil {
+			fmt.Fprintf(os.Stderr, "llm-tracelab: refresh session summary %q failed: %v\n", sessionID, err)
+		}
+	}
+}
+
+func (s *Store) refreshOverviewMetricBucketForTraceIDBestEffort(traceID string) {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return
+	}
+	var path string
+	if err := s.db.QueryRow(`SELECT path FROM logs WHERE trace_id = ?`, traceID).Scan(&path); err != nil {
+		return
+	}
+	s.refreshOverviewMetricBucketForPathBestEffort(path)
+}
+
+func (s *Store) refreshOverviewMetricBucketForPathBestEffort(path string) {
+	if err := s.RefreshOverviewMetricBucketForPath(path); err != nil {
+		fmt.Fprintf(os.Stderr, "llm-tracelab: refresh overview metric bucket for %q failed: %v\n", path, err)
+	}
+}
+
+func (s *Store) RefreshOverviewMetricBucketForPath(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	contribution, ok, err := s.overviewMetricContributionForPath(path)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.applyOverviewMetricContributionTx(tx, path, contribution, ok); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) RebuildOverviewMetricBuckets() error {
+	rows, err := s.db.Query(`
+		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
+		FROM logs
+		WHERE ` + clientVisibleLogClause("") + `
+		ORDER BY recorded_at ASC, path ASC
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var contributions []overviewMetricContribution
+	for rows.Next() {
+		contribution, err := s.scanOverviewMetricContribution(rows)
+		if err != nil {
+			return err
+		}
+		contributions = append(contributions, contribution)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members`); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, `DELETE FROM overview_metric_buckets`); err != nil {
+		return err
+	}
+	for _, contribution := range contributions {
+		if err := s.insertOverviewMetricContributionTx(tx, contribution); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) overviewMetricContributionForPath(path string) (overviewMetricContribution, bool, error) {
+	row := s.db.QueryRow(`
+		SELECT path, recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms, is_stream
+		FROM logs
+		WHERE path = ? AND `+clientVisibleLogClause("")+`
+	`, path)
+	contribution, err := s.scanOverviewMetricContribution(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return overviewMetricContribution{}, false, nil
+	}
+	if err != nil {
+		return overviewMetricContribution{}, false, err
+	}
+	return contribution, true, nil
+}
+
+type overviewMetricContributionScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) scanOverviewMetricContribution(scanner overviewMetricContributionScanner) (overviewMetricContribution, error) {
+	var (
+		contribution overviewMetricContribution
+		recordedAt   any
+		statusCode   int
+		errorText    string
+		totalTokens  int64
+		ttftMs       int64
+		durationMs   int64
+		isStream     any
+	)
+	if err := scanner.Scan(
+		&contribution.Path,
+		&recordedAt,
+		&statusCode,
+		&errorText,
+		&totalTokens,
+		&ttftMs,
+		&durationMs,
+		&isStream,
+	); err != nil {
+		return overviewMetricContribution{}, err
+	}
+	recorded, err := timeParseValue(recordedAt)
+	if err != nil {
+		return overviewMetricContribution{}, err
+	}
+	contribution.BucketStart = recorded.UTC().Truncate(overviewMetricBucketSize)
+	contribution.BucketSizeSeconds = int(overviewMetricBucketSize / time.Second)
+	contribution.RequestCount = 1
+	if statusCode >= 200 && statusCode < 300 && strings.TrimSpace(errorText) == "" {
+		contribution.SuccessRequest = 1
+	} else {
+		contribution.FailedRequest = 1
+	}
+	contribution.TotalTokens = totalTokens
+	if ttftMs > 0 {
+		contribution.TTFTSum = ttftMs
+		contribution.TTFTCount = 1
+	}
+	if durationMs > 0 {
+		contribution.DurationSum = durationMs
+		contribution.DurationCount = 1
+	}
+	if boolValue(isStream) {
+		contribution.StreamCount = 1
+	}
+	return contribution, nil
+}
+
+func (s *Store) applyOverviewMetricContributionTx(tx *sql.Tx, path string, contribution overviewMetricContribution, hasContribution bool) error {
+	previous, ok, err := s.overviewMetricMemberTx(tx, path)
+	if err != nil {
+		return err
+	}
+	if ok {
+		previous.RequestCount = -previous.RequestCount
+		previous.SuccessRequest = -previous.SuccessRequest
+		previous.FailedRequest = -previous.FailedRequest
+		previous.TotalTokens = -previous.TotalTokens
+		previous.TTFTSum = -previous.TTFTSum
+		previous.TTFTCount = -previous.TTFTCount
+		previous.DurationSum = -previous.DurationSum
+		previous.DurationCount = -previous.DurationCount
+		previous.StreamCount = -previous.StreamCount
+		if err := s.addOverviewMetricBucketTx(tx, previous); err != nil {
+			return err
+		}
+		if _, err := s.execTx(tx, `DELETE FROM overview_metric_bucket_members WHERE path = ?`, path); err != nil {
+			return err
+		}
+	}
+	if !hasContribution {
+		return nil
+	}
+	return s.insertOverviewMetricContributionTx(tx, contribution)
+}
+
+func (s *Store) overviewMetricMemberTx(tx *sql.Tx, path string) (overviewMetricContribution, bool, error) {
+	var contribution overviewMetricContribution
+	var bucketStart any
+	err := tx.QueryRow(s.db.rebind(`
+		SELECT path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count
+		FROM overview_metric_bucket_members
+		WHERE path = ?
+	`), path).Scan(
+		&contribution.Path,
+		&bucketStart,
+		&contribution.BucketSizeSeconds,
+		&contribution.RequestCount,
+		&contribution.SuccessRequest,
+		&contribution.FailedRequest,
+		&contribution.TotalTokens,
+		&contribution.TTFTSum,
+		&contribution.TTFTCount,
+		&contribution.DurationSum,
+		&contribution.DurationCount,
+		&contribution.StreamCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return overviewMetricContribution{}, false, nil
+	}
+	if err != nil {
+		return overviewMetricContribution{}, false, err
+	}
+	parsed, err := timeParseValue(bucketStart)
+	if err != nil {
+		return overviewMetricContribution{}, false, err
+	}
+	contribution.BucketStart = parsed.UTC()
+	return contribution, true, nil
+}
+
+func (s *Store) insertOverviewMetricContributionTx(tx *sql.Tx, contribution overviewMetricContribution) error {
+	now := time.Now().UTC().Format(timeLayout)
+	if _, err := s.execTx(tx, `
+		INSERT INTO overview_metric_bucket_members (
+			path, bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, contribution.Path,
+		contribution.BucketStart.UTC().Format(timeLayout),
+		contribution.BucketSizeSeconds,
+		contribution.RequestCount,
+		contribution.SuccessRequest,
+		contribution.FailedRequest,
+		contribution.TotalTokens,
+		contribution.TTFTSum,
+		contribution.TTFTCount,
+		contribution.DurationSum,
+		contribution.DurationCount,
+		contribution.StreamCount,
+		now,
+	); err != nil {
+		return err
+	}
+	return s.addOverviewMetricBucketTx(tx, contribution)
+}
+
+func (s *Store) addOverviewMetricBucketTx(tx *sql.Tx, contribution overviewMetricContribution) error {
+	now := time.Now().UTC().Format(timeLayout)
+	_, err := s.execTx(tx, `
+		INSERT INTO overview_metric_buckets (
+			bucket_start, bucket_size_seconds, request_count, success_request, failed_request,
+			total_tokens, ttft_sum, ttft_count, duration_sum, duration_count, stream_count, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(bucket_start, bucket_size_seconds) DO UPDATE SET
+			request_count = overview_metric_buckets.request_count + excluded.request_count,
+			success_request = overview_metric_buckets.success_request + excluded.success_request,
+			failed_request = overview_metric_buckets.failed_request + excluded.failed_request,
+			total_tokens = overview_metric_buckets.total_tokens + excluded.total_tokens,
+			ttft_sum = overview_metric_buckets.ttft_sum + excluded.ttft_sum,
+			ttft_count = overview_metric_buckets.ttft_count + excluded.ttft_count,
+			duration_sum = overview_metric_buckets.duration_sum + excluded.duration_sum,
+			duration_count = overview_metric_buckets.duration_count + excluded.duration_count,
+			stream_count = overview_metric_buckets.stream_count + excluded.stream_count,
+			updated_at = excluded.updated_at
+	`, contribution.BucketStart.UTC().Format(timeLayout),
+		contribution.BucketSizeSeconds,
+		contribution.RequestCount,
+		contribution.SuccessRequest,
+		contribution.FailedRequest,
+		contribution.TotalTokens,
+		contribution.TTFTSum,
+		contribution.TTFTCount,
+		contribution.DurationSum,
+		contribution.DurationCount,
+		contribution.StreamCount,
+		now,
+	)
 	return err
+}
+
+func (s *Store) RebuildSessionSummary(sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.execTx(tx, `DELETE FROM session_summaries WHERE session_id = ?`, sessionID); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, s.insertSessionSummaryFromLogsSQL(`s.session_id = ? AND `+clientVisibleLogClause("s")), sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SessionSummaryRebuildStats(sessionID string) (SessionSummaryRebuildStats, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	stats := SessionSummaryRebuildStats{SessionID: sessionID}
+	if sessionID == "" {
+		stats.WouldDeleteAll = true
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&stats.ExistingCount); err != nil {
+			return stats, err
+		}
+		if err := s.db.QueryRow(`SELECT COUNT(DISTINCT session_id) FROM logs s WHERE s.session_id <> '' AND ` + clientVisibleLogClause("s")).Scan(&stats.CandidateCount); err != nil {
+			return stats, err
+		}
+		return stats, nil
+	}
+	stats.WouldDeleteOne = true
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries WHERE session_id = ?`, sessionID).Scan(&stats.ExistingCount); err != nil {
+		return stats, err
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(DISTINCT session_id) FROM logs s WHERE s.session_id = ? AND `+clientVisibleLogClause("s"), sessionID).Scan(&stats.CandidateCount); err != nil {
+		return stats, err
+	}
+	return stats, nil
+}
+
+func (s *Store) RebuildSessionSummaries() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := s.execTx(tx, `DELETE FROM session_summaries`); err != nil {
+		return err
+	}
+	if _, err := s.execTx(tx, s.insertSessionSummaryFromLogsSQL(clientVisibleLogClause("s"))); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) insertSessionSummaryFromLogsSQL(whereSQL string) string {
+	whereSQL = andSQL(`s.session_id <> ''`, whereSQL)
+	return `
+		INSERT INTO session_summaries (
+			session_id, session_source, request_count, first_seen, last_seen, last_model, providers,
+			success_request, failed_request, success_rate, total_tokens, avg_ttft, total_duration, stream_count, updated_at
+		)
+		SELECT
+			s.session_id,
+			MIN(s.session_source) AS session_source,
+			COUNT(*) AS request_count,
+			MIN(s.recorded_at) AS first_seen,
+			MAX(s.recorded_at) AS last_seen,
+			COALESCE((
+				SELECT model FROM logs l2
+				WHERE l2.session_id = s.session_id
+					AND ` + clientVisibleLogClause("l2") + `
+				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
+				LIMIT 1
+			), '') AS last_model,
+			` + s.sessionProvidersAggregateSQL() + ` AS providers,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
+				100.0 * SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+			END AS success_rate,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
+			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
+			COALESCE(SUM(` + s.boolCountCaseSQL("s.is_stream") + `), 0) AS stream_count,
+			CURRENT_TIMESTAMP AS updated_at
+		FROM logs s
+		WHERE ` + whereSQL + `
+		GROUP BY s.session_id
+	`
 }
 
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
@@ -4168,10 +5762,6 @@ const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
 func (s *Store) Sync() error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
-
-	if err := s.backfillGrouping(); err != nil {
-		return err
-	}
 
 	freshness, err := s.loadFreshness()
 	if err != nil {
@@ -4224,7 +5814,7 @@ type freshnessRecord struct {
 }
 
 func (s *Store) loadFreshness() (map[string]freshnessRecord, error) {
-	rows, err := s.query(`SELECT path, mod_time_ns, file_size FROM logs`)
+	rows, err := s.db.Query(`SELECT path, mod_time_ns, file_size FROM logs`)
 	if err != nil {
 		return nil, err
 	}
@@ -4334,6 +5924,14 @@ func (s *Store) ListRecent(limit int) ([]LogEntry, error) {
 }
 
 func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
+	return s.listPage(page, pageSize, filter, true)
+}
+
+func (s *Store) ListRoutingPage(page int, pageSize int, filter ListFilter) (ListPageResult, error) {
+	return s.listPage(page, pageSize, filter, false)
+}
+
+func (s *Store) listPage(page int, pageSize int, filter ListFilter, clientVisibleOnly bool) (ListPageResult, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -4343,6 +5941,9 @@ func (s *Store) ListPage(page int, pageSize int, filter ListFilter) (ListPageRes
 
 	ctx := context.Background()
 	predicates := buildTraceLogPredicates(filter)
+	if clientVisibleOnly {
+		predicates = append(predicates, clientVisibleTraceLogPredicate())
+	}
 	total, err := s.client.TraceLog.Query().Where(predicates...).Count(ctx)
 	if err != nil {
 		return ListPageResult{}, err
@@ -4421,7 +6022,7 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 		return out, nil
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(args)), ",")
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT trace_id, parser, parser_version, status, updated_at
 		FROM trace_observations
 		WHERE trace_id IN (`+placeholders+`)
@@ -4459,7 +6060,7 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 		return out, nil
 	}
 	missingPlaceholders := strings.TrimRight(strings.Repeat("?,", len(missingArgs)), ",")
-	rows, err = s.query(`
+	rows, err = s.db.Query(`
 		SELECT p.trace_id, p.status, p.updated_at
 		FROM parse_jobs p
 		INNER JOIN (
@@ -4494,20 +6095,23 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 }
 
 func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
-	if limit <= 0 {
-		limit = 1000
-	}
 	whereSQL, whereArgs := buildLogFilterClause(filter, "")
+	whereSQL = andSQL(whereSQL, clientVisibleLogClause(""))
 	if whereSQL == "" {
 		whereSQL = "1 = 1"
 	}
-	rows, err := s.query(`
+	query := `
 		SELECT trace_id
 		FROM logs
-		WHERE `+whereSQL+`
+		WHERE ` + whereSQL + `
 		ORDER BY recorded_at DESC, trace_id DESC
-		LIMIT ?
-	`, append(whereArgs, limit)...)
+	`
+	args := whereArgs
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -4571,19 +6175,20 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := execSQL(tx, s.driver, `
+	if _, err := s.execTx(tx, `
 		INSERT INTO parser_versions (parser, version, created_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(parser, version) DO NOTHING
 	`, obs.Parser, obs.ParserVersion, now); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `
+	if _, err := s.execTx(tx, `
 		INSERT INTO trace_observations (
 			trace_id, parser, parser_version, status, provider, operation, model,
+			exchange_kind, exchange_role, parent_exchange_id, sequence_index, request_audit_id, response_id,
 			summary_json, warnings_json, created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(trace_id) DO UPDATE SET
 			parser=excluded.parser,
 			parser_version=excluded.parser_version,
@@ -4591,14 +6196,21 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 			provider=excluded.provider,
 			operation=excluded.operation,
 			model=excluded.model,
+			exchange_kind=excluded.exchange_kind,
+			exchange_role=excluded.exchange_role,
+			parent_exchange_id=excluded.parent_exchange_id,
+			sequence_index=excluded.sequence_index,
+			request_audit_id=excluded.request_audit_id,
+			response_id=excluded.response_id,
 			summary_json=excluded.summary_json,
 			warnings_json=excluded.warnings_json,
 			updated_at=excluded.updated_at
-	`, safeDBText(obs.TraceID), safeDBText(obs.Parser), safeDBText(obs.ParserVersion), safeDBText(string(obs.Status)),
-		safeDBText(obs.Provider), safeDBText(obs.Operation), safeDBText(obs.Model), string(summaryJSON), string(warningsJSON), now, now); err != nil {
+	`, sqlSafeText(obs.TraceID), sqlSafeText(obs.Parser), sqlSafeText(obs.ParserVersion), string(obs.Status), sqlSafeText(obs.Provider), sqlSafeText(obs.Operation), sqlSafeText(obs.Model),
+		sqlSafeText(obs.ExchangeKind), sqlSafeText(obs.ExchangeRole), sqlSafeText(obs.ParentExchangeID), obs.SequenceIndex, sqlSafeText(obs.RequestAuditID), sqlSafeText(obs.ResponseID),
+		sqlSafeBytes(summaryJSON), sqlSafeBytes(warningsJSON), now, now); err != nil {
 		return err
 	}
-	if _, err := execSQL(tx, s.driver, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
+	if _, err := s.execTx(tx, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
 		return err
 	}
 	for _, row := range nodes {
@@ -4610,19 +6222,20 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 		if err != nil {
 			return err
 		}
-		if _, err := execSQL(tx, s.driver, `
+		nodeJSON = sqlSafeBytes(nodeJSON)
+		rawJSON = sqlSafeBytes(rawJSON)
+		if _, err := s.execTx(tx, `
 			INSERT INTO semantic_nodes (
 				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
 				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, safeDBText(obs.TraceID), safeDBText(row.Node.ID), safeDBText(row.ParentID), safeDBText(row.Node.ProviderType),
-			safeDBText(string(row.Node.NormalizedType)), safeDBText(row.Node.Role), safeDBText(row.Node.Path),
-			row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
+		`, sqlSafeText(obs.TraceID), sqlSafeText(row.Node.ID), sqlSafeText(row.ParentID), sqlSafeText(row.Node.ProviderType), string(row.Node.NormalizedType), sqlSafeText(row.Node.Role),
+			sqlSafeText(row.Node.Path), row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
 			return err
 		}
 	}
-	if _, err := execSQL(tx, s.driver, `
+	if _, err := s.execTx(tx, `
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
 		VALUES (?, ?, 1, ?, ?)
 	`, obs.TraceID, string(obs.Status), now, now); err != nil {
@@ -4634,8 +6247,9 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error) {
 	var summary ObservationSummary
 	var createdAt, updatedAt any
-	err := s.queryRow(`
+	err := s.db.QueryRow(`
 		SELECT trace_id, parser, parser_version, status, provider, operation, model,
+			exchange_kind, exchange_role, parent_exchange_id, sequence_index, request_audit_id, response_id,
 			summary_json, warnings_json, created_at, updated_at
 		FROM trace_observations
 		WHERE trace_id = ?
@@ -4647,6 +6261,12 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 		&summary.Provider,
 		&summary.Operation,
 		&summary.Model,
+		&summary.ExchangeKind,
+		&summary.ExchangeRole,
+		&summary.ParentExchangeID,
+		&summary.SequenceIndex,
+		&summary.RequestAuditID,
+		&summary.ResponseID,
 		&summary.SummaryJSON,
 		&summary.WarningsJSON,
 		&createdAt,
@@ -4665,7 +6285,7 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 }
 
 func (s *Store) ListSemanticNodes(traceID string) ([]observe.FlatSemanticNode, error) {
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT node_id, parent_node_id, provider_type, normalized_type, role, path,
 			node_index, depth, text_preview, json, raw
 		FROM semantic_nodes
@@ -4724,18 +6344,74 @@ func (s *Store) GetObservation(traceID string) (observe.TraceObservation, error)
 		_ = json.Unmarshal([]byte(summary.WarningsJSON), &warnings)
 	}
 	return observe.TraceObservation{
-		TraceID:       summary.TraceID,
-		Provider:      summary.Provider,
-		Operation:     summary.Operation,
-		Model:         summary.Model,
-		Parser:        summary.Parser,
-		ParserVersion: summary.ParserVersion,
-		Status:        observe.ParseStatus(summary.Status),
-		Warnings:      warnings,
+		TraceID:          summary.TraceID,
+		Provider:         summary.Provider,
+		Operation:        summary.Operation,
+		Model:            summary.Model,
+		ExchangeKind:     summary.ExchangeKind,
+		ExchangeRole:     summary.ExchangeRole,
+		ParentExchangeID: summary.ParentExchangeID,
+		SequenceIndex:    summary.SequenceIndex,
+		RequestAuditID:   summary.RequestAuditID,
+		ResponseID:       summary.ResponseID,
+		Parser:           summary.Parser,
+		ParserVersion:    summary.ParserVersion,
+		Status:           observe.ParseStatus(summary.Status),
+		Warnings:         warnings,
 		Response: observe.ObservationResponse{
 			Nodes: observe.RebuildNodeTree(nodes),
 		},
 	}, nil
+}
+
+func (s *Store) GetTraceExchangeMetadata(traceID string) (recordfile.MetaData, error) {
+	var meta recordfile.MetaData
+	var logKind, logRole, logParent string
+	var logSeq int
+	err := s.db.QueryRow(`
+		SELECT exchange_kind, exchange_role, parent_exchange_id, sequence_index
+		FROM logs
+		WHERE trace_id = ?
+	`, traceID).Scan(&logKind, &logRole, &logParent, &logSeq)
+	if err != nil && err != sql.ErrNoRows {
+		return recordfile.MetaData{}, err
+	}
+	meta.ExchangeKind = logKind
+	meta.ExchangeRole = logRole
+	meta.ParentExchangeID = logParent
+	meta.SequenceIndex = logSeq
+
+	var requestAuditID, responseID, upstreamKind, upstreamRole, upstreamParent sql.NullString
+	var upstreamSeq sql.NullInt64
+	err = s.db.QueryRow(`
+		SELECT request_audit_id, response_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index
+		FROM upstream_exchanges
+		WHERE trace_id = ?
+		ORDER BY started_at DESC, id DESC
+		LIMIT 1
+	`, traceID).Scan(&requestAuditID, &responseID, &upstreamKind, &upstreamRole, &upstreamParent, &upstreamSeq)
+	if err != nil && err != sql.ErrNoRows {
+		return recordfile.MetaData{}, err
+	}
+	if meta.ExchangeKind == "" {
+		meta.ExchangeKind = upstreamKind.String
+	}
+	if meta.ExchangeRole == "" {
+		meta.ExchangeRole = upstreamRole.String
+	}
+	if meta.ParentExchangeID == "" {
+		meta.ParentExchangeID = upstreamParent.String
+	}
+	if meta.SequenceIndex == 0 && upstreamSeq.Valid {
+		meta.SequenceIndex = int(upstreamSeq.Int64)
+	}
+	if requestAuditID.Valid {
+		meta.RequestAuditID = requestAuditID.String
+	}
+	if responseID.Valid {
+		meta.ResponseID = responseID.String
+	}
+	return meta, nil
 }
 
 func (s *Store) EnqueueParseJob(traceID string) error {
@@ -4743,7 +6419,7 @@ func (s *Store) EnqueueParseJob(traceID string) error {
 		return fmt.Errorf("enqueue parse job: trace id is required")
 	}
 	now := time.Now().UTC()
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
 		VALUES (?, 'queued', 0, ?, ?)
 	`, traceID, now, now)
@@ -4754,7 +6430,7 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE status = ?
@@ -4770,7 +6446,7 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 }
 
 func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
-	row := s.queryRow(`
+	row := s.db.QueryRow(`
 		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE id = ?
@@ -4791,7 +6467,7 @@ func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
 }
 
 func (s *Store) MarkParseJobRunning(id int64) error {
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE parse_jobs
 		SET status = 'running', attempts = attempts + 1, updated_at = ?
 		WHERE id = ?
@@ -4800,7 +6476,7 @@ func (s *Store) MarkParseJobRunning(id int64) error {
 }
 
 func (s *Store) MarkParseJobDone(id int64) error {
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE parse_jobs
 		SET status = 'parsed', last_error = '', updated_at = ?
 		WHERE id = ?
@@ -4809,7 +6485,7 @@ func (s *Store) MarkParseJobDone(id int64) error {
 }
 
 func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE parse_jobs
 		SET status = 'failed', last_error = ?, updated_at = ?
 		WHERE id = ?
@@ -4867,7 +6543,7 @@ func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 		detailsJSON = "{}"
 	}
 
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		INSERT INTO system_events (
 			id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
@@ -4928,19 +6604,33 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	whereSQL, args := buildSystemEventFilterClause(filter)
 	var total int
-	if err := s.queryRow(`SELECT COUNT(*) FROM system_events WHERE `+whereSQL, args...).Scan(&total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM system_events WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return SystemEventPageResult{}, err
 	}
 	queryArgs := append([]any{}, args...)
-	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
-	rows, err := s.query(`
+	offsetSQL := ` OFFSET ?`
+	if strings.TrimSpace(filter.After) != "" {
+		cursor, err := decodeSystemEventCursor(filter.After)
+		if err != nil {
+			return SystemEventPageResult{}, err
+		}
+		whereSQL += ` AND (last_seen_at < ? OR (last_seen_at = ? AND id < ?))`
+		cursorLastSeen := cursor.LastSeenAt.UTC()
+		queryArgs = append(queryArgs, cursorLastSeen, cursorLastSeen, cursor.ID)
+		offsetSQL = ``
+	}
+	queryArgs = append(queryArgs, pageSize+1)
+	if offsetSQL != "" {
+		queryArgs = append(queryArgs, (page-1)*pageSize)
+	}
+	rows, err := s.db.Query(`
 		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
 			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
 		FROM system_events
 		WHERE `+whereSQL+`
 		ORDER BY last_seen_at DESC, id DESC
-		LIMIT ? OFFSET ?
+		LIMIT ?`+offsetSQL+`
 	`, queryArgs...)
 	if err != nil {
 		return SystemEventPageResult{}, err
@@ -4950,12 +6640,25 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 	if err != nil {
 		return SystemEventPageResult{}, err
 	}
+	hasMore := len(items) > pageSize
+	if hasMore {
+		items = items[:pageSize]
+	}
+	nextCursor := ""
+	if hasMore && len(items) > 0 {
+		nextCursor, err = encodeSystemEventCursor(items[len(items)-1])
+		if err != nil {
+			return SystemEventPageResult{}, err
+		}
+	}
 	return SystemEventPageResult{
 		Items:      items,
 		Total:      total,
 		Page:       page,
 		PageSize:   pageSize,
 		TotalPages: totalPages(total, pageSize),
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
 	}, nil
 }
 
@@ -4968,7 +6671,7 @@ func (s *Store) SystemEventSummary(since time.Time) (SystemEventSummary, error) 
 	}
 	var summary SystemEventSummary
 	var lastSeen any
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
 		SELECT
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END), 0) AS unread,
@@ -4998,7 +6701,7 @@ func (s *Store) SystemEventSummary(since time.Time) (SystemEventSummary, error) 
 
 func (s *Store) MarkSystemEventRead(id string) error {
 	now := time.Now().UTC()
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE system_events
 		SET status = 'read', read_at = ?, updated_at = ?
 		WHERE id = ? AND status != 'ignored'
@@ -5013,7 +6716,7 @@ func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 	whereSQL, args := buildSystemEventFilterClause(filter)
 	now := time.Now().UTC()
 	args = append([]any{now, now}, args...)
-	result, err := s.exec(`
+	result, err := s.db.Exec(`
 		UPDATE system_events
 		SET status = 'read', read_at = ?, updated_at = ?
 		WHERE status != 'ignored' AND `+whereSQL, args...)
@@ -5029,7 +6732,7 @@ func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 
 func (s *Store) ResolveSystemEvent(id string) error {
 	now := time.Now().UTC()
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE system_events
 		SET status = 'resolved', resolved_at = ?, updated_at = ?
 		WHERE id = ?
@@ -5041,7 +6744,7 @@ func (s *Store) ResolveSystemEvent(id string) error {
 }
 
 func (s *Store) IgnoreSystemEvent(id string) error {
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE system_events
 		SET status = 'ignored', updated_at = ?
 		WHERE id = ?
@@ -5084,7 +6787,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := execSQL(tx, s.driver, `DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
+	if _, err := s.execTx(tx, `DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
 		return err
 	}
 	for _, finding := range findings {
@@ -5097,7 +6800,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 		if finding.TraceID == "" {
 			finding.TraceID = traceID
 		}
-		if _, err := execSQL(tx, s.driver, `
+		if _, err := s.execTx(tx, `
 			INSERT INTO trace_findings (
 				trace_id, finding_id, category, severity, confidence, title, description,
 				evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
@@ -5133,7 +6836,7 @@ func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Fi
 	}
 	query += ` ORDER BY id ASC`
 
-	rows, err := s.query(query, args...)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5180,7 +6883,7 @@ func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Find
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.query(query, args...)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5201,7 +6904,27 @@ func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.exec(`
+	if s.driver == "postgres" {
+		var id int64
+		err := s.db.QueryRow(`
+			INSERT INTO analysis_runs (
+				trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id
+		`, run.TraceID, run.SessionID, run.Kind, run.Analyzer, run.AnalyzerVersion, run.Model, run.InputRef, run.OutputJSON, run.Status, run.CreatedAt).Scan(&id)
+		if err != nil {
+			return 0, err
+		}
+		run.ID = id
+		if isAnalysisRunFailure(run.Status) {
+			if _, err := s.UpsertSystemEvent(systemEventForAnalysisFailure(run)); err != nil {
+				return 0, err
+			}
+		}
+		return id, nil
+	}
+	result, err := s.db.Exec(`
 		INSERT INTO analysis_runs (
 			trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
 		)
@@ -5248,7 +6971,7 @@ func (s *Store) ListAnalysisRuns(sessionID string, traceID string, kind string, 
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.query(query, args...)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5299,7 +7022,22 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
-	result, err := s.exec(`
+	if s.driver == "postgres" {
+		err := s.db.QueryRow(`
+			INSERT INTO analysis_jobs (
+				job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
+				attempts, created_at, updated_at, started_at, finished_at
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			RETURNING id
+		`, job.JobType, job.TargetType, job.TargetID, job.Status, job.StepsJSON, job.RequestJSON, job.ResultJSON, job.LastError,
+			job.Attempts, job.CreatedAt, job.UpdatedAt, nullableTime(job.StartedAt), nullableTime(job.FinishedAt)).Scan(&job.ID)
+		if err != nil {
+			return AnalysisJobRecord{}, err
+		}
+		return job, nil
+	}
+	result, err := s.db.Exec(`
 		INSERT INTO analysis_jobs (
 			job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
@@ -5319,7 +7057,7 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 }
 
 func (s *Store) GetAnalysisJob(id int64) (AnalysisJobRecord, error) {
-	row := s.queryRow(`
+	row := s.db.QueryRow(`
 		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
@@ -5354,7 +7092,7 @@ func (s *Store) ListAnalysisJobs(status string, targetType string, targetID stri
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.query(query, args...)
+	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5366,7 +7104,7 @@ func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
@@ -5382,7 +7120,7 @@ func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error
 }
 
 func (s *Store) MarkAnalysisJobRunning(id int64) error {
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE analysis_jobs
 		SET status = 'running', attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
 		WHERE id = ?
@@ -5395,7 +7133,7 @@ func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
 		resultJSON = "{}"
 	}
 	now := time.Now().UTC()
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE analysis_jobs
 		SET status = 'completed', result_json = ?, last_error = '', finished_at = ?, updated_at = ?
 		WHERE id = ?
@@ -5405,7 +7143,7 @@ func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
 
 func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
 	now := time.Now().UTC()
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE analysis_jobs
 		SET status = 'failed', last_error = ?, finished_at = ?, updated_at = ?
 		WHERE id = ?
@@ -5423,7 +7161,7 @@ func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
 
 func (s *Store) MarkAnalysisJobCanceled(id int64) error {
 	now := time.Now().UTC()
-	_, err := s.exec(`
+	_, err := s.db.Exec(`
 		UPDATE analysis_jobs
 		SET status = 'canceled', finished_at = ?, updated_at = ?
 		WHERE id = ? AND status IN ('queued', 'running')
@@ -5431,59 +7169,59 @@ func (s *Store) MarkAnalysisJobCanceled(id int64) error {
 	return err
 }
 
-func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
-	if page < 1 {
-		page = 1
+func sessionSummaryFilterSupported(filter ListFilter) bool {
+	return strings.TrimSpace(filter.Endpoint) == "" &&
+		strings.TrimSpace(filter.SelectedUpstream) == "" &&
+		strings.TrimSpace(filter.ObservationStatus) == "" &&
+		!filter.MissingUsage &&
+		filter.MinDurationMs == 0 &&
+		filter.MaxDurationMs == 0 &&
+		filter.MinTTFTMs == 0 &&
+		filter.MaxTTFTMs == 0 &&
+		filter.MinTokens == 0 &&
+		filter.MaxTokens == 0
+}
+
+func (s *Store) listSessionPageFromSummaries(page int, pageSize int, filter ListFilter) (SessionPageResult, bool, error) {
+	var summaryRows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries`).Scan(&summaryRows); err != nil {
+		return SessionPageResult{}, false, err
 	}
-	if pageSize <= 0 {
-		pageSize = 50
+	if summaryRows == 0 {
+		return SessionPageResult{}, false, nil
 	}
 
-	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
-	sessionWhere := `s.session_id <> ''`
-	if whereSQL != "" {
-		sessionWhere += " AND " + whereSQL
-	}
+	whereSQL, whereArgs := buildSessionSummaryFilterClause(filter)
 	var total int
-	if err := s.queryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs s WHERE `+sessionWhere+` GROUP BY session_id)`, whereArgs...).Scan(&total); err != nil {
-		return SessionPageResult{}, err
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM session_summaries s WHERE `+whereSQL, whereArgs...).Scan(&total); err != nil {
+		return SessionPageResult{}, false, err
 	}
-
 	offset := (page - 1) * pageSize
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, pageSize, offset)
-	listSQL := `
+	rows, err := s.db.Query(`
 		SELECT
 			s.session_id,
-			MIN(s.session_source) AS session_source,
-			COUNT(*) AS request_count,
-			MIN(s.recorded_at) AS first_seen,
-			MAX(s.recorded_at) AS last_seen,
-			COALESCE((
-				SELECT model FROM logs l2
-				WHERE l2.session_id = s.session_id
-				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
-				LIMIT 1
-			), '') AS last_model,
-			COALESCE(` + s.groupConcatDistinctSQL(`CASE WHEN s.provider <> '' THEN s.provider END`) + `, '') AS providers,
-			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
-			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
-			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
-				100.0 * SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
-			END AS success_rate,
-			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
-			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
-			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
-			COALESCE(SUM(CASE WHEN ` + s.boolTrueSQL("s.is_stream") + ` THEN 1 ELSE 0 END), 0) AS stream_count
-		FROM logs s
-		WHERE ` + sessionWhere + `
-		GROUP BY s.session_id
-		ORDER BY MAX(s.recorded_at) DESC
+			s.session_source,
+			s.request_count,
+			s.first_seen,
+			s.last_seen,
+			s.last_model,
+			s.providers,
+			s.success_request,
+			s.failed_request,
+			s.success_rate,
+			s.total_tokens,
+			s.avg_ttft,
+			s.total_duration,
+			s.stream_count
+		FROM session_summaries s
+		WHERE `+whereSQL+`
+		ORDER BY s.last_seen DESC, s.session_id DESC
 		LIMIT ? OFFSET ?
-	`
-	rows, err := s.query(listSQL, queryArgs...)
+	`, queryArgs...)
 	if err != nil {
-		return SessionPageResult{}, err
+		return SessionPageResult{}, false, err
 	}
 	defer rows.Close()
 
@@ -5495,22 +7233,111 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 	for rows.Next() {
 		summary, err := scanSessionSummary(rows)
 		if err != nil {
-			return SessionPageResult{}, err
+			return SessionPageResult{}, false, err
 		}
 		result.Items = append(result.Items, summary)
 	}
 	if err := rows.Err(); err != nil {
+		return SessionPageResult{}, false, err
+	}
+	if total > 0 {
+		result.TotalPages = int(math.Ceil(float64(total) / float64(pageSize)))
+	}
+	return result, true, nil
+}
+
+func (s *Store) getSessionFromSummary(sessionID string) (SessionSummary, error) {
+	row := s.db.QueryRow(`
+		SELECT
+			session_id,
+			session_source,
+			request_count,
+			first_seen,
+			last_seen,
+			last_model,
+			providers,
+			success_request,
+			failed_request,
+			success_rate,
+			total_tokens,
+			avg_ttft,
+			total_duration,
+			stream_count
+		FROM session_summaries
+		WHERE session_id = ?
+	`, sessionID)
+	return scanSessionSummary(row)
+}
+
+func buildSessionSummaryFilterClause(filter ListFilter) (string, []any) {
+	var clauses []string
+	var args []any
+	if query := strings.TrimSpace(filter.Query); query != "" {
+		like := "%" + escapeLike(query) + "%"
+		clauses = append(clauses, `(LOWER(s.session_id) LIKE LOWER(?) ESCAPE '\' OR LOWER(s.last_model) LIKE LOWER(?) ESCAPE '\' OR LOWER(s.providers) LIKE LOWER(?) ESCAPE '\')`)
+		args = append(args, like, like, like)
+	}
+	if provider := strings.TrimSpace(filter.Provider); provider != "" {
+		like := "%" + escapeLike(provider) + "%"
+		clauses = append(clauses, `LOWER(s.providers) LIKE LOWER(?) ESCAPE '\'`)
+		args = append(args, like)
+	}
+	if model := strings.TrimSpace(filter.Model); model != "" {
+		clauses = append(clauses, `LOWER(s.last_model) LIKE LOWER(?) ESCAPE '\'`)
+		args = append(args, "%"+escapeLike(model)+"%")
+	}
+	switch strings.ToLower(strings.TrimSpace(filter.Status)) {
+	case "success":
+		clauses = append(clauses, `s.failed_request = 0`)
+	case "failed", "error":
+		clauses = append(clauses, `s.failed_request > 0`)
+	}
+	if len(clauses) == 0 {
+		return "1=1", nil
+	}
+	return strings.Join(clauses, " AND "), args
+}
+
+func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (SessionPageResult, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if s.useSessionSummaryRead && sessionSummaryFilterSupported(filter) {
+		result, ok, err := s.listSessionPageFromSummaries(page, pageSize, filter)
+		if err == nil && ok {
+			return result, nil
+		}
+	}
+
+	whereSQL, whereArgs := buildLogFilterClause(filter, "s")
+	sessionWhere := andSQL(`s.session_id <> ''`, clientVisibleLogClause("s"))
+	sessionWhere = andSQL(sessionWhere, whereSQL)
+	sessionIDs, total, err := s.listSessionPageIDs(sessionWhere, whereArgs, page, pageSize)
+	if err != nil {
 		return SessionPageResult{}, err
+	}
+
+	result := SessionPageResult{
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
 	}
 	if total == 0 {
 		return result, nil
 	}
-	result.TotalPages = int(math.Ceil(float64(total) / float64(pageSize)))
-	return result, nil
-}
+	result.TotalPages = totalPages(total, pageSize)
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
 
-func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
-	row := s.queryRow(`
+	queryArgs := append([]any{}, whereArgs...)
+	for _, sessionID := range sessionIDs {
+		queryArgs = append(queryArgs, sessionID)
+	}
+	listSQL := `
 		SELECT
 			s.session_id,
 			MIN(s.session_source) AS session_source,
@@ -5520,10 +7347,11 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 			COALESCE((
 				SELECT model FROM logs l2
 				WHERE l2.session_id = s.session_id
+					AND ` + clientVisibleLogClause("l2") + `
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
-			COALESCE(`+s.groupConcatDistinctSQL(`CASE WHEN s.provider <> '' THEN s.provider END`)+`, '') AS providers,
+			` + s.sessionProvidersAggregateSQL() + ` AS providers,
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
 			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
@@ -5532,26 +7360,126 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
-			COALESCE(SUM(CASE WHEN `+s.boolTrueSQL("s.is_stream")+` THEN 1 ELSE 0 END), 0) AS stream_count
+			COALESCE(SUM(` + s.boolCountCaseSQL("s.is_stream") + `), 0) AS stream_count
 		FROM logs s
-		WHERE s.session_id = ?
+		WHERE ` + sessionWhere + ` AND s.session_id IN (` + placeholders(len(sessionIDs)) + `)
+		GROUP BY s.session_id
+	`
+	rows, err := s.db.Query(listSQL, queryArgs...)
+	if err != nil {
+		return SessionPageResult{}, err
+	}
+	defer rows.Close()
+
+	bySessionID := make(map[string]SessionSummary, len(sessionIDs))
+	for rows.Next() {
+		summary, err := scanSessionSummary(rows)
+		if err != nil {
+			return SessionPageResult{}, err
+		}
+		bySessionID[summary.SessionID] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return SessionPageResult{}, err
+	}
+	for _, sessionID := range sessionIDs {
+		if summary, ok := bySessionID[sessionID]; ok {
+			result.Items = append(result.Items, summary)
+		}
+	}
+	return result, nil
+}
+
+func (s *Store) listSessionPageIDs(sessionWhere string, whereArgs []any, page int, pageSize int) ([]string, int, error) {
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(DISTINCT s.session_id) FROM logs s WHERE `+sessionWhere, whereArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return nil, 0, nil
+	}
+	offset := (page - 1) * pageSize
+	queryArgs := append([]any{}, whereArgs...)
+	queryArgs = append(queryArgs, pageSize, offset)
+	rows, err := s.db.Query(`
+		SELECT s.session_id
+		FROM logs s
+		WHERE `+sessionWhere+`
+		GROUP BY s.session_id
+		ORDER BY MAX(s.recorded_at) DESC
+		LIMIT ? OFFSET ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var sessionIDs []string
+	for rows.Next() {
+		var sessionID string
+		if err := rows.Scan(&sessionID); err != nil {
+			return nil, 0, err
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return sessionIDs, total, nil
+}
+
+func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
+	if s.useSessionSummaryRead {
+		summary, err := s.getSessionFromSummary(sessionID)
+		if err == nil {
+			return summary, nil
+		}
+	}
+	row := s.db.QueryRow(`
+		SELECT
+			s.session_id,
+			MIN(s.session_source) AS session_source,
+			COUNT(*) AS request_count,
+			MIN(s.recorded_at) AS first_seen,
+			MAX(s.recorded_at) AS last_seen,
+			COALESCE((
+				SELECT model FROM logs l2
+				WHERE l2.session_id = s.session_id
+					AND `+clientVisibleLogClause("l2")+`
+				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
+				LIMIT 1
+			), '') AS last_model,
+			`+s.sessionProvidersAggregateSQL()+` AS providers,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
+			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
+			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
+				100.0 * SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END) / COUNT(*)
+			END AS success_rate,
+			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
+			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
+			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
+			COALESCE(SUM(`+s.boolCountCaseSQL("s.is_stream")+`), 0) AS stream_count
+		FROM logs s
+		WHERE s.session_id = ? AND `+clientVisibleLogClause("s")+`
 		GROUP BY s.session_id
 	`, sessionID)
 	return scanSessionSummary(row)
 }
 
 func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
-		WHERE session_id = ?
+		WHERE session_id = ? AND `+clientVisibleLogClause("")+`
 		ORDER BY recorded_at DESC, trace_id DESC
 	`, sessionID)
 	if err != nil {
@@ -5573,6 +7501,98 @@ func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
 	return entries, rows.Err()
 }
 
+func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]LogEntry, error) {
+	out := make(map[string][]LogEntry, len(parents))
+	if len(parents) == 0 {
+		return out, nil
+	}
+
+	parentByAudit := make(map[string]string, len(parents))
+	parentByExchange := make(map[string]string, len(parents))
+	parentByResponse := make(map[string]string, len(parents))
+	var auditArgs []any
+	var exchangeArgs []any
+	var responseArgs []any
+	for _, parent := range parents {
+		if auditID := strings.TrimSpace(parent.Header.Meta.RequestAuditID); auditID != "" {
+			parentByAudit[auditID] = parent.ID
+			auditArgs = append(auditArgs, auditID)
+		}
+		if responseID := strings.TrimSpace(parent.Header.Meta.ResponseID); responseID != "" {
+			parentByResponse[responseID] = parent.ID
+			responseArgs = append(responseArgs, responseID)
+		}
+		if exchangeID := strings.TrimSpace(parent.Header.Meta.ExchangeID); exchangeID != "" {
+			parentByExchange[exchangeID] = parent.ID
+			exchangeArgs = append(exchangeArgs, exchangeID)
+		}
+	}
+	if len(auditArgs) == 0 && len(exchangeArgs) == 0 && len(responseArgs) == 0 {
+		return out, nil
+	}
+
+	var clauses []string
+	var args []any
+	if len(auditArgs) > 0 {
+		clauses = append(clauses, `request_audit_id IN (`+placeholders(len(auditArgs))+`)`)
+		args = append(args, auditArgs...)
+	}
+	if len(exchangeArgs) > 0 {
+		clauses = append(clauses, `parent_exchange_id IN (`+placeholders(len(exchangeArgs))+`)`)
+		args = append(args, exchangeArgs...)
+	}
+	if len(responseArgs) > 0 {
+		clauses = append(clauses, `response_id IN (`+placeholders(len(responseArgs))+`)`)
+		args = append(args, responseArgs...)
+	}
+	rows, err := s.db.Query(`
+		SELECT
+			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
+			duration_ms, ttft_ms, client_ip, content_length, error_text,
+			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
+			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
+			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
+			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
+			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
+		FROM logs
+		WHERE exchange_kind = 'model' AND (`+strings.Join(clauses, " OR ")+`)
+		ORDER BY sequence_index ASC, recorded_at ASC, trace_id ASC
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		entry, err := scanEntry(rows)
+		if err != nil {
+			return nil, err
+		}
+		parentID := parentByAudit[strings.TrimSpace(entry.Header.Meta.RequestAuditID)]
+		if parentID == "" {
+			parentID = parentByResponse[strings.TrimSpace(entry.Header.Meta.ResponseID)]
+		}
+		if parentID == "" {
+			parentID = parentByExchange[strings.TrimSpace(entry.Header.Meta.ParentExchangeID)]
+		}
+		if parentID == "" || parentID == entry.ID {
+			continue
+		}
+		out[parentID] = append(out[parentID], entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, children := range out {
+		if err := s.populateObservationMetadata(children); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) PathByID(traceID string) (string, error) {
 	path, err := s.client.TraceLog.Query().
 		Where(tracelog.TraceIDEQ(traceID)).
@@ -5585,13 +7605,14 @@ func (s *Store) PathByID(traceID string) (string, error) {
 
 func (s *Store) Stats() (Stats, error) {
 	ctx := context.Background()
-	total, err := s.client.TraceLog.Query().Count(ctx)
+	clientVisible := clientVisibleTraceLogPredicate()
+	total, err := s.client.TraceLog.Query().Where(clientVisible).Count(ctx)
 	if err != nil {
 		return Stats{}, err
 	}
 
 	successQuery := s.client.TraceLog.Query().
-		Where(tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
+		Where(clientVisible, tracelog.StatusCodeGTE(200), tracelog.StatusCodeLT(300))
 	successCount, err := successQuery.Clone().Count(ctx)
 	if err != nil {
 		return Stats{}, err
@@ -5682,11 +7703,11 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 			COALESCE(SUM(total_tokens), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms END), 0) AS avg_ttft,
 			COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS avg_duration,
-			COALESCE(SUM(CASE WHEN ` + s.boolTrueSQL("is_stream") + ` THEN 1 ELSE 0 END), 0) AS stream_count,
+			COALESCE(SUM(` + s.boolCountCaseSQL("is_stream") + `), 0) AS stream_count,
 			COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS session_count
 		FROM logs
 		WHERE ` + whereSQL
-	if err := s.queryRow(query, whereArgs...).Scan(
+	if err := s.db.QueryRow(query, whereArgs...).Scan(
 		&summary.RequestCount,
 		&summary.SuccessRequest,
 		&summary.TotalTokens,
@@ -5721,7 +7742,7 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []any, percentile float64) (int64, error) {
 	var count int
 	countArgs := append([]any{}, whereArgs...)
-	if err := s.queryRow(`SELECT COUNT(*) FROM logs WHERE `+whereSQL+` AND `+column+` > 0`, countArgs...).Scan(&count); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+whereSQL+` AND `+column+` > 0`, countArgs...).Scan(&count); err != nil {
 		return 0, err
 	}
 	if count == 0 {
@@ -5734,7 +7755,7 @@ func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []a
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, offset)
 	var value int64
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
 		SELECT `+column+`
 		FROM logs
 		WHERE `+whereSQL+` AND `+column+` > 0
@@ -5749,21 +7770,17 @@ func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []a
 func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, error) {
 	referenceTime := time.Now().UTC()
 	var latestRecordedAt any
-	if err := s.queryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+	if err := s.db.QueryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
 		return nil, err
 	}
-	if latestRecordedAt != nil {
-		latestTime, err := timeParseNullableValue(latestRecordedAt)
-		if err != nil {
-			return nil, err
-		}
-		if !latestTime.IsZero() {
-			referenceTime = latestTime
-		}
+	if latestTime, err := timeParseNullableValue(latestRecordedAt); err != nil {
+		return nil, err
+	} else if !latestTime.IsZero() {
+		referenceTime = latestTime
 	}
 	bucketStart := referenceTime.UTC().Truncate(opts.BucketSize).Add(-time.Duration(opts.BucketCount-1) * opts.BucketSize)
 	queryArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms
 		FROM logs
 		WHERE recorded_at >= ? AND `+whereSQL+`
@@ -5875,7 +7892,7 @@ func (s *Store) overviewBreakdown(whereSQL string, whereArgs []any, limit int) (
 func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any, limit int) ([]CountItem, error) {
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT `+column+`, COUNT(*) AS count
 		FROM logs
 		WHERE `+whereSQL+` AND `+column+` != ''
@@ -5891,7 +7908,7 @@ func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any,
 }
 
 func (s *Store) overviewFindingCategories(limit int) ([]CountItem, error) {
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT category, COUNT(*) AS count
 		FROM trace_findings
 		WHERE category != ''
@@ -5927,13 +7944,15 @@ func (s *Store) overviewAttention(whereSQL string, whereArgs []any, limit int) (
 func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy string, limit int) ([]LogEntry, error) {
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
 			prompt_tokens, completion_tokens, total_tokens, cached_tokens,
 			req_header_len, req_body_len, res_header_len, res_body_len, is_stream,
 			session_id, session_source, window_id, client_request_id,
+			request_audit_id, response_id,
+			exchange_id, exchange_kind, exchange_role, parent_exchange_id, sequence_index,
 			selected_upstream_id, selected_upstream_base_url, selected_upstream_provider_preset,
 			routing_policy, routing_score, routing_candidate_count, routing_failure_reason
 		FROM logs
@@ -5958,7 +7977,7 @@ func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy stri
 }
 
 func (s *Store) overviewHighRiskFindings(limit int) ([]observe.Finding, error) {
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT finding_id, trace_id, category, severity, confidence, title, description,
 			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
 		FROM trace_findings
@@ -5979,7 +7998,7 @@ func (s *Store) overviewHighRiskFindings(limit int) ([]observe.Finding, error) {
 func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit int) ([]RoutingFailureRecord, error) {
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT trace_id, model, endpoint, recorded_at, routing_failure_reason, error_text, status_code
 		FROM logs
 		WHERE `+whereSQL+`
@@ -6010,7 +8029,7 @@ func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit 
 
 func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 	var summary OverviewAnalysisSummary
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
 		SELECT
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN status NOT IN ('completed', 'success') THEN 1 ELSE 0 END), 0) AS failed
@@ -6028,28 +8047,39 @@ func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 
 func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, error) {
 	var summary OverviewObservationSummary
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
 		SELECT
 			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed,
-			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed
+			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed
 		FROM trace_observations
-	`).Scan(&summary.TotalObservations, &summary.Parsed, &summary.Failed); err != nil {
+	`).Scan(&summary.TotalObservations, &summary.Parsed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.queryRow(`
+	if err := s.db.QueryRow(`
+		SELECT COUNT(DISTINCT trace_id)
+		FROM (
+			SELECT trace_id FROM trace_observations WHERE status IN ('failed', 'parse_failed', 'analysis_failed')
+			UNION
+			SELECT trace_id FROM parse_jobs WHERE status = 'failed'
+		) AS failed_traces
+	`).Scan(&summary.Failed); err != nil {
+		return OverviewObservationSummary{}, err
+	}
+	if err := s.db.QueryRow(`
 		SELECT COUNT(*)
 		FROM logs l
 		WHERE NOT EXISTS (
-			SELECT 1 FROM trace_observations o WHERE o.trace_id = l.trace_id
+			SELECT 1
+			FROM trace_observations o
+			WHERE o.trace_id = l.trace_id
 		)
 	`).Scan(&summary.Unparsed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.queryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.queryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'running'`).Scan(&summary.Running); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'running'`).Scan(&summary.Running); err != nil {
 		return OverviewObservationSummary{}, err
 	}
 	jobs, err := s.overviewRecentParseFailures(limit)
@@ -6061,7 +8091,7 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 }
 
 func (s *Store) overviewRecentParseFailures(limit int) ([]ParseJobRecord, error) {
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE status = 'failed'
@@ -6099,6 +8129,13 @@ func logEntryFromTraceLog(row *dao.TraceLog) LogEntry {
 	entry.Header.Meta.ClientIP = row.ClientIP
 	entry.Header.Meta.ContentLength = row.ContentLength
 	entry.Header.Meta.Error = row.ErrorText
+	entry.Header.Meta.RequestAuditID = row.RequestAuditID
+	entry.Header.Meta.ResponseID = row.ResponseID
+	entry.Header.Meta.ExchangeID = row.ExchangeID
+	entry.Header.Meta.ExchangeKind = row.ExchangeKind
+	entry.Header.Meta.ExchangeRole = row.ExchangeRole
+	entry.Header.Meta.ParentExchangeID = row.ParentExchangeID
+	entry.Header.Meta.SequenceIndex = row.SequenceIndex
 	entry.Header.Meta.SelectedUpstreamID = row.SelectedUpstreamID
 	entry.Header.Meta.SelectedUpstreamBaseURL = row.SelectedUpstreamBaseURL
 	entry.Header.Meta.SelectedUpstreamProviderPreset = row.SelectedUpstreamProviderPreset
@@ -6157,6 +8194,9 @@ func channelConfigRecordFromEnt(row *dao.ChannelConfig) ChannelConfigRecord {
 		Source:             row.Source,
 		BaseURL:            row.BaseURL,
 		ProviderPreset:     row.ProviderPreset,
+		APIType:            row.APIType,
+		Mode:               row.Mode,
+		CapabilitiesJSON:   row.CapabilitiesJSON,
 		ProtocolFamily:     row.ProtocolFamily,
 		RoutingProfile:     row.RoutingProfile,
 		APIVersion:         row.APIVersion,
@@ -6207,16 +8247,19 @@ func (s *Store) channelConfigRecordFromEnt(row *dao.ChannelConfig) (ChannelConfi
 
 func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 	record := ChannelModelRecord{
-		ChannelID:            row.ChannelID,
-		Model:                row.Model,
-		DisplayName:          row.DisplayName,
-		Source:               row.Source,
-		Enabled:              row.Enabled,
-		InputModalitiesJSON:  row.InputModalitiesJSON,
-		OutputModalitiesJSON: row.OutputModalitiesJSON,
-		RawModelJSON:         row.RawModelJSON,
-		FirstSeenAt:          row.FirstSeenAt,
-		LastSeenAt:           row.LastSeenAt,
+		ChannelID:             row.ChannelID,
+		Model:                 row.Model,
+		DisplayName:           row.DisplayName,
+		Source:                row.Source,
+		Enabled:               row.Enabled,
+		UpstreamModel:         row.UpstreamModel,
+		ProfileSource:         row.ProfileSource,
+		ProfileAdoptionStatus: row.ProfileAdoptionStatus,
+		InputModalitiesJSON:   row.InputModalitiesJSON,
+		OutputModalitiesJSON:  row.OutputModalitiesJSON,
+		RawModelJSON:          row.RawModelJSON,
+		FirstSeenAt:           row.FirstSeenAt,
+		LastSeenAt:            row.LastSeenAt,
 	}
 	if row.SupportsResponses != nil {
 		value := *row.SupportsResponses
@@ -6234,8 +8277,33 @@ func channelModelRecordFromEnt(row *dao.ChannelModel) ChannelModelRecord {
 		value := *row.ContextWindow
 		record.ContextWindow = &value
 	}
+	if row.MaxOutputTokens != nil {
+		value := *row.MaxOutputTokens
+		record.MaxOutputTokens = &value
+	}
+	if row.CompactHistoryItemThreshold != nil {
+		value := *row.CompactHistoryItemThreshold
+		record.CompactHistoryItemThreshold = &value
+	}
 	if row.LastProbeAt != nil {
 		record.LastProbeAt = *row.LastProbeAt
+	}
+	return record
+}
+
+func modelCatalogRecordFromEnt(row *dao.ModelCatalog) ModelCatalogRecord {
+	record := ModelCatalogRecord{
+		Model:       row.ID,
+		DisplayName: row.DisplayName,
+		Family:      row.Family,
+		Vendor:      row.Vendor,
+		Description: row.Description,
+		TagsJSON:    row.TagsJSON,
+		FirstSeenAt: row.FirstSeenAt,
+		LastSeenAt:  row.LastSeenAt,
+	}
+	if row.LastUsedAt != nil {
+		record.LastUsedAt = *row.LastUsedAt
 	}
 	return record
 }
@@ -6374,6 +8442,13 @@ func scanEntry(scanner interface {
 		&entry.SessionSource,
 		&entry.WindowID,
 		&entry.ClientRequestID,
+		&entry.Header.Meta.RequestAuditID,
+		&entry.Header.Meta.ResponseID,
+		&entry.Header.Meta.ExchangeID,
+		&entry.Header.Meta.ExchangeKind,
+		&entry.Header.Meta.ExchangeRole,
+		&entry.Header.Meta.ParentExchangeID,
+		&entry.Header.Meta.SequenceIndex,
 		&entry.Header.Meta.SelectedUpstreamID,
 		&entry.Header.Meta.SelectedUpstreamBaseURL,
 		&entry.Header.Meta.SelectedUpstreamProviderPreset,
@@ -6392,7 +8467,7 @@ func scanEntry(scanner interface {
 	}
 	entry.Header.Meta.Error = errorText
 	entry.Header.Meta.RoutingScore = routingScore
-	entry.Header.Layout.IsStream = boolFromDB(isStream)
+	entry.Header.Layout.IsStream = boolValue(isStream)
 	if cached > 0 {
 		entry.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
 	}
@@ -6524,39 +8599,25 @@ func boolToInt(v bool) int {
 	return 0
 }
 
-func (s *Store) boolValue(v bool) any {
-	if s != nil && (s.driver == "postgres" || s.driver == "postgresql") {
-		return v
-	}
-	return boolToInt(v)
-}
-
-func (s *Store) boolTrueSQL(column string) string {
-	if s != nil && (s.driver == "postgres" || s.driver == "postgresql") {
-		return column
-	}
-	return column + " = 1"
-}
-
-func (s *Store) groupConcatDistinctSQL(expr string) string {
-	if s != nil && (s.driver == "postgres" || s.driver == "postgresql") {
-		return "STRING_AGG(DISTINCT " + expr + ", ',')"
-	}
-	return "GROUP_CONCAT(DISTINCT " + expr + ")"
-}
-
-func boolFromDB(value any) bool {
-	switch v := value.(type) {
+func boolValue(v any) bool {
+	switch value := v.(type) {
 	case bool:
-		return v
+		return value
 	case int:
-		return v != 0
+		return value != 0
 	case int64:
-		return v != 0
+		return value != 0
+	case int32:
+		return value != 0
 	case []byte:
-		return string(v) == "1" || strings.EqualFold(string(v), "true")
+		return boolValue(string(value))
 	case string:
-		return v == "1" || strings.EqualFold(v, "true")
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "1", "t", "true", "yes":
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -6573,7 +8634,7 @@ func extractGroupingInfoFromRequest(reqFull []byte) (GroupingInfo, error) {
 		WindowID:        strings.TrimSpace(headers.Get("X-Codex-Window-Id")),
 		ClientRequestID: strings.TrimSpace(headers.Get("X-Client-Request-Id")),
 	}
-	if sessionID := strings.TrimSpace(headers.Get("Session_id")); sessionID != "" {
+	if sessionID := firstHeaderValue(headers, "Session-Id", "Session_id"); sessionID != "" {
 		info.SessionID = sessionID
 		info.SessionSource = "header.session_id"
 		return info, nil
@@ -6622,6 +8683,15 @@ func parseRawRequestHeaders(reqFull []byte) textproto.MIMEHeader {
 		headers.Add(textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name)), strings.TrimSpace(value))
 	}
 	return headers
+}
+
+func firstHeaderValue(headers textproto.MIMEHeader, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(headers.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func normalizeWindowSessionID(windowID string) string {
@@ -6742,11 +8812,46 @@ func buildTraceLogPredicates(filter ListFilter) []predicate.TraceLog {
 	return predicates
 }
 
-func overviewLogWhere(since time.Time) (string, []any) {
-	if since.IsZero() {
-		return "1 = 1", nil
+func clientVisibleTraceLogPredicate() predicate.TraceLog {
+	return predicate.TraceLog(func(s *entsql.Selector) {
+		s.Where(entsql.ExprP(`COALESCE(` + s.C(tracelog.FieldExchangeKind) + `, '') IN ('', 'entry', 'proxy')`))
+	})
+}
+
+func clientVisibleLogClause(alias string) string {
+	column := "exchange_kind"
+	if alias != "" {
+		column = alias + "." + column
 	}
-	return "recorded_at >= ?", []any{since.UTC().Format(timeLayout)}
+	return `COALESCE(` + column + `, '') IN ('', 'entry', 'proxy')`
+}
+
+func andSQL(left string, right string) string {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	switch {
+	case left == "":
+		return right
+	case right == "":
+		return left
+	default:
+		return "(" + left + ") AND (" + right + ")"
+	}
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", count), ",")
+}
+
+func overviewLogWhere(since time.Time) (string, []any) {
+	visible := clientVisibleLogClause("")
+	if since.IsZero() {
+		return visible, nil
+	}
+	return andSQL("recorded_at >= ?", visible), []any{since.UTC().Format(timeLayout)}
 }
 
 func scanCountItems(rows *sql.Rows) ([]CountItem, error) {
@@ -6918,6 +9023,8 @@ func observationSummaryJSON(obs observe.TraceObservation) map[string]any {
 		"tool_calls":     len(obs.Tools.Calls),
 		"tool_results":   len(obs.Tools.Results),
 		"findings":       len(obs.Findings),
+		"exchange_kind":  obs.ExchangeKind,
+		"exchange_role":  obs.ExchangeRole,
 	}
 }
 
@@ -6950,7 +9057,7 @@ func dedupeFlatSemanticNodes(nodes []observe.FlatSemanticNode) []observe.FlatSem
 }
 
 func textPreview(text string, limit int) string {
-	text = safeDBText(text)
+	text = sqlSafeText(text)
 	if limit <= 0 || len(text) <= limit {
 		return text
 	}
@@ -6967,8 +9074,15 @@ func textPreview(text string, limit int) string {
 	return text[:cut]
 }
 
-func safeDBText(text string) string {
-	return strings.ToValidUTF8(text, "\ufffd")
+func sqlSafeText(text string) string {
+	return strings.ToValidUTF8(text, "\uFFFD")
+}
+
+func sqlSafeBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return data
+	}
+	return []byte(sqlSafeText(string(data)))
 }
 
 func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
@@ -7070,19 +9184,19 @@ func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
 func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	var clauses []string
 	var args []any
-	if status := strings.ToLower(strings.TrimSpace(filter.Status)); status != "" && status != "all" {
+	if status := normalizedSystemEventFilterValue(filter.Status); status != "" {
 		clauses = append(clauses, `status = ?`)
 		args = append(args, status)
 	}
-	if severity := strings.ToLower(strings.TrimSpace(filter.Severity)); severity != "" {
+	if severity := normalizedSystemEventFilterValue(filter.Severity); severity != "" {
 		clauses = append(clauses, `severity = ?`)
 		args = append(args, severity)
 	}
-	if source := strings.ToLower(strings.TrimSpace(filter.Source)); source != "" {
+	if source := normalizedSystemEventFilterValue(filter.Source); source != "" {
 		clauses = append(clauses, `source = ?`)
 		args = append(args, source)
 	}
-	if category := strings.ToLower(strings.TrimSpace(filter.Category)); category != "" {
+	if category := normalizedSystemEventFilterValue(filter.Category); category != "" {
 		clauses = append(clauses, `category = ?`)
 		args = append(args, category)
 	}
@@ -7111,9 +9225,17 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 	return strings.Join(clauses, " AND "), args
 }
 
+func normalizedSystemEventFilterValue(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || value == "all" {
+		return ""
+	}
+	return value
+}
+
 func (s *Store) getSystemEvent(whereSQL string, arg any) (SystemEvent, error) {
 	var event SystemEvent
-	row := s.queryRow(`
+	row := s.db.QueryRow(`
 		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
 			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
@@ -7135,7 +9257,7 @@ func (s *Store) systemEventCountBy(column string, whereSQL string, args []any, l
 	}
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.query(`
+	rows, err := s.db.Query(`
 		SELECT `+column+`, COUNT(*) AS count
 		FROM system_events
 		WHERE `+whereSQL+` AND `+column+` != ''
@@ -7431,6 +9553,50 @@ func normalizePage(page int, pageSize int) (int, int) {
 	return page, pageSize
 }
 
+func encodeSystemEventCursor(event SystemEvent) (string, error) {
+	event.ID = strings.TrimSpace(event.ID)
+	if event.ID == "" || event.LastSeenAt.IsZero() {
+		return "", fmt.Errorf("encode system event cursor: missing sort key")
+	}
+	payload := systemEventCursor{
+		Version:    systemEventCursorVersion,
+		LastSeenAt: event.LastSeenAt.UTC().Format(timeLayout),
+		ID:         event.ID,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+func decodeSystemEventCursor(value string) (systemEventCursorPosition, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: cursor is empty")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid encoding")
+	}
+	var payload systemEventCursor
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid payload")
+	}
+	if payload.Version != systemEventCursorVersion {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: unsupported version %d", payload.Version)
+	}
+	payload.ID = strings.TrimSpace(payload.ID)
+	if payload.ID == "" {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: id is required")
+	}
+	lastSeenAt, err := timeParse(payload.LastSeenAt)
+	if err != nil || lastSeenAt.IsZero() {
+		return systemEventCursorPosition{}, fmt.Errorf("decode system event cursor: invalid last_seen_at")
+	}
+	return systemEventCursorPosition{LastSeenAt: lastSeenAt.UTC(), ID: payload.ID}, nil
+}
+
 func totalPages(total int, pageSize int) int {
 	if total <= 0 || pageSize <= 0 {
 		return 0
@@ -7439,7 +9605,7 @@ func totalPages(total int, pageSize int) int {
 }
 
 func (s *Store) backfillGrouping() error {
-	rows, err := s.query(`SELECT path FROM logs WHERE session_source = '' OR session_source = 'none'`)
+	rows, err := s.db.Query(`SELECT path FROM logs WHERE session_source = '' OR session_source = 'none'`)
 	if err != nil {
 		return err
 	}
@@ -7476,7 +9642,7 @@ func (s *Store) backfillGrouping() error {
 		if err != nil {
 			return err
 		}
-		if _, err := s.exec(
+		if _, err := s.db.Exec(
 			`UPDATE logs SET session_id = ?, session_source = ?, window_id = ?, client_request_id = ? WHERE path = ?`,
 			grouping.SessionID,
 			grouping.SessionSource,

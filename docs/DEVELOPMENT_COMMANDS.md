@@ -112,9 +112,37 @@ llm-tracelab -c config/config.yaml --format json db secret status
 - `export --out` 以 `0600` 权限写备份文件。
 - `rotate --yes` 会备份旧 key、写入新 key，并重加密渠道 API key 和敏感 header。
 
+## Postgres 运维验证
+
+长期运行的 Postgres 优化、回填、灰度读、分区/归档规划见
+[PostgreSQL 长期运行优化 Runbook](./POSTGRES_OPERATIONS_RUNBOOK.md)。
+
+生产状态检查入口：
+
+```bash
+llm-tracelab -c config/config.yaml db migrate status --check-db
+llm-tracelab -c config/config.yaml db migrate optimize-indexes --dry-run
+llm-tracelab -c config/config.yaml db summary rebuild sessions --dry-run
+llm-tracelab -c config/config.yaml db summary rebuild sessions --session-id <session_id>
+LLM_TRACELAB_DATABASE_DSN='postgres://...' scripts/postgres-baseline.sh /tmp/tracelab-postgres-baseline.txt
+llm-tracelab -c config/config.yaml auth migrate status --check-db
+llm-tracelab -c config/config.yaml analyze backfill-exchanges --dry-run
+```
+
+- `db migrate status --check-db`：只读检查 application schema migration 状态。
+- `db migrate optimize-indexes --dry-run`：预览非事务 PostgreSQL concurrent index 优化语句；确认后去掉 `--dry-run` 执行。
+- `db summary rebuild sessions --dry-run`：只读统计将从 `logs` 重建的 session summary 数量，不更新 `session_summaries`。
+- `db summary rebuild sessions --session-id <session_id>`：只重建单个 session；不带 `--session-id` 时会安全地全量重建 `session_summaries`。
+- `scripts/postgres-baseline.sh`：运行只读 PostgreSQL 基线 SQL，并将所有采集信息写入一个输出文件。
+- `auth migrate status --check-db`：只读检查 auth-owned 表和共享 application migration namespace 状态。
+- `analyze backfill-exchanges --dry-run`：只报告 exchange metadata 回填扫描/冲突，不更新 DB，不重写 `.http` cassette。
+- `database.use_session_summary_read: true` 或 `LLM_TRACELAB_DATABASE_USE_SESSION_SUMMARY_READ=true` 可让服务读取 `session_summaries`；默认关闭。PostgreSQL 生产路径在 `database.auto_migrate: false` 下必须先执行 `db migrate up`，否则服务启动会报出缺失 migration/table 的明确错误。
+- 新增生产索引、summary、回填或灰度读路径时，先按 runbook 保存 `pg_stat_statements` 基线和 `EXPLAIN (ANALYZE, BUFFERS)`，再选择代码测试命令。
+
 ## AI Agent 默认选择
 
 - 文档改动：`git diff --check`，必要时补链接检查。
+- Postgres 运维 runbook 或生产 DB 操作说明改动：`git diff --check`；如涉及真实查询路径或 migration SQL，再补 `task check:quick` 和 `go test ./internal/store ./internal/monitor`。
 - 小代码改动：`task check:quick`。
 - record/replay/协议解析改动：`go test ./pkg/recordfile ./pkg/replay ./pkg/llm ./pkg/observe ./internal/monitor`。
 - Monitor UI 改动：`task ui:build && task ui:test && go test ./internal/monitor`。

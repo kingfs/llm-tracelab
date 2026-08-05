@@ -1,9 +1,13 @@
 package recordfile
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 )
 
@@ -35,6 +39,16 @@ type LayoutInfo struct {
 
 type MetaData struct {
 	RequestID                      string    `json:"request_id"`
+	RequestAuditID                 string    `json:"request_audit_id,omitempty"`
+	ResponseID                     string    `json:"response_id,omitempty"`
+	ConversationID                 string    `json:"conversation_id,omitempty"`
+	ClientRequestID                string    `json:"client_request_id,omitempty"`
+	ExchangeID                     string    `json:"exchange_id,omitempty"`
+	ExchangeKind                   string    `json:"exchange_kind,omitempty"`
+	ExchangeRole                   string    `json:"exchange_role,omitempty"`
+	ParentExchangeID               string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex                  int       `json:"sequence_index,omitempty"`
+	TraceID                        string    `json:"trace_id,omitempty"`
 	Time                           time.Time `json:"time"`
 	Model                          string    `json:"model"`
 	Provider                       string    `json:"provider,omitempty"`
@@ -81,6 +95,39 @@ type ParsedPrelude struct {
 	Header        RecordHeader
 	Events        []RecordEvent
 	PayloadOffset int64
+}
+
+type CassetteSummaryOptions struct {
+	BodyLimit int
+}
+
+type HTTPRequestSummary struct {
+	Method        string              `json:"method"`
+	URL           string              `json:"url"`
+	Header        map[string][]string `json:"header,omitempty"`
+	Body          string              `json:"body,omitempty"`
+	BodyBytes     int                 `json:"body_bytes"`
+	BodySHA256    string              `json:"body_sha256,omitempty"`
+	BodyTruncated bool                `json:"body_truncated"`
+}
+
+type HTTPResponseSummary struct {
+	Status        string              `json:"status"`
+	StatusCode    int                 `json:"status_code"`
+	ContentType   string              `json:"content_type,omitempty"`
+	Header        map[string][]string `json:"header,omitempty"`
+	Body          string              `json:"body,omitempty"`
+	BodyBytes     int                 `json:"body_bytes"`
+	BodySHA256    string              `json:"body_sha256,omitempty"`
+	BodyTruncated bool                `json:"body_truncated"`
+	IsStream      bool                `json:"is_stream"`
+}
+
+type HTTPExchangeSummary struct {
+	Header   RecordHeader        `json:"header"`
+	Events   []RecordEvent       `json:"events,omitempty"`
+	Request  HTTPRequestSummary  `json:"request"`
+	Response HTTPResponseSummary `json:"response"`
 }
 
 func MarshalPrelude(header RecordHeader, events []RecordEvent) ([]byte, error) {
@@ -255,4 +302,82 @@ func ExtractSections(content []byte, parsed *ParsedPrelude) (reqFull, reqBody, r
 	}
 
 	return reqFull, reqBody, resFull, resBody
+}
+
+func SummarizeHTTPExchange(content []byte, opts CassetteSummaryOptions) (*HTTPExchangeSummary, error) {
+	parsed, err := ParsePrelude(content)
+	if err != nil {
+		return nil, err
+	}
+	reqFull, reqBody, resFull, resBody := ExtractSections(content, parsed)
+
+	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(reqFull)))
+	if err != nil {
+		return nil, fmt.Errorf("parse request: %w", err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(resFull)), req)
+	if err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	return &HTTPExchangeSummary{
+		Header: parsed.Header,
+		Events: append([]RecordEvent(nil), parsed.Events...),
+		Request: HTTPRequestSummary{
+			Method:        req.Method,
+			URL:           req.URL.String(),
+			Header:        cloneHeader(req.Header),
+			Body:          summarizeBody(reqBody, normalizeBodyLimit(opts.BodyLimit)),
+			BodyBytes:     len(reqBody),
+			BodySHA256:    bodySHA256(reqBody),
+			BodyTruncated: len(reqBody) > normalizeBodyLimit(opts.BodyLimit),
+		},
+		Response: HTTPResponseSummary{
+			Status:        resp.Status,
+			StatusCode:    resp.StatusCode,
+			ContentType:   resp.Header.Get("Content-Type"),
+			Header:        cloneHeader(resp.Header),
+			Body:          summarizeBody(resBody, normalizeBodyLimit(opts.BodyLimit)),
+			BodyBytes:     len(resBody),
+			BodySHA256:    bodySHA256(resBody),
+			BodyTruncated: len(resBody) > normalizeBodyLimit(opts.BodyLimit),
+			IsStream:      parsed.Header.Layout.IsStream,
+		},
+	}, nil
+}
+
+func normalizeBodyLimit(limit int) int {
+	if limit <= 0 {
+		return 4096
+	}
+	if limit > 20000 {
+		return 20000
+	}
+	return limit
+}
+
+func summarizeBody(body []byte, limit int) string {
+	if len(body) == 0 {
+		return ""
+	}
+	if len(body) > limit {
+		return string(body[:limit])
+	}
+	return string(body)
+}
+
+func bodySHA256(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func cloneHeader(header http.Header) map[string][]string {
+	out := make(map[string][]string, len(header))
+	for key, values := range header {
+		out[key] = append([]string(nil), values...)
+	}
+	return out
 }

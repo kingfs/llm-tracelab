@@ -35,6 +35,16 @@ type ChannelModel struct {
 	SupportsEmbeddings *int `json:"supports_embeddings,omitempty"`
 	// ContextWindow holds the value of the "context_window" field.
 	ContextWindow *int `json:"context_window,omitempty"`
+	// MaxOutputTokens holds the value of the "max_output_tokens" field.
+	MaxOutputTokens *int `json:"max_output_tokens,omitempty"`
+	// CompactHistoryItemThreshold holds the value of the "compact_history_item_threshold" field.
+	CompactHistoryItemThreshold *int `json:"compact_history_item_threshold,omitempty"`
+	// UpstreamModel holds the value of the "upstream_model" field.
+	UpstreamModel string `json:"upstream_model,omitempty"`
+	// ProfileSource holds the value of the "profile_source" field.
+	ProfileSource string `json:"profile_source,omitempty"`
+	// ProfileAdoptionStatus holds the value of the "profile_adoption_status" field.
+	ProfileAdoptionStatus string `json:"profile_adoption_status,omitempty"`
 	// InputModalitiesJSON holds the value of the "input_modalities_json" field.
 	InputModalitiesJSON string `json:"input_modalities_json,omitempty"`
 	// OutputModalitiesJSON holds the value of the "output_modalities_json" field.
@@ -57,9 +67,9 @@ func (*ChannelModel) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case channelmodel.FieldEnabled:
 			values[i] = new(sql.NullBool)
-		case channelmodel.FieldID, channelmodel.FieldSupportsResponses, channelmodel.FieldSupportsChatCompletions, channelmodel.FieldSupportsEmbeddings, channelmodel.FieldContextWindow:
+		case channelmodel.FieldID, channelmodel.FieldSupportsResponses, channelmodel.FieldSupportsChatCompletions, channelmodel.FieldSupportsEmbeddings, channelmodel.FieldContextWindow, channelmodel.FieldMaxOutputTokens, channelmodel.FieldCompactHistoryItemThreshold:
 			values[i] = new(sql.NullInt64)
-		case channelmodel.FieldChannelID, channelmodel.FieldModel, channelmodel.FieldDisplayName, channelmodel.FieldSource, channelmodel.FieldInputModalitiesJSON, channelmodel.FieldOutputModalitiesJSON, channelmodel.FieldRawModelJSON:
+		case channelmodel.FieldChannelID, channelmodel.FieldModel, channelmodel.FieldDisplayName, channelmodel.FieldSource, channelmodel.FieldUpstreamModel, channelmodel.FieldProfileSource, channelmodel.FieldProfileAdoptionStatus, channelmodel.FieldInputModalitiesJSON, channelmodel.FieldOutputModalitiesJSON, channelmodel.FieldRawModelJSON:
 			values[i] = new(sql.NullString)
 		case channelmodel.FieldFirstSeenAt, channelmodel.FieldLastSeenAt, channelmodel.FieldLastProbeAt:
 			values[i] = new(sql.NullTime)
@@ -141,6 +151,38 @@ func (_m *ChannelModel) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.ContextWindow = new(int)
 				*_m.ContextWindow = int(value.Int64)
+			}
+		case channelmodel.FieldMaxOutputTokens:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field max_output_tokens", values[i])
+			} else if value.Valid {
+				_m.MaxOutputTokens = new(int)
+				*_m.MaxOutputTokens = int(value.Int64)
+			}
+		case channelmodel.FieldCompactHistoryItemThreshold:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field compact_history_item_threshold", values[i])
+			} else if value.Valid {
+				_m.CompactHistoryItemThreshold = new(int)
+				*_m.CompactHistoryItemThreshold = int(value.Int64)
+			}
+		case channelmodel.FieldUpstreamModel:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field upstream_model", values[i])
+			} else if value.Valid {
+				_m.UpstreamModel = value.String
+			}
+		case channelmodel.FieldProfileSource:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field profile_source", values[i])
+			} else if value.Valid {
+				_m.ProfileSource = value.String
+			}
+		case channelmodel.FieldProfileAdoptionStatus:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field profile_adoption_status", values[i])
+			} else if value.Valid {
+				_m.ProfileAdoptionStatus = value.String
 			}
 		case channelmodel.FieldInputModalitiesJSON:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -249,6 +291,25 @@ func (_m *ChannelModel) String() string {
 		builder.WriteString("context_window=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
+	builder.WriteString(", ")
+	if v := _m.MaxOutputTokens; v != nil {
+		builder.WriteString("max_output_tokens=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	if v := _m.CompactHistoryItemThreshold; v != nil {
+		builder.WriteString("compact_history_item_threshold=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("upstream_model=")
+	builder.WriteString(_m.UpstreamModel)
+	builder.WriteString(", ")
+	builder.WriteString("profile_source=")
+	builder.WriteString(_m.ProfileSource)
+	builder.WriteString(", ")
+	builder.WriteString("profile_adoption_status=")
+	builder.WriteString(_m.ProfileAdoptionStatus)
 	builder.WriteString(", ")
 	builder.WriteString("input_modalities_json=")
 	builder.WriteString(_m.InputModalitiesJSON)

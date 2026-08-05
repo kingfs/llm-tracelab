@@ -5,6 +5,7 @@ import { InlineTag } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import {
   buildModelLink,
   formatCount,
@@ -16,6 +17,7 @@ import {
 } from "../lib/monitor";
 
 export function ModelsPage() {
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
   const queryValue = searchParams.get("q") || "";
@@ -50,7 +52,7 @@ export function ModelsPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Model marketplace</p>
-          <h1>Models</h1>
+          <h1>{t("models.title")}</h1>
         </div>
         <div className="topbar-meta">
           <span className="badge">{models.data?.refreshed_at ? formatTime(models.data.refreshed_at) : "..."}</span>
@@ -61,10 +63,10 @@ export function ModelsPage() {
         <div className="panel-head">
           <div>
             <p className="eyebrow">Catalog</p>
-            <h2>Seen and configured models</h2>
+            <h2>{t("models.catalogTitle")}</h2>
           </div>
           <div className="panel-head-actions">
-            <div className="view-toggle" role="tablist" aria-label="Model analytics window">
+            <div className="view-toggle" role="tablist" aria-label={t("models.window")}>
               {MONITOR_WINDOW_OPTIONS.map((window) => (
                 <button key={window} className={windowValue === window ? "ghost-button active" : "ghost-button"} onClick={() => setWindow(window)}>
                   {window}
@@ -74,8 +76,8 @@ export function ModelsPage() {
           </div>
         </div>
         <form className="filter-bar" onSubmit={applySearch}>
-          <input className="filter-input filter-input-wide" type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder="Search model name" />
-          <button className="ghost-button" type="submit">Apply</button>
+          <input className="filter-input filter-input-wide" type="search" value={queryDraft} onChange={(event) => setQueryDraft(event.target.value)} placeholder={t("models.search")} />
+          <button className="ghost-button" type="submit">{t("common.apply")}</button>
           <button
             className="ghost-button"
             type="button"
@@ -86,23 +88,23 @@ export function ModelsPage() {
               setSearchParams(next);
             }}
           >
-            Reset
+            {t("common.reset")}
           </button>
         </form>
         <div className="hero-grid hero-grid-compact">
-          <StatCard label="Models" value={formatCount(items.length)} />
-          <StatCard label="Requests" value={formatCount(totals.requests)} />
-          <StatCard label="Failed" value={formatCount(totals.failed)} accent={totals.failed ? "accent-red" : ""} />
-          <StatCard label="Tokens" value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing)} />
+          <StatCard label={t("models.title")} value={formatCount(items.length)} />
+          <StatCard label={t("common.requests")} value={formatCount(totals.requests)} />
+          <StatCard label={t("common.failed")} value={formatCount(totals.failed)} accent={totals.failed ? "accent-red" : ""} />
+          <StatCard label={t("common.tokens")} value={formatCount(totals.tokens)} detail={usageCoverageDetail(totals.missing, t)} />
         </div>
       </section>
 
-      {models.error ? <EmptyState title="Unable to load models" detail={models.error} tone="danger" /> : null}
-      {models.loading && !models.data ? <EmptyState title="Loading models" detail="Collecting model catalog and usage summary." /> : null}
+      {models.error ? <EmptyState title={t("models.loadError")} detail={models.error} tone="danger" /> : null}
+      {models.loading && !models.data ? <EmptyState title={t("models.loading")} detail={t("models.loadingDetail")} /> : null}
 
       {models.data ? (
         <section className="model-market-grid" aria-label="Model cards">
-          {items.length ? items.map((item) => <ModelCard key={item.model} item={item} windowValue={windowValue} />) : <EmptyState title="No models" detail="No model has been discovered, configured, or recorded in the current window." />}
+          {items.length ? items.map((item) => <ModelCard key={item.model} item={item} windowValue={windowValue} />) : <EmptyState title={t("models.noModels")} detail={t("models.noModelsDetail")} />}
         </section>
       ) : null}
     </div>
@@ -110,6 +112,7 @@ export function ModelsPage() {
 }
 
 function ModelCard({ item, windowValue }) {
+  const { t } = useI18n();
   const summary = item.summary || {};
   const today = item.today || {};
   const failed = Number(summary.failed_request || 0);
@@ -121,18 +124,18 @@ function ModelCard({ item, windowValue }) {
           <h2>{item.display_name || item.model}</h2>
         </div>
         <div className="trace-tag-group">
-          <InlineTag tone="accent">{formatCount(item.enabled_channel_count || 0)} enabled</InlineTag>
-          <InlineTag>{formatCount(item.channel_count || 0)} channels</InlineTag>
+          <InlineTag tone="accent">{t("models.enabled", { count: formatCount(item.enabled_channel_count || 0) })}</InlineTag>
+          <InlineTag>{t("models.channels", { count: formatCount(item.channel_count || 0) })}</InlineTag>
         </div>
       </div>
       <div className="model-market-metrics">
-        <Metric label="requests" value={formatCount(summary.request_count)} />
-        <Metric label="errors" value={formatCount(failed)} danger={failed > 0} />
-        <Metric label="tokens" value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request)} />
-        <Metric label="today" value={formatCount(today.total_tokens)} detail={usageCoverageDetail(today.missing_usage_request)} />
+        <Metric label={t("common.requests")} value={formatCount(summary.request_count)} />
+        <Metric label={t("common.errors")} value={formatCount(failed)} danger={failed > 0} />
+        <Metric label={t("common.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
+        <Metric label={t("models.today")} value={formatCount(today.total_tokens)} detail={usageCoverageDetail(today.missing_usage_request, t)} />
       </div>
       <div className="model-market-footer">
-        <span>{(item.channels || []).slice(0, 4).join(" · ") || "no channel"}</span>
+        <span>{(item.channels || []).slice(0, 4).join(" · ") || t("models.noChannel")}</span>
         <span>{formatDateTime(summary.last_seen)}</span>
       </div>
     </Link>
@@ -163,7 +166,7 @@ function summarizeModels(items) {
   );
 }
 
-function usageCoverageDetail(missing) {
+function usageCoverageDetail(missing, t = (key, values) => `${values?.count || 0} missing usage`) {
   const count = Number(missing || 0);
-  return count > 0 ? `${formatCount(count)} missing usage` : "";
+  return count > 0 ? t("providers.missingUsage", { count: formatCount(count) }) : "";
 }

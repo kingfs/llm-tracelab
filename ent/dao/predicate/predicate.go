@@ -9,6 +9,12 @@ import (
 // APIToken is the predicate function for apitoken builders.
 type APIToken func(*sql.Selector)
 
+// AnalysisJob is the predicate function for analysisjob builders.
+type AnalysisJob func(*sql.Selector)
+
+// AnalysisRun is the predicate function for analysisrun builders.
+type AnalysisRun func(*sql.Selector)
+
 // ChannelConfig is the predicate function for channelconfig builders.
 type ChannelConfig func(*sql.Selector)
 
@@ -27,17 +33,53 @@ type DatasetExample func(*sql.Selector)
 // EvalRun is the predicate function for evalrun builders.
 type EvalRun func(*sql.Selector)
 
+// ExecutionEvent is the predicate function for executionevent builders.
+type ExecutionEvent func(*sql.Selector)
+
 // ExperimentRun is the predicate function for experimentrun builders.
 type ExperimentRun func(*sql.Selector)
 
 // ModelCatalog is the predicate function for modelcatalog builders.
 type ModelCatalog func(*sql.Selector)
 
+// ParseJob is the predicate function for parsejob builders.
+type ParseJob func(*sql.Selector)
+
+// ParserVersion is the predicate function for parserversion builders.
+type ParserVersion func(*sql.Selector)
+
+// RequestAudit is the predicate function for requestaudit builders.
+type RequestAudit func(*sql.Selector)
+
+// Response is the predicate function for response builders.
+type Response func(*sql.Selector)
+
+// ResponseItem is the predicate function for responseitem builders.
+type ResponseItem func(*sql.Selector)
+
 // Score is the predicate function for score builders.
 type Score func(*sql.Selector)
 
+// SemanticNode is the predicate function for semanticnode builders.
+type SemanticNode func(*sql.Selector)
+
+// SystemEvent is the predicate function for systemevent builders.
+type SystemEvent func(*sql.Selector)
+
+// ToolCallAudit is the predicate function for toolcallaudit builders.
+type ToolCallAudit func(*sql.Selector)
+
+// TraceFinding is the predicate function for tracefinding builders.
+type TraceFinding func(*sql.Selector)
+
 // TraceLog is the predicate function for tracelog builders.
 type TraceLog func(*sql.Selector)
+
+// TraceObservation is the predicate function for traceobservation builders.
+type TraceObservation func(*sql.Selector)
+
+// UpstreamExchange is the predicate function for upstreamexchange builders.
+type UpstreamExchange func(*sql.Selector)
 
 // UpstreamModel is the predicate function for upstreammodel builders.
 type UpstreamModel func(*sql.Selector)

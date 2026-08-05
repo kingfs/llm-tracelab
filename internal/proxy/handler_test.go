@@ -39,6 +39,163 @@ func TestUsageSnifferUsesLLMPipelineForStreamUsage(t *testing.T) {
 	}
 }
 
+func TestExtractResponsesEntryResponseID(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		stream   bool
+		expected string
+	}{
+		{
+			name:     "json",
+			body:     `{"id":"resp_json","object":"response","status":"completed"}`,
+			expected: "resp_json",
+		},
+		{
+			name: "sse response object",
+			body: strings.Join([]string{
+				`event: response.created`,
+				`data: {"type":"response.created","response":{"id":"resp_stream","status":"in_progress"}}`,
+				``,
+			}, "\n"),
+			stream:   true,
+			expected: "resp_stream",
+		},
+		{
+			name: "sse top level id",
+			body: strings.Join([]string{
+				`data: {"type":"response.completed","id":"resp_top_level"}`,
+				``,
+			}, "\n"),
+			stream:   true,
+			expected: "resp_top_level",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := extractResponsesEntryResponseID([]byte(tt.body), tt.stream); got != tt.expected {
+				t.Fatalf("extractResponsesEntryResponseID() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHandlerWithNoUpstreamsServesEmptyModelList(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = t.TempDir()
+	cfg.Trace.OutputDir = cfg.Debug.OutputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/models status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"data":[]`) {
+		t.Fatalf("GET /v1/models body = %s, want empty data array", rec.Body.String())
+	}
+}
+
+func TestHandlerWithNoUpstreamsServesOpenAIModelDetail(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Trace.OutputDir = outputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/models/qwen3.6-35b-a3b", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /v1/models/{model} status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var payload aggregatedModelListEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, rec.Body.String())
+	}
+	if payload.ID != "qwen3.6-35b-a3b" || payload.ContextLength != 262144 || payload.MaxOutput != 65536 {
+		t.Fatalf("payload = %+v, want enriched qwen3.6-35b-a3b metadata", payload)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Model != "qwen3.6-35b-a3b" {
+		t.Fatalf("recorded Model = %q, want qwen3.6-35b-a3b", parsed.Header.Meta.Model)
+	}
+	if parsed.Header.Meta.Endpoint != "/v1/models" || parsed.Header.Meta.Operation != llm.OperationModels {
+		t.Fatalf("recorded endpoint/operation = %q/%q, want /v1/models/%s", parsed.Header.Meta.Endpoint, parsed.Header.Meta.Operation, llm.OperationModels)
+	}
+}
+
+func TestHandlerWithNoUpstreamsServesOllamaShowModelDetail(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{}
+	cfg.Debug.OutputDir = outputDir
+	cfg.Trace.OutputDir = outputDir
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler(empty upstreams) error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/show", bytes.NewBufferString(`{"name":"qwen3.6-35b-a3b"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/show status = %d, want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	var payload aggregatedModelListEntry
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; body=%s", err, rec.Body.String())
+	}
+	if payload.ID != "qwen3.6-35b-a3b" || payload.MaxModelLen != 262144 {
+		t.Fatalf("payload = %+v, want enriched qwen3.6-35b-a3b metadata", payload)
+	}
+
+	recordPath := findRecordedHTTP(t, outputDir)
+	parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+	if err != nil {
+		t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+	}
+	if parsed.Header.Meta.Model != "qwen3.6-35b-a3b" {
+		t.Fatalf("recorded Model = %q, want qwen3.6-35b-a3b", parsed.Header.Meta.Model)
+	}
+	if parsed.Header.Meta.Endpoint != "/api/show" || parsed.Header.Meta.Operation != llm.OperationModels {
+		t.Fatalf("recorded endpoint/operation = %q/%q, want /api/show/%s", parsed.Header.Meta.Endpoint, parsed.Header.Meta.Operation, llm.OperationModels)
+	}
+}
+
 func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 	var usage recorder.UsageInfo
 	sniffer := UsageSniffer{
@@ -54,6 +211,31 @@ func TestUsageSnifferCloseFinalizesNonStreamUsage(t *testing.T) {
 
 	if usage.PromptTokens != 10 || usage.CompletionTokens != 4 || usage.TotalTokens != 14 {
 		t.Fatalf("usage = %+v, want prompt=10 completion=4 total=14", usage)
+	}
+}
+
+func TestUsageSnifferRecordsTTFTFromFirstSourceBytes(t *testing.T) {
+	var ttft int64
+	start := time.Now().Add(-25 * time.Millisecond)
+	sniffer := UsageSniffer{
+		Source: nopReadCloser{Reader: bytes.NewBufferString(`{"id":"chatcmpl_ttft"}`)},
+		Start:  start,
+		TTFTMs: &ttft,
+	}
+
+	buf := make([]byte, 4)
+	if _, err := sniffer.Read(buf); err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	first := ttft
+	if first <= 0 {
+		t.Fatalf("TTFTMs = %d, want positive first-byte latency", first)
+	}
+	if _, err := sniffer.Read(buf); err != nil && err != io.EOF {
+		t.Fatalf("second Read() error = %v", err)
+	}
+	if ttft != first {
+		t.Fatalf("TTFTMs changed from %d to %d after subsequent read", first, ttft)
 	}
 }
 
@@ -92,10 +274,113 @@ func TestRedactRoutingBaseURLRemovesCredentialsAndSensitiveQuery(t *testing.T) {
 	}
 }
 
+func TestMCPHostedExecutorOptionsMapsToolConfig(t *testing.T) {
+	disabled := false
+	options := mcpHostedExecutorOptions(config.MCPToolConfig{
+		Enabled:          true,
+		DefaultTimeoutMS: 2500,
+		MaxResultBytes:   4096,
+		Servers: []config.MCPToolServerConfig{{
+			ID:             "docs",
+			Label:          "Docs",
+			URL:            "https://mcp.example.com/mcp",
+			BearerTokenEnv: "DOCS_MCP_TOKEN",
+			EnabledTools:   []string{"search", "fetch"},
+			DisabledTools:  []string{"delete"},
+		}, {
+			ID:      "disabled",
+			URL:     "https://disabled.example.com/mcp",
+			Enabled: &disabled,
+		}},
+	})
+
+	if !options.Enabled {
+		t.Fatalf("options.Enabled = false, want true")
+	}
+	if len(options.Servers) != 2 {
+		t.Fatalf("len(options.Servers) = %d, want 2", len(options.Servers))
+	}
+	first := options.Servers[0]
+	if first.ID != "docs" || first.Label != "Docs" || first.URL != "https://mcp.example.com/mcp" || first.BearerTokenEnv != "DOCS_MCP_TOKEN" || !first.Enabled {
+		t.Fatalf("first server = %+v, want mapped enabled server", first)
+	}
+	if first.Timeout != 2500*time.Millisecond || first.MaxResultBytes != 4096 {
+		t.Fatalf("first server limits = %s/%d, want 2500ms/4096", first.Timeout, first.MaxResultBytes)
+	}
+	if strings.Join(first.AllowedTools, ",") != "search,fetch" || strings.Join(first.DeniedTools, ",") != "delete" {
+		t.Fatalf("first server filters = %+v/%+v", first.AllowedTools, first.DeniedTools)
+	}
+	if options.Servers[1].Enabled {
+		t.Fatalf("second server Enabled = true, want false")
+	}
+}
+
+func TestMCPHostedExecutorOptionsDisabledWithoutEnabledServers(t *testing.T) {
+	disabled := false
+	options := mcpHostedExecutorOptions(config.MCPToolConfig{
+		Enabled: true,
+		Servers: []config.MCPToolServerConfig{{
+			ID:      "disabled",
+			Enabled: &disabled,
+		}},
+	})
+
+	if options.Enabled {
+		t.Fatalf("options.Enabled = true, want false without enabled servers")
+	}
+}
+
+func TestResponsesCodexCompatHTTPOptionsMapsEnabledWebSearch(t *testing.T) {
+	injectWhenAbsent := true
+	preserveClientTools := true
+	cfg := &config.Config{}
+	cfg.ResponsesServer.CodexCompat.Enabled = true
+	cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &injectWhenAbsent
+	cfg.ResponsesServer.CodexCompat.PreserveClientTools = &preserveClientTools
+	cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = []string{"web_search_preview", "web_search", "mcp"}
+	cfg.Tools.WebSearch.Enabled = true
+	cfg.Tools.WebSearch.Provider = "mock"
+	cfg.Tools.WebSearch.MaxResults = 7
+	cfg.Tools.MCP.Enabled = true
+
+	options := responsesCodexCompatHTTPOptions(cfg)
+
+	if !options.Enabled || !options.InjectWhenToolsAbsent || !options.PreserveClientTools || options.DefaultToolChoice != "auto" {
+		t.Fatalf("codex compat options = %+v", options)
+	}
+	if len(options.AvailableHostedTools) != 1 {
+		t.Fatalf("available hosted tools = %#v, want one web_search tool", options.AvailableHostedTools)
+	}
+	tool := options.AvailableHostedTools[0]
+	if tool.Type != "web_search" || tool.MaxNumResults != 7 {
+		t.Fatalf("available hosted tool = %#v, want web_search max_num_results=7", tool)
+	}
+}
+
+func TestResponsesCodexCompatHTTPOptionsDisabledWithoutWebSearch(t *testing.T) {
+	injectWhenAbsent := true
+	cfg := &config.Config{}
+	cfg.ResponsesServer.CodexCompat.Enabled = true
+	cfg.ResponsesServer.CodexCompat.InjectWhenToolsAbsent = &injectWhenAbsent
+	cfg.ResponsesServer.CodexCompat.AutoInjectHostedTools = []string{"web_search"}
+	cfg.Tools.WebSearch.Enabled = false
+
+	options := responsesCodexCompatHTTPOptions(cfg)
+
+	if !options.Enabled || !options.InjectWhenToolsAbsent {
+		t.Fatalf("codex compat options = %+v", options)
+	}
+	if len(options.AvailableHostedTools) != 0 {
+		t.Fatalf("available hosted tools = %#v, want none when web_search is disabled", options.AvailableHostedTools)
+	}
+}
+
 func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	attrs := candidateEventAttributes([]router.CandidateDecision{{
 		ID:             "primary",
 		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+		Mode:           "responses_server",
 		BaseURL:        "https://user:secret@example.com/v1?api_key=abc&region=us",
 		SupportsPath:   true,
 		SupportsModel:  true,
@@ -110,6 +395,9 @@ func TestCandidateEventAttributesRedactsBaseURL(t *testing.T) {
 	}
 	if !strings.Contains(baseURL, "api_key=REDACTED") || !strings.Contains(baseURL, "region=us") {
 		t.Fatalf("candidateEventAttributes base_url = %q, want redacted api_key and preserved region", baseURL)
+	}
+	if attrs[0]["api_type"] != "chat_completions" || attrs[0]["mode"] != "responses_server" {
+		t.Fatalf("candidateEventAttributes API surface attrs = %+v", attrs[0])
 	}
 }
 
@@ -230,6 +518,40 @@ func TestRoutingOutcomeEventRedactsCredentialError(t *testing.T) {
 	}
 	if got := fmt.Sprint(event.Attributes["error"]); strings.Contains(got, "sk-live-token") || !strings.Contains(got, "REDACTED") {
 		t.Fatalf("outcome error not safely redacted: %q", got)
+	}
+}
+
+func TestRoutePlanEventForDecisionIncludesFailureReason(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"missing-model"}`))
+	decision := &router.DecisionTrace{
+		ModelName:     "missing-model",
+		Endpoint:      "/v1/chat/completions",
+		Policy:        router.PolicyFirstAvailable,
+		FailureReason: router.SelectionFailureNoSupportingTarget,
+		Candidates: []router.CandidateDecision{{
+			ID:            "openai-primary",
+			SupportsPath:  true,
+			SupportsModel: false,
+			Selectable:    false,
+			FilterReason:  "model_not_supported",
+			RouteTargetID: "route-a",
+			ChannelID:     "channel-a",
+			APIType:       "chat_completions",
+			Mode:          "proxy",
+		}},
+	}
+
+	event := routePlanEventForDecision(req, []byte(`{"model":"missing-model"}`), decision, time.Now(), router.PolicyFirstAvailable, "")
+	attrs := event.Attributes
+	if event.Type != "routing.route_plan" || attrs["failure_reason"] != router.SelectionFailureNoSupportingTarget {
+		t.Fatalf("route plan failure attrs = %+v", attrs)
+	}
+	if attrs["client_entrypoint"] != "/v1/chat/completions" || attrs["requested_model"] != "missing-model" {
+		t.Fatalf("route plan request attrs = %+v", attrs)
+	}
+	summary, ok := attrs["candidate_summary"].([]map[string]interface{})
+	if !ok || len(summary) != 1 || summary[0]["filter_reason"] != "model_not_supported" {
+		t.Fatalf("route plan candidate_summary = %#v", attrs["candidate_summary"])
 	}
 }
 

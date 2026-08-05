@@ -23,6 +23,12 @@ const (
 	FieldBaseURL = "base_url"
 	// FieldProviderPreset holds the string denoting the provider_preset field in the database.
 	FieldProviderPreset = "provider_preset"
+	// FieldAPIType holds the string denoting the api_type field in the database.
+	FieldAPIType = "api_type"
+	// FieldMode holds the string denoting the mode field in the database.
+	FieldMode = "mode"
+	// FieldCapabilitiesJSON holds the string denoting the capabilities_json field in the database.
+	FieldCapabilitiesJSON = "capabilities_json"
 	// FieldProtocolFamily holds the string denoting the protocol_family field in the database.
 	FieldProtocolFamily = "protocol_family"
 	// FieldRoutingProfile holds the string denoting the routing_profile field in the database.
@@ -77,6 +83,9 @@ var Columns = []string{
 	FieldSource,
 	FieldBaseURL,
 	FieldProviderPreset,
+	FieldAPIType,
+	FieldMode,
+	FieldCapabilitiesJSON,
 	FieldProtocolFamily,
 	FieldRoutingProfile,
 	FieldAPIVersion,
@@ -121,6 +130,12 @@ var (
 	BaseURLValidator func(string) error
 	// DefaultProviderPreset holds the default value on creation for the "provider_preset" field.
 	DefaultProviderPreset string
+	// DefaultAPIType holds the default value on creation for the "api_type" field.
+	DefaultAPIType string
+	// DefaultMode holds the default value on creation for the "mode" field.
+	DefaultMode string
+	// DefaultCapabilitiesJSON holds the default value on creation for the "capabilities_json" field.
+	DefaultCapabilitiesJSON string
 	// DefaultProtocolFamily holds the default value on creation for the "protocol_family" field.
 	DefaultProtocolFamily string
 	// DefaultRoutingProfile holds the default value on creation for the "routing_profile" field.
@@ -194,6 +209,21 @@ func ByBaseURL(opts ...sql.OrderTermOption) OrderOption {
 // ByProviderPreset orders the results by the provider_preset field.
 func ByProviderPreset(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldProviderPreset, opts...).ToFunc()
+}
+
+// ByAPIType orders the results by the api_type field.
+func ByAPIType(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAPIType, opts...).ToFunc()
+}
+
+// ByMode orders the results by the mode field.
+func ByMode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldMode, opts...).ToFunc()
+}
+
+// ByCapabilitiesJSON orders the results by the capabilities_json field.
+func ByCapabilitiesJSON(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCapabilitiesJSON, opts...).ToFunc()
 }
 
 // ByProtocolFamily orders the results by the protocol_family field.

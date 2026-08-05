@@ -198,6 +198,116 @@ func TestResolveProviderPresets(t *testing.T) {
 	}
 }
 
+func TestResolveKeepsAPISurface(t *testing.T) {
+	responsesEnabled := true
+	chatDisabled := false
+	toolCallingDisabled := false
+
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com/v1",
+		APIType: "Responses",
+		Mode:    "Server",
+		Capabilities: config.UpstreamCapabilitiesConfig{
+			Responses:       &responsesEnabled,
+			ChatCompletions: &chatDisabled,
+			ToolCalling:     &toolCallingDisabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.APIType != APITypeResponses {
+		t.Fatalf("APIType = %q, want %q", resolved.APIType, APITypeResponses)
+	}
+	if resolved.Mode != APIModeServer {
+		t.Fatalf("Mode = %q, want %q", resolved.Mode, APIModeServer)
+	}
+	if enabled, configured := resolved.Capability(CapabilityResponses); !configured || !enabled {
+		t.Fatalf("Capability(responses) = enabled:%v configured:%v, want true/true", enabled, configured)
+	}
+	if enabled, configured := resolved.Capability(CapabilityChatCompletions); !configured || enabled {
+		t.Fatalf("Capability(chat_completions) = enabled:%v configured:%v, want false/true", enabled, configured)
+	}
+	if enabled, configured := resolved.Capability(CapabilityToolCalling); !configured || enabled {
+		t.Fatalf("Capability(tool_calling) = enabled:%v configured:%v, want false/true", enabled, configured)
+	}
+	if resolved.SupportsToolCalling() {
+		t.Fatalf("SupportsToolCalling() = true, want false")
+	}
+	if !resolved.NativeResponsesServerMode() {
+		t.Fatalf("NativeResponsesServerMode() = false, want true")
+	}
+	if resolved.ChatCompletionsServerMode() {
+		t.Fatalf("ChatCompletionsServerMode() = true, want false")
+	}
+}
+
+func TestResolveDefaultsAPISurface(t *testing.T) {
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL: "https://api.openai.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if resolved.APIType != APITypeChatCompletions {
+		t.Fatalf("APIType = %q, want %q", resolved.APIType, APITypeChatCompletions)
+	}
+	if resolved.Mode != "" {
+		t.Fatalf("Mode = %q, want empty", resolved.Mode)
+	}
+	if enabled, configured := resolved.Capability(CapabilityResponses); configured || enabled {
+		t.Fatalf("Capability(responses) = enabled:%v configured:%v, want false/false", enabled, configured)
+	}
+	if !resolved.SupportsToolCalling() {
+		t.Fatalf("SupportsToolCalling() = false, want default true")
+	}
+}
+
+func TestResolveDefaultsAPISurfaceByProtocolFamily(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     config.UpstreamConfig
+		wantAPI string
+	}{
+		{
+			name: "anthropic_messages",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+			},
+			wantAPI: APITypeMessages,
+		},
+		{
+			name: "google_generate_content",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://generativelanguage.googleapis.com",
+				ProviderPreset: "google_genai",
+			},
+			wantAPI: APITypeGemini,
+		},
+		{
+			name: "vertex_generate_content",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://aiplatform.googleapis.com",
+				ProviderPreset: "vertex",
+				ModelResource:  "publishers/google/models",
+			},
+			wantAPI: APITypeGemini,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := Resolve(tt.cfg)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+			if resolved.APIType != tt.wantAPI {
+				t.Fatalf("APIType = %q, want %q", resolved.APIType, tt.wantAPI)
+			}
+		})
+	}
+}
+
 func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -266,6 +376,31 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 				BaseURL: "https://api.openai.com",
 			},
 			wantErr: `upstream.base_url must include the upstream API path prefix for protocol_family="openai_compatible" (examples: /v1, /api/v1, /openai, /openai/v1)`,
+		},
+		{
+			name: "unknown_api_type",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.openai.com/v1",
+				APIType: "not_real",
+			},
+			wantErr: `unsupported upstream.api_type "not_real"`,
+		},
+		{
+			name: "unknown_mode",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.openai.com/v1",
+				Mode:    "sidecar",
+			},
+			wantErr: `unsupported upstream.mode "sidecar"`,
+		},
+		{
+			name: "anthropic_api_type_mismatch",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.anthropic.com",
+				ProviderPreset: "anthropic",
+				APIType:        APITypeChatCompletions,
+			},
+			wantErr: `upstream.api_type="chat_completions" is incompatible with protocol_family="anthropic_messages"`,
 		},
 	}
 
@@ -380,7 +515,7 @@ func TestResolvedUpstreamBuildURL(t *testing.T) {
 			wantURL: "https://openrouter.example.com/v1/chat/completions",
 		},
 		{
-			name: "openai_compatible_tokenize_uses_top_level_route",
+			name: "chat_completions_tokenize_uses_top_level_route",
 			cfg: config.UpstreamConfig{
 				BaseURL: "http://10.2.69.245:38080/v1",
 			},

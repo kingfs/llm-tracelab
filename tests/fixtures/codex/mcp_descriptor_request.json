@@ -1,0 +1,25 @@
+{
+  "model": "local-test-model",
+  "input": "Read project metadata through the configured workspace MCP server.",
+  "tools": [
+    {
+      "type": "mcp",
+      "server_label": "workspace",
+      "server_url": "https://mcp.example.test/sse",
+      "allowed_tools": [
+        "read_file"
+      ],
+      "require_approval": "never"
+    }
+  ],
+  "tool_choice": "auto",
+  "stream": true,
+  "store": true,
+  "metadata": {
+    "fixture": "codex_mcp_descriptor",
+    "codex": {
+      "thread_id": "thread_fixture_mcp_descriptor",
+      "client_request_id": "turn_fixture_mcp_descriptor_1"
+    }
+  }
+}

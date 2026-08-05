@@ -425,6 +425,34 @@ func (_c *TraceLogCreate) SetNillableClientRequestID(v *string) *TraceLogCreate 
 	return _c
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (_c *TraceLogCreate) SetRequestAuditID(v string) *TraceLogCreate {
+	_c.mutation.SetRequestAuditID(v)
+	return _c
+}
+
+// SetNillableRequestAuditID sets the "request_audit_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableRequestAuditID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetRequestAuditID(*v)
+	}
+	return _c
+}
+
+// SetResponseID sets the "response_id" field.
+func (_c *TraceLogCreate) SetResponseID(v string) *TraceLogCreate {
+	_c.mutation.SetResponseID(v)
+	return _c
+}
+
+// SetNillableResponseID sets the "response_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableResponseID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetResponseID(*v)
+	}
+	return _c
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (_c *TraceLogCreate) SetSelectedUpstreamID(v string) *TraceLogCreate {
 	_c.mutation.SetSelectedUpstreamID(v)
@@ -463,6 +491,76 @@ func (_c *TraceLogCreate) SetSelectedUpstreamProviderPreset(v string) *TraceLogC
 func (_c *TraceLogCreate) SetNillableSelectedUpstreamProviderPreset(v *string) *TraceLogCreate {
 	if v != nil {
 		_c.SetSelectedUpstreamProviderPreset(*v)
+	}
+	return _c
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (_c *TraceLogCreate) SetExchangeID(v string) *TraceLogCreate {
+	_c.mutation.SetExchangeID(v)
+	return _c
+}
+
+// SetNillableExchangeID sets the "exchange_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableExchangeID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetExchangeID(*v)
+	}
+	return _c
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (_c *TraceLogCreate) SetExchangeKind(v string) *TraceLogCreate {
+	_c.mutation.SetExchangeKind(v)
+	return _c
+}
+
+// SetNillableExchangeKind sets the "exchange_kind" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableExchangeKind(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetExchangeKind(*v)
+	}
+	return _c
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (_c *TraceLogCreate) SetExchangeRole(v string) *TraceLogCreate {
+	_c.mutation.SetExchangeRole(v)
+	return _c
+}
+
+// SetNillableExchangeRole sets the "exchange_role" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableExchangeRole(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetExchangeRole(*v)
+	}
+	return _c
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (_c *TraceLogCreate) SetParentExchangeID(v string) *TraceLogCreate {
+	_c.mutation.SetParentExchangeID(v)
+	return _c
+}
+
+// SetNillableParentExchangeID sets the "parent_exchange_id" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableParentExchangeID(v *string) *TraceLogCreate {
+	if v != nil {
+		_c.SetParentExchangeID(*v)
+	}
+	return _c
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (_c *TraceLogCreate) SetSequenceIndex(v int) *TraceLogCreate {
+	_c.mutation.SetSequenceIndex(v)
+	return _c
+}
+
+// SetNillableSequenceIndex sets the "sequence_index" field if the given value is not nil.
+func (_c *TraceLogCreate) SetNillableSequenceIndex(v *int) *TraceLogCreate {
+	if v != nil {
+		_c.SetSequenceIndex(*v)
 	}
 	return _c
 }
@@ -672,6 +770,14 @@ func (_c *TraceLogCreate) defaults() {
 		v := tracelog.DefaultClientRequestID
 		_c.mutation.SetClientRequestID(v)
 	}
+	if _, ok := _c.mutation.RequestAuditID(); !ok {
+		v := tracelog.DefaultRequestAuditID
+		_c.mutation.SetRequestAuditID(v)
+	}
+	if _, ok := _c.mutation.ResponseID(); !ok {
+		v := tracelog.DefaultResponseID
+		_c.mutation.SetResponseID(v)
+	}
 	if _, ok := _c.mutation.SelectedUpstreamID(); !ok {
 		v := tracelog.DefaultSelectedUpstreamID
 		_c.mutation.SetSelectedUpstreamID(v)
@@ -683,6 +789,26 @@ func (_c *TraceLogCreate) defaults() {
 	if _, ok := _c.mutation.SelectedUpstreamProviderPreset(); !ok {
 		v := tracelog.DefaultSelectedUpstreamProviderPreset
 		_c.mutation.SetSelectedUpstreamProviderPreset(v)
+	}
+	if _, ok := _c.mutation.ExchangeID(); !ok {
+		v := tracelog.DefaultExchangeID
+		_c.mutation.SetExchangeID(v)
+	}
+	if _, ok := _c.mutation.ExchangeKind(); !ok {
+		v := tracelog.DefaultExchangeKind
+		_c.mutation.SetExchangeKind(v)
+	}
+	if _, ok := _c.mutation.ExchangeRole(); !ok {
+		v := tracelog.DefaultExchangeRole
+		_c.mutation.SetExchangeRole(v)
+	}
+	if _, ok := _c.mutation.ParentExchangeID(); !ok {
+		v := tracelog.DefaultParentExchangeID
+		_c.mutation.SetParentExchangeID(v)
+	}
+	if _, ok := _c.mutation.SequenceIndex(); !ok {
+		v := tracelog.DefaultSequenceIndex
+		_c.mutation.SetSequenceIndex(v)
 	}
 	if _, ok := _c.mutation.RoutingPolicy(); !ok {
 		v := tracelog.DefaultRoutingPolicy
@@ -807,6 +933,12 @@ func (_c *TraceLogCreate) check() error {
 	if _, ok := _c.mutation.ClientRequestID(); !ok {
 		return &ValidationError{Name: "client_request_id", err: errors.New(`dao: missing required field "TraceLog.client_request_id"`)}
 	}
+	if _, ok := _c.mutation.RequestAuditID(); !ok {
+		return &ValidationError{Name: "request_audit_id", err: errors.New(`dao: missing required field "TraceLog.request_audit_id"`)}
+	}
+	if _, ok := _c.mutation.ResponseID(); !ok {
+		return &ValidationError{Name: "response_id", err: errors.New(`dao: missing required field "TraceLog.response_id"`)}
+	}
 	if _, ok := _c.mutation.SelectedUpstreamID(); !ok {
 		return &ValidationError{Name: "selected_upstream_id", err: errors.New(`dao: missing required field "TraceLog.selected_upstream_id"`)}
 	}
@@ -815,6 +947,21 @@ func (_c *TraceLogCreate) check() error {
 	}
 	if _, ok := _c.mutation.SelectedUpstreamProviderPreset(); !ok {
 		return &ValidationError{Name: "selected_upstream_provider_preset", err: errors.New(`dao: missing required field "TraceLog.selected_upstream_provider_preset"`)}
+	}
+	if _, ok := _c.mutation.ExchangeID(); !ok {
+		return &ValidationError{Name: "exchange_id", err: errors.New(`dao: missing required field "TraceLog.exchange_id"`)}
+	}
+	if _, ok := _c.mutation.ExchangeKind(); !ok {
+		return &ValidationError{Name: "exchange_kind", err: errors.New(`dao: missing required field "TraceLog.exchange_kind"`)}
+	}
+	if _, ok := _c.mutation.ExchangeRole(); !ok {
+		return &ValidationError{Name: "exchange_role", err: errors.New(`dao: missing required field "TraceLog.exchange_role"`)}
+	}
+	if _, ok := _c.mutation.ParentExchangeID(); !ok {
+		return &ValidationError{Name: "parent_exchange_id", err: errors.New(`dao: missing required field "TraceLog.parent_exchange_id"`)}
+	}
+	if _, ok := _c.mutation.SequenceIndex(); !ok {
+		return &ValidationError{Name: "sequence_index", err: errors.New(`dao: missing required field "TraceLog.sequence_index"`)}
 	}
 	if _, ok := _c.mutation.RoutingPolicy(); !ok {
 		return &ValidationError{Name: "routing_policy", err: errors.New(`dao: missing required field "TraceLog.routing_policy"`)}
@@ -994,6 +1141,14 @@ func (_c *TraceLogCreate) createSpec() (*TraceLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(tracelog.FieldClientRequestID, field.TypeString, value)
 		_node.ClientRequestID = value
 	}
+	if value, ok := _c.mutation.RequestAuditID(); ok {
+		_spec.SetField(tracelog.FieldRequestAuditID, field.TypeString, value)
+		_node.RequestAuditID = value
+	}
+	if value, ok := _c.mutation.ResponseID(); ok {
+		_spec.SetField(tracelog.FieldResponseID, field.TypeString, value)
+		_node.ResponseID = value
+	}
 	if value, ok := _c.mutation.SelectedUpstreamID(); ok {
 		_spec.SetField(tracelog.FieldSelectedUpstreamID, field.TypeString, value)
 		_node.SelectedUpstreamID = value
@@ -1005,6 +1160,26 @@ func (_c *TraceLogCreate) createSpec() (*TraceLog, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.SelectedUpstreamProviderPreset(); ok {
 		_spec.SetField(tracelog.FieldSelectedUpstreamProviderPreset, field.TypeString, value)
 		_node.SelectedUpstreamProviderPreset = value
+	}
+	if value, ok := _c.mutation.ExchangeID(); ok {
+		_spec.SetField(tracelog.FieldExchangeID, field.TypeString, value)
+		_node.ExchangeID = value
+	}
+	if value, ok := _c.mutation.ExchangeKind(); ok {
+		_spec.SetField(tracelog.FieldExchangeKind, field.TypeString, value)
+		_node.ExchangeKind = value
+	}
+	if value, ok := _c.mutation.ExchangeRole(); ok {
+		_spec.SetField(tracelog.FieldExchangeRole, field.TypeString, value)
+		_node.ExchangeRole = value
+	}
+	if value, ok := _c.mutation.ParentExchangeID(); ok {
+		_spec.SetField(tracelog.FieldParentExchangeID, field.TypeString, value)
+		_node.ParentExchangeID = value
+	}
+	if value, ok := _c.mutation.SequenceIndex(); ok {
+		_spec.SetField(tracelog.FieldSequenceIndex, field.TypeInt, value)
+		_node.SequenceIndex = value
 	}
 	if value, ok := _c.mutation.RoutingPolicy(); ok {
 		_spec.SetField(tracelog.FieldRoutingPolicy, field.TypeString, value)
@@ -1530,6 +1705,30 @@ func (u *TraceLogUpsert) UpdateClientRequestID() *TraceLogUpsert {
 	return u
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *TraceLogUpsert) SetRequestAuditID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldRequestAuditID, v)
+	return u
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateRequestAuditID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldRequestAuditID)
+	return u
+}
+
+// SetResponseID sets the "response_id" field.
+func (u *TraceLogUpsert) SetResponseID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldResponseID, v)
+	return u
+}
+
+// UpdateResponseID sets the "response_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateResponseID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldResponseID)
+	return u
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (u *TraceLogUpsert) SetSelectedUpstreamID(v string) *TraceLogUpsert {
 	u.Set(tracelog.FieldSelectedUpstreamID, v)
@@ -1563,6 +1762,72 @@ func (u *TraceLogUpsert) SetSelectedUpstreamProviderPreset(v string) *TraceLogUp
 // UpdateSelectedUpstreamProviderPreset sets the "selected_upstream_provider_preset" field to the value that was provided on create.
 func (u *TraceLogUpsert) UpdateSelectedUpstreamProviderPreset() *TraceLogUpsert {
 	u.SetExcluded(tracelog.FieldSelectedUpstreamProviderPreset)
+	return u
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (u *TraceLogUpsert) SetExchangeID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldExchangeID, v)
+	return u
+}
+
+// UpdateExchangeID sets the "exchange_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateExchangeID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldExchangeID)
+	return u
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *TraceLogUpsert) SetExchangeKind(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldExchangeKind, v)
+	return u
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateExchangeKind() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldExchangeKind)
+	return u
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *TraceLogUpsert) SetExchangeRole(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldExchangeRole, v)
+	return u
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateExchangeRole() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldExchangeRole)
+	return u
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *TraceLogUpsert) SetParentExchangeID(v string) *TraceLogUpsert {
+	u.Set(tracelog.FieldParentExchangeID, v)
+	return u
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateParentExchangeID() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldParentExchangeID)
+	return u
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *TraceLogUpsert) SetSequenceIndex(v int) *TraceLogUpsert {
+	u.Set(tracelog.FieldSequenceIndex, v)
+	return u
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *TraceLogUpsert) UpdateSequenceIndex() *TraceLogUpsert {
+	u.SetExcluded(tracelog.FieldSequenceIndex)
+	return u
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *TraceLogUpsert) AddSequenceIndex(v int) *TraceLogUpsert {
+	u.Add(tracelog.FieldSequenceIndex, v)
 	return u
 }
 
@@ -2206,6 +2471,34 @@ func (u *TraceLogUpsertOne) UpdateClientRequestID() *TraceLogUpsertOne {
 	})
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *TraceLogUpsertOne) SetRequestAuditID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetRequestAuditID(v)
+	})
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateRequestAuditID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateRequestAuditID()
+	})
+}
+
+// SetResponseID sets the "response_id" field.
+func (u *TraceLogUpsertOne) SetResponseID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetResponseID(v)
+	})
+}
+
+// UpdateResponseID sets the "response_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateResponseID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateResponseID()
+	})
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (u *TraceLogUpsertOne) SetSelectedUpstreamID(v string) *TraceLogUpsertOne {
 	return u.Update(func(s *TraceLogUpsert) {
@@ -2245,6 +2538,83 @@ func (u *TraceLogUpsertOne) SetSelectedUpstreamProviderPreset(v string) *TraceLo
 func (u *TraceLogUpsertOne) UpdateSelectedUpstreamProviderPreset() *TraceLogUpsertOne {
 	return u.Update(func(s *TraceLogUpsert) {
 		s.UpdateSelectedUpstreamProviderPreset()
+	})
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (u *TraceLogUpsertOne) SetExchangeID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetExchangeID(v)
+	})
+}
+
+// UpdateExchangeID sets the "exchange_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateExchangeID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateExchangeID()
+	})
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *TraceLogUpsertOne) SetExchangeKind(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetExchangeKind(v)
+	})
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateExchangeKind() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateExchangeKind()
+	})
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *TraceLogUpsertOne) SetExchangeRole(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetExchangeRole(v)
+	})
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateExchangeRole() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateExchangeRole()
+	})
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *TraceLogUpsertOne) SetParentExchangeID(v string) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetParentExchangeID(v)
+	})
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateParentExchangeID() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateParentExchangeID()
+	})
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *TraceLogUpsertOne) SetSequenceIndex(v int) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetSequenceIndex(v)
+	})
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *TraceLogUpsertOne) AddSequenceIndex(v int) *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.AddSequenceIndex(v)
+	})
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *TraceLogUpsertOne) UpdateSequenceIndex() *TraceLogUpsertOne {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateSequenceIndex()
 	})
 }
 
@@ -3065,6 +3435,34 @@ func (u *TraceLogUpsertBulk) UpdateClientRequestID() *TraceLogUpsertBulk {
 	})
 }
 
+// SetRequestAuditID sets the "request_audit_id" field.
+func (u *TraceLogUpsertBulk) SetRequestAuditID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetRequestAuditID(v)
+	})
+}
+
+// UpdateRequestAuditID sets the "request_audit_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateRequestAuditID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateRequestAuditID()
+	})
+}
+
+// SetResponseID sets the "response_id" field.
+func (u *TraceLogUpsertBulk) SetResponseID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetResponseID(v)
+	})
+}
+
+// UpdateResponseID sets the "response_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateResponseID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateResponseID()
+	})
+}
+
 // SetSelectedUpstreamID sets the "selected_upstream_id" field.
 func (u *TraceLogUpsertBulk) SetSelectedUpstreamID(v string) *TraceLogUpsertBulk {
 	return u.Update(func(s *TraceLogUpsert) {
@@ -3104,6 +3502,83 @@ func (u *TraceLogUpsertBulk) SetSelectedUpstreamProviderPreset(v string) *TraceL
 func (u *TraceLogUpsertBulk) UpdateSelectedUpstreamProviderPreset() *TraceLogUpsertBulk {
 	return u.Update(func(s *TraceLogUpsert) {
 		s.UpdateSelectedUpstreamProviderPreset()
+	})
+}
+
+// SetExchangeID sets the "exchange_id" field.
+func (u *TraceLogUpsertBulk) SetExchangeID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetExchangeID(v)
+	})
+}
+
+// UpdateExchangeID sets the "exchange_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateExchangeID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateExchangeID()
+	})
+}
+
+// SetExchangeKind sets the "exchange_kind" field.
+func (u *TraceLogUpsertBulk) SetExchangeKind(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetExchangeKind(v)
+	})
+}
+
+// UpdateExchangeKind sets the "exchange_kind" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateExchangeKind() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateExchangeKind()
+	})
+}
+
+// SetExchangeRole sets the "exchange_role" field.
+func (u *TraceLogUpsertBulk) SetExchangeRole(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetExchangeRole(v)
+	})
+}
+
+// UpdateExchangeRole sets the "exchange_role" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateExchangeRole() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateExchangeRole()
+	})
+}
+
+// SetParentExchangeID sets the "parent_exchange_id" field.
+func (u *TraceLogUpsertBulk) SetParentExchangeID(v string) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetParentExchangeID(v)
+	})
+}
+
+// UpdateParentExchangeID sets the "parent_exchange_id" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateParentExchangeID() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateParentExchangeID()
+	})
+}
+
+// SetSequenceIndex sets the "sequence_index" field.
+func (u *TraceLogUpsertBulk) SetSequenceIndex(v int) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.SetSequenceIndex(v)
+	})
+}
+
+// AddSequenceIndex adds v to the "sequence_index" field.
+func (u *TraceLogUpsertBulk) AddSequenceIndex(v int) *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.AddSequenceIndex(v)
+	})
+}
+
+// UpdateSequenceIndex sets the "sequence_index" field to the value that was provided on create.
+func (u *TraceLogUpsertBulk) UpdateSequenceIndex() *TraceLogUpsertBulk {
+	return u.Update(func(s *TraceLogUpsert) {
+		s.UpdateSequenceIndex()
 	})
 }
 

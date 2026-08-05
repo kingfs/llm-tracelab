@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -160,6 +161,63 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByRequestID(req-credential-failure) error = %v", err)
 	}
+	auditTime := time.Date(2026, 4, 21, 8, 2, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-mcp-1").
+		SetResponseID("resp-mcp-1").
+		SetConversationID("thread-mcp-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetClientRequestID("client-mcp-1").
+		SetHeaderJSON(map[string]any{"content-type": "application/json"}).
+		SetBodyPreview(`{"model":"gpt-5.1-codex","input":"audit"}`).
+		SetBodySha256("sha256-mcp").
+		SetStatus("completed").
+		SetCreatedAt(auditTime).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit error = %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex-mcp-1").
+		SetResponseID("resp-mcp-1").
+		SetRequestAuditID("reqaudit-mcp-1").
+		SetTraceID(credentialEntry.ID).
+		SetCassettePath(credentialEntry.LogPath).
+		SetUpstreamID("openai-primary").
+		SetRouteTarget("openai-primary:cred-a").
+		SetModel("gpt-5.1-codex").
+		SetEndpoint("/v1/responses").
+		SetStatusCode(http.StatusOK).
+		SetStartedAt(auditTime.Add(10 * time.Millisecond)).
+		SetCompletedAt(auditTime.Add(120 * time.Millisecond)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange error = %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("exev-mcp-1").
+		SetResponseID("resp-mcp-1").
+		SetRequestAuditID("reqaudit-mcp-1").
+		SetConversationID("thread-mcp-1").
+		SetEventType("response.request").
+		SetPhase("request").
+		SetStatus("completed").
+		SetMessage("request completed").
+		SetDetailsJSON(map[string]any{"request_audit_id": "reqaudit-mcp-1"}).
+		SetOccurredAt(auditTime.Add(130 * time.Millisecond)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create execution event error = %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("exev-mcp-2").
+		SetRequestAuditID("reqaudit-mcp-1").
+		SetEventType("response.model_call").
+		SetPhase("model_call").
+		SetStatus("started").
+		SetDetailsJSON(map[string]any{"request_audit_id": "reqaudit-mcp-1"}).
+		SetOccurredAt(auditTime.Add(20 * time.Millisecond)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request-scoped execution event error = %v", err)
+	}
 	if err := st.SaveFindings(failureEntry.ID, []observe.Finding{{
 		ID:              "finding-danger",
 		TraceID:         failureEntry.ID,
@@ -223,8 +281,8 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools() error = %v", err)
 	}
-	if len(tools.Tools) != 19 {
-		t.Fatalf("len(tools.Tools) = %d, want 19", len(tools.Tools))
+	if len(tools.Tools) != 21 {
+		t.Fatalf("len(tools.Tools) = %d, want 21", len(tools.Tools))
 	}
 
 	traceList, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -330,6 +388,109 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := credentialRoutingPayload["selected_credential_id"].(string); got != "cred-a" {
 		t.Fatalf("credential selected_credential_id = %q, want cred-a", got)
+	}
+
+	responsesAudit, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "responses_audit_trace",
+		Arguments: map[string]any{"response_id": "resp-mcp-1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_trace response_id) error = %v", err)
+	}
+	auditPayload := responsesAudit.StructuredContent.(map[string]any)
+	requestAudit := auditPayload["request_audit"].(map[string]any)
+	if got := requestAudit["id"].(string); got != "reqaudit-mcp-1" {
+		t.Fatalf("responses_audit_trace request audit id = %q, want reqaudit-mcp-1", got)
+	}
+	if got := requestAudit["client_request_id"].(string); got != "client-mcp-1" {
+		t.Fatalf("responses_audit_trace client_request_id = %q, want client-mcp-1", got)
+	}
+	auditEvents := auditPayload["events"].([]any)
+	if len(auditEvents) != 2 {
+		t.Fatalf("len(responses_audit_trace.events) = %d, want 2", len(auditEvents))
+	}
+	if got := auditEvents[0].(map[string]any)["status"].(string); got != "started" {
+		t.Fatalf("responses_audit_trace first event status = %q, want started", got)
+	}
+	if got := auditEvents[1].(map[string]any)["status"].(string); got != "completed" {
+		t.Fatalf("responses_audit_trace second event status = %q, want completed", got)
+	}
+	auditExchanges := auditPayload["upstream_exchanges"].([]any)
+	if len(auditExchanges) != 1 {
+		t.Fatalf("len(responses_audit_trace.upstream_exchanges) = %d, want 1", len(auditExchanges))
+	}
+	if got := auditExchanges[0].(map[string]any)["trace_id"].(string); got != credentialEntry.ID {
+		t.Fatalf("responses_audit_trace exchange trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+	modelExchanges := auditPayload["model_exchanges"].([]any)
+	if len(modelExchanges) != 1 {
+		t.Fatalf("len(responses_audit_trace.model_exchanges) = %d, want 1", len(modelExchanges))
+	}
+	modelExchange := modelExchanges[0].(map[string]any)
+	if got := modelExchange["trace_id"].(string); got != credentialEntry.ID {
+		t.Fatalf("responses_audit_trace model exchange trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+	if got := modelExchange["exchange_kind"].(string); got != "model" {
+		t.Fatalf("responses_audit_trace model exchange exchange_kind = %q, want model", got)
+	}
+	if got := modelExchange["exchange_role"].(string); got != "primary_model_call" {
+		t.Fatalf("responses_audit_trace model exchange exchange_role = %q, want primary_model_call", got)
+	}
+	if got := modelExchange["parent_exchange_id"].(string); got != "entry:reqaudit-mcp-1" {
+		t.Fatalf("responses_audit_trace model exchange parent_exchange_id = %q, want entry:reqaudit-mcp-1", got)
+	}
+	if got := int(modelExchange["sequence_index"].(float64)); got != 0 {
+		t.Fatalf("responses_audit_trace model exchange sequence_index = %d, want 0", got)
+	}
+	entryExchange := auditPayload["entry_exchange"].(map[string]any)
+	if got := entryExchange["exchange_kind"].(string); got != "entry" {
+		t.Fatalf("responses_audit_trace entry exchange exchange_kind = %q, want entry", got)
+	}
+	if got := entryExchange["exchange_role"].(string); got != "client_request" {
+		t.Fatalf("responses_audit_trace entry exchange exchange_role = %q, want client_request", got)
+	}
+	finalResponse := auditPayload["final_response"].(map[string]any)
+	if got := finalResponse["response_id"].(string); got != "resp-mcp-1" {
+		t.Fatalf("responses_audit_trace final response_id = %q, want resp-mcp-1", got)
+	}
+	if got := finalResponse["client_request_id"].(string); got != "client-mcp-1" {
+		t.Fatalf("responses_audit_trace final client_request_id = %q, want client-mcp-1", got)
+	}
+	rawCassettes := auditPayload["raw_cassettes"].([]any)
+	if len(rawCassettes) != 1 {
+		t.Fatalf("len(responses_audit_trace.raw_cassettes) = %d, want 1", len(rawCassettes))
+	}
+	rawCassette := rawCassettes[0].(map[string]any)
+	if got := rawCassette["trace_id"].(string); got != credentialEntry.ID {
+		t.Fatalf("responses_audit_trace raw cassette trace_id = %q, want %q", got, credentialEntry.ID)
+	}
+	if got := rawCassette["exchange_kind"].(string); got != "model" {
+		t.Fatalf("responses_audit_trace raw cassette exchange_kind = %q, want model", got)
+	}
+	if got := rawCassette["exchange_role"].(string); got != "primary_model_call" {
+		t.Fatalf("responses_audit_trace raw cassette exchange_role = %q, want primary_model_call", got)
+	}
+	if got := rawCassette["parent_exchange_id"].(string); got != "entry:reqaudit-mcp-1" {
+		t.Fatalf("responses_audit_trace raw cassette parent_exchange_id = %q, want entry:reqaudit-mcp-1", got)
+	}
+	if got := int(rawCassette["sequence_index"].(float64)); got != 0 {
+		t.Fatalf("responses_audit_trace raw cassette sequence_index = %d, want 0", got)
+	}
+	rawResponse := rawCassette["response"].(map[string]any)
+	if got, want := int(rawResponse["status_code"].(float64)), credentialEntry.Header.Meta.StatusCode; got != want {
+		t.Fatalf("responses_audit_trace raw cassette status_code = %d, want %d", got, want)
+	}
+
+	responsesAuditByRequest, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "responses_audit_trace",
+		Arguments: map[string]any{"request_audit_id": "reqaudit-mcp-1"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_trace request_audit_id) error = %v", err)
+	}
+	requestQuery := responsesAuditByRequest.StructuredContent.(map[string]any)["query"].(map[string]any)
+	if got := requestQuery["response_id"].(string); got != "resp-mcp-1" {
+		t.Fatalf("responses_audit_trace request lookup response_id = %q, want resp-mcp-1", got)
 	}
 
 	stickyRouting, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -633,6 +794,101 @@ func TestServerListsAndQueriesReadOnlyTools(t *testing.T) {
 	}
 	if got := analysisJob.StructuredContent.(map[string]any)["job_type"].(string); got != "session_reanalyze" {
 		t.Fatalf("get_analysis_job.job_type = %q, want session_reanalyze", got)
+	}
+}
+
+func TestResponsesAuditToolCallsTool(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	base := time.Date(2026, 6, 23, 11, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-mcp-tool-1").
+		SetResponseID("resp-mcp-tool-1").
+		SetConversationID("thread-mcp-tool-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(ctx); err != nil {
+		t.Fatalf("create request audit error = %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	if _, err := auditor.RecordToolCallAudit(responsesaudit.ContextWithRequestAuditID(ctx, "reqaudit-mcp-tool-1"), responsesaudit.ToolCallAudit{
+		ResponseID:     "resp-mcp-tool-1",
+		ConversationID: "thread-mcp-tool-1",
+		CallID:         "call_mcp_secret",
+		ToolType:       "function",
+		ToolName:       "lookup",
+		Executor:       "function_executor:lookup",
+		Status:         "completed",
+		InputJSON:      map[string]any{"query": "SECRET_MARKER_MCP"},
+		OutputJSON:     map[string]any{"result": "SECRET_MARKER_MCP"},
+		MetadataJSON:   map[string]any{"note": "SECRET_MARKER_MCP"},
+		StartedAt:      base.Add(time.Second),
+		CompletedAt:    base.Add(2 * time.Second),
+		CreatedAt:      base.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+
+	server := New(st, Options{})
+	session, err := connectClient(ctx, server)
+	if err != nil {
+		t.Fatalf("connectClient() error = %v", err)
+	}
+	defer session.Close()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "responses_audit_tool_calls",
+		Arguments: map[string]any{
+			"request_audit_id": "reqaudit-mcp-tool-1",
+			"tool_name":        "lookup",
+			"status":           "completed",
+			"limit":            10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_tool_calls) error = %v", err)
+	}
+	payload := result.StructuredContent.(map[string]any)
+	if strings.Contains(fmt.Sprintf("%v", payload), "SECRET_MARKER_MCP") {
+		t.Fatalf("default MCP response leaked secret marker: %+v", payload)
+	}
+	if got := int(payload["total"].(float64)); got != 1 {
+		t.Fatalf("responses_audit_tool_calls total = %d, want 1", got)
+	}
+	items := payload["items"].([]any)
+	item := items[0].(map[string]any)
+	if got := item["call_id"].(string); got != "call_mcp_secret" {
+		t.Fatalf("responses_audit_tool_calls call_id = %q, want call_mcp_secret", got)
+	}
+	inputSummary := item["input_summary"].(map[string]any)
+	if present, ok := inputSummary["present"].(bool); !ok || !present || inputSummary["sha256"] == "" {
+		t.Fatalf("input_summary = %+v, want present sha", inputSummary)
+	}
+	if _, ok := item["input_json"]; ok {
+		t.Fatalf("default MCP response included input_json: %+v", item)
+	}
+
+	result, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "responses_audit_tool_calls",
+		Arguments: map[string]any{
+			"call_id":          "call_mcp_secret",
+			"include_payloads": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(responses_audit_tool_calls include payloads) error = %v", err)
+	}
+	payload = result.StructuredContent.(map[string]any)
+	if !strings.Contains(fmt.Sprintf("%v", payload), "SECRET_MARKER_MCP") {
+		t.Fatalf("include_payloads MCP response missing secret marker: %+v", payload)
 	}
 }
 

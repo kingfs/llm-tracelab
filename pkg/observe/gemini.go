@@ -44,6 +44,8 @@ func (p geminiParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 		Operation:     input.Header.Meta.Operation,
 		Endpoint:      input.Header.Meta.Endpoint,
 		Model:         input.Header.Meta.Model,
+		ExchangeKind:  input.Header.Meta.ExchangeKind,
+		ExchangeRole:  input.Header.Meta.ExchangeRole,
 		Parser:        p.Name(),
 		ParserVersion: p.Version(),
 		Status:        ParseStatusParsed,
@@ -63,6 +65,7 @@ func (p geminiParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 			CacheCreationTokens: 0,
 		},
 	}
+	applyExchangeMetadata(input, &obs)
 	req, err := decodeJSONObject(input.RequestBody)
 	if err != nil {
 		return obs, fmt.Errorf("parse gemini request: %w", err)
@@ -91,6 +94,9 @@ func (p geminiParser) Parse(ctx context.Context, input ParseInput) (TraceObserva
 	}
 	appendGeminiToolObservations(obs.Request.Messages, &obs)
 
+	if appendHTTPErrorResponseIfNonLLM(input, &obs) {
+		return obs, nil
+	}
 	if input.IsStream {
 		parseGeminiStream(input.ResponseBody, &obs)
 		return obs, nil

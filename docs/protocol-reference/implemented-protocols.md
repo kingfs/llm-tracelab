@@ -16,7 +16,7 @@ The proxy hot path does not translate one provider request schema into another. 
 
 | Protocol family | Provider labels | Routing profiles | Current endpoint coverage | Parser coverage |
 | --- | --- | --- | --- | --- |
-| `openai_compatible` | `openai_compatible`, `azure_openai`, `vllm` | `openai_default`, `azure_openai_v1`, `azure_openai_deployment`, `vllm_openai` | `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/models` | Chat Completions, Responses, Models |
+| `openai_compatible` | `openai_compatible`, `azure_openai`, `vllm` | `openai_default`, `azure_openai_v1`, `azure_openai_deployment`, `vllm_openai` | `/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/models`, vLLM `/tokenize`, `/detokenize` | Chat Completions, Responses, Models, Tokenization |
 | `anthropic_messages` | `anthropic` | `anthropic_default` | `/v1/messages`, `/v1/models` for connectivity/model discovery | Messages |
 | `google_genai` | `google_genai` | `google_ai_studio` | `/v1beta/models/{model}:generateContent`, `/v1beta/models/{model}:streamGenerateContent`, `/v1beta/models` | GenerateContent, streamGenerateContent |
 | `vertex_native` | `vertex_native` | `vertex_express`, `vertex_project_location` | Vertex Gemini `generateContent`, `streamGenerateContent`, model list paths | GenerateContent, streamGenerateContent |
@@ -31,10 +31,13 @@ Current normalized endpoints:
 - `/v1/responses`
 - `/v1/embeddings`
 - `/v1/models`
+- `/tokenize`
+- `/detokenize`
 
 Important details:
 
 - client `/responses` is accepted as a TraceLab entrypoint alias and is normalized to `/v1/responses`
+- for the `vllm_openai` routing profile, client `/tokenize`, `/v1/tokenize`, `/detokenize`, and `/v1/detokenize` are routed to the vLLM root tokenization endpoints
 - `upstream.base_url` should include the provider's API prefix such as `/v1`, `/api/v1`, `/openai`, or `/openai/v1`.
 - The proxy records and parses Chat Completions and Responses. Embeddings are routed/recorded but are not a deep Observation IR parser target today.
 - Responses and Chat Completions are different OpenAI surfaces. Codex traffic commonly uses `/v1/responses`.

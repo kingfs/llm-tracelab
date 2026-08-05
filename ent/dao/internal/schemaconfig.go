@@ -7,20 +7,34 @@ import "context"
 // SchemaConfig represents alternative schema names for all tables
 // that can be passed at runtime.
 type SchemaConfig struct {
-	APIToken        string // APIToken table.
-	ChannelConfig   string // ChannelConfig table.
-	ChannelModel    string // ChannelModel table.
-	ChannelProbeRun string // ChannelProbeRun table.
-	Dataset         string // Dataset table.
-	DatasetExample  string // DatasetExample table.
-	EvalRun         string // EvalRun table.
-	ExperimentRun   string // ExperimentRun table.
-	ModelCatalog    string // ModelCatalog table.
-	Score           string // Score table.
-	TraceLog        string // TraceLog table.
-	UpstreamModel   string // UpstreamModel table.
-	UpstreamTarget  string // UpstreamTarget table.
-	User            string // User table.
+	APIToken         string // APIToken table.
+	AnalysisJob      string // AnalysisJob table.
+	AnalysisRun      string // AnalysisRun table.
+	ChannelConfig    string // ChannelConfig table.
+	ChannelModel     string // ChannelModel table.
+	ChannelProbeRun  string // ChannelProbeRun table.
+	Dataset          string // Dataset table.
+	DatasetExample   string // DatasetExample table.
+	EvalRun          string // EvalRun table.
+	ExecutionEvent   string // ExecutionEvent table.
+	ExperimentRun    string // ExperimentRun table.
+	ModelCatalog     string // ModelCatalog table.
+	ParseJob         string // ParseJob table.
+	ParserVersion    string // ParserVersion table.
+	RequestAudit     string // RequestAudit table.
+	Response         string // Response table.
+	ResponseItem     string // ResponseItem table.
+	Score            string // Score table.
+	SemanticNode     string // SemanticNode table.
+	SystemEvent      string // SystemEvent table.
+	ToolCallAudit    string // ToolCallAudit table.
+	TraceFinding     string // TraceFinding table.
+	TraceLog         string // TraceLog table.
+	TraceObservation string // TraceObservation table.
+	UpstreamExchange string // UpstreamExchange table.
+	UpstreamModel    string // UpstreamModel table.
+	UpstreamTarget   string // UpstreamTarget table.
+	User             string // User table.
 }
 
 type schemaCtxKey struct{}

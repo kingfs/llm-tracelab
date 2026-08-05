@@ -6,12 +6,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,11 +24,27 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/channel"
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/observeworker"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/internal/routeplan"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
+
+func testJWTManager(t *testing.T, ttl time.Duration) *auth.JWTManager {
+	t.Helper()
+	manager, err := auth.NewJWTManager(auth.JWTOptions{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+		TTL:    ttl,
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
+	return manager
+}
 
 func TestEmbeddedMonitorUISmoke(t *testing.T) {
 	t.Parallel()
@@ -35,6 +53,7 @@ func TestEmbeddedMonitorUISmoke(t *testing.T) {
 	routes := []string{
 		"/",
 		"/overview",
+		"/models/dev%2Fgpt-5.5",
 		"/traces",
 		"/sessions",
 		"/audit",
@@ -165,6 +184,641 @@ func TestProviderPresetAPIHandlerReturnsSupportMatrix(t *testing.T) {
 	}
 	if got := strings.Join(byID["vertex"].AllowedProfiles, ","); !strings.Contains(got, "vertex_express") || !strings.Contains(got, "vertex_project_location") {
 		t.Fatalf("vertex allowed profiles = %q", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerDefaultDisabled(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Enabled {
+		t.Fatalf("enabled = true, want false")
+	}
+	if payload.Timeout != "5s" || payload.MaxResultBytes != 64<<10 {
+		t.Fatalf("defaults = timeout %q max %d, want 5s and %d", payload.Timeout, payload.MaxResultBytes, 64<<10)
+	}
+	if got := strings.Join(payload.SupportedTypes, ","); got != "static_response,external_command" {
+		t.Fatalf("supported_types = %q, want static_response,external_command", got)
+	}
+	if len(payload.Executors) != 0 || len(payload.Warnings) != 0 {
+		t.Fatalf("executors/warnings = %+v/%+v, want empty", payload.Executors, payload.Warnings)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerStaticResponseRedactsOutput(t *testing.T) {
+	t.Parallel()
+
+	disabled := false
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled:        true,
+		Timeout:        2 * time.Second,
+		MaxResultBytes: 256,
+		Redaction: config.ResponsesFunctionRedactionConfig{
+			Arguments: true,
+			Output:    true,
+		},
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:   "lookup_order",
+				Type:   "static_response",
+				Output: map[string]any{"secret": "do-not-leak"},
+			},
+			{
+				Name:    "disabled_tool",
+				Type:    "static_response",
+				Enabled: &disabled,
+				Output:  "also-do-not-leak",
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "do-not-leak") || strings.Contains(body, "also-do-not-leak") {
+		t.Fatalf("response leaked configured output: %s", body)
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Enabled || payload.Timeout != "2s" || payload.MaxResultBytes != 256 {
+		t.Fatalf("summary = %+v, want enabled 2s max 256", payload)
+	}
+	if !payload.Redaction.Arguments || !payload.Redaction.Output {
+		t.Fatalf("redaction = %+v, want arguments/output true", payload.Redaction)
+	}
+	if len(payload.Executors) != 2 {
+		t.Fatalf("len(executors) = %d, want 2", len(payload.Executors))
+	}
+	if payload.Executors[0].Name != "lookup_order" || !payload.Executors[0].Enabled || !payload.Executors[0].Available || !payload.Executors[0].OutputConfigured {
+		t.Fatalf("first executor = %+v, want enabled configured lookup_order", payload.Executors[0])
+	}
+	if payload.Executors[1].Name != "disabled_tool" || payload.Executors[1].Enabled || payload.Executors[1].Available || !payload.Executors[1].OutputConfigured {
+		t.Fatalf("second executor = %+v, want disabled configured disabled_tool", payload.Executors[1])
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerValidationWarnings(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: true,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{Name: " ", Type: "static_response", Output: "do-not-leak"},
+			{Name: "future", Type: "external_command", Command: "echo ok"},
+			{Name: "mystery", Type: "unknown_type"},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "do-not-leak") || strings.Contains(body, "echo ok") {
+		t.Fatalf("response leaked executor payload: %s", body)
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Executors) != 3 {
+		t.Fatalf("len(executors) = %d, want 3", len(payload.Executors))
+	}
+	if payload.Executors[0].Available || !strings.Contains(strings.Join(payload.Executors[0].Warnings, " "), "name is required") {
+		t.Fatalf("empty-name executor = %+v, want unavailable name warning", payload.Executors[0])
+	}
+	if !payload.Executors[1].Available || !payload.Executors[1].CommandConfigured || len(payload.Executors[1].Warnings) != 0 {
+		t.Fatalf("external executor = %+v, want available command-configured executor", payload.Executors[1])
+	}
+	if payload.Executors[2].Available || !strings.Contains(strings.Join(payload.Executors[2].Warnings, " "), "unsupported executor type") {
+		t.Fatalf("unknown executor = %+v, want unavailable unsupported warning", payload.Executors[2])
+	}
+	if got := strings.Join(payload.Warnings, " "); strings.Contains(got, "no available executors") || !strings.Contains(got, "unsupported executor type") {
+		t.Fatalf("warnings = %q, want validation warning without no-available warning", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerWarnsWhenEnabledWithoutExecutors(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{
+		ResponsesFunctionExecutors: config.ResponsesFunctionExecutorConfig{
+			Enabled: true,
+		},
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Enabled {
+		t.Fatalf("enabled = false, want true")
+	}
+	if len(payload.Warnings) != 1 || !strings.Contains(payload.Warnings[0], "enabled but no executors") {
+		t.Fatalf("warnings = %+v, want enabled-without-executors warning", payload.Warnings)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerValidateOnlyDoesNotPersist(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"enabled": true,
+		"timeout": "2s",
+		"max_result_bytes": 128,
+		"redaction": {"arguments": true, "output": true}
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var update responsesFunctionExecutorUpdateResponse
+	if err := json.NewDecoder(rr.Body).Decode(&update); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if update.Applied || !update.ValidateOnly || !update.Summary.Enabled || update.Summary.Timeout != "2s" || update.Summary.MaxResultBytes != 128 {
+		t.Fatalf("update response = %+v, want validate-only enabled 2s max 128", update)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Enabled || payload.Timeout != "5s" || payload.MaxResultBytes != 64<<10 {
+		t.Fatalf("summary after validate-only = %+v, want original defaults", payload)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerApplyUpdatesSummaryWithoutEchoingSecrets(t *testing.T) {
+	t.Parallel()
+
+	allowedDir := t.TempDir()
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: false,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:    "lookup_order",
+				Type:    "external_command",
+				Command: "echo do-not-leak",
+				Output:  map[string]any{"secret": "also-do-not-leak"},
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
+		"validate_only": false,
+		"enabled": true,
+		"timeout": "3s",
+		"max_result_bytes": 256,
+		"redaction": {"arguments": true, "output": true},
+		"executors": [
+			{
+				"name": "lookup_order",
+				"type": "external_command",
+				"enabled": true,
+				"process": {
+					"working_dir": %q,
+					"require_absolute_command": true,
+					"allowed_command_dirs": [%q],
+					"reject_root": true
+				}
+			}
+			]
+		}`, allowedDir, allowedDir)))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); strings.Contains(body, "do-not-leak") || strings.Contains(body, "echo ") {
+		t.Fatalf("response leaked sensitive executor config: %s", body)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/function-executors", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "do-not-leak") || strings.Contains(body, "echo ") {
+		t.Fatalf("GET response leaked sensitive executor config: %s", body)
+	}
+	var payload responsesFunctionExecutorsSummary
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Enabled || payload.Timeout != "3s" || payload.MaxResultBytes != 256 || !payload.Redaction.Arguments || !payload.Redaction.Output {
+		t.Fatalf("summary after apply = %+v, want applied global policy", payload)
+	}
+	if len(payload.Executors) != 1 || !payload.Executors[0].Enabled || !payload.Executors[0].CommandConfigured || !payload.Executors[0].OutputConfigured {
+		t.Fatalf("executors after apply = %+v, want preserved non-echoed command/output flags", payload.Executors)
+	}
+	if got := payload.Executors[0].Process; got.WorkingDir != allowedDir || !got.RequireAbsoluteCommand || len(got.AllowedCommandDirs) != 1 || got.AllowedCommandDirs[0] != allowedDir || !got.RejectRoot {
+		t.Fatalf("process after apply = %+v, want safe process overlay fields", got)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerApplyPersistsSafeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: false,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{
+				Name:    "lookup_order",
+				Type:    config.ResponsesFunctionExecutorTypeExternalCommand,
+				Command: "echo do-not-store",
+				Output:  "do-not-store-output",
+			},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": false,
+		"enabled": true,
+		"timeout": "4s",
+		"max_result_bytes": 512,
+		"redaction": {"arguments": true, "output": false},
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "enabled": true}
+		]
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	got, ok, err := st.LoadResponsesFunctionExecutorConfigSnapshot(context.Background())
+	if err != nil {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() error = %v", err)
+	}
+	if !ok {
+		t.Fatalf("LoadResponsesFunctionExecutorConfigSnapshot() ok = false, want true")
+	}
+	if !got.Enabled || got.Timeout != 4*time.Second || got.MaxResultBytes != 512 || !got.Redaction.Arguments || got.Redaction.Output {
+		t.Fatalf("persisted config = %+v, want safe applied fields", got)
+	}
+	if len(got.Executors) != 1 || got.Executors[0].Command != "" || got.Executors[0].Output != nil {
+		t.Fatalf("persisted executors = %+v, want sensitive fields stripped", got.Executors)
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerRejectsSensitiveWriteFields(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{"name": "lookup_order", "type": "static_response", "output": "do-not-leak"}
+		]
+	}`))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "do-not-leak") {
+		t.Fatalf("error response leaked sensitive field value: %s", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "command": "echo do-not-leak"}
+		]
+	}`))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "do-not-leak") {
+		t.Fatalf("error response leaked sensitive field value: %s", rr.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(`{
+		"validate_only": true,
+		"executors": [
+			{"name": "lookup_order", "type": "external_command", "process": {"env": {"SECRET": "do-not-leak"}}}
+		]
+	}`))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "do-not-leak") || strings.Contains(rr.Body.String(), "SECRET") {
+		t.Fatalf("error response leaked sensitive process field value: %s", rr.Body.String())
+	}
+}
+
+func TestResponsesFunctionExecutorsAPIHandlerWarnsOnInvalidProcessPatch(t *testing.T) {
+	t.Parallel()
+
+	filePath := filepath.Join(t.TempDir(), "not-dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write file fixture: %v", err)
+	}
+	cfg := config.ResponsesFunctionExecutorConfig{
+		Enabled: true,
+		Executors: []config.ResponsesFunctionExecutorBinding{
+			{Name: "lookup_order", Type: "external_command", Command: "echo ok"},
+		},
+	}
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, nil, RouteOptions{ResponsesFunctionExecutors: cfg})
+	req := httptest.NewRequest(http.MethodPost, "/api/responses/function-executors", strings.NewReader(fmt.Sprintf(`{
+		"validate_only": true,
+		"executors": [
+			{
+				"name": "lookup_order",
+				"type": "external_command",
+				"enabled": true,
+				"process": {
+					"working_dir": "relative-dir",
+					"require_absolute_command": true,
+					"allowed_command_dirs": ["relative-dir", %q],
+					"reject_root": true
+				}
+			}
+		]
+	}`, filePath)))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var update responsesFunctionExecutorUpdateResponse
+	if err := json.NewDecoder(rr.Body).Decode(&update); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(update.Summary.Executors) != 1 {
+		t.Fatalf("executors = %+v, want one executor", update.Summary.Executors)
+	}
+	warnings := strings.Join(update.Summary.Executors[0].Warnings, " ")
+	if update.Summary.Executors[0].Available || !strings.Contains(warnings, "working_dir must be absolute") || !strings.Contains(warnings, "command must be absolute") || !strings.Contains(warnings, "allowed_command_dirs entries must be absolute") || !strings.Contains(warnings, "allowed_command_dirs entries must be directories") {
+		t.Fatalf("executor = %+v, want invalid process warnings", update.Summary.Executors[0])
+	}
+	if got := update.Summary.Executors[0].Process; got.WorkingDir != "relative-dir" || !got.RequireAbsoluteCommand || len(got.AllowedCommandDirs) != 2 || got.AllowedCommandDirs[0] != "relative-dir" || got.AllowedCommandDirs[1] != filePath || !got.RejectRoot {
+		t.Fatalf("process summary = %+v, want patched safe fields", got)
+	}
+}
+
+func TestResponsesAuditTraceAPIHandler(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-monitor-1").
+		SetResponseID("resp-monitor-1").
+		SetConversationID("thread-monitor-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetClientRequestID("client-monitor-1").
+		SetHeaderJSON(map[string]any{"content-type": "application/json"}).
+		SetBodyPreview(`{"input":"hello"}`).
+		SetBodySha256("sha-monitor").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	if err := st.EntClient().ExecutionEvent.Create().
+		SetID("exev-monitor-1").
+		SetRequestAuditID("reqaudit-monitor-1").
+		SetEventType("response.model_call").
+		SetPhase("model_call").
+		SetStatus("started").
+		SetDetailsJSON(map[string]any{"request_audit_id": "reqaudit-monitor-1"}).
+		SetOccurredAt(base.Add(time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create execution event: %v", err)
+	}
+	cassettePath := filepath.Join(t.TempDir(), "trace-monitor-1.http")
+	cassette := buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/chat/completions", false, "200 OK", nil, `{"model":"gpt-5","input":"hello"}`, `{"id":"resp-monitor-1","output_text":"hello"}`, func(header *recordfile.RecordHeader) {
+		header.Meta.RequestID = "trace-monitor-1"
+		header.Meta.RequestAuditID = "reqaudit-monitor-1"
+		header.Meta.ResponseID = "resp-monitor-1"
+		header.Meta.ConversationID = "thread-monitor-1"
+		header.Meta.ClientRequestID = "client-monitor-1"
+		header.Meta.ExchangeID = "upex-monitor-1"
+		header.Meta.ExchangeKind = "model"
+		header.Meta.ExchangeRole = "primary_model_call"
+		header.Meta.ParentExchangeID = "reqaudit-monitor-1"
+		header.Meta.SequenceIndex = 2
+		header.Meta.Provider = "openai"
+		header.Meta.Model = "gpt-5"
+		header.Meta.Endpoint = "/v1/chat/completions"
+	})
+	if err := os.WriteFile(cassettePath, cassette, 0o644); err != nil {
+		t.Fatalf("write cassette: %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex-monitor-1").
+		SetRequestAuditID("reqaudit-monitor-1").
+		SetResponseID("resp-monitor-1").
+		SetTraceID("trace-monitor-1").
+		SetCassettePath(cassettePath).
+		SetStatusCode(http.StatusOK).
+		SetStartedAt(base.Add(2 * time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st)
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace?response_id=resp-monitor-1", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	responseBody := rr.Body.Bytes()
+	var payload responsesAuditTraceResponse
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.RequestAudit == nil || payload.RequestAudit.ID != "reqaudit-monitor-1" {
+		t.Fatalf("request audit = %+v, want reqaudit-monitor-1", payload.RequestAudit)
+	}
+	if len(payload.Events) != 1 || payload.Events[0].RequestAuditID != "reqaudit-monitor-1" {
+		t.Fatalf("events = %+v, want request-scoped event", payload.Events)
+	}
+	if len(payload.UpstreamExchanges) != 1 || payload.UpstreamExchanges[0].TraceID != "trace-monitor-1" {
+		t.Fatalf("upstream exchanges = %+v, want trace-monitor-1", payload.UpstreamExchanges)
+	}
+	if got := payload.UpstreamExchanges[0]; got.ExchangeKind != "model" || got.ExchangeRole != "primary_model_call" || got.ParentExchangeID != "reqaudit-monitor-1" || got.SequenceIndex != 2 {
+		t.Fatalf("upstream exchange metadata = %+v, want model primary_model_call reqaudit-monitor-1 seq 2", got)
+	}
+	if payload.EntryExchange == nil || payload.EntryExchange.ExchangeKind != "entry" || payload.EntryExchange.ExchangeRole != "client_request" || payload.EntryExchange.RequestAuditID != "reqaudit-monitor-1" {
+		t.Fatalf("entry exchange = %+v, want fallback entry summary for reqaudit-monitor-1", payload.EntryExchange)
+	}
+	if len(payload.ModelExchanges) != 1 || payload.ModelExchanges[0].ExchangeKind != "model" || payload.ModelExchanges[0].ExchangeRole != "primary_model_call" || payload.ModelExchanges[0].SequenceIndex != 2 {
+		t.Fatalf("model exchanges = %+v, want model metadata copied from cassette", payload.ModelExchanges)
+	}
+	if payload.FinalResponse == nil || payload.FinalResponse.ResponseID != "resp-monitor-1" || payload.FinalResponse.ClientRequestID != "client-monitor-1" {
+		t.Fatalf("final response = %+v, want response/client correlation", payload.FinalResponse)
+	}
+	if len(payload.RawCassettes) != 1 || payload.RawCassettes[0].TraceID != "trace-monitor-1" || payload.RawCassettes[0].ReadError != "" {
+		t.Fatalf("raw cassettes = %+v, want linked readable cassette", payload.RawCassettes)
+	}
+	if got := payload.RawCassettes[0]; got.ExchangeKind != "model" || got.ExchangeRole != "primary_model_call" || got.ParentExchangeID != "reqaudit-monitor-1" || got.SequenceIndex != 2 {
+		t.Fatalf("raw cassette metadata = %+v, want model primary_model_call reqaudit-monitor-1 seq 2", got)
+	}
+	if !strings.Contains(payload.RawCassettes[0].Response.Body, `"id":"resp-monitor-1"`) {
+		t.Fatalf("raw cassette response body = %q, want final upstream response preview", payload.RawCassettes[0].Response.Body)
+	}
+	var rawPayload map[string]json.RawMessage
+	if err := json.Unmarshal(responseBody, &rawPayload); err != nil {
+		t.Fatalf("decode raw response: %v", err)
+	}
+	for _, key := range []string{"entry_exchange", "model_exchanges", "upstream_exchanges", "raw_cassettes"} {
+		if _, ok := rawPayload[key]; !ok {
+			t.Fatalf("response missing JSON key %q: %s", key, string(responseBody))
+		}
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing query status = %d, want 400", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/trace?request_audit_id=missing", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing audit status = %d, want 404", rr.Code)
+	}
+}
+
+func TestResponsesToolCallAuditsAPIHandler(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	base := time.Date(2026, 6, 23, 10, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-monitor-tool-1").
+		SetResponseID("resp-monitor-tool-1").
+		SetConversationID("thread-monitor-tool-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(ctx); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	auditor := responsesaudit.NewEntAuditor(st.EntClient())
+	if _, err := auditor.RecordToolCallAudit(responsesaudit.ContextWithRequestAuditID(ctx, "reqaudit-monitor-tool-1"), responsesaudit.ToolCallAudit{
+		ResponseID:     "resp-monitor-tool-1",
+		ConversationID: "thread-monitor-tool-1",
+		CallID:         "call_monitor_secret",
+		ToolType:       "function",
+		ToolName:       "lookup",
+		Executor:       "function_executor:lookup",
+		Status:         "completed",
+		InputJSON:      map[string]any{"query": "SECRET_MARKER_MONITOR"},
+		OutputJSON:     map[string]any{"result": "SECRET_MARKER_MONITOR"},
+		MetadataJSON:   map[string]any{"note": "SECRET_MARKER_MONITOR"},
+		StartedAt:      base.Add(time.Second),
+		CompletedAt:    base.Add(2 * time.Second),
+		CreatedAt:      base.Add(3 * time.Second),
+	}); err != nil {
+		t.Fatalf("RecordToolCallAudit() error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st)
+	req := httptest.NewRequest(http.MethodGet, "/api/responses/audit/tool-calls?request_audit_id=reqaudit-monitor-tool-1&tool_name=lookup&status=completed&limit=10", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "SECRET_MARKER_MONITOR") {
+		t.Fatalf("default response leaked secret marker: %s", rr.Body.String())
+	}
+	var payload responsesToolCallAuditListResponse
+	if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total != 1 || len(payload.Items) != 1 {
+		t.Fatalf("tool call audit total/items = %d/%d, want 1/1", payload.Total, len(payload.Items))
+	}
+	item := payload.Items[0]
+	if item.RequestAuditID != "reqaudit-monitor-tool-1" || item.ResponseID != "resp-monitor-tool-1" || item.CallID != "call_monitor_secret" || item.ToolName != "lookup" || item.Status != "completed" {
+		t.Fatalf("tool call audit item = %+v, want seeded lookup audit", item)
+	}
+	if !item.InputSummary.Present || item.InputSummary.SHA256 == "" || len(item.InputJSON) != 0 || len(item.OutputJSON) != 0 || len(item.MetadataJSON) != 0 {
+		t.Fatalf("default payload fields = input summary %+v raw %v/%v/%v, want summary only", item.InputSummary, item.InputJSON, item.OutputJSON, item.MetadataJSON)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/responses/audit/tool-calls?call_id=call_monitor_secret&include_payloads=true", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("include payload status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "SECRET_MARKER_MONITOR") {
+		t.Fatalf("include_payloads response missing secret marker: %s", rr.Body.String())
 	}
 }
 
@@ -654,13 +1308,28 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	if _, err := authStore.CreateUser(context.Background(), "admin", "change-me-123"); err != nil {
 		t.Fatalf("CreateUser() error = %v", err)
 	}
-	token, err := authStore.CreateToken(context.Background(), "admin", "test", auth.DefaultTokenScope, time.Hour)
+	apiToken, err := authStore.CreateToken(context.Background(), "admin", "test", auth.DefaultTokenScope, time.Hour)
 	if err != nil {
 		t.Fatalf("CreateToken() error = %v", err)
 	}
+	jwtManager := testJWTManager(t, time.Hour)
+	jwtToken, err := jwtManager.IssueToken(auth.Principal{
+		UserID:   1,
+		Username: "admin",
+		Role:     "admin",
+		Scope:    auth.DefaultTokenScope,
+	})
+	if err != nil {
+		t.Fatalf("IssueToken() error = %v", err)
+	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore})
+	RegisterRoutes(mux, nil, RouteOptions{
+		AuthStore:           authStore,
+		AuthVerifier:        authStore,
+		MonitorAuthVerifier: jwtManager,
+		MonitorJWT:          jwtManager,
+	})
 
 	statusReq := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
 	statusRR := httptest.NewRecorder()
@@ -677,11 +1346,26 @@ func TestRegisterRoutesProtectsMonitorAPIsWhenVerifierConfigured(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
-	req.Header.Set("Authorization", "Bearer "+token.Token)
+	req.Header.Set("Authorization", "Bearer "+apiToken.Token)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("api token check code = %d, want 401", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken.Token)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("authenticated check code = %d, want 200", rr.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/auth/check?access_token="+jwtToken.Token, nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("query token check code = %d, want 401 outside event stream", rr.Code)
 	}
 }
 
@@ -703,16 +1387,22 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	if _, err := authStore.CreateUser(context.Background(), "other", "change-me-123"); err != nil {
 		t.Fatalf("CreateUser(other) error = %v", err)
 	}
-	loginToken, err := authStore.CreateToken(context.Background(), "admin", "monitor-login", auth.DefaultTokenScope, time.Hour)
+	jwtManager := testJWTManager(t, time.Hour)
+	loginToken, err := jwtManager.IssueToken(auth.Principal{
+		UserID:   1,
+		Username: "admin",
+		Role:     "admin",
+		Scope:    auth.DefaultTokenScope,
+	})
 	if err != nil {
-		t.Fatalf("CreateToken(login) error = %v", err)
+		t.Fatalf("IssueToken(login) error = %v", err)
 	}
 	if _, err := authStore.CreateToken(context.Background(), "other", "other-token", auth.DefaultTokenScope, time.Hour); err != nil {
 		t.Fatalf("CreateToken(other) error = %v", err)
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore})
+	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, MonitorAuthVerifier: jwtManager, MonitorJWT: jwtManager})
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/auth/tokens", strings.NewReader(`{"name":"local-dev","scope":"api","ttl":"24h"}`))
 	createReq.Header.Set("Authorization", "Bearer "+loginToken.Token)
@@ -740,8 +1430,8 @@ func TestAuthTokensAPIListsCreatesAndRevokesCurrentUserTokens(t *testing.T) {
 	if err := json.Unmarshal(listRR.Body.Bytes(), &list); err != nil {
 		t.Fatalf("json.Unmarshal(list) error = %v", err)
 	}
-	if list.Total != 2 {
-		t.Fatalf("list total = %d, want admin login + created token", list.Total)
+	if list.Total != 1 {
+		t.Fatalf("list total = %d, want created token only", list.Total)
 	}
 	var target tokenItem
 	for _, item := range list.Items {
@@ -796,7 +1486,14 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, nil, RouteOptions{AuthStore: authStore, AuthVerifier: authStore, SessionTTL: time.Hour})
+	jwtManager := testJWTManager(t, time.Hour)
+	RegisterRoutes(mux, nil, RouteOptions{
+		AuthStore:           authStore,
+		AuthVerifier:        authStore,
+		MonitorAuthVerifier: jwtManager,
+		MonitorJWT:          jwtManager,
+		SessionTTL:          time.Hour,
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"admin","password":"change-me-123"}`))
 	rr := httptest.NewRecorder()
@@ -810,6 +1507,12 @@ func TestRegisterRoutesSupportsPasswordLogin(t *testing.T) {
 	}
 	if payload.Token == "" {
 		t.Fatalf("login token missing")
+	}
+	if strings.HasPrefix(payload.Token, "llmtl_") {
+		t.Fatalf("login returned api token prefix, want jwt")
+	}
+	if strings.Count(payload.Token, ".") != 2 {
+		t.Fatalf("login token is not jwt-shaped: %q", payload.Token)
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/auth/check", nil)
@@ -1201,6 +1904,8 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        "https://api.openai.com/v1",
 					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "responses_server",
 				},
 			},
 		},
@@ -1236,16 +1941,23 @@ func TestUpstreamListAPIHandlerReturnsRouterSnapshots(t *testing.T) {
 	if payload.Items[0].HealthState != router.HealthHealthy {
 		t.Fatalf("HealthState = %q, want %q", payload.Items[0].HealthState, router.HealthHealthy)
 	}
+	if payload.Items[0].APIType != "chat_completions" || payload.Items[0].Mode != "responses_server" {
+		t.Fatalf("API surface = %q/%q, want chat_completions/responses_server", payload.Items[0].APIType, payload.Items[0].Mode)
+	}
 }
 
 func TestChannelManagementAPI(t *testing.T) {
 	t.Parallel()
 
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Fatalf("request path = %q, want /v1/models", r.URL.Path)
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"},{"id":"gpt-4.1"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"},{"id":"gpt-4.1"}]}`))
 	}))
 	defer upstreamServer.Close()
 
@@ -1261,6 +1973,9 @@ func TestChannelManagementAPI(t *testing.T) {
 		"name":"OpenAI Primary",
 		"base_url":"` + upstreamServer.URL + `/v1",
 		"provider_preset":"openai",
+		"api_type":"chat_completions",
+		"mode":"responses_server",
+		"capabilities":{"responses":false,"chat_completions":true,"tool_calling":true},
 		"api_key":"sk-secret-value",
 		"headers":{"Authorization":"Bearer hidden","X-Test":"visible"},
 		"enabled":true,
@@ -1292,6 +2007,15 @@ func TestChannelManagementAPI(t *testing.T) {
 	if !created.AllowUnknownModels {
 		t.Fatalf("created.AllowUnknownModels = false, want true")
 	}
+	if created.APIType != "chat_completions" || created.Mode != "responses_server" {
+		t.Fatalf("created api surface = %q/%q", created.APIType, created.Mode)
+	}
+	if created.Capabilities.ChatCompletions == nil || !*created.Capabilities.ChatCompletions {
+		t.Fatalf("created.Capabilities.ChatCompletions = %#v", created.Capabilities.ChatCompletions)
+	}
+	if created.Capabilities.Responses == nil || *created.Capabilities.Responses {
+		t.Fatalf("created.Capabilities.Responses = %#v", created.Capabilities.Responses)
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
 	rr = httptest.NewRecorder()
@@ -1305,6 +2029,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if probe.Status != "success" || probe.DiscoveredCount != 2 {
 		t.Fatalf("probe = %+v", probe)
+	}
+	if probe.ProviderProbe == nil || probe.ProviderProbe.SuggestedAPIType != "chat_completions" || probe.ProviderProbe.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("probe.ProviderProbe = %+v", probe.ProviderProbe)
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", strings.NewReader(`{"enable_discovered":false}`))
@@ -1521,6 +2248,9 @@ func TestChannelManagementAPI(t *testing.T) {
 	if detail.Summary.RequestCount != 2 || detail.Summary.FailedRequest != 1 || detail.Summary.TotalTokens != 150 {
 		t.Fatalf("detail summary = %+v", detail.Summary)
 	}
+	if detail.APIType != "chat_completions" || detail.Mode != "responses_server" {
+		t.Fatalf("detail api surface = %q/%q", detail.APIType, detail.Mode)
+	}
 	if len(detail.ModelsUsage) != 3 || detail.ModelsUsage[0].Model != "gpt-4.1" || detail.ModelsUsage[0].Summary.TotalTokens != 120 {
 		t.Fatalf("models usage = %+v", detail.ModelsUsage)
 	}
@@ -1546,6 +2276,501 @@ func TestChannelManagementAPI(t *testing.T) {
 	}
 	if len(allModels) != 0 {
 		t.Fatalf("channel models after channel delete = %#v, want none", allModels)
+	}
+}
+
+func TestProviderProbePreviewAPI(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	body := strings.NewReader(`{
+		"provider_id":"new-provider",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"api_key":"sk-preview-secret",
+		"api_type":"chat_completions",
+		"protocol_family":"openai_compatible"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe", body)
+	rr := httptest.NewRecorder()
+	providerProbeAPIHandler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-preview-secret") {
+		t.Fatalf("probe response leaked api key: %s", rr.Body.String())
+	}
+	var report providerprobe.Report
+	if err := json.Unmarshal(rr.Body.Bytes(), &report); err != nil {
+		t.Fatalf("json.Unmarshal(report) error = %v", err)
+	}
+	if report.Status != "detected" || report.SuggestedAPIType != "chat_completions" || report.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestProviderSetupValidateDoesNotPersistAndRedactsSecrets(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"openai-primary",
+		"name":"OpenAI Primary",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_key":"sk-setup-secret",
+		"headers":{"Authorization":"Bearer setup-secret","X-Test":"visible"},
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/validate", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup validate status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-setup-secret") || strings.Contains(rr.Body.String(), "Bearer setup-secret") {
+		t.Fatalf("setup validate response leaked secret: %s", rr.Body.String())
+	}
+	var payload providerSetupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if payload.Applied || payload.Channel != nil {
+		t.Fatalf("validate applied provider: %+v", payload)
+	}
+	if !payload.Secret.APIKeySet || payload.Secret.APIKeyHint == "" {
+		t.Fatalf("secret state = %+v", payload.Secret)
+	}
+	if payload.NormalizedConfig.APIType != "chat_completions" || payload.NormalizedConfig.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("normalized config = %+v", payload.NormalizedConfig)
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		t.Fatalf("ListChannelConfigs() error = %v", err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("validate persisted channels: %#v", channels)
+	}
+}
+
+func TestProviderSetupApplyPersistsNormalizedProvider(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"openai-primary",
+		"name":"OpenAI Primary",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_key":"sk-apply-secret",
+		"enabled":true,
+		"priority":100,
+		"weight":1,
+		"capacity_hint":1,
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-apply-secret") {
+		t.Fatalf("setup apply response leaked api key: %s", rr.Body.String())
+	}
+	var payload providerSetupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if !payload.Applied || payload.Channel == nil {
+		t.Fatalf("setup apply did not return applied channel: %+v", payload)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record suggestions = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	if string(record.APIKeyCiphertext) != "sk-apply-secret" || record.APIKeyHint == "" {
+		t.Fatalf("record api key state = %q/%q", string(record.APIKeyCiphertext), record.APIKeyHint)
+	}
+}
+
+func TestProviderSetupApplyDoesNotPersistWhenProbeFails(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not available", http.StatusInternalServerError)
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"broken-provider",
+		"name":"Broken Provider",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_key":"sk-broken-secret",
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("setup apply status = %d, want 502; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-broken-secret") {
+		t.Fatalf("setup apply failure response leaked api key: %s", rr.Body.String())
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		t.Fatalf("ListChannelConfigs() error = %v", err)
+	}
+	if len(channels) != 0 {
+		t.Fatalf("failed setup apply persisted channels: %#v", channels)
+	}
+}
+
+func TestProviderSetupApplyAllowsExplicitSurfaceWhenProbeFails(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not available", http.StatusInternalServerError)
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"explicit-offline",
+		"name":"Explicit Offline",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"openai",
+		"api_type":"chat_completions",
+		"protocol_family":"openai_compatible",
+		"api_key":"sk-offline-secret",
+		"model_discovery":"disabled"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-offline-secret") {
+		t.Fatalf("setup apply response leaked api key: %s", rr.Body.String())
+	}
+	record, err := st.GetChannelConfig("explicit-offline")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record explicit surface = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+}
+
+func TestProviderSetupApplyAllowsVLLMWithoutAPIKeyWhenExplicit(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not available", http.StatusInternalServerError)
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"qujing",
+		"name":"qujing",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"vllm",
+		"api_type":"chat_completions",
+		"protocol_family":"openai_compatible",
+		"routing_profile":"vllm_openai",
+		"enabled":true,
+		"model_discovery":"disabled",
+		"allow_unknown_models":true
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var payload providerSetupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if !payload.Applied || payload.Secret.APIKeySet || payload.Secret.APIKeyHint != "" {
+		t.Fatalf("setup apply secret state = %+v", payload.Secret)
+	}
+	record, err := st.GetChannelConfig("qujing")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.ProviderPreset != "vllm" || record.RoutingProfile != "vllm_openai" {
+		t.Fatalf("record provider route = %q/%q", record.ProviderPreset, record.RoutingProfile)
+	}
+	if len(record.APIKeyCiphertext) != 0 || record.APIKeyHint != "" {
+		t.Fatalf("record api key state = %q/%q", string(record.APIKeyCiphertext), record.APIKeyHint)
+	}
+	if !record.AllowUnknownModels {
+		t.Fatalf("record AllowUnknownModels = false, want true")
+	}
+}
+
+func TestProviderSetupSuggestionsDoNotOverrideExplicitFields(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	body := strings.NewReader(`{
+		"id":"explicit-provider",
+		"name":"Explicit Provider",
+		"base_url":"` + upstreamServer.URL + `/v1",
+		"provider_preset":"custom",
+		"api_type":"messages",
+		"protocol_family":"anthropic_messages",
+		"capabilities":{"chat_completions":false},
+		"model_discovery":"list_models"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-setup/apply", body)
+	rr := httptest.NewRecorder()
+	providerSetupAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("setup apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	record, err := st.GetChannelConfig("explicit-provider")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "messages" || record.ProtocolFamily != "anthropic_messages" {
+		t.Fatalf("explicit fields were overwritten: %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	var capabilities config.UpstreamCapabilitiesConfig
+	if err := json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities); err != nil {
+		t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+	}
+	if capabilities.ChatCompletions == nil || *capabilities.ChatCompletions {
+		t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+	}
+	if capabilities.Models == nil || !*capabilities.Models {
+		t.Fatalf("models capability was not merged: %#v", capabilities.Models)
+	}
+}
+
+func TestProviderProbeReportAPIUsesChannelsReadOnly(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        upstreamServer.URL + "/v1",
+		APIType:        "responses",
+		ProtocolFamily: "openai_compatible",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe/report", strings.NewReader(`{"channel_id":"openai-primary"}`))
+	rr := httptest.NewRecorder()
+	providerProbeReportAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe report status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var report providerprobe.BatchReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &report); err != nil {
+		t.Fatalf("json.Unmarshal(report) error = %v", err)
+	}
+	if len(report.Reports) != 1 {
+		t.Fatalf("len(report.Reports) = %d, want 1", len(report.Reports))
+	}
+	got := report.Reports[0]
+	if got.TargetSource != "channel" || got.ProviderID != "openai-primary" || got.Status != "detected" {
+		t.Fatalf("report identity/status = %+v", got)
+	}
+	if got.SuggestedAPIType != "chat_completions" || got.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("suggestion = %q/%q", got.SuggestedAPIType, got.SuggestedProtocolFamily)
+	}
+	runs, err := st.ListChannelProbeRuns("openai-primary", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("provider probe report wrote probe runs: %#v", runs)
+	}
+}
+
+func TestProviderProbeReportApplyAPIAppliesSafeSuggestions(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	disabled := false
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{ChatCompletions: &disabled})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          upstreamServer.URL + "/v1",
+		APIKeyCiphertext: []byte("sk-apply-secret"),
+		APIKeyHint:       "sk...cret",
+		HeadersJSON:      `{"Authorization":"Bearer header-secret","X-Test":"visible"}`,
+		CapabilitiesJSON: string(capabilitiesJSON),
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe/report/apply", strings.NewReader(`{"channel_id":"openai-primary"}`))
+	rr := httptest.NewRecorder()
+	providerProbeReportApplyAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe report apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "sk-apply-secret") || strings.Contains(rr.Body.String(), "Bearer header-secret") {
+		t.Fatalf("probe report apply leaked secret: %s", rr.Body.String())
+	}
+	var result channel.ProviderProbeApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if len(result.Applied) != 1 || !result.Applied[0].Applied {
+		t.Fatalf("result.Applied = %#v", result.Applied)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record suggestions = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	var capabilities config.UpstreamCapabilitiesConfig
+	if err := json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities); err != nil {
+		t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+	}
+	if capabilities.ChatCompletions == nil || *capabilities.ChatCompletions {
+		t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+	}
+	if capabilities.Models == nil || !*capabilities.Models {
+		t.Fatalf("models capability was not applied: %#v", capabilities.Models)
+	}
+	runs, err := st.ListChannelProbeRuns("openai-primary", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("provider probe report apply wrote probe runs: %#v", runs)
 	}
 }
 
@@ -1692,7 +2917,8 @@ func TestModelCatalogAPI(t *testing.T) {
 		t.Fatalf("UpsertChannelConfig() error = %v", err)
 	}
 	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
-		{Model: "gpt-5", Source: "manual", Enabled: true},
+		{Model: "gpt-5", Source: "manual", Enabled: true, ContextWindow: intPtr(272000), MaxOutputTokens: intPtr(128000), ProfileAdoptionStatus: "adopted"},
+		{Model: "dev/gpt-5.5", Source: "manual", Enabled: true, ContextWindow: intPtr(128000), MaxOutputTokens: intPtr(16000)},
 		{Model: "gpt-zero", Source: "manual", Enabled: true},
 	}); err != nil {
 		t.Fatalf("ReplaceChannelModels() error = %v", err)
@@ -1719,6 +2945,50 @@ func TestModelCatalogAPI(t *testing.T) {
 	if err := st.UpsertLog(path, header); err != nil {
 		t.Fatalf("UpsertLog() error = %v", err)
 	}
+	slashedPath := filepath.Join(dir, "model-slashed-api.http")
+	if err := os.WriteFile(slashedPath, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(slashed) error = %v", err)
+	}
+	slashedHeader := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          "model-slashed-api",
+			Time:               time.Now().UTC(),
+			Model:              "dev/gpt-5.5",
+			URL:                "/v1/responses",
+			Method:             "POST",
+			StatusCode:         200,
+			DurationMs:         100,
+			TTFTMs:             10,
+			SelectedUpstreamID: "openai-primary",
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: 11},
+	}
+	if err := st.UpsertLog(slashedPath, slashedHeader); err != nil {
+		t.Fatalf("UpsertLog(slashed) error = %v", err)
+	}
+	traceOnlyPath := filepath.Join(dir, "model-trace-only-api.http")
+	if err := os.WriteFile(traceOnlyPath, []byte("test"), 0o644); err != nil {
+		t.Fatalf("WriteFile(traceOnly) error = %v", err)
+	}
+	traceOnlyHeader := recordfile.RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: recordfile.MetaData{
+			RequestID:          "model-trace-only-api",
+			Time:               time.Now().UTC(),
+			Model:              "qwen3.6-27b",
+			URL:                "/v1/responses",
+			Method:             "POST",
+			StatusCode:         200,
+			DurationMs:         100,
+			TTFTMs:             10,
+			SelectedUpstreamID: "openai-primary",
+		},
+		Usage: recordfile.UsageInfo{TotalTokens: 24},
+	}
+	if err := st.UpsertLog(traceOnlyPath, traceOnlyHeader); err != nil {
+		t.Fatalf("UpsertLog(traceOnly) error = %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/models?window=24h", nil)
 	rr := httptest.NewRecorder()
@@ -1730,8 +3000,15 @@ func TestModelCatalogAPI(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
 		t.Fatalf("json.Unmarshal(list) error = %v", err)
 	}
-	if len(list.Items) != 1 || list.Items[0].Model != "gpt-5" || list.Items[0].Summary.TotalTokens != 42 {
+	itemsByModel := map[string]modelItem{}
+	for _, item := range list.Items {
+		itemsByModel[item.Model] = item
+	}
+	if len(list.Items) != 3 || itemsByModel["gpt-5"].Summary.TotalTokens != 42 || itemsByModel["dev/gpt-5.5"].Summary.TotalTokens != 11 {
 		t.Fatalf("model list = %+v", list)
+	}
+	if itemsByModel["qwen3.6-27b"].ChannelCount != 1 || len(itemsByModel["qwen3.6-27b"].Channels) != 1 || itemsByModel["qwen3.6-27b"].Channels[0] != "openai-primary" {
+		t.Fatalf("trace-only model list item = %+v", itemsByModel["qwen3.6-27b"])
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/models/gpt-5?window=24h", nil)
@@ -1746,6 +3023,79 @@ func TestModelCatalogAPI(t *testing.T) {
 	}
 	if detail.Model.Model != "gpt-5" || len(detail.Channels) != 1 || len(detail.Trends) != 24 {
 		t.Fatalf("model detail = %+v", detail)
+	}
+	if detail.Channels[0].ContextWindow == nil || *detail.Channels[0].ContextWindow != 272000 || detail.Channels[0].ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("model detail channel profile = %+v", detail.Channels[0])
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/dev%2Fgpt-5.5?window=24h", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("slashed model detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var slashedDetail modelDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &slashedDetail); err != nil {
+		t.Fatalf("json.Unmarshal(slashedDetail) error = %v", err)
+	}
+	if slashedDetail.Model.Model != "dev/gpt-5.5" || len(slashedDetail.Channels) != 1 || slashedDetail.Channels[0].ContextWindow == nil || *slashedDetail.Channels[0].ContextWindow != 128000 {
+		t.Fatalf("slashed model detail = %+v", slashedDetail)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/qwen3.6-27b?window=24h", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("trace-only model detail status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var traceOnlyDetail modelDetailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &traceOnlyDetail); err != nil {
+		t.Fatalf("json.Unmarshal(traceOnlyDetail) error = %v", err)
+	}
+	if traceOnlyDetail.Model.Model != "qwen3.6-27b" || len(traceOnlyDetail.Channels) != 1 || traceOnlyDetail.Channels[0].ChannelID != "openai-primary" || traceOnlyDetail.Channels[0].Source != "trace" {
+		t.Fatalf("trace-only detail = %+v", traceOnlyDetail)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/qwen3.6-27b", strings.NewReader(`{"enabled":true,"context_window":262144,"max_output_tokens":65536,"profile_source":"manual","profile_adoption_status":"adopted","supports_chat_completions":true}`))
+	rr = httptest.NewRecorder()
+	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("trace-only model patch status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var patched channelModelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("json.Unmarshal(traceOnlyPatch) error = %v", err)
+	}
+	if !patched.Enabled || patched.ContextWindow == nil || *patched.ContextWindow != 262144 || patched.ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("patched trace-only model = %+v", patched)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/qwen3.6-35b-a3b/spec-lookup", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("model spec lookup status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var spec modelSpecLookupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &spec); err != nil {
+		t.Fatalf("json.Unmarshal(spec) error = %v", err)
+	}
+	if !spec.Matched || spec.Suggestion == nil || spec.Suggestion.ContextWindow != 262144 {
+		t.Fatalf("model spec lookup = %+v", spec)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/models/dev%2Fgpt-5.5/spec-lookup", nil)
+	rr = httptest.NewRecorder()
+	modelDetailAPIHandler(st).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("slashed model spec lookup status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var slashedSpec modelSpecLookupResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &slashedSpec); err != nil {
+		t.Fatalf("json.Unmarshal(slashedSpec) error = %v", err)
+	}
+	if slashedSpec.Query != "dev/gpt-5.5" {
+		t.Fatalf("slashed model spec lookup query = %q, want dev/gpt-5.5", slashedSpec.Query)
 	}
 }
 
@@ -1787,11 +3137,18 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(`{"enabled":false,"context_window":262144,"max_output_tokens":65536,"profile_source":"go-llm-specs","profile_adoption_status":"adopted","supports_chat_completions":true}`))
 	rr := httptest.NewRecorder()
 	channelDetailAPIHandler(st, rtr, channel.NewService(st)).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("disable model status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var updated channelModelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("json.Unmarshal(updated) error = %v", err)
+	}
+	if updated.ContextWindow == nil || *updated.ContextWindow != 262144 || updated.ProfileAdoptionStatus != "adopted" {
+		t.Fatalf("updated model = %+v", updated)
 	}
 
 	selectReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
@@ -1799,6 +3156,183 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 	if _, err := rtr.Select(selectReq); err == nil {
 		t.Fatalf("Select(gpt-5) error = nil, want no supporting target after reload")
 	}
+}
+
+func TestChannelCapabilityPatchReloadsRouter(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	falseValue := false
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{ChatCompletions: &falseValue})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "openai-primary",
+		Name:             "OpenAI Primary",
+		BaseURL:          "https://api.openai.com/v1",
+		ProviderPreset:   "openai",
+		APIType:          "responses",
+		CapabilitiesJSON: string(capabilitiesJSON),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	selectReq := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[]}`))
+	selectReq.Header.Set("Content-Type", "application/json")
+	if _, err := rtr.Select(selectReq); err == nil {
+		t.Fatalf("Select(/v1/chat/completions) error = nil, want explicit unsupported before reload")
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary", strings.NewReader(`{"capabilities":{"chat_completions":true}}`))
+	rr := httptest.NewRecorder()
+	channelDetailAPIHandler(st, rtr, channel.NewService(st)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("patch channel status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var updated channelItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("json.Unmarshal(updated) error = %v", err)
+	}
+	if updated.Capabilities.ChatCompletions == nil || !*updated.Capabilities.ChatCompletions {
+		t.Fatalf("updated.Capabilities.ChatCompletions = %#v, want true", updated.Capabilities.ChatCompletions)
+	}
+	if _, err := rtr.Select(selectReq); err != nil {
+		t.Fatalf("Select(/v1/chat/completions) after capability reload error = %v", err)
+	}
+}
+
+func TestProviderProbeReportApplyReloadsRouterCapabilities(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://probe.local/v1",
+		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	selectReq := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	selectReq.Header.Set("Content-Type", "application/json")
+	selection, err := rtr.Select(selectReq)
+	if err != nil {
+		t.Fatalf("Select(/v1/responses) before apply error = %v", err)
+	}
+	if selection.Target.Upstream.APIType != "chat_completions" {
+		t.Fatalf("selected APIType before apply = %q, want chat_completions", selection.Target.Upstream.APIType)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/provider-probe/report/apply", strings.NewReader(`{"channel_id":"openai-primary"}`))
+	rr := httptest.NewRecorder()
+	probeClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		status := http.StatusNotFound
+		switch req.URL.Path {
+		case "/v1/models":
+			status = http.StatusOK
+		case "/v1/responses":
+			status = http.StatusBadRequest
+		}
+		return &http.Response{
+			StatusCode: status,
+			Status:     http.StatusText(status),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Request:    req,
+		}, nil
+	})}
+	providerProbeReportApplyAPIHandler(st, rtr, channel.NewService(st).WithHTTPClient(probeClient)).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("probe report apply status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var result channel.ProviderProbeApplyResult
+	if err := json.Unmarshal(rr.Body.Bytes(), &result); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if len(result.Applied) != 1 || !result.Applied[0].Applied {
+		t.Fatalf("result.Applied = %#v", result.Applied)
+	}
+	if !slices.Contains(result.Applied[0].AppliedFields, "capabilities.responses") {
+		t.Fatalf("AppliedFields = %#v, want capabilities.responses", result.Applied[0].AppliedFields)
+	}
+	record, err := st.GetChannelConfig("openai-primary")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" {
+		t.Fatalf("record.APIType = %q, want preserved chat_completions", record.APIType)
+	}
+	selection, err = rtr.Select(selectReq)
+	if err != nil {
+		t.Fatalf("Select(/v1/responses) after apply reload error = %v", err)
+	}
+	if selection.Target.Upstream.APIType != "chat_completions" {
+		t.Fatalf("selected APIType after apply = %q, want preserved chat_completions", selection.Target.Upstream.APIType)
+	}
+	if enabled, configured := selection.Target.Upstream.Capability(upstream.CapabilityResponses); !configured || !enabled {
+		t.Fatalf("responses capability after apply = enabled %v configured %v, want true/true", enabled, configured)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func TestUpstreamListAPIHandlerFallsBackToStore(t *testing.T) {
@@ -1995,7 +3529,7 @@ func TestUpstreamListAPIHandlerAppliesWindowAndModelFilters(t *testing.T) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
 	if err := st.UpsertUpstreamTarget(store.UpstreamTargetRecord{
 		ID:                "openai-primary",
 		BaseURL:           "https://api.openai.com/v1",
@@ -2083,7 +3617,7 @@ func TestUpstreamListAPIHandlerIncludesRoutingFailureAnalytics(t *testing.T) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
 	writeLog("match-a.http", now.Add(-20*time.Minute), "gpt-5", "no_supporting_target")
 	writeLog("match-b.http", now.Add(-10*time.Minute), "gpt-5", "all_targets_open")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "gemini-2.5-flash", "no_supporting_target")
@@ -2278,7 +3812,7 @@ func TestUpstreamDetailAPIHandlerReturnsBreakdownAndTraces(t *testing.T) {
 		}
 	}
 
-	now := time.Now().UTC()
+	now := startOfUTCDay(time.Now().UTC()).Add(2 * time.Hour)
 	writeLog("match-a.http", now.Add(-20*time.Minute), "/v1/responses", "gpt-5", 200, "")
 	writeLog("match-b.http", now.Add(-10*time.Minute), "/v1/chat/completions", "gpt-5", 503, "upstream overloaded")
 	writeLog("other-model.http", now.Add(-5*time.Minute), "/v1/responses", "gemini-2.5-flash", 200, "")
@@ -2407,6 +3941,83 @@ func TestTraceDetailAPIHandlerReturnsConversationData(t *testing.T) {
 	}
 }
 
+func TestTraceListAndDetailIncludeUpstreamCalls(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	responseID := "resp_trace_children"
+	writeTraceFixture(t, outputDir, "entry.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/responses", false, "200 OK", nil,
+		`{"model":"gpt-5","input":"hello"}`,
+		`{"id":"`+responseID+`","object":"response","status":"completed"}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-entry-trace-children"
+			header.Meta.ResponseID = responseID
+			header.Meta.ExchangeID = "entry:" + responseID
+			header.Meta.ExchangeKind = "entry"
+			header.Meta.ExchangeRole = "client_request"
+			header.Meta.Operation = "responses"
+			header.Meta.Endpoint = "/v1/responses"
+			header.Meta.URL = "/v1/responses"
+		}))
+	writeTraceFixture(t, outputDir, "model.http", buildRecordFixtureWithStatusHeadersAndMutator(t, "/v1/chat/completions", false, "200 OK", nil,
+		`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`,
+		`{"choices":[{"message":{"content":"done"}}]}`,
+		func(header *recordfile.RecordHeader) {
+			header.Meta.RequestID = "req-model-trace-children"
+			header.Meta.ResponseID = responseID
+			header.Meta.RequestAuditID = "audit-trace-children"
+			header.Meta.ExchangeID = "model:" + responseID + ":0"
+			header.Meta.ExchangeKind = "model"
+			header.Meta.ExchangeRole = "primary_model_call"
+			header.Meta.ParentExchangeID = "entry:" + responseID
+			header.Meta.SequenceIndex = 0
+			header.Meta.Operation = "chat.completions"
+			header.Meta.Endpoint = "/v1/chat/completions"
+			header.Meta.URL = "/v1/chat/completions"
+		}))
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	syncStore(t, st)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/traces?page=1&page_size=50", nil)
+	listRR := httptest.NewRecorder()
+	listAPIHandler(st).ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want 200", listRR.Code)
+	}
+	var listPayload listResponse
+	if err := json.Unmarshal(listRR.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if len(listPayload.Items) != 1 {
+		t.Fatalf("len(list items) = %d, want only entry", len(listPayload.Items))
+	}
+	if listPayload.Items[0].UpstreamCallCount != 1 {
+		t.Fatalf("upstream_call_count = %d, want 1", listPayload.Items[0].UpstreamCallCount)
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/traces/"+listPayload.Items[0].ID, nil)
+	detailRR := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(detailRR, detailReq)
+	if detailRR.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, want 200", detailRR.Code)
+	}
+	var detailPayload detailResponse
+	if err := json.Unmarshal(detailRR.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("json.Unmarshal(detail) error = %v", err)
+	}
+	if len(detailPayload.UpstreamCalls) != 1 {
+		t.Fatalf("len(upstream_calls) = %d, want 1", len(detailPayload.UpstreamCalls))
+	}
+	if got := detailPayload.UpstreamCalls[0].ParentExchangeID; got != "entry:"+responseID {
+		t.Fatalf("child parent_exchange_id = %q, want entry:%s", got, responseID)
+	}
+}
+
 func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 	t.Parallel()
 
@@ -2460,6 +4071,114 @@ func TestTraceDetailAPIHandlerReturnsSessionContext(t *testing.T) {
 	}
 	if payload.Performance.RequestCount != 1 || payload.Performance.DurationMs != 100 || payload.Performance.TTFTMs != 10 {
 		t.Fatalf("performance = %+v", payload.Performance)
+	}
+}
+
+func TestTraceDetailAPIHandlerIncludesResponsesAuditReference(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "responses-audit-link.http")
+	content := buildRecordFixture(t, "/v1/responses", false, `{"input":"hello"}`, `{"output_text":"done"}`)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+	traceID := items[0].ID
+	recorderRequestID := items[0].Header.Meta.RequestID
+	if recorderRequestID == "" {
+		t.Fatalf("recorder request id is empty")
+	}
+	base := time.Date(2026, 6, 22, 12, 0, 0, 0, time.UTC)
+	if err := st.EntClient().RequestAudit.Create().
+		SetID("reqaudit-trace-detail-1").
+		SetResponseID("resp-trace-detail-1").
+		SetMethod(http.MethodPost).
+		SetPath("/v1/responses").
+		SetStatus("completed").
+		SetCreatedAt(base).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create request audit: %v", err)
+	}
+	if err := st.EntClient().UpstreamExchange.Create().
+		SetID("upex-trace-detail-1").
+		SetRequestAuditID("reqaudit-trace-detail-1").
+		SetTraceID(recorderRequestID).
+		SetStartedAt(base.Add(time.Second)).
+		Exec(context.Background()); err != nil {
+		t.Fatalf("create upstream exchange: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+traceID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ResponseID != "resp-trace-detail-1" {
+		t.Fatalf("ResponseID = %q, want resp-trace-detail-1", payload.ResponseID)
+	}
+	if payload.RequestAuditID != "reqaudit-trace-detail-1" {
+		t.Fatalf("RequestAuditID = %q, want reqaudit-trace-detail-1", payload.RequestAuditID)
+	}
+	if payload.ResponsesAudit == nil || payload.ResponsesAudit.ResponseID != "resp-trace-detail-1" || payload.ResponsesAudit.RequestAuditID != "reqaudit-trace-detail-1" {
+		t.Fatalf("ResponsesAudit = %+v, want linked audit reference", payload.ResponsesAudit)
+	}
+}
+
+func TestTraceDetailAPIHandlerOmitsResponsesAuditReferenceWhenUnlinked(t *testing.T) {
+	t.Parallel()
+
+	outputDir := t.TempDir()
+	tracePath := filepath.Join(outputDir, "unlinked.http")
+	content := buildRecordFixture(t, "/v1/chat/completions", false, `{"messages":[{"role":"user","content":"hello"}]}`, `{"choices":[{"message":{"content":"done"}}]}`)
+	if err := os.WriteFile(tracePath, content, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+	items, err := st.ListRecent(10)
+	if err != nil {
+		t.Fatalf("ListRecent() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/"+items[0].ID, nil)
+	rr := httptest.NewRecorder()
+	traceAPIHandler(st, nil).ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
+	}
+
+	var payload detailResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ResponseID != "" || payload.RequestAuditID != "" || payload.ResponsesAudit != nil {
+		t.Fatalf("unexpected responses audit reference: response=%q request_audit=%q nested=%+v", payload.ResponseID, payload.RequestAuditID, payload.ResponsesAudit)
 	}
 }
 
@@ -3263,7 +4982,8 @@ func TestTraceDetailAPIHandlerReturnsParseErrorForInvalidCassette(t *testing.T) 
 		LogPath: tracePath,
 	}
 	rr := httptest.NewRecorder()
-	handleTraceDetail(rr, tracePath, entry, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/traces/broken", nil)
+	handleTraceDetail(rr, req, nil, tracePath, entry, nil)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rr.Code)
 	}
@@ -3713,4 +5433,222 @@ func parseStatusCode(status string) int {
 		return 200
 	}
 	return code
+}
+
+func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	handler := routingSettingsAPIHandler(st)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/routing", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got routingSettingsView
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode GET response: %v", err)
+	}
+	if got.ResponsesStrategy != "auto" || got.SelectionPolicy != router.PolicyP2C {
+		t.Fatalf("default settings = %+v", got)
+	}
+
+	req = httptest.NewRequest(http.MethodPatch, "/api/settings/routing", strings.NewReader(`{"responses_strategy":"prefer_local_server","selection_policy":"first_available","missing_model_policy":"fallback"}`))
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	got = routingSettingsView{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode PATCH response: %v", err)
+	}
+	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyFirstAvailable || got.MissingModelPolicy != "fallback" {
+		t.Fatalf("patched settings = %+v", got)
+	}
+}
+
+func TestModelAliasAPIHandlerCRUD(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	listHandler := modelAliasListCreateAPIHandler(st)
+	req := httptest.NewRequest(http.MethodPost, "/api/model-aliases", strings.NewReader(`{"alias":"abc","target_model":"gpt-5.5","channel_id":"openai-main"}`))
+	rr := httptest.NewRecorder()
+	listHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("POST status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var created modelAliasItem
+	if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created alias: %v", err)
+	}
+	if created.ID == "" || created.Alias != "abc" || created.TargetModel != "gpt-5.5" || created.ChannelID != "openai-main" || !created.Enabled {
+		t.Fatalf("created alias = %+v", created)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/model-aliases?alias=abc&enabled_only=true", nil)
+	rr = httptest.NewRecorder()
+	listHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var list modelAliasListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].ID != created.ID {
+		t.Fatalf("list = %+v, want created", list.Items)
+	}
+
+	detailHandler := modelAliasDetailAPIHandler(st)
+	req = httptest.NewRequest(http.MethodPatch, "/api/model-aliases/"+created.ID, strings.NewReader(`{"alias":"abc","target_model":"gpt-5.5","enabled":false}`))
+	rr = httptest.NewRecorder()
+	detailHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PATCH status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodDelete, "/api/model-aliases/"+created.ID, nil)
+	rr = httptest.NewRecorder()
+	detailHandler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestModelAliasAPIHandlerValidationFailures(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	handler := modelAliasListCreateAPIHandler(st)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "self alias", body: `{"alias":"abc","target_model":"abc"}`},
+		{name: "direct cycle", body: `{"alias":"b","target_model":"a"}`},
+	} {
+		if tc.name == "direct cycle" {
+			if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "a", TargetModel: "b", Enabled: true}); err != nil {
+				t.Fatalf("seed alias error = %v", err)
+			}
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/model-aliases", strings.NewReader(tc.body))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d body=%s", tc.name, rr.Code, rr.Body.String())
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/model-aliases", strings.NewReader(`{"id":"custom-duplicate","alias":"a","target_model":"b"}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("duplicate status = %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestModelAliasValidateAPIHandlerWarnings(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channel := range []store.ChannelConfigRecord{
+		{ID: "enabled", Name: "Enabled", BaseURL: "https://enabled.example/v1", Enabled: true},
+		{ID: "disabled", Name: "Disabled", BaseURL: "https://disabled.example/v1", Enabled: false},
+		{ID: "empty", Name: "Empty", BaseURL: "https://empty.example/v1", Enabled: true},
+	} {
+		if _, err := st.UpsertChannelConfig(channel); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channel.ID, err)
+		}
+	}
+	if _, err := st.UpsertChannelModel("enabled", store.ChannelModelRecord{Model: "gpt-5", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel(enabled) error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("disabled", store.ChannelModelRecord{Model: "gpt-5", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel(disabled) error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("enabled", store.ChannelModelRecord{Model: "other-model", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel(other) error = %v", err)
+	}
+
+	handler := modelAliasValidateAPIHandler(st)
+	for _, tc := range []struct {
+		name      string
+		body      string
+		wantCodes []string
+	}{
+		{name: "missing target model", body: `{"alias":"missing","target_model":"missing-model"}`, wantCodes: []string{"target_model_not_enabled"}},
+		{name: "disabled scoped channel", body: `{"alias":"scoped","target_model":"gpt-5","channel_id":"disabled"}`, wantCodes: []string{"scoped_channel_disabled"}},
+		{name: "scoped channel lacks target", body: `{"alias":"scoped","target_model":"gpt-5","channel_id":"empty"}`, wantCodes: []string{"scoped_channel_target_model_not_enabled"}},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/model-aliases/validate", strings.NewReader(tc.body))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d body=%s", tc.name, rr.Code, rr.Body.String())
+		}
+		var resp modelAliasValidationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode %s response: %v", tc.name, err)
+		}
+		got := map[string]bool{}
+		for _, warning := range resp.Warnings {
+			got[warning.Code] = true
+		}
+		for _, code := range tc.wantCodes {
+			if !got[code] {
+				t.Fatalf("%s warnings = %+v, want code %s", tc.name, resp.Warnings, code)
+			}
+		}
+	}
+}
+
+func TestRoutingInspectAPIHandlerUsesAliasesAndChatFallback(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "deepseek", Name: "DeepSeek", BaseURL: "https://deepseek.example/v1", APIType: upstream.APITypeChatCompletions, Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if _, err := st.UpsertChannelModel("deepseek", store.ChannelModelRecord{Model: "deepseek-chat", Source: "manual", Enabled: true}); err != nil {
+		t.Fatalf("UpsertChannelModel() error = %v", err)
+	}
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "coder", TargetModel: "deepseek-chat", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias() error = %v", err)
+	}
+
+	handler := routingInspectAPIHandler(st)
+	req := httptest.NewRequest(http.MethodPost, "/api/routing/inspect", strings.NewReader(`{"endpoint":"responses","model":"coder"}`))
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("inspect status = %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp routingInspectResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode inspect response: %v", err)
+	}
+	if resp.Error != "" || resp.Result == nil {
+		t.Fatalf("inspect response = %+v", resp)
+	}
+	if resp.Result.Plan.ExecutionMode != routeplan.ExecutionModeResponsesServer || resp.Result.Plan.UpstreamModel != "deepseek-chat" {
+		t.Fatalf("inspect plan = %+v, want responses_server deepseek-chat", resp.Result.Plan)
+	}
 }

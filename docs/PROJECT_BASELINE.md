@@ -8,11 +8,12 @@
 
 TraceLab 当前提供：
 
-- 本地 LLM API 代理。
+- Postgres-first LLM gateway。
 - 原始 HTTP cassette 录制。
 - cassette replay。
-- SQLite 元数据索引。
+- Postgres 生产 metadata / audit / Responses state；SQLite 本地 fallback。
 - 多上游和模型/渠道管理。
+- 可选 Responses server-mode。
 - Monitor Web。
 - MCP 排障工具。
 - Observation IR、findings、reanalysis jobs。
@@ -31,6 +32,14 @@ TraceLab 当前提供：
 - 可以识别、记录、解析这些协议。
 - 不在代理热路径中做跨协议请求转换。
 - OpenAI-compatible provider 只能声明兼容其实际支持的 endpoint。
+- Responses server-mode 默认关闭；关闭时 `/v1/responses` 仍按普通 OpenAI-compatible endpoint 代理透传，native Responses target 会被原样转发并录制为 `/v1/responses` cassette。
+- 开启 `responses_server.enabled=true` 后，配置的 Responses path 由本地 runtime 处理，当前通过内部上游 `/v1/chat/completions` 调用实现 Responses 响应；该内部调用会受 upstream `api_type` / capabilities 约束，不会选择显式关闭 Chat Completions 能力的 Responses-native target，也不会在请求带 `tools` 时选择 `capabilities.tool_calling: false` 的 target。也就是说，native Responses pass-through 能力不等于本地 runtime 的 Chat Completions backend 能力。下游 `stream:true` 时，简单文本输出路径已能边读取内部 Chat Completions SSE、边输出 Responses `response.output_text.delta`；普通 `function` tool 参数分片已能输出 `response.function_call_arguments.delta/done`，并仍记录原始 OpenAI-compatible SSE cassette。已注册 server-side function executor 的 stream 首切会输出 arguments delta/done、执行 executor 前输出 started 态 `response.output_item.added` tool item、成功后输出完成态 `response.output_item.done` tool item、再继续流式输出最终文本，并写带 `stream=true` 的 tool_call started/completed/failed events；auto compact 后的同名 registered executor 会先 compact 再进入同一真实增量 stream tool loop。同一轮多个已注册 executor call 会按模型 tool call 顺序逐个输出 started/done；若后续 call 执行失败，已完成 call 保留 completed done，当前失败 call best-effort 输出 failed done 并把原错误交回 HTTP 层。provider 就绪的 hosted `web_search` stream 也会输出 arguments delta/done、执行 server-side search 前输出 started 态 `response.output_item.added` `web_search_call` item、成功后输出完成态 `response.output_item.done`、注入结果并继续最终文本 delta，tool_call started/completed/failed events 同样写 `stream=true`；同轮 registered function 完成后 hosted `web_search` provider 失败时，会保留前者 completed item，并对失败的 `web_search_call` 输出 failed done。auto compact 后 provider 就绪且 `tool_choice` 为 nil/空/`none`/`auto` 的 hosted `web_search` / `web_search_preview` 也会先 compact 再进入同一真实增量 stream tool loop。stream tool loop 已在 executor/provider 失败时 best-effort 输出 failed `response.output_item.done`，之后仍让 HTTP 层追加最小 `response.failed` 并记录 failed audit。auto compact 后未知/未实现 hosted 工具或非平凡 `tool_choice`，以及不支持的工具组合已具备 deferred fallback contract：runtime 在写出 SSE 或调用上游前返回可识别的 `ErrIncrementalStreamUnsupported` 并带 reason，HTTP handler 记录 fallback event 后转入 deferred envelope；auto compact 后未注册普通 function arguments、同名 registered executor stream tool loop 和 provider 就绪 hosted web_search 平凡 `tool_choice` tool loop 已能继续真实增量 streaming，更复杂的跨轮/cancel lifecycle 仍未完成。
+- `provider probe` 是当前手动 provider detection 入口，会对配置中的 upstream endpoint 做保守探测并输出建议的 `api_type`、`protocol_family` 和 capability signals；`doctor --probe-providers` 会显式复用同一套 provider probe 并输出脱敏摘要；`provider probe-report` 是同类只读批量报告入口，面向 YAML upstream 列表输出 report，不写配置。默认启动不执行 probe；显式开启 `provider_probe.startup_fill=true` 后，serve 只在内存中填补 YAML upstream 缺失字段，不写回配置，也不覆盖显式配置。`config inspect` 会输出脱敏 effective config，并通过 `sources` 摘要以保守枚举标注主要字段来自 config file、default、effective、empty、derived 或 not_configured。Monitor provider create dialog 提供临时 preview endpoint；`POST /api/provider-setup/validate` 已作为 provider setup wizard 首切，会组合 base URL、API key、provider preset、model discovery 和 capability 字段返回 provider probe、归一化配置和 redacted secret state，不落库且不回显 API key；create dialog 已收敛为 validate -> review normalized config/probe/secret state -> create 的状态流，字段变更会清空旧验证结果；`POST /api/provider-setup/apply` 复用归一化逻辑；当 probe 检测成功，或用户显式提供 `api_type` 与 `protocol_family` 时，才写入 channel store。setup 建议只填补缺失字段或未声明 capability，不覆盖显式 `api_type`、`protocol_family` 或 capability false。`POST /api/provider-probe/report` 会面向 channel 列表返回只读批量 detection report，不写 probe run、model 或 channel 配置；provider detail 的 probe 动作也会返回同类 detection report，并支持用户显式 Apply suggestions 写入表单或 channel 配置。Monitor Providers 列表页提供 Batch probe and apply 首切：先预览只读 report，再调用 `POST /api/provider-probe/report/apply` 批量写入 detected 且可补的非敏感建议；CLI `provider probe-apply` 复用同一 channel service 用例。批量写入口不接收或返回 API key，只填缺失 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置或 capability false，Monitor 写入成功后会 reload router。
+- `responses_server.model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和 `upstream_model`。当前 runtime 会使用匹配 profile 的 `compact_history_item_threshold` 覆盖全局 item-count 自动 compact 阈值；配置 `upstream_model` 时，内部 Chat Completions 请求使用该上游模型名，但外部 Responses `model` 仍保留客户端请求 model 或默认 model；配置 `max_output_tokens` 时，会在客户端未显式传 `max_output_tokens` 时作为内部 Chat Completions `max_tokens` 默认值；配置 `context_window_tokens` 且开启 auto compact 时，会通过可注入 token estimator 估算 prompt+reserved output，超预算则触发 compact。默认 estimator 已通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback。当 profile 有 `name` 或 `pattern`、配置了 `context_window_tokens`、未显式 `tokenize_counter.enabled=false`，并匹配 upstream/router target 的 `capabilities.tokenize=true` 时，proxy 会自动用该 target 的 base URL、API key 和 headers 构造 HTTP provider `/tokenize` counter；显式 `tokenize_counter.enabled=true` 仍可强制启用，显式 false 可关闭。当前 compact v2 provenance 首切会把安全 lineage/read-model metadata 写入 compact response 的 `metadata._gateway.compact`，覆盖 source/compact response id、source item/window 计数、安全 item refs、retained summary boundary、summary item ids、budget/trigger 和 auto/manual 标记；manual/auto compact event details 引用/摘要该 provenance，`internal/responses/audit.QueryService.ListCompactProvenance` 可从 execution events 派生查询 source/retained refs、summary item ids、retained window 和 budget 白名单字段的安全 read model。`stream:true` 简单文本 continuation、未注册普通 `function` tool arguments、同名 registered executor stream tool loop 和 provider 就绪 hosted `web_search` / `web_search_preview` 平凡 `tool_choice` tool loop 已能在 auto compact 后继续真实增量 streaming；未知/未实现 hosted 工具或非平凡 `tool_choice` 的 auto compact stream 组合仍 deferred fallback。完整 context optimization、独立 compact read model schema/HTTP/CLI surface 和更复杂 auto compact hosted 工具流真实增量尚未接入。
+- Codex 兼容性已有离线 gate、配置建议命令和 doctor drift/HTTP guard/store health 诊断。`task test:codex-fixtures` 运行 focused fixture runner，枚举 `tests/fixtures/codex` 当前 inventory 并校验 JSON/NDJSON、HTTP handler reachability 和最小 runtime/parser 对齐；测试不依赖真实 Codex、真实模型、网络或 Postgres。`models codex-config <model>` 离线输出 JSON envelope 与 Codex TOML 建议；diagnostics 默认明确 `runtime_profile_source=responses_server.model_profiles`、`profile_precedence=[responses_server.model_profiles, zero_limits_when_unmatched]`、`catalog_profile_role=available_for_runtime_opt_in` 和 `capability_source=provider_upstream_capabilities`。默认 `provider_channel_profile_adoption=report_only`，命令输出 `profile_conflict_strategy=responses_server.model_profiles_wins` 和 `profile_adoption_required_gates=[schema_migration, dry_run_diff, conflict_report, rollback_plan, dsn_gated_tests]`；`profile_adoption_report` 内会输出 `adoption_ready=true`、`blocking_gate_count=0`，其中 `schema_migration` 是 `implemented_runtime_opt_in`，其余 gate 是非阻塞 implemented contract。显式配置 `responses_server.adopt_channel_model_profiles=true` 后，runtime 与 `models codex-config` 会读取 `profile_adoption_status=adopted` 的 enabled channel model profile，并在无显式 profile、无冲突且未声明 `supports_chat_completions=false` 时采用为 `channel_models.profile_adoption`；显式 `responses_server.model_profiles` 仍优先，冲突 adopted profile 会保守跳过。显式传入 `--codex-config <path>` 时会只读解析本地 Codex TOML，对比 `[profiles.<model>]` 与 `[model_providers.llm-tracelab]` 关键字段并输出字段级 drift diagnostics，未传 flag 时标记 `not_configured` 且不读取用户真实文件。`doctor` 的 `responses_server.model_catalog_drift` check 会复用默认模型与 profile match，在本地 SQLite application DB 文件可用时只读检查请求模型是否存在于 `model_catalog` 与 `channel_models`，并输出 catalog/channel drift diagnostics。`doctor --codex-config <path>` 通过 `responses_server.codex_config_drift` 复用同一套本地 Codex TOML drift helper；未传 flag 时 pass 并标注 `not_configured`，missing/unreadable/parse_error/drift 均为 warn 且不会让 doctor 默认失败，输出不包含 TOML 文件内容、API key/token 或未脱敏 URL secret。`responses_server.http_guard` check 会离线输出 path、normalized path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要，并检查非法 path、过小 body limit 和 MCP/monitor management path 明显冲突。`responses_server.store_health` check 默认离线报告 database driver、auto_migrate、force_store、migration mode、required semantic/audit/settings table set 和是否建议 `--check-db`；显式 `doctor --check-db` 时复用 app DB status check，并检查 `responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`、`app_settings` 是否存在，缺表或 DB 不可达为 fail。默认 DB 不可用、`:memory:`、非 SQLite 默认保持离线回落；Postgres 只有显式 `--check-db` 才会只读打开并参与 adoption diagnostics，输出会脱敏 DSN 和 DB 错误。
+- 开启 `tools.web_search.enabled=true` 后，Responses runtime 可执行 hosted `web_search` / `web_search_preview` 首切，provider 支持 `mock` 和 SearXNG；有 ent-backed audit store 时会写 hosted web_search `response.tool_call` started/completed/failed events，`stream:true` 路径会用真实 stream tool loop 执行 hosted search 并写 `stream=true`。强制 `tool_choice` 选择未启用的 `web_search` 或未实现的 `mcp` / `file_search` / `code_interpreter` / `computer_use_preview` 时，runtime 返回稳定 `unsupported_tool` error，并写入不含 raw descriptor/payload 的 `tool_call_audits` rejected 记录。普通 `function` tool 默认仍走客户端回路；runtime 现在提供默认空的 server-side function executor registry。配置 `responses_server.function_executors.enabled=true` 并声明可用的 `static_response` 或 `external_command` executor 后，runtime 才会自动执行同名 function tool，并按 timeout、max-result-bytes 和 audit redaction policy 写 started/completed/failed events。`external_command` 默认不继承环境变量、不使用 shell，通过 stdin JSON 接收 tool call，stdout 作为 tool output，stderr 只进入失败摘要；可选 `process.working_dir` 会把子进程限制到显式绝对工作目录，`process.require_absolute_command=true` 会拒绝相对 command/PATH 查找，`process.allowed_command_dirs` 会要求 command 解析到允许目录内，`process.reject_root=true` 会在当前进程以 root 运行时拒绝执行。Monitor 提供 `/api/responses/function-executors` 配置摘要、validate-only、安全 overlay apply 持久化和 Audit 页面状态/enable 控件；apply 会写入应用库 `app_settings` 并热更新当前进程 runtime executor registry，后续新请求生效。API 不返回 `static_response` output 或 `external_command` command 内容，写接口和持久化 snapshot 也不接受/保存这些敏感可执行字段。
+- Tool ownership boundary 已有回归覆盖：普通 `function` 默认 client-owned；即使 registry 中存在其它 executor，未注册同名 executor 的 function call 也只返回给客户端，不触发 server-side execution。
+- 非 Responses 请求不进入 Responses runtime，继续走现有代理、路由、录制和解析路径。
 
 详细内容见 [协议参考](./protocol-reference/README.md)。
 
@@ -40,10 +49,13 @@ TraceLab 当前提供：
 - 读取兼容：`LLM_PROXY_V2`。
 - `.http` cassette 是 replay 和详情页事实源。
 - `pkg/replay` 是硬要求，测试 replay 不访问上游网络。
+- Responses server-mode 内部调用上游 Chat Completions 时，该上游 HTTP exchange 也写入 `.http` cassette；Responses semantic state 不替代 raw cassette。
 
-## SQLite 基线
+## 存储基线
 
-SQLite 当前负责：
+Postgres 是生产结构化状态主路径，当前负责用户、token、trace index、session、upstream/channel/model、system events、Observation IR、findings、analysis、eval、Responses semantic state 和 audit 表。SQLite 保留为本地开发、离线测试和既有本地 DB 兼容的 startup-schema fallback。
+
+SQLite fallback 覆盖：
 
 - trace 列表、过滤、分页和统计。
 - session 聚合。
@@ -55,8 +67,23 @@ SQLite 当前负责：
 - trace findings。
 - analysis jobs。
 - eval、dataset、score、experiment。
+- Responses semantic state fallback 表：`responses`、`response_items`。
 
-启动时 schema 升级必须兼容已有本地 DB。
+启动时 schema 升级必须兼容已有本地 DB；生产 versioned migration 主路径是 Postgres checked-in SQL。
+
+Responses server-mode 当前优先使用 ent-backed runtime store。Postgres 是生产存储、迁移和运维主路径：`db migrate up` 通过 `internal/appdbmigrate` 和 `golang-migrate` 应用 checked-in `ent/postgres-migrations` SQL，`config inspect`、`db migrate status` 和 `doctor` 均输出 `production_storage_driver=postgres`、`production_ready`、`storage_role` 和 `storage_contract`。SQLite raw DDL 仍包含 Responses/audit/settings 表，但仅作为 legacy/dev/test `startup_schema_fallback` 兼容路径；`db migrate status --check-db` 对 SQLite 只读解释 `app_schema_status` marker 和 required table 状态，不创建缺失文件。Postgres auth 表当前由 application migration set 拥有：`auth migrate up` 复用 checked-in Postgres SQL，`auth migrate down` 已阻止，status/dry-run 报告 `effective_database_namespace=application`、`schema_authority=application_postgres_migration_set`、`storage_contract=postgres_application_schema_owns_auth_tables`、`postgres_auth_namespace_strategy=shared_application_schema_migrations`、`independent_auth_namespace_status=not_implemented` 和 `auth_namespace_rollback_scope=unsupported_from_auth_cli_shared_application_migration_set`。Postgres 真实检查和代表 runtime SQL 路径继续由 `LLM_TRACELAB_TEST_POSTGRES_DSN` 门控；默认测试保持离线。Stage 9 已准备 `request_audits`、`execution_events`、`upstream_exchanges` schema 骨架；Stage 10A/11A 已接入最小 request audit 写入和内部 Chat Completions upstream exchange correlation，Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入，Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具，Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events，`tool_call_audits` 已承接 hosted web_search、configured function executor lifecycle 和强制 unsupported hosted tool rejected lifecycle，并通过 CLI/Monitor/MCP 查询。
+
+`audit query` 的 agent-friendly 诊断面已扩展：默认 trace JSON/text 输出包含顶层 diagnostics，基于已取到的 request audit、execution events、upstream exchanges 和 derived tool calls 保守汇总 event/upstream/tool-call count、latest status、cancel/failed/stream/compact signals、pending tool calls 和 compact candidate/summary。`audit query --list` 可按 conversation/client-request/status/operation 等现有 selector 返回 request audit summary 列表，`--status` 支持 `accepted`、`completed`、`failed`、`rejected`、`cancelled`，`--operation` 支持 `create`、`compact`、`input_items` 且只允许和 `--list` 搭配；两者都在 QueryService 层下推过滤，operation 只从 `request_audits.method/path` 派生，不读取 body/header raw。列表只含 id、response_id、conversation_id、client_request_id、status、operation、created_at，不输出 body/header raw。当前仍没有真实 thread/session/turn 字段和对应范围查询。
+
+Stage 9 audit 表职责边界：
+
+- `request_audits`：入站 Responses request envelope、client request id、redaction/body hash；`audit query` 可查询最新 trace、输出顶层 diagnostics，并可用 `--list` 返回 conversation/client-request/status/operation 范围 summary，其中 operation 是 method/path 派生字段。
+- `execution_events`：runtime plan、model/tool/compact/stream/error 生命周期。当前写入 request、内部 model_call、hosted web_search、普通 function requested/submitted、registered server-side function started/completed/failed（含 stream tool loop 标记）、incremental stream fallback、deferred/incremental stream started/completed/failed、request/model_call cancellation、explicit compact 和 item-count auto compact trigger 的最小生命周期；auto compact event details 会引用 compact response metadata 中的安全 compact v2 provenance。
+- `upstream_exchanges`：semantic response/request 与 `.http` cassette、trace id、route target 的关联。
+
+后续接入顺序建议继续补 Responses audit 更完整关联入口，再补 hosted/server-side streaming lifecycle 细化和 compact events。
+
+Storage 生产边界已定案：Postgres 是生产存储、迁移和运维唯一主路径；SQLite application DB 只作为 `startup_schema_fallback` 兼容 legacy/dev/test。Postgres auth 继续共享 application `schema_migrations` namespace；独立 auth namespace 当前未实现。`auth migrate down` 已阻止，当前 rollback scope 为 `unsupported_from_auth_cli_shared_application_migration_set`；默认测试离线，真实 Postgres 检查继续 DSN-gated。
 
 ## Session 基线
 
@@ -78,7 +105,7 @@ Monitor 和 MCP 都可查询 session 列表和详情。
 
 - legacy `upstream`。
 - 多 `upstreams`。
-- SQLite 中的 `channel_configs` / `channel_models`。
+- 应用数据库中的 `channel_configs` / `channel_models`，生产使用 Postgres，本地 fallback 可使用 SQLite。
 - YAML 首次 bootstrap。
 - Monitor Web 管理 channel/model。
 - model discovery / probe。
@@ -87,7 +114,7 @@ Monitor 和 MCP 都可查询 session 列表和详情。
 - selected route 记录。
 - 健康状态、重试和 sticky routing 事件。
 
-长期配置以 SQLite channel/model 记录为准。
+长期配置以应用数据库 channel/model 记录为准。
 
 ## Monitor 基线
 
@@ -102,7 +129,8 @@ Monitor 当前包括：
 - Events。
 - Tokens。
 - Analysis。
-- Trace detail。
+- Audit。
+- Trace detail，且 trace detail API 会按 `upstream_exchanges.trace_id` 补充 Responses audit 关联 ID。
 
 主要 API：
 
@@ -112,6 +140,10 @@ Monitor 当前包括：
 - `/api/models`
 - `/api/channels`
 - `/api/routing/summary`
+- `/api/responses/function-executors`
+- `/api/responses/audit/trace`
+- `/api/provider-probe/report`
+- `/api/provider-probe/report/apply`
 - `/api/events`
 - `/api/findings`
 - `/api/analysis`
@@ -131,7 +163,7 @@ MCP 当前是 streamable HTTP。
 - findings 查询。
 - 受控 reanalysis。
 
-MCP 不替代 replay、Monitor 或 SQLite 事实源。
+MCP 不替代 replay、Monitor 或应用数据库事实源。
 
 ## Observation 与 Reanalysis 基线
 
@@ -151,6 +183,10 @@ MCP 不替代 replay、Monitor 或 SQLite 事实源。
 - 跨协议转换。
 - 用派生数据替代 raw cassette。
 - 让测试依赖真实 provider。
+- auto compact 后未知/未实现 hosted 工具、非平凡 `tool_choice` 或更复杂混合工具等复杂场景的真实增量 Responses server-mode streaming；内部 Chat Completions upstream cancel 传播已落地，auto compact 后简单文本 continuation、未注册普通 function arguments、同名 registered executor stream tool loop、provider 就绪 hosted `web_search` / `web_search_preview` 平凡 `tool_choice` tool loop、普通 function、已注册 server-side executor 和 provider 就绪 hosted `web_search` 已有 stream tool loop 首切。
+- 外部 executor root/container 级沙箱、更完整的跨轮/cancel lifecycle events、未来真实 MCP/file/code/computer-use 执行 lifecycle 和完整 model profile/context optimization；当前已有默认关闭的 YAML `static_response` / `external_command` executor 首切、`external_command` opt-in working directory/absolute command/allowed_command_dirs/reject_root 轻量进程隔离首切、Monitor 配置摘要 API、validate-only、安全 overlay 持久化到 `app_settings`、runtime executor registry 热更新和 Audit 页面状态/enable 控件、profile max output/token-budget auto compact estimator adapter 扩展边界、provider `/tokenize` 自动选择首切、默认保守计数 fallback、普通 function call argument streaming 首切、已注册 executor 与 hosted `web_search` 的 stream tool loop 首切、同轮多个已注册 executor call 顺序覆盖、同轮 registered function + hosted web_search mixed success 覆盖、同轮 registered function 完成后 hosted web_search provider 失败的 completed/failed item 顺序覆盖、started 态 `response.output_item.added`、成功/失败态 `response.output_item.done` tool item、已写出 SSE 后的最小 `response.failed` 事件、带 `stream=true` 的 tool_call started/completed/failed events，以及 unsupported hosted tool rejected audit。
+- 完整真实 stream/compact execution events 和所有未来 analytics 查询的 Postgres 兼容审计；当前已覆盖最小 `request_audits` 写入、内部 Chat Completions `upstream_exchanges` correlation、request/model_call/hosted web_search started/completed/failed/cancelled、普通 function tool requested/submitted、incremental stream fallback、deferred/incremental stream started/completed、stream tool loop `stream=true` 标记等最小 `execution_events`，核心查询服务/Monitor API/MCP/UI 查询，Postgres `db migrate up`/`auth migrate up` 的 versioned SQL 应用路径，application store 的 open-vs-migrate 分离，以及 migrated logs/observation/finding/analysis/system-event、eval dataset list/detail/example/run/score、experiment read model、monitor core list/aggregate、session/overview、upstream/routing、model catalog/detail 和 channel usage analytics 代表路径的 Postgres raw SQL 兼容；新增或更深 analytics 查询和独立 auth migration namespace 仍未完成。SQLite application versioned migration 不是当前生产边界，SQLite 保留为 startup-schema fallback。
+- provider probe 的完整配置/Monitor 工作流；当前已有手动 `provider probe` / `doctor --probe-providers` 诊断建议、只读 `provider probe-report` / Monitor `/api/provider-probe/report` 批量报告入口、默认关闭的启动时保守补全首切、`config inspect` sources 摘要，以及 Monitor provider create preview/detail report 展示、provider setup validate/apply 首切、create dialog 状态编排首切、显式 Apply suggestions 首切、Providers 列表页 Batch probe and apply 首切和 CLI `provider probe-apply` 首切；尚未完成更完整的批量 provider onboarding、自动修复策略和跨协议消息转换。
 
 ## 推荐验证
 

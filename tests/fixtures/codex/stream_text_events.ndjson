@@ -1,0 +1,9 @@
+{"type":"response.created","response":{"id":"resp_fixture_stream","object":"response","status":"queued","model":"local-test-model","output":[]}}
+{"type":"response.in_progress","response":{"id":"resp_fixture_stream","object":"response","status":"in_progress","model":"local-test-model","output":[]}}
+{"type":"response.output_item.added","output_index":0,"item":{"id":"msg_fixture_stream","type":"message","status":"in_progress","role":"assistant","content":[]}}
+{"type":"response.content_part.added","item_id":"msg_fixture_stream","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}
+{"type":"response.output_text.delta","item_id":"msg_fixture_stream","output_index":0,"content_index":0,"delta":"Hello"}
+{"type":"response.output_text.done","item_id":"msg_fixture_stream","output_index":0,"content_index":0,"text":"Hello"}
+{"type":"response.content_part.done","item_id":"msg_fixture_stream","output_index":0,"content_index":0,"part":{"type":"output_text","text":"Hello"}}
+{"type":"response.output_item.done","output_index":0,"item":{"id":"msg_fixture_stream","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}
+{"type":"response.completed","response":{"id":"resp_fixture_stream","object":"response","status":"completed","model":"local-test-model","output":[{"id":"msg_fixture_stream","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}]}}

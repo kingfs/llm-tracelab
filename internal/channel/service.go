@@ -1,6 +1,7 @@
 package channel
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
 )
@@ -23,6 +25,7 @@ type Store interface {
 	UpsertChannelConfig(store.ChannelConfigRecord) (store.ChannelConfigRecord, error)
 	UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error
 	ListChannelModels(channelID string, enabledOnly bool) ([]store.ChannelModelRecord, error)
+	ListModelAliases(alias string, enabledOnly bool) ([]store.ModelAliasRecord, error)
 	ReplaceChannelModels(channelID string, records []store.ChannelModelRecord) error
 	UpsertChannelModel(channelID string, record store.ChannelModelRecord) (store.ChannelModelRecord, error)
 	UpsertModelCatalog(store.ModelCatalogRecord) error
@@ -54,6 +57,7 @@ type ProbeResult struct {
 	EnabledCount    int
 	Endpoint        string
 	ErrorText       string
+	ProviderReport  providerprobe.Report
 	StartedAt       time.Time
 	CompletedAt     time.Time
 	DurationMs      int64
@@ -61,6 +65,24 @@ type ProbeResult struct {
 
 type ProbeOptions struct {
 	EnableDiscovered *bool
+	DetectProvider   bool
+}
+
+type ProviderProbeReportOptions struct {
+	ChannelID string
+}
+
+type ProviderProbeApplyResult struct {
+	Report  providerprobe.BatchReport `json:"report"`
+	Applied []ProviderProbeApplyItem  `json:"applied"`
+}
+
+type ProviderProbeApplyItem struct {
+	ChannelID     string   `json:"channel_id"`
+	Status        string   `json:"status"`
+	Applied       bool     `json:"applied"`
+	AppliedFields []string `json:"applied_fields,omitempty"`
+	SkippedReason string   `json:"skipped_reason,omitempty"`
 }
 
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
@@ -100,12 +122,19 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 			}
 			headersJSON = string(data)
 		}
-		_, err := s.store.UpsertChannelConfig(store.ChannelConfigRecord{
+		capabilitiesJSON, err := marshalCapabilities(target.Upstream.Capabilities)
+		if err != nil {
+			return imported, err
+		}
+		_, err = s.store.UpsertChannelConfig(store.ChannelConfigRecord{
 			ID:               channelID,
 			Name:             defaultChannelName(channelID, target.Upstream.ProviderPreset),
 			Source:           "bootstrap",
 			BaseURL:          target.Upstream.BaseURL,
 			ProviderPreset:   target.Upstream.ProviderPreset,
+			APIType:          target.Upstream.APIType,
+			Mode:             target.Upstream.Mode,
+			CapabilitiesJSON: capabilitiesJSON,
 			ProtocolFamily:   target.Upstream.ProtocolFamily,
 			RoutingProfile:   target.Upstream.RoutingProfile,
 			APIVersion:       target.Upstream.APIVersion,
@@ -175,6 +204,10 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	aliases, err := s.store.ListModelAliases("", true)
+	if err != nil {
+		return nil, err
+	}
 	targets := make([]config.UpstreamTargetConfig, 0, len(channels))
 	for _, channel := range channels {
 		if !channel.Enabled {
@@ -190,20 +223,29 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 				return nil, fmt.Errorf("decode headers for channel %q: %w", channel.ID, err)
 			}
 		}
+		capabilities, err := unmarshalCapabilities(channel.CapabilitiesJSON)
+		if err != nil {
+			return nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
+		}
 		enabled := true
 		target := config.UpstreamTargetConfig{
-			ID:                 channel.ID,
-			Enabled:            &enabled,
-			Priority:           channel.Priority,
-			Weight:             channel.Weight,
-			CapacityHint:       channel.CapacityHint,
-			ModelDiscovery:     channel.ModelDiscovery,
-			StaticModels:       channelModelNames(models),
-			AllowUnknownModels: &channel.AllowUnknownModels,
+			ID:                   channel.ID,
+			Enabled:              &enabled,
+			Priority:             channel.Priority,
+			Weight:               channel.Weight,
+			CapacityHint:         channel.CapacityHint,
+			ModelDiscovery:       channel.ModelDiscovery,
+			StaticModels:         channelModelNamesWithAliases(models, aliases, channel.ID),
+			ModelAliases:         channelModelAliases(models, aliases, channel.ID),
+			ConfiguredModelsOnly: true,
+			AllowUnknownModels:   &channel.AllowUnknownModels,
 			Upstream: config.UpstreamConfig{
 				BaseURL:        channel.BaseURL,
 				ApiKey:         string(channel.APIKeyCiphertext),
 				ProviderPreset: channel.ProviderPreset,
+				APIType:        channel.APIType,
+				Mode:           channel.Mode,
+				Capabilities:   capabilities,
 				ProtocolFamily: channel.ProtocolFamily,
 				RoutingProfile: channel.RoutingProfile,
 				APIVersion:     channel.APIVersion,
@@ -217,6 +259,154 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		targets = append(targets, target)
 	}
 	return targets, nil
+}
+
+func (s *Service) ProviderProbeReport(ctx context.Context, options ProviderProbeReportOptions) (providerprobe.BatchReport, error) {
+	targets, err := s.ProviderProbeTargets(options.ChannelID)
+	if err != nil {
+		return providerprobe.BatchReport{}, err
+	}
+	return providerprobe.ProbeBatch(ctx, targets, s.httpClient), nil
+}
+
+func (s *Service) ApplyProviderProbeReport(ctx context.Context, options ProviderProbeReportOptions) (ProviderProbeApplyResult, error) {
+	report, err := s.ProviderProbeReport(ctx, options)
+	if err != nil {
+		return ProviderProbeApplyResult{}, err
+	}
+	channels, err := s.store.ListChannelConfigs()
+	if err != nil {
+		return ProviderProbeApplyResult{}, err
+	}
+	byID := make(map[string]store.ChannelConfigRecord, len(channels))
+	for _, channel := range channels {
+		byID[channel.ID] = channel
+	}
+	result := ProviderProbeApplyResult{
+		Report:  report,
+		Applied: make([]ProviderProbeApplyItem, 0, len(report.Reports)),
+	}
+	for _, probeReport := range report.Reports {
+		item := ProviderProbeApplyItem{
+			ChannelID: strings.TrimSpace(probeReport.ProviderID),
+			Status:    probeReport.Status,
+		}
+		if probeReport.Status != providerprobe.StatusDetected {
+			item.SkippedReason = "probe status is not detected"
+			result.Applied = append(result.Applied, item)
+			continue
+		}
+		channel, ok := byID[item.ChannelID]
+		if !ok {
+			item.SkippedReason = "channel not found"
+			result.Applied = append(result.Applied, item)
+			continue
+		}
+		updated, fields, err := applyProviderProbeSuggestions(channel, probeReport)
+		if err != nil {
+			return ProviderProbeApplyResult{}, err
+		}
+		if len(fields) == 0 {
+			item.SkippedReason = "no missing fields to apply"
+			result.Applied = append(result.Applied, item)
+			continue
+		}
+		if _, err := s.store.UpsertChannelConfig(updated); err != nil {
+			return ProviderProbeApplyResult{}, err
+		}
+		item.Applied = true
+		item.AppliedFields = fields
+		result.Applied = append(result.Applied, item)
+	}
+	return result, nil
+}
+
+func (s *Service) ProviderProbeTargets(channelID string) ([]providerprobe.ProbeTarget, error) {
+	if s == nil || s.store == nil {
+		return nil, fmt.Errorf("channel service store is required")
+	}
+	channelID = strings.TrimSpace(channelID)
+	channels, err := s.store.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]providerprobe.ProbeTarget, 0, len(channels))
+	for _, channel := range channels {
+		if !channel.Enabled {
+			continue
+		}
+		if channelID != "" && channel.ID != channelID {
+			continue
+		}
+		target := providerProbeTargetFromChannel(channel)
+		target.TargetSource = "channel"
+		if strings.TrimSpace(target.BaseURL) == "" {
+			continue
+		}
+		targets = append(targets, target)
+	}
+	if channelID != "" && len(targets) == 0 {
+		return nil, fmt.Errorf("channel %q was not found, is disabled, or has no base_url", channelID)
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no enabled channel with base_url is configured")
+	}
+	return targets, nil
+}
+
+func marshalCapabilities(capabilities config.UpstreamCapabilitiesConfig) (string, error) {
+	data, err := json.Marshal(capabilities)
+	if err != nil {
+		return "", err
+	}
+	if string(data) == "null" || string(data) == "" {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func unmarshalCapabilities(raw string) (config.UpstreamCapabilitiesConfig, error) {
+	var capabilities config.UpstreamCapabilitiesConfig
+	if strings.TrimSpace(raw) == "" {
+		return capabilities, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &capabilities); err != nil {
+		return config.UpstreamCapabilitiesConfig{}, err
+	}
+	return capabilities, nil
+}
+
+func applyProviderProbeSuggestions(channel store.ChannelConfigRecord, report providerprobe.Report) (store.ChannelConfigRecord, []string, error) {
+	updated := channel
+	var fields []string
+	if strings.TrimSpace(updated.APIType) == "" && strings.TrimSpace(report.SuggestedAPIType) != "" {
+		updated.APIType = strings.TrimSpace(report.SuggestedAPIType)
+		fields = append(fields, "api_type")
+	}
+	if strings.TrimSpace(updated.ProtocolFamily) == "" && strings.TrimSpace(report.SuggestedProtocolFamily) != "" {
+		updated.ProtocolFamily = strings.TrimSpace(report.SuggestedProtocolFamily)
+		fields = append(fields, "protocol_family")
+	}
+	capabilities, err := unmarshalCapabilities(updated.CapabilitiesJSON)
+	if err != nil {
+		return store.ChannelConfigRecord{}, nil, fmt.Errorf("decode capabilities for channel %q: %w", channel.ID, err)
+	}
+	for _, capability := range report.Capabilities {
+		if upstream.SetCapabilityIfUnset(&capabilities, capability, true) {
+			if field := upstream.CapabilityFieldName(capability); field != "" {
+				fields = append(fields, field)
+			}
+		}
+	}
+	if len(fields) == 0 {
+		return updated, nil, nil
+	}
+	capabilitiesJSON, err := marshalCapabilities(capabilities)
+	if err != nil {
+		return store.ChannelConfigRecord{}, nil, err
+	}
+	updated.CapabilitiesJSON = capabilitiesJSON
+	return updated, fields, nil
 }
 
 func (s *Service) Probe(channelID string) (ProbeResult, error) {
@@ -237,6 +427,12 @@ func (s *Service) ProbeWithOptions(channelID string, options ProbeOptions) (Prob
 	channel, err := s.store.GetChannelConfig(channelID)
 	if err != nil {
 		return result, err
+	}
+	if options.DetectProvider {
+		providerReport, providerProbeErr := providerprobe.Probe(context.Background(), providerProbeTargetFromChannel(channel), s.httpClient)
+		if providerProbeErr == nil {
+			result.ProviderReport = providerReport
+		}
 	}
 	resolved, err := upstream.Resolve(upstreamConfigFromChannel(channel))
 	if err != nil {
@@ -375,12 +571,15 @@ func countEnabledModels(records []store.ChannelModelRecord) int {
 }
 
 func probeRequestMetaJSON(result ProbeResult) string {
-	meta := map[string]string{}
+	meta := map[string]any{}
 	if result.FailureReason != "" {
 		meta["failure_reason"] = result.FailureReason
 	}
 	if result.RetryHint != "" {
 		meta["retry_hint"] = result.RetryHint
+	}
+	if result.ProviderReport.Status != "" {
+		meta["provider_probe"] = result.ProviderReport
 	}
 	if len(meta) == 0 {
 		return "{}"
@@ -439,10 +638,14 @@ func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 	if strings.TrimSpace(channel.HeadersJSON) != "" {
 		_ = json.Unmarshal([]byte(channel.HeadersJSON), &headers)
 	}
+	capabilities, _ := unmarshalCapabilities(channel.CapabilitiesJSON)
 	return config.UpstreamConfig{
 		BaseURL:        channel.BaseURL,
 		ApiKey:         string(channel.APIKeyCiphertext),
 		ProviderPreset: channel.ProviderPreset,
+		APIType:        channel.APIType,
+		Mode:           channel.Mode,
+		Capabilities:   capabilities,
 		ProtocolFamily: channel.ProtocolFamily,
 		RoutingProfile: channel.RoutingProfile,
 		APIVersion:     channel.APIVersion,
@@ -451,6 +654,18 @@ func upstreamConfigFromChannel(channel store.ChannelConfigRecord) config.Upstrea
 		Location:       channel.Location,
 		ModelResource:  channel.ModelResource,
 		Headers:        headers,
+	}
+}
+
+func providerProbeTargetFromChannel(channel store.ChannelConfigRecord) providerprobe.ProbeTarget {
+	upstreamCfg := upstreamConfigFromChannel(channel)
+	return providerprobe.ProbeTarget{
+		ProviderID:              channel.ID,
+		BaseURL:                 upstreamCfg.BaseURL,
+		APIKey:                  upstreamCfg.ApiKey,
+		Headers:                 upstreamCfg.Headers,
+		SpecifiedAPIType:        upstreamCfg.APIType,
+		SpecifiedProtocolFamily: upstreamCfg.ProtocolFamily,
 	}
 }
 
@@ -523,4 +738,63 @@ func channelModelNames(models []store.ChannelModelRecord) []string {
 		out = append(out, model.Model)
 	}
 	return normalizeModels(out)
+}
+
+func channelModelNamesWithAliases(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) []string {
+	modelNames := channelModelNames(models)
+	if len(aliases) == 0 || len(modelNames) == 0 {
+		return modelNames
+	}
+	supported := make(map[string]struct{}, len(modelNames))
+	for _, model := range modelNames {
+		supported[model] = struct{}{}
+	}
+	out := append([]string(nil), modelNames...)
+	for _, alias := range aliases {
+		aliasName := strings.ToLower(strings.TrimSpace(alias.Alias))
+		targetModel := strings.ToLower(strings.TrimSpace(alias.TargetModel))
+		aliasChannelID := strings.TrimSpace(alias.ChannelID)
+		if aliasName == "" || targetModel == "" {
+			continue
+		}
+		if aliasChannelID != "" && aliasChannelID != channelID {
+			continue
+		}
+		if _, ok := supported[targetModel]; !ok {
+			continue
+		}
+		out = append(out, aliasName)
+	}
+	return normalizeModels(out)
+}
+
+func channelModelAliases(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]string {
+	modelNames := channelModelNames(models)
+	if len(aliases) == 0 || len(modelNames) == 0 {
+		return nil
+	}
+	supported := make(map[string]struct{}, len(modelNames))
+	for _, model := range modelNames {
+		supported[model] = struct{}{}
+	}
+	out := map[string]string{}
+	for _, alias := range aliases {
+		aliasName := strings.ToLower(strings.TrimSpace(alias.Alias))
+		targetModel := strings.ToLower(strings.TrimSpace(alias.TargetModel))
+		aliasChannelID := strings.TrimSpace(alias.ChannelID)
+		if aliasName == "" || targetModel == "" {
+			continue
+		}
+		if aliasChannelID != "" && aliasChannelID != channelID {
+			continue
+		}
+		if _, ok := supported[targetModel]; !ok {
+			continue
+		}
+		out[aliasName] = targetModel
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

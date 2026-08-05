@@ -1,0 +1,21 @@
+{
+  "model": "local-test-model",
+  "input": "Answer from local context. Do not browse unless the server chooses to execute a hosted search.",
+  "stream": true,
+  "tools": [
+    {
+      "type": "web_search",
+      "max_num_results": 2
+    }
+  ],
+  "tool_choice": "auto",
+  "store": true,
+  "metadata": {
+    "fixture": "codex_ordinary_web_search_descriptor",
+    "expected_behavior": "descriptor parses as compatibility input; without a configured web_search provider it must not be exposed to the upstream chat model or block ordinary text streaming",
+    "codex": {
+      "thread_id": "thread_fixture_web_search",
+      "client_request_id": "turn_fixture_web_search_1"
+    }
+  }
+}

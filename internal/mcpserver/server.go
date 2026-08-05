@@ -128,6 +128,22 @@ type queryUnreadSystemEventsInput struct {
 	MinSeverity string `json:"min_severity,omitempty" jsonschema:"minimum severity: info, warning, error, or critical"`
 }
 
+type responsesAuditTraceInput struct {
+	ResponseID     string `json:"response_id,omitempty" jsonschema:"Responses API response id"`
+	RequestAuditID string `json:"request_audit_id,omitempty" jsonschema:"Responses request audit id"`
+}
+
+type responsesAuditToolCallsInput struct {
+	ResponseID      string `json:"response_id,omitempty" jsonschema:"Responses API response id"`
+	RequestAuditID  string `json:"request_audit_id,omitempty" jsonschema:"Responses request audit id"`
+	ConversationID  string `json:"conversation_id,omitempty" jsonschema:"Responses conversation id"`
+	CallID          string `json:"call_id,omitempty" jsonschema:"tool call id"`
+	ToolName        string `json:"tool_name,omitempty" jsonschema:"tool name"`
+	Status          string `json:"status,omitempty" jsonschema:"tool call audit status"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"maximum records to return, default 100, max 500"`
+	IncludePayloads bool   `json:"include_payloads,omitempty" jsonschema:"include raw input_json, output_json, and metadata_json payloads"`
+}
+
 type reanalyzeTraceInput struct {
 	TraceID     string `json:"trace_id" jsonschema:"trace identifier from list_traces"`
 	RepairUsage bool   `json:"repair_usage,omitempty" jsonschema:"repair indexed usage before reparse/scan"`
@@ -386,6 +402,14 @@ func New(traceStore *store.Store, opts Options) *mcp.Server {
 		Name:        "query_unread_system_events",
 		Description: "Return unread warning/error/critical TraceLab system events ordered by severity and recency.",
 	}, api.queryUnreadSystemEvents)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "responses_audit_trace",
+		Description: "Return Responses request audit, execution events, and upstream exchange summaries by response_id or request_audit_id.",
+	}, api.responsesAuditTrace)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "responses_audit_tool_calls",
+		Description: "List persisted Responses tool-call audit records with optional filters. Raw payload JSON is returned only when include_payloads is true.",
+	}, api.responsesAuditToolCalls)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "reanalyze_trace",
 		Description: "Run or enqueue controlled reanalysis for one trace.",

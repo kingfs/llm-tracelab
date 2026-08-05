@@ -128,18 +128,20 @@ func (r *Router) HealthThresholds() HealthThresholds {
 }
 
 type Target struct {
-	ID             string
-	RouteTargetID  string
-	ChannelID      string
-	CredentialID   string
-	CredentialHint string
-	Enabled        bool
-	Priority       int
-	Weight         float64
-	CapacityHint   float64
-	ModelDiscovery string
-	StaticModels   []string
-	Upstream       upstream.ResolvedUpstream
+	ID                   string
+	RouteTargetID        string
+	ChannelID            string
+	CredentialID         string
+	CredentialHint       string
+	Enabled              bool
+	Priority             int
+	Weight               float64
+	CapacityHint         float64
+	ModelDiscovery       string
+	StaticModels         []string
+	ModelAliases         map[string]string
+	configuredModelsOnly bool
+	Upstream             upstream.ResolvedUpstream
 
 	allowUnknownModels bool
 
@@ -184,6 +186,8 @@ type Snapshot struct {
 	ModelDiscovery    string    `json:"model_discovery"`
 	BaseURL           string    `json:"base_url"`
 	ProviderPreset    string    `json:"provider_preset"`
+	APIType           string    `json:"api_type"`
+	Mode              string    `json:"mode,omitempty"`
 	ProtocolFamily    string    `json:"protocol_family"`
 	RoutingProfile    string    `json:"routing_profile"`
 	HealthState       string    `json:"health_state"`
@@ -237,6 +241,12 @@ const (
 	SelectionFailureAllTargetsExcluded = "all_targets_excluded"
 	SelectionFailureUnknown            = "unknown"
 )
+
+const LocalResponsesServerBackendRequiredError = "responses_server.enabled requires at least one enabled OpenAI-compatible chat completions-compatible upstream for local Responses server mode"
+
+func LocalResponsesServerBackendRequired() error {
+	return errors.New(LocalResponsesServerBackendRequiredError)
+}
 
 func SelectionFailureReason(err error) string {
 	var selectionErr *SelectionError
@@ -296,12 +306,15 @@ type CandidateDecision struct {
 	CredentialSelectable   *bool   `json:"credential_selectable,omitempty"`
 	CredentialFilterReason string  `json:"credential_filter_reason,omitempty"`
 	ProviderPreset         string  `json:"provider_preset,omitempty"`
+	APIType                string  `json:"api_type,omitempty"`
+	Mode                   string  `json:"mode,omitempty"`
 	BaseURL                string  `json:"base_url,omitempty"`
 	Priority               int     `json:"priority"`
 	Weight                 float64 `json:"weight"`
 	HealthState            string  `json:"health_state,omitempty"`
 	SupportsPath           bool    `json:"supports_path"`
 	SupportsModel          bool    `json:"supports_model"`
+	SupportsTools          bool    `json:"supports_tools"`
 	Excluded               bool    `json:"excluded,omitempty"`
 	Selectable             bool    `json:"selectable"`
 	FilterReason           string  `json:"filter_reason,omitempty"`
@@ -339,9 +352,6 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
 		return nil, fmt.Errorf("config cannot define both upstream and upstreams")
 	}
-	if len(targetCfgs) == 0 {
-		return nil, fmt.Errorf("no upstream targets configured")
-	}
 
 	r := &Router{
 		modelToTargets:   make(map[string][]*Target),
@@ -370,6 +380,9 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 	if r.failureThreshold <= 0 {
 		r.failureThreshold = 3
 	}
+	if len(targetCfgs) == 0 {
+		return r, nil
+	}
 
 	targets, err := buildTargets(targetCfgs)
 	if err != nil {
@@ -380,6 +393,9 @@ func New(cfg *config.Config, st *store.Store) (*Router, error) {
 }
 
 func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
+	if len(targetCfgs) == 0 {
+		return nil, nil
+	}
 	seenIDs := map[string]struct{}{}
 	targets := make([]*Target, 0, len(targetCfgs))
 	for idx, targetCfg := range targetCfgs {
@@ -427,27 +443,36 @@ func buildTargets(targetCfgs []config.UpstreamTargetConfig) ([]*Target, error) {
 
 func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstream.ResolvedUpstream, id string, routeTargetID string, channelID string, credentialID string, credentialHint string, singleConfiguredTarget bool) *Target {
 	return &Target{
-		ID:                 id,
-		RouteTargetID:      routeTargetID,
-		ChannelID:          channelID,
-		CredentialID:       credentialID,
-		CredentialHint:     credentialHint,
-		Enabled:            true,
-		Priority:           targetCfg.Priority,
-		Weight:             defaultFloat(targetCfg.Weight, 1),
-		CapacityHint:       defaultFloat(targetCfg.CapacityHint, 1),
-		ModelDiscovery:     normalizeDiscoveryMode(targetCfg.ModelDiscovery),
-		StaticModels:       normalizeModels(targetCfg.StaticModels),
-		Upstream:           resolved,
-		allowUnknownModels: allowUnknownModels(targetCfg, singleConfiguredTarget),
-		models:             map[string]struct{}{},
-		ttftFastMs:         500,
-		ttftSlowMs:         500,
-		reqLatencyFastMs:   800,
-		reqLatencySlowMs:   800,
-		healthState:        HealthHealthy,
-		modelHealth:        map[string]*modelHealthState{},
+		ID:                   id,
+		RouteTargetID:        routeTargetID,
+		ChannelID:            channelID,
+		CredentialID:         credentialID,
+		CredentialHint:       credentialHint,
+		Enabled:              true,
+		Priority:             targetCfg.Priority,
+		Weight:               defaultFloat(targetCfg.Weight, 1),
+		CapacityHint:         defaultFloat(targetCfg.CapacityHint, 1),
+		ModelDiscovery:       normalizeDiscoveryMode(targetCfg.ModelDiscovery),
+		StaticModels:         normalizeModels(targetCfg.StaticModels),
+		ModelAliases:         normalizeModelAliases(targetCfg.ModelAliases),
+		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
+		Upstream:             resolved,
+		allowUnknownModels:   allowUnknownModels(targetCfg, singleConfiguredTarget),
+		models:               map[string]struct{}{},
+		ttftFastMs:           500,
+		ttftSlowMs:           500,
+		reqLatencyFastMs:     800,
+		reqLatencySlowMs:     800,
+		healthState:          HealthHealthy,
+		modelHealth:          map[string]*modelHealthState{},
 	}
+}
+
+func (t *Target) ResolveModelAlias(model string) string {
+	if t == nil || len(t.ModelAliases) == 0 {
+		return ""
+	}
+	return t.ModelAliases[strings.ToLower(strings.TrimSpace(model))]
 }
 
 func appendTarget(targets *[]*Target, seenIDs map[string]struct{}, target *Target) error {
@@ -472,6 +497,12 @@ func sortTargets(targets []*Target) {
 }
 
 func (r *Router) Initialize() error {
+	if r == nil {
+		return nil
+	}
+	if len(r.Targets()) == 0 {
+		return nil
+	}
 	usable, err := r.refreshAll()
 	if err != nil {
 		return err
@@ -488,9 +519,6 @@ func (r *Router) Initialize() error {
 func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 	if r == nil {
 		return fmt.Errorf("router is nil")
-	}
-	if len(targetCfgs) == 0 {
-		return fmt.Errorf("no upstream targets configured")
 	}
 	nextTargets, err := buildTargets(targetCfgs)
 	if err != nil {
@@ -509,8 +537,10 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 		}
 	}
 
-	if _, err := r.refreshTargets(nextTargets); err != nil {
-		return err
+	if len(nextTargets) > 0 {
+		if _, err := r.refreshTargets(nextTargets); err != nil {
+			return err
+		}
 	}
 
 	r.mu.Lock()
@@ -524,6 +554,58 @@ func (r *Router) Targets() []*Target {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return append([]*Target(nil), r.targets...)
+}
+
+func (r *Router) HasLocalResponsesServerBackend() bool {
+	if r == nil {
+		return false
+	}
+	for _, target := range r.Targets() {
+		if target == nil || !target.Enabled {
+			continue
+		}
+		if SupportsLocalResponsesServerBackend(target.Upstream) {
+			return true
+		}
+	}
+	return false
+}
+
+func ValidateLocalResponsesServerBackendConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if len(cfg.Upstreams) > 0 && strings.TrimSpace(cfg.Upstream.BaseURL) != "" {
+		return fmt.Errorf("config cannot define both upstream and upstreams")
+	}
+	targets := cfg.EffectiveUpstreams()
+	if len(targets) == 0 {
+		return nil
+	}
+	for idx, targetCfg := range targets {
+		enabled := true
+		if targetCfg.Enabled != nil {
+			enabled = *targetCfg.Enabled
+		}
+		if !enabled {
+			continue
+		}
+		resolved, err := upstream.Resolve(targetCfg.Upstream)
+		if err != nil {
+			return fmt.Errorf("resolve upstream target %q: %w", targetID(targetCfg, idx), err)
+		}
+		if SupportsLocalResponsesServerBackend(resolved) {
+			return nil
+		}
+	}
+	return LocalResponsesServerBackendRequired()
+}
+
+func SupportsLocalResponsesServerBackend(resolved upstream.ResolvedUpstream) bool {
+	if resolved.ProtocolFamily != upstream.ProtocolFamilyOpenAICompatible {
+		return false
+	}
+	return resolved.SupportsChatCompletionsAPI()
 }
 
 func (r *Router) Policy() string {
@@ -628,6 +710,19 @@ func (r *Router) AggregatedModels() []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0)
 	for _, target := range targets {
+		if target.configuredModelsOnly || len(target.StaticModels) > 0 {
+			for _, model := range normalizeModels(target.StaticModels) {
+				if model == "" {
+					continue
+				}
+				if _, ok := seen[model]; ok {
+					continue
+				}
+				seen[model] = struct{}{}
+				out = append(out, model)
+			}
+			continue
+		}
 		target.mu.Lock()
 		for model := range target.models {
 			if model == "" {
@@ -685,6 +780,62 @@ func (r *Router) SelectWithBody(req *http.Request, body []byte) (*Selection, err
 	return r.selectTargets(req, body, nil)
 }
 
+func (r *Router) HasSelectableCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil || req == nil {
+		return false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	model := features.ModelName
+	candidates := r.candidatesForRequest(rawPath, model, features)
+	now := time.Now()
+	for _, candidate := range candidates {
+		if candidate.canSelect(now, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request, body []byte) bool {
+	if r == nil || req == nil {
+		return false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	model := features.ModelName
+	candidates := r.candidatesForRequest(rawPath, model, features)
+	now := time.Now()
+	for _, candidate := range candidates {
+		if candidate.Upstream.SupportsResponsesAPI() && candidate.canSelect(now, model) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte) bool {
+	if r == nil || req == nil {
+		return false
+	}
+	rawPath := req.URL.Path
+	features := extractRequestFeatures(rawPath, body)
+	if llm.NormalizeEndpoint(rawPath) != "/v1/responses" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, target := range r.targets {
+		if target == nil || !target.Upstream.SupportsResponsesAPI() {
+			continue
+		}
+		if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+			return true
+		}
+	}
+	return false
+}
+
 // selectTargets is the shared selection core used by SelectWithBody and SelectWithExclusion.
 func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []string) (*Selection, error) {
 	rawPath := req.URL.Path
@@ -696,8 +847,8 @@ func (r *Router) selectTargets(req *http.Request, body []byte, excludeIDs []stri
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	decision := r.buildDecisionTrace(rawPath, model, excludeIDs)
-	candidates := r.candidatesForRequest(rawPath, model)
+	decision := r.buildDecisionTrace(rawPath, model, excludeIDs, features)
+	candidates := r.candidatesForRequest(rawPath, model, features)
 	if len(candidates) == 0 {
 		return nil, &SelectionError{
 			Reason:   SelectionFailureNoSupportingTarget,
@@ -795,7 +946,7 @@ func targetAlias(target *Target, fallback string) string {
 	return fallback
 }
 
-func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string) *DecisionTrace {
+func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []string, features RequestFeatures) *DecisionTrace {
 	decision := &DecisionTrace{
 		ModelName:      model,
 		Endpoint:       llm.NormalizeEndpoint(rawPath),
@@ -810,7 +961,7 @@ func (r *Router) buildDecisionTrace(rawPath string, model string, excludeIDs []s
 	}
 	now := time.Now()
 	for _, target := range r.targets {
-		candidate := target.candidateDecision(rawPath, model, now)
+		candidate := target.candidateDecision(rawPath, model, now, features)
 		if _, excluded := excludeSet[target.ID]; excluded {
 			candidate.Excluded = true
 			candidate.Selectable = false
@@ -960,11 +1111,11 @@ func (r *Router) pickCostAware(candidates []*Target, req RequestFeatures) (*Targ
 	return b, scoreB
 }
 
-func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
+func (r *Router) candidatesForRequest(rawPath string, model string, features RequestFeatures) []*Target {
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath) {
+			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -974,7 +1125,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
 	var candidates []*Target
 	if model != "" {
 		for _, target := range r.modelToTargets[strings.ToLower(model)] {
-			if supportsPath(target, rawPath) {
+			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -986,6 +1137,9 @@ func (r *Router) candidatesForRequest(rawPath string, model string) []*Target {
 	var fallback []*Target
 	for _, target := range r.targets {
 		if !supportsPath(target, rawPath) {
+			continue
+		}
+		if !supportsRequestFeatures(target, features) {
 			continue
 		}
 		if target.allowUnknownModels || model == "" || r.fallbackPolicy != FallbackReject {
@@ -1212,6 +1366,8 @@ func (t *Target) snapshot() Snapshot {
 		ModelDiscovery:    t.ModelDiscovery,
 		BaseURL:           t.Upstream.BaseURL,
 		ProviderPreset:    t.Upstream.ProviderPreset,
+		APIType:           t.Upstream.APIType,
+		Mode:              t.Upstream.Mode,
 		ProtocolFamily:    t.Upstream.ProtocolFamily,
 		RoutingProfile:    t.Upstream.RoutingProfile,
 		HealthState:       health,
@@ -1263,7 +1419,7 @@ func (t *Target) canSelect(now time.Time, model string) bool {
 	return true
 }
 
-func (t *Target) candidateDecision(rawPath string, model string, now time.Time) CandidateDecision {
+func (t *Target) candidateDecision(rawPath string, model string, now time.Time, features RequestFeatures) CandidateDecision {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -1274,12 +1430,15 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 		CredentialID:   t.CredentialID,
 		CredentialHint: t.CredentialHint,
 		ProviderPreset: t.Upstream.ProviderPreset,
+		APIType:        t.Upstream.APIType,
+		Mode:           t.Upstream.Mode,
 		BaseURL:        t.Upstream.BaseURL,
 		Priority:       t.Priority,
 		Weight:         t.Weight,
 		HealthState:    t.healthState,
 		SupportsPath:   supportsPath(t, rawPath),
 		SupportsModel:  t.supportsModelLocked(model),
+		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
 	}
 	if !decision.SupportsPath {
@@ -1290,6 +1449,11 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time) 
 	if !decision.SupportsModel {
 		decision.Selectable = false
 		decision.FilterReason = "unsupported_model"
+		return decision
+	}
+	if !decision.SupportsTools {
+		decision.Selectable = false
+		decision.FilterReason = "unsupported_tools"
 		return decision
 	}
 	if t.healthState == HealthOpen && !t.openUntil.IsZero() && now.Before(t.openUntil) {
@@ -1598,8 +1762,25 @@ func supportsPath(target *Target, rawPath string) bool {
 	if !supportsProtocolFamily(target.Upstream.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
 		return false
 	}
+	if !supportsAPISurface(target.Upstream, semantics.Endpoint) {
+		return false
+	}
 	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
 	return err == nil
+}
+
+func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string) bool {
+	return resolved.SupportsEndpoint(endpoint)
+}
+
+func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
+	if target == nil {
+		return false
+	}
+	if features.HasTools && !target.Upstream.SupportsToolCalling() {
+		return false
+	}
+	return true
 }
 
 func supportsProtocolFamily(protocolFamily string, provider string, endpoint string) bool {
@@ -1710,6 +1891,25 @@ func normalizeModels(models []string) []string {
 		out = append(out, model)
 	}
 	slices.Sort(out)
+	return out
+}
+
+func normalizeModelAliases(aliases map[string]string) map[string]string {
+	if len(aliases) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for alias, targetModel := range aliases {
+		alias = strings.ToLower(strings.TrimSpace(alias))
+		targetModel = strings.ToLower(strings.TrimSpace(targetModel))
+		if alias == "" || targetModel == "" {
+			continue
+		}
+		out[alias] = targetModel
+	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 

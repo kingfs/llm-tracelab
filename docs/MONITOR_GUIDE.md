@@ -16,9 +16,12 @@ Monitor 是 TraceLab 的本地 Web 工作台。
 go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
-登录后在 `Tokens` 页面创建个人 token。
+Monitor UI 使用用户名密码登录，登录态由 monitor-only JWT 承载。JWT 只用于
+Monitor API，不用于 SDK、proxy 或 MCP。
 
-同一个 token 用于：
+登录后可在 `Tokens` 页面创建个人 API token。
+
+个人 API token 用于：
 
 - 代理 API：`Authorization: Bearer <token>`。
 - MCP：`Authorization: Bearer <token>`。
@@ -88,12 +91,17 @@ Monitor 使用两类数据：
 
 - 创建渠道。
 - 设置 provider preset、base URL、API key、headers、routing 字段。
-- 探测模型。
+- 设置 provider API surface：`api_type`、`mode`，以及 Responses、Chat Completions、tool calling、models 等 capability 开关；这些字段会写入 channel store，并在运行时还原为 upstream routing target。
+- 创建前可用 Detect provider 做临时探测，不落库返回 API surface 建议；需要采用建议时，使用 Apply suggestions 显式写入表单。
+- 创建前需用 Validate setup 调用 provider setup validate：它会组合 base URL、API key、provider preset、model discovery 和 capability 字段做一次探测并把归一化配置写回表单，但不会落库；dialog 会展示 normalized config、probe 和 redacted secret state，字段变更会清空旧验证结果；Create provider 才通过 setup apply 写入 channel store；若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
+- setup validate/apply 响应不会回显 API key；只返回 `api_key_hint`、secret storage mode 和 redacted header 状态。
+- 探测模型，并查看 provider detection 建议；需要写回建议时，使用 Apply suggestions 显式更新 channel 配置。
+- 在 Channels/Providers 列表页使用 Batch probe and apply 先运行只读 `POST /api/provider-probe/report` 预览，再对 detected 且有可补字段的 provider 执行批量 Apply detected suggestions；Monitor 不展示或传递 API key。批量应用只填缺失的 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置，也不覆盖显式 `false` capability。
 - 启停渠道。
 - 启停单个模型。
 - 查看渠道用量、token、失败和 probe 结果。
 
-长期渠道配置保存在 SQLite。YAML 只作为启动和首次 bootstrap 输入。
+长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。YAML 只作为启动和首次 bootstrap 输入。
 
 ### Routing
 
@@ -107,6 +115,24 @@ Monitor 使用两类数据：
 - 从路由记录跳到 trace detail。
 
 `GET /api/routing/summary` 会读取 V3 cassette prelude 中的路由事件，并按 failure reason、selected route、sticky 状态等聚合。
+
+### Responses Function Executors API
+
+`GET /api/responses/function-executors` 返回当前进程中的 server-side function executor 摘要；Audit 页面会读取该接口并展示状态面板。
+
+Audit 页面也可以按 `response_id` 或 `request_audit_id` 查询 Responses server-mode 的 request audit、execution events 和 upstream exchanges。Trace detail 如果携带对应 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id，会在 Reading guide 中显示 `Responses audit` 入口，直接跳转到 `/audit` 的同一条 request lineage。
+
+返回内容包括：
+
+- `enabled`、`timeout`、`max_result_bytes`。
+- `redaction.arguments`、`redaction.output`。
+- `supported_types`，当前为 `["static_response", "external_command"]`。
+- `executors[]` 中的 `name`、`type`、`enabled`、`available`、`process`、`output_configured`、`command_configured` 和 `warnings`。
+- `warnings`，例如开启 executor 但未配置任何 binding、没有可用 executor、重复 name、空 name、未知 type 或 `external_command` 缺少 command。
+
+该 API 不返回 `static_response` 的 output 内容，也不返回 `external_command` 的 command 内容。`POST /api/responses/function-executors` 是保守的 Monitor 写配置入口：默认 `validate_only=true`，返回 normalized summary 和 warnings；`validate_only=false` 时会把非敏感 overlay 持久化到应用库 `app_settings`，并热更新当前进程的 Responses runtime executor registry，后续新请求生效。写入 payload 只接受 `enabled`、`timeout`、`max_result_bytes`、`redaction.arguments`、`redaction.output`、executor `name` / `type` / `enabled`，以及 `external_command` 的 `process.working_dir` / `process.require_absolute_command` / `process.allowed_command_dirs` / `process.reject_root` 隔离字段；`output`、`command`、`args`、`env` 等敏感可执行字段不被写接口接受，响应和持久化 snapshot 中也不会回显或保存。
+
+`external_command` 必须通过 YAML 显式配置真实 command，运行时不使用 shell，默认不继承环境变量，tool call 输入通过 stdin JSON 传入命令。Monitor overlay 只能调整开关、全局策略和进程隔离字段，不能创建新的可执行 command。可选 `process.working_dir` 会要求绝对且已存在的执行目录；可选 `process.require_absolute_command=true` 会拒绝相对 command/PATH 查找；可选 `process.allowed_command_dirs` 会要求 command 为绝对路径并解析到允许目录内；可选 `process.reject_root=true` 会在当前进程以 root 运行时拒绝执行 external command。相关危险配置会以 validation warning 形式出现在摘要中。当前这些能力是轻量进程约束，不等同于容器或 root namespace 沙箱。
 
 ### Events
 
@@ -136,10 +162,8 @@ TraceLab 自身事件收件箱。
 
 - trace/session analysis runs。
 - analysis jobs。
-- batch reanalysis。
-- usage repair。
-- reparse Observation IR。
-- rescan findings。
+- refresh analysis：重新生成本地派生分析数据。
+- repair token stats：从本地响应重新抽取 usage/token 统计。
 
 这些操作不调用上游模型。
 
@@ -164,10 +188,8 @@ trace detail 用于查看单条请求的完整上下文。
 
 可执行动作：
 
-- `Repair usage`：从本地响应重新抽取 usage。
-- `Reparse`：从 cassette 重建 Observation IR。
-- `Rescan`：对已有 Observation IR 重跑 deterministic detectors。
-- `Reanalyze`：重建 Observation IR 并重扫 findings。
+- `Refresh analysis`：从本地 cassette 重新生成 Observation 和 findings。仅在自动处理异常或结果明显不对时使用。
+- `Repair stats`：从本地响应重新抽取 usage/token 统计。仅在 token/cost 统计缺失或错误时使用。
 
 ## Deep Link
 
@@ -193,4 +215,4 @@ Trace detail 支持 query 参数定位：
 2. Routing 页面或 trace 中的 routing context。
 3. Events 页面是否有 parser/router/upstream 事件。
 4. Models/Channels 页面确认模型启用和渠道健康。
-5. 必要时运行 Reparse/Reanalyze。
+5. 只有在派生结果明显不对时运行 Refresh analysis；token 统计异常时运行 Repair stats。

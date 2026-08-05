@@ -9,6 +9,14 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/auth/status") {
       return route.fulfill({ json: { auth_required: false } });
     }
+    if (path === "/api/events/summary") {
+      return route.fulfill({ json: eventSummaryPayload() });
+    }
+    if (path === "/api/events") {
+      expect(url.searchParams.get("window")).toBe("all");
+      expect(url.searchParams.get("status")).toBe("unread");
+      return route.fulfill({ json: eventListPayload() });
+    }
     if (path === "/api/models") {
       return route.fulfill({ json: modelListPayload() });
     }
@@ -17,6 +25,42 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/channels") {
       return route.fulfill({ json: channelListPayload() });
+    }
+    if (path === "/api/provider-probe" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_type).toBe("chat_completions");
+      return route.fulfill({ json: providerProbePreviewPayload() });
+    }
+    if (path === "/api/provider-probe/report" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body).toEqual({});
+      return route.fulfill({ json: providerProbeBatchReportPayload() });
+    }
+    if (path === "/api/provider-probe/report/apply" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body).toEqual({});
+      expect(JSON.stringify(body)).not.toContain("sk-test-secret");
+      return route.fulfill({
+        json: {
+          report: providerProbeBatchReportPayload(),
+          applied: [{ channel_id: "openai-primary", status: "detected", applied: true, applied_fields: ["capabilities.models"] }],
+        },
+      });
+    }
+    if (path === "/api/provider-setup/validate" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_key).toBe("sk-test-secret");
+      return route.fulfill({ json: providerSetupValidatePayload(body) });
+    }
+    if (path === "/api/provider-setup/apply" && method === "POST") {
+      const body = route.request().postDataJSON();
+      expect(body.base_url).toBe("https://api.openai.example/v1");
+      expect(body.api_key).toBe("sk-test-secret");
+      expect(body.api_type).toBe("chat_completions");
+      expect(body.protocol_family).toBe("openai_compatible");
+      return route.fulfill({ json: channelDetailPayload() });
     }
     if (path === "/api/provider-presets") {
       return route.fulfill({ json: providerPresetPayload() });
@@ -39,6 +83,7 @@ test.beforeEach(async ({ page }) => {
     if (path === "/api/channels/openai-primary/probe") {
       const body = route.request().postDataJSON();
       expect(body.enable_discovered).toBe(false);
+      expect(body.detect_provider).toBe(true);
       return route.fulfill({ status: 502, json: probeFailurePayload() });
     }
     if (path === "/api/channels/openai-primary/models") {
@@ -72,6 +117,16 @@ test.beforeEach(async ({ page }) => {
     }
     if (path === "/api/traces/trace-routed/observation" || path === "/api/traces/trace-routed/findings" || path === "/api/traces/trace-routed/performance") {
       return route.fulfill({ json: {} });
+    }
+    if (path === "/api/findings") {
+      return route.fulfill({ json: { total: 0, items: [] } });
+    }
+    if (path === "/api/responses/audit/trace") {
+      expect(["resp_123", "resp 123/encoded"]).toContain(url.searchParams.get("response_id"));
+      return route.fulfill({ json: responsesAuditTracePayload() });
+    }
+    if (path === "/api/responses/function-executors") {
+      return route.fulfill({ json: responsesFunctionExecutorsPayload() });
     }
     if (path === "/api/analysis") {
       return route.fulfill({ json: analysisPayload() });
@@ -109,18 +164,45 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Provider secret storage" })).toBeVisible();
   await expect(page.getByText("abc123")).toBeVisible();
   await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Apply detected suggestions" })).toBeDisabled();
+  await page.getByRole("button", { name: "Preview batch probe" }).click();
+  await expect(page.getByText("1 fillable")).toBeVisible();
+  await expect(page.getByText("explicit configuration and false capabilities are preserved")).toBeVisible();
+  await page.getByRole("button", { name: "Apply detected suggestions" }).click();
+  await expect(page.getByText("1 applied, 0 skipped")).toBeVisible();
   await page.getByRole("button", { name: "New provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
-  await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
+  await page.getByLabel("API key").fill("sk-test-secret");
+  await page.getByRole("button", { name: "Detect provider" }).click();
+  await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
+  await page.getByRole("button", { name: "Apply suggestions" }).click();
+  await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
+  await expect(page.getByLabel("API mode")).toHaveValue("proxy");
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await page.getByRole("button", { name: "Validate setup" }).click();
+  await expect(page.getByRole("heading", { name: "Ready to create" })).toBeVisible();
+  await expect(page.getByText("stored as sk-...cret")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v1/");
+  await expect(page.getByText("Validate setup before creating the provider.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
+  await page.getByRole("button", { name: "Validate setup" }).click();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
+  await page.getByRole("button", { name: "Create provider" }).click();
+  await expect(page.getByRole("heading", { name: "Create provider" })).toBeHidden();
 
   await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("config source").first()).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
+  await expect(page.getByText("chat_completions").first()).toBeVisible();
+  await expect(page.getByText("responses_server").first()).toBeVisible();
   await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
   await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
@@ -131,6 +213,8 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByLabel("Provider enabled")).toBeVisible();
   await expect(page.locator(".provider-edit-modal").getByText(/^Enabled$/)).toHaveCount(0);
   await page.getByRole("button", { name: "Advanced options" }).click();
+  await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
+  await expect(page.getByLabel("API mode")).toHaveValue("responses_server");
   await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
@@ -143,6 +227,8 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "Probe provider" }).click();
   await expect(page.getByText("auth_error").first()).toBeVisible();
   await expect(page.getByText(/Verify the API key/i).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
+  await expect(page.getByText("chat_completions").first()).toBeVisible();
 
   await page.getByRole("button", { name: "Enable new (1)" }).click();
   await expect(page.getByRole("button", { name: "Enabling" })).toBeHidden();
@@ -167,13 +253,41 @@ test("routing page renders selected route records", async ({ page }) => {
   await expect(page).not.toHaveURL(/status=error/);
 });
 
+test("events page opens the all-window unread inbox", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("llm-tracelab.monitor.language", "en");
+  });
+  await page.goto("/events");
+  await expect(page.getByRole("heading", { name: "Events" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "all", exact: true })).toHaveClass(/active/);
+  await expect(page.getByText("18").first()).toBeVisible();
+  await expect(page.getByText("analysis job failed").first()).toBeVisible();
+});
+
 test("trace routing links to channel and upstream views", async ({ page }) => {
   await page.goto("/traces/trace-routed");
-  await expect(page.getByText("Routing decision")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Selected route target" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Channel" })).toHaveAttribute("href", "/channels/openai-primary");
   await expect(page.getByRole("link", { name: "Open Upstream" })).toHaveAttribute("href", "/upstreams/openai-primary");
+  await expect(page.getByRole("link", { name: "Responses audit" })).toHaveAttribute("href", "/audit?response_id=resp+123%2Fencoded");
+  await expect(page.getByRole("button", { name: "Show all" })).toBeVisible();
+  await page.getByRole("button", { name: "Show all" }).click();
+  await expect(page.getByRole("button", { name: "Show less" })).toBeVisible();
   await page.getByRole("button", { name: "Reanalyze" }).click();
-  await expect(page.getByText(/Reanalysis job #301 completed/)).toBeVisible();
+  await expect(page.getByText(/job #301 completed/)).toBeVisible();
+});
+
+test("audit page renders responses audit trace", async ({ page }) => {
+  await page.goto("/audit?response_id=resp_123");
+  await expect(page.getByRole("heading", { name: "Audit", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Request lineage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Server-side tools" })).toBeVisible();
+  await expect(page.getByText("lookup_order")).toBeVisible();
+  await expect(page.getByText("output configured")).toBeVisible();
+  await expect(page.getByText("do-not-leak")).toHaveCount(0);
+  await expect(page.getByText("audit_resp_123")).toBeVisible();
+  await expect(page.getByText("response.request").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "trace-routed" })).toHaveAttribute("href", "/traces/trace-routed");
 });
 
 test("connect page renders protocol entrypoint examples", async ({ page }) => {
@@ -262,6 +376,9 @@ function channelDetailPayload() {
     source: "manual",
     base_url: "https://api.openai.example/v1",
     provider_preset: "openai",
+    api_type: "chat_completions",
+    mode: "responses_server",
+    capabilities: { responses: false, chat_completions: true, tool_calling: true },
     protocol_family: "openai_compatible",
     routing_profile: "openai_default",
     api_version: "",
@@ -323,6 +440,62 @@ function channelDetailPayload() {
   };
 }
 
+function responsesAuditTracePayload() {
+  return {
+    query: { response_id: "resp_123", request_audit_id: "audit_resp_123" },
+    request_audit: {
+      id: "audit_resp_123",
+      response_id: "resp_123",
+      conversation_id: "thread_123",
+      method: "POST",
+      path: "/v1/responses",
+      client_request_id: "client-123",
+      header_json: { "content-type": "application/json", "x-client-request-id": "client-123" },
+      body_preview: "{\"model\":\"gpt-5\",\"input\":\"hello\"}",
+      body_sha256: "sha256-demo",
+      status: "completed",
+      created_at: "2026-06-22T08:00:00Z",
+    },
+    events: [
+      {
+        id: "event-accepted",
+        response_id: "resp_123",
+        request_audit_id: "audit_resp_123",
+        conversation_id: "thread_123",
+        event_type: "response.request",
+        phase: "request",
+        status: "accepted",
+        details_json: { method: "POST", path: "/v1/responses" },
+        occurred_at: "2026-06-22T08:00:00Z",
+      },
+      {
+        id: "event-completed",
+        response_id: "resp_123",
+        request_audit_id: "audit_resp_123",
+        conversation_id: "thread_123",
+        event_type: "response.request",
+        phase: "request",
+        status: "completed",
+        occurred_at: "2026-06-22T08:00:01Z",
+      },
+    ],
+    upstream_exchanges: [
+      {
+        id: "exchange-1",
+        response_id: "resp_123",
+        request_audit_id: "audit_resp_123",
+        trace_id: "trace-routed",
+        upstream_id: "openai-primary",
+        model: "gpt-5",
+        endpoint: "/v1/responses",
+        status_code: 200,
+        started_at: "2026-06-22T08:00:00Z",
+        completed_at: "2026-06-22T08:00:01Z",
+      },
+    ],
+  };
+}
+
 function localSecretPayload() {
   return {
     mode: "encrypted-local",
@@ -330,6 +503,47 @@ function localSecretPayload() {
     exists: true,
     readable: true,
     fingerprint: "abc123",
+  };
+}
+
+function eventSummaryPayload() {
+  return {
+    total: 163,
+    unread: 18,
+    critical: 0,
+    error: 16,
+    warning: 2,
+    last_seen_at: new Date().toISOString(),
+    by_source: [{ label: "analyzer", count: 136 }],
+    by_category: [{ label: "analysis_job_failure", count: 136 }],
+    window: "all",
+  };
+}
+
+function eventListPayload() {
+  return {
+    page: 1,
+    page_size: 50,
+    total: 18,
+    total_pages: 1,
+    window: "all",
+    refreshed_at: new Date().toISOString(),
+    items: [{
+      id: "event-analysis-1",
+      fingerprint: "analyzer:analysis_job_failure:demo",
+      source: "analyzer",
+      category: "analysis_job_failure",
+      severity: "error",
+      status: "unread",
+      title: "analysis job failed",
+      message: "semantic scan failed",
+      occurrence_count: 3,
+      first_seen_at: new Date(Date.now() - 60_000).toISOString(),
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date(Date.now() - 60_000).toISOString(),
+      updated_at: new Date().toISOString(),
+      details_json: { job_id: 101 },
+    }],
   };
 }
 
@@ -351,14 +565,36 @@ function tracePayload() {
         routing_policy: "p2c",
         routing_score: 0.82,
         routing_candidate_count: 2,
+        response_id: "resp 123/encoded",
+        request_audit_id: "audit_resp_123",
       },
       usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
       layout: { is_stream: false },
     },
-    messages: [{ role: "user", content: "hello", message_type: "message" }],
+    messages: [
+      { role: "system", content: longSystemPrompt(), message_type: "message" },
+      { role: "user", content: "hello", message_type: "message" },
+    ],
     events: [],
     tools: [],
   };
+}
+
+function longSystemPrompt() {
+  return [
+    "You are operating inside a local trace review workflow.",
+    "Preserve exact user intent.",
+    "Prefer source-near evidence.",
+    "Do not call external services from replay tests.",
+    "Keep cassette files human inspectable.",
+    "Explain storage changes before changing schemas.",
+    "Handle OpenAI-compatible payloads without translation.",
+    "Treat replay compatibility as a hard requirement.",
+    "Keep derived indexes rebuildable.",
+    "Avoid mutating unrelated trace files.",
+    "This line should be hidden until the reviewer expands the prompt.",
+    "This final line verifies the expanded view keeps the full system prompt available.",
+  ].join("\n");
 }
 
 function traceListPayload() {
@@ -407,6 +643,28 @@ function traceListPayload() {
   };
 }
 
+function responsesFunctionExecutorsPayload() {
+  return {
+    enabled: true,
+    timeout: "2s",
+    max_result_bytes: 256,
+    redaction: {
+      arguments: true,
+      output: true,
+    },
+    supported_types: ["static_response"],
+    executors: [
+      {
+        name: "lookup_order",
+        type: "static_response",
+        enabled: true,
+        output_configured: true,
+      },
+    ],
+    warnings: [],
+  };
+}
+
 function analysisPayload() {
   return {
     total: 1,
@@ -452,9 +710,83 @@ function probeFailurePayload() {
     enabled_count: 0,
     endpoint: "/v1/models",
     error_text: "upstream status: 401 Unauthorized",
+    provider_probe: {
+      provider_id: "openai-primary",
+      base_url: "https://api.openai.example/v1",
+      specified_api_type: "chat_completions",
+      specified_protocol_family: "openai_compatible",
+      checked_endpoints: [],
+      status: "detected",
+      suggested_api_type: "chat_completions",
+      suggested_protocol_family: "openai_compatible",
+      capabilities: ["chat_completions", "models"],
+      confidence: 0.7,
+    },
     started_at: new Date().toISOString(),
     completed_at: new Date().toISOString(),
     duration_ms: 12,
+  };
+}
+
+function providerProbePreviewPayload() {
+  return {
+    provider_id: "OpenAI Primary",
+    base_url: "https://api.openai.example/v1",
+    specified_api_type: "chat_completions",
+    specified_protocol_family: "openai_compatible",
+    checked_endpoints: [],
+    status: "detected",
+    suggested_api_type: "chat_completions",
+    suggested_protocol_family: "openai_compatible",
+    capabilities: ["chat_completions", "models"],
+    confidence: 0.7,
+  };
+}
+
+function providerProbeBatchReportPayload() {
+  return {
+    reports: [
+      {
+        target_source: "channel",
+        provider_id: "openai-primary",
+        base_url: "https://api.openai.example/v1",
+        specified_api_type: "chat_completions",
+        specified_protocol_family: "openai_compatible",
+        checked_endpoints: [],
+        status: "detected",
+        suggested_api_type: "responses",
+        suggested_protocol_family: "openai_compatible",
+        capabilities: ["chat_completions", "models"],
+        confidence: 0.7,
+      },
+    ],
+  };
+}
+
+function providerSetupValidatePayload(body) {
+  return {
+    normalized_config: {
+      name: body.name || "OpenAI Primary",
+      base_url: body.base_url,
+      provider_preset: body.provider_preset || "openai",
+      api_type: "chat_completions",
+      mode: body.mode || "proxy",
+      capabilities: { chat_completions: true, models: true },
+      protocol_family: "openai_compatible",
+      routing_profile: "openai_default",
+      enabled: true,
+      priority: body.priority ?? 100,
+      weight: body.weight ?? 1,
+      capacity_hint: body.capacity_hint ?? 1,
+      model_discovery: body.model_discovery || "list_models",
+      allow_unknown_models: Boolean(body.allow_unknown_models),
+    },
+    probe: providerProbePreviewPayload(),
+    secret: {
+      api_key_hint: "sk-...cret",
+      secret_storage_mode: "encrypted-local",
+      redaction_guarantee: "api_key is never echoed; secret headers are redacted",
+    },
   };
 }
 

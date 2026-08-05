@@ -15,9 +15,11 @@ func TestOpenAIParserParsesChatCompletion(t *testing.T) {
 		TraceID: "trace-chat",
 		Header: recordfile.RecordHeader{
 			Meta: recordfile.MetaData{
-				Provider:  llm.ProviderOpenAICompatible,
-				Operation: llm.OperationChatCompletions,
-				Endpoint:  "/v1/chat/completions",
+				Provider:     llm.ProviderOpenAICompatible,
+				Operation:    llm.OperationChatCompletions,
+				Endpoint:     "/v1/chat/completions",
+				ExchangeKind: "model",
+				ExchangeRole: "primary_model_call",
 			},
 		},
 		RequestBody: []byte(`{
@@ -49,6 +51,9 @@ func TestOpenAIParserParsesChatCompletion(t *testing.T) {
 	}
 	if obs.Model != "gpt-4o" {
 		t.Fatalf("Model = %q", obs.Model)
+	}
+	if obs.ExchangeKind != "model" || obs.ExchangeRole != "primary_model_call" {
+		t.Fatalf("exchange scope = %q/%q, want model/primary_model_call", obs.ExchangeKind, obs.ExchangeRole)
 	}
 	if len(obs.Request.Messages) != 3 {
 		t.Fatalf("request messages = %d, want 3", len(obs.Request.Messages))
@@ -328,6 +333,73 @@ func TestOpenAIParserParsesChatStream(t *testing.T) {
 	}
 }
 
+func TestOpenAIParserMarksInterruptedChatStream(t *testing.T) {
+	parser := NewOpenAIParser()
+	body := joinSSE(
+		`data: {"id":"chatcmpl-a8333e055b613c64","object":"chat.completion.chunk","created":1782303858,"model":"qwen3.6-27b","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}],"usage":{"prompt_tokens":42105,"total_tokens":42105,"completion_tokens":0}}`,
+		`data: {"id":"chatcmpl-a8333e055b613c64","object":"chat.completion.chunk","created":1782303858,"model":"qwen3.6-27b","choices":[{"index":0,"delta":{"reasoning":"The"},"finish_reason":null}],"usage":{"prompt_tokens":42105,"total_tokens":42106,"completion_tokens":1}}`,
+	)
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-stream-interrupted",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+			Layout: recordfile.LayoutInfo{IsStream: true},
+		},
+		IsStream: true,
+		RequestBody: []byte(`{
+			"model":"qwen3.6-27b",
+			"messages":[{"role":"user","content":"hi"}],
+			"stream":true
+		}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Stream.AccumulatedReasoning != "The" {
+		t.Fatalf("stream reasoning = %q", obs.Stream.AccumulatedReasoning)
+	}
+	if len(obs.Stream.Errors) != 1 || obs.Stream.Errors[0].ProviderType != "stream_interrupted" {
+		t.Fatalf("stream errors = %+v", obs.Stream.Errors)
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "stream_interrupted" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
+func TestOpenAIParserInfersChatStreamFromSSEBody(t *testing.T) {
+	parser := NewOpenAIParser()
+	body := joinSSE(
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"qwen3.6-27b","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}`,
+		`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"qwen3.6-27b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	)
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-stream-missing-flag",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Stream.AccumulatedText != "hello" {
+		t.Fatalf("stream text = %q", obs.Stream.AccumulatedText)
+	}
+	if len(obs.Warnings) != 0 {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
 func TestOpenAIParserParsesResponsesStream(t *testing.T) {
 	parser := NewOpenAIParser()
 	body := strings.Join([]string{
@@ -436,5 +508,69 @@ func TestOpenAIParserParsesNonStreamProviderError(t *testing.T) {
 	}
 	if len(obs.Response.Outputs) != 0 {
 		t.Fatalf("outputs = %+v", obs.Response.Outputs)
+	}
+}
+
+func TestOpenAIParserRecordsEmptyChatResponse(t *testing.T) {
+	parser := NewOpenAIParser()
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-chat-empty-response",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:  llm.ProviderOpenAICompatible,
+				Operation: llm.OperationChatCompletions,
+				Endpoint:  "/v1/chat/completions",
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-27b","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: nil,
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].ProviderType != "empty_response" {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "empty_response" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
+	}
+}
+
+func TestOpenAIParserRecordsPlainTextHTTPErrorWithoutLLMResponseParse(t *testing.T) {
+	parser := NewOpenAIParser()
+	body := `Proxy Error: upstream 3a4c1531-4540-4fa2-ae29-10ea554bbec3 returned status 404 for model "qwen3.6-35b-a3b"`
+	obs, err := parser.Parse(context.Background(), ParseInput{
+		TraceID: "trace-proxy-error",
+		Header: recordfile.RecordHeader{
+			Meta: recordfile.MetaData{
+				Provider:   llm.ProviderOpenAICompatible,
+				Operation:  llm.OperationChatCompletions,
+				Endpoint:   "/v1/chat/completions",
+				StatusCode: 502,
+			},
+		},
+		RequestBody:  []byte(`{"model":"qwen3.6-35b-a3b","messages":[{"role":"user","content":"hi"}]}`),
+		ResponseBody: []byte(body),
+	})
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if obs.Status != ParseStatusParsed {
+		t.Fatalf("status = %q", obs.Status)
+	}
+	if len(obs.Request.Messages) != 1 {
+		t.Fatalf("request messages = %+v", obs.Request.Messages)
+	}
+	if len(obs.Response.Errors) != 1 || obs.Response.Errors[0].NormalizedType != NodeError {
+		t.Fatalf("errors = %+v", obs.Response.Errors)
+	}
+	if !strings.Contains(obs.Response.Errors[0].Text, "Proxy Error") {
+		t.Fatalf("error text = %q", obs.Response.Errors[0].Text)
+	}
+	if len(obs.Response.Errors[0].Raw) != 0 {
+		t.Fatalf("plain text error should not be stored as raw JSON: %q", string(obs.Response.Errors[0].Raw))
+	}
+	if len(obs.Warnings) != 1 || obs.Warnings[0].Code != "http_error_response" {
+		t.Fatalf("warnings = %+v", obs.Warnings)
 	}
 }

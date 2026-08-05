@@ -5,14 +5,14 @@
 
 [中文说明](./README.md) | **English**
 
-`llm-tracelab` is a local-first record/replay proxy for LLM HTTP APIs. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
+`llm-tracelab` is a Postgres-first LLM gateway with built-in LLM HTTP record/replay, Responses server-mode, Monitor, and MCP diagnostics. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
 The core workflow is simple:
 
-- record real LLM HTTP traffic during development
-- replay it in unit tests without calling the upstream model
-- get faster, cheaper, and more reliable tests
+- use Postgres for production users, tokens, trace index, channels/models, Responses state, and audit data
+- serve optional `/v1/responses` semantics over an OpenAI-compatible / vLLM upstream
+- record real LLM HTTP exchanges as `.http` cassettes and replay them offline in tests
 
-It is similar in spirit to HTTP record/replay tooling, but tuned for LLM traffic: streaming responses, token usage, trace inspection, and lightweight chaos testing.
+Raw `.http` cassettes remain the source of truth for replay and detail views. Postgres is the production structured-state path; SQLite remains a local fallback and offline test path.
 
 ## Current Release Notes
 
@@ -20,7 +20,7 @@ This refactor introduces four major changes:
 
 - `pkg/llm` is now a provider/endpoint adapter layer for requests, responses, stream transcripts, and usage pipelines
 - the monitor is now an embedded React UI with async pagination and detail views for timeline / summary / raw protocol
-- SQLite now exposes stable `trace_id` values instead of path-based monitor URLs
+- Postgres application migrations now use checked-in SQL; SQLite is explicitly a startup-schema fallback
 - `LLM_PROXY_V3` `# event:` lines now include `llm.*` provider timelines in addition to base request/response events
 
 ## Good Fit
@@ -36,7 +36,8 @@ This refactor introduces four major changes:
 - persists each exchange as a local `.http` cassette
 - `pkg/replay.Transport` for replay-based unit tests
 - monitor UI for request detail, unified timeline, and raw protocol views
-- SQLite metadata index for fast list/stat queries
+- Postgres metadata, audit, and Responses state for production; SQLite fallback for local development
+- default production Compose topology with app + Postgres and optional SearXNG hosted `web_search`
 - backward-compatible readers for legacy V2 record files
 
 ## Layout
@@ -45,14 +46,14 @@ This refactor introduces four major changes:
 cmd/server            server entrypoint
 internal/proxy        reverse proxy and response interception
 internal/recorder     cassette recording and persistence
-internal/store        SQLite metadata index
+internal/store        Postgres/SQLite application store and metadata index
 internal/monitor      monitor UI and detail parsing
 pkg/recordfile        shared V2/V3 record format parser/writer
 pkg/replay            replay transport for tests
 pkg/llm               cross-provider normalization helpers
 ```
 
-AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), and authenticated proxy examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), the multi-upstream routing design note is in [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md), the credential routing operator guide is in [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md), the project roadmap is in [docs/ROADMAP.md](./docs/ROADMAP.md), the gateway ecosystem direction review is in [docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md), and the Vertex family design note is in [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md).
+AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). Production deployment guidance is in [docs/PRODUCTION_DEPLOYMENT.md](./docs/PRODUCTION_DEPLOYMENT.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), and authenticated proxy examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), and the credential routing operator guide is in [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md).
 
 The gateway ecosystem review compares Sub2API, LiteLLM, Portkey, and Helicone. It clarifies that TraceLab should not become a public relay, payment, or SaaS quota-distribution platform; it should absorb channel management, routing, rate limiting, health, cost, and governance ideas only where they strengthen local-first record/replay, debugging, audit, and evaluation workflows.
 
@@ -63,13 +64,17 @@ New recordings use `LLM_PROXY_V3`:
 1. a compact metadata prelude instead of a fixed 2KB header block
 2. full raw HTTP request/response bytes kept for inspection and replay
 3. `# event:` lines now capture normalized provider timeline events such as `llm.output_text.delta`, `llm.reasoning.delta`, `llm.tool_call`, and `llm.usage`
-4. metadata is indexed into `llm_tracelab.sqlite3` for fast monitor queries
+4. metadata, trace ids, session hints, Responses audit, and derived summaries are indexed into the application database; production defaults to Postgres
 
-Default storage layout:
+Production storage layout:
 
 ```text
-logs/
-  llm_tracelab.sqlite3
+Postgres:
+  users / api_tokens / channel_configs / channel_models
+  logs / sessions / responses / response_items
+  request_audits / execution_events / upstream_exchanges / tool_call_audits
+
+data/traces/
   <upstream-host>/<model>/<yyyy>/<mm>/<dd>/*.http
 ```
 
@@ -77,9 +82,9 @@ logs/
 
 ### 1. Configure Startup Settings
 
-Starting with v1, YAML should be limited to service startup settings: ports, database, trace output directory, auth, MCP, and router policy. Model channels and model enablement should be managed in the Monitor Web UI and persisted to SQLite.
+Starting with v1, YAML should be limited to service startup settings: ports, database, trace output directory, auth, MCP, router policy, Responses server, and tool switches. Model channels, provider base URLs, API keys, model enablement, and model profiles should be managed in the Monitor Web UI and persisted to the application database.
 
-[config/config.yaml](./config/config.yaml) is the tracked default example and should not contain real secrets. Production deployments can still override startup settings with environment variables.
+[config/config.yaml](./config/config.yaml) is the tracked default Postgres-first startup config. It contains no real secrets and no built-in provider. With no upstream configured, the service still starts and Monitor Web can be used to configure providers later. Production deployments should inject only deployment-local values through environment variables: Postgres DSN/password, exposed ports, and an optional single bootstrap upstream base URL/API key. Local SQLite development can use [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml).
 
 The recommended base config shape is:
 
@@ -95,17 +100,24 @@ mcp:
   path: "/mcp"
 
 database:
-  driver: "sqlite"
-  dsn: "" # defaults to {{trace.output_dir}}/llm_tracelab.sqlite3
-  max_open_conns: 4
-  max_idle_conns: 4
+  driver: "postgres"
+  dsn: ""
+  max_open_conns: 16
+  max_idle_conns: 8
   auto_migrate: true
 
 auth:
   session_ttl: 24h
 
 trace:
-  output_dir: "./logs"
+  output_dir: "./data/traces"
+
+responses_server:
+  enabled: true
+  default_model: ""
+  force_store: true
+  path: "/v1/responses"
+  auto_compact: true
 
 router:
   model_discovery:
@@ -121,64 +133,34 @@ router:
     on_missing_model: "reject"
 
 debug:
-  output_dir: "./logs"
-  mask_key: false
+  output_dir: "./data/traces"
+  mask_key: true
 ```
 
-Legacy `upstream` / `upstreams` YAML is still supported, but it should be treated as a first-run bootstrap or migration input. Once channel configuration exists in SQLite, runtime routing uses the database and does not continuously sync YAML upstreams. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
-
-Compatible bootstrap example:
-
-```yaml
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "$env:LLM_API_KEY"
-  provider_preset: "openai"
-```
+Legacy `upstream` / `upstreams` YAML is still supported, but it is no longer the long-term production configuration entry point. On first startup, setting `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL` imports one OpenAI-compatible bootstrap provider; leaving it empty starts only the Web and management surface. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
 
 For an example with two explicit credentials under one upstream, plus sticky route target, credential-safe metadata, and limit scope guidance, see [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md). The examples use `$env:...` placeholders only; do not commit real provider secrets in YAML.
 
 If you prefer starting from a ready-made bootstrap config, use one of these examples; long-lived channel configuration should still be managed in Monitor Web:
 
 - [config/examples/openai.yaml](./config/examples/openai.yaml)
+- [config/examples/openai-compatible-vllm-postgres.yaml](./config/examples/openai-compatible-vllm-postgres.yaml)
+- [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)
 - [config/examples/anthropic.yaml](./config/examples/anthropic.yaml)
 - [config/examples/google_genai.yaml](./config/examples/google_genai.yaml)
 - [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
 - [config/examples/vertex.yaml](./config/examples/vertex.yaml)
 
-Supported environment variable overrides:
-
-- `LLM_TRACELAB_SERVER_PORT`
-- `LLM_TRACELAB_MONITOR_PORT`
-- `LLM_TRACELAB_DATABASE_DRIVER`
-- `LLM_TRACELAB_DATABASE_DSN`
-- `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
-- `LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS`
-- `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`
-- `LLM_TRACELAB_TRACE_OUTPUT_DIR`
-- `LLM_TRACELAB_AUTH_SESSION_TTL`
-- `LLM_TRACELAB_UPSTREAM_BASE_URL`
-- `LLM_TRACELAB_UPSTREAM_API_KEY`
-- `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
-- `LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY`
-- `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
-- `LLM_TRACELAB_UPSTREAM_API_VERSION`
-- `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
-- `LLM_TRACELAB_UPSTREAM_PROJECT`
-- `LLM_TRACELAB_UPSTREAM_LOCATION`
-- `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
-- `LLM_TRACELAB_OUTPUT_DIR`
-- `LLM_TRACELAB_MASK_KEY`
-
-The legacy `LLM_TRACELAB_UPSTREAM_*` variables still override the first bootstrap upstream target. This is useful for migrating a single default upstream. For more complex multi-channel deployments, manage channels in Monitor Web.
+Production environment injection should stay small: `LLM_TRACELAB_DATABASE_DSN`, `POSTGRES_PASSWORD`, `LLM_TRACELAB_HOST_SERVER_PORT`, `LLM_TRACELAB_HOST_MONITOR_PORT`, and optional `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`, `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`, `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`. Keep other service behavior in `config/config.yaml`. The legacy `LLM_TRACELAB_UPSTREAM_*` variables remain available for old single-upstream migrations, but new deployments should manage providers in Monitor Web.
 
 Access control notes:
 
-- `database` is the unified structured store for users, API tokens, trace index, sessions, upstream metadata, datasets, and eval metadata. The default SQLite path is `trace.output_dir/llm_tracelab.sqlite3`.
+- `database` is the unified structured store for users, API tokens, trace index, sessions, upstream metadata, datasets, eval metadata, Responses state, and audit data. Production defaults to Postgres.
 - Initialize the first user with `go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`.
-- The Monitor UI uses username/password login. After login, use the `Tokens` page to generate a personal API token for the current user.
-- The same personal token works for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
-- Channels / Models are managed in Monitor Web and stored in SQLite; YAML is no longer the long-lived channel configuration surface.
+- The Monitor UI uses username/password login. The web login session uses a monitor-only JWT and does not reuse personal API tokens.
+- After login, use the `Tokens` page to generate a personal API token for the current user.
+- Personal API tokens work for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
+- Channels / Models are managed in Monitor Web and stored in the application database; YAML is no longer the long-lived channel configuration surface.
 
 Recommended compatibility pattern:
 
@@ -306,15 +288,19 @@ task run
 task migrate
 ```
 
-The default config path is `config/config.yaml`. You can also choose a config explicitly:
+The default config path is the Postgres-first example `config/config.yaml`; local `config inspect` / `doctor` work as-is, while real startup should point at a reachable Postgres database and upstream. For SQLite local development, choose a config explicitly:
 
 ```bash
-CONFIG=config/examples/openai.yaml task run
+CONFIG=config/examples/local-sqlite.yaml task run
 ```
 
 Direct run also works:
 
 ```bash
+export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@localhost:5432/llm_tracelab?sslmode=disable'
+export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
+export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
+export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
 go run ./cmd/server -c config/config.yaml
 ```
 
@@ -341,7 +327,7 @@ The detail page now has three first-class views:
 - `Summary`: conversation / tools / output block projection
 - `Raw Protocol`: side-by-side request/response inspection
 
-## Legacy Migration And SQLite Rebuild
+## Legacy Cassette Migration And Index Rebuild
 
 Use the explicit migration command:
 
@@ -352,7 +338,7 @@ go run ./cmd/server migrate -c config/config.yaml
 By default it does both:
 
 - rewrites legacy `LLM_PROXY_V2` `.http` cassettes in place to `LLM_PROXY_V3`
-- clears and rebuilds trace index rows in `llm_tracelab.sqlite3`; users and tokens are preserved
+- clears and rebuilds trace index rows in the application database; users and tokens are preserved
 
 Run only one part if needed:
 
@@ -361,7 +347,7 @@ go run ./cmd/server migrate -c config/config.yaml -rewrite-v2=false
 go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 ```
 
-This is intended for bulk upgrades of old cassette directories and for full SQLite recovery.
+This is intended for bulk upgrades of old cassette directories and for structured trace index recovery. The `.http` cassette remains the replay and detail source of truth.
 
 ## Docker And Compose
 
@@ -370,7 +356,7 @@ The standardized in-container paths are:
 - binary: `/app/bin/llm-tracelab`
 - config file: `/app/config/config.yaml`
 - trace directory: `/app/data/traces`
-- SQLite database: `/app/data/traces/llm_tracelab.sqlite3`
+- database: Postgres service, configured through `LLM_TRACELAB_DATABASE_DSN`
 
 The repo now includes:
 
@@ -381,22 +367,40 @@ The repo now includes:
 Start it with:
 
 ```bash
-export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
-docker compose up --build
-docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/config/config.yaml --username admin --password 'change-me-123'
+cp .env.example .env
+docker compose up -d
+docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
-Then visit `http://localhost:8081`, sign in, and create a personal token from the `Tokens` page for SDK / MCP traffic.
+Then visit `http://localhost:8081`, sign in, configure upstream base URLs, API keys, and models from the `Providers` page, and create a personal token from the `Tokens` page for SDK / MCP traffic.
 When SDKs call the proxy, use this token as the SDK API key. For direct curl calls, send `Authorization: Bearer <token>`.
 
-If you only want to use the published Docker Hub image, you can run it directly without cloning the repo:
+Optional SearXNG hosted `web_search`:
+
+```bash
+export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
+docker compose --profile search up -d
+```
+
+For local source builds, use the dev override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+If you only want to use the published Docker Hub image, provide an external Postgres database:
 
 ```bash
 docker run --rm \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
-  -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
+  -e LLM_TRACELAB_DATABASE_DRIVER=postgres \
+  -e LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@host.docker.internal:5432/llm_tracelab?sslmode=disable' \
+  -e LLM_TRACELAB_RESPONSES_ENABLED=true \
+  -e LLM_TRACELAB_RESPONSES_FORCE_STORE=true \
+  -e LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
+  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
+  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
   -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_SERVER_PORT=8080 \
@@ -411,12 +415,20 @@ If you prefer `docker compose`, you can also reference the Docker Hub image dire
 services:
   llm-tracelab:
     image: kingfs/llm-tracelab:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8080:8080"
       - "8081:8081"
     environment:
-      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com/v1
-      LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
+      LLM_TRACELAB_DATABASE_DRIVER: postgres
+      LLM_TRACELAB_DATABASE_DSN: postgres://llm_tracelab:llm_tracelab@postgres:5432/llm_tracelab?sslmode=disable
+      LLM_TRACELAB_RESPONSES_ENABLED: "true"
+      LLM_TRACELAB_RESPONSES_FORCE_STORE: "true"
+      LLM_TRACELAB_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
+      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
+      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"
@@ -425,6 +437,17 @@ services:
       - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
     command: ["serve", "-c", "/app/config/config.yaml"]
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: llm_tracelab
+      POSTGRES_USER: llm_tracelab
+      POSTGRES_PASSWORD: llm_tracelab
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 ```
 
 If the default Go module proxy is slow or blocked in your network, pass `GOPROXY` at build time:
@@ -433,7 +456,7 @@ If the default Go module proxy is slow or blocked in your network, pass `GOPROXY
 GOPROXY=https://goproxy.cn,direct docker compose build
 ```
 
-`task docker:build` and `task docker:up` now share the same build variable convention. They automatically forward the current shell's `GOPROXY`, `GOSUMDB`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values, including lowercase variants, into Docker build:
+`task docker:build` and `task docker:up` share the same build variable convention. They prefer `DOCKER_BUILD_*`, then the current shell's `GOPROXY`, `GOSUMDB`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` values, including lowercase variants. If `GOPROXY` / `GOSUMDB` are not exported in the shell, the tasks fall back to `go env GOPROXY` / `go env GOSUMDB`. When HTTP(S) proxy points at host `127.0.0.1` or `localhost`, the tasks rewrite it to `host.docker.internal` so Docker build containers can reach it.
 
 ```bash
 GOPROXY=https://goproxy.cn,direct task docker:build
@@ -447,22 +470,23 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
 DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 ```
 
-The same precedence also applies when you run `docker compose build` or `docker compose up --build` directly.
+Direct `docker compose build` or `docker compose up --build` can only read exported environment variables. Use `task docker:build` or `task docker:up` when you want the automatic `go env` fallback and host loopback proxy rewrite.
 
 Recommended convention:
 
-- Local development: prefer `DOCKER_BUILD_GOPROXY`; existing shell-wide `GOPROXY` values are still honored as fallback
+- Local development: prefer `DOCKER_BUILD_GOPROXY`; `go env GOPROXY` is also honored when no shell `GOPROXY` is exported
 - CI / GitHub Actions: leave them unset and use the public default `https://proxy.golang.org,direct`
-- If your network also requires system-level proxy settings, prefer `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`; regular proxy env vars remain supported as fallback
+- If your network also requires system-level proxy settings, prefer `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`; regular proxy env vars remain supported as fallback, with host loopback addresses rewritten for Docker build
 
 Default mounts:
 
 - `./config/config.yaml -> /app/config/config.yaml:ro`
-- `./docker-data -> /app/data`
+- `llm-tracelab-data -> /app/data`
+- `postgres-data -> /var/lib/postgresql/data`
 
 The runtime image starts as `root` by default. This avoids common bind-mount permission failures when the host directory owner does not match a fixed in-container UID/GID, such as failing to create `/app/data/traces`.
 
-For external configuration, prefer mounted config files and environment variables for service startup settings such as ports, database, and output directories. Manage channels and models in Monitor Web so they are persisted to SQLite. Keep `debug.output_dir` on a stable path inside the mounted data volume.
+For external configuration, prefer mounted config files and environment variables for service startup settings such as ports, database, and output directories. Manage channels and models in Monitor Web so they are persisted to the application database. Keep `debug.output_dir` on a stable path inside the mounted data volume.
 
 ## Developer Commands
 
@@ -498,10 +522,18 @@ func TestChat(t *testing.T) {
 ## Design Rules
 
 - raw `.http` cassettes are the source of truth for replay
-- SQLite is a metadata index, not a replacement for raw files
+- Postgres is the production structured-state path; SQLite is a local fallback and does not replace raw files
 - new writes use V3, old V2 files remain readable
-- prefer readable files, offline tests, and local-first workflows
+- prefer readable files, offline tests, and deployable migration paths
 - provider semantics, stream transcripts, usage, and event timelines should converge inside `pkg/llm`
+
+Explicit non-support boundaries:
+
+- public multi-tenant relay, billing, recharge, or subscription distribution: rejected
+- cross-protocol translation in the proxy hot path: rejected
+- independent Postgres auth migration namespace: audited gap; current Postgres auth shares application `schema_migrations`
+- SQLite versioned application migrations: audited fallback; current SQLite remains startup-schema fallback
+- real MCP/file/code/computer-use execution lifecycle and root/container-grade executor sandboxing: future secure executor work
 
 ## Screenshots
 

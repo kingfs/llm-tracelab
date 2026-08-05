@@ -92,12 +92,12 @@ MCP 使用和代理 API 相同的个人 token。
 
 ### 重分析
 
-- `reanalyze_trace`：对单条 trace 修复 usage、重建 Observation IR、重扫 findings。
-- `reanalyze_session`：对 session 内 traces 执行重分析。
+- `reanalyze_trace`：刷新单条 trace 的本地派生分析数据。
+- `reanalyze_session`：刷新 session 内 traces 的本地派生分析数据。
 - `list_analysis_jobs`：列出分析任务。
 - `get_analysis_job`：查看任务详情。
 
-这些操作只读取本地 cassette 并写入 SQLite 派生状态，不会访问上游模型。
+这些操作只读取本地 cassette 并写入 application DB 派生状态；生产部署写入 Postgres，本地 fallback 可写入 SQLite。刷新分析不会访问上游模型，通常只在自动处理异常或结果明显不对时使用。
 
 ### 安全相关查询
 

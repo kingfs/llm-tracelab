@@ -99,6 +99,31 @@ func ContextWindow(v int) predicate.ChannelModel {
 	return predicate.ChannelModel(sql.FieldEQ(FieldContextWindow, v))
 }
 
+// MaxOutputTokens applies equality check predicate on the "max_output_tokens" field. It's identical to MaxOutputTokensEQ.
+func MaxOutputTokens(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldMaxOutputTokens, v))
+}
+
+// CompactHistoryItemThreshold applies equality check predicate on the "compact_history_item_threshold" field. It's identical to CompactHistoryItemThresholdEQ.
+func CompactHistoryItemThreshold(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldCompactHistoryItemThreshold, v))
+}
+
+// UpstreamModel applies equality check predicate on the "upstream_model" field. It's identical to UpstreamModelEQ.
+func UpstreamModel(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldUpstreamModel, v))
+}
+
+// ProfileSource applies equality check predicate on the "profile_source" field. It's identical to ProfileSourceEQ.
+func ProfileSource(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldProfileSource, v))
+}
+
+// ProfileAdoptionStatus applies equality check predicate on the "profile_adoption_status" field. It's identical to ProfileAdoptionStatusEQ.
+func ProfileAdoptionStatus(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldProfileAdoptionStatus, v))
+}
+
 // InputModalitiesJSON applies equality check predicate on the "input_modalities_json" field. It's identical to InputModalitiesJSONEQ.
 func InputModalitiesJSON(v string) predicate.ChannelModel {
 	return predicate.ChannelModel(sql.FieldEQ(FieldInputModalitiesJSON, v))
@@ -597,6 +622,301 @@ func ContextWindowIsNil() predicate.ChannelModel {
 // ContextWindowNotNil applies the NotNil predicate on the "context_window" field.
 func ContextWindowNotNil() predicate.ChannelModel {
 	return predicate.ChannelModel(sql.FieldNotNull(FieldContextWindow))
+}
+
+// MaxOutputTokensEQ applies the EQ predicate on the "max_output_tokens" field.
+func MaxOutputTokensEQ(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldMaxOutputTokens, v))
+}
+
+// MaxOutputTokensNEQ applies the NEQ predicate on the "max_output_tokens" field.
+func MaxOutputTokensNEQ(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNEQ(FieldMaxOutputTokens, v))
+}
+
+// MaxOutputTokensIn applies the In predicate on the "max_output_tokens" field.
+func MaxOutputTokensIn(vs ...int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIn(FieldMaxOutputTokens, vs...))
+}
+
+// MaxOutputTokensNotIn applies the NotIn predicate on the "max_output_tokens" field.
+func MaxOutputTokensNotIn(vs ...int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotIn(FieldMaxOutputTokens, vs...))
+}
+
+// MaxOutputTokensGT applies the GT predicate on the "max_output_tokens" field.
+func MaxOutputTokensGT(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGT(FieldMaxOutputTokens, v))
+}
+
+// MaxOutputTokensGTE applies the GTE predicate on the "max_output_tokens" field.
+func MaxOutputTokensGTE(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGTE(FieldMaxOutputTokens, v))
+}
+
+// MaxOutputTokensLT applies the LT predicate on the "max_output_tokens" field.
+func MaxOutputTokensLT(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLT(FieldMaxOutputTokens, v))
+}
+
+// MaxOutputTokensLTE applies the LTE predicate on the "max_output_tokens" field.
+func MaxOutputTokensLTE(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLTE(FieldMaxOutputTokens, v))
+}
+
+// MaxOutputTokensIsNil applies the IsNil predicate on the "max_output_tokens" field.
+func MaxOutputTokensIsNil() predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIsNull(FieldMaxOutputTokens))
+}
+
+// MaxOutputTokensNotNil applies the NotNil predicate on the "max_output_tokens" field.
+func MaxOutputTokensNotNil() predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotNull(FieldMaxOutputTokens))
+}
+
+// CompactHistoryItemThresholdEQ applies the EQ predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdEQ(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldCompactHistoryItemThreshold, v))
+}
+
+// CompactHistoryItemThresholdNEQ applies the NEQ predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdNEQ(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNEQ(FieldCompactHistoryItemThreshold, v))
+}
+
+// CompactHistoryItemThresholdIn applies the In predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdIn(vs ...int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIn(FieldCompactHistoryItemThreshold, vs...))
+}
+
+// CompactHistoryItemThresholdNotIn applies the NotIn predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdNotIn(vs ...int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotIn(FieldCompactHistoryItemThreshold, vs...))
+}
+
+// CompactHistoryItemThresholdGT applies the GT predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdGT(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGT(FieldCompactHistoryItemThreshold, v))
+}
+
+// CompactHistoryItemThresholdGTE applies the GTE predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdGTE(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGTE(FieldCompactHistoryItemThreshold, v))
+}
+
+// CompactHistoryItemThresholdLT applies the LT predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdLT(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLT(FieldCompactHistoryItemThreshold, v))
+}
+
+// CompactHistoryItemThresholdLTE applies the LTE predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdLTE(v int) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLTE(FieldCompactHistoryItemThreshold, v))
+}
+
+// CompactHistoryItemThresholdIsNil applies the IsNil predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdIsNil() predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIsNull(FieldCompactHistoryItemThreshold))
+}
+
+// CompactHistoryItemThresholdNotNil applies the NotNil predicate on the "compact_history_item_threshold" field.
+func CompactHistoryItemThresholdNotNil() predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotNull(FieldCompactHistoryItemThreshold))
+}
+
+// UpstreamModelEQ applies the EQ predicate on the "upstream_model" field.
+func UpstreamModelEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldUpstreamModel, v))
+}
+
+// UpstreamModelNEQ applies the NEQ predicate on the "upstream_model" field.
+func UpstreamModelNEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNEQ(FieldUpstreamModel, v))
+}
+
+// UpstreamModelIn applies the In predicate on the "upstream_model" field.
+func UpstreamModelIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIn(FieldUpstreamModel, vs...))
+}
+
+// UpstreamModelNotIn applies the NotIn predicate on the "upstream_model" field.
+func UpstreamModelNotIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotIn(FieldUpstreamModel, vs...))
+}
+
+// UpstreamModelGT applies the GT predicate on the "upstream_model" field.
+func UpstreamModelGT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGT(FieldUpstreamModel, v))
+}
+
+// UpstreamModelGTE applies the GTE predicate on the "upstream_model" field.
+func UpstreamModelGTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGTE(FieldUpstreamModel, v))
+}
+
+// UpstreamModelLT applies the LT predicate on the "upstream_model" field.
+func UpstreamModelLT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLT(FieldUpstreamModel, v))
+}
+
+// UpstreamModelLTE applies the LTE predicate on the "upstream_model" field.
+func UpstreamModelLTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLTE(FieldUpstreamModel, v))
+}
+
+// UpstreamModelContains applies the Contains predicate on the "upstream_model" field.
+func UpstreamModelContains(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContains(FieldUpstreamModel, v))
+}
+
+// UpstreamModelHasPrefix applies the HasPrefix predicate on the "upstream_model" field.
+func UpstreamModelHasPrefix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasPrefix(FieldUpstreamModel, v))
+}
+
+// UpstreamModelHasSuffix applies the HasSuffix predicate on the "upstream_model" field.
+func UpstreamModelHasSuffix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasSuffix(FieldUpstreamModel, v))
+}
+
+// UpstreamModelEqualFold applies the EqualFold predicate on the "upstream_model" field.
+func UpstreamModelEqualFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEqualFold(FieldUpstreamModel, v))
+}
+
+// UpstreamModelContainsFold applies the ContainsFold predicate on the "upstream_model" field.
+func UpstreamModelContainsFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContainsFold(FieldUpstreamModel, v))
+}
+
+// ProfileSourceEQ applies the EQ predicate on the "profile_source" field.
+func ProfileSourceEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldProfileSource, v))
+}
+
+// ProfileSourceNEQ applies the NEQ predicate on the "profile_source" field.
+func ProfileSourceNEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNEQ(FieldProfileSource, v))
+}
+
+// ProfileSourceIn applies the In predicate on the "profile_source" field.
+func ProfileSourceIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIn(FieldProfileSource, vs...))
+}
+
+// ProfileSourceNotIn applies the NotIn predicate on the "profile_source" field.
+func ProfileSourceNotIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotIn(FieldProfileSource, vs...))
+}
+
+// ProfileSourceGT applies the GT predicate on the "profile_source" field.
+func ProfileSourceGT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGT(FieldProfileSource, v))
+}
+
+// ProfileSourceGTE applies the GTE predicate on the "profile_source" field.
+func ProfileSourceGTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGTE(FieldProfileSource, v))
+}
+
+// ProfileSourceLT applies the LT predicate on the "profile_source" field.
+func ProfileSourceLT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLT(FieldProfileSource, v))
+}
+
+// ProfileSourceLTE applies the LTE predicate on the "profile_source" field.
+func ProfileSourceLTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLTE(FieldProfileSource, v))
+}
+
+// ProfileSourceContains applies the Contains predicate on the "profile_source" field.
+func ProfileSourceContains(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContains(FieldProfileSource, v))
+}
+
+// ProfileSourceHasPrefix applies the HasPrefix predicate on the "profile_source" field.
+func ProfileSourceHasPrefix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasPrefix(FieldProfileSource, v))
+}
+
+// ProfileSourceHasSuffix applies the HasSuffix predicate on the "profile_source" field.
+func ProfileSourceHasSuffix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasSuffix(FieldProfileSource, v))
+}
+
+// ProfileSourceEqualFold applies the EqualFold predicate on the "profile_source" field.
+func ProfileSourceEqualFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEqualFold(FieldProfileSource, v))
+}
+
+// ProfileSourceContainsFold applies the ContainsFold predicate on the "profile_source" field.
+func ProfileSourceContainsFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContainsFold(FieldProfileSource, v))
+}
+
+// ProfileAdoptionStatusEQ applies the EQ predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEQ(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusNEQ applies the NEQ predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusNEQ(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNEQ(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusIn applies the In predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldIn(FieldProfileAdoptionStatus, vs...))
+}
+
+// ProfileAdoptionStatusNotIn applies the NotIn predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusNotIn(vs ...string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldNotIn(FieldProfileAdoptionStatus, vs...))
+}
+
+// ProfileAdoptionStatusGT applies the GT predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusGT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGT(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusGTE applies the GTE predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusGTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldGTE(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusLT applies the LT predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusLT(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLT(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusLTE applies the LTE predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusLTE(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldLTE(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusContains applies the Contains predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusContains(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContains(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusHasPrefix applies the HasPrefix predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusHasPrefix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasPrefix(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusHasSuffix applies the HasSuffix predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusHasSuffix(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldHasSuffix(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusEqualFold applies the EqualFold predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusEqualFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldEqualFold(FieldProfileAdoptionStatus, v))
+}
+
+// ProfileAdoptionStatusContainsFold applies the ContainsFold predicate on the "profile_adoption_status" field.
+func ProfileAdoptionStatusContainsFold(v string) predicate.ChannelModel {
+	return predicate.ChannelModel(sql.FieldContainsFold(FieldProfileAdoptionStatus, v))
 }
 
 // InputModalitiesJSONEQ applies the EQ predicate on the "input_modalities_json" field.

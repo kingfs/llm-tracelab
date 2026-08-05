@@ -1,0 +1,24 @@
+{
+  "model": "local-test-model",
+  "input": "Search an indexed file store for API compatibility notes.",
+  "tools": [
+    {
+      "type": "file_search",
+      "vector_store_ids": [
+        "vs_fixture"
+      ]
+    }
+  ],
+  "tool_choice": {
+    "type": "file_search"
+  },
+  "store": true,
+  "metadata": {
+    "fixture": "codex_unsupported_file_search",
+    "expected_behavior": "unsupported hosted file_search must be rejected before execution or fabricated output",
+    "codex": {
+      "thread_id": "thread_fixture_unsupported_file_search",
+      "client_request_id": "turn_fixture_unsupported_file_search_1"
+    }
+  }
+}

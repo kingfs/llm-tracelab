@@ -49,6 +49,27 @@ tasks:
     cmds:
       - go generate ./ent/...
 
+  migrate:ent:sqlite:
+    desc: Generate a SQLite ent migration, pass NAME=change_name
+    cmds:
+      - >-
+        sh -c 'test -n "{{.NAME}}" ||
+        { echo "NAME is required, for example: task migrate:ent:sqlite NAME=add_table"; exit 2; }'
+      - go run -mod=mod ent/migrate/main.go --dialect sqlite --dir ent/migrations "{{.NAME}}"
+      - go run -mod=mod ent/migrate/update_hash.go ent/migrations
+
+  migrate:ent:postgres:
+    desc: Generate a Postgres ent migration, pass NAME=change_name and DEV_URL=postgres://...
+    cmds:
+      - >-
+        sh -c 'test -n "{{.NAME}}" ||
+        { echo "NAME is required, for example: task migrate:ent:postgres NAME=add_table DEV_URL=postgres://..."; exit 2; }'
+      - >-
+        sh -c 'test -n "{{.DEV_URL}}" ||
+        { echo "DEV_URL is required and must point to a temporary development Postgres database"; exit 2; }'
+      - go run -mod=mod ent/migrate/main.go --dialect postgres --dir ent/postgres-migrations --dev-url "{{.DEV_URL}}" "{{.NAME}}"
+      - go run -mod=mod ent/migrate/update_hash.go ent/postgres-migrations
+
   fmt:
     desc: Format Go code
     cmds:
@@ -80,6 +101,11 @@ tasks:
     desc: Run local end-to-end tests without external network dependencies
     cmds:
       - go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest
+
+  test:codex-fixtures:
+    desc: Run offline Codex Responses fixture runner tests
+    cmds:
+      - env -u GOROOT go test ./internal/responses/httpapi ./internal/responses/runtime -count=1
 
   test:short:
     desc: Run short unit tests
@@ -162,15 +188,17 @@ tasks:
     desc: Build Docker image
     cmds:
       - >-
+        eval "$(./scripts/docker-build-env.sh)" &&
         docker build
-        --build-arg GOPROXY="${DOCKER_BUILD_GOPROXY:-${GOPROXY:-https://proxy.golang.org,direct}}"
-        --build-arg GOSUMDB="${DOCKER_BUILD_GOSUMDB:-${GOSUMDB:-sum.golang.org}}"
-        --build-arg HTTP_PROXY="${DOCKER_BUILD_HTTP_PROXY:-${HTTP_PROXY:-}}"
-        --build-arg HTTPS_PROXY="${DOCKER_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
-        --build-arg NO_PROXY="${DOCKER_BUILD_NO_PROXY:-${NO_PROXY:-}}"
-        --build-arg http_proxy="${DOCKER_BUILD_http_proxy:-${http_proxy:-}}"
-        --build-arg https_proxy="${DOCKER_BUILD_https_proxy:-${https_proxy:-}}"
-        --build-arg no_proxy="${DOCKER_BUILD_no_proxy:-${no_proxy:-}}"
+        --add-host host.docker.internal:host-gateway
+        --build-arg GOPROXY="${DOCKER_BUILD_GOPROXY}"
+        --build-arg GOSUMDB="${DOCKER_BUILD_GOSUMDB}"
+        --build-arg HTTP_PROXY="${DOCKER_BUILD_HTTP_PROXY}"
+        --build-arg HTTPS_PROXY="${DOCKER_BUILD_HTTPS_PROXY}"
+        --build-arg NO_PROXY="${DOCKER_BUILD_NO_PROXY}"
+        --build-arg http_proxy="${DOCKER_BUILD_http_proxy}"
+        --build-arg https_proxy="${DOCKER_BUILD_https_proxy}"
+        --build-arg no_proxy="${DOCKER_BUILD_no_proxy}"
         --build-arg VERSION="{{.VERSION}}"
         --build-arg COMMIT="{{.COMMIT}}"
         --build-arg BUILD_DATE="{{.BUILD_DATE}}"
@@ -182,15 +210,11 @@ tasks:
     desc: Start llm-tracelab with docker compose
     cmds:
       - >-
-        DOCKER_BUILD_GOPROXY="${DOCKER_BUILD_GOPROXY:-${GOPROXY:-https://proxy.golang.org,direct}}"
-        DOCKER_BUILD_GOSUMDB="${DOCKER_BUILD_GOSUMDB:-${GOSUMDB:-sum.golang.org}}"
-        DOCKER_BUILD_HTTP_PROXY="${DOCKER_BUILD_HTTP_PROXY:-${HTTP_PROXY:-}}"
-        DOCKER_BUILD_HTTPS_PROXY="${DOCKER_BUILD_HTTPS_PROXY:-${HTTPS_PROXY:-}}"
-        DOCKER_BUILD_NO_PROXY="${DOCKER_BUILD_NO_PROXY:-${NO_PROXY:-}}"
-        DOCKER_BUILD_http_proxy="${DOCKER_BUILD_http_proxy:-${http_proxy:-}}"
-        DOCKER_BUILD_https_proxy="${DOCKER_BUILD_https_proxy:-${https_proxy:-}}"
-        DOCKER_BUILD_no_proxy="${DOCKER_BUILD_no_proxy:-${no_proxy:-}}"
-        docker compose up --build -d
+        eval "$(./scripts/docker-build-env.sh)" &&
+        export DOCKER_BUILD_GOPROXY DOCKER_BUILD_GOSUMDB
+        DOCKER_BUILD_HTTP_PROXY DOCKER_BUILD_HTTPS_PROXY DOCKER_BUILD_NO_PROXY
+        DOCKER_BUILD_http_proxy DOCKER_BUILD_https_proxy DOCKER_BUILD_no_proxy &&
+        docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
   check:
     desc: Run the default local quality gate

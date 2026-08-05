@@ -1,8 +1,11 @@
 package channel
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,6 +21,9 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	defer st.Close()
 
 	enabled := true
+	responsesEnabled := false
+	chatCompletionsEnabled := true
+	toolCallingEnabled := true
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
 			{
@@ -32,6 +38,13 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 					BaseURL:        "https://api.openai.com/v1",
 					ApiKey:         "test-inline-key",
 					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Mode:           "responses_server",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       &responsesEnabled,
+						ChatCompletions: &chatCompletionsEnabled,
+						ToolCalling:     &toolCallingEnabled,
+					},
 					Headers: map[string]string{
 						"X-Test": "true",
 					},
@@ -62,6 +75,12 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	if record.Source != "bootstrap" {
 		t.Fatalf("record.Source = %q, want bootstrap", record.Source)
 	}
+	if record.APIType != "chat_completions" || record.Mode != "responses_server" {
+		t.Fatalf("record api surface = %q/%q", record.APIType, record.Mode)
+	}
+	if !strings.Contains(record.CapabilitiesJSON, `"chat_completions":true`) || !strings.Contains(record.CapabilitiesJSON, `"responses":false`) {
+		t.Fatalf("record.CapabilitiesJSON = %s", record.CapabilitiesJSON)
+	}
 
 	targets, err := svc.RuntimeTargets()
 	if err != nil {
@@ -79,6 +98,15 @@ func TestBootstrapFromConfigImportsYAMLUpstreamsOnce(t *testing.T) {
 	}
 	if got := target.Upstream.Headers["X-Test"]; got != "true" {
 		t.Fatalf("target header X-Test = %q", got)
+	}
+	if target.Upstream.APIType != "chat_completions" || target.Upstream.Mode != "responses_server" {
+		t.Fatalf("target api surface = %q/%q", target.Upstream.APIType, target.Upstream.Mode)
+	}
+	if target.Upstream.Capabilities.ChatCompletions == nil || !*target.Upstream.Capabilities.ChatCompletions {
+		t.Fatalf("target.Upstream.Capabilities.ChatCompletions = %#v", target.Upstream.Capabilities.ChatCompletions)
+	}
+	if target.Upstream.Capabilities.Responses == nil || *target.Upstream.Capabilities.Responses {
+		t.Fatalf("target.Upstream.Capabilities.Responses = %#v", target.Upstream.Capabilities.Responses)
 	}
 	if len(target.StaticModels) != 2 || target.StaticModels[0] != "gpt-4.1" || target.StaticModels[1] != "gpt-5" {
 		t.Fatalf("target.StaticModels = %#v", target.StaticModels)
@@ -189,6 +217,271 @@ func TestProbeDiscoversModelsAndUpdatesCatalogs(t *testing.T) {
 	}
 	if len(runs) != 1 || runs[0].Status != "success" || runs[0].DiscoveredCount != 2 {
 		t.Fatalf("probe runs = %#v", runs)
+	}
+}
+
+func TestProbeWithOptionsDetectsProviderSurface(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "probe-channel",
+		Name:             "Probe Channel",
+		BaseURL:          upstreamServer.URL + "/v1",
+		ProviderPreset:   "openai",
+		APIKeyCiphertext: []byte("sk-probe"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	result, err := NewService(st).ProbeWithOptions("probe-channel", ProbeOptions{DetectProvider: true})
+	if err != nil {
+		t.Fatalf("ProbeWithOptions() error = %v", err)
+	}
+	if result.ProviderReport.Status != "detected" {
+		t.Fatalf("ProviderReport.Status = %q, want detected", result.ProviderReport.Status)
+	}
+	if result.ProviderReport.SuggestedAPIType != "chat_completions" || result.ProviderReport.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("provider suggestion = %q/%q", result.ProviderReport.SuggestedAPIType, result.ProviderReport.SuggestedProtocolFamily)
+	}
+	if !slices.Contains(result.ProviderReport.Capabilities, "chat_completions") || !slices.Contains(result.ProviderReport.Capabilities, "models") {
+		t.Fatalf("ProviderReport.Capabilities = %#v", result.ProviderReport.Capabilities)
+	}
+	runs, err := st.ListChannelProbeRuns("probe-channel", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 1 || !strings.Contains(runs[0].RequestMetaJSON, `"provider_probe"`) {
+		t.Fatalf("probe run meta = %#v", runs)
+	}
+}
+
+func TestProviderProbeReportDetectsChannelsReadOnly(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "probe-channel",
+		Name:             "Probe Channel",
+		BaseURL:          upstreamServer.URL + "/v1",
+		APIType:          "responses",
+		ProtocolFamily:   "openai_compatible",
+		APIKeyCiphertext: []byte("sk-probe"),
+		HeadersJSON:      "{}",
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	report, err := NewService(st).ProviderProbeReport(context.Background(), ProviderProbeReportOptions{})
+	if err != nil {
+		t.Fatalf("ProviderProbeReport() error = %v", err)
+	}
+	if len(report.Reports) != 1 {
+		t.Fatalf("len(report.Reports) = %d, want 1", len(report.Reports))
+	}
+	got := report.Reports[0]
+	if got.TargetSource != "channel" || got.ProviderID != "probe-channel" || got.Status != "detected" {
+		t.Fatalf("report identity/status = %+v", got)
+	}
+	if got.SuggestedAPIType != "chat_completions" || got.SuggestedProtocolFamily != "openai_compatible" {
+		t.Fatalf("suggestion = %q/%q", got.SuggestedAPIType, got.SuggestedProtocolFamily)
+	}
+	if !slices.Contains(got.Warnings, `specified api_type "responses" differs from probed suggestion "chat_completions"`) {
+		t.Fatalf("Warnings = %#v, want api_type mismatch", got.Warnings)
+	}
+	runs, err := st.ListChannelProbeRuns("probe-channel", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("ProviderProbeReport wrote probe runs: %#v", runs)
+	}
+	models, err := st.ListChannelModels("probe-channel", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels() error = %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("ProviderProbeReport wrote channel models: %#v", models)
+	}
+}
+
+func TestApplyProviderProbeReportFillsOnlyMissingNonSensitiveSuggestions(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	disabled := false
+	capabilitiesJSON, err := json.Marshal(config.UpstreamCapabilitiesConfig{ChatCompletions: &disabled})
+	if err != nil {
+		t.Fatalf("json.Marshal(capabilities) error = %v", err)
+	}
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:               "probe-channel",
+		Name:             "Probe Channel",
+		BaseURL:          upstreamServer.URL + "/v1",
+		APIKeyCiphertext: []byte("sk-probe"),
+		APIKeyHint:       "sk...robe",
+		HeadersJSON:      `{"Authorization":"Bearer secret","X-Test":"visible"}`,
+		CapabilitiesJSON: string(capabilitiesJSON),
+		Enabled:          true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+
+	result, err := NewService(st).ApplyProviderProbeReport(context.Background(), ProviderProbeReportOptions{})
+	if err != nil {
+		t.Fatalf("ApplyProviderProbeReport() error = %v", err)
+	}
+	if len(result.Applied) != 1 || !result.Applied[0].Applied {
+		t.Fatalf("Applied = %#v", result.Applied)
+	}
+	if !slices.Contains(result.Applied[0].AppliedFields, "api_type") ||
+		!slices.Contains(result.Applied[0].AppliedFields, "protocol_family") ||
+		!slices.Contains(result.Applied[0].AppliedFields, "capabilities.models") {
+		t.Fatalf("AppliedFields = %#v", result.Applied[0].AppliedFields)
+	}
+	if slices.Contains(result.Applied[0].AppliedFields, "capabilities.chat_completions") {
+		t.Fatalf("explicit false capability was applied: %#v", result.Applied[0].AppliedFields)
+	}
+	record, err := st.GetChannelConfig("probe-channel")
+	if err != nil {
+		t.Fatalf("GetChannelConfig() error = %v", err)
+	}
+	if record.APIType != "chat_completions" || record.ProtocolFamily != "openai_compatible" {
+		t.Fatalf("record suggestions = %q/%q", record.APIType, record.ProtocolFamily)
+	}
+	if string(record.APIKeyCiphertext) != "sk-probe" || !strings.Contains(record.HeadersJSON, "Bearer secret") {
+		t.Fatalf("secret fields were not preserved: api_key=%q headers=%s", string(record.APIKeyCiphertext), record.HeadersJSON)
+	}
+	var capabilities config.UpstreamCapabilitiesConfig
+	if err := json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities); err != nil {
+		t.Fatalf("json.Unmarshal(capabilities) error = %v", err)
+	}
+	if capabilities.ChatCompletions == nil || *capabilities.ChatCompletions {
+		t.Fatalf("explicit chat_completions capability was overwritten: %#v", capabilities.ChatCompletions)
+	}
+	if capabilities.Models == nil || !*capabilities.Models {
+		t.Fatalf("models capability was not applied: %#v", capabilities.Models)
+	}
+	runs, err := st.ListChannelProbeRuns("probe-channel", 10)
+	if err != nil {
+		t.Fatalf("ListChannelProbeRuns() error = %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("ApplyProviderProbeReport wrote probe runs: %#v", runs)
+	}
+}
+
+func TestApplyProviderProbeReportSkipsNonDetectedAndSupportsChannelSelection(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5"}]}`))
+		case "/v1/chat/completions":
+			http.Error(w, "missing model", http.StatusBadRequest)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstreamServer.Close()
+	unknownServer := httptest.NewServer(http.NotFoundHandler())
+	defer unknownServer.Close()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, record := range []store.ChannelConfigRecord{
+		{ID: "selected-channel", Name: "Selected Channel", BaseURL: upstreamServer.URL + "/v1", HeadersJSON: "{}", Enabled: true},
+		{ID: "other-channel", Name: "Other Channel", BaseURL: upstreamServer.URL + "/v1", HeadersJSON: "{}", Enabled: true},
+		{ID: "unknown-channel", Name: "Unknown Channel", BaseURL: unknownServer.URL + "/v1", HeadersJSON: "{}", Enabled: true},
+	} {
+		if _, err := st.UpsertChannelConfig(record); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", record.ID, err)
+		}
+	}
+
+	selected, err := NewService(st).ApplyProviderProbeReport(context.Background(), ProviderProbeReportOptions{ChannelID: "selected-channel"})
+	if err != nil {
+		t.Fatalf("selected ApplyProviderProbeReport() error = %v", err)
+	}
+	if len(selected.Applied) != 1 || selected.Applied[0].ChannelID != "selected-channel" || !selected.Applied[0].Applied {
+		t.Fatalf("selected Applied = %#v", selected.Applied)
+	}
+	other, err := st.GetChannelConfig("other-channel")
+	if err != nil {
+		t.Fatalf("GetChannelConfig(other-channel) error = %v", err)
+	}
+	if other.APIType != "" || other.ProtocolFamily != "" {
+		t.Fatalf("unselected channel was updated: %q/%q", other.APIType, other.ProtocolFamily)
+	}
+
+	unknown, err := NewService(st).ApplyProviderProbeReport(context.Background(), ProviderProbeReportOptions{ChannelID: "unknown-channel"})
+	if err != nil {
+		t.Fatalf("unknown ApplyProviderProbeReport() error = %v", err)
+	}
+	if len(unknown.Applied) != 1 || unknown.Applied[0].Applied || unknown.Applied[0].SkippedReason == "" {
+		t.Fatalf("unknown Applied = %#v", unknown.Applied)
+	}
+	record, err := st.GetChannelConfig("unknown-channel")
+	if err != nil {
+		t.Fatalf("GetChannelConfig(unknown-channel) error = %v", err)
+	}
+	if record.APIType != "" || record.ProtocolFamily != "" || record.CapabilitiesJSON != "{}" {
+		t.Fatalf("unknown channel was updated: %+v", record)
 	}
 }
 
@@ -354,5 +647,99 @@ func TestRuntimeTargetsSkipsDisabledChannelsAndModels(t *testing.T) {
 	}
 	if len(targets[0].StaticModels) != 1 || targets[0].StaticModels[0] != "gpt-5" {
 		t.Fatalf("StaticModels = %#v", targets[0].StaticModels)
+	}
+	if !targets[0].ConfiguredModelsOnly {
+		t.Fatalf("ConfiguredModelsOnly = false, want true for channel runtime target")
+	}
+}
+
+func TestRuntimeTargetsProjectsEnabledModelAliases(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channelID := range []string{"primary", "secondary"} {
+		if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+			ID:             channelID,
+			Name:           channelID,
+			BaseURL:        "https://" + channelID + ".example.com/v1",
+			ProviderPreset: "openai",
+			HeadersJSON:    "{}",
+			Enabled:        true,
+		}); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channelID, err)
+		}
+		if err := st.ReplaceChannelModels(channelID, []store.ChannelModelRecord{
+			{Model: "gpt-5.5", Source: "manual", Enabled: true},
+		}); err != nil {
+			t.Fatalf("ReplaceChannelModels(%s) error = %v", channelID, err)
+		}
+	}
+
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "abc", TargetModel: "gpt-5.5", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias(global) error = %v", err)
+	}
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "disabled", TargetModel: "gpt-5.5", Enabled: false}); err != nil {
+		t.Fatalf("UpsertModelAlias(disabled) error = %v", err)
+	}
+
+	targets, err := NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("len(targets) = %d, want 2", len(targets))
+	}
+	for _, target := range targets {
+		if !slices.Equal(target.StaticModels, []string{"abc", "gpt-5.5"}) {
+			t.Fatalf("target %s StaticModels = %#v", target.ID, target.StaticModels)
+		}
+	}
+}
+
+func TestRuntimeTargetsProjectsChannelScopedModelAliases(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	for _, channelID := range []string{"primary", "secondary"} {
+		if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+			ID:             channelID,
+			Name:           channelID,
+			BaseURL:        "https://" + channelID + ".example.com/v1",
+			ProviderPreset: "openai",
+			HeadersJSON:    "{}",
+			Enabled:        true,
+		}); err != nil {
+			t.Fatalf("UpsertChannelConfig(%s) error = %v", channelID, err)
+		}
+		if err := st.ReplaceChannelModels(channelID, []store.ChannelModelRecord{
+			{Model: "gpt-5.5", Source: "manual", Enabled: true},
+		}); err != nil {
+			t.Fatalf("ReplaceChannelModels(%s) error = %v", channelID, err)
+		}
+	}
+
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "coder", TargetModel: "gpt-5.5", ChannelID: "primary", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias(scoped) error = %v", err)
+	}
+
+	targets, err := NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	modelsByTarget := map[string][]string{}
+	for _, target := range targets {
+		modelsByTarget[target.ID] = target.StaticModels
+	}
+	if !slices.Equal(modelsByTarget["primary"], []string{"coder", "gpt-5.5"}) {
+		t.Fatalf("primary StaticModels = %#v", modelsByTarget["primary"])
+	}
+	if !slices.Equal(modelsByTarget["secondary"], []string{"gpt-5.5"}) {
+		t.Fatalf("secondary StaticModels = %#v", modelsByTarget["secondary"])
 	}
 }

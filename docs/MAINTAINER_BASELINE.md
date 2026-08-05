@@ -22,7 +22,8 @@ raw `.http` cassette 是：
 - raw protocol 详情源。
 - Observation IR / findings / usage repair 的重建来源。
 
-SQLite 是：
+Application DB 是结构化查询源。生产部署必须使用 Postgres；SQLite 只保留为
+legacy/dev/test 兼容 fallback。
 
 - 列表、聚合、过滤、分页的查询源。
 - auth、channel/model 配置、system events、analysis jobs、Observation IR、findings、eval 的结构化源。
@@ -49,7 +50,16 @@ SQLite 是：
 3. 保持 `.http` 人类可读。
 4. 保持旧 cassette 可读，除非明确做 breaking migration。
 
-## SQLite 升级
+## Storage 升级
+
+Postgres 是生产迁移主路径：
+
+- `db migrate up` 使用 checked-in `ent/postgres-migrations`。
+- `db migrate down` 不作为 CLI 生产回滚路径；需要 backup restore 或审阅过的手工迁移计划。
+- auth 表当前由 application Postgres migration set 拥有；`auth migrate down` 不得回滚共享 application schema。
+- 长期运行优化必须按 [PostgreSQL 长期运行优化 Runbook](./POSTGRES_OPERATIONS_RUNBOOK.md) 执行：先采集 `pg_stat_statements` 和 `EXPLAIN (ANALYZE, BUFFERS)` 基线，再做 concurrent index、query tuning、summary、backfill、灰度读或分区/归档。
+
+SQLite schema 只能按兼容 fallback 演进。
 
 schema 演进必须 additive。
 
@@ -59,9 +69,20 @@ schema 演进必须 additive。
 - 查询或索引依赖新列前，必须保证列已存在。
 - 旧本地 `trace_index.sqlite3` / 当前 SQLite 文件必须可原地升级。
 
+## Postgres 长期运行运维
+
+生产 Postgres 优化不是普通代码重构，必须有可回滚的 operator plan：
+
+- 大表索引默认使用 `CREATE INDEX CONCURRENTLY`，失败后按 runbook 检查并清理 invalid index。
+- 热查询优化必须保留变更前后的 `pg_stat_statements`、`EXPLAIN` 和用户面 latency 指标。
+- session summary、overview summary 或 audit summary 只能作为可重建 read model；`logs`、audit tables 和 raw `.http` cassette 的事实源边界不能改变。
+- backfill 必须可 dry-run、可重入、分批执行，并记录 scanned/updated/conflicts/skipped；不得重写 raw cassette。
+- 灰度读必须有旧读路径 fallback，回退优先通过配置或发布切换完成，不依赖 DDL rollback。
+- 分区/归档需要单独设计和验收，不能夹带在普通 schema migration 或临时性能修复中。
+
 ## Channel 与模型配置
 
-长期配置源是 SQLite：
+长期配置源是 application DB；生产为 Postgres，SQLite 仅用于 legacy/dev/test：
 
 - `channel_configs`
 - `channel_models`
@@ -138,9 +159,9 @@ system events 是 TraceLab 自身运行和派生管道异常，不是普通用�
 - ignored 事件保持 ignored。
 - read/resolved 事件复发时重新 unread。
 
-## Reanalysis
+## Analysis Refresh
 
-reanalysis 只基于本地 cassette 和 SQLite 派生状态工作。
+analysis refresh 只基于本地 cassette 和 application DB 派生状态工作；生产写入 Postgres，SQLite 仅用于 legacy/dev/test fallback。用户面向入口应尽量收敛为“刷新分析”和“修复统计”；下面的 job 类型是审计和兼容层面的实现细节。
 
 任务必须写入 `analysis_jobs`，便于审计：
 

@@ -17,8 +17,6 @@ ARG COMMIT=none
 ARG BUILD_DATE=unknown
 ARG BRANCH=unknown
 
-RUN apk add --no-cache ca-certificates tzdata
-
 COPY go.mod go.sum ./
 RUN go env -w GOPROXY="${GOPROXY}" GOSUMDB="${GOSUMDB}" && \
 	go mod download
@@ -30,8 +28,6 @@ RUN go build -trimpath \
 	-o /out/llm-tracelab ./cmd/server
 
 FROM alpine:3.22 AS runtime
-
-RUN apk add --no-cache ca-certificates tzdata
 
 ENV APP_HOME=/app \
 	LLM_TRACELAB_CONFIG=/app/config/config.yaml

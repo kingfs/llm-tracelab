@@ -2,10 +2,13 @@ package auth
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,6 +42,68 @@ func TestBearerTokenRequiresBearerScheme(t *testing.T) {
 		if ok != tc.ok || token != tc.token {
 			t.Fatalf("BearerToken(%q) = %q, %v; want %q, %v", tc.header, token, ok, tc.token, tc.ok)
 		}
+	}
+}
+
+func TestJWTManagerIssuesAndConstrainsMonitorTokens(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 6, 25, 12, 0, 0, 0, time.UTC)
+	manager, err := NewJWTManager(JWTOptions{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+		TTL:    time.Hour,
+		Now:    func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager() error = %v", err)
+	}
+	token, err := manager.IssueToken(Principal{UserID: 7, Username: "admin", Role: "admin", Scope: DefaultTokenScope})
+	if err != nil {
+		t.Fatalf("IssueToken() error = %v", err)
+	}
+	if strings.Count(token.Token, ".") != 2 {
+		t.Fatalf("jwt token shape = %q", token.Token)
+	}
+	principal, ok, err := manager.VerifyToken(context.Background(), token.Token)
+	if err != nil || !ok {
+		t.Fatalf("VerifyToken(valid) ok=%v err=%v", ok, err)
+	}
+	if principal.UserID != 7 || principal.Username != "admin" || principal.Role != "admin" || principal.Scope != DefaultTokenScope {
+		t.Fatalf("principal = %+v", principal)
+	}
+
+	tampered := token.Token[:len(token.Token)-1] + "x"
+	if _, ok, err := manager.VerifyToken(context.Background(), tampered); err != nil || ok {
+		t.Fatalf("VerifyToken(tampered) ok=%v err=%v, want false nil", ok, err)
+	}
+
+	wrongAudience, err := NewJWTManager(JWTOptions{
+		Secret:   []byte("0123456789abcdef0123456789abcdef"),
+		Audience: "other-ui",
+		TTL:      time.Hour,
+		Now:      func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager(wrongAudience) error = %v", err)
+	}
+	if _, ok, err := wrongAudience.VerifyToken(context.Background(), token.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(wrong audience) ok=%v err=%v, want false nil", ok, err)
+	}
+
+	expired, err := NewJWTManager(JWTOptions{
+		Secret: []byte("0123456789abcdef0123456789abcdef"),
+		TTL:    time.Hour,
+		Now:    func() time.Time { return now.Add(2 * time.Hour) },
+	})
+	if err != nil {
+		t.Fatalf("NewJWTManager(expired) error = %v", err)
+	}
+	if _, ok, err := expired.VerifyToken(context.Background(), token.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(expired) ok=%v err=%v, want false nil", ok, err)
+	}
+
+	if _, err := NewJWTManager(JWTOptions{Secret: []byte("too-short")}); !errors.Is(err, ErrJWTSecretTooShort) {
+		t.Fatalf("NewJWTManager(short secret) err=%v, want ErrJWTSecretTooShort", err)
 	}
 }
 
@@ -165,6 +230,60 @@ func TestStoreUserLoginAndTokenVerification(t *testing.T) {
 	}
 }
 
+func TestStoreLoginReplacesPreviousMonitorLoginToken(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateUp(dbPath, 0); err != nil {
+		t.Fatalf("MigrateUp() error = %v", err)
+	}
+	st, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.CreateUser(ctx, "admin", "change-me-123"); err != nil {
+		t.Fatalf("CreateUser() error = %v", err)
+	}
+	if _, err := st.CreateToken(ctx, "admin", "manual", "api", time.Hour); err != nil {
+		t.Fatalf("CreateToken(manual) error = %v", err)
+	}
+	first, err := st.Login(ctx, "admin", "change-me-123", time.Hour)
+	if err != nil {
+		t.Fatalf("first Login() error = %v", err)
+	}
+	second, err := st.Login(ctx, "admin", "change-me-123", time.Hour)
+	if err != nil {
+		t.Fatalf("second Login() error = %v", err)
+	}
+
+	if _, ok, err := st.VerifyToken(ctx, first.Token); err != nil || ok {
+		t.Fatalf("VerifyToken(first login) = ok %v err %v, want old login token removed", ok, err)
+	}
+	if _, ok, err := st.VerifyToken(ctx, second.Token); err != nil || !ok {
+		t.Fatalf("VerifyToken(second login) = ok %v err %v, want active token", ok, err)
+	}
+	tokens, err := st.ListTokens(ctx, "admin")
+	if err != nil {
+		t.Fatalf("ListTokens() error = %v", err)
+	}
+	var monitorLoginCount int
+	var manualCount int
+	for _, token := range tokens {
+		switch token.Name {
+		case "monitor-login":
+			monitorLoginCount++
+		case "manual":
+			manualCount++
+		}
+	}
+	if monitorLoginCount != 1 || manualCount != 1 {
+		t.Fatalf("token counts monitor-login=%d manual=%d tokens=%+v, want 1/1", monitorLoginCount, manualCount, tokens)
+	}
+}
+
 func TestStoreListsAndRevokesUserTokens(t *testing.T) {
 	t.Parallel()
 
@@ -256,6 +375,115 @@ func TestOpenDatabaseAcceptsSQLiteFileDSN(t *testing.T) {
 	}
 }
 
+func TestNormalizeDriver(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		driver string
+		want   string
+	}{
+		{name: "empty defaults sqlite", driver: "", want: "sqlite"},
+		{name: "trims lowercases", driver: " SQLite ", want: "sqlite"},
+		{name: "postgres", driver: "postgres", want: "postgres"},
+		{name: "postgresql alias", driver: " PostgreSQL ", want: "postgres"},
+		{name: "unsupported preserved", driver: "mysql", want: "mysql"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeDriver(tt.driver); got != tt.want {
+				t.Fatalf("normalizeDriver(%q) = %q, want %q", tt.driver, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOpenDatabaseRejectsPostgresWithoutDSN(t *testing.T) {
+	t.Parallel()
+
+	_, err := OpenDatabase("postgresql", "", 4, 4)
+	if err == nil || !strings.Contains(err.Error(), "postgres auth database dsn is required") {
+		t.Fatalf("OpenDatabase(postgresql empty dsn) error = %v, want required dsn", err)
+	}
+}
+
+func TestOpenDatabaseAcceptsPostgresDSNWithoutConnecting(t *testing.T) {
+	t.Parallel()
+
+	st, err := OpenDatabase("postgres", "postgres://user:pass@example.invalid/traces?sslmode=disable", 7, 3)
+	if err != nil {
+		t.Fatalf("OpenDatabase(postgres) error = %v", err)
+	}
+	defer st.Close()
+	if st.Path() != "postgres://user:pass@example.invalid/traces?sslmode=disable" {
+		t.Fatalf("store path = %q, want dsn", st.Path())
+	}
+	if stats := st.db.Stats(); stats.MaxOpenConnections != 7 {
+		t.Fatalf("MaxOpenConnections = %d, want 7", stats.MaxOpenConnections)
+	}
+}
+
+func TestMigrateDatabaseUpPostgresRequiresDSN(t *testing.T) {
+	t.Parallel()
+
+	err := MigrateDatabaseUp("postgresql", "", 0)
+	if err == nil || !strings.Contains(err.Error(), "postgres application database dsn is required") {
+		t.Fatalf("MigrateDatabaseUp(postgresql empty dsn) error = %v, want required dsn", err)
+	}
+}
+
+func TestMigrateDatabaseDownPostgresRollbackUnsupported(t *testing.T) {
+	t.Parallel()
+
+	err := MigrateDatabaseDown("postgresql", "", 1, false)
+	if !errors.Is(err, ErrPostgresAuthRollbackUnsupported) {
+		t.Fatalf("MigrateDatabaseDown(postgresql) error = %v, want ErrPostgresAuthRollbackUnsupported", err)
+	}
+}
+
+func TestMigrateDatabaseUpPostgresIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("LLM_TRACELAB_TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("set LLM_TRACELAB_TEST_POSTGRES_DSN to a disposable Postgres test database DSN")
+	}
+	if err := MigrateDatabaseUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp(postgres) error = %v", err)
+	}
+	if err := MigrateDatabaseUp("postgres", dsn, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp(postgres idempotent) error = %v", err)
+	}
+
+	st, err := OpenDatabase("postgres", dsn, 4, 4)
+	if err != nil {
+		t.Fatalf("OpenDatabase(postgres) error = %v", err)
+	}
+	defer st.Close()
+
+	ctx := context.Background()
+	username := "admin_" + strings.ReplaceAll(t.Name(), "/", "_")
+	normalizedUsername := normalizeUsername(username)
+	if _, err := st.CreateUser(ctx, username, "change-me-123"); err != nil {
+		t.Fatalf("CreateUser(postgres) error = %v", err)
+	}
+	if err := st.VerifyPassword(ctx, username, "change-me-123"); err != nil {
+		t.Fatalf("VerifyPassword(postgres) error = %v", err)
+	}
+	token, err := st.CreateToken(ctx, username, "postgres-integration", DefaultTokenScope, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateToken(postgres) error = %v", err)
+	}
+	if token.Token == "" || token.Prefix == "" {
+		t.Fatalf("CreateToken(postgres) returned empty token: %+v", token)
+	}
+	principal, ok, err := st.VerifyToken(ctx, token.Token)
+	if err != nil {
+		t.Fatalf("VerifyToken(postgres) error = %v", err)
+	}
+	if !ok || principal.Username != normalizedUsername {
+		t.Fatalf("VerifyToken(postgres) principal=%+v ok=%v, want username %q", principal, ok, normalizedUsername)
+	}
+}
+
 func TestMigrateDatabaseUpCreatesMissingSQLiteParentDir(t *testing.T) {
 	t.Parallel()
 
@@ -277,6 +505,61 @@ func TestMigrateDatabaseUpAcceptsRelativeSQLitePath(t *testing.T) {
 	}
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Fatalf("database file stat error = %v", err)
+	}
+}
+
+func TestCheckStatusSQLiteReportsAuthTablesPresent(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus() error = %v", err)
+	}
+	if !status.Available || !status.Versioned || status.Version == 0 || status.Dirty {
+		t.Fatalf("migration status = %+v", status)
+	}
+	if !status.RequiredTablesPresent || len(status.MissingTables) != 0 {
+		t.Fatalf("auth table status = present %v missing %v", status.RequiredTablesPresent, status.MissingTables)
+	}
+	if strings.Join(status.RequiredTables, ",") != "users,api_tokens" || strings.Join(status.TablesChecked, ",") != "users,api_tokens" {
+		t.Fatalf("auth tables checked = required %v checked %v", status.RequiredTables, status.TablesChecked)
+	}
+}
+
+func TestCheckStatusSQLiteReportsMissingAuthTables(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "control.sqlite3")
+	if err := MigrateDatabaseUp("sqlite", dbPath, 0); err != nil {
+		t.Fatalf("MigrateDatabaseUp() error = %v", err)
+	}
+	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := db.Exec(`DROP TABLE api_tokens`); err != nil {
+		_ = db.Close()
+		t.Fatalf("DROP TABLE api_tokens error = %v", err)
+	}
+	_ = db.Close()
+
+	status, err := CheckStatus("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("CheckStatus() error = %v", err)
+	}
+	if !status.Available || status.Version == 0 {
+		t.Fatalf("migration status = %+v", status)
+	}
+	if status.RequiredTablesPresent || strings.Join(status.MissingTables, ",") != "api_tokens" {
+		t.Fatalf("missing auth tables = present %v missing %v", status.RequiredTablesPresent, status.MissingTables)
+	}
+	if strings.Join(status.TablesChecked, ",") != "users,api_tokens" {
+		t.Fatalf("auth tables checked = %v", status.TablesChecked)
 	}
 }
 

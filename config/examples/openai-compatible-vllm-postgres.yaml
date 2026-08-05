@@ -1,0 +1,91 @@
+server:
+  port: "8080"
+
+monitor:
+  port: "8081"
+
+mcp:
+  enabled: true
+  path: "/mcp"
+
+auth:
+  session_ttl: 24h
+
+database:
+  driver: "postgres"
+  dsn: "$env:LLM_TRACELAB_DATABASE_DSN"
+  max_open_conns: 16
+  max_idle_conns: 8
+  auto_migrate: true
+
+trace:
+  output_dir: "./data/traces"
+
+responses_server:
+  enabled: true
+  default_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+  force_store: true
+  max_request_body_bytes: 10485760
+  path: "/v1/responses"
+  auto_compact: true
+  compact_history_item_threshold: 80
+  model_profiles:
+    - pattern: "*"
+      context_window_tokens: 128000
+      max_output_tokens: 4096
+      compact_history_item_threshold: 80
+      upstream_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+
+tools:
+  web_search:
+    enabled: false
+    provider: "searxng"
+    max_results: 5
+    base_url: "http://searxng:8080"
+    timeout_ms: 5000
+
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: 10m
+    startup_policy: "best_effort"
+  selection:
+    policy: "p2c"
+    epsilon: 0.02
+    open_window: 15s
+    failure_threshold: 3
+  fallback:
+    on_missing_model: "reject"
+
+upstreams:
+  - id: "primary"
+    enabled: true
+    priority: 100
+    weight: 1.0
+    capacity_hint: 1.0
+    model_discovery: "static_only"
+    static_models:
+      - "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
+    upstream:
+      base_url: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL"
+      api_key: "$env:LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY"
+      provider_preset: "vllm"
+      api_type: "chat_completions"
+      mode: "proxy"
+      capabilities:
+        chat_completions: true
+        responses: false
+        tool_calling: true
+        models: true
+        tokenize: false
+      protocol_family: "openai_compatible"
+      routing_profile: "vllm_openai"
+      headers: {}
+
+debug:
+  output_dir: "./data/traces"
+  mask_key: true
+
+chaos:
+  enabled: false
+  rules: []

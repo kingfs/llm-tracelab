@@ -3,14 +3,16 @@ import { Link } from "react-router-dom";
 import { DownloadIcon, InlineTag, LatencyMetric, MiniToken, StackIcon, ViewIcon } from "../common/Badges";
 import { EmptyState } from "../common/EmptyState";
 import { apiPaths } from "../../lib/api";
+import { useI18n } from "../../lib/i18n";
 import { buildTraceLink, formatCacheRate, formatDateTime, formatDuration, formatEndpointTag, formatGenerationSpeed, formatPrefillSpeed, formatProviderTag } from "../../lib/monitor";
 
 export function RequestList({ items, fromView = "", fromSessionID = "", focusFailures = false, groupSessionFailures = false }) {
+  const { t } = useI18n();
   const [expandedGroups, setExpandedGroups] = useState(() => new Set());
   const rows = useMemo(() => buildRequestRows(items, groupSessionFailures), [items, groupSessionFailures]);
 
   if (!items.length) {
-    return <EmptyState title="No traces found" detail="No trace records matched the current filter or page range." />;
+    return <EmptyState title={t("requests.noFound")} detail={t("requests.noFoundDetail")} />;
   }
 
   const toggleGroup = (key) => {
@@ -28,11 +30,11 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
   return (
     <div className="trace-table">
       <div className="trace-table-head">
-        <span>Model</span>
-        <span>Status</span>
-        <span>Speed</span>
-        <span>Tokens</span>
-        <span>Actions</span>
+        <span>{t("requests.model")}</span>
+        <span>{t("common.status")}</span>
+        <span>{t("requests.speed")}</span>
+        <span>{t("common.tokens")}</span>
+        <span>{t("common.actions")}</span>
       </div>
       {rows.map((row) => {
         if (row.type === "group") {
@@ -40,37 +42,55 @@ export function RequestList({ items, fromView = "", fromSessionID = "", focusFai
           return (
             <React.Fragment key={row.key}>
               <FailureGroupRow group={row} isOpen={isOpen} onToggle={() => toggleGroup(row.key)} />
-              {isOpen ? row.items.map((item) => <RequestRow key={item.id} item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild />) : null}
+              {isOpen ? row.items.map((item) => <RequestRowGroup key={item.id} item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild />) : null}
             </React.Fragment>
           );
         }
-        return <RequestRow key={row.item.id} item={row.item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} />;
+        return <RequestRowGroup key={row.item.id} item={row.item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} />;
       })}
     </div>
   );
 }
 
-function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false }) {
+function RequestRowGroup({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false }) {
+  const children = fromView === "routing" ? [] : (Array.isArray(item.upstream_calls) ? item.upstream_calls : []);
+  return (
+    <React.Fragment>
+      <RequestRow item={item} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild={groupedChild} />
+      {children.map((child) => (
+        <RequestRow key={child.id || child.trace_id} item={child} fromView={fromView} fromSessionID={fromSessionID} focusFailures={focusFailures} groupedChild childRole="upstream" />
+      ))}
+    </React.Fragment>
+  );
+}
+
+function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = false, groupedChild = false, childRole = "" }) {
+  const { t } = useI18n();
   const failed = item.status_code < 200 || item.status_code >= 300;
   const focus = focusFailures && failed ? "failure" : "";
+  const upstreamCallCount = Number(item.upstream_call_count || 0);
 
   return (
     <article className={`${failed ? "trace-row trace-row-failed" : "trace-row"}${groupedChild ? " trace-row-grouped-child" : ""}`}>
       <div>
         <div className="trace-title-row">
+          {childRole === "upstream" ? <span className="trace-child-rail" aria-hidden="true" /> : null}
           <strong className="trace-model-name">{item.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
+            {childRole === "upstream" ? <InlineTag tone="gold">Child</InlineTag> : null}
+            <ExchangeTag item={item} />
             <InlineTag tone="accent">{formatEndpointTag(item.endpoint || item.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(item.provider)}</InlineTag>
-            {item.selected_upstream_id ? <InlineTag tone="green">{item.selected_upstream_id}</InlineTag> : null}
-            {item.session_id ? <InlineTag tone="green">session</InlineTag> : null}
+            {item.selected_upstream_id ? <UpstreamTag item={item} /> : null}
+            {!groupedChild && upstreamCallCount > 0 ? <InlineTag tone="gold">{upstreamCallCount} child</InlineTag> : null}
+            {item.session_id ? <InlineTag tone="green">{t("sessions.title")}</InlineTag> : null}
             {item.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
-            <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status)}</InlineTag>
+            <InlineTag tone={observationTone(item.observation?.status)}>{formatObservationStatus(item.observation?.status, t)}</InlineTag>
           </div>
         </div>
         <div className="trace-subline-group">
           <span className="trace-subline">{formatDateTime(item.recorded_at)}</span>
-          {item.session_id ? <span className="trace-subline mono">session {item.session_id}</span> : null}
+          {item.session_id ? <span className="trace-subline mono">{t("sessions.title")} {item.session_id}</span> : null}
         </div>
       </div>
       <div className="trace-metric-stack">
@@ -89,18 +109,64 @@ function RequestRow({ item, fromView = "", fromSessionID = "", focusFailures = f
   );
 }
 
-function formatObservationStatus(status = "") {
+function ExchangeTag({ item }) {
+  const kind = String(item.exchange_kind || "").trim();
+  const role = String(item.exchange_role || "").trim();
+  if (!kind && !role) {
+    return <InlineTag>client</InlineTag>;
+  }
+  const label = exchangeLabel(role || kind);
+  const tone = kind === "model" ? "gold" : kind === "entry" ? "green" : "default";
+  return <InlineTag tone={tone}>{label}</InlineTag>;
+}
+
+function exchangeLabel(value = "") {
+  switch (String(value || "").trim()) {
+    case "primary_model_call":
+      return "Model";
+    case "client_request":
+      return "Request";
+    case "upstream_model_call":
+    case "model_call":
+      return "Model";
+    case "model":
+      return "Model";
+    case "entry":
+      return "Request";
+    default:
+      return value || "Request";
+  }
+}
+
+function UpstreamTag({ item }) {
+  const id = String(item.selected_upstream_id || "").trim();
+  const preset = String(item.selected_upstream_provider_preset || "").trim();
+  const label = preset || compactUpstreamID(id);
+  return <span title={id}><InlineTag tone="green">{label}</InlineTag></span>;
+}
+
+function compactUpstreamID(value = "") {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    return "upstream";
+  }
+  if (value.length > 18) {
+    return `${value.slice(0, 10)}...`;
+  }
+  return value || "upstream";
+}
+
+function formatObservationStatus(status = "", t = (key) => key) {
   switch (String(status || "").toLowerCase()) {
     case "parsed":
-      return "parsed";
+      return t("requests.parsed");
     case "failed":
-      return "parse failed";
+      return t("requests.parseFailed");
     case "queued":
-      return "parse queued";
+      return t("requests.parseQueued");
     case "running":
-      return "parse running";
+      return t("requests.parseRunning");
     default:
-      return "unparsed";
+      return t("requests.unparsed");
   }
 }
 
@@ -119,6 +185,7 @@ function observationTone(status = "") {
 }
 
 function FailureGroupRow({ group, isOpen, onToggle }) {
+  const { t } = useI18n();
   const first = group.items[0] || {};
   return (
     <article className="trace-row trace-row-failed trace-row-group">
@@ -126,7 +193,7 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
         <div className="trace-title-row">
           <strong className="trace-model-name">{first.model || "unknown-model"}</strong>
           <div className="trace-tag-group">
-            <InlineTag tone="danger">{group.count} failures</InlineTag>
+            <InlineTag tone="danger">{t("requests.failures", { count: group.count })}</InlineTag>
             <InlineTag tone="accent">{formatEndpointTag(first.endpoint || first.operation)}</InlineTag>
             <InlineTag>{formatProviderTag(first.provider)}</InlineTag>
             {first.is_stream ? <InlineTag tone="gold">stream</InlineTag> : null}
@@ -134,7 +201,7 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
         </div>
         <div className="trace-subline-group">
           <span className="trace-subline">{formatDateTime(group.firstSeen)} - {formatDateTime(group.lastSeen)}</span>
-          {group.sessionID ? <span className="trace-subline mono">session {group.sessionID}</span> : null}
+          {group.sessionID ? <span className="trace-subline mono">{t("sessions.title")} {group.sessionID}</span> : null}
         </div>
       </div>
       <div className="trace-metric-stack">
@@ -148,7 +215,7 @@ function FailureGroupRow({ group, isOpen, onToggle }) {
       <TokenMetrics item={group} />
       <div className="action-group trace-row-actions">
         <button className="ghost-button" type="button" onClick={onToggle}>
-          {isOpen ? "Collapse" : "Expand"}
+          {isOpen ? t("requests.collapse") : t("requests.expand")}
         </button>
       </div>
     </article>
@@ -170,27 +237,29 @@ function TokenMetrics({ item }) {
 }
 
 function RowActions({ item, fromView = "", fromSessionID = "", focus = "" }) {
+  const { t } = useI18n();
+  const itemID = item.id || item.trace_id;
   return (
     <div className="action-group trace-row-actions">
       {item.session_id ? (
-        <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title="View session" aria-label="View session">
+        <Link className="icon-button" to={`/sessions/${encodeURIComponent(item.session_id)}`} title={t("requests.viewSession")} aria-label={t("requests.viewSession")}>
           <StackIcon />
         </Link>
       ) : null}
       {fromSessionID ? (
-        <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
-          Timeline
+        <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "timeline", focus === "failure" ? "timeline_error" : "timeline")}>
+          {t("requests.timeline")}
         </Link>
       ) : null}
       {fromSessionID ? (
-        <Link className="ghost-button" to={buildTraceLink(item.id, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
-          Raw
+        <Link className="ghost-button" to={buildTraceLink(itemID, fromView, fromSessionID, "raw", focus === "failure" ? "response" : focus)}>
+          {t("requests.raw")}
         </Link>
       ) : null}
-      <Link className="icon-button" to={buildTraceLink(item.id, fromView, fromSessionID, "", focus)} title="View trace" aria-label="View trace">
+      <Link className="icon-button" to={buildTraceLink(itemID, fromView, fromSessionID, "", focus)} title={t("requests.viewTrace")} aria-label={t("requests.viewTrace")}>
         <ViewIcon />
       </Link>
-      <a className="icon-button" href={apiPaths.traceDownload(item.id)} title="Download .http" aria-label="Download trace">
+      <a className="icon-button" href={apiPaths.traceDownload(itemID)} title={t("requests.downloadTrace")} aria-label={t("requests.downloadTrace")}>
         <DownloadIcon />
       </a>
     </div>

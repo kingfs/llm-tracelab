@@ -1,0 +1,13 @@
+{
+  "model": "local-test-model",
+  "instructions": "You are a concise coding assistant.",
+  "input": "Say hello in one short sentence.",
+  "store": true,
+  "metadata": {
+    "fixture": "codex_text_create",
+    "codex": {
+      "thread_id": "thread_fixture_text",
+      "client_request_id": "turn_fixture_text_1"
+    }
+  }
+}

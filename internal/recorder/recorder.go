@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/redaction"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
@@ -46,6 +47,13 @@ type PrepareOptions struct {
 	RoutingScore                   float64
 	RoutingCandidateCount          int
 	RoutingFailureReason           string
+	ExchangeID                     string
+	ExchangeKind                   string
+	ExchangeRole                   string
+	ParentExchangeID               string
+	SequenceIndex                  int
+	TraceID                        string
+	ResponseID                     string
 }
 
 type Recorder struct {
@@ -83,9 +91,12 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		} else {
 			var payload struct {
 				Model string `json:"model"`
+				Name  string `json:"name"`
 			}
 			if json.Unmarshal(bodyBytes, &payload) == nil && payload.Model != "" {
 				modelName = payload.Model
+			} else if payload.Name != "" {
+				modelName = payload.Name
 			}
 		}
 	}
@@ -167,6 +178,15 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		Version: "LLM_PROXY_V3",
 		Meta: MetaData{
 			RequestID:                      fmt.Sprintf("%d", now.UnixNano()),
+			RequestAuditID:                 requestAuditIDFromRequest(req),
+			ClientRequestID:                req.Header.Get("X-Client-Request-Id"),
+			ExchangeID:                     opts.ExchangeID,
+			ExchangeKind:                   opts.ExchangeKind,
+			ExchangeRole:                   opts.ExchangeRole,
+			ParentExchangeID:               opts.ParentExchangeID,
+			SequenceIndex:                  opts.SequenceIndex,
+			TraceID:                        opts.TraceID,
+			ResponseID:                     opts.ResponseID,
 			Time:                           now,
 			Model:                          modelName,
 			Provider:                       semantics.Provider,
@@ -194,6 +214,14 @@ func (r *Recorder) PrepareLogFileWithOptionsAndBody(req *http.Request, opts Prep
 		Path:   logPath,
 		Header: header,
 	}, nil
+}
+
+func requestAuditIDFromRequest(req *http.Request) string {
+	if req == nil {
+		return ""
+	}
+	id, _ := responsesaudit.RequestAuditIDFromContext(req.Context())
+	return id
 }
 
 func (r *Recorder) UpdateLogFile(info *LogInfo) error {

@@ -12,6 +12,8 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlgraph"
+	"github.com/kingfs/llm-tracelab/ent/dao/analysisjob"
+	"github.com/kingfs/llm-tracelab/ent/dao/analysisrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/apitoken"
 	"github.com/kingfs/llm-tracelab/ent/dao/channelconfig"
 	"github.com/kingfs/llm-tracelab/ent/dao/channelmodel"
@@ -19,10 +21,22 @@ import (
 	"github.com/kingfs/llm-tracelab/ent/dao/dataset"
 	"github.com/kingfs/llm-tracelab/ent/dao/datasetexample"
 	"github.com/kingfs/llm-tracelab/ent/dao/evalrun"
+	"github.com/kingfs/llm-tracelab/ent/dao/executionevent"
 	"github.com/kingfs/llm-tracelab/ent/dao/experimentrun"
 	"github.com/kingfs/llm-tracelab/ent/dao/modelcatalog"
+	"github.com/kingfs/llm-tracelab/ent/dao/parsejob"
+	"github.com/kingfs/llm-tracelab/ent/dao/parserversion"
+	"github.com/kingfs/llm-tracelab/ent/dao/requestaudit"
+	"github.com/kingfs/llm-tracelab/ent/dao/response"
+	"github.com/kingfs/llm-tracelab/ent/dao/responseitem"
 	"github.com/kingfs/llm-tracelab/ent/dao/score"
+	"github.com/kingfs/llm-tracelab/ent/dao/semanticnode"
+	"github.com/kingfs/llm-tracelab/ent/dao/systemevent"
+	"github.com/kingfs/llm-tracelab/ent/dao/toolcallaudit"
+	"github.com/kingfs/llm-tracelab/ent/dao/tracefinding"
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
+	"github.com/kingfs/llm-tracelab/ent/dao/traceobservation"
+	"github.com/kingfs/llm-tracelab/ent/dao/upstreamexchange"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreammodel"
 	"github.com/kingfs/llm-tracelab/ent/dao/upstreamtarget"
 	"github.com/kingfs/llm-tracelab/ent/dao/user"
@@ -86,20 +100,34 @@ var (
 func checkColumn(t, c string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			apitoken.Table:        apitoken.ValidColumn,
-			channelconfig.Table:   channelconfig.ValidColumn,
-			channelmodel.Table:    channelmodel.ValidColumn,
-			channelproberun.Table: channelproberun.ValidColumn,
-			dataset.Table:         dataset.ValidColumn,
-			datasetexample.Table:  datasetexample.ValidColumn,
-			evalrun.Table:         evalrun.ValidColumn,
-			experimentrun.Table:   experimentrun.ValidColumn,
-			modelcatalog.Table:    modelcatalog.ValidColumn,
-			score.Table:           score.ValidColumn,
-			tracelog.Table:        tracelog.ValidColumn,
-			upstreammodel.Table:   upstreammodel.ValidColumn,
-			upstreamtarget.Table:  upstreamtarget.ValidColumn,
-			user.Table:            user.ValidColumn,
+			apitoken.Table:         apitoken.ValidColumn,
+			analysisjob.Table:      analysisjob.ValidColumn,
+			analysisrun.Table:      analysisrun.ValidColumn,
+			channelconfig.Table:    channelconfig.ValidColumn,
+			channelmodel.Table:     channelmodel.ValidColumn,
+			channelproberun.Table:  channelproberun.ValidColumn,
+			dataset.Table:          dataset.ValidColumn,
+			datasetexample.Table:   datasetexample.ValidColumn,
+			evalrun.Table:          evalrun.ValidColumn,
+			executionevent.Table:   executionevent.ValidColumn,
+			experimentrun.Table:    experimentrun.ValidColumn,
+			modelcatalog.Table:     modelcatalog.ValidColumn,
+			parsejob.Table:         parsejob.ValidColumn,
+			parserversion.Table:    parserversion.ValidColumn,
+			requestaudit.Table:     requestaudit.ValidColumn,
+			response.Table:         response.ValidColumn,
+			responseitem.Table:     responseitem.ValidColumn,
+			score.Table:            score.ValidColumn,
+			semanticnode.Table:     semanticnode.ValidColumn,
+			systemevent.Table:      systemevent.ValidColumn,
+			toolcallaudit.Table:    toolcallaudit.ValidColumn,
+			tracefinding.Table:     tracefinding.ValidColumn,
+			tracelog.Table:         tracelog.ValidColumn,
+			traceobservation.Table: traceobservation.ValidColumn,
+			upstreamexchange.Table: upstreamexchange.ValidColumn,
+			upstreammodel.Table:    upstreammodel.ValidColumn,
+			upstreamtarget.Table:   upstreamtarget.ValidColumn,
+			user.Table:             user.ValidColumn,
 		})
 	})
 	return columnCheck(t, c)

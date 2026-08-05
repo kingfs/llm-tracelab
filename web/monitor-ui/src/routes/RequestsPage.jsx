@@ -5,12 +5,14 @@ import { EmptyState } from "../components/common/EmptyState";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { formatDuration, formatTime, formatTokenCount, setOrDeleteParam } from "../lib/monitor";
 
 const REFRESH_MS = 60_000;
 const PAGE_SIZE = 50;
 
 export function RequestsPage() {
+  const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const query = searchParams.get("q") || "";
@@ -81,36 +83,36 @@ export function RequestsPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Local First LLM Replay Proxy</p>
-          <h1>Requests</h1>
+          <h1>{t("requests.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <span className="badge badge-live">refresh / 60s</span>
+          <span className="badge badge-live">{t("common.refresh60")}</span>
           <span className="badge">{data?.refreshed_at ? formatTime(data.refreshed_at) : "..."}</span>
         </div>
       </header>
       <section className="hero-grid">
-        <StatCard label="Total" value={stats.total_request ?? 0} />
+        <StatCard label={t("common.total")} value={stats.total_request ?? 0} />
         <StatCard label="Avg TTFT" value={formatDuration(stats.avg_ttft ?? 0)} title={`${stats.avg_ttft ?? 0} ms`} />
-        <StatCard label="Tokens" value={formatTokenCount(stats.total_tokens ?? 0)} accent="accent-gold" title={String(stats.total_tokens ?? 0)} />
-        <StatCard label="Success" value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
+        <StatCard label={t("common.tokens")} value={formatTokenCount(stats.total_tokens ?? 0)} accent="accent-gold" title={String(stats.total_tokens ?? 0)} />
+        <StatCard label={t("common.success")} value={`${Number(stats.success_rate ?? 0).toFixed(1)}%`} accent="accent-green" />
       </section>
 
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Recent traffic</p>
-            <h2>Latest 50 traces</h2>
+            <h2>{t("requests.latest")}</h2>
           </div>
           <div className="panel-head-actions">
             <div className="pager">
               <button className="ghost-button" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-                Previous
+                {t("common.previous")}
               </button>
               <span className="pager-label">
                 {data?.page ?? page} / {Math.max(data?.total_pages ?? 1, 1)}
               </span>
               <button className="ghost-button" disabled={!data || page >= (data.total_pages || 1)} onClick={() => goToPage(page + 1)}>
-                Next
+                {t("common.next")}
               </button>
             </div>
           </div>
@@ -119,21 +121,21 @@ export function RequestsPage() {
           <input
             className="filter-input filter-input-wide"
             type="search"
-            placeholder="Search trace id, session id, model"
+            placeholder={t("requests.search")}
             value={filters.query}
             onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
           />
           <input
             className="filter-input"
             type="text"
-            placeholder="provider"
+            placeholder={t("sessions.provider")}
             value={filters.provider}
             onChange={(event) => setFilters((current) => ({ ...current, provider: event.target.value }))}
           />
           <input
             className="filter-input"
             type="text"
-            placeholder="model"
+            placeholder={t("sessions.model")}
             value={filters.model}
             onChange={(event) => setFilters((current) => ({ ...current, model: event.target.value }))}
           />
@@ -141,25 +143,25 @@ export function RequestsPage() {
             className="filter-input filter-select"
             value={filters.observation}
             onChange={(event) => setFilters((current) => ({ ...current, observation: event.target.value }))}
-            aria-label="Observation status"
+            aria-label={t("requests.observationStatus")}
           >
-            <option value="">all observations</option>
-            <option value="unparsed">unparsed</option>
-            <option value="parsed">parsed</option>
-            <option value="failed">parse failed</option>
-            <option value="queued">parse queued</option>
-            <option value="running">parse running</option>
+            <option value="">{t("requests.allObservations")}</option>
+            <option value="unparsed">{t("requests.unparsed")}</option>
+            <option value="parsed">{t("requests.parsed")}</option>
+            <option value="failed">{t("requests.parseFailed")}</option>
+            <option value="queued">{t("requests.parseQueued")}</option>
+            <option value="running">{t("requests.parseRunning")}</option>
           </select>
           <button className="ghost-button" type="submit">
-            Apply
+            {t("common.apply")}
           </button>
           <button className="ghost-button" type="button" onClick={resetFilters}>
-            Reset
+            {t("common.reset")}
           </button>
         </form>
 
-        {error ? <EmptyState title="Unable to load requests" detail={error} tone="danger" /> : null}
-        {loading && !data ? <EmptyState title="Loading requests" detail="Refreshing the latest trace index for this request list." /> : null}
+        {error ? <EmptyState title={t("requests.loadError")} detail={error} tone="danger" /> : null}
+        {loading && !data ? <EmptyState title={t("requests.loading")} detail={t("requests.loadingDetail")} /> : null}
 
         <RequestList items={items} fromView="requests" />
       </section>

@@ -1,0 +1,13 @@
+{
+  "model": "local-test-model",
+  "input": "Search the web for recent AI coding assistant news and summarize the top result.",
+  "store": true,
+  "metadata": {
+    "fixture": "codex_web_search_absent_tools",
+    "expected_behavior": "raw Codex request shape omits tools; HTTP compatibility normalization may inject an available hosted web search descriptor before runtime execution",
+    "codex": {
+      "thread_id": "thread_fixture_web_search_absent_tools",
+      "client_request_id": "turn_fixture_web_search_absent_tools_1"
+    }
+  }
+}

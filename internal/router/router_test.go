@@ -3,11 +3,13 @@ package router
 import (
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/upstream"
 )
 
 func boolPtr(v bool) *bool { return &v }
@@ -60,6 +62,32 @@ func TestRouterSelectUsesModelCatalog(t *testing.T) {
 	}
 	if selection.Target.ID != "fallback" {
 		t.Fatalf("selected target = %q, want fallback", selection.Target.ID)
+	}
+}
+
+func TestRouterAllowsEmptyStartupConfig(t *testing.T) {
+	rtr, err := New(&config.Config{}, nil)
+	if err != nil {
+		t.Fatalf("New(empty) error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize(empty) error = %v", err)
+	}
+	if got := rtr.Targets(); len(got) != 0 {
+		t.Fatalf("len(Targets()) = %d, want 0", len(got))
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"gpt-5"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	_, err = rtr.Select(req)
+	if err == nil {
+		t.Fatal("Select(empty) error = nil, want no supporting target")
+	}
+	if SelectionFailureReason(err) != SelectionFailureNoSupportingTarget {
+		t.Fatalf("SelectionFailureReason() = %q, want %q", SelectionFailureReason(err), SelectionFailureNoSupportingTarget)
 	}
 }
 
@@ -182,6 +210,263 @@ func TestRouterSingleTargetAllowsUnknownModels(t *testing.T) {
 	}
 	if selection.Target.ID != "default" {
 		t.Fatalf("selected target = %q, want default", selection.Target.ID)
+	}
+}
+
+func TestRouterChatCompletionsRequiresChatCapableAPISurface(t *testing.T) {
+	chatDisabled := false
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "native-responses",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ChatCompletions: &chatDisabled,
+					},
+				},
+			},
+			{
+				ID:             "chat",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "chat" {
+		t.Fatalf("selected target = %q, want chat", selection.Target.ID)
+	}
+	if selection.Decision == nil || len(selection.Decision.Candidates) != 2 {
+		t.Fatalf("selection decision missing candidates: %+v", selection.Decision)
+	}
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID == "chat" && candidate.APIType != "chat_completions" {
+			t.Fatalf("chat candidate APIType = %q, want chat_completions", candidate.APIType)
+		}
+		if candidate.ID == "native-responses" && (candidate.SupportsPath || candidate.FilterReason != "unsupported_path") {
+			t.Fatalf("native responses candidate = %+v, want unsupported_path", candidate)
+		}
+	}
+	snapshots := rtr.Snapshots()
+	if len(snapshots) != 2 {
+		t.Fatalf("len(snapshots) = %d, want 2", len(snapshots))
+	}
+	for _, snapshot := range snapshots {
+		if snapshot.ID == "native-responses" && snapshot.APIType != "responses_native" {
+			t.Fatalf("native response snapshot APIType = %q, want responses_native", snapshot.APIType)
+		}
+	}
+}
+
+func TestRouterResponsesEndpointAllowsNativeResponsesTarget(t *testing.T) {
+	chatDisabled := false
+	responsesEnabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "native-responses",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Mode:           "proxy",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       &responsesEnabled,
+						ChatCompletions: &chatDisabled,
+					},
+				},
+			},
+			{
+				ID:             "chat",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "native-responses" {
+		t.Fatalf("selected target = %q, want native-responses", selection.Target.ID)
+	}
+	if selection.Target.Upstream.APIType != "responses_native" {
+		t.Fatalf("selected APIType = %q, want responses_native", selection.Target.Upstream.APIType)
+	}
+	if selection.Decision == nil || len(selection.Decision.Candidates) != 2 {
+		t.Fatalf("selection decision missing candidates: %+v", selection.Decision)
+	}
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID == "native-responses" && (!candidate.SupportsPath || candidate.FilterReason != "") {
+			t.Fatalf("native responses candidate = %+v, want selectable for /v1/responses", candidate)
+		}
+		if candidate.ID == "chat" && !candidate.SupportsPath {
+			t.Fatalf("chat completions candidate = %+v, want compatible fallback for /v1/responses", candidate)
+		}
+	}
+}
+
+func TestSupportsLocalResponsesServerBackendExcludesNativeResponsesOnlyTarget(t *testing.T) {
+	responsesEnabled := true
+	chatDisabled := false
+	native, err := upstream.Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.openai.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "responses_native",
+		Capabilities: config.UpstreamCapabilitiesConfig{
+			Responses:       &responsesEnabled,
+			ChatCompletions: &chatDisabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve(native) error = %v", err)
+	}
+	if !native.SupportsEndpoint("/v1/responses") {
+		t.Fatal("native responses target should support /v1/responses pass-through")
+	}
+	if SupportsLocalResponsesServerBackend(native) {
+		t.Fatal("native responses-only target must not satisfy local Responses server backend")
+	}
+
+	chat, err := upstream.Resolve(config.UpstreamConfig{
+		BaseURL:        "https://compat.example.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+	})
+	if err != nil {
+		t.Fatalf("Resolve(chat) error = %v", err)
+	}
+	if !SupportsLocalResponsesServerBackend(chat) {
+		t.Fatal("chat completions target should satisfy local Responses server backend")
+	}
+}
+
+func TestRouterSelectFiltersTargetsWithoutToolCallingCapability(t *testing.T) {
+	toolCallingDisabled := false
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "no-tools",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat-no-tools.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						ToolCalling: &toolCallingDisabled,
+					},
+				},
+			},
+			{
+				ID:             "tools",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://compat-tools.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "chat_completions",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"gpt-5","messages":[{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "tools" {
+		t.Fatalf("selected target = %q, want tools", selection.Target.ID)
+	}
+	var sawNoTools bool
+	for _, candidate := range selection.Decision.Candidates {
+		if candidate.ID != "no-tools" {
+			continue
+		}
+		sawNoTools = true
+		if candidate.SupportsTools || candidate.Selectable || candidate.FilterReason != "unsupported_tools" {
+			t.Fatalf("no-tools candidate = %+v, want unsupported_tools", candidate)
+		}
+	}
+	if !sawNoTools {
+		t.Fatalf("decision did not include no-tools candidate: %+v", selection.Decision)
 	}
 }
 
@@ -933,6 +1218,60 @@ func TestRouterExtractsModelAndRoutesAnthropicCountTokens(t *testing.T) {
 	}
 }
 
+func TestRouterExtractsModelAndRoutesOpenAITokenize(t *testing.T) {
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"gpt-5"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.openai.com/v1",
+					ProviderPreset: "openai",
+				},
+			},
+			{
+				ID:             "vllm-primary",
+				Enabled:        boolPtr(true),
+				Priority:       90,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"qwen3.6-35b-a3b"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "http://vllm.local:8000/v1",
+					ProviderPreset: "vllm",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/tokenize", strings.NewReader(`{"model":"qwen3.6-35b-a3b","prompt":"hello","add_special_tokens":false}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	selection, err := rtr.Select(req)
+	if err != nil {
+		t.Fatalf("Select() error = %v", err)
+	}
+	if selection.Target.ID != "vllm-primary" {
+		t.Fatalf("selected target = %q, want vllm-primary", selection.Target.ID)
+	}
+	if selection.Decision == nil || selection.Decision.ModelName != "qwen3.6-35b-a3b" {
+		t.Fatalf("decision model = %#v, want qwen3.6-35b-a3b", selection.Decision)
+	}
+}
+
 func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
 	cfg := &config.Config{
 		Upstreams: []config.UpstreamTargetConfig{
@@ -978,6 +1317,85 @@ func TestRouterAggregatedModelsDeduplicatesAcrossUpstreams(t *testing.T) {
 		if models[i] != want[i] {
 			t.Fatalf("models[%d] = %q, want %q (all=%v)", i, models[i], want[i], models)
 		}
+	}
+}
+
+func TestRouterAggregatedModelsPreferConfiguredModelsOverDiscoveredCatalog(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-enabled"},{"id":"gpt-disabled"},{"id":"gpt-upstream-only"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "primary",
+				Enabled:        boolPtr(true),
+				ModelDiscovery: ModelDiscoveryListModels,
+				StaticModels:   []string{"gpt-enabled"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	models := rtr.AggregatedModels()
+	if len(models) != 1 || models[0] != "gpt-enabled" {
+		t.Fatalf("AggregatedModels() = %#v, want only configured enabled model", models)
+	}
+}
+
+func TestRouterAggregatedModelsHidesDiscoveredCatalogForConfiguredModelsOnlyTarget(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-disabled"},{"id":"gpt-upstream-only"}]}`))
+	}))
+	defer upstreamServer.Close()
+
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:                   "primary",
+				Enabled:              boolPtr(true),
+				ModelDiscovery:       ModelDiscoveryListModels,
+				ConfiguredModelsOnly: true,
+				Upstream: config.UpstreamConfig{
+					BaseURL:        upstreamServer.URL + "/v1",
+					ProviderPreset: "openai",
+				},
+			},
+		},
+	}
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	if models := rtr.AggregatedModels(); len(models) != 0 {
+		t.Fatalf("AggregatedModels() = %#v, want empty configured model list", models)
 	}
 }
 

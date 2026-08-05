@@ -4,9 +4,11 @@ import { EmptyState } from "../components/common/EmptyState";
 import { DetailMetaPill, InlineTag } from "../components/common/Badges";
 import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, postJSON } from "../lib/api";
+import { useI18n } from "../lib/i18n";
 import { formatDateTime } from "../lib/monitor";
 
 export function AnalysisPage() {
+  const { t } = useI18n();
   const [refreshTick, setRefreshTick] = useState(0);
   const [batchBusy, setBatchBusy] = useState(false);
   const [jobNotice, setJobNotice] = useState(null);
@@ -29,12 +31,16 @@ export function AnalysisPage() {
     }
   };
 
-  const runUnparsedBatch = async () => {
+  const runAnalysisRepairBatch = async () => {
     setBatchBusy(true);
     setJobNotice(null);
     try {
-      const response = await postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true });
-      setJobNotice({ tone: "green", text: `Batch reanalysis job #${response.job?.id || "-"} ${response.job?.status || "queued"}` });
+      const jobs = await Promise.all([
+        postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "failed", limit: 1000, reparse: true, scan: true }),
+        postJSON(apiPaths.analysisBatchReanalyze, { mode: "async", observation: "unparsed", limit: 1000, reparse: true, scan: true }),
+      ]);
+      const jobIDs = jobs.map((response) => `#${response.job?.id || "-"}`).join(", ");
+      setJobNotice({ tone: "green", text: `Analysis refresh jobs ${jobIDs} queued` });
       setRefreshTick((value) => value + 1);
     } catch (error) {
       setJobNotice({ tone: "danger", text: error.message || "request failed" });
@@ -48,28 +54,28 @@ export function AnalysisPage() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Offline runs</p>
-          <h1>Analysis</h1>
+          <h1>{t("analysis.title")}</h1>
         </div>
         <div className="topbar-meta">
-          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runUnparsedBatch}>
-            {batchBusy ? "Queueing" : "Reparse unparsed"}
+          <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runAnalysisRepairBatch}>
+            {batchBusy ? t("analysis.queueing") : t("analysis.refreshProblemData")}
           </button>
           <button className="ghost-button active" type="button" disabled={batchBusy} onClick={runMissingUsageBatch}>
-            {batchBusy ? "Queueing" : "Repair missing usage"}
+            {batchBusy ? t("analysis.queueing") : t("analysis.repairMissingUsage")}
           </button>
         </div>
       </header>
-      {jobNotice ? <EmptyState title="Reanalysis job" detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
+      {jobNotice ? <EmptyState title={t("analysis.jobNotice")} detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Reanalysis jobs</p>
-            <h2>Job queue</h2>
+            <h2>{t("analysis.jobQueue")}</h2>
           </div>
-          <InlineTag>{jobs.data?.total ?? 0} jobs</InlineTag>
+          <InlineTag>{t("analysis.jobs", { count: jobs.data?.total ?? 0 })}</InlineTag>
         </div>
-        {jobs.error ? <EmptyState title="Unable to load jobs" detail={jobs.error} tone="danger" /> : null}
-        {jobs.loading && !jobs.data ? <EmptyState title="Loading jobs" detail="Reading queued and completed reanalysis work." /> : null}
+        {jobs.error ? <EmptyState title={t("analysis.loadJobsError")} detail={jobs.error} tone="danger" /> : null}
+        {jobs.loading && !jobs.data ? <EmptyState title={t("analysis.loadingJobs")} detail={t("analysis.loadingJobsDetail")} /> : null}
         {jobItems.length ? (
           <div className="finding-list">
             {jobItems.map((job) => (
@@ -92,19 +98,19 @@ export function AnalysisPage() {
             ))}
           </div>
         ) : jobs.data ? (
-          <EmptyState title="No reanalysis jobs" detail="Trace, session, and batch actions create auditable jobs here." />
+          <EmptyState title={t("analysis.noJobs")} detail={t("analysis.noJobsDetail")} />
         ) : null}
       </section>
       <section className="panel">
         <div className="panel-head">
           <div>
             <p className="eyebrow">Persisted runs</p>
-            <h2>Latest analysis</h2>
+            <h2>{t("analysis.latest")}</h2>
           </div>
-          <InlineTag>{analysis.data?.total ?? 0} total</InlineTag>
+          <InlineTag>{t("analysis.totalRuns", { count: analysis.data?.total ?? 0 })}</InlineTag>
         </div>
-        {analysis.error ? <EmptyState title="Unable to load analysis" detail={analysis.error} tone="danger" /> : null}
-        {analysis.loading && !analysis.data ? <EmptyState title="Loading analysis" detail="Reading persisted analysis runs." /> : null}
+        {analysis.error ? <EmptyState title={t("analysis.loadError")} detail={analysis.error} tone="danger" /> : null}
+        {analysis.loading && !analysis.data ? <EmptyState title={t("analysis.loading")} detail={t("analysis.loadingDetail")} /> : null}
         {items.length ? (
           <div className="finding-list">
             {items.map((run) => (
@@ -123,14 +129,14 @@ export function AnalysisPage() {
                   <DetailMetaPill label="created" value={formatDateTime(run.created_at)} />
                 </div>
                 <div className="action-group action-group-start">
-                  {run.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(run.session_id)}`}>Open Session</Link> : null}
-                  {run.trace_id ? <Link className="ghost-button" to={`/traces/${encodeURIComponent(run.trace_id)}`}>Open Trace</Link> : null}
+                  {run.session_id ? <Link className="ghost-button" to={`/sessions/${encodeURIComponent(run.session_id)}`}>{t("analysis.openSession")}</Link> : null}
+                  {run.trace_id ? <Link className="ghost-button" to={`/traces/${encodeURIComponent(run.trace_id)}`}>{t("analysis.openTrace")}</Link> : null}
                 </div>
               </article>
             ))}
           </div>
         ) : analysis.data ? (
-          <EmptyState title="No analysis runs" detail="Run analyze session --session-id to create deterministic session analysis." />
+          <EmptyState title={t("analysis.noRuns")} detail={t("analysis.noRunsDetail")} />
         ) : null}
       </section>
     </div>

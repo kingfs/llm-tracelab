@@ -12,14 +12,52 @@ auth:
   session_ttl: 24h
 
 database:
-  driver: "sqlite"
+  driver: "postgres"
   dsn: ""
-  max_open_conns: 4
-  max_idle_conns: 4
+  max_open_conns: 16
+  max_idle_conns: 8
   auto_migrate: true
 
 trace:
-  output_dir: "./logs"
+  output_dir: "./data/traces"
+
+responses_server:
+  enabled: true
+  default_model: ""
+  force_store: true
+  max_request_body_bytes: 10485760
+  path: "/v1/responses"
+  auto_compact: true
+  compact_history_item_threshold: 80
+  adopt_channel_model_profiles: true
+  codex_compat:
+    enabled: true
+    auto_inject_hosted_tools: ["web_search"]
+    inject_when_tools_absent: true
+    preserve_client_tools: true
+    default_tool_choice: "auto"
+  function_executors:
+    enabled: false
+    timeout: 2s
+    max_result_bytes: 65536
+    redaction:
+      arguments: true
+      output: true
+    executors: []
+
+tools:
+  web_search:
+    enabled: true
+    provider: "searxng"
+    max_results: 5
+    base_url: "http://searxng:8080"
+    timeout_ms: 5000
+    user_agent: "llm-tracelab/production"
+  mcp:
+    enabled: true
+    default_timeout_ms: 60000
+    max_result_bytes: 65536
+    servers: []
 
 router:
   model_discovery:
@@ -34,30 +72,8 @@ router:
   fallback:
     on_missing_model: "reject"
 
-upstreams:
-  - id: "primary"
-    enabled: true
-    priority: 100
-    weight: 1.0
-    capacity_hint: 1.0
-    model_discovery: "static_only"
-    static_models:
-      - "gpt-4o-mini"
-    upstream:
-      base_url: "https://api.openai.com/v1"
-      api_key: "$env:LLM_API_KEY"
-      provider_preset: "openai"
-      protocol_family: ""
-      routing_profile: ""
-      api_version: ""
-      deployment: ""
-      project: ""
-      location: ""
-      model_resource: ""
-      headers: {}
-
 debug:
-  output_dir: "./logs"
+  output_dir: "./data/traces"
   mask_key: true
 
 chaos:

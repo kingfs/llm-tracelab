@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -14,11 +15,18 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	llmspecs "github.com/kingfs/go-llm-specs"
 	"github.com/kingfs/llm-tracelab/internal/auth"
 	"github.com/kingfs/llm-tracelab/internal/channel"
+	"github.com/kingfs/llm-tracelab/internal/config"
+	"github.com/kingfs/llm-tracelab/internal/providerprobe"
 	"github.com/kingfs/llm-tracelab/internal/reanalysis"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
+	"github.com/kingfs/llm-tracelab/internal/routeplan"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/internal/upstream"
@@ -203,28 +211,192 @@ type systemEventView struct {
 	ResolvedAt      *time.Time      `json:"resolved_at,omitempty"`
 }
 
+type responsesAuditTraceResponse struct {
+	Query             responsesAuditTraceQuery      `json:"query"`
+	RequestAudit      *responsesRequestAuditView    `json:"request_audit,omitempty"`
+	FinalResponse     *responsesFinalResponseView   `json:"final_response,omitempty"`
+	Events            []responsesExecutionEventView `json:"events"`
+	EntryExchange     *responsesExchangeView        `json:"entry_exchange,omitempty"`
+	ModelExchanges    []responsesExchangeView       `json:"model_exchanges"`
+	UpstreamExchanges []responsesUpstreamExchange   `json:"upstream_exchanges"`
+	RawCassettes      []responsesRawCassetteView    `json:"raw_cassettes"`
+}
+
+type responsesToolCallAuditListResponse struct {
+	Query           responsesToolCallAuditQuery  `json:"query"`
+	Items           []responsesToolCallAuditView `json:"items"`
+	Total           int                          `json:"total"`
+	IncludePayloads bool                         `json:"include_payloads"`
+}
+
+type responsesAuditTraceQuery struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+}
+
+type responsesToolCallAuditQuery struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	CallID         string `json:"call_id,omitempty"`
+	ToolName       string `json:"tool_name,omitempty"`
+	Status         string `json:"status,omitempty"`
+	Limit          int    `json:"limit"`
+}
+
+type responsesRequestAuditView struct {
+	ID              string         `json:"id"`
+	ResponseID      string         `json:"response_id,omitempty"`
+	ConversationID  string         `json:"conversation_id,omitempty"`
+	Method          string         `json:"method"`
+	Path            string         `json:"path"`
+	ClientRequestID string         `json:"client_request_id,omitempty"`
+	HeaderJSON      map[string]any `json:"header_json,omitempty"`
+	BodyPreview     string         `json:"body_preview,omitempty"`
+	BodySHA256      string         `json:"body_sha256,omitempty"`
+	Status          string         `json:"status,omitempty"`
+	ErrorText       string         `json:"error_text,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+}
+
+type responsesExecutionEventView struct {
+	ID             string         `json:"id"`
+	ResponseID     string         `json:"response_id,omitempty"`
+	RequestAuditID string         `json:"request_audit_id,omitempty"`
+	ConversationID string         `json:"conversation_id,omitempty"`
+	EventType      string         `json:"event_type"`
+	Phase          string         `json:"phase,omitempty"`
+	Status         string         `json:"status,omitempty"`
+	Message        string         `json:"message,omitempty"`
+	DetailsJSON    map[string]any `json:"details_json,omitempty"`
+	OccurredAt     time.Time      `json:"occurred_at"`
+}
+
+type responsesUpstreamExchange struct {
+	ID               string    `json:"id"`
+	ResponseID       string    `json:"response_id,omitempty"`
+	RequestAuditID   string    `json:"request_audit_id,omitempty"`
+	TraceID          string    `json:"trace_id,omitempty"`
+	CassettePath     string    `json:"cassette_path,omitempty"`
+	ExchangeKind     string    `json:"exchange_kind,omitempty"`
+	ExchangeRole     string    `json:"exchange_role,omitempty"`
+	ParentExchangeID string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int       `json:"sequence_index,omitempty"`
+	UpstreamID       string    `json:"upstream_id,omitempty"`
+	RouteTarget      string    `json:"route_target,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Provider         string    `json:"provider,omitempty"`
+	Endpoint         string    `json:"endpoint,omitempty"`
+	StatusCode       int       `json:"status_code,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+	ErrorText        string    `json:"error_text,omitempty"`
+}
+
+type responsesExchangeView struct {
+	ID               string    `json:"id,omitempty"`
+	ResponseID       string    `json:"response_id,omitempty"`
+	RequestAuditID   string    `json:"request_audit_id,omitempty"`
+	TraceID          string    `json:"trace_id,omitempty"`
+	CassettePath     string    `json:"cassette_path,omitempty"`
+	ExchangeKind     string    `json:"exchange_kind,omitempty"`
+	ExchangeRole     string    `json:"exchange_role,omitempty"`
+	ParentExchangeID string    `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int       `json:"sequence_index,omitempty"`
+	UpstreamID       string    `json:"upstream_id,omitempty"`
+	RouteTarget      string    `json:"route_target,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Provider         string    `json:"provider,omitempty"`
+	Endpoint         string    `json:"endpoint,omitempty"`
+	StatusCode       int       `json:"status_code,omitempty"`
+	StartedAt        time.Time `json:"started_at,omitempty"`
+	CompletedAt      time.Time `json:"completed_at,omitempty"`
+	ErrorText        string    `json:"error_text,omitempty"`
+}
+
+type responsesFinalResponseView struct {
+	ResponseID      string    `json:"response_id,omitempty"`
+	RequestAuditID  string    `json:"request_audit_id,omitempty"`
+	ConversationID  string    `json:"conversation_id,omitempty"`
+	ClientRequestID string    `json:"client_request_id,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	ErrorText       string    `json:"error_text,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Endpoint        string    `json:"endpoint,omitempty"`
+	StatusCode      int       `json:"status_code,omitempty"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+}
+
+type responsesRawCassetteView struct {
+	ExchangeID       string                         `json:"exchange_id,omitempty"`
+	TraceID          string                         `json:"trace_id,omitempty"`
+	CassettePath     string                         `json:"cassette_path,omitempty"`
+	ExchangeKind     string                         `json:"exchange_kind,omitempty"`
+	ExchangeRole     string                         `json:"exchange_role,omitempty"`
+	ParentExchangeID string                         `json:"parent_exchange_id,omitempty"`
+	SequenceIndex    int                            `json:"sequence_index,omitempty"`
+	ReadError        string                         `json:"read_error,omitempty"`
+	Header           recordHeaderView               `json:"header,omitempty"`
+	Events           []recordfile.RecordEvent       `json:"events,omitempty"`
+	Request          recordfile.HTTPRequestSummary  `json:"request,omitempty"`
+	Response         recordfile.HTTPResponseSummary `json:"response,omitempty"`
+}
+
+type responsesToolCallAuditView struct {
+	ID              string                        `json:"id"`
+	ResponseID      string                        `json:"response_id,omitempty"`
+	RequestAuditID  string                        `json:"request_audit_id,omitempty"`
+	ConversationID  string                        `json:"conversation_id,omitempty"`
+	CallID          string                        `json:"call_id"`
+	ToolType        string                        `json:"tool_type,omitempty"`
+	ToolName        string                        `json:"tool_name,omitempty"`
+	Executor        string                        `json:"executor,omitempty"`
+	Status          string                        `json:"status,omitempty"`
+	Phase           string                        `json:"phase,omitempty"`
+	InputSummary    responsesaudit.PayloadSummary `json:"input_summary"`
+	OutputSummary   responsesaudit.PayloadSummary `json:"output_summary"`
+	MetadataSummary responsesaudit.PayloadSummary `json:"metadata_summary"`
+	InputJSON       map[string]any                `json:"input_json,omitempty"`
+	OutputJSON      map[string]any                `json:"output_json,omitempty"`
+	MetadataJSON    map[string]any                `json:"metadata_json,omitempty"`
+	ErrorText       string                        `json:"error_text,omitempty"`
+	StartedAt       time.Time                     `json:"started_at,omitempty"`
+	CompletedAt     time.Time                     `json:"completed_at,omitempty"`
+	CreatedAt       time.Time                     `json:"created_at"`
+}
+
 type traceListItem struct {
-	ID               string              `json:"id"`
-	SessionID        string              `json:"session_id,omitempty"`
-	SessionSource    string              `json:"session_source,omitempty"`
-	RecordedAt       time.Time           `json:"recorded_at"`
-	Model            string              `json:"model"`
-	Provider         string              `json:"provider"`
-	SelectedUpstream string              `json:"selected_upstream_id,omitempty"`
-	Operation        string              `json:"operation"`
-	Endpoint         string              `json:"endpoint"`
-	Method           string              `json:"method"`
-	URL              string              `json:"url"`
-	StatusCode       int                 `json:"status_code"`
-	DurationMs       int64               `json:"duration_ms"`
-	TTFTMs           int64               `json:"ttft_ms"`
-	TotalTokens      int                 `json:"total_tokens"`
-	PromptTokens     int                 `json:"prompt_tokens"`
-	CompletionTokens int                 `json:"completion_tokens"`
-	CachedTokens     int                 `json:"cached_tokens"`
-	IsStream         bool                `json:"is_stream"`
-	Error            string              `json:"error,omitempty"`
-	Observation      observationListView `json:"observation"`
+	ID                string              `json:"id"`
+	SessionID         string              `json:"session_id,omitempty"`
+	SessionSource     string              `json:"session_source,omitempty"`
+	RecordedAt        time.Time           `json:"recorded_at"`
+	Model             string              `json:"model"`
+	Provider          string              `json:"provider"`
+	SelectedUpstream  string              `json:"selected_upstream_id,omitempty"`
+	SelectedPreset    string              `json:"selected_upstream_provider_preset,omitempty"`
+	Operation         string              `json:"operation"`
+	Endpoint          string              `json:"endpoint"`
+	Method            string              `json:"method"`
+	URL               string              `json:"url"`
+	StatusCode        int                 `json:"status_code"`
+	DurationMs        int64               `json:"duration_ms"`
+	TTFTMs            int64               `json:"ttft_ms"`
+	TotalTokens       int                 `json:"total_tokens"`
+	PromptTokens      int                 `json:"prompt_tokens"`
+	CompletionTokens  int                 `json:"completion_tokens"`
+	CachedTokens      int                 `json:"cached_tokens"`
+	IsStream          bool                `json:"is_stream"`
+	Error             string              `json:"error,omitempty"`
+	RequestAuditID    string              `json:"request_audit_id,omitempty"`
+	ResponseID        string              `json:"response_id,omitempty"`
+	ExchangeID        string              `json:"exchange_id,omitempty"`
+	ExchangeKind      string              `json:"exchange_kind,omitempty"`
+	ExchangeRole      string              `json:"exchange_role,omitempty"`
+	ParentExchangeID  string              `json:"parent_exchange_id,omitempty"`
+	SequenceIndex     int                 `json:"sequence_index,omitempty"`
+	UpstreamCallCount int                 `json:"upstream_call_count,omitempty"`
+	UpstreamCalls     []traceListItem     `json:"upstream_calls,omitempty"`
+	Observation       observationListView `json:"observation"`
 }
 
 type observationListView struct {
@@ -391,6 +563,9 @@ type sessionTimelineItem struct {
 
 type detailResponse struct {
 	ID                     string                   `json:"id"`
+	ResponseID             string                   `json:"response_id,omitempty"`
+	RequestAuditID         string                   `json:"request_audit_id,omitempty"`
+	ResponsesAudit         *traceResponsesAuditRef  `json:"responses_audit,omitempty"`
 	Session                *traceSessionView        `json:"session,omitempty"`
 	Header                 recordHeaderView         `json:"header"`
 	Events                 []recordEventView        `json:"events"`
@@ -400,8 +575,14 @@ type detailResponse struct {
 	AIReasoning            string                   `json:"ai_reasoning"`
 	AIBlocks               []ContentBlock           `json:"ai_blocks"`
 	ToolCalls              []ToolCall               `json:"tool_calls"`
+	UpstreamCalls          []traceListItem          `json:"upstream_calls,omitempty"`
 	SelectedUpstreamHealth *traceUpstreamHealthView `json:"selected_upstream_health,omitempty"`
 	Performance            performanceView          `json:"performance"`
+}
+
+type traceResponsesAuditRef struct {
+	ResponseID     string `json:"response_id,omitempty"`
+	RequestAuditID string `json:"request_audit_id,omitempty"`
 }
 
 type performanceResponse struct {
@@ -576,11 +757,167 @@ type LogStats struct {
 }
 
 type RouteOptions struct {
-	Router         *router.Router
-	ChannelService *channel.Service
-	AuthVerifier   auth.TokenVerifier
-	AuthStore      *auth.Store
-	SessionTTL     time.Duration
+	Router                           *router.Router
+	ChannelService                   *channel.Service
+	AuthVerifier                     auth.TokenVerifier
+	MonitorAuthVerifier              auth.TokenVerifier
+	MonitorJWT                       *auth.JWTManager
+	AuthStore                        *auth.Store
+	SessionTTL                       time.Duration
+	ResponsesFunctionExecutors       config.ResponsesFunctionExecutorConfig
+	ResponsesFunctionExecutorState   *ResponsesFunctionExecutorState
+	ResponsesFunctionExecutorStore   *store.Store
+	ResponsesFunctionExecutorManager *functionexec.Manager
+}
+
+type responsesFunctionExecutorsSummary struct {
+	Enabled        bool                                   `json:"enabled"`
+	Timeout        string                                 `json:"timeout"`
+	MaxResultBytes int                                    `json:"max_result_bytes"`
+	Redaction      responsesFunctionExecutorRedactionView `json:"redaction"`
+	SupportedTypes []string                               `json:"supported_types"`
+	Executors      []responsesFunctionExecutorBindingView `json:"executors"`
+	Warnings       []string                               `json:"warnings"`
+}
+
+type responsesFunctionExecutorRedactionView struct {
+	Arguments bool `json:"arguments"`
+	Output    bool `json:"output"`
+}
+
+type responsesFunctionExecutorBindingView struct {
+	Name              string                               `json:"name"`
+	Type              string                               `json:"type"`
+	Enabled           bool                                 `json:"enabled"`
+	Available         bool                                 `json:"available"`
+	Process           responsesFunctionExecutorProcessView `json:"process"`
+	OutputConfigured  bool                                 `json:"output_configured"`
+	CommandConfigured bool                                 `json:"command_configured"`
+	Warnings          []string                             `json:"warnings"`
+}
+
+type responsesFunctionExecutorProcessView struct {
+	WorkingDir             string   `json:"working_dir,omitempty"`
+	RequireAbsoluteCommand bool     `json:"require_absolute_command,omitempty"`
+	AllowedCommandDirs     []string `json:"allowed_command_dirs,omitempty"`
+	RejectRoot             bool     `json:"reject_root,omitempty"`
+}
+
+type responsesFunctionExecutorUpdateRequest struct {
+	ValidateOnly   *bool                                    `json:"validate_only"`
+	Enabled        *bool                                    `json:"enabled"`
+	Timeout        string                                   `json:"timeout"`
+	MaxResultBytes *int                                     `json:"max_result_bytes"`
+	Redaction      *responsesFunctionExecutorRedactionPatch `json:"redaction"`
+	Executors      []responsesFunctionExecutorBindingPatch  `json:"executors"`
+	ExecutorsSet   bool                                     `json:"-"`
+}
+
+type responsesFunctionExecutorRedactionPatch struct {
+	Arguments *bool `json:"arguments"`
+	Output    *bool `json:"output"`
+}
+
+type responsesFunctionExecutorBindingPatch struct {
+	Name    string                                 `json:"name"`
+	Type    string                                 `json:"type"`
+	Enabled *bool                                  `json:"enabled"`
+	Process *responsesFunctionExecutorProcessPatch `json:"process"`
+}
+
+type responsesFunctionExecutorProcessPatch struct {
+	WorkingDir             string   `json:"working_dir"`
+	RequireAbsoluteCommand *bool    `json:"require_absolute_command"`
+	AllowedCommandDirs     []string `json:"allowed_command_dirs"`
+	RejectRoot             *bool    `json:"reject_root"`
+}
+
+type responsesFunctionExecutorUpdateResponse struct {
+	Applied      bool                              `json:"applied"`
+	ValidateOnly bool                              `json:"validate_only"`
+	Summary      responsesFunctionExecutorsSummary `json:"summary"`
+}
+
+type ResponsesFunctionExecutorState struct {
+	mu      sync.RWMutex
+	cfg     config.ResponsesFunctionExecutorConfig
+	store   *store.Store
+	manager *functionexec.Manager
+}
+
+type ResponsesFunctionExecutorStateOption func(*ResponsesFunctionExecutorState)
+
+func WithResponsesFunctionExecutorPersistence(st *store.Store) ResponsesFunctionExecutorStateOption {
+	return func(s *ResponsesFunctionExecutorState) {
+		s.store = st
+	}
+}
+
+func WithResponsesFunctionExecutorManager(manager *functionexec.Manager) ResponsesFunctionExecutorStateOption {
+	return func(s *ResponsesFunctionExecutorState) {
+		s.manager = manager
+	}
+}
+
+func NewResponsesFunctionExecutorState(cfg config.ResponsesFunctionExecutorConfig, opts ...ResponsesFunctionExecutorStateOption) *ResponsesFunctionExecutorState {
+	state := &ResponsesFunctionExecutorState{cfg: cloneResponsesFunctionExecutorConfig(cfg)}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(state)
+		}
+	}
+	return state
+}
+
+func (s *ResponsesFunctionExecutorState) summary() responsesFunctionExecutorsSummary {
+	if s == nil {
+		return responsesFunctionExecutorsSummaryFromConfig(config.ResponsesFunctionExecutorConfig{})
+	}
+	s.mu.RLock()
+	cfg := cloneResponsesFunctionExecutorConfig(s.cfg)
+	s.mu.RUnlock()
+	return responsesFunctionExecutorsSummaryFromConfig(cfg)
+}
+
+func (s *ResponsesFunctionExecutorState) validate(req responsesFunctionExecutorUpdateRequest) (responsesFunctionExecutorsSummary, error) {
+	if s == nil {
+		s = NewResponsesFunctionExecutorState(config.ResponsesFunctionExecutorConfig{})
+	}
+	s.mu.RLock()
+	cfg := cloneResponsesFunctionExecutorConfig(s.cfg)
+	s.mu.RUnlock()
+	updated, err := applyResponsesFunctionExecutorUpdate(cfg, req)
+	if err != nil {
+		return responsesFunctionExecutorsSummary{}, err
+	}
+	return responsesFunctionExecutorsSummaryFromConfig(updated), nil
+}
+
+func (s *ResponsesFunctionExecutorState) apply(ctx context.Context, req responsesFunctionExecutorUpdateRequest) (responsesFunctionExecutorsSummary, error) {
+	if s == nil {
+		s = NewResponsesFunctionExecutorState(config.ResponsesFunctionExecutorConfig{})
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	updated, err := applyResponsesFunctionExecutorUpdate(cloneResponsesFunctionExecutorConfig(s.cfg), req)
+	if err != nil {
+		return responsesFunctionExecutorsSummary{}, err
+	}
+	if _, err := functionexec.Registrations(updated); err != nil {
+		return responsesFunctionExecutorsSummary{}, err
+	}
+	if s.store != nil {
+		if err := s.store.SaveResponsesFunctionExecutorConfigSnapshot(ctx, updated); err != nil {
+			return responsesFunctionExecutorsSummary{}, err
+		}
+	}
+	if s.manager != nil {
+		if err := s.manager.Apply(updated); err != nil {
+			return responsesFunctionExecutorsSummary{}, err
+		}
+	}
+	s.cfg = cloneResponsesFunctionExecutorConfig(updated)
+	return responsesFunctionExecutorsSummaryFromConfig(updated), nil
 }
 
 type loginRequest struct {
@@ -649,6 +986,8 @@ type upstreamItem struct {
 	ModelDiscovery    string                `json:"model_discovery"`
 	BaseURL           string                `json:"base_url"`
 	ProviderPreset    string                `json:"provider_preset"`
+	APIType           string                `json:"api_type"`
+	Mode              string                `json:"mode,omitempty"`
 	ProtocolFamily    string                `json:"protocol_family"`
 	RoutingProfile    string                `json:"routing_profile"`
 	HealthState       string                `json:"health_state"`
@@ -750,6 +1089,9 @@ type channelItem struct {
 	Source             string                `json:"source"`
 	BaseURL            string                `json:"base_url"`
 	ProviderPreset     string                `json:"provider_preset"`
+	APIType            string                `json:"api_type"`
+	Mode               string                `json:"mode"`
+	Capabilities       upstreamCapabilities  `json:"capabilities,omitempty"`
 	ProtocolFamily     string                `json:"protocol_family"`
 	RoutingProfile     string                `json:"routing_profile"`
 	APIVersion         string                `json:"api_version,omitempty"`
@@ -801,55 +1143,135 @@ type channelModelsResponse struct {
 }
 
 type channelModelItem struct {
-	Model       string    `json:"model"`
-	DisplayName string    `json:"display_name,omitempty"`
-	Source      string    `json:"source"`
-	Enabled     bool      `json:"enabled"`
-	FirstSeenAt time.Time `json:"first_seen_at"`
-	LastSeenAt  time.Time `json:"last_seen_at"`
-	LastProbeAt time.Time `json:"last_probe_at,omitempty"`
+	Model                       string    `json:"model"`
+	DisplayName                 string    `json:"display_name,omitempty"`
+	Source                      string    `json:"source"`
+	Enabled                     bool      `json:"enabled"`
+	SupportsResponses           *bool     `json:"supports_responses,omitempty"`
+	SupportsChatCompletions     *bool     `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings          *bool     `json:"supports_embeddings,omitempty"`
+	ContextWindow               *int      `json:"context_window,omitempty"`
+	MaxOutputTokens             *int      `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int      `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string    `json:"upstream_model,omitempty"`
+	ProfileSource               string    `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string    `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string  `json:"input_modalities,omitempty"`
+	OutputModalities            []string  `json:"output_modalities,omitempty"`
+	FirstSeenAt                 time.Time `json:"first_seen_at"`
+	LastSeenAt                  time.Time `json:"last_seen_at"`
+	LastProbeAt                 time.Time `json:"last_probe_at,omitempty"`
+}
+
+type modelSpecLookupResponse struct {
+	Query       string                `json:"query"`
+	Matched     bool                  `json:"matched"`
+	Suggestion  *modelSpecSuggestion  `json:"suggestion,omitempty"`
+	Candidates  []modelSpecSuggestion `json:"candidates,omitempty"`
+	RefreshedAt time.Time             `json:"refreshed_at"`
+}
+
+type modelSpecSuggestion struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Provider         string   `json:"provider"`
+	Family           string   `json:"family"`
+	Series           string   `json:"series"`
+	Summary          string   `json:"summary"`
+	Description      string   `json:"description,omitempty"`
+	DescriptionCN    string   `json:"description_cn,omitempty"`
+	Tags             []string `json:"tags"`
+	Aliases          []string `json:"aliases"`
+	ContextWindow    int      `json:"context_window"`
+	MaxOutputTokens  int      `json:"max_output_tokens"`
+	Capabilities     []string `json:"capabilities"`
+	SupportsChat     bool     `json:"supports_chat_completions"`
+	SupportsTools    bool     `json:"supports_tool_calling"`
+	SupportsJSON     bool     `json:"supports_json_mode"`
+	SupportsEmbeds   bool     `json:"supports_embeddings"`
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
 }
 
 type channelProbeResponse struct {
-	ChannelID       string    `json:"channel_id"`
-	Status          string    `json:"status"`
-	FailureReason   string    `json:"failure_reason,omitempty"`
-	RetryHint       string    `json:"retry_hint,omitempty"`
-	Models          []string  `json:"models"`
-	DiscoveredCount int       `json:"discovered_count"`
-	EnabledCount    int       `json:"enabled_count"`
-	Endpoint        string    `json:"endpoint,omitempty"`
-	ErrorText       string    `json:"error_text,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	CompletedAt     time.Time `json:"completed_at"`
-	DurationMs      int64     `json:"duration_ms"`
+	ChannelID       string                `json:"channel_id"`
+	Status          string                `json:"status"`
+	FailureReason   string                `json:"failure_reason,omitempty"`
+	RetryHint       string                `json:"retry_hint,omitempty"`
+	Models          []string              `json:"models"`
+	DiscoveredCount int                   `json:"discovered_count"`
+	EnabledCount    int                   `json:"enabled_count"`
+	Endpoint        string                `json:"endpoint,omitempty"`
+	ErrorText       string                `json:"error_text,omitempty"`
+	ProviderProbe   *providerprobe.Report `json:"provider_probe,omitempty"`
+	StartedAt       time.Time             `json:"started_at"`
+	CompletedAt     time.Time             `json:"completed_at"`
+	DurationMs      int64                 `json:"duration_ms"`
 }
 
 type channelProbeRequest struct {
 	EnableDiscovered *bool `json:"enable_discovered"`
+	DetectProvider   *bool `json:"detect_provider"`
+}
+
+type providerProbeRequest struct {
+	ProviderID     string            `json:"provider_id"`
+	BaseURL        string            `json:"base_url"`
+	APIKey         string            `json:"api_key"`
+	Headers        map[string]string `json:"headers"`
+	APIType        string            `json:"api_type"`
+	ProtocolFamily string            `json:"protocol_family"`
+}
+
+type providerSetupRequest struct {
+	channelUpsertRequest
+}
+
+type providerSetupResponse struct {
+	Status           string                `json:"status"`
+	Applied          bool                  `json:"applied"`
+	NormalizedConfig channelItem           `json:"normalized_config"`
+	Secret           providerSetupSecret   `json:"secret"`
+	Probe            *providerprobe.Report `json:"probe,omitempty"`
+	Channel          *channelItem          `json:"channel,omitempty"`
+	Warnings         []string              `json:"warnings,omitempty"`
+}
+
+type providerSetupSecret struct {
+	APIKeySet          bool   `json:"api_key_set"`
+	APIKeyHint         string `json:"api_key_hint,omitempty"`
+	SecretStorageMode  string `json:"secret_storage_mode,omitempty"`
+	RedactionGuarantee string `json:"redaction_guarantee"`
+}
+
+type providerProbeReportRequest struct {
+	ChannelID string `json:"channel_id"`
 }
 
 type channelUpsertRequest struct {
-	ID                 string                         `json:"id"`
-	Name               string                         `json:"name"`
-	Description        string                         `json:"description"`
-	BaseURL            string                         `json:"base_url"`
-	ProviderPreset     string                         `json:"provider_preset"`
-	ProtocolFamily     string                         `json:"protocol_family"`
-	RoutingProfile     string                         `json:"routing_profile"`
-	APIVersion         string                         `json:"api_version"`
-	Deployment         string                         `json:"deployment"`
-	Project            string                         `json:"project"`
-	Location           string                         `json:"location"`
-	ModelResource      string                         `json:"model_resource"`
-	APIKey             string                         `json:"api_key"`
-	Headers            map[string]channelHeaderUpdate `json:"headers"`
-	Enabled            *bool                          `json:"enabled"`
-	Priority           *int                           `json:"priority"`
-	Weight             *float64                       `json:"weight"`
-	CapacityHint       *float64                       `json:"capacity_hint"`
-	ModelDiscovery     string                         `json:"model_discovery"`
-	AllowUnknownModels *bool                          `json:"allow_unknown_models"`
+	ID                 string                             `json:"id"`
+	Name               string                             `json:"name"`
+	Description        string                             `json:"description"`
+	BaseURL            string                             `json:"base_url"`
+	ProviderPreset     string                             `json:"provider_preset"`
+	APIType            string                             `json:"api_type"`
+	Mode               string                             `json:"mode"`
+	Capabilities       *config.UpstreamCapabilitiesConfig `json:"capabilities"`
+	ProtocolFamily     string                             `json:"protocol_family"`
+	RoutingProfile     string                             `json:"routing_profile"`
+	APIVersion         string                             `json:"api_version"`
+	Deployment         string                             `json:"deployment"`
+	Project            string                             `json:"project"`
+	Location           string                             `json:"location"`
+	ModelResource      string                             `json:"model_resource"`
+	APIKey             string                             `json:"api_key"`
+	Headers            map[string]channelHeaderUpdate     `json:"headers"`
+	Enabled            *bool                              `json:"enabled"`
+	Priority           *int                               `json:"priority"`
+	Weight             *float64                           `json:"weight"`
+	CapacityHint       *float64                           `json:"capacity_hint"`
+	ModelDiscovery     string                             `json:"model_discovery"`
+	AllowUnknownModels *bool                              `json:"allow_unknown_models"`
 }
 
 type channelHeaderUpdate struct {
@@ -857,6 +1279,8 @@ type channelHeaderUpdate struct {
 	Keep   bool
 	Delete bool
 }
+
+type upstreamCapabilities = config.UpstreamCapabilitiesConfig
 
 func (u *channelHeaderUpdate) UnmarshalJSON(data []byte) error {
 	var value string
@@ -879,7 +1303,17 @@ func (u *channelHeaderUpdate) UnmarshalJSON(data []byte) error {
 }
 
 type channelModelPatchRequest struct {
-	Enabled bool `json:"enabled"`
+	DisplayName                 *string `json:"display_name"`
+	Enabled                     *bool   `json:"enabled"`
+	SupportsResponses           *bool   `json:"supports_responses"`
+	SupportsChatCompletions     *bool   `json:"supports_chat_completions"`
+	SupportsEmbeddings          *bool   `json:"supports_embeddings"`
+	ContextWindow               *int    `json:"context_window"`
+	MaxOutputTokens             *int    `json:"max_output_tokens"`
+	CompactHistoryItemThreshold *int    `json:"compact_history_item_threshold"`
+	UpstreamModel               *string `json:"upstream_model"`
+	ProfileSource               *string `json:"profile_source"`
+	ProfileAdoptionStatus       *string `json:"profile_adoption_status"`
 }
 
 type channelModelBatchPatchRequest struct {
@@ -897,6 +1331,68 @@ type channelModelCreateRequest struct {
 	Model       string `json:"model"`
 	DisplayName string `json:"display_name"`
 	Enabled     *bool  `json:"enabled"`
+}
+
+type modelAliasListResponse struct {
+	Items       []modelAliasItem `json:"items"`
+	RefreshedAt time.Time        `json:"refreshed_at"`
+}
+
+type modelAliasItem struct {
+	ID          string    `json:"id"`
+	Alias       string    `json:"alias"`
+	TargetModel string    `json:"target_model"`
+	ChannelID   string    `json:"channel_id,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	Description string    `json:"description,omitempty"`
+	Source      string    `json:"source,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type modelAliasUpsertRequest struct {
+	ID          string `json:"id"`
+	Alias       string `json:"alias"`
+	TargetModel string `json:"target_model"`
+	ChannelID   string `json:"channel_id"`
+	Enabled     *bool  `json:"enabled"`
+	Description string `json:"description"`
+	Source      string `json:"source"`
+}
+
+type modelAliasValidationResponse struct {
+	Valid       bool                       `json:"valid"`
+	Alias       modelAliasItem             `json:"alias"`
+	Errors      []string                   `json:"errors,omitempty"`
+	Warnings    []modelAliasValidationNote `json:"warnings,omitempty"`
+	RefreshedAt time.Time                  `json:"refreshed_at"`
+}
+
+type modelAliasValidationNote struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type routingSettingsView struct {
+	ResponsesStrategy  string    `json:"responses_strategy"`
+	SelectionPolicy    string    `json:"selection_policy"`
+	MissingModelPolicy string    `json:"missing_model_policy"`
+	RoutePlanLogLevel  string    `json:"route_plan_log_level,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+}
+
+type routingInspectRequest struct {
+	Endpoint string `json:"endpoint"`
+	Model    string `json:"model"`
+	Stream   bool   `json:"stream"`
+	Tools    bool   `json:"tools"`
+}
+
+type routingInspectResponse struct {
+	Request     routingInspectRequest `json:"request"`
+	Result      *routeplan.Result     `json:"result,omitempty"`
+	Error       string                `json:"error,omitempty"`
+	RefreshedAt time.Time             `json:"refreshed_at"`
 }
 
 type usageSummaryView struct {
@@ -949,11 +1445,23 @@ type modelDetailResponse struct {
 }
 
 type modelChannelItem struct {
-	ChannelID string           `json:"channel_id"`
-	Model     string           `json:"model"`
-	Enabled   bool             `json:"enabled"`
-	Source    string           `json:"source"`
-	Summary   usageSummaryView `json:"summary"`
+	ChannelID                   string           `json:"channel_id"`
+	Model                       string           `json:"model"`
+	DisplayName                 string           `json:"display_name,omitempty"`
+	Enabled                     bool             `json:"enabled"`
+	Source                      string           `json:"source"`
+	SupportsResponses           *bool            `json:"supports_responses,omitempty"`
+	SupportsChatCompletions     *bool            `json:"supports_chat_completions,omitempty"`
+	SupportsEmbeddings          *bool            `json:"supports_embeddings,omitempty"`
+	ContextWindow               *int             `json:"context_window,omitempty"`
+	MaxOutputTokens             *int             `json:"max_output_tokens,omitempty"`
+	CompactHistoryItemThreshold *int             `json:"compact_history_item_threshold,omitempty"`
+	UpstreamModel               string           `json:"upstream_model,omitempty"`
+	ProfileSource               string           `json:"profile_source,omitempty"`
+	ProfileAdoptionStatus       string           `json:"profile_adoption_status,omitempty"`
+	InputModalities             []string         `json:"input_modalities,omitempty"`
+	OutputModalities            []string         `json:"output_modalities,omitempty"`
+	Summary                     usageSummaryView `json:"summary"`
 }
 
 func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
@@ -961,38 +1469,70 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
-	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.SessionTTL))
-	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), opt.AuthVerifier))
-	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), opt.AuthVerifier))
-	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAuthRequired(analysisBatchReanalyzeAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), opt.AuthVerifier))
-	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), opt.AuthVerifier))
-	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), opt.AuthVerifier))
-	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), opt.AuthVerifier))
-	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), opt.AuthVerifier))
+	monitorVerifier := opt.MonitorAuthVerifier
+	if monitorVerifier == nil {
+		monitorVerifier = opt.AuthVerifier
+	}
+	functionExecutorState := opt.ResponsesFunctionExecutorState
+	if functionExecutorState == nil {
+		stateOptions := []ResponsesFunctionExecutorStateOption{}
+		functionExecutorStore := opt.ResponsesFunctionExecutorStore
+		if functionExecutorStore == nil {
+			functionExecutorStore = st
+		}
+		if functionExecutorStore != nil {
+			stateOptions = append(stateOptions, WithResponsesFunctionExecutorPersistence(functionExecutorStore))
+		}
+		if opt.ResponsesFunctionExecutorManager != nil {
+			stateOptions = append(stateOptions, WithResponsesFunctionExecutorManager(opt.ResponsesFunctionExecutorManager))
+		}
+		functionExecutorState = NewResponsesFunctionExecutorState(opt.ResponsesFunctionExecutors, stateOptions...)
+	}
+	mux.HandleFunc("/api/auth/status", authStatusAPIHandler(monitorVerifier))
+	mux.HandleFunc("/api/auth/login", authLoginAPIHandler(opt.AuthStore, opt.MonitorJWT, opt.SessionTTL))
+	mux.HandleFunc("/api/auth/check", monitorAuthRequired(authCheckAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/auth/me", monitorAuthRequired(authMeAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/auth/password", monitorAuthRequired(authChangePasswordAPIHandler(opt.AuthStore), monitorVerifier))
+	mux.HandleFunc("/api/auth/tokens", monitorAuthRequired(authTokensAPIHandler(opt.AuthStore), monitorVerifier))
+	mux.HandleFunc("/api/auth/tokens/", monitorAuthRequired(authTokenDetailAPIHandler(opt.AuthStore), monitorVerifier))
+	mux.HandleFunc("/api/overview", monitorAuthRequired(overviewAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/summary", monitorAuthRequired(systemEventSummaryAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/read-all", monitorAuthRequired(systemEventReadAllAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/stream", monitorAuthRequired(systemEventStreamAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events", monitorAuthRequired(systemEventListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/events/", monitorAuthRequired(systemEventDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/responses/function-executors", monitorAuthRequired(responsesFunctionExecutorsAPIHandler(functionExecutorState), monitorVerifier))
+	mux.HandleFunc("/api/responses/audit/trace", monitorAuthRequired(responsesAuditTraceAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/responses/audit/tool-calls", monitorAuthRequired(responsesToolCallAuditsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/exchanges", monitorAuthRequired(routingExchangeListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(modelAliasListCreateAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases/", monitorAuthRequired(modelAliasDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/sessions/", monitorAuthRequired(sessionDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/findings", monitorAuthRequired(findingListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/batch/reanalyze", monitorAuthRequired(analysisBatchReanalyzeAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/jobs", monitorAuthRequired(analysisJobListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis/jobs/", monitorAuthRequired(analysisJobDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/analysis", monitorAuthRequired(analysisListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/models", monitorAuthRequired(modelListAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/models/", monitorAuthRequired(modelDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/secrets/local-key", monitorAuthRequired(localSecretKeyAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/provider-setup/", monitorAuthRequired(providerSetupAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe/report/apply", monitorAuthRequired(providerProbeReportApplyAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe/report", monitorAuthRequired(providerProbeReportAPIHandler(st, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-probe", monitorAuthRequired(providerProbeAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
+	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
+	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
+	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	mux.Handle("/", appHandler())
 }
 
@@ -1002,7 +1542,7 @@ func authStatusAPIHandler(verifier auth.TokenVerifier) http.HandlerFunc {
 	}
 }
 
-func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerFunc {
+func authLoginAPIHandler(authStore *auth.Store, jwtManager *auth.JWTManager, ttl time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -1017,13 +1557,271 @@ func authLoginAPIHandler(authStore *auth.Store, ttl time.Duration) http.HandlerF
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid login payload"})
 			return
 		}
-		token, err := authStore.Login(r.Context(), req.Username, req.Password, ttl)
+		var token auth.TokenResult
+		var err error
+		if jwtManager != nil {
+			var principal auth.Principal
+			principal, err = authStore.AuthenticatePassword(r.Context(), req.Username, req.Password)
+			if err == nil {
+				token, err = jwtManager.IssueToken(principal)
+			}
+		} else {
+			token, err = authStore.Login(r.Context(), req.Username, req.Password, ttl)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid username or password"})
 			return
 		}
 		writeJSON(w, http.StatusOK, loginResponse{Token: token.Token, Prefix: token.Prefix})
 	}
+}
+
+func responsesFunctionExecutorsAPIHandler(state *ResponsesFunctionExecutorState) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, state.summary())
+		case http.MethodPost:
+			var req responsesFunctionExecutorUpdateRequest
+			dec := json.NewDecoder(r.Body)
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid function executor configuration payload"})
+				return
+			}
+			validateOnly := true
+			if req.ValidateOnly != nil {
+				validateOnly = *req.ValidateOnly
+			}
+			var (
+				summary responsesFunctionExecutorsSummary
+				err     error
+			)
+			if validateOnly {
+				summary, err = state.validate(req)
+			} else {
+				summary, err = state.apply(r.Context(), req)
+			}
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, responsesFunctionExecutorUpdateResponse{
+				Applied:      !validateOnly,
+				ValidateOnly: validateOnly,
+				Summary:      summary,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func (r *responsesFunctionExecutorUpdateRequest) UnmarshalJSON(data []byte) error {
+	type alias responsesFunctionExecutorUpdateRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if err := validateJSONKeys(raw, map[string]struct{}{
+		"validate_only":    {},
+		"enabled":          {},
+		"timeout":          {},
+		"max_result_bytes": {},
+		"redaction":        {},
+		"executors":        {},
+	}); err != nil {
+		return err
+	}
+	if redactionRaw, ok := raw["redaction"]; ok {
+		var redaction map[string]json.RawMessage
+		if err := json.Unmarshal(redactionRaw, &redaction); err != nil {
+			return err
+		}
+		if err := validateJSONKeys(redaction, map[string]struct{}{"arguments": {}, "output": {}}); err != nil {
+			return err
+		}
+	}
+	if executorsRaw, ok := raw["executors"]; ok {
+		var executors []map[string]json.RawMessage
+		if err := json.Unmarshal(executorsRaw, &executors); err != nil {
+			return err
+		}
+		for _, executor := range executors {
+			if err := validateJSONKeys(executor, map[string]struct{}{
+				"name":    {},
+				"type":    {},
+				"enabled": {},
+				"process": {},
+			}); err != nil {
+				return err
+			}
+			if processRaw, ok := executor["process"]; ok {
+				var process map[string]json.RawMessage
+				if err := json.Unmarshal(processRaw, &process); err != nil {
+					return err
+				}
+				if err := validateJSONKeys(process, map[string]struct{}{
+					"working_dir":              {},
+					"require_absolute_command": {},
+					"allowed_command_dirs":     {},
+					"reject_root":              {},
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = responsesFunctionExecutorUpdateRequest(decoded)
+	_, r.ExecutorsSet = raw["executors"]
+	return nil
+}
+
+func validateJSONKeys(raw map[string]json.RawMessage, allowed map[string]struct{}) error {
+	for key := range raw {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("unknown field %q", key)
+		}
+	}
+	return nil
+}
+
+func applyResponsesFunctionExecutorUpdate(cfg config.ResponsesFunctionExecutorConfig, req responsesFunctionExecutorUpdateRequest) (config.ResponsesFunctionExecutorConfig, error) {
+	if req.Enabled != nil {
+		cfg.Enabled = *req.Enabled
+	}
+	if strings.TrimSpace(req.Timeout) != "" {
+		timeout, err := time.ParseDuration(strings.TrimSpace(req.Timeout))
+		if err != nil {
+			return config.ResponsesFunctionExecutorConfig{}, fmt.Errorf("timeout must be a Go duration such as 5s")
+		}
+		cfg.Timeout = timeout
+	}
+	if req.MaxResultBytes != nil {
+		cfg.MaxResultBytes = *req.MaxResultBytes
+	}
+	if req.Redaction != nil {
+		if req.Redaction.Arguments != nil {
+			cfg.Redaction.Arguments = *req.Redaction.Arguments
+		}
+		if req.Redaction.Output != nil {
+			cfg.Redaction.Output = *req.Redaction.Output
+		}
+	}
+	if req.ExecutorsSet {
+		cfg.Executors = mergeResponsesFunctionExecutorBindings(cfg.Executors, req.Executors)
+	}
+	return cfg, nil
+}
+
+func mergeResponsesFunctionExecutorBindings(current []config.ResponsesFunctionExecutorBinding, patches []responsesFunctionExecutorBindingPatch) []config.ResponsesFunctionExecutorBinding {
+	byName := make(map[string]config.ResponsesFunctionExecutorBinding, len(current))
+	for _, binding := range current {
+		byName[strings.TrimSpace(binding.Name)] = binding
+	}
+	out := make([]config.ResponsesFunctionExecutorBinding, 0, len(patches))
+	for _, patch := range patches {
+		name := strings.TrimSpace(patch.Name)
+		binding := byName[name]
+		binding.Name = name
+		if strings.TrimSpace(patch.Type) != "" {
+			binding.Type = patch.Type
+		}
+		if patch.Enabled != nil {
+			binding.Enabled = cloneBoolPtr(patch.Enabled)
+		}
+		if patch.Process != nil {
+			binding.Process.WorkingDir = patch.Process.WorkingDir
+			if patch.Process.RequireAbsoluteCommand != nil {
+				binding.Process.RequireAbsoluteCommand = *patch.Process.RequireAbsoluteCommand
+			}
+			if patch.Process.AllowedCommandDirs != nil {
+				binding.Process.AllowedCommandDirs = append([]string{}, patch.Process.AllowedCommandDirs...)
+			}
+			if patch.Process.RejectRoot != nil {
+				binding.Process.RejectRoot = *patch.Process.RejectRoot
+			}
+		}
+		out = append(out, binding)
+	}
+	return out
+}
+
+func cloneResponsesFunctionExecutorConfig(cfg config.ResponsesFunctionExecutorConfig) config.ResponsesFunctionExecutorConfig {
+	cfg.Warnings = append([]string{}, cfg.Warnings...)
+	cfg.Executors = append([]config.ResponsesFunctionExecutorBinding(nil), cfg.Executors...)
+	for i := range cfg.Executors {
+		cfg.Executors[i].Enabled = cloneBoolPtr(cfg.Executors[i].Enabled)
+		cfg.Executors[i].Args = append([]string{}, cfg.Executors[i].Args...)
+		cfg.Executors[i].EnvAllowlist = append([]string{}, cfg.Executors[i].EnvAllowlist...)
+		cfg.Executors[i].Process.AllowedCommandDirs = append([]string{}, cfg.Executors[i].Process.AllowedCommandDirs...)
+		cfg.Executors[i].Warnings = append([]string{}, cfg.Executors[i].Warnings...)
+		if cfg.Executors[i].Env != nil {
+			env := make(map[string]string, len(cfg.Executors[i].Env))
+			for key, value := range cfg.Executors[i].Env {
+				env[key] = value
+			}
+			cfg.Executors[i].Env = env
+		}
+	}
+	return cfg
+}
+
+func cloneBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func responsesFunctionExecutorsSummaryFromConfig(cfg config.ResponsesFunctionExecutorConfig) responsesFunctionExecutorsSummary {
+	cfg = (config.Config{
+		ResponsesServer: config.ResponsesServerConfig{
+			FunctionExecutors: cfg,
+		},
+	}).ResponsesFunctionExecutorsConfig()
+	out := responsesFunctionExecutorsSummary{
+		Enabled:        cfg.Enabled,
+		Timeout:        cfg.Timeout.String(),
+		MaxResultBytes: cfg.MaxResultBytes,
+		Redaction: responsesFunctionExecutorRedactionView{
+			Arguments: cfg.Redaction.Arguments,
+			Output:    cfg.Redaction.Output,
+		},
+		SupportedTypes: config.SupportedResponsesFunctionExecutorTypes(),
+		Executors:      make([]responsesFunctionExecutorBindingView, 0, len(cfg.Executors)),
+		Warnings:       append([]string{}, cfg.Warnings...),
+	}
+	for _, binding := range cfg.Executors {
+		enabled := true
+		if binding.Enabled != nil {
+			enabled = *binding.Enabled
+		}
+		out.Executors = append(out.Executors, responsesFunctionExecutorBindingView{
+			Name:      binding.Name,
+			Type:      binding.Type,
+			Enabled:   enabled,
+			Available: binding.Available,
+			Process: responsesFunctionExecutorProcessView{
+				WorkingDir:             binding.Process.WorkingDir,
+				RequireAbsoluteCommand: binding.Process.RequireAbsoluteCommand,
+				AllowedCommandDirs:     append([]string{}, binding.Process.AllowedCommandDirs...),
+				RejectRoot:             binding.Process.RejectRoot,
+			},
+			OutputConfigured:  binding.Output != nil,
+			CommandConfigured: binding.Command != "",
+			Warnings:          append([]string{}, binding.Warnings...),
+		})
+	}
+	if out.Warnings == nil {
+		out.Warnings = []string{}
+	}
+	return out
 }
 
 func authCheckAPIHandler() http.HandlerFunc {
@@ -1078,6 +1876,86 @@ func systemEventSummaryAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, systemEventSummaryView(summary, windowLabel))
+	}
+}
+
+func responsesAuditTraceAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		responseID := strings.TrimSpace(r.URL.Query().Get("response_id"))
+		requestAuditID := strings.TrimSpace(r.URL.Query().Get("request_audit_id"))
+		if responseID == "" && requestAuditID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "response_id or request_audit_id is required"})
+			return
+		}
+		if st == nil || st.EntClient() == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "responses audit store not configured"})
+			return
+		}
+		trace, found, err := responsesaudit.NewQueryService(st.EntClient()).GetRequestAuditTrace(r.Context(), responsesaudit.GetRequestAuditTraceParams{
+			ResponseID:     responseID,
+			RequestAuditID: requestAuditID,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "responses audit query error: " + err.Error()})
+			return
+		}
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "responses audit trace not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, responsesAuditTraceFromAudit(trace, responseID, requestAuditID))
+	}
+}
+
+func responsesToolCallAuditsAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil || st.EntClient() == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "responses audit store not configured"})
+			return
+		}
+		query := r.URL.Query()
+		limit := parseInt(query.Get("limit"), responsesaudit.DefaultAuditQueryLimit)
+		params := responsesaudit.ListToolCallAuditsParams{
+			ResponseID:     strings.TrimSpace(query.Get("response_id")),
+			RequestAuditID: strings.TrimSpace(query.Get("request_audit_id")),
+			ConversationID: strings.TrimSpace(query.Get("conversation_id")),
+			CallID:         strings.TrimSpace(query.Get("call_id")),
+			ToolName:       strings.TrimSpace(query.Get("tool_name")),
+			Status:         strings.TrimSpace(query.Get("status")),
+			Limit:          limit,
+		}
+		records, err := responsesaudit.NewQueryService(st.EntClient()).ListToolCallAudits(r.Context(), params)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "responses tool call audit query error: " + err.Error()})
+			return
+		}
+		includePayloads := parseBool(query.Get("include_payloads"))
+		items := make([]responsesToolCallAuditView, 0, len(records))
+		for _, record := range records {
+			items = append(items, responsesToolCallAuditFromAudit(record, includePayloads))
+		}
+		writeJSON(w, http.StatusOK, responsesToolCallAuditListResponse{
+			Query: responsesToolCallAuditQuery{
+				ResponseID:     params.ResponseID,
+				RequestAuditID: params.RequestAuditID,
+				ConversationID: params.ConversationID,
+				CallID:         params.CallID,
+				ToolName:       params.ToolName,
+				Status:         params.Status,
+				Limit:          responsesaudit.NormalizeAuditQueryLimit(limit),
+			},
+			Items:           items,
+			Total:           len(items),
+			IncludePayloads: includePayloads,
+		})
 	}
 }
 
@@ -1412,8 +2290,30 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
 			return
 		}
-		model := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/models/"), "/")
-		if model == "" || strings.Contains(model, "/") {
+		relativePath := strings.Trim(strings.TrimPrefix(pathClean(r.URL.EscapedPath()), "/api/models/"), "/")
+		if relativePath == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasSuffix(relativePath, "/spec-lookup") {
+			model, err := url.PathUnescape(strings.TrimSuffix(relativePath, "/spec-lookup"))
+			if err != nil || strings.TrimSpace(model) == "" {
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodPost {
+				http.NotFound(w, r)
+				return
+			}
+			writeJSON(w, http.StatusOK, modelSpecLookup(model))
+			return
+		}
+		model, err := url.PathUnescape(relativePath)
+		if err != nil || strings.TrimSpace(model) == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return
 		}
@@ -1434,17 +2334,118 @@ func modelDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			RefreshedAt: time.Now().UTC(),
 			Window:      windowLabel,
 		}
+		modelRecords := map[string]store.ChannelModelRecord{}
+		if records, err := st.ListChannelModels("", false); err == nil {
+			for _, record := range records {
+				if strings.EqualFold(record.Model, model) {
+					modelRecords[record.ChannelID] = record
+				}
+			}
+		}
 		for _, channelRecord := range detail.Channels {
-			resp.Channels = append(resp.Channels, modelChannelItem{
+			item := modelChannelItem{
 				ChannelID: channelRecord.ChannelID,
 				Model:     channelRecord.Model,
 				Enabled:   channelRecord.Enabled,
 				Source:    channelRecord.Source,
 				Summary:   usageSummaryViewFromRecord(channelRecord.Summary),
-			})
+			}
+			if record, ok := modelRecords[channelRecord.ChannelID]; ok {
+				enrichModelChannelItemFromRecord(&item, record)
+			}
+			resp.Channels = append(resp.Channels, item)
 		}
 		writeJSON(w, http.StatusOK, resp)
 	}
+}
+
+func modelSpecLookup(model string) modelSpecLookupResponse {
+	model = strings.TrimSpace(model)
+	resp := modelSpecLookupResponse{
+		Query:       model,
+		RefreshedAt: time.Now().UTC(),
+	}
+	if spec, ok := llmspecs.Get(model); ok {
+		suggestion := modelSpecSuggestionFromSpec(spec)
+		resp.Matched = true
+		resp.Suggestion = &suggestion
+		return resp
+	}
+	candidates := llmspecs.Search(model, 5)
+	resp.Candidates = make([]modelSpecSuggestion, 0, len(candidates))
+	for _, candidate := range candidates {
+		resp.Candidates = append(resp.Candidates, modelSpecSuggestionFromSpec(candidate))
+	}
+	if len(resp.Candidates) > 0 {
+		resp.Suggestion = &resp.Candidates[0]
+	}
+	return resp
+}
+
+func modelSpecSuggestionFromSpec(model llmspecs.Model) modelSpecSuggestion {
+	features := model.Features()
+	card := model.Card()
+	return modelSpecSuggestion{
+		ID:               model.ID(),
+		Name:             model.Name(),
+		Provider:         model.Provider(),
+		Family:           model.Family(),
+		Series:           model.Series(),
+		Summary:          model.Summary(),
+		Description:      model.Description(),
+		DescriptionCN:    model.DescriptionCN(),
+		Tags:             append([]string(nil), model.Tags()...),
+		Aliases:          append([]string(nil), model.Aliases()...),
+		ContextWindow:    model.ContextLength(),
+		MaxOutputTokens:  model.MaxOutput(),
+		Capabilities:     features.ToStrings(),
+		SupportsChat:     model.HasCapability(llmspecs.CapChat),
+		SupportsTools:    model.HasCapability(llmspecs.CapFunctionCall),
+		SupportsJSON:     model.HasCapability(llmspecs.CapJsonMode),
+		SupportsEmbeds:   model.HasCapability(llmspecs.CapEmbedding),
+		InputModalities:  inputModalitiesFromCapabilities(card.Features),
+		OutputModalities: outputModalitiesFromCapabilities(card.Features),
+	}
+}
+
+func inputModalitiesFromCapabilities(features llmspecs.Capability) []string {
+	out := make([]string, 0, 4)
+	if features.Has(llmspecs.ModalityTextIn) {
+		out = append(out, "text")
+	}
+	if features.Has(llmspecs.ModalityImageIn) {
+		out = append(out, "image")
+	}
+	if features.Has(llmspecs.ModalityAudioIn) {
+		out = append(out, "audio")
+	}
+	if features.Has(llmspecs.ModalityVideoIn) {
+		out = append(out, "video")
+	}
+	if features.Has(llmspecs.ModalityFileIn) {
+		out = append(out, "file")
+	}
+	return out
+}
+
+func outputModalitiesFromCapabilities(features llmspecs.Capability) []string {
+	out := make([]string, 0, 3)
+	if features.Has(llmspecs.ModalityTextOut) {
+		out = append(out, "text")
+	}
+	if features.Has(llmspecs.ModalityImageOut) {
+		out = append(out, "image")
+	}
+	if features.Has(llmspecs.ModalityAudioOut) {
+		out = append(out, "audio")
+	}
+	if features.Has(llmspecs.ModalityVideoOut) {
+		out = append(out, "video")
+	}
+	if features.Has(llmspecs.ModalityFileOut) {
+		out = append(out, "file")
+	}
+	return out
 }
 
 func providerPresetAPIHandler() http.HandlerFunc {
@@ -1498,6 +2499,309 @@ func providerPresetAPIHandler() http.HandlerFunc {
 	}
 }
 
+func providerProbeAPIHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req providerProbeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe payload"})
+			return
+		}
+		report, err := providerprobe.Probe(r.Context(), providerprobe.ProbeTarget{
+			ProviderID:              strings.TrimSpace(req.ProviderID),
+			BaseURL:                 strings.TrimSpace(req.BaseURL),
+			APIKey:                  strings.TrimSpace(req.APIKey),
+			Headers:                 req.Headers,
+			SpecifiedAPIType:        strings.TrimSpace(req.APIType),
+			SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+		}, nil)
+		if err != nil && report.Status == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		status := http.StatusOK
+		if err != nil {
+			status = http.StatusBadGateway
+		}
+		writeJSON(w, status, report)
+	}
+}
+
+func providerSetupAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		action := strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/provider-setup/"), "/")
+		if action != "validate" && action != "apply" {
+			http.NotFound(w, r)
+			return
+		}
+		var req providerSetupRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider setup payload"})
+			return
+		}
+		resp, probeErr := buildProviderSetupResponse(r.Context(), req, st)
+		if action == "validate" {
+			status := http.StatusOK
+			if probeErr != nil {
+				status = http.StatusBadGateway
+			}
+			writeJSON(w, status, resp)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if !providerSetupApplyAllowed(resp, req) {
+			writeJSON(w, http.StatusBadGateway, resp)
+			return
+		}
+		record, err := st.UpsertChannelConfig(channelRecordFromRequest(providerSetupUpsertRequest(resp.NormalizedConfig, req.channelUpsertRequest), store.ChannelConfigRecord{}))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		svc := effectiveChannelService(st, channelService)
+		if err := reloadRouterFromChannels(rtr, svc); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+			return
+		}
+		item := channelItemFromRecord(st, record, 0, 0)
+		resp.Applied = true
+		resp.Channel = &item
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func providerSetupApplyAllowed(resp providerSetupResponse, req providerSetupRequest) bool {
+	if resp.Status == providerprobe.StatusDetected {
+		return true
+	}
+	return strings.TrimSpace(req.APIType) != "" && strings.TrimSpace(req.ProtocolFamily) != ""
+}
+
+func buildProviderSetupResponse(ctx context.Context, req providerSetupRequest, st *store.Store) (providerSetupResponse, error) {
+	report, probeErr := providerprobe.Probe(ctx, providerprobe.ProbeTarget{
+		ProviderID:              strings.TrimSpace(valueOrExisting(req.ID, req.Name)),
+		BaseURL:                 strings.TrimSpace(req.BaseURL),
+		APIKey:                  strings.TrimSpace(req.APIKey),
+		Headers:                 setupPlainHeaders(req.Headers),
+		SpecifiedAPIType:        strings.TrimSpace(req.APIType),
+		SpecifiedProtocolFamily: strings.TrimSpace(req.ProtocolFamily),
+	}, nil)
+	normalizedReq := mergeProviderSetupSuggestions(req.channelUpsertRequest, report)
+	record := channelRecordFromRequest(normalizedReq, store.ChannelConfigRecord{})
+	normalized := channelItemFromSetupRecord(st, record, normalizedReq)
+	resp := providerSetupResponse{
+		Status:           report.Status,
+		NormalizedConfig: normalized,
+		Secret: providerSetupSecret{
+			APIKeySet:          strings.TrimSpace(req.APIKey) != "",
+			APIKeyHint:         secretHint(req.APIKey),
+			SecretStorageMode:  secretStorageMode(st),
+			RedactionGuarantee: "api_key is never echoed; secret headers are redacted",
+		},
+		Probe:    &report,
+		Warnings: append([]string(nil), report.Warnings...),
+	}
+	if resp.Status == "" {
+		resp.Status = "unknown"
+	}
+	return resp, probeErr
+}
+
+func mergeProviderSetupSuggestions(req channelUpsertRequest, report providerprobe.Report) channelUpsertRequest {
+	out := req
+	if out.Enabled == nil {
+		enabled := true
+		out.Enabled = &enabled
+	}
+	if strings.TrimSpace(out.APIType) == "" && strings.TrimSpace(report.SuggestedAPIType) != "" {
+		out.APIType = report.SuggestedAPIType
+	}
+	if strings.TrimSpace(out.ProtocolFamily) == "" && strings.TrimSpace(report.SuggestedProtocolFamily) != "" {
+		out.ProtocolFamily = report.SuggestedProtocolFamily
+	}
+	if out.Capabilities == nil {
+		out.Capabilities = &config.UpstreamCapabilitiesConfig{}
+	}
+	for _, capability := range report.Capabilities {
+		upstream.SetCapabilityIfUnset(out.Capabilities, capability, true)
+	}
+	return out
+}
+
+func channelItemFromSetupRecord(st *store.Store, record store.ChannelConfigRecord, req channelUpsertRequest) channelItem {
+	headers := map[string]string{}
+	if strings.TrimSpace(record.HeadersJSON) != "" {
+		_ = json.Unmarshal([]byte(record.HeadersJSON), &headers)
+	}
+	capabilities := upstreamCapabilities{}
+	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
+		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
+	}
+	return channelItem{
+		ID:                 record.ID,
+		Name:               record.Name,
+		Description:        record.Description,
+		Source:             record.Source,
+		BaseURL:            record.BaseURL,
+		ProviderPreset:     record.ProviderPreset,
+		APIType:            record.APIType,
+		Mode:               record.Mode,
+		Capabilities:       capabilities,
+		ProtocolFamily:     record.ProtocolFamily,
+		RoutingProfile:     record.RoutingProfile,
+		APIVersion:         record.APIVersion,
+		Deployment:         record.Deployment,
+		Project:            record.Project,
+		Location:           record.Location,
+		ModelResource:      record.ModelResource,
+		APIKeyHint:         secretHint(req.APIKey),
+		SecretStorageMode:  secretStorageMode(st),
+		Headers:            redactHeaders(headers),
+		Enabled:            record.Enabled,
+		Priority:           record.Priority,
+		Weight:             record.Weight,
+		CapacityHint:       record.CapacityHint,
+		ModelDiscovery:     record.ModelDiscovery,
+		AllowUnknownModels: record.AllowUnknownModels,
+	}
+}
+
+func secretStorageMode(st *store.Store) string {
+	if st == nil {
+		return ""
+	}
+	return st.SecretStorageMode()
+}
+
+func setupPlainHeaders(headers map[string]channelHeaderUpdate) map[string]string {
+	if len(headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(headers))
+	for key, update := range headers {
+		if update.Delete || update.Keep {
+			continue
+		}
+		name := strings.TrimSpace(key)
+		if name == "" {
+			continue
+		}
+		out[name] = update.Value
+	}
+	return out
+}
+
+func providerSetupUpsertRequest(normalized channelItem, original channelUpsertRequest) channelUpsertRequest {
+	return channelUpsertRequest{
+		ID:                 normalized.ID,
+		Name:               normalized.Name,
+		Description:        normalized.Description,
+		BaseURL:            normalized.BaseURL,
+		ProviderPreset:     normalized.ProviderPreset,
+		APIType:            normalized.APIType,
+		Mode:               normalized.Mode,
+		Capabilities:       &normalized.Capabilities,
+		ProtocolFamily:     normalized.ProtocolFamily,
+		RoutingProfile:     normalized.RoutingProfile,
+		APIVersion:         normalized.APIVersion,
+		Deployment:         normalized.Deployment,
+		Project:            normalized.Project,
+		Location:           normalized.Location,
+		ModelResource:      normalized.ModelResource,
+		APIKey:             original.APIKey,
+		Headers:            original.Headers,
+		Enabled:            &normalized.Enabled,
+		Priority:           &normalized.Priority,
+		Weight:             &normalized.Weight,
+		CapacityHint:       &normalized.CapacityHint,
+		ModelDiscovery:     normalized.ModelDiscovery,
+		AllowUnknownModels: &normalized.AllowUnknownModels,
+	}
+}
+
+func providerProbeReportAPIHandler(st *store.Store, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		var req providerProbeReportRequest
+		if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe report payload"})
+				return
+			}
+		}
+		svc := effectiveChannelService(st, channelService)
+		report, err := svc.ProviderProbeReport(r.Context(), channel.ProviderProbeReportOptions{
+			ChannelID: strings.TrimSpace(req.ChannelID),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
+	}
+}
+
+func providerProbeReportApplyAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		var req providerProbeReportRequest
+		if r.Body != nil && r.Body != http.NoBody && r.ContentLength != 0 {
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid provider probe report apply payload"})
+				return
+			}
+		}
+		svc := effectiveChannelService(st, channelService)
+		result, err := svc.ApplyProviderProbeReport(r.Context(), channel.ProviderProbeReportOptions{
+			ChannelID: strings.TrimSpace(req.ChannelID),
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if appliedProviderProbeSuggestions(result.Applied) {
+			if err := reloadRouterFromChannels(rtr, svc); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+func appliedProviderProbeSuggestions(items []channel.ProviderProbeApplyItem) bool {
+	for _, item := range items {
+		if item.Applied {
+			return true
+		}
+	}
+	return false
+}
+
 func localSecretKeyAPIHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
@@ -1543,7 +2847,13 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 		return next
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		principal, ok := auth.VerifyRequest(r, verifier)
+		authReq := r
+		if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" && r.Header.Get("Authorization") == "" && allowMonitorQueryAccessToken(r) {
+			authReq = r.Clone(r.Context())
+			authReq.Header = r.Header.Clone()
+			authReq.Header.Set("Authorization", "Bearer "+token)
+		}
+		principal, ok := auth.VerifyRequest(authReq, verifier)
 		if !ok {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="llm-tracelab-monitor"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
@@ -1551,6 +2861,10 @@ func monitorAuthRequired(next http.HandlerFunc, verifier auth.TokenVerifier) htt
 		}
 		next(w, r.WithContext(auth.WithPrincipal(r.Context(), principal)))
 	}
+}
+
+func allowMonitorQueryAccessToken(r *http.Request) bool {
+	return r.Method == http.MethodGet && pathClean(r.URL.Path) == "/api/events/stream"
 }
 
 func appHandler() http.Handler {
@@ -1568,7 +2882,7 @@ func appHandler() http.Handler {
 			return
 		}
 
-		clean := strings.TrimPrefix(pathClean(r.URL.Path), "/")
+		clean := strings.TrimPrefix(pathClean(r.URL.EscapedPath()), "/")
 		if clean == "" {
 			serveEmbeddedIndex(distFS, w, r)
 			return
@@ -1660,7 +2974,11 @@ func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService
 				return
 			}
 			svc := effectiveChannelService(st, channelService)
-			result, err := svc.ProbeWithOptions(channelID, channel.ProbeOptions{EnableDiscovered: req.EnableDiscovered})
+			detectProvider := true
+			if req.DetectProvider != nil {
+				detectProvider = *req.DetectProvider
+			}
+			result, err := svc.ProbeWithOptions(channelID, channel.ProbeOptions{EnableDiscovered: req.EnableDiscovered, DetectProvider: detectProvider})
 			if err != nil && result.Status == "" {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
@@ -1726,6 +3044,209 @@ func decodeChannelProbeRequest(r *http.Request) (channelProbeRequest, error) {
 		return channelProbeRequest{}, fmt.Errorf("invalid probe payload")
 	}
 	return req, nil
+}
+
+const routingSettingsKey = "routing.settings"
+
+func routingSettingsAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			settings, err := loadRoutingSettings(r.Context(), st)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, settings)
+		case http.MethodPatch:
+			settings, err := loadRoutingSettings(r.Context(), st)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			var req routingSettingsView
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid routing settings payload"})
+				return
+			}
+			settings = mergeRoutingSettings(settings, req)
+			if err := validateRoutingSettings(settings); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			settings.UpdatedAt = time.Now().UTC()
+			if err := st.SaveAppSettingJSON(r.Context(), routingSettingsKey, settings); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, settings)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func modelAliasListCreateAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			enabledOnly := parseBoolQuery(r.URL.Query().Get("enabled_only"), false)
+			aliases, err := st.ListModelAliases(r.URL.Query().Get("alias"), enabledOnly)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			items := make([]modelAliasItem, 0, len(aliases))
+			for _, alias := range aliases {
+				items = append(items, modelAliasItemFromRecord(alias))
+			}
+			writeJSON(w, http.StatusOK, modelAliasListResponse{Items: items, RefreshedAt: time.Now().UTC()})
+		case http.MethodPost:
+			var req modelAliasUpsertRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model alias payload"})
+				return
+			}
+			record, err := st.UpsertModelAlias(modelAliasRecordFromRequest(req, store.ModelAliasRecord{}))
+			if err != nil {
+				writeAliasValidationError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func modelAliasValidateAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var req modelAliasUpsertRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model alias payload"})
+			return
+		}
+		record := normalizeModelAliasPreview(modelAliasRecordFromRequest(req, store.ModelAliasRecord{}))
+		resp := modelAliasValidationResponse{
+			Valid:       true,
+			Alias:       modelAliasItemFromRecord(record),
+			RefreshedAt: time.Now().UTC(),
+		}
+		if err := st.ValidateModelAlias(record); err != nil {
+			resp.Valid = false
+			resp.Errors = []string{err.Error()}
+		}
+		warnings, err := modelAliasValidationWarnings(st, record)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		resp.Warnings = warnings
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func modelAliasDetailAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		id, err := url.PathUnescape(strings.Trim(strings.TrimPrefix(pathClean(r.URL.Path), "/api/model-aliases/"), "/"))
+		if err != nil || strings.TrimSpace(id) == "" || strings.Contains(id, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			record, err := st.GetModelAlias(id)
+			if err != nil {
+				writeAliasError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
+		case http.MethodPatch:
+			existing, err := st.GetModelAlias(id)
+			if err != nil {
+				writeAliasError(w, err)
+				return
+			}
+			var req modelAliasUpsertRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model alias payload"})
+				return
+			}
+			req.ID = id
+			record, err := st.UpsertModelAlias(modelAliasRecordFromRequest(req, existing))
+			if err != nil {
+				writeAliasValidationError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, modelAliasItemFromRecord(record))
+		case http.MethodDelete:
+			if err := st.DeleteModelAlias(id); err != nil {
+				writeAliasError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+func routingInspectAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		var req routingInspectRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid routing inspect payload"})
+			return
+		}
+		settings, err := loadRoutingSettings(r.Context(), st)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		planReq, upstreams, err := routingInspectPlanInput(st, req, settings)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		result, planErr := routeplan.Plan(planReq, upstreams)
+		resp := routingInspectResponse{Request: req, RefreshedAt: time.Now().UTC()}
+		if planErr != nil {
+			resp.Error = planErr.Error()
+			resp.Result = &result
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		resp.Result = &result
+		writeJSON(w, http.StatusOK, resp)
+	}
 }
 
 func handleChannelConfig(w http.ResponseWriter, r *http.Request, st *store.Store, rtr *router.Router, channelService *channel.Service, channelID string) {
@@ -1893,7 +3414,23 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
 		return
 	}
-	if err := st.SetChannelModelEnabled(channelID, model, req.Enabled); err != nil {
+	record, err := st.UpdateChannelModelProfile(channelID, model, store.ChannelModelProfilePatch{
+		DisplayName:                 req.DisplayName,
+		Enabled:                     req.Enabled,
+		SupportsResponses:           req.SupportsResponses,
+		SupportsChatCompletions:     req.SupportsChatCompletions,
+		SupportsEmbeddings:          req.SupportsEmbeddings,
+		ContextWindow:               req.ContextWindow,
+		MaxOutputTokens:             req.MaxOutputTokens,
+		CompactHistoryItemThreshold: req.CompactHistoryItemThreshold,
+		UpstreamModel:               req.UpstreamModel,
+		ProfileSource:               req.ProfileSource,
+		ProfileAdoptionStatus:       req.ProfileAdoptionStatus,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		record, err = st.UpsertChannelModel(channelID, channelModelRecordFromPatch(model, req))
+	}
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1901,7 +3438,59 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reload router: " + err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, channelModelItemFromRecord(record))
+}
+
+func channelModelRecordFromPatch(model string, req channelModelPatchRequest) store.ChannelModelRecord {
+	displayName := strings.TrimSpace(model)
+	if req.DisplayName != nil && strings.TrimSpace(*req.DisplayName) != "" {
+		displayName = strings.TrimSpace(*req.DisplayName)
+	}
+	record := store.ChannelModelRecord{
+		Model:                       model,
+		DisplayName:                 displayName,
+		Source:                      "trace",
+		SupportsResponses:           capabilityIntPtr(req.SupportsResponses),
+		SupportsChatCompletions:     capabilityIntPtr(req.SupportsChatCompletions),
+		SupportsEmbeddings:          capabilityIntPtr(req.SupportsEmbeddings),
+		ContextWindow:               positiveIntPtr(req.ContextWindow),
+		MaxOutputTokens:             positiveIntPtr(req.MaxOutputTokens),
+		CompactHistoryItemThreshold: positiveIntPtr(req.CompactHistoryItemThreshold),
+		InputModalitiesJSON:         "[]",
+		OutputModalitiesJSON:        "[]",
+		RawModelJSON:                "{}",
+	}
+	if req.Enabled != nil {
+		record.Enabled = *req.Enabled
+	}
+	if req.UpstreamModel != nil {
+		record.UpstreamModel = strings.TrimSpace(*req.UpstreamModel)
+	}
+	if req.ProfileSource != nil {
+		record.ProfileSource = strings.TrimSpace(*req.ProfileSource)
+	}
+	if req.ProfileAdoptionStatus != nil {
+		record.ProfileAdoptionStatus = strings.TrimSpace(*req.ProfileAdoptionStatus)
+	}
+	return record
+}
+
+func capabilityIntPtr(value *bool) *int {
+	if value == nil {
+		return nil
+	}
+	out := 0
+	if *value {
+		out = 1
+	}
+	return &out
+}
+
+func positiveIntPtr(value *int) *int {
+	if value == nil || *value <= 0 {
+		return nil
+	}
+	return value
 }
 
 func normalizeModelList(models []string) []string {
@@ -1920,6 +3509,358 @@ func normalizeModelList(models []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func defaultRoutingSettings() routingSettingsView {
+	return routingSettingsView{
+		ResponsesStrategy:  "auto",
+		SelectionPolicy:    router.PolicyP2C,
+		MissingModelPolicy: router.FallbackReject,
+		RoutePlanLogLevel:  "normal",
+	}
+}
+
+func loadRoutingSettings(ctx context.Context, st *store.Store) (routingSettingsView, error) {
+	settings := defaultRoutingSettings()
+	if st == nil {
+		return settings, nil
+	}
+	var persisted routingSettingsView
+	found, err := st.LoadAppSettingJSON(ctx, routingSettingsKey, &persisted)
+	if err != nil {
+		return routingSettingsView{}, err
+	}
+	if found {
+		settings = mergeRoutingSettings(settings, persisted)
+	}
+	if err := validateRoutingSettings(settings); err != nil {
+		return defaultRoutingSettings(), nil
+	}
+	return settings, nil
+}
+
+func mergeRoutingSettings(base routingSettingsView, patch routingSettingsView) routingSettingsView {
+	if strings.TrimSpace(patch.ResponsesStrategy) != "" {
+		base.ResponsesStrategy = strings.TrimSpace(patch.ResponsesStrategy)
+	}
+	if strings.TrimSpace(patch.SelectionPolicy) != "" {
+		base.SelectionPolicy = strings.TrimSpace(patch.SelectionPolicy)
+	}
+	if strings.TrimSpace(patch.MissingModelPolicy) != "" {
+		base.MissingModelPolicy = strings.TrimSpace(patch.MissingModelPolicy)
+	}
+	if strings.TrimSpace(patch.RoutePlanLogLevel) != "" {
+		base.RoutePlanLogLevel = strings.TrimSpace(patch.RoutePlanLogLevel)
+	}
+	if !patch.UpdatedAt.IsZero() {
+		base.UpdatedAt = patch.UpdatedAt
+	}
+	return base
+}
+
+func validateRoutingSettings(settings routingSettingsView) error {
+	switch routeplan.ResponsesStrategy(settings.ResponsesStrategy) {
+	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative, routeplan.ResponsesStrategyPreferLocalServer, routeplan.ResponsesStrategyNativeOnly, routeplan.ResponsesStrategyLocalServerOnly:
+	default:
+		return fmt.Errorf("unsupported responses_strategy %q", settings.ResponsesStrategy)
+	}
+	switch settings.SelectionPolicy {
+	case router.PolicyP2C, router.PolicyFirstAvailable:
+	default:
+		return fmt.Errorf("unsupported selection_policy %q", settings.SelectionPolicy)
+	}
+	switch settings.MissingModelPolicy {
+	case router.FallbackReject, "fallback":
+	default:
+		return fmt.Errorf("unsupported missing_model_policy %q", settings.MissingModelPolicy)
+	}
+	switch settings.RoutePlanLogLevel {
+	case "", "normal", "verbose":
+	default:
+		return fmt.Errorf("unsupported route_plan_log_level %q", settings.RoutePlanLogLevel)
+	}
+	return nil
+}
+
+func modelAliasRecordFromRequest(req modelAliasUpsertRequest, existing store.ModelAliasRecord) store.ModelAliasRecord {
+	record := existing
+	isCreate := record.ID == ""
+	if strings.TrimSpace(req.ID) != "" {
+		record.ID = strings.TrimSpace(req.ID)
+	}
+	if strings.TrimSpace(req.Alias) != "" {
+		record.Alias = strings.TrimSpace(req.Alias)
+	}
+	if strings.TrimSpace(req.TargetModel) != "" {
+		record.TargetModel = strings.TrimSpace(req.TargetModel)
+	}
+	record.ChannelID = strings.TrimSpace(req.ChannelID)
+	if req.Enabled != nil {
+		record.Enabled = *req.Enabled
+	} else if isCreate {
+		record.Enabled = true
+	}
+	if strings.TrimSpace(req.Description) != "" {
+		record.Description = strings.TrimSpace(req.Description)
+	}
+	if strings.TrimSpace(req.Source) != "" {
+		record.Source = strings.TrimSpace(req.Source)
+	}
+	return record
+}
+
+func normalizeModelAliasPreview(record store.ModelAliasRecord) store.ModelAliasRecord {
+	record.ID = strings.TrimSpace(record.ID)
+	record.Alias = strings.ToLower(strings.TrimSpace(record.Alias))
+	record.TargetModel = strings.ToLower(strings.TrimSpace(record.TargetModel))
+	record.ChannelID = strings.TrimSpace(record.ChannelID)
+	record.Description = strings.TrimSpace(record.Description)
+	record.Source = strings.TrimSpace(record.Source)
+	return record
+}
+
+func modelAliasValidationWarnings(st *store.Store, record store.ModelAliasRecord) ([]modelAliasValidationNote, error) {
+	if strings.TrimSpace(record.TargetModel) == "" {
+		return nil, nil
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	models, err := st.ListChannelModels("", false)
+	if err != nil {
+		return nil, err
+	}
+	target := strings.ToLower(strings.TrimSpace(record.TargetModel))
+	enabledChannels := map[string]store.ChannelConfigRecord{}
+	allChannels := map[string]store.ChannelConfigRecord{}
+	for _, channel := range channels {
+		allChannels[channel.ID] = channel
+		if channel.Enabled {
+			enabledChannels[channel.ID] = channel
+		}
+	}
+	targetEnabledOnAnyChannel := false
+	targetEnabledByChannel := map[string]bool{}
+	for _, model := range models {
+		if strings.ToLower(strings.TrimSpace(model.Model)) != target || !model.Enabled {
+			continue
+		}
+		targetEnabledByChannel[model.ChannelID] = true
+		if _, ok := enabledChannels[model.ChannelID]; ok {
+			targetEnabledOnAnyChannel = true
+		}
+	}
+	warnings := []modelAliasValidationNote{}
+	if !targetEnabledOnAnyChannel {
+		warnings = append(warnings, modelAliasValidationNote{
+			Code:    "target_model_not_enabled",
+			Message: "target model is not enabled on any enabled channel",
+		})
+	}
+	if record.ChannelID != "" {
+		channel, ok := allChannels[record.ChannelID]
+		if !ok || !channel.Enabled {
+			warnings = append(warnings, modelAliasValidationNote{
+				Code:    "scoped_channel_disabled",
+				Message: "scoped channel is disabled or missing",
+			})
+		}
+		if !targetEnabledByChannel[record.ChannelID] {
+			warnings = append(warnings, modelAliasValidationNote{
+				Code:    "scoped_channel_target_model_not_enabled",
+				Message: "scoped channel does not have the target model enabled",
+			})
+		}
+	}
+	return warnings, nil
+}
+
+func modelAliasItemFromRecord(record store.ModelAliasRecord) modelAliasItem {
+	return modelAliasItem{
+		ID:          record.ID,
+		Alias:       record.Alias,
+		TargetModel: record.TargetModel,
+		ChannelID:   record.ChannelID,
+		Enabled:     record.Enabled,
+		Description: record.Description,
+		Source:      record.Source,
+		CreatedAt:   record.CreatedAt,
+		UpdatedAt:   record.UpdatedAt,
+	}
+}
+
+func writeAliasError(w http.ResponseWriter, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "model alias not found"})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+func writeAliasValidationError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrModelAliasConflict) {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+}
+
+func routingInspectPlanInput(st *store.Store, req routingInspectRequest, settings routingSettingsView) (routeplan.Request, []routeplan.UpstreamCandidate, error) {
+	entrypoint, err := routingInspectEntrypoint(req.Endpoint)
+	if err != nil {
+		return routeplan.Request{}, nil, err
+	}
+	model := strings.TrimSpace(req.Model)
+	resolved, err := resolvedModelCandidatesForInspect(st, model)
+	if err != nil {
+		return routeplan.Request{}, nil, err
+	}
+	upstreams, err := upstreamCandidatesForInspect(st)
+	if err != nil {
+		return routeplan.Request{}, nil, err
+	}
+	return routeplan.Request{
+		Entrypoint:              entrypoint,
+		RequestedModel:          model,
+		ResolvedModelCandidates: resolved,
+		ResponsesStrategy:       routeplan.ResponsesStrategy(settings.ResponsesStrategy),
+		HasTools:                req.Tools,
+		Stream:                  req.Stream,
+	}, upstreams, nil
+}
+
+func routingInspectEntrypoint(value string) (routeplan.ClientEntrypoint, error) {
+	switch strings.TrimSpace(value) {
+	case "", "responses", "/v1/responses":
+		return routeplan.EntrypointResponses, nil
+	case "chat_completions", "/v1/chat/completions":
+		return routeplan.EntrypointChatCompletions, nil
+	case "anthropic_messages", "/v1/messages":
+		return routeplan.EntrypointAnthropicMessage, nil
+	default:
+		return "", fmt.Errorf("unsupported endpoint %q", value)
+	}
+}
+
+func resolvedModelCandidatesForInspect(st *store.Store, model string) ([]routeplan.ResolvedModelCandidate, error) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil, nil
+	}
+	out := []routeplan.ResolvedModelCandidate{{Model: model, Source: "request"}}
+	aliases, err := st.ListModelAliases(model, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, alias := range aliases {
+		out = append(out, routeplan.ResolvedModelCandidate{
+			Model:     alias.TargetModel,
+			Alias:     alias.Alias,
+			ChannelID: alias.ChannelID,
+			Source:    alias.Source,
+		})
+	}
+	return out, nil
+}
+
+func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidate, error) {
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		return nil, err
+	}
+	models, err := st.ListChannelModels("", true)
+	if err != nil {
+		return nil, err
+	}
+	modelsByChannel := map[string][]string{}
+	modelCapsByChannel := map[string]store.ChannelModelRecord{}
+	for _, model := range models {
+		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model.Model)
+		if _, ok := modelCapsByChannel[model.ChannelID]; !ok {
+			modelCapsByChannel[model.ChannelID] = model
+		}
+	}
+	out := make([]routeplan.UpstreamCandidate, 0, len(channels))
+	for _, channel := range channels {
+		caps := upstreamCapabilitiesFromChannel(channel)
+		if modelCaps, ok := modelCapsByChannel[channel.ID]; ok {
+			applyChannelModelCapabilities(&caps, modelCaps)
+		}
+		out = append(out, routeplan.UpstreamCandidate{
+			ID:                        channel.ID,
+			RouteTargetID:             channel.ID,
+			ChannelID:                 channel.ID,
+			Enabled:                   channel.Enabled,
+			Priority:                  channel.Priority,
+			Weight:                    channel.Weight,
+			Models:                    modelsByChannel[channel.ID],
+			SupportsChatCompletions:   caps.chatCompletions,
+			SupportsResponses:         caps.responses,
+			SupportsAnthropicMessages: caps.anthropicMessages,
+			SupportsToolCalling:       caps.toolCalling,
+		})
+	}
+	return out, nil
+}
+
+type inspectCapabilities struct {
+	chatCompletions   bool
+	responses         bool
+	anthropicMessages bool
+	toolCalling       bool
+}
+
+func upstreamCapabilitiesFromChannel(channel store.ChannelConfigRecord) inspectCapabilities {
+	var configured config.UpstreamCapabilitiesConfig
+	capabilitiesJSON := strings.TrimSpace(channel.CapabilitiesJSON)
+	if capabilitiesJSON == "" {
+		capabilitiesJSON = "{}"
+	}
+	_ = json.Unmarshal([]byte(capabilitiesJSON), &configured)
+	caps := inspectCapabilities{toolCalling: true}
+	if configured.ChatCompletions != nil {
+		caps.chatCompletions = *configured.ChatCompletions
+	}
+	if configured.Responses != nil {
+		caps.responses = *configured.Responses
+	}
+	if configured.ToolCalling != nil {
+		caps.toolCalling = *configured.ToolCalling
+	}
+	switch strings.TrimSpace(channel.APIType) {
+	case upstream.APITypeChatCompletions, "":
+		if configured.ChatCompletions == nil {
+			caps.chatCompletions = true
+		}
+	case upstream.APITypeResponses, upstream.APITypeResponsesNative:
+		if configured.Responses == nil {
+			caps.responses = true
+		}
+	case upstream.APITypeMessages:
+		caps.anthropicMessages = true
+	}
+	return caps
+}
+
+func applyChannelModelCapabilities(caps *inspectCapabilities, model store.ChannelModelRecord) {
+	if model.SupportsChatCompletions != nil {
+		caps.chatCompletions = *model.SupportsChatCompletions != 0
+	}
+	if model.SupportsResponses != nil {
+		caps.responses = *model.SupportsResponses != 0
+	}
+}
+
+func parseBoolQuery(value string, fallback bool) bool {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func routerReloadAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
@@ -1980,6 +3921,13 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	if strings.TrimSpace(req.ProviderPreset) != "" {
 		record.ProviderPreset = strings.TrimSpace(req.ProviderPreset)
 	}
+	record.APIType = valueOrExisting(req.APIType, record.APIType)
+	record.Mode = valueOrExisting(req.Mode, record.Mode)
+	if req.Capabilities != nil {
+		if data, err := json.Marshal(req.Capabilities); err == nil {
+			record.CapabilitiesJSON = string(data)
+		}
+	}
 	if strings.TrimSpace(req.ProtocolFamily) != "" {
 		record.ProtocolFamily = strings.TrimSpace(req.ProtocolFamily)
 	}
@@ -2028,6 +3976,10 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 	if strings.TrimSpace(record.HeadersJSON) != "" {
 		_ = json.Unmarshal([]byte(record.HeadersJSON), &headers)
 	}
+	capabilities := upstreamCapabilities{}
+	if strings.TrimSpace(record.CapabilitiesJSON) != "" {
+		_ = json.Unmarshal([]byte(record.CapabilitiesJSON), &capabilities)
+	}
 	return channelItem{
 		ID:                 record.ID,
 		Name:               record.Name,
@@ -2035,6 +3987,9 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 		Source:             record.Source,
 		BaseURL:            record.BaseURL,
 		ProviderPreset:     record.ProviderPreset,
+		APIType:            record.APIType,
+		Mode:               record.Mode,
+		Capabilities:       capabilities,
 		ProtocolFamily:     record.ProtocolFamily,
 		RoutingProfile:     record.RoutingProfile,
 		APIVersion:         record.APIVersion,
@@ -2063,14 +4018,65 @@ func channelItemFromRecord(st *store.Store, record store.ChannelConfigRecord, mo
 
 func channelModelItemFromRecord(record store.ChannelModelRecord) channelModelItem {
 	return channelModelItem{
-		Model:       record.Model,
-		DisplayName: record.DisplayName,
-		Source:      record.Source,
-		Enabled:     record.Enabled,
-		FirstSeenAt: record.FirstSeenAt,
-		LastSeenAt:  record.LastSeenAt,
-		LastProbeAt: record.LastProbeAt,
+		Model:                       record.Model,
+		DisplayName:                 record.DisplayName,
+		Source:                      record.Source,
+		Enabled:                     record.Enabled,
+		SupportsResponses:           capabilityBool(record.SupportsResponses),
+		SupportsChatCompletions:     capabilityBool(record.SupportsChatCompletions),
+		SupportsEmbeddings:          capabilityBool(record.SupportsEmbeddings),
+		ContextWindow:               record.ContextWindow,
+		MaxOutputTokens:             record.MaxOutputTokens,
+		CompactHistoryItemThreshold: record.CompactHistoryItemThreshold,
+		UpstreamModel:               record.UpstreamModel,
+		ProfileSource:               record.ProfileSource,
+		ProfileAdoptionStatus:       record.ProfileAdoptionStatus,
+		InputModalities:             decodeStringList(record.InputModalitiesJSON),
+		OutputModalities:            decodeStringList(record.OutputModalitiesJSON),
+		FirstSeenAt:                 record.FirstSeenAt,
+		LastSeenAt:                  record.LastSeenAt,
+		LastProbeAt:                 record.LastProbeAt,
 	}
+}
+
+func enrichModelChannelItemFromRecord(item *modelChannelItem, record store.ChannelModelRecord) {
+	if item == nil {
+		return
+	}
+	item.DisplayName = record.DisplayName
+	item.Enabled = record.Enabled
+	item.Source = record.Source
+	item.SupportsResponses = capabilityBool(record.SupportsResponses)
+	item.SupportsChatCompletions = capabilityBool(record.SupportsChatCompletions)
+	item.SupportsEmbeddings = capabilityBool(record.SupportsEmbeddings)
+	item.ContextWindow = record.ContextWindow
+	item.MaxOutputTokens = record.MaxOutputTokens
+	item.CompactHistoryItemThreshold = record.CompactHistoryItemThreshold
+	item.UpstreamModel = record.UpstreamModel
+	item.ProfileSource = record.ProfileSource
+	item.ProfileAdoptionStatus = record.ProfileAdoptionStatus
+	item.InputModalities = decodeStringList(record.InputModalitiesJSON)
+	item.OutputModalities = decodeStringList(record.OutputModalitiesJSON)
+}
+
+func capabilityBool(value *int) *bool {
+	if value == nil {
+		return nil
+	}
+	out := *value != 0
+	return &out
+}
+
+func decodeStringList(raw string) []string {
+	var out []string
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "[]"
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID string, since time.Time, bucketSize time.Duration, bucketCount int, includeDetail bool) {
@@ -2107,7 +4113,7 @@ func enrichChannelItemAnalytics(st *store.Store, item *channelItem, channelID st
 }
 
 func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResponse {
-	return channelProbeResponse{
+	resp := channelProbeResponse{
 		ChannelID:       result.ChannelID,
 		Status:          result.Status,
 		FailureReason:   result.FailureReason,
@@ -2121,6 +4127,10 @@ func channelProbeResponseFromResult(result channel.ProbeResult) channelProbeResp
 		CompletedAt:     result.CompletedAt,
 		DurationMs:      result.DurationMs,
 	}
+	if result.ProviderReport.Status != "" {
+		resp.ProviderProbe = &result.ProviderReport
+	}
+	return resp
 }
 
 func channelProbeRunItems(records []store.ChannelProbeRunRecord) []channelProbeRunItem {
@@ -2459,6 +4469,8 @@ func newUpstreamItemFromSnapshot(snapshot router.Snapshot, analytics store.Upstr
 		ModelDiscovery:    snapshot.ModelDiscovery,
 		BaseURL:           snapshot.BaseURL,
 		ProviderPreset:    snapshot.ProviderPreset,
+		APIType:           snapshot.APIType,
+		Mode:              snapshot.Mode,
 		ProtocolFamily:    snapshot.ProtocolFamily,
 		RoutingProfile:    snapshot.RoutingProfile,
 		HealthState:       snapshot.HealthState,
@@ -2757,6 +4769,43 @@ func listAPIHandler(st *store.Store) http.HandlerFunc {
 			},
 			RefreshedAt: time.Now().UTC(),
 		}
+		childrenByTrace, err := st.ListChildExchangesForEntries(result.Items)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query child exchanges: " + err.Error()})
+			return
+		}
+		for _, entry := range result.Items {
+			item := traceListItemFromEntry(entry)
+			item.UpstreamCallCount = len(childrenByTrace[entry.ID])
+			resp.Items = append(resp.Items, item)
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func routingExchangeListAPIHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+
+		page := parseInt(r.URL.Query().Get("page"), 1)
+		pageSize := parseInt(r.URL.Query().Get("page_size"), 50)
+		filter := parseListFilter(r)
+		result, err := st.ListRoutingPage(page, pageSize, filter)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
+			return
+		}
+
+		resp := listResponse{
+			Page:        result.Page,
+			PageSize:    result.PageSize,
+			Total:       result.Total,
+			TotalPages:  result.TotalPages,
+			RefreshedAt: time.Now().UTC(),
+		}
 		for _, entry := range result.Items {
 			resp.Items = append(resp.Items, traceListItemFromEntry(entry))
 		}
@@ -2836,12 +4885,22 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query error: " + err.Error()})
 			return
 		}
+		children, err := st.ListChildExchangesForEntries(traces)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query child exchanges: " + err.Error()})
+			return
+		}
 
 		resp := sessionDetailResponse{
 			Summary: sessionSummaryItem(summary),
 		}
 		for _, entry := range traces {
-			resp.Traces = append(resp.Traces, traceListItemFromEntry(entry))
+			item := traceListItemFromEntry(entry)
+			for _, child := range children[entry.ID] {
+				item.UpstreamCalls = append(item.UpstreamCalls, traceListItemFromEntry(child))
+			}
+			item.UpstreamCallCount = len(item.UpstreamCalls)
+			resp.Traces = append(resp.Traces, item)
 		}
 		resp.Breakdown = buildSessionBreakdown(resp.Traces)
 		resp.Timeline = buildSessionTimeline(resp.Traces)
@@ -3121,7 +5180,7 @@ func traceAPIHandler(st *store.Store, rtr *router.Router) http.HandlerFunc {
 
 		switch {
 		case len(parts) == 1 && r.Method == http.MethodGet:
-			handleTraceDetail(w, absPath, entry, rtr)
+			handleTraceDetail(w, r, st, absPath, entry, rtr)
 		case len(parts) == 2 && parts[1] == "raw" && r.Method == http.MethodGet:
 			handleTraceRaw(w, absPath, entry)
 		case len(parts) == 2 && parts[1] == "observation" && r.Method == http.MethodGet:
@@ -3305,7 +5364,7 @@ func handleTracePerformance(w http.ResponseWriter, entry store.LogEntry) {
 	})
 }
 
-func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEntry, rtr *router.Router) {
+func handleTraceDetail(w http.ResponseWriter, r *http.Request, st *store.Store, absPath string, entry store.LogEntry, rtr *router.Router) {
 	content, err := os.ReadFile(absPath)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
@@ -3342,8 +5401,50 @@ func handleTraceDetail(w http.ResponseWriter, absPath string, entry store.LogEnt
 	if health := selectedUpstreamHealthView(rtr, entry.Header.Meta.SelectedUpstreamID); health != nil {
 		resp.SelectedUpstreamHealth = health
 	}
+	if ref, ok, err := traceResponsesAuditReference(r.Context(), st, entry); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query responses audit reference: " + err.Error()})
+		return
+	} else if ok {
+		resp.ResponseID = ref.ResponseID
+		resp.RequestAuditID = ref.RequestAuditID
+		resp.ResponsesAudit = &traceResponsesAuditRef{
+			ResponseID:     ref.ResponseID,
+			RequestAuditID: ref.RequestAuditID,
+		}
+	}
+	childrenByTrace, err := st.ListChildExchangesForEntries([]store.LogEntry{entry})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "query child exchanges: " + err.Error()})
+		return
+	}
+	for _, child := range childrenByTrace[entry.ID] {
+		resp.UpstreamCalls = append(resp.UpstreamCalls, traceListItemFromEntry(child))
+	}
 	resp.Events = buildTimelineEventViews(parsed)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func traceResponsesAuditReference(ctx context.Context, st *store.Store, entry store.LogEntry) (responsesaudit.RequestAuditReference, bool, error) {
+	if st == nil || st.EntClient() == nil {
+		return responsesaudit.RequestAuditReference{}, false, nil
+	}
+	query := responsesaudit.NewQueryService(st.EntClient())
+	seen := map[string]struct{}{}
+	for _, candidate := range []string{entry.ID, entry.Header.Meta.RequestID} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		ref, ok, err := query.FindRequestAuditReferenceByTraceID(ctx, candidate)
+		if err != nil || ok {
+			return ref, ok, err
+		}
+	}
+	return responsesaudit.RequestAuditReference{}, false, nil
 }
 
 func handleTraceRaw(w http.ResponseWriter, absPath string, entry store.LogEntry) {
@@ -3455,7 +5556,7 @@ func buildRoutingSummary(st *store.Store, since time.Time, modelFilter string) (
 	// ListPage does not expose a recorded_at filter, so stop once the descending
 	// index reaches traces older than the requested monitor window.
 	for page := 1; ; page++ {
-		result, err := st.ListPage(page, pageSize, filter)
+		result, err := st.ListRoutingPage(page, pageSize, filter)
 		if err != nil {
 			return routingSummaryResponse{}, err
 		}
@@ -3963,6 +6064,7 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		Model:            entry.Header.Meta.Model,
 		Provider:         entry.Header.Meta.Provider,
 		SelectedUpstream: entry.Header.Meta.SelectedUpstreamID,
+		SelectedPreset:   entry.Header.Meta.SelectedUpstreamProviderPreset,
 		Operation:        entry.Header.Meta.Operation,
 		Endpoint:         entry.Header.Meta.Endpoint,
 		Method:           entry.Header.Meta.Method,
@@ -3976,6 +6078,13 @@ func traceListItemFromEntry(entry store.LogEntry) traceListItem {
 		CachedTokens:     cachedTokens(entry),
 		IsStream:         entry.Header.Layout.IsStream,
 		Error:            entry.Header.Meta.Error,
+		RequestAuditID:   entry.Header.Meta.RequestAuditID,
+		ResponseID:       entry.Header.Meta.ResponseID,
+		ExchangeID:       entry.Header.Meta.ExchangeID,
+		ExchangeKind:     entry.Header.Meta.ExchangeKind,
+		ExchangeRole:     entry.Header.Meta.ExchangeRole,
+		ParentExchangeID: entry.Header.Meta.ParentExchangeID,
+		SequenceIndex:    entry.Header.Meta.SequenceIndex,
 		Observation:      observationListViewFromStore(entry.Observation),
 	}
 }
@@ -4000,6 +6109,291 @@ func systemEventViews(events []store.SystemEvent) []systemEventView {
 	out := make([]systemEventView, 0, len(events))
 	for _, event := range events {
 		out = append(out, systemEventViewFromStore(event))
+	}
+	return out
+}
+
+func responsesAuditTraceFromAudit(trace responsesaudit.RequestAuditTrace, responseID string, requestAuditID string) responsesAuditTraceResponse {
+	out := responsesAuditTraceResponse{
+		Query: responsesAuditTraceQuery{
+			ResponseID:     firstNonEmpty(responseID, trace.RequestAudit.ResponseID),
+			RequestAuditID: firstNonEmpty(requestAuditID, trace.RequestAudit.ID),
+		},
+		RequestAudit:      responsesRequestAuditFromAudit(trace.RequestAudit),
+		FinalResponse:     responsesFinalResponseFromAudit(trace.FinalResponse),
+		Events:            make([]responsesExecutionEventView, 0, len(trace.ExecutionEvents)),
+		ModelExchanges:    make([]responsesExchangeView, 0, len(trace.UpstreamExchanges)),
+		UpstreamExchanges: make([]responsesUpstreamExchange, 0, len(trace.UpstreamExchanges)),
+		RawCassettes:      make([]responsesRawCassetteView, 0, len(trace.RawCassettes)),
+	}
+	for _, event := range trace.ExecutionEvents {
+		out.Events = append(out.Events, responsesExecutionEventFromAudit(event))
+	}
+	for _, cassette := range trace.RawCassettes {
+		out.RawCassettes = append(out.RawCassettes, responsesRawCassetteFromAudit(cassette))
+	}
+	cassetteByExchangeID := responsesRawCassettesByExchangeID(out.RawCassettes)
+	for _, exchange := range trace.UpstreamExchanges {
+		dto := responsesUpstreamExchangeFromAudit(exchange)
+		responsesApplyCassetteMetadata(&dto, cassetteByExchangeID[dto.ID])
+		out.UpstreamExchanges = append(out.UpstreamExchanges, dto)
+		out.ModelExchanges = append(out.ModelExchanges, responsesModelExchangeFromUpstream(dto))
+	}
+	out.EntryExchange = responsesEntryExchangeFromAudit(trace, out.RawCassettes)
+	return out
+}
+
+func responsesRequestAuditFromAudit(audit responsesaudit.RequestAuditView) *responsesRequestAuditView {
+	return &responsesRequestAuditView{
+		ID:              audit.ID,
+		ResponseID:      audit.ResponseID,
+		ConversationID:  audit.ConversationID,
+		Method:          audit.Method,
+		Path:            audit.Path,
+		ClientRequestID: audit.ClientRequestID,
+		HeaderJSON:      audit.HeaderJSON,
+		BodyPreview:     audit.BodyPreview,
+		BodySHA256:      audit.BodySha256,
+		Status:          audit.Status,
+		ErrorText:       audit.ErrorText,
+		CreatedAt:       audit.CreatedAt,
+	}
+}
+
+func responsesExecutionEventFromAudit(event responsesaudit.ExecutionEventView) responsesExecutionEventView {
+	return responsesExecutionEventView{
+		ID:             event.ID,
+		ResponseID:     event.ResponseID,
+		RequestAuditID: event.RequestAuditID,
+		ConversationID: event.ConversationID,
+		EventType:      event.EventType,
+		Phase:          event.Phase,
+		Status:         event.Status,
+		Message:        event.Message,
+		DetailsJSON:    event.DetailsJSON,
+		OccurredAt:     event.OccurredAt,
+	}
+}
+
+func responsesUpstreamExchangeFromAudit(exchange responsesaudit.UpstreamExchangeView) responsesUpstreamExchange {
+	return responsesUpstreamExchange{
+		ID:             exchange.ID,
+		ResponseID:     exchange.ResponseID,
+		RequestAuditID: exchange.RequestAuditID,
+		TraceID:        exchange.TraceID,
+		CassettePath:   exchange.CassettePath,
+		UpstreamID:     exchange.UpstreamID,
+		RouteTarget:    exchange.RouteTarget,
+		Model:          exchange.Model,
+		Endpoint:       exchange.Endpoint,
+		StatusCode:     exchange.StatusCode,
+		StartedAt:      exchange.StartedAt,
+		CompletedAt:    exchange.CompletedAt,
+		ErrorText:      exchange.ErrorText,
+	}
+}
+
+func responsesModelExchangeFromUpstream(exchange responsesUpstreamExchange) responsesExchangeView {
+	return responsesExchangeView{
+		ID:               exchange.ID,
+		ResponseID:       exchange.ResponseID,
+		RequestAuditID:   exchange.RequestAuditID,
+		TraceID:          exchange.TraceID,
+		CassettePath:     exchange.CassettePath,
+		ExchangeKind:     firstNonEmptyLocal(exchange.ExchangeKind, "model"),
+		ExchangeRole:     exchange.ExchangeRole,
+		ParentExchangeID: exchange.ParentExchangeID,
+		SequenceIndex:    exchange.SequenceIndex,
+		UpstreamID:       exchange.UpstreamID,
+		RouteTarget:      exchange.RouteTarget,
+		Model:            exchange.Model,
+		Provider:         exchange.Provider,
+		Endpoint:         exchange.Endpoint,
+		StatusCode:       exchange.StatusCode,
+		StartedAt:        exchange.StartedAt,
+		CompletedAt:      exchange.CompletedAt,
+		ErrorText:        exchange.ErrorText,
+	}
+}
+
+func responsesEntryExchangeFromAudit(trace responsesaudit.RequestAuditTrace, cassettes []responsesRawCassetteView) *responsesExchangeView {
+	for _, cassette := range cassettes {
+		if cassette.ExchangeKind != "entry" {
+			continue
+		}
+		meta := responsesRecordMeta(cassette.Header.Meta)
+		return &responsesExchangeView{
+			ID:               firstNonEmptyLocal(cassette.ExchangeID, meta.ExchangeID),
+			ResponseID:       firstNonEmptyLocal(meta.ResponseID, trace.RequestAudit.ResponseID, trace.FinalResponse.ResponseID),
+			RequestAuditID:   firstNonEmptyLocal(meta.RequestAuditID, trace.RequestAudit.ID),
+			TraceID:          firstNonEmptyLocal(cassette.TraceID, meta.RequestID),
+			CassettePath:     cassette.CassettePath,
+			ExchangeKind:     firstNonEmptyLocal(cassette.ExchangeKind, meta.ExchangeKind, "entry"),
+			ExchangeRole:     firstNonEmptyLocal(cassette.ExchangeRole, meta.ExchangeRole, "client_request"),
+			ParentExchangeID: firstNonEmptyLocal(cassette.ParentExchangeID, meta.ParentExchangeID),
+			SequenceIndex:    firstNonZero(cassette.SequenceIndex, meta.SequenceIndex),
+			Model:            meta.Model,
+			Provider:         meta.Provider,
+			Endpoint:         firstNonEmptyLocal(meta.Endpoint, trace.RequestAudit.Path),
+			StatusCode:       firstNonZero(meta.StatusCode, trace.FinalResponse.StatusCode),
+			CompletedAt:      trace.FinalResponse.CompletedAt,
+			ErrorText:        firstNonEmptyLocal(meta.Error, trace.FinalResponse.ErrorText),
+		}
+	}
+	if trace.RequestAudit.ID == "" && trace.RequestAudit.ResponseID == "" && trace.FinalResponse.ResponseID == "" {
+		return nil
+	}
+	return &responsesExchangeView{
+		ID:             trace.RequestAudit.ID,
+		ResponseID:     firstNonEmptyLocal(trace.RequestAudit.ResponseID, trace.FinalResponse.ResponseID),
+		RequestAuditID: trace.RequestAudit.ID,
+		ExchangeKind:   "entry",
+		ExchangeRole:   "client_request",
+		Model:          trace.FinalResponse.Model,
+		Endpoint:       firstNonEmptyLocal(trace.FinalResponse.Endpoint, trace.RequestAudit.Path),
+		StatusCode:     trace.FinalResponse.StatusCode,
+		StartedAt:      trace.RequestAudit.CreatedAt,
+		CompletedAt:    trace.FinalResponse.CompletedAt,
+		ErrorText:      firstNonEmptyLocal(trace.RequestAudit.ErrorText, trace.FinalResponse.ErrorText),
+	}
+}
+
+func responsesRawCassettesByExchangeID(cassettes []responsesRawCassetteView) map[string]responsesRawCassetteView {
+	out := make(map[string]responsesRawCassetteView, len(cassettes))
+	for _, cassette := range cassettes {
+		if cassette.ExchangeID != "" {
+			out[cassette.ExchangeID] = cassette
+		}
+	}
+	return out
+}
+
+func responsesApplyCassetteMetadata(exchange *responsesUpstreamExchange, cassette responsesRawCassetteView) {
+	if exchange == nil {
+		return
+	}
+	meta := responsesRecordMeta(cassette.Header.Meta)
+	exchange.ExchangeKind = firstNonEmptyLocal(exchange.ExchangeKind, cassette.ExchangeKind, meta.ExchangeKind, "model")
+	exchange.ExchangeRole = firstNonEmptyLocal(exchange.ExchangeRole, cassette.ExchangeRole, meta.ExchangeRole)
+	exchange.ParentExchangeID = firstNonEmptyLocal(exchange.ParentExchangeID, cassette.ParentExchangeID, meta.ParentExchangeID)
+	exchange.SequenceIndex = firstNonZero(exchange.SequenceIndex, cassette.SequenceIndex, meta.SequenceIndex)
+	exchange.Provider = firstNonEmptyLocal(exchange.Provider, meta.Provider)
+	exchange.Model = firstNonEmptyLocal(exchange.Model, meta.Model)
+	exchange.Endpoint = firstNonEmptyLocal(exchange.Endpoint, meta.Endpoint)
+}
+
+func responsesFinalResponseFromAudit(response responsesaudit.FinalResponseView) *responsesFinalResponseView {
+	if response.ResponseID == "" && response.RequestAuditID == "" && response.Status == "" {
+		return nil
+	}
+	return &responsesFinalResponseView{
+		ResponseID:      response.ResponseID,
+		RequestAuditID:  response.RequestAuditID,
+		ConversationID:  response.ConversationID,
+		ClientRequestID: response.ClientRequestID,
+		Status:          response.Status,
+		ErrorText:       response.ErrorText,
+		Model:           response.Model,
+		Endpoint:        response.Endpoint,
+		StatusCode:      response.StatusCode,
+		CompletedAt:     response.CompletedAt,
+	}
+}
+
+func responsesRawCassetteFromAudit(cassette responsesaudit.RawCassetteView) responsesRawCassetteView {
+	meta := responsesRecordMeta(cassette.Header.Meta)
+	return responsesRawCassetteView{
+		ExchangeID:       firstNonEmptyLocal(cassette.ExchangeID, meta.ExchangeID),
+		TraceID:          firstNonEmptyLocal(cassette.TraceID, meta.RequestID),
+		CassettePath:     cassette.CassettePath,
+		ExchangeKind:     meta.ExchangeKind,
+		ExchangeRole:     meta.ExchangeRole,
+		ParentExchangeID: meta.ParentExchangeID,
+		SequenceIndex:    meta.SequenceIndex,
+		ReadError:        cassette.ReadError,
+		Header: recordHeaderView{
+			Version: cassette.Header.Version,
+			Meta:    cassette.Header.Meta,
+			Layout:  cassette.Header.Layout,
+			Usage:   cassette.Header.Usage,
+		},
+		Events:   append([]recordfile.RecordEvent(nil), cassette.Events...),
+		Request:  cassette.Request,
+		Response: cassette.Response,
+	}
+}
+
+type responsesRecordMetaView struct {
+	RequestID        string
+	ResponseID       string
+	RequestAuditID   string
+	ExchangeID       string
+	ExchangeKind     string
+	ExchangeRole     string
+	ParentExchangeID string
+	SequenceIndex    int
+	Model            string
+	Provider         string
+	Endpoint         string
+	StatusCode       int
+	Error            string
+}
+
+func responsesRecordMeta(value any) responsesRecordMetaView {
+	meta, ok := value.(recordfile.MetaData)
+	if !ok {
+		return responsesRecordMetaView{}
+	}
+	return responsesRecordMetaView{
+		RequestID:        meta.RequestID,
+		ResponseID:       meta.ResponseID,
+		RequestAuditID:   meta.RequestAuditID,
+		ExchangeID:       meta.ExchangeID,
+		ExchangeKind:     meta.ExchangeKind,
+		ExchangeRole:     meta.ExchangeRole,
+		ParentExchangeID: meta.ParentExchangeID,
+		SequenceIndex:    meta.SequenceIndex,
+		Model:            meta.Model,
+		Provider:         meta.Provider,
+		Endpoint:         meta.Endpoint,
+		StatusCode:       meta.StatusCode,
+		Error:            meta.Error,
+	}
+}
+
+func firstNonZero(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func responsesToolCallAuditFromAudit(record responsesaudit.ToolCallAuditView, includePayloads bool) responsesToolCallAuditView {
+	out := responsesToolCallAuditView{
+		ID:              record.ID,
+		ResponseID:      record.ResponseID,
+		RequestAuditID:  record.RequestAuditID,
+		ConversationID:  record.ConversationID,
+		CallID:          record.CallID,
+		ToolType:        record.ToolType,
+		ToolName:        record.ToolName,
+		Executor:        record.Executor,
+		Status:          record.Status,
+		Phase:           record.Phase,
+		InputSummary:    responsesaudit.SummarizeJSONPayload(record.InputJSON),
+		OutputSummary:   responsesaudit.SummarizeJSONPayload(record.OutputJSON),
+		MetadataSummary: responsesaudit.SummarizeJSONPayload(record.MetadataJSON),
+		ErrorText:       record.ErrorText,
+		StartedAt:       record.StartedAt,
+		CompletedAt:     record.CompletedAt,
+		CreatedAt:       record.CreatedAt,
+	}
+	if includePayloads {
+		out.InputJSON = record.InputJSON
+		out.OutputJSON = record.OutputJSON
+		out.MetadataJSON = record.MetadataJSON
 	}
 	return out
 }

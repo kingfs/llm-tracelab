@@ -5,13 +5,13 @@
 
 **中文说明** | [English](./README_EN.md)
 
-`llm-tracelab` 是一个本地优先的 LLM HTTP 录制与回放代理。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面。核心目标很直接：
+`llm-tracelab` 是一个 Postgres-first 的 LLM gateway，内置 LLM HTTP record/replay、Responses server-mode、Monitor 和 MCP 排障面。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面，并把可部署网关与可回放 cassette 保持在同一个调试闭环里。核心目标很直接：
 
-- 开发时把真实大模型 HTTP 请求录下来
-- 单元测试时直接回放，不再依赖外网和真实模型
-- 让测试更稳定、更快、更省钱
+- 生产或准生产环境用 Postgres 保存用户、token、trace index、渠道/模型、Responses state 和 audit 数据
+- 对 OpenAI-compatible / vLLM 上游提供可选 `/v1/responses` semantic server
+- 开发和测试时把真实大模型 HTTP exchange 录为 `.http` cassette，并可离线回放
 
-项目定位接近 `http record/replay`，但针对 LLM 场景补了流式响应、Token usage、可视化查看和故障注入能力。
+raw `.http` cassette 仍是 replay 和详情页的事实来源；Postgres 是生产结构化状态与索引主路径，SQLite 只保留为本地 fallback 和离线测试路径。
 
 ## 当前版本发布说明
 
@@ -20,7 +20,7 @@
 - `pkg/llm` 升级为按 provider/endpoint 工作的 adapter 层，统一处理 request、response、stream transcript 和 usage pipeline
 - Monitor 改成 Go embed 的 React UI，列表页异步分页，详情页支持 timeline / summary / raw protocol
 - Monitor 首页支持 `Sessions / Requests` 双视角，可按 `session_id` 等线索聚合相关请求
-- SQLite 数据库改用稳定 `trace_id`，不再在 URL 中暴露本地路径
+- Postgres 应用库迁移已通过 checked-in SQL 路径接入，SQLite 明确降级为 startup-schema fallback
 - `LLM_PROXY_V3` 的 `# event:` 现在不仅有 request/response 基础事件，还会落 `llm.*` provider timeline
 
 ## 适合什么场景
@@ -37,7 +37,8 @@
 - 使用 `pkg/replay.Transport` 在测试中直接回放
 - Monitor 页面查看请求详情、统一 timeline、原始协议和 Token 消耗
 - Trace Monitor 支持按单请求查看，也支持按 session 聚合查看相关请求
-- 使用 SQLite 维护 metadata 索引，避免统计页每次全量读文件
+- 使用 Postgres 维护生产 metadata / audit / Responses state；SQLite 可作为本地 fallback
+- 默认生产 Compose 包含 app + Postgres，并可通过 profile 启用 SearXNG hosted `web_search`
 - 支持对旧版 V2 记录文件兼容读取
 
 ## 项目结构
@@ -46,14 +47,14 @@
 cmd/server            服务入口
 internal/proxy        代理转发、stream 注入、响应拦截
 internal/recorder     .http 录制与落盘
-internal/store        SQLite 元数据索引
+internal/store        Postgres/SQLite 应用数据与 metadata 索引
 internal/monitor      Monitor UI 与详情解析
 pkg/recordfile        录制文件格式 V2/V3 解析与 V3 写入
 pkg/replay            单元测试回放 Transport
 pkg/llm               多厂商请求/响应归一化
 ```
 
-更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，v1 产品与架构设计入口见 [docs/v1/README.md](./docs/v1/README.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，系统事件中心设计见 [docs/SYSTEM_EVENTS_DESIGN.md](./docs/SYSTEM_EVENTS_DESIGN.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，多 upstream 路由设计说明见 [docs/MULTI_UPSTREAM_PLAN.md](./docs/MULTI_UPSTREAM_PLAN.md)，Credential 路由操作指南见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)，项目路线图见 [docs/ROADMAP.md](./docs/ROADMAP.md)，Vertex 协议族设计说明见 [docs/VERTEX_NATIVE_PLAN.md](./docs/VERTEX_NATIVE_PLAN.md)。
+更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，生产部署说明见 [docs/PRODUCTION_DEPLOYMENT.md](./docs/PRODUCTION_DEPLOYMENT.md)，v1 产品与架构设计入口见 [docs/v1/README.md](./docs/v1/README.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，Credential 路由操作指南见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)。
 
 面向 Sub2API、LiteLLM、Portkey、Helicone 等 LLM 网关/观测生态的方向校准和能力吸收设计见 [docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md)。该文档明确 TraceLab 不转向公网中转、支付或 SaaS 分发平台，而是吸收渠道管理、调度、限流、健康、成本和治理能力来强化本地优先的 record/replay、调试、审计和评估闭环。
 
@@ -67,13 +68,17 @@ pkg/llm               多厂商请求/响应归一化
 1. 文件前导包含紧凑元数据行，而不是固定 2KB 占位行
 2. 原始 HTTP request/response 仍然完整保留，方便人工排查
 3. `# event:` 会记录统一 timeline，例如 `llm.output_text.delta`、`llm.reasoning.delta`、`llm.tool_call`、`llm.usage`
-4. 请求摘要、耗时、Token、trace id，以及可提取的 `session_id` 等聚合字段会同步索引到 `llm_tracelab.sqlite3`
+4. 请求摘要、耗时、Token、trace id、`session_id`、Responses audit 等结构化数据会同步索引到应用数据库；生产默认使用 Postgres
 
-默认存储布局：
+生产默认存储布局：
 
 ```text
-logs/
-  llm_tracelab.sqlite3
+Postgres:
+  users / api_tokens / channel_configs / channel_models
+  logs / sessions / responses / response_items
+  request_audits / execution_events / upstream_exchanges / tool_call_audits
+
+data/traces/
   <upstream-host>/<model>/<yyyy>/<mm>/<dd>/*.http
 ```
 
@@ -81,9 +86,9 @@ logs/
 
 ### 1. 配置服务启动参数
 
-v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略等。模型渠道和模型启停应通过 Monitor Web 管理，并持久化到 SQLite。
+v1 起，推荐把 YAML 限定为服务启动配置：端口、数据库、trace 输出目录、认证、MCP、router 策略、Responses server 和工具开关。模型渠道、provider 地址、API key、模型启停和模型 profile 应通过 Monitor Web 管理，并持久化到应用数据库。
 
-[config/config.yaml](./config/config.yaml) 是提交到仓库的默认样例配置，不放真实密钥。生产部署可以继续用环境变量覆盖端口、数据库、输出目录等启动参数。
+[config/config.yaml](./config/config.yaml) 是提交到仓库的默认 Postgres-first 启动配置，不放真实密钥，也不内置 provider。没有任何上游配置时，服务仍应能启动，Monitor Web 可用于后续配置 providers。生产部署只需要通过环境变量注入部署现场值：Postgres DSN/密码、对外端口，以及可选的单个 bootstrap upstream 地址和 API key。本地 SQLite 开发可使用 [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)。
 
 推荐的基础配置结构如下：
 
@@ -99,17 +104,24 @@ mcp:
   path: "/mcp"
 
 database:
-  driver: "sqlite"
-  dsn: "" # 默认 {{trace.output_dir}}/llm_tracelab.sqlite3
-  max_open_conns: 4
-  max_idle_conns: 4
+  driver: "postgres"
+  dsn: ""
+  max_open_conns: 16
+  max_idle_conns: 8
   auto_migrate: true
 
 auth:
   session_ttl: 24h
 
 trace:
-  output_dir: "./logs"
+  output_dir: "./data/traces"
+
+responses_server:
+  enabled: true
+  default_model: ""
+  force_store: true
+  path: "/v1/responses"
+  auto_compact: true
 
 router:
   model_discovery:
@@ -125,66 +137,34 @@ router:
     on_missing_model: "reject"
 
 debug:
-  output_dir: "./logs"
-  mask_key: false
+  output_dir: "./data/traces"
+  mask_key: true
 ```
 
-历史 `upstream` / `upstreams` YAML 仍然兼容，但只建议作为首次启动 bootstrap 或迁移入口使用。当 SQLite 中已经存在 channel 配置时，运行时以数据库为准，不再持续同步 YAML upstreams。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
-
-兼容的 bootstrap 示例：
-
-```yaml
-upstream:
-  base_url: "https://api.openai.com/v1"
-  api_key: "$env:LLM_API_KEY"
-  provider_preset: "openai"
-```
+历史 `upstream` / `upstreams` YAML 仍然兼容，但不再作为长期生产配置入口。首次启动时，如果设置了 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`，系统会导入一个 OpenAI-compatible bootstrap provider；如果未设置，服务仅启动 Web 和管理面。导入后的渠道会在 Monitor 中标记为 `bootstrap`，之后请在 Web 中编辑、探测、启用或禁用模型。
 
 同一个 upstream 下配置多个 explicit credentials 的示例和 sticky route target、credential-safe metadata、limit scope 说明见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)。文档示例只使用 `$env:...` 占位符，不应在 YAML 中提交真实 provider secret。
 
 如果你不想从零开始写 bootstrap 配置，可参考这些现成样例；长期配置仍建议在 Monitor Web 中完成：
 
 - [config/examples/openai.yaml](./config/examples/openai.yaml)
+- [config/examples/openai-compatible-vllm-postgres.yaml](./config/examples/openai-compatible-vllm-postgres.yaml)
+- [config/examples/local-sqlite.yaml](./config/examples/local-sqlite.yaml)
 - [config/examples/anthropic.yaml](./config/examples/anthropic.yaml)
 - [config/examples/google_genai.yaml](./config/examples/google_genai.yaml)
 - [config/examples/azure_openai.yaml](./config/examples/azure_openai.yaml)
 - [config/examples/vertex.yaml](./config/examples/vertex.yaml)
 
-支持的环境变量覆盖：
-
-- `LLM_TRACELAB_SERVER_PORT`
-- `LLM_TRACELAB_MONITOR_PORT`
-- `LLM_TRACELAB_DATABASE_DRIVER`
-- `LLM_TRACELAB_DATABASE_DSN`
-- `LLM_TRACELAB_DATABASE_MAX_OPEN_CONNS`
-- `LLM_TRACELAB_DATABASE_MAX_IDLE_CONNS`
-- `LLM_TRACELAB_DATABASE_AUTO_MIGRATE`
-- `LLM_TRACELAB_TRACE_OUTPUT_DIR`
-- `LLM_TRACELAB_AUTH_SESSION_TTL`
-- `LLM_TRACELAB_MCP_ENABLED`
-- `LLM_TRACELAB_MCP_PATH`
-- `LLM_TRACELAB_UPSTREAM_BASE_URL`
-- `LLM_TRACELAB_UPSTREAM_API_KEY`
-- `LLM_TRACELAB_UPSTREAM_PROVIDER_PRESET`
-- `LLM_TRACELAB_UPSTREAM_PROTOCOL_FAMILY`
-- `LLM_TRACELAB_UPSTREAM_ROUTING_PROFILE`
-- `LLM_TRACELAB_UPSTREAM_API_VERSION`
-- `LLM_TRACELAB_UPSTREAM_DEPLOYMENT`
-- `LLM_TRACELAB_UPSTREAM_PROJECT`
-- `LLM_TRACELAB_UPSTREAM_LOCATION`
-- `LLM_TRACELAB_UPSTREAM_MODEL_RESOURCE`
-- `LLM_TRACELAB_OUTPUT_DIR`
-- `LLM_TRACELAB_MASK_KEY`
-
-兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 仍会覆盖第一个 bootstrap upstream target，适合单默认上游迁移。更复杂的多渠道生产配置请在 Monitor Web 中管理。
+生产建议通过环境变量注入的值保持最小：`LLM_TRACELAB_DATABASE_DSN`、`POSTGRES_PASSWORD`、`LLM_TRACELAB_HOST_SERVER_PORT`、`LLM_TRACELAB_HOST_MONITOR_PORT`，以及可选的 `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL`、`LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY`、`LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED`。其余服务行为默认保留在 `config/config.yaml`。兼容旧命名的 `LLM_TRACELAB_UPSTREAM_*` 仍可用于老单上游迁移，但新部署应优先通过 Monitor Web 管理 providers。
 
 访问控制说明：
 
-- `database` 是统一的结构化数据存储，承载用户、API token、trace index、session、upstream、dataset 和 eval 元数据；SQLite 默认路径是 `trace.output_dir/llm_tracelab.sqlite3`。
+- `database` 是统一的结构化数据存储，承载用户、API token、trace index、session、upstream、dataset、eval、Responses state 和 audit 元数据；生产默认使用 Postgres。
 - 首次启动前先初始化用户：`go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'`。
-- Monitor UI 使用用户名密码登录；登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
-- 同一个个人 token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
-- Channels / Models 通过 Monitor Web 管理并写入 SQLite；YAML 不再作为长期渠道配置入口。
+- Monitor UI 使用用户名密码登录；网页登录态使用 monitor-only JWT，不复用个人 API token。
+- 登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
+- 个人 API token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
+- Channels / Models 通过 Monitor Web 管理并写入应用数据库；YAML 不再作为长期渠道配置入口。
 
 ### MCP Server
 
@@ -333,15 +313,19 @@ task run
 task migrate
 ```
 
-默认读取 `config/config.yaml`。也可以显式指定：
+默认读取 Postgres-first 样例 `config/config.yaml`；本地 `config inspect` / `doctor` 可直接运行，真实启动前应配置可用 Postgres 和 upstream。SQLite 本地开发可以显式指定：
 
 ```bash
-CONFIG=config/examples/openai.yaml task run
+CONFIG=config/examples/local-sqlite.yaml task run
 ```
 
 如果只想直接运行：
 
 ```bash
+export LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@localhost:5432/llm_tracelab?sslmode=disable'
+export LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini
+export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://localhost:8000/v1
+export LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder
 go run ./cmd/server -c config/config.yaml
 ```
 
@@ -379,7 +363,7 @@ go run ./cmd/server migrate -c config/config.yaml
 这个命令默认会做两件事：
 
 - 将旧的 `LLM_PROXY_V2` `.http` 文件原地改写成 `LLM_PROXY_V3`
-- 清空并重建 `llm_tracelab.sqlite3` 中的 trace 索引数据，不会删除用户和 token
+- 清空并重建应用数据库中的 trace 索引数据，不会删除用户和 token
 
 如果只想做其中一部分：
 
@@ -388,7 +372,7 @@ go run ./cmd/server migrate -c config/config.yaml -rewrite-v2=false
 go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 ```
 
-适合老日志目录批量升级，或者 SQLite 数据库损坏/丢失后的全量恢复。
+适合老日志目录批量升级，或者结构化 trace index 损坏/丢失后的全量恢复。`.http` cassette 仍是 replay 和 detail 的事实源。
 
 ## Docker / Compose
 
@@ -397,7 +381,7 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 - 可执行文件：`/app/bin/llm-tracelab`
 - 配置文件：`/app/config/config.yaml`
 - 数据目录：`/app/data/traces`
-- SQLite 数据库：`/app/data/traces/llm_tracelab.sqlite3`
+- 数据库：Postgres service，DSN 由 `LLM_TRACELAB_DATABASE_DSN` 提供
 
 默认提供：
 
@@ -408,22 +392,40 @@ go run ./cmd/server migrate -c config/config.yaml -rebuild-index=false
 启动方式：
 
 ```bash
-export LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx
-docker compose up --build
-docker compose exec llm-tracelab /app/bin/llm-tracelab auth init-user -c /app/config/config.yaml --username admin --password 'change-me-123'
+cp .env.example .env
+docker compose up -d
+docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
 
-然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
+然后访问 `http://localhost:8081`，使用用户名密码登录，在 `Providers` 页面配置上游地址、API key 和模型；在 `Tokens` 页面生成用于 SDK / MCP 的个人 token。
 SDK 调用 proxy 时把这个 token 作为 SDK API key；直接 curl 时使用 `Authorization: Bearer <token>`。
 
-如果只想直接使用已经发布到 Docker Hub 的镜像，可以不克隆仓库，直接运行：
+可选 SearXNG hosted `web_search`：
+
+```bash
+export LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true
+docker compose --profile search up -d
+```
+
+本地开发需要从源码构建镜像时使用 dev override：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+如果只想直接使用已经发布到 Docker Hub 的镜像，需要同时提供外部 Postgres：
 
 ```bash
 docker run --rm \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e LLM_TRACELAB_UPSTREAM_BASE_URL=https://api.openai.com/v1 \
-  -e LLM_TRACELAB_UPSTREAM_API_KEY=sk-xxx \
+  -e LLM_TRACELAB_DATABASE_DRIVER=postgres \
+  -e LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@host.docker.internal:5432/llm_tracelab?sslmode=disable' \
+  -e LLM_TRACELAB_RESPONSES_ENABLED=true \
+  -e LLM_TRACELAB_RESPONSES_FORCE_STORE=true \
+  -e LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
+  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
+  -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY=local-vllm-placeholder \
   -e LLM_TRACELAB_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_TRACE_OUTPUT_DIR=/app/data/traces \
   -e LLM_TRACELAB_SERVER_PORT=8080 \
@@ -438,12 +440,20 @@ docker run --rm \
 services:
   llm-tracelab:
     image: kingfs/llm-tracelab:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8080:8080"
       - "8081:8081"
     environment:
-      LLM_TRACELAB_UPSTREAM_BASE_URL: https://api.openai.com/v1
-      LLM_TRACELAB_UPSTREAM_API_KEY: ${LLM_TRACELAB_UPSTREAM_API_KEY}
+      LLM_TRACELAB_DATABASE_DRIVER: postgres
+      LLM_TRACELAB_DATABASE_DSN: postgres://llm_tracelab:llm_tracelab@postgres:5432/llm_tracelab?sslmode=disable
+      LLM_TRACELAB_RESPONSES_ENABLED: "true"
+      LLM_TRACELAB_RESPONSES_FORCE_STORE: "true"
+      LLM_TRACELAB_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
+      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1
+      LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY: local-vllm-placeholder
       LLM_TRACELAB_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_TRACE_OUTPUT_DIR: /app/data/traces
       LLM_TRACELAB_SERVER_PORT: "8080"
@@ -452,6 +462,17 @@ services:
       - ./config/config.yaml:/app/config/config.yaml:ro
       - ./docker-data:/app/data
     command: ["serve", "-c", "/app/config/config.yaml"]
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: llm_tracelab
+      POSTGRES_USER: llm_tracelab
+      POSTGRES_PASSWORD: llm_tracelab
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 ```
 
 如果本机访问 Go 官方模块代理较慢，可以在构建时直接传入 `GOPROXY`：
@@ -460,7 +481,7 @@ services:
 GOPROXY=https://goproxy.cn,direct docker compose build
 ```
 
-`task docker:build` 和 `task docker:up` 使用同一套构建变量约定，会自动读取当前 shell 的 `GOPROXY`、`GOSUMDB`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`（以及对应的小写变量）并传入 Docker build，无需额外改脚本：
+`task docker:build` 和 `task docker:up` 使用同一套构建变量约定。优先读取 `DOCKER_BUILD_*`，其次读取当前 shell 的 `GOPROXY`、`GOSUMDB`、`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`（以及对应的小写变量）；如果 shell 没有导出 `GOPROXY` / `GOSUMDB`，会回落到 `go env GOPROXY` / `go env GOSUMDB`。当 HTTP(S) proxy 指向宿主机 `127.0.0.1` 或 `localhost` 时，任务会自动转换为 Docker build 容器可访问的 `host.docker.internal`。
 
 ```bash
 GOPROXY=https://goproxy.cn,direct task docker:build
@@ -474,22 +495,23 @@ DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:build
 DOCKER_BUILD_GOPROXY=https://goproxy.cn,direct task docker:up
 ```
 
-同样地，直接执行 `docker compose build` / `docker compose up --build` 时，也优先读取 `DOCKER_BUILD_*`，再回落到普通环境变量。
+直接执行 `docker compose build` / `docker compose up --build` 时，Compose 只能读取已导出的环境变量；需要自动读取 `go env` 和转换本机回环代理时，请使用 `task docker:build` 或 `task docker:up`。
 
 推荐约定：
 
-- 本地开发：优先设置 `DOCKER_BUILD_GOPROXY`；如果已经全局设置 `GOPROXY`，脚本也会自动兼容
+- 本地开发：优先设置 `DOCKER_BUILD_GOPROXY`；如果只配置了 `go env GOPROXY`，任务也会自动兼容
 - CI / GitHub Actions：默认不设置，直接使用公开默认值 `https://proxy.golang.org,direct`
-- 如果公司网络还要求系统代理，优先设置 `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`；未设置时会回落到 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`
+- 如果公司网络还要求系统代理，优先设置 `DOCKER_BUILD_HTTP_PROXY` / `DOCKER_BUILD_HTTPS_PROXY` / `DOCKER_BUILD_NO_PROXY`；未设置时会回落到 `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`，并自动处理宿主机回环地址
 
 默认挂载：
 
 - `./config/config.yaml -> /app/config/config.yaml:ro`
-- `./docker-data -> /app/data`
+- `llm-tracelab-data -> /app/data`
+- `postgres-data -> /var/lib/postgresql/data`
 
 运行镜像默认使用 `root` 用户启动。这是为了兼容最常见的 bind mount 场景，避免宿主机目录属主与容器内固定 UID/GID 不一致时出现 `permission denied`，例如无法创建 `/app/data/traces`。
 
-如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖端口、数据库、输出目录等服务启动参数；渠道和模型配置请在 Monitor Web 中维护并写入 SQLite。`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
+如果在容器外部配置，优先通过挂载配置文件和环境变量覆盖端口、数据库、输出目录等服务启动参数；渠道和模型配置请在 Monitor Web 中维护并写入应用数据库。`debug.output_dir` 建议始终指向容器内挂载卷中的固定路径。
 
 ## 开发命令
 
@@ -525,10 +547,18 @@ func TestChat(t *testing.T) {
 ## 当前设计原则
 
 - `.http` cassette 是回放的事实来源
-- SQLite 只做 metadata 索引，不替代原始文件
+- Postgres 是生产结构化状态主路径，SQLite 是本地 fallback，不替代原始文件
 - 新文件写 V3，旧文件继续兼容读取
-- 尽量保持文件可读、测试离线、实现本地优先
+- 尽量保持文件可读、测试离线、生产部署可迁移
 - provider 语义、stream transcript、usage 和 event timeline 尽量收敛在 `pkg/llm`
+
+未实现能力边界：
+
+- 公网多租户中转、计费/充值/订阅分发：rejected。
+- 代理热路径跨协议转换：rejected。
+- 独立 Postgres auth migration namespace：audited gap，当前共享 application `schema_migrations`。
+- SQLite versioned application migration：audited fallback，当前为 startup-schema fallback。
+- MCP/file/code/computer-use 真实执行 lifecycle 与 root/container 级 executor 沙箱：future secure executor。
 
 ## 截图
 

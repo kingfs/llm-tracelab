@@ -39,7 +39,7 @@ func AdapterFor(provider string, endpoint string) (Adapter, error) {
 	case "/v1/responses":
 		return openAIResponsesAdapter{semantics: semantics}, nil
 	case "/tokenize", "/detokenize":
-		return openAITokenizerPassthroughAdapter{semantics: semantics}, nil
+		return tokenizationAdapter{semantics: semantics}, nil
 	case "/v1/models", "/v1beta/models", "/v1/publishers/models":
 		return modelListAdapter{semantics: semantics}, nil
 	case "/v1/messages", "/v1/messages/count_tokens":
@@ -199,28 +199,29 @@ func (a modelListAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
 	return json.Marshal(resp.Extensions["model_list"])
 }
 
-type openAITokenizerPassthroughAdapter struct {
+type tokenizationAdapter struct {
 	semantics TraceSemantics
 }
 
-func (a openAITokenizerPassthroughAdapter) Semantics() TraceSemantics { return a.semantics }
-func (a openAITokenizerPassthroughAdapter) ParseRequest(body []byte) (LLMRequest, error) {
-	var payload struct {
-		Model string `json:"model"`
-	}
+func (a tokenizationAdapter) Semantics() TraceSemantics { return a.semantics }
+func (a tokenizationAdapter) ParseRequest(body []byte) (LLMRequest, error) {
+	var payload map[string]any
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &payload); err != nil {
 			return LLMRequest{}, err
 		}
 	}
-	return LLMRequest{
-		Model: payload.Model,
-		Extensions: map[string]any{
-			"passthrough_endpoint": a.semantics.Endpoint,
-		},
-	}, nil
+	req := LLMRequest{Extensions: map[string]any{
+		"passthrough_endpoint": a.semantics.Endpoint,
+		"tokenization":         payload,
+		"raw":                  payload,
+	}}
+	if model, ok := payload["model"].(string); ok {
+		req.Model = model
+	}
+	return req, nil
 }
-func (a openAITokenizerPassthroughAdapter) ParseResponse(body []byte) (LLMResponse, error) {
+func (a tokenizationAdapter) ParseResponse(body []byte) (LLMResponse, error) {
 	if resp, ok := parseProviderErrorResponse(body); ok {
 		return resp, nil
 	}
@@ -230,24 +231,36 @@ func (a openAITokenizerPassthroughAdapter) ParseResponse(body []byte) (LLMRespon
 			return LLMResponse{}, err
 		}
 	}
-	return LLMResponse{
-		Extensions: map[string]any{
-			"passthrough_endpoint": a.semantics.Endpoint,
-			"raw":                  raw,
-		},
-	}, nil
-}
-func (a openAITokenizerPassthroughAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
-	if raw, ok := req.Extensions["raw"]; ok {
-		return json.Marshal(raw)
+	extensions := map[string]any{
+		"passthrough_endpoint": a.semantics.Endpoint,
+		"raw":                  raw,
 	}
-	return json.Marshal(req)
-}
-func (a openAITokenizerPassthroughAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
-	if raw, ok := resp.Extensions["raw"]; ok {
-		return json.Marshal(raw)
+	if payload, ok := raw.(map[string]any); ok {
+		extensions["tokenization"] = payload
 	}
-	return json.Marshal(resp)
+	return LLMResponse{Extensions: extensions}, nil
+}
+func (a tokenizationAdapter) MarshalRequest(req LLMRequest) ([]byte, error) {
+	if req.Extensions != nil {
+		if payload, ok := req.Extensions["raw"]; ok {
+			return json.Marshal(payload)
+		}
+		if payload, ok := req.Extensions["tokenization"]; ok {
+			return json.Marshal(payload)
+		}
+	}
+	return json.Marshal(map[string]any{"model": req.Model})
+}
+func (a tokenizationAdapter) MarshalResponse(resp LLMResponse) ([]byte, error) {
+	if resp.Extensions != nil {
+		if payload, ok := resp.Extensions["raw"]; ok {
+			return json.Marshal(payload)
+		}
+		if payload, ok := resp.Extensions["tokenization"]; ok {
+			return json.Marshal(payload)
+		}
+	}
+	return []byte("{}"), nil
 }
 
 type googleGenerateContentAdapter struct {

@@ -27,6 +27,12 @@ type ChannelConfig struct {
 	BaseURL string `json:"base_url,omitempty"`
 	// ProviderPreset holds the value of the "provider_preset" field.
 	ProviderPreset string `json:"provider_preset,omitempty"`
+	// APIType holds the value of the "api_type" field.
+	APIType string `json:"api_type,omitempty"`
+	// Mode holds the value of the "mode" field.
+	Mode string `json:"mode,omitempty"`
+	// CapabilitiesJSON holds the value of the "capabilities_json" field.
+	CapabilitiesJSON string `json:"capabilities_json,omitempty"`
 	// ProtocolFamily holds the value of the "protocol_family" field.
 	ProtocolFamily string `json:"protocol_family,omitempty"`
 	// RoutingProfile holds the value of the "routing_profile" field.
@@ -85,7 +91,7 @@ func (*ChannelConfig) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case channelconfig.FieldPriority:
 			values[i] = new(sql.NullInt64)
-		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
+		case channelconfig.FieldID, channelconfig.FieldName, channelconfig.FieldDescription, channelconfig.FieldSource, channelconfig.FieldBaseURL, channelconfig.FieldProviderPreset, channelconfig.FieldAPIType, channelconfig.FieldMode, channelconfig.FieldCapabilitiesJSON, channelconfig.FieldProtocolFamily, channelconfig.FieldRoutingProfile, channelconfig.FieldAPIVersion, channelconfig.FieldDeployment, channelconfig.FieldProject, channelconfig.FieldLocation, channelconfig.FieldModelResource, channelconfig.FieldAPIKeyHint, channelconfig.FieldHeadersJSON, channelconfig.FieldModelDiscovery, channelconfig.FieldLastProbeStatus, channelconfig.FieldLastProbeError:
 			values[i] = new(sql.NullString)
 		case channelconfig.FieldCreatedAt, channelconfig.FieldUpdatedAt, channelconfig.FieldLastProbeAt:
 			values[i] = new(sql.NullTime)
@@ -139,6 +145,24 @@ func (_m *ChannelConfig) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field provider_preset", values[i])
 			} else if value.Valid {
 				_m.ProviderPreset = value.String
+			}
+		case channelconfig.FieldAPIType:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field api_type", values[i])
+			} else if value.Valid {
+				_m.APIType = value.String
+			}
+		case channelconfig.FieldMode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field mode", values[i])
+			} else if value.Valid {
+				_m.Mode = value.String
+			}
+		case channelconfig.FieldCapabilitiesJSON:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field capabilities_json", values[i])
+			} else if value.Valid {
+				_m.CapabilitiesJSON = value.String
 			}
 		case channelconfig.FieldProtocolFamily:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -317,6 +341,15 @@ func (_m *ChannelConfig) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("provider_preset=")
 	builder.WriteString(_m.ProviderPreset)
+	builder.WriteString(", ")
+	builder.WriteString("api_type=")
+	builder.WriteString(_m.APIType)
+	builder.WriteString(", ")
+	builder.WriteString("mode=")
+	builder.WriteString(_m.Mode)
+	builder.WriteString(", ")
+	builder.WriteString("capabilities_json=")
+	builder.WriteString(_m.CapabilitiesJSON)
 	builder.WriteString(", ")
 	builder.WriteString("protocol_family=")
 	builder.WriteString(_m.ProtocolFamily)

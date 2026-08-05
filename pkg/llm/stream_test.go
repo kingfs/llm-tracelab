@@ -29,6 +29,35 @@ func TestParseOpenAIResponsesStreamResponse(t *testing.T) {
 	assert.Equal(t, "web_search_call", resp.Candidates[0].ToolCalls[1].Name)
 }
 
+func TestParseOpenAIResponsesStreamResponseDoesNotDuplicateCompletedAddedMessage(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer"}]}}`,
+		`data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"final answer"}`,
+		`data: {"type":"response.output_item.done","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer"}]}}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	resp, err := ParseStreamResponse(ProviderOpenAICompatible, "/v1/responses", []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.Len(t, resp.Candidates[0].Content, 1)
+	assert.Equal(t, "final answer", resp.Candidates[0].Content[0].Text)
+}
+
+func TestParseOpenAIResponsesStreamResponseUsesDoneMessageWhenNoDelta(t *testing.T) {
+	body := strings.Join([]string{
+		`data: {"type":"response.output_item.added","item":{"id":"msg_1","type":"message","role":"assistant","status":"in_progress"}}`,
+		`data: {"type":"response.output_item.done","item":{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"final answer"}]}}`,
+		`data: [DONE]`,
+	}, "\n")
+
+	resp, err := ParseStreamResponse(ProviderOpenAICompatible, "/v1/responses", []byte(body))
+	require.NoError(t, err)
+	require.Len(t, resp.Candidates, 1)
+	require.Len(t, resp.Candidates[0].Content, 1)
+	assert.Equal(t, "final answer", resp.Candidates[0].Content[0].Text)
+}
+
 func TestParseOpenAIResponsesStreamResponsePreservesRefusal(t *testing.T) {
 	body := strings.Join([]string{
 		`data: {"type":"response.reasoning_summary_text.delta","delta":"checking safety"}`,

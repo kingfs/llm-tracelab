@@ -78,3 +78,81 @@ func TestMarshalAndParsePreludeV3PreservesEventAttributes(t *testing.T) {
 	assert.Equal(t, "llm.usage", parsed.Events[0].Type)
 	assert.Equal(t, float64(18), parsed.Events[0].Attributes["total_tokens"])
 }
+
+func TestMarshalAndParsePreludeV3PreservesExchangeMetadata(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: MetaData{
+			RequestID:        "req-exchange-1",
+			RequestAuditID:   "audit-exchange-1",
+			ExchangeID:       "exchange-entry-1",
+			ExchangeKind:     "entry",
+			ExchangeRole:     "responses_entry",
+			ParentExchangeID: "exchange-parent-1",
+			SequenceIndex:    2,
+			TraceID:          "trace-exchange-1",
+			Time:             time.Date(2026, 6, 24, 10, 0, 0, 0, time.UTC),
+			Model:            "gpt-5",
+			URL:              "/v1/responses",
+			Method:           "POST",
+			StatusCode:       200,
+		},
+	}
+
+	prelude, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+
+	parsed, err := ParsePrelude(prelude)
+	require.NoError(t, err)
+
+	assert.Equal(t, "exchange-entry-1", parsed.Header.Meta.ExchangeID)
+	assert.Equal(t, "entry", parsed.Header.Meta.ExchangeKind)
+	assert.Equal(t, "responses_entry", parsed.Header.Meta.ExchangeRole)
+	assert.Equal(t, "exchange-parent-1", parsed.Header.Meta.ParentExchangeID)
+	assert.Equal(t, 2, parsed.Header.Meta.SequenceIndex)
+	assert.Equal(t, "trace-exchange-1", parsed.Header.Meta.TraceID)
+}
+
+func TestSummarizeHTTPExchangePreservesCorrelationAndBoundsBodies(t *testing.T) {
+	header := RecordHeader{
+		Version: "LLM_PROXY_V3",
+		Meta: MetaData{
+			RequestID:       "trace-1",
+			RequestAuditID:  "reqaudit-1",
+			ResponseID:      "resp-1",
+			ConversationID:  "thread-1",
+			ClientRequestID: "client-1",
+			Time:            time.Date(2026, 6, 22, 11, 0, 0, 0, time.UTC),
+			Model:           "gpt-5",
+			URL:             "/v1/responses",
+			Method:          "POST",
+			StatusCode:      200,
+		},
+		Layout: LayoutInfo{
+			ReqHeaderLen: int64(len("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n")),
+			ReqBodyLen:   int64(len(`{"model":"gpt-5","input":"hello"}`)),
+			ResHeaderLen: int64(len("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")),
+			ResBodyLen:   int64(len(`{"id":"resp-1","output_text":"hello world"}`)),
+		},
+	}
+	prelude, err := MarshalPrelude(header, BuildEvents(header))
+	require.NoError(t, err)
+	content := append(prelude, []byte("POST /v1/responses HTTP/1.1\r\nHost: example.com\r\nContent-Type: application/json\r\n\r\n")...)
+	content = append(content, []byte(`{"model":"gpt-5","input":"hello"}`)...)
+	content = append(content, '\n')
+	content = append(content, []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")...)
+	content = append(content, []byte(`{"id":"resp-1","output_text":"hello world"}`)...)
+
+	summary, err := SummarizeHTTPExchange(content, CassetteSummaryOptions{BodyLimit: 12})
+	require.NoError(t, err)
+
+	assert.Equal(t, "reqaudit-1", summary.Header.Meta.RequestAuditID)
+	assert.Equal(t, "client-1", summary.Header.Meta.ClientRequestID)
+	assert.Equal(t, "POST", summary.Request.Method)
+	assert.Equal(t, 200, summary.Response.StatusCode)
+	assert.Equal(t, `{"model":"gp`, summary.Request.Body)
+	assert.True(t, summary.Request.BodyTruncated)
+	assert.True(t, summary.Response.BodyTruncated)
+	assert.NotEmpty(t, summary.Response.BodySHA256)
+	assert.Len(t, summary.Events, 2)
+}

@@ -23,6 +23,7 @@ export function ProviderDetailPage() {
   const [modelDraft, setModelDraft] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState(() => emptyEditForm());
+  const [lastProbe, setLastProbe] = useState(null);
   const params = new URLSearchParams();
   params.set("window", windowValue);
   const detail = useJSON(apiURL(apiPaths.provider(effectiveProviderID), params), [effectiveProviderID, windowValue, refreshTick]);
@@ -52,11 +53,32 @@ export function ProviderDetailPage() {
     setBusy("probe");
     setActionError("");
     try {
-      await postJSON(apiPaths.providerProbe(effectiveProviderID), { enable_discovered: false });
+      const result = await postJSON(apiPaths.providerProbe(effectiveProviderID), { enable_discovered: false, detect_provider: true });
+      setLastProbe(result);
       reload();
     } catch (err) {
+      if (err.payload?.provider_probe) {
+        setLastProbe(err.payload);
+      }
       setActionError(formatProbeActionError(err));
       reload();
+    } finally {
+      setBusy("");
+    }
+  };
+  const applyProbeSuggestions = async () => {
+    const report = lastProbe?.provider_probe;
+    if (!report) {
+      return;
+    }
+    setBusy("apply-probe");
+    setActionError("");
+    try {
+      await patchJSON(apiPaths.provider(effectiveProviderID), providerProbeSuggestionPayload(provider, report));
+      setLastProbe(null);
+      reload();
+    } catch (err) {
+      setActionError(err.message || "Unable to apply provider probe suggestions.");
     } finally {
       setBusy("");
     }
@@ -178,6 +200,8 @@ export function ProviderDetailPage() {
           </div>
           <div className="detail-meta-strip">
             <DetailMetaPill label="config source" value={providerSourceLabel(provider.source)} />
+            <DetailMetaPill label="api type" value={provider.api_type || "-"} />
+            <DetailMetaPill label="mode" value={provider.mode || "-"} />
             <DetailMetaPill label="base url" value={provider.base_url || "-"} mono />
             <DetailMetaPill label="models" value={`${formatCount(provider.enabled_model_count)} / ${formatCount(provider.model_count)}`} />
             <DetailMetaPill label="requests" value={formatCount(summary.request_count)} />
@@ -228,6 +252,13 @@ export function ProviderDetailPage() {
       {detail.loading && !detail.data ? <EmptyState title="Loading provider" detail="Collecting provider configuration, models, and usage." /> : null}
       {detail.data?.secret_storage_mode === "plaintext-local" ? (
         <EmptyState title="Local plaintext secret storage" detail="API keys and secret headers are redacted in Monitor responses, but currently stored in the local SQLite database without encryption." tone="danger" />
+      ) : null}
+      {lastProbe?.provider_probe ? (
+        <ProviderProbeSuggestionPanel
+          report={lastProbe.provider_probe}
+          busy={busy === "apply-probe"}
+          onApply={applyProbeSuggestions}
+        />
       ) : null}
 
       {detail.data && editOpen ? (
@@ -399,6 +430,34 @@ function ProbeRunCard({ item }) {
   );
 }
 
+function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
+  const capabilities = Array.isArray(report.capabilities) ? report.capabilities : [];
+  const warnings = Array.isArray(report.warnings) ? report.warnings : [];
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <p className="eyebrow">Provider detection</p>
+          <h2>Probe suggestions</h2>
+        </div>
+        <div className="trace-tag-group">
+          <InlineTag tone={report.status === "detected" ? "green" : report.status === "error" ? "danger" : "gold"}>{report.status || "unknown"}</InlineTag>
+          {report.confidence ? <InlineTag tone="accent">{Math.round(Number(report.confidence) * 100)}%</InlineTag> : null}
+        </div>
+      </div>
+      <div className="detail-meta-strip">
+        <Metric label="api type" value={report.suggested_api_type || "-"} />
+        <Metric label="protocol" value={report.suggested_protocol_family || "-"} />
+        <Metric label="capabilities" value={capabilities.length ? capabilities.join(", ") : "-"} />
+      </div>
+      {warnings.length ? <p className="trace-subline">{warnings.join(" · ")}</p> : null}
+      <div className="provider-form-actions">
+        <button className="ghost-button active" type="button" onClick={onApply} disabled={busy || report.status !== "detected"}>{busy ? "Applying" : "Apply suggestions"}</button>
+      </div>
+    </section>
+  );
+}
+
 function ProviderModelRow({ item, busy, deleting, onToggle, onDelete }) {
   const summary = item.summary || {};
   const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
@@ -509,6 +568,9 @@ function emptyEditForm() {
     name: "",
     base_url: "",
     provider_preset: "",
+    api_type: "chat_completions",
+    mode: "proxy",
+    capabilities: {},
     protocol_family: "",
     routing_profile: "",
     api_version: "",
@@ -532,6 +594,9 @@ function editFormFromProvider(provider = {}) {
     name: provider.name || "",
     base_url: provider.base_url || "",
     provider_preset: provider.provider_preset || "",
+    api_type: provider.api_type || "chat_completions",
+    mode: provider.mode || "proxy",
+    capabilities: provider.capabilities || {},
     protocol_family: provider.protocol_family || "",
     routing_profile: provider.routing_profile || "",
     api_version: provider.api_version || "",
@@ -558,6 +623,9 @@ function providerPayloadFromForm(form) {
     name: form.name,
     base_url: form.base_url,
     provider_preset: form.provider_preset,
+    api_type: form.api_type,
+    mode: form.mode,
+    capabilities: normalizeCapabilities(form.capabilities),
     protocol_family: form.protocol_family,
     routing_profile: form.routing_profile,
     api_version: form.api_version,
@@ -576,6 +644,53 @@ function providerPayloadFromForm(form) {
     payload.api_key = form.api_key.trim();
   }
   return payload;
+}
+
+function providerProbeSuggestionPayload(provider = {}, report = {}) {
+  const payload = {};
+  if (report.suggested_api_type) {
+    payload.api_type = report.suggested_api_type;
+  }
+  if (report.suggested_protocol_family) {
+    payload.protocol_family = report.suggested_protocol_family;
+  }
+  const capabilities = { ...(provider.capabilities || {}) };
+  for (const capability of report.capabilities || []) {
+    switch (capability) {
+      case "responses":
+        capabilities.responses = true;
+        break;
+      case "chat_completions":
+        capabilities.chat_completions = true;
+        break;
+      case "tool_calling":
+        capabilities.tool_calling = true;
+        break;
+      case "models":
+        capabilities.models = true;
+        break;
+      case "embeddings":
+        capabilities.embeddings = true;
+        break;
+      case "tokenize":
+        capabilities.tokenize = true;
+        break;
+      default:
+        break;
+    }
+  }
+  payload.capabilities = normalizeCapabilities(capabilities);
+  return payload;
+}
+
+function normalizeCapabilities(value) {
+  const capabilities = {};
+  for (const key of ["responses", "chat_completions", "tool_calling", "models", "embeddings", "tokenize"]) {
+    if (typeof value?.[key] === "boolean") {
+      capabilities[key] = value[key];
+    }
+  }
+  return capabilities;
 }
 
 function parseHeadersText(value) {

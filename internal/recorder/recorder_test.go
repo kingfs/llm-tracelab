@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
@@ -34,6 +35,60 @@ func TestPrepareLogFileUsesAdapterModelExtraction(t *testing.T) {
 	}
 	if info.Header.Meta.Operation != "responses" {
 		t.Fatalf("operation = %q, want responses", info.Header.Meta.Operation)
+	}
+}
+
+func TestPrepareLogFilePersistsResponsesAuditCorrelation(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	req = req.WithContext(responsesaudit.ContextWithRequestAuditID(req.Context(), "reqaudit-recorder-1"))
+	req.Header.Set("X-Client-Request-Id", "client-recorder-1")
+
+	info, err := rec.PrepareLogFile(req, "https://api.openai.com")
+	if err != nil {
+		t.Fatalf("PrepareLogFile() error = %v", err)
+	}
+	defer info.File.Close()
+
+	if info.Header.Meta.RequestAuditID != "reqaudit-recorder-1" {
+		t.Fatalf("RequestAuditID = %q, want reqaudit-recorder-1", info.Header.Meta.RequestAuditID)
+	}
+	if info.Header.Meta.ClientRequestID != "client-recorder-1" {
+		t.Fatalf("ClientRequestID = %q, want client-recorder-1", info.Header.Meta.ClientRequestID)
+	}
+}
+
+func TestPrepareLogFilePersistsExchangeMetadata(t *testing.T) {
+	dir := t.TempDir()
+	rec := New(dir, false, nil)
+
+	req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", bytes.NewBufferString(`{"model":"gpt-5","input":"hello"}`))
+	if err != nil {
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+
+	info, err := rec.PrepareLogFileWithOptions(req, PrepareOptions{
+		SiteURL:          "https://api.openai.com",
+		ExchangeID:       "exchange-model-1",
+		ExchangeKind:     "model",
+		ExchangeRole:     "main_model_call",
+		ParentExchangeID: "exchange-entry-1",
+		SequenceIndex:    3,
+		TraceID:          "trace-model-1",
+	})
+	if err != nil {
+		t.Fatalf("PrepareLogFileWithOptions() error = %v", err)
+	}
+	defer info.File.Close()
+
+	meta := info.Header.Meta
+	if meta.ExchangeID != "exchange-model-1" || meta.ExchangeKind != "model" || meta.ExchangeRole != "main_model_call" || meta.ParentExchangeID != "exchange-entry-1" || meta.SequenceIndex != 3 || meta.TraceID != "trace-model-1" {
+		t.Fatalf("exchange metadata = %+v, want configured values", meta)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,14 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/limit"
 	"github.com/kingfs/llm-tracelab/internal/recorder"
 	"github.com/kingfs/llm-tracelab/internal/redaction"
+	responsesaudit "github.com/kingfs/llm-tracelab/internal/responses/audit"
+	"github.com/kingfs/llm-tracelab/internal/responses/functionexec"
+	"github.com/kingfs/llm-tracelab/internal/responses/httpapi"
+	"github.com/kingfs/llm-tracelab/internal/responses/protocol"
+	responsesruntime "github.com/kingfs/llm-tracelab/internal/responses/runtime"
+	mcptools "github.com/kingfs/llm-tracelab/internal/responses/tools/mcp"
+	"github.com/kingfs/llm-tracelab/internal/responses/tools/websearch"
+	"github.com/kingfs/llm-tracelab/internal/routeplan"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
 	"github.com/kingfs/llm-tracelab/pkg/llm"
@@ -32,6 +41,10 @@ import (
 type aggregatedModelListResponse struct {
 	Object string                     `json:"object,omitempty"`
 	Data   []aggregatedModelListEntry `json:"data"`
+}
+
+type ollamaShowRequest struct {
+	Name string `json:"name"`
 }
 
 type aggregatedModelListEntry struct {
@@ -90,6 +103,21 @@ type limitDecision struct {
 	Key      string
 	Identity router.CredentialDecisionInfo
 }
+
+type responsesRouteDecision struct {
+	strategy        routeplan.ResponsesStrategy
+	useLocal        bool
+	nativeAvailable bool
+	nativePresent   bool
+	localAvailable  bool
+	rejectReason    string
+}
+
+type proxyRoutingSettings struct {
+	ResponsesStrategy string `json:"responses_strategy"`
+}
+
+const proxyRoutingSettingsKey = "routing.settings"
 
 // ensureStreamOptions 检查请求体，如果是 stream 模式，强制注入 stream_options
 func ensureStreamOptions(req *http.Request) {
@@ -164,6 +192,33 @@ func injectStreamOptions(req *http.Request, bodyBytes []byte) []byte {
 	return bodyBytes
 }
 
+func rewriteRequestModelAlias(bodyBytes []byte, selection *router.Selection) ([]byte, bool) {
+	if len(bodyBytes) == 0 || selection == nil || selection.Target == nil {
+		return bodyBytes, false
+	}
+	requestedModel := strings.TrimSpace(selection.Request.ModelName)
+	if requestedModel == "" {
+		return bodyBytes, false
+	}
+	upstreamModel := selection.Target.ResolveModelAlias(requestedModel)
+	if upstreamModel == "" || strings.EqualFold(upstreamModel, requestedModel) {
+		return bodyBytes, false
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		return bodyBytes, false
+	}
+	if _, ok := payload["model"]; !ok {
+		return bodyBytes, false
+	}
+	payload["model"] = upstreamModel
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return bodyBytes, false
+	}
+	return rewritten, true
+}
+
 // UsageSniffer 纯粹的嗅探器，不再做估算
 type UsageSniffer struct {
 	Source   io.ReadCloser
@@ -172,11 +227,16 @@ type UsageSniffer struct {
 	Usage    *recorder.UsageInfo
 	Pipeline *llm.ResponsePipeline
 	Events   *[]recorder.RecordEvent
+	Start    time.Time
+	TTFTMs   *int64
 }
 
 func (s *UsageSniffer) Read(p []byte) (n int, err error) {
 	n, err = s.Source.Read(p)
 	if n > 0 {
+		if s.TTFTMs != nil && *s.TTFTMs <= 0 && !s.Start.IsZero() {
+			*s.TTFTMs = time.Since(s.Start).Milliseconds()
+		}
 		data := p[:n]
 
 		// 1. 写入日志文件并计数
@@ -260,9 +320,17 @@ type Handler struct {
 	router       *router.Router
 	authVerifier auth.TokenVerifier
 	limiter      *limit.Limiter
+	store        *store.Store
+
+	responsesPath    string
+	responsesHandler http.Handler
 }
 
 func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router) (*Handler, error) {
+	return newHandler(cfg, st, nil, provided...)
+}
+
+func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *functionexec.Manager, provided ...*router.Router) (*Handler, error) {
 	var rtr *router.Router
 	if len(provided) > 0 {
 		rtr = provided[0]
@@ -374,18 +442,273 @@ func NewHandler(cfg *config.Config, st *store.Store, provided ...*router.Router)
 		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
 	}
 
+	var localResponses http.Handler
+	responsesPath := cfg.ResponsesServerPath()
+	if cfg.ResponsesServerEnabled() {
+		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
+		var requestAuditor responsesaudit.RequestAuditor
+		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder
+		var executionEventRecorder responsesaudit.ExecutionEventRecorder
+		var toolCallAuditRecorder responsesaudit.ToolCallAuditRecorder
+		if st != nil {
+			if entClient := st.EntClient(); entClient != nil {
+				responseStore = responsesruntime.NewEntStore(entClient)
+				entAuditor := responsesaudit.NewEntAuditor(entClient)
+				requestAuditor = entAuditor
+				upstreamExchangeRecorder = entAuditor
+				executionEventRecorder = entAuditor
+				toolCallAuditRecorder = entAuditor
+			}
+		}
+		modelProfiles, err := responsesRuntimeModelProfiles(cfg, st)
+		if err != nil {
+			return nil, err
+		}
+		runtimeConfig := responsesruntime.Config{
+			DefaultModel:                cfg.ResponsesDefaultModel(),
+			ForceStore:                  cfg.ResponsesForceStore(),
+			WebSearchEnabled:            cfg.WebSearchEnabled(),
+			WebSearchMaxResults:         cfg.WebSearchConfig().MaxResults,
+			AutoCompact:                 cfg.ResponsesAutoCompactEnabled(),
+			CompactHistoryItemThreshold: cfg.ResponsesCompactHistoryItemThreshold(),
+			ModelProfiles:               modelProfiles,
+		}
+		runtimeOptions := []responsesruntime.Option{}
+		if executionEventRecorder != nil {
+			runtimeOptions = append(runtimeOptions, responsesruntime.WithExecutionEventRecorder(executionEventRecorder))
+		}
+		if toolCallAuditRecorder != nil {
+			runtimeOptions = append(runtimeOptions, responsesruntime.WithToolCallAuditRecorder(toolCallAuditRecorder))
+		}
+		tokenizeEstimatorOption, err := responsesTokenizeEstimatorOption(cfg, rtr, nil)
+		if err != nil {
+			return nil, err
+		}
+		if tokenizeEstimatorOption != nil {
+			runtimeOptions = append(runtimeOptions, tokenizeEstimatorOption)
+		}
+		if cfg.WebSearchEnabled() {
+			webSearchConfig := cfg.WebSearchConfig()
+			if webSearchConfig.Provider == websearch.ProviderDisabled {
+				return nil, fmt.Errorf("build web_search provider: provider is disabled")
+			}
+			provider, err := websearch.NewProvider(websearch.Options{
+				Provider:   webSearchConfig.Provider,
+				BaseURL:    webSearchConfig.BaseURL,
+				TimeoutMS:  webSearchConfig.TimeoutMS,
+				UserAgent:  webSearchConfig.UserAgent,
+				MaxResults: webSearchConfig.MaxResults,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("build web_search provider: %w", err)
+			}
+			runtimeOptions = append(runtimeOptions, responsesruntime.WithWebSearchProvider(provider))
+		}
+		if cfg.MCPToolsEnabled() {
+			mcpOptions := mcpHostedExecutorOptions(cfg.MCPToolsConfig())
+			if mcpOptions.Enabled {
+				runtimeOptions = append(runtimeOptions, responsesruntime.WithMCPHostedExecutor(mcptools.NewExecutor(mcpOptions)))
+			}
+		}
+		if functionExecutorManager == nil {
+			functionExecutorManager, err = functionexec.NewManager(cfg.ResponsesFunctionExecutorsConfig())
+			if err != nil {
+				return nil, err
+			}
+		}
+		runtimeOptions = append(runtimeOptions, responsesruntime.WithFunctionToolExecutorRegistry(functionExecutorManager.Registry()))
+		rt := responsesruntime.New(runtimeConfig, &responsesChatCompletionsAdapter{
+			router:        rtr,
+			recorder:      rec,
+			routingPolicy: routerPolicy(rtr),
+			auditor:       upstreamExchangeRecorder,
+			events:        executionEventRecorder,
+		}, responseStore, runtimeOptions...)
+		localResponses = httpapi.NewHandler(
+			rt,
+			httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()),
+			httpapi.WithRequestAuditor(requestAuditor),
+			httpapi.WithExecutionEventRecorder(executionEventRecorder),
+			httpapi.WithCodexCompat(responsesCodexCompatHTTPOptions(cfg)),
+		)
+	}
+
 	return &Handler{
-		proxy:        rp,
-		recorder:     rec,
-		chaosManager: cm,
-		cfg:          cfg,
-		router:       rtr,
-		limiter:      localLimiter,
+		proxy:            rp,
+		recorder:         rec,
+		chaosManager:     cm,
+		cfg:              cfg,
+		router:           rtr,
+		store:            st,
+		limiter:          localLimiter,
+		responsesPath:    responsesPath,
+		responsesHandler: localResponses,
 	}, nil
 }
 
-func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier) (*Handler, error) {
-	h, err := NewHandler(cfg, st, rtr)
+func responsesCodexCompatHTTPOptions(cfg *config.Config) httpapi.CodexCompatOptions {
+	if cfg == nil {
+		return httpapi.CodexCompatOptions{}
+	}
+	compat := cfg.ResponsesCodexCompatConfig()
+	injectWhenToolsAbsent := compat.InjectWhenToolsAbsent != nil && *compat.InjectWhenToolsAbsent
+	preserveClientTools := compat.PreserveClientTools != nil && *compat.PreserveClientTools
+	return httpapi.CodexCompatOptions{
+		Enabled:               compat.Enabled,
+		InjectWhenToolsAbsent: injectWhenToolsAbsent,
+		PreserveClientTools:   preserveClientTools,
+		AvailableHostedTools:  responsesCodexCompatAvailableHostedTools(cfg, compat),
+		DefaultToolChoice:     compat.DefaultToolChoice,
+	}
+}
+
+func responsesCodexCompatAvailableHostedTools(cfg *config.Config, compat config.ResponsesCodexCompatConfig) []protocol.Tool {
+	if cfg == nil || !compat.Enabled {
+		return nil
+	}
+	tools := make([]protocol.Tool, 0, len(compat.AutoInjectHostedTools))
+	seen := map[string]struct{}{}
+	for _, toolType := range compat.AutoInjectHostedTools {
+		normalized := strings.ToLower(strings.TrimSpace(toolType))
+		if normalized == "web_search_preview" {
+			normalized = "web_search"
+		}
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		switch normalized {
+		case "web_search":
+			if cfg.WebSearchEnabled() {
+				tools = append(tools, protocol.Tool{
+					Type:          "web_search",
+					MaxNumResults: cfg.WebSearchConfig().MaxResults,
+				})
+			}
+		}
+	}
+	return tools
+}
+
+func responsesRuntimeModelProfiles(cfg *config.Config, st *store.Store) ([]responsesruntime.ModelProfile, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	profiles := cfg.ResponsesModelProfiles()
+	out := make([]responsesruntime.ModelProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		out = append(out, responsesruntime.ModelProfile{
+			Name:          profile.Name,
+			Pattern:       profile.Pattern,
+			UpstreamModel: profile.UpstreamModel,
+			Budget: responsesruntime.ContextBudget{
+				ContextWindowTokens:         profile.ContextWindowTokens,
+				MaxOutputTokens:             profile.MaxOutputTokens,
+				CompactHistoryItemThreshold: profile.CompactHistoryItemThreshold,
+			},
+		})
+	}
+	if !cfg.ResponsesAdoptChannelModelProfilesEnabled() || st == nil {
+		return out, nil
+	}
+	adopted, err := st.ListAdoptedChannelModelProfiles()
+	if err != nil {
+		return nil, fmt.Errorf("load adopted channel model profiles: %w", err)
+	}
+	byModel := map[string]responsesruntime.ModelProfile{}
+	conflicted := map[string]struct{}{}
+	for _, record := range adopted {
+		model := strings.TrimSpace(record.Model)
+		if model == "" || cfg.MatchResponsesModelProfile(model).Matched {
+			continue
+		}
+		profile := channelModelRuntimeProfile(record)
+		if existing, ok := byModel[model]; ok {
+			if !sameRuntimeModelProfile(existing, profile) {
+				delete(byModel, model)
+				conflicted[model] = struct{}{}
+			}
+			continue
+		}
+		if _, conflict := conflicted[model]; conflict {
+			continue
+		}
+		byModel[model] = profile
+	}
+	for _, record := range adopted {
+		model := strings.TrimSpace(record.Model)
+		profile, ok := byModel[model]
+		if !ok {
+			continue
+		}
+		out = append(out, profile)
+		delete(byModel, model)
+	}
+	return out, nil
+}
+
+func channelModelRuntimeProfile(record store.ChannelModelRecord) responsesruntime.ModelProfile {
+	profile := responsesruntime.ModelProfile{
+		Name:          strings.TrimSpace(record.Model),
+		UpstreamModel: strings.TrimSpace(record.UpstreamModel),
+	}
+	if record.ContextWindow != nil {
+		profile.Budget.ContextWindowTokens = *record.ContextWindow
+	}
+	if record.MaxOutputTokens != nil {
+		profile.Budget.MaxOutputTokens = *record.MaxOutputTokens
+	}
+	if record.CompactHistoryItemThreshold != nil {
+		profile.Budget.CompactHistoryItemThreshold = *record.CompactHistoryItemThreshold
+	}
+	return profile
+}
+
+func sameRuntimeModelProfile(left responsesruntime.ModelProfile, right responsesruntime.ModelProfile) bool {
+	return left.Name == right.Name &&
+		left.Pattern == right.Pattern &&
+		left.UpstreamModel == right.UpstreamModel &&
+		left.Budget.ContextWindowTokens == right.Budget.ContextWindowTokens &&
+		left.Budget.MaxOutputTokens == right.Budget.MaxOutputTokens &&
+		left.Budget.CompactHistoryItemThreshold == right.Budget.CompactHistoryItemThreshold
+}
+
+func mcpHostedExecutorOptions(cfg config.MCPToolConfig) mcptools.Options {
+	timeout := time.Duration(cfg.DefaultTimeoutMS) * time.Millisecond
+	servers := make([]mcptools.ServerDescriptor, 0, len(cfg.Servers))
+	enabledServers := 0
+	for _, server := range cfg.Servers {
+		enabled := server.EnabledOrDefault()
+		if enabled {
+			enabledServers++
+		}
+		servers = append(servers, mcptools.ServerDescriptor{
+			ID:             server.ID,
+			Label:          server.Label,
+			Enabled:        enabled,
+			URL:            server.URL,
+			BearerTokenEnv: server.BearerTokenEnv,
+			Timeout:        timeout,
+			MaxResultBytes: cfg.MaxResultBytes,
+			AllowedTools:   append([]string(nil), server.EnabledTools...),
+			DeniedTools:    append([]string(nil), server.DisabledTools...),
+		})
+	}
+	return mcptools.Options{
+		Enabled: cfg.Enabled && enabledServers > 0,
+		Servers: servers,
+	}
+}
+
+func NewHandlerWithAuth(cfg *config.Config, st *store.Store, rtr *router.Router, verifier auth.TokenVerifier, managers ...*functionexec.Manager) (*Handler, error) {
+	var manager *functionexec.Manager
+	if len(managers) > 0 {
+		manager = managers[0]
+	}
+	h, err := newHandler(cfg, st, manager, rtr)
 	if err != nil {
 		return nil, err
 	}
@@ -403,8 +726,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if isOpenAIModelDetailRequest(r) {
+		h.serveOpenAIModelDetail(w, r, start)
+		return
+	}
+	if isOllamaShowRequest(r) {
+		h.serveOllamaShow(w, r, start)
+		return
+	}
 	if llm.NormalizeEndpoint(r.URL.Path) == "/v1/models" {
 		h.serveAggregatedModelList(w, r, start)
+		return
+	}
+	if h.router == nil || len(h.router.Targets()) == 0 {
+		selectErr := &router.SelectionError{
+			Reason:  router.SelectionFailureNoSupportingTarget,
+			Message: "no upstream targets are configured; add a provider in Monitor",
+		}
+		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, nil, nil)
+		http.Error(w, selectErr.Error(), http.StatusBadGateway)
 		return
 	}
 
@@ -414,6 +754,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Failed to read request body", "error", err)
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
+	}
+	if h.responsesHandler != nil && h.localResponsesPath(r.URL.Path) {
+		decision := h.responsesRoutingDecision(r, bodyBytes)
+		if decision.useLocal {
+			r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
+			h.serveLocalResponsesWithBody(w, r, bodyBytes)
+			return
+		}
+		if decision.rejectReason != "" {
+			selectErr := &router.SelectionError{
+				Reason:  router.SelectionFailureNoSupportingTarget,
+				Message: decision.rejectReason,
+			}
+			h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, selectErr, bodyBytes, []recorder.RecordEvent{
+				routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start),
+			})
+			http.Error(w, selectErr.Error(), http.StatusBadGateway)
+			return
+		}
 	}
 	if h.limiter != nil {
 		if decision, ok := h.preSelectionLimitDecision(r); ok {
@@ -513,6 +872,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		triedIDs = append(triedIDs, selection.Target.ID)
+		upstreamBodyBytes := bodyBytes
+		if rewrittenBody, rewritten := rewriteRequestModelAlias(bodyBytes, selection); rewritten {
+			upstreamBodyBytes = rewrittenBody
+		}
 
 		// 准备日志
 		logInfo, err = h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
@@ -522,7 +885,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			RoutingPolicy:                  h.routerPolicy(),
 			RoutingScore:                   selection.Score,
 			RoutingCandidateCount:          selection.CandidateCount,
-		}, bodyBytes)
+		}, upstreamBodyBytes)
 		if err != nil {
 			slog.Error("Failed to prepare log file", "err", err)
 			h.router.Complete(selection, router.Outcome{
@@ -545,6 +908,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"candidate_targets": selection.Candidates,
 			},
 		})
+		logInfo.Events = append(logInfo.Events, routePlanEventForSelection(r, selection, start, h.routerPolicy(), h.routePlanStrategy(r)))
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(selection.Decision, start)...)
 
 		// Chaos
@@ -556,7 +920,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// 发送请求到上游
-		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, bodyBytes)
+		resp, reqErr := h.sendUpstreamRequest(r, selection.Target, upstreamBodyBytes)
 		if reqErr != nil {
 			// 网络层面错误（TCP 连接失败、TLS 握手失败、超时等）→ 可重试
 			logInfo.Header.Meta.Error = reqErr.Error()
@@ -662,6 +1026,101 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.recordSelectionFailureWithBody(r, start, http.StatusBadGateway, lastErr, bodyBytes, retryEvents)
 	}
 	http.Error(w, "Proxy Error: "+lastErr.Error(), http.StatusBadGateway)
+}
+
+func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) responsesRouteDecision {
+	strategy := h.responsesStrategy(r.Context())
+	nativeAvailable := h.router != nil && h.router.HasSelectableNativeResponsesCandidateWithBody(r, bodyBytes)
+	nativePresent := h.router != nil && h.router.HasNativeResponsesTargetWithBody(r, bodyBytes)
+	localAvailable := h.responsesHandler != nil && h.responsesChatBackendAvailable(r, bodyBytes)
+	decision := responsesRouteDecision{strategy: strategy, nativeAvailable: nativeAvailable, nativePresent: nativePresent, localAvailable: localAvailable}
+
+	switch strategy {
+	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative:
+		if nativeAvailable {
+			return decision
+		}
+		if nativePresent {
+			decision.rejectReason = "native Responses upstream exists but is not selectable for this request"
+			return decision
+		}
+		if localAvailable {
+			decision.useLocal = true
+			return decision
+		}
+	case routeplan.ResponsesStrategyPreferLocalServer:
+		if localAvailable {
+			decision.useLocal = true
+			return decision
+		}
+		if nativeAvailable {
+			return decision
+		}
+	case routeplan.ResponsesStrategyNativeOnly:
+		if nativeAvailable {
+			return decision
+		}
+		decision.rejectReason = "responses_strategy native_only requires a matching native Responses upstream"
+		return decision
+	case routeplan.ResponsesStrategyLocalServerOnly:
+		if localAvailable {
+			decision.useLocal = true
+			return decision
+		}
+		decision.rejectReason = "responses_strategy local_server_only requires a matching chat completions backend"
+		return decision
+	default:
+		if nativeAvailable {
+			return decision
+		}
+		if localAvailable {
+			decision.useLocal = true
+			return decision
+		}
+	}
+	decision.rejectReason = "no matching Responses route is available for the requested model and strategy"
+	return decision
+}
+
+func (h *Handler) responsesStrategy(ctx context.Context) routeplan.ResponsesStrategy {
+	strategy := routeplan.ResponsesStrategyAuto
+	if h == nil || h.store == nil {
+		return strategy
+	}
+	var settings proxyRoutingSettings
+	found, err := h.store.LoadAppSettingJSON(ctx, proxyRoutingSettingsKey, &settings)
+	if err != nil || !found {
+		return strategy
+	}
+	switch routeplan.ResponsesStrategy(strings.TrimSpace(settings.ResponsesStrategy)) {
+	case routeplan.ResponsesStrategyAuto, routeplan.ResponsesStrategyPreferNative, routeplan.ResponsesStrategyPreferLocalServer, routeplan.ResponsesStrategyNativeOnly, routeplan.ResponsesStrategyLocalServerOnly:
+		return routeplan.ResponsesStrategy(strings.TrimSpace(settings.ResponsesStrategy))
+	default:
+		return strategy
+	}
+}
+
+func (h *Handler) routePlanStrategy(r *http.Request) string {
+	if clientEntrypoint(r) != "/v1/responses" {
+		return ""
+	}
+	ctx := context.Background()
+	if r != nil {
+		ctx = r.Context()
+	}
+	return string(h.responsesStrategy(ctx))
+}
+
+func (h *Handler) responsesChatBackendAvailable(r *http.Request, bodyBytes []byte) bool {
+	if h == nil || h.router == nil || r == nil {
+		return false
+	}
+	chatReq := r.Clone(r.Context())
+	chatReq.URL = cloneURL(r.URL)
+	chatReq.URL.Path = "/v1/chat/completions"
+	chatReq.URL.RawPath = ""
+	chatReq.RequestURI = chatReq.URL.RequestURI()
+	return h.router.HasSelectableCandidateWithBody(chatReq, bodyBytes)
 }
 
 func sleepBeforeRetry(ctx context.Context, delay time.Duration) bool {
@@ -851,6 +1310,164 @@ func routingDecisionEvents(decision *router.DecisionTrace, eventTime time.Time) 
 	return events
 }
 
+type routePlanEventContextKey struct{}
+
+func requestWithRoutePlanEvent(r *http.Request, event recorder.RecordEvent) *http.Request {
+	if r == nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), routePlanEventContextKey{}, event))
+}
+
+func routePlanEventFromContext(ctx context.Context) (recorder.RecordEvent, bool) {
+	if ctx == nil {
+		return recorder.RecordEvent{}, false
+	}
+	event, ok := ctx.Value(routePlanEventContextKey{}).(recorder.RecordEvent)
+	return event, ok
+}
+
+func routePlanEventForSelection(r *http.Request, selection *router.Selection, eventTime time.Time, policy string, strategy string) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"client_entrypoint": clientEntrypoint(r),
+		"execution_mode":    "proxy_pass",
+		"routing_policy":    policy,
+	}
+	if strategy != "" {
+		attrs["strategy"] = strategy
+	}
+	if selection != nil {
+		attrs["requested_model"] = selection.Request.ModelName
+		attrs["upstream_model"] = upstreamModelForSelection(selection)
+		attrs["selected_route_target_id"] = selection.Credential.RouteTargetID
+		attrs["selected_channel_id"] = selection.Credential.ChannelID
+		attrs["routing_score"] = selection.Score
+		attrs["candidate_count"] = selection.CandidateCount
+		if selection.Target != nil {
+			attrs["selected_upstream_id"] = selection.Target.ID
+			attrs["upstream_endpoint"] = redaction.DisplayURL(selection.Target.Upstream.BaseURL)
+			if selection.Target.Upstream.APIType != "" {
+				attrs["api_type"] = selection.Target.Upstream.APIType
+			}
+			if selection.Target.Upstream.Mode != "" {
+				attrs["mode"] = selection.Target.Upstream.Mode
+			}
+		}
+		if selection.Decision != nil {
+			attrs["candidate_summary"] = routePlanCandidateSummary(selection.Decision.Candidates)
+		}
+	}
+	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
+}
+
+func routePlanEventForDecision(r *http.Request, bodyBytes []byte, decision *router.DecisionTrace, eventTime time.Time, policy string, failureReason string) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"client_entrypoint": clientEntrypoint(r),
+		"execution_mode":    "proxy_pass",
+		"routing_policy":    policy,
+		"requested_model":   requestModelFromBody(r, bodyBytes),
+	}
+	if decision != nil {
+		attrs["requested_model"] = decision.ModelName
+		attrs["upstream_model"] = decision.ModelName
+		attrs["upstream_endpoint"] = decision.Endpoint
+		attrs["candidate_summary"] = routePlanCandidateSummary(decision.Candidates)
+		if failureReason == "" {
+			failureReason = decision.FailureReason
+		}
+	}
+	if failureReason != "" {
+		attrs["failure_reason"] = failureReason
+	}
+	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
+}
+
+func routePlanEventForLocalResponsesEntry(r *http.Request, bodyBytes []byte, decision responsesRouteDecision, policy string, eventTime time.Time) recorder.RecordEvent {
+	attrs := map[string]interface{}{
+		"client_entrypoint": clientEntrypoint(r),
+		"execution_mode":    "responses_server",
+		"requested_model":   requestModelFromBody(r, bodyBytes),
+		"upstream_model":    requestModelFromBody(r, bodyBytes),
+		"upstream_endpoint": "/v1/responses",
+		"strategy":          string(decision.strategy),
+		"routing_policy":    policy,
+		"local_available":   decision.localAvailable,
+		"native_available":  decision.nativeAvailable,
+		"native_present":    decision.nativePresent,
+	}
+	if decision.rejectReason != "" {
+		attrs["failure_reason"] = decision.rejectReason
+	}
+	return recorder.RecordEvent{Type: "routing.route_plan", Time: eventTime, Attributes: attrs}
+}
+
+func upstreamModelForSelection(selection *router.Selection) string {
+	if selection == nil {
+		return ""
+	}
+	requestedModel := strings.TrimSpace(selection.Request.ModelName)
+	if selection.Target != nil {
+		if upstreamModel := selection.Target.ResolveModelAlias(requestedModel); upstreamModel != "" {
+			return upstreamModel
+		}
+	}
+	return requestedModel
+}
+
+func routePlanCandidateSummary(candidates []router.CandidateDecision) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(candidates))
+	for _, candidate := range candidates {
+		attrs := map[string]interface{}{
+			"id":             candidate.ID,
+			"selectable":     candidate.Selectable,
+			"supports_path":  candidate.SupportsPath,
+			"supports_model": candidate.SupportsModel,
+		}
+		if candidate.RouteTargetID != "" {
+			attrs["route_target_id"] = candidate.RouteTargetID
+		}
+		if candidate.ChannelID != "" {
+			attrs["channel_id"] = candidate.ChannelID
+		}
+		if candidate.FilterReason != "" {
+			attrs["filter_reason"] = candidate.FilterReason
+		}
+		if candidate.APIType != "" {
+			attrs["api_type"] = candidate.APIType
+		}
+		if candidate.Mode != "" {
+			attrs["mode"] = candidate.Mode
+		}
+		out = append(out, attrs)
+	}
+	return out
+}
+
+func clientEntrypoint(r *http.Request) string {
+	if r == nil || r.URL == nil {
+		return ""
+	}
+	return llm.NormalizeEndpoint(r.URL.Path)
+}
+
+func requestModelFromBody(r *http.Request, bodyBytes []byte) string {
+	if len(bodyBytes) > 0 {
+		if parsed, err := llm.ParseRequestForPath(clientEntrypoint(r), "", bodyBytes); err == nil && strings.TrimSpace(parsed.Model) != "" {
+			return strings.TrimSpace(parsed.Model)
+		}
+	}
+	return ""
+}
+
+func hasRoutePlanEvent(events []recorder.RecordEvent) bool {
+	for _, event := range events {
+		if event.Type == "routing.route_plan" {
+			return true
+		}
+	}
+	return false
+}
+
 func stickyKeyFingerprint(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -886,6 +1503,7 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 		attrs := map[string]interface{}{
 			"id":              candidate.ID,
 			"provider_preset": candidate.ProviderPreset,
+			"api_type":        candidate.APIType,
 			"priority":        candidate.Priority,
 			"weight":          candidate.Weight,
 			"health_state":    candidate.HealthState,
@@ -895,6 +1513,9 @@ func candidateEventAttributes(candidates []router.CandidateDecision) []map[strin
 		}
 		if candidate.BaseURL != "" {
 			attrs["base_url"] = redaction.DisplayURL(candidate.BaseURL)
+		}
+		if candidate.Mode != "" {
+			attrs["mode"] = candidate.Mode
 		}
 		addCredentialAttrs(attrs, router.CredentialDecisionInfo{
 			RouteTargetID:  candidate.RouteTargetID,
@@ -1090,9 +1711,15 @@ func (h *Handler) writeUpstreamResponse(
 	})
 
 	slog.Info("Request completed",
+		"request_id", logInfo.Header.Meta.RequestID,
 		"model", logInfo.Header.Meta.Model,
+		"endpoint", logInfo.Header.Meta.Endpoint,
 		"selected_upstream_id", logInfo.Header.Meta.SelectedUpstreamID,
 		"status", code,
+		"duration_ms", logInfo.Header.Meta.DurationMs,
+		"ttft_ms", logInfo.Header.Meta.TTFTMs,
+		"stream", logInfo.Header.Layout.IsStream || selection.Request.Stream,
+		"content_length", written,
 		"tokens_total", logInfo.Header.Usage.TotalTokens,
 	)
 }
@@ -1315,13 +1942,92 @@ func isTransientRetryStatus(code int) bool {
 	}
 }
 
-func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
-	if h == nil || h.router == nil {
-		http.Error(w, "router unavailable", http.StatusBadGateway)
+func isOpenAIModelDetailRequest(r *http.Request) bool {
+	if r == nil || r.Method != http.MethodGet {
+		return false
+	}
+	model := llm.ModelFromPath(r.URL.Path)
+	return strings.HasPrefix(pathClean(r.URL.Path), "/v1/models/") && model != ""
+}
+
+func isOllamaShowRequest(r *http.Request) bool {
+	if r == nil || r.Method != http.MethodPost {
+		return false
+	}
+	return llm.NormalizeEndpoint(r.URL.Path) == "/api/show"
+}
+
+func pathClean(rawPath string) string {
+	clean := path.Clean(rawPath)
+	if clean == "." {
+		return "/"
+	}
+	if !strings.HasPrefix(clean, "/") {
+		clean = "/" + clean
+	}
+	return clean
+}
+
+func (h *Handler) serveOpenAIModelDetail(w http.ResponseWriter, r *http.Request, start time.Time) {
+	model := llm.ModelFromPath(r.URL.Path)
+	body, err := json.Marshal(newAggregatedModelListEntry(model))
+	if err != nil {
+		http.Error(w, "failed to marshal model detail", http.StatusInternalServerError)
+		return
+	}
+	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
+		{
+			Type: "routing.model_detail",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"endpoint": "/v1/models",
+				"model":    model,
+			},
+		},
+	})
+}
+
+func (h *Handler) serveOllamaShow(w http.ResponseWriter, r *http.Request, start time.Time) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	var payload ollamaShowRequest
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	model := strings.TrimSpace(payload.Name)
+	if model == "" {
+		http.Error(w, "missing model name", http.StatusBadRequest)
 		return
 	}
 
-	models := h.router.AggregatedModels()
+	body, err := json.Marshal(newAggregatedModelListEntry(model))
+	if err != nil {
+		http.Error(w, "failed to marshal model detail", http.StatusInternalServerError)
+		return
+	}
+	h.serveSyntheticModelJSON(w, r, start, body, "/api/show", bodyBytes, []recorder.RecordEvent{
+		{
+			Type: "routing.model_show",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"endpoint": "/api/show",
+				"model":    model,
+			},
+		},
+	})
+}
+
+func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Request, start time.Time) {
+	var models []string
+	if h != nil && h.router != nil {
+		models = h.router.AggregatedModels()
+	}
 	payload := aggregatedModelListResponse{
 		Object: "list",
 		Data:   make([]aggregatedModelListEntry, 0, len(models)),
@@ -1334,28 +2040,38 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "failed to marshal model list", http.StatusInternalServerError)
 		return
 	}
-
-	logInfo, err := h.recorder.PrepareLogFileWithOptions(r, recorder.PrepareOptions{
-		RoutingPolicy: h.routerPolicy(),
+	h.serveSyntheticModelJSON(w, r, start, body, "/v1/models", nil, []recorder.RecordEvent{
+		{
+			Type: "routing.aggregate",
+			Time: start,
+			Attributes: map[string]interface{}{
+				"endpoint":    "/v1/models",
+				"model_count": len(models),
+			},
+		},
 	})
-	if err != nil {
-		slog.Error("Failed to prepare aggregated model-list log file", "err", err)
+}
+
+func (h *Handler) serveSyntheticModelJSON(w http.ResponseWriter, r *http.Request, start time.Time, body []byte, endpoint string, requestBody []byte, events []recorder.RecordEvent) {
+	if h == nil || h.recorder == nil {
 		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
 		return
 	}
-	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
-		Type: "routing.aggregate",
-		Time: start,
-		Attributes: map[string]interface{}{
-			"endpoint":    "/v1/models",
-			"model_count": len(models),
-		},
-	})
+
+	logInfo, err := h.recorder.PrepareLogFileWithOptionsAndBody(r, recorder.PrepareOptions{
+		RoutingPolicy: h.routerPolicy(),
+	}, requestBody)
+	if err != nil {
+		slog.Error("Failed to prepare synthetic model-info log file", "err", err)
+		http.Error(w, "Internal Logging Error", http.StatusInternalServerError)
+		return
+	}
+	logInfo.Events = append(logInfo.Events, events...)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(body); err != nil {
-		slog.Error("Failed to write aggregated model-list response", "err", err)
+		slog.Error("Failed to write synthetic model-info response", "err", err)
 	}
 
 	headerBuf := bytes.NewBufferString(fmt.Sprintf("HTTP/1.1 %d %s\r\n", http.StatusOK, http.StatusText(http.StatusOK)))
@@ -1363,39 +2079,48 @@ func (h *Handler) serveAggregatedModelList(w http.ResponseWriter, r *http.Reques
 	fmt.Fprintf(headerBuf, "Content-Length: %d\r\n", len(body))
 	headerBuf.WriteString("\r\n")
 	if _, err := logInfo.File.Write([]byte("\n")); err != nil {
-		slog.Error("Failed to write aggregated model-list separator", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to write synthetic model-info separator", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
 		return
 	}
 	nHead, err := logInfo.File.Write(headerBuf.Bytes())
 	if err != nil {
-		slog.Error("Failed to write aggregated model-list response header", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to write synthetic model-info response header", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
 		return
 	}
 	nBody, err := logInfo.File.Write(body)
 	if err != nil {
-		slog.Error("Failed to write aggregated model-list response body", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to write synthetic model-info response body", "path", logInfo.Path, "err", err)
 		_ = logInfo.File.Close()
 		return
 	}
 
 	logInfo.Header.Meta.DurationMs = time.Since(start).Milliseconds()
 	logInfo.Header.Meta.StatusCode = http.StatusOK
+	logInfo.Header.Meta.Endpoint = endpoint
+	logInfo.Header.Meta.Operation = llm.OperationModels
 	logInfo.Header.Meta.ContentLength = int64(len(body))
 	logInfo.Header.Layout.ResHeaderLen = int64(nHead)
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Header.Layout.IsStream = false
 	if err := h.recorder.UpdateLogFile(logInfo); err != nil {
-		slog.Error("Failed to update aggregated model-list log file", "path", logInfo.Path, "err", err)
+		slog.Error("Failed to update synthetic model-info log file", "path", logInfo.Path, "err", err)
 	}
 }
 
 func (h *Handler) routerPolicy() string {
-	if h == nil || h.router == nil {
+	if h == nil {
 		return ""
 	}
-	return h.router.Policy()
+	return routerPolicy(h.router)
+}
+
+func routerPolicy(rtr *router.Router) string {
+	if rtr == nil {
+		return ""
+	}
+	return rtr.Policy()
 }
 
 func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Time, statusCode int, selectErr error, bodyBytes []byte, retryEvents []recorder.RecordEvent) {
@@ -1445,7 +2170,12 @@ func (h *Handler) recordSelectionFailureWithBody(r *http.Request, start time.Tim
 	logInfo.Header.Layout.ResBodyLen = int64(nBody)
 	logInfo.Events = append(logInfo.Events, retryEvents...)
 	if decision := router.SelectionDecision(selectErr); decision != nil {
+		if !hasRoutePlanEvent(logInfo.Events) {
+			logInfo.Events = append(logInfo.Events, routePlanEventForDecision(r, bodyBytes, decision, start, h.routerPolicy(), reason))
+		}
 		logInfo.Events = append(logInfo.Events, routingDecisionEvents(decision, start)...)
+	} else if !hasRoutePlanEvent(logInfo.Events) {
+		logInfo.Events = append(logInfo.Events, routePlanEventForDecision(r, bodyBytes, nil, start, h.routerPolicy(), reason))
 	}
 	logInfo.Events = append(logInfo.Events, recorder.RecordEvent{
 		Type:    "routing.failure",

@@ -16,6 +16,10 @@ type Tx struct {
 	config
 	// APIToken is the client for interacting with the APIToken builders.
 	APIToken *APITokenClient
+	// AnalysisJob is the client for interacting with the AnalysisJob builders.
+	AnalysisJob *AnalysisJobClient
+	// AnalysisRun is the client for interacting with the AnalysisRun builders.
+	AnalysisRun *AnalysisRunClient
 	// ChannelConfig is the client for interacting with the ChannelConfig builders.
 	ChannelConfig *ChannelConfigClient
 	// ChannelModel is the client for interacting with the ChannelModel builders.
@@ -28,14 +32,38 @@ type Tx struct {
 	DatasetExample *DatasetExampleClient
 	// EvalRun is the client for interacting with the EvalRun builders.
 	EvalRun *EvalRunClient
+	// ExecutionEvent is the client for interacting with the ExecutionEvent builders.
+	ExecutionEvent *ExecutionEventClient
 	// ExperimentRun is the client for interacting with the ExperimentRun builders.
 	ExperimentRun *ExperimentRunClient
 	// ModelCatalog is the client for interacting with the ModelCatalog builders.
 	ModelCatalog *ModelCatalogClient
+	// ParseJob is the client for interacting with the ParseJob builders.
+	ParseJob *ParseJobClient
+	// ParserVersion is the client for interacting with the ParserVersion builders.
+	ParserVersion *ParserVersionClient
+	// RequestAudit is the client for interacting with the RequestAudit builders.
+	RequestAudit *RequestAuditClient
+	// Response is the client for interacting with the Response builders.
+	Response *ResponseClient
+	// ResponseItem is the client for interacting with the ResponseItem builders.
+	ResponseItem *ResponseItemClient
 	// Score is the client for interacting with the Score builders.
 	Score *ScoreClient
+	// SemanticNode is the client for interacting with the SemanticNode builders.
+	SemanticNode *SemanticNodeClient
+	// SystemEvent is the client for interacting with the SystemEvent builders.
+	SystemEvent *SystemEventClient
+	// ToolCallAudit is the client for interacting with the ToolCallAudit builders.
+	ToolCallAudit *ToolCallAuditClient
+	// TraceFinding is the client for interacting with the TraceFinding builders.
+	TraceFinding *TraceFindingClient
 	// TraceLog is the client for interacting with the TraceLog builders.
 	TraceLog *TraceLogClient
+	// TraceObservation is the client for interacting with the TraceObservation builders.
+	TraceObservation *TraceObservationClient
+	// UpstreamExchange is the client for interacting with the UpstreamExchange builders.
+	UpstreamExchange *UpstreamExchangeClient
 	// UpstreamModel is the client for interacting with the UpstreamModel builders.
 	UpstreamModel *UpstreamModelClient
 	// UpstreamTarget is the client for interacting with the UpstreamTarget builders.
@@ -174,16 +202,30 @@ func (tx *Tx) Client() *Client {
 
 func (tx *Tx) init() {
 	tx.APIToken = NewAPITokenClient(tx.config)
+	tx.AnalysisJob = NewAnalysisJobClient(tx.config)
+	tx.AnalysisRun = NewAnalysisRunClient(tx.config)
 	tx.ChannelConfig = NewChannelConfigClient(tx.config)
 	tx.ChannelModel = NewChannelModelClient(tx.config)
 	tx.ChannelProbeRun = NewChannelProbeRunClient(tx.config)
 	tx.Dataset = NewDatasetClient(tx.config)
 	tx.DatasetExample = NewDatasetExampleClient(tx.config)
 	tx.EvalRun = NewEvalRunClient(tx.config)
+	tx.ExecutionEvent = NewExecutionEventClient(tx.config)
 	tx.ExperimentRun = NewExperimentRunClient(tx.config)
 	tx.ModelCatalog = NewModelCatalogClient(tx.config)
+	tx.ParseJob = NewParseJobClient(tx.config)
+	tx.ParserVersion = NewParserVersionClient(tx.config)
+	tx.RequestAudit = NewRequestAuditClient(tx.config)
+	tx.Response = NewResponseClient(tx.config)
+	tx.ResponseItem = NewResponseItemClient(tx.config)
 	tx.Score = NewScoreClient(tx.config)
+	tx.SemanticNode = NewSemanticNodeClient(tx.config)
+	tx.SystemEvent = NewSystemEventClient(tx.config)
+	tx.ToolCallAudit = NewToolCallAuditClient(tx.config)
+	tx.TraceFinding = NewTraceFindingClient(tx.config)
 	tx.TraceLog = NewTraceLogClient(tx.config)
+	tx.TraceObservation = NewTraceObservationClient(tx.config)
+	tx.UpstreamExchange = NewUpstreamExchangeClient(tx.config)
 	tx.UpstreamModel = NewUpstreamModelClient(tx.config)
 	tx.UpstreamTarget = NewUpstreamTargetClient(tx.config)
 	tx.User = NewUserClient(tx.config)
