@@ -516,7 +516,11 @@ func validateOpenAIBasePath(resolved ResolvedUpstream) error {
 	if err != nil {
 		return fmt.Errorf("invalid upstream.base_url: %w", err)
 	}
-	if cleanURLPath(parsed.Path) == "/" {
+	// DeepSeek documents its OpenAI-compatible Responses API with the origin as
+	// the base URL. Its endpoints live at /responses and /models rather than
+	// requiring a /v1 prefix, so the normal OpenAI base-path guard does not
+	// apply to the explicit DeepSeek preset.
+	if cleanURLPath(parsed.Path) == "/" && resolved.ProviderPreset != "deepseek" {
 		return fmt.Errorf("upstream.base_url must include the upstream API path prefix for protocol_family=%q (examples: /v1, /api/v1, /openai, /openai/v1)", resolved.ProtocolFamily)
 	}
 	return nil

@@ -282,6 +282,30 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 	}
 }
 
+func TestResolveAllowsDeepSeekRootBaseURL(t *testing.T) {
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.deepseek.com",
+		ProviderPreset: "deepseek",
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	if resolved.BaseURL != "https://api.deepseek.com" {
+		t.Fatalf("BaseURL = %q, want DeepSeek origin", resolved.BaseURL)
+	}
+	if got, err := resolved.BuildURL("/v1/responses"); err != nil {
+		t.Fatalf("BuildURL() error = %v", err)
+	} else if got != "https://api.deepseek.com/responses" {
+		t.Fatalf("BuildURL() = %q, want DeepSeek Responses endpoint", got)
+	}
+	if got, err := resolved.ConnectivityCheckURL(); err != nil {
+		t.Fatalf("ConnectivityCheckURL() error = %v", err)
+	} else if got != "https://api.deepseek.com/models" {
+		t.Fatalf("ConnectivityCheckURL() = %q, want DeepSeek models endpoint", got)
+	}
+}
+
 func TestResolvedUpstreamBuildURL(t *testing.T) {
 	tests := []struct {
 		name    string
