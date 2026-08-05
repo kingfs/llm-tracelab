@@ -5453,7 +5453,7 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode GET response: %v", err)
 	}
-	if got.ResponsesStrategy != "auto" || got.SelectionPolicy != router.PolicyP2C {
+	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyP2C {
 		t.Fatalf("default settings = %+v", got)
 	}
 

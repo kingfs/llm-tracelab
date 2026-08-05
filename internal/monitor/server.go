@@ -3513,7 +3513,7 @@ func normalizeModelList(models []string) []string {
 
 func defaultRoutingSettings() routingSettingsView {
 	return routingSettingsView{
-		ResponsesStrategy:  "auto",
+		ResponsesStrategy:  "prefer_local_server",
 		SelectionPolicy:    router.PolicyP2C,
 		MissingModelPolicy: router.FallbackReject,
 		RoutePlanLogLevel:  "normal",
