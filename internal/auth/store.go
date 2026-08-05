@@ -22,6 +22,7 @@ import (
 
 	"entgo.io/ent/dialect"
 	entsql "entgo.io/ent/dialect/sql"
+	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -35,6 +36,7 @@ type Store struct {
 	client *dao.Client
 	db     *sql.DB
 	path   string
+	driver string
 }
 
 type TokenResult struct {
@@ -63,17 +65,33 @@ func Open(path string) (*Store, error) {
 
 func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int) (*Store, error) {
 	driver = normalizeDriver(driver)
-	if driver != "sqlite" {
+	var (
+		db             *sql.DB
+		err            error
+		path           string
+		entDialectName string
+	)
+	switch driver {
+	case "sqlite":
+		path = config.SQLitePathFromDSN(dsn)
+		if strings.TrimSpace(path) == "" {
+			return nil, errors.New("auth database path is required")
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return nil, err
+		}
+		db, err = sql.Open("sqlite", sqliteDSN(path))
+		entDialectName = dialect.SQLite
+	case "postgres", "postgresql":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, errors.New("auth postgres dsn is required")
+		}
+		db, err = sql.Open("postgres", dsn)
+		path = dsn
+		entDialectName = dialect.Postgres
+	default:
 		return nil, fmt.Errorf("auth store driver %q is not supported yet", driver)
 	}
-	path := config.SQLitePathFromDSN(dsn)
-	if strings.TrimSpace(path) == "" {
-		return nil, errors.New("auth database path is required")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +101,12 @@ func OpenDatabase(driver string, dsn string, maxOpenConns int, maxIdleConns int)
 	if maxIdleConns > 0 {
 		db.SetMaxIdleConns(maxIdleConns)
 	}
-	drv := entsql.OpenDB(dialect.SQLite, db)
+	drv := entsql.OpenDB(entDialectName, db)
 	return &Store{
 		client: dao.NewClient(dao.Driver(drv)),
 		db:     db,
 		path:   path,
+		driver: driver,
 	}, nil
 }
 

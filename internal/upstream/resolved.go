@@ -111,6 +111,7 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 		ModelResource:  strings.Trim(strings.TrimSpace(cfg.ModelResource), "/"),
 		Headers:        cloneStringMap(cfg.Headers),
 	}
+	applyHostProviderDefaults(&resolved, parsed)
 	if err := validatePresetSelection(resolved.ProviderPreset, resolved.ProtocolFamily); err != nil {
 		return ResolvedUpstream{}, err
 	}
@@ -443,6 +444,19 @@ func applyPresetDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	}
 }
 
+func applyHostProviderDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
+	if resolved == nil || parsed == nil {
+		return
+	}
+	if !isDeepSeekAPIHost(parsed.Host) {
+		return
+	}
+	switch resolved.ProviderPreset {
+	case "", "openai":
+		resolved.ProviderPreset = "deepseek"
+	}
+}
+
 func inferDefaults(resolved *ResolvedUpstream, parsed *url.URL) {
 	host := strings.ToLower(parsed.Host)
 	basePath := strings.ToLower(parsed.Path)
@@ -524,6 +538,17 @@ func validateOpenAIBasePath(resolved ResolvedUpstream) error {
 		return fmt.Errorf("upstream.base_url must include the upstream API path prefix for protocol_family=%q (examples: /v1, /api/v1, /openai, /openai/v1)", resolved.ProtocolFamily)
 	}
 	return nil
+}
+
+func isDeepSeekAPIHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return false
+	}
+	if withoutPort, _, found := strings.Cut(host, ":"); found {
+		host = withoutPort
+	}
+	return host == "api.deepseek.com"
 }
 
 func joinRequestPath(target *url.URL, clientPath string, resolved ResolvedUpstream) string {

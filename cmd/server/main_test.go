@@ -1176,6 +1176,48 @@ debug:
 	}
 }
 
+func TestRunServeRejectsUnknownDatabaseDriver(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	prev := slog.Default()
+	slog.SetDefault(logger)
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+	})
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	configBody := []byte(strings.TrimSpace(`
+server:
+  port: "8080"
+monitor:
+  port: "8081"
+mcp:
+  enabled: true
+database:
+  driver: "mysql"
+  dsn: "mysql://llm_tracelab:secret@mysql:3306/llm_tracelab"
+upstream:
+  base_url: "https://api.openai.com/v1"
+debug:
+  output_dir: "` + dir + `"
+  mask_key: false
+`))
+	if err := os.WriteFile(configPath, configBody, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	code := runServe([]string{"-c", configPath})
+	if code != 1 {
+		t.Fatalf("runServe() = %d, want 1", code)
+	}
+	if output := buf.String(); !strings.Contains(output, "database.driver") ||
+		!strings.Contains(output, "mysql") ||
+		!strings.Contains(output, "is not supported yet; use sqlite or postgres") {
+		t.Fatalf("log output = %q, want unsupported database driver", output)
+	}
+}
+
 func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 	t.Parallel()
 

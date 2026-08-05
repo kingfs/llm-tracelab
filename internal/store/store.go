@@ -45,6 +45,7 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/llm"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
+	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
 )
 
@@ -73,6 +74,7 @@ type Store struct {
 	client    *dao.Client
 	outputDir string
 	dbPath    string
+	driver    string
 	secrets   *secretBox
 	syncMu    sync.Mutex
 	eventMu   sync.Mutex
@@ -1374,7 +1376,7 @@ func (s *Store) GetChannelRecentFailures(channelID string, since time.Time, limi
 
 func (s *Store) ListUpstreamAnalytics(limitModels int, limitErrors int, since time.Time, modelFilter string) ([]UpstreamAnalyticsRecord, error) {
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT
 			selected_upstream_id,
 			COUNT(*) AS request_count,
@@ -1458,13 +1460,13 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	}
 
 	var analytics RoutingFailureAnalytics
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&analytics.Total); err != nil {
+	if err := s.queryRow(`SELECT COUNT(*) FROM logs WHERE `+baseWhere, whereArgs...).Scan(&analytics.Total); err != nil {
 		return RoutingFailureAnalytics{}, err
 	}
 
 	reasonArgs := append([]any{}, whereArgs...)
 	reasonArgs = append(reasonArgs, limitReasons)
-	reasonRows, err := s.db.Query(`
+	reasonRows, err := s.query(`
 		SELECT routing_failure_reason, COUNT(*) AS count
 		FROM logs
 		WHERE `+baseWhere+`
@@ -1489,7 +1491,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 
 	recentArgs := append([]any{}, whereArgs...)
 	recentArgs = append(recentArgs, limitRecent)
-	recentRows, err := s.db.Query(`
+	recentRows, err := s.query(`
 		SELECT trace_id, model, endpoint, recorded_at, routing_failure_reason, error_text, status_code
 		FROM logs
 		WHERE `+baseWhere+`
@@ -1520,7 +1522,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 
 	referenceTime := time.Now().UTC()
 	var latestRecordedAt string
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
+	if err := s.queryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+baseWhere, whereArgs...).Scan(&latestRecordedAt); err != nil {
 		return RoutingFailureAnalytics{}, err
 	}
 	if strings.TrimSpace(latestRecordedAt) != "" {
@@ -1532,7 +1534,7 @@ func (s *Store) GetRoutingFailureAnalytics(since time.Time, modelFilter string, 
 	}
 	bucketStart := referenceTime.UTC().Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	timelineArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
-	timelineRows, err := s.db.Query(`
+	timelineRows, err := s.query(`
 		SELECT recorded_at
 		FROM logs
 		WHERE recorded_at >= ? AND `+baseWhere+`
@@ -1607,7 +1609,7 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	queryArgs := append([]any{upstreamID}, whereArgs...)
 	queryArgs = append(queryArgs, traceLimit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
@@ -1653,7 +1655,7 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 
 	timelineArgs := append([]any{upstreamID}, whereArgs...)
 	var latestRecordedAt string
-	err = s.db.QueryRow(`
+	err = s.queryRow(`
 		SELECT COALESCE(MAX(recorded_at), '')
 		FROM logs
 		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL,
@@ -1673,7 +1675,7 @@ func (s *Store) GetUpstreamDetail(upstreamID string, since time.Time, modelFilte
 	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	buckets := make(map[time.Time]int, bucketCount)
 	failureTimelineArgs := append([]any{upstreamID}, whereArgs...)
-	timelineRows, err := s.db.Query(`
+	timelineRows, err := s.query(`
 		SELECT recorded_at
 		FROM logs
 		WHERE selected_upstream_id = ? AND status_code >= 400`+whereSQL+`
@@ -1725,7 +1727,7 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.T
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT model, COUNT(*) AS count
 		FROM logs
 		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
@@ -1753,7 +1755,7 @@ func (s *Store) upstreamModelCoverage(upstreamID string, limit int, since time.T
 
 	var lastModel string
 	lastModelArgs := append([]any{upstreamID}, whereArgs...)
-	if err := s.db.QueryRow(`
+	if err := s.queryRow(`
 		SELECT model
 		FROM logs
 		WHERE selected_upstream_id = ? AND model <> ''`+whereSQL+`
@@ -1773,7 +1775,7 @@ func (s *Store) upstreamRecentErrors(upstreamID string, limit int, since time.Ti
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT error_text, status_code, endpoint
 		FROM logs
 		WHERE selected_upstream_id = ?
@@ -1816,7 +1818,7 @@ func (s *Store) upstreamRecentFailures(upstreamID string, limit int, since time.
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
 	args = append(args, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT trace_id, model, endpoint, status_code, recorded_at, error_text
 		FROM logs
 		WHERE selected_upstream_id = ?
@@ -1855,7 +1857,7 @@ func (s *Store) upstreamFailureReasons(upstreamID string, limit int, since time.
 	}
 	whereSQL, whereArgs := buildUpstreamAnalyticsWhere(since, modelFilter)
 	args := append([]any{upstreamID}, whereArgs...)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT status_code, error_text
 		FROM logs
 		WHERE selected_upstream_id = ?
@@ -1939,7 +1941,7 @@ func (s *Store) listLogModels(since time.Time) ([]string, error) {
 		where += " AND recorded_at >= ?"
 		args = append(args, since.UTC().Format(timeLayout))
 	}
-	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
+	rows, err := s.query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1964,7 +1966,7 @@ func (s *Store) channelLogModels(channelID string, since time.Time) ([]string, e
 		where += " AND recorded_at >= ?"
 		args = append(args, since.UTC().Format(timeLayout))
 	}
-	rows, err := s.db.Query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
+	rows, err := s.query(`SELECT DISTINCT LOWER(model) FROM logs WHERE `+where+` ORDER BY LOWER(model)`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1999,7 +2001,7 @@ func (s *Store) usageSummary(baseWhere string, baseArgs []any, since time.Time) 
 		successRate  float64
 		lastSeenText string
 	)
-	if err := s.db.QueryRow(`
+	if err := s.queryRow(`
 		SELECT
 			COUNT(*) AS request_count,
 			COALESCE(SUM(CASE WHEN status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
@@ -2057,7 +2059,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	args := append([]any(nil), baseArgs...)
 	referenceTime := time.Now().UTC()
 	var latestRecordedAt string
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
+	if err := s.queryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+where, args...).Scan(&latestRecordedAt); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(latestRecordedAt) != "" {
@@ -2074,7 +2076,7 @@ func (s *Store) usageTrends(baseWhere string, baseArgs []any, since time.Time, b
 	bucketStart := referenceTime.Truncate(bucketSize).Add(-time.Duration(bucketCount-1) * bucketSize)
 	queryArgs := append([]any(nil), args...)
 	queryArgs = append(queryArgs, bucketStart.Format(timeLayout))
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT recorded_at, status_code, total_tokens, prompt_tokens, completion_tokens, model
 		FROM logs
 		WHERE `+where+` AND recorded_at >= ?
@@ -2193,19 +2195,34 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 	if driver == "" {
 		driver = "sqlite"
 	}
-	if driver != "sqlite" {
+	var (
+		db             *sql.DB
+		dbPath         string
+		entDialectName string
+	)
+	switch driver {
+	case "sqlite":
+		dbPath = config.SQLitePathFromDSN(dsn)
+		if strings.TrimSpace(dbPath) == "" {
+			dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
+		}
+		if dbPath != ":memory:" {
+			if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+				return nil, err
+			}
+		}
+		db, err = sql.Open("sqlite", sqliteDSN(dbPath))
+		entDialectName = dialect.SQLite
+	case "postgres", "postgresql":
+		if strings.TrimSpace(dsn) == "" {
+			return nil, fmt.Errorf("postgres dsn is required")
+		}
+		db, err = sql.Open("postgres", dsn)
+		dbPath = dsn
+		entDialectName = dialect.Postgres
+	default:
 		return nil, fmt.Errorf("store driver %q is not supported yet", driver)
 	}
-	dbPath := config.SQLitePathFromDSN(dsn)
-	if strings.TrimSpace(dbPath) == "" {
-		dbPath = filepath.Join(outputDir, "llm_tracelab.sqlite3")
-	}
-	if dbPath != ":memory:" {
-		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-			return nil, err
-		}
-	}
-	db, err := sql.Open("sqlite", sqliteDSN(dbPath))
 	if err != nil {
 		return nil, err
 	}
@@ -2218,17 +2235,127 @@ func NewWithDatabase(outputDir string, driver string, dsn string, maxOpenConns i
 
 	st := &Store{
 		db:        db,
-		client:    dao.NewClient(dao.Driver(entsql.OpenDB(dialect.SQLite, db))),
+		client:    dao.NewClient(dao.Driver(entsql.OpenDB(entDialectName, db))),
 		outputDir: outputDir,
 		dbPath:    dbPath,
+		driver:    driver,
 		secrets:   secrets,
 	}
-	if err := st.initSchema(); err != nil {
+	if driver == "sqlite" {
+		err = st.initSchema()
+	} else {
+		err = st.ensurePostgresSchema()
+	}
+	if err != nil {
 		_ = st.Close()
 		return nil, err
 	}
 
 	return st, nil
+}
+
+func (s *Store) ensurePostgresSchema() error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres store is not configured")
+	}
+	if err := s.db.Ping(); err != nil {
+		return err
+	}
+	requiredTables := []string{
+		"logs",
+		"users",
+		"api_tokens",
+		"channel_configs",
+		"channel_models",
+		"upstream_targets",
+		"upstream_models",
+		"model_catalog",
+		"system_events",
+	}
+	for _, table := range requiredTables {
+		var exists bool
+		if err := s.queryRow(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM information_schema.tables
+				WHERE table_schema = 'public' AND table_name = $1
+			)
+		`, table).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("postgres schema is missing required table %q; run migrations before starting", table)
+		}
+	}
+	return nil
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+type queryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+type queryRower interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func (s *Store) exec(query string, args ...any) (sql.Result, error) {
+	return execSQL(s.db, s.driver, query, args...)
+}
+
+func (s *Store) query(query string, args ...any) (*sql.Rows, error) {
+	return querySQL(s.db, s.driver, query, args...)
+}
+
+func (s *Store) queryRow(query string, args ...any) *sql.Row {
+	return queryRowSQL(s.db, s.driver, query, args...)
+}
+
+func execSQL(db execer, driver string, query string, args ...any) (sql.Result, error) {
+	return db.Exec(rebindPlaceholders(driver, query), args...)
+}
+
+func querySQL(db queryer, driver string, query string, args ...any) (*sql.Rows, error) {
+	return db.Query(rebindPlaceholders(driver, query), args...)
+}
+
+func queryRowSQL(db queryRower, driver string, query string, args ...any) *sql.Row {
+	return db.QueryRow(rebindPlaceholders(driver, query), args...)
+}
+
+func rebindPlaceholders(driver string, query string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver != "postgres" && driver != "postgresql" {
+		return query
+	}
+	var b strings.Builder
+	b.Grow(len(query) + 8)
+	inSingleQuote := false
+	argIndex := 1
+	for i := 0; i < len(query); i++ {
+		ch := query[i]
+		if ch == '\'' {
+			b.WriteByte(ch)
+			if inSingleQuote && i+1 < len(query) && query[i+1] == '\'' {
+				i++
+				b.WriteByte(query[i])
+				continue
+			}
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+		if ch == '?' && !inSingleQuote {
+			b.WriteByte('$')
+			fmt.Fprint(&b, argIndex)
+			argIndex++
+			continue
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
 }
 
 func newLocalSecretBox(outputDir string) (*secretBox, error) {
@@ -2477,12 +2604,12 @@ func (s *Store) applyRotatedChannelSecrets(items []rotatedChannelSecret) error {
 	defer tx.Rollback()
 	for _, item := range items {
 		if item.hasAPIKey {
-			if _, err := tx.Exec(`UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+			if _, err := execSQL(tx, s.driver, `UPDATE channel_configs SET api_key_ciphertext = ?, headers_json = ?, updated_at = ? WHERE id = ?`, item.apiKey, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
 				return err
 			}
 			continue
 		}
-		if _, err := tx.Exec(`UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
+		if _, err := execSQL(tx, s.driver, `UPDATE channel_configs SET headers_json = ?, updated_at = ? WHERE id = ?`, item.headersJSON, time.Now().UTC().Format(timeLayout), item.id); err != nil {
 			return err
 		}
 	}
@@ -2994,7 +3121,7 @@ func (s *Store) initSchema() error {
 	}
 
 	for _, stmt := range stmts {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.exec(stmt); err != nil {
 			return err
 		}
 	}
@@ -3063,7 +3190,7 @@ func (s *Store) initSchema() error {
 		`CREATE INDEX IF NOT EXISTS tracelog_request_id ON logs(request_id);`,
 	}
 	for _, stmt := range postColumnStmts {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.exec(stmt); err != nil {
 			return err
 		}
 	}
@@ -3071,9 +3198,6 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err := s.backfillSemantics(); err != nil {
-		return err
-	}
-	if err := s.backfillGrouping(); err != nil {
 		return err
 	}
 	return nil
@@ -3140,10 +3264,10 @@ func (s *Store) ensureUpstreamTargetsEntTable() error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`ALTER TABLE upstream_targets RENAME TO upstream_targets_old`); err != nil {
+	if _, err := execSQL(tx, s.driver, `ALTER TABLE upstream_targets RENAME TO upstream_targets_old`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE upstream_targets (
+	if _, err := execSQL(tx, s.driver, `CREATE TABLE upstream_targets (
 		id TEXT PRIMARY KEY,
 		base_url TEXT NOT NULL DEFAULT '',
 		provider_preset TEXT NOT NULL DEFAULT '',
@@ -3159,7 +3283,7 @@ func (s *Store) ensureUpstreamTargetsEntTable() error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO upstream_targets (
+	if _, err := execSQL(tx, s.driver, `INSERT INTO upstream_targets (
 		id, base_url, provider_preset, protocol_family, routing_profile, enabled,
 		priority, weight, capacity_hint, last_refresh_at, last_refresh_status, last_refresh_error
 	)
@@ -3172,7 +3296,7 @@ func (s *Store) ensureUpstreamTargetsEntTable() error {
 	FROM upstream_targets_old`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE upstream_targets_old`); err != nil {
+	if _, err := execSQL(tx, s.driver, `DROP TABLE upstream_targets_old`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3202,7 +3326,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		`DROP INDEX IF EXISTS tracelog_session_id_recorded_at`,
 		`DROP INDEX IF EXISTS tracelog_request_id`,
 	} {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := s.exec(stmt); err != nil {
 			return err
 		}
 	}
@@ -3212,10 +3336,10 @@ func (s *Store) ensureLogsDatetimeTable() error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`ALTER TABLE logs RENAME TO logs_old`); err != nil {
+	if _, err := execSQL(tx, s.driver, `ALTER TABLE logs RENAME TO logs_old`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE logs (
+	if _, err := execSQL(tx, s.driver, `CREATE TABLE logs (
 		path TEXT PRIMARY KEY,
 		trace_id TEXT NOT NULL DEFAULT '',
 		mod_time_ns INTEGER NOT NULL,
@@ -3258,7 +3382,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO logs (
+	if _, err := execSQL(tx, s.driver, `INSERT INTO logs (
 		path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
 		status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
 		prompt_tokens, completion_tokens, total_tokens, cached_tokens,
@@ -3281,7 +3405,7 @@ func (s *Store) ensureLogsDatetimeTable() error {
 	FROM logs_old`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE logs_old`); err != nil {
+	if _, err := execSQL(tx, s.driver, `DROP TABLE logs_old`); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3301,20 +3425,20 @@ func (s *Store) ensureAutoIDTable(table string, createSQL string, copySQL string
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`ALTER TABLE ` + table + ` RENAME TO ` + table + `_old`); err != nil {
+	if _, err := execSQL(tx, s.driver, `ALTER TABLE `+table+` RENAME TO `+table+`_old`); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(createSQL); err != nil {
+	if _, err := execSQL(tx, s.driver, createSQL); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(copySQL); err != nil {
+	if _, err := execSQL(tx, s.driver, copySQL); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE ` + table + `_old`); err != nil {
+	if _, err := execSQL(tx, s.driver, `DROP TABLE `+table+`_old`); err != nil {
 		return err
 	}
 	for _, stmt := range indexes {
-		if _, err := tx.Exec(stmt); err != nil {
+		if _, err := execSQL(tx, s.driver, stmt); err != nil {
 			return err
 		}
 	}
@@ -3330,7 +3454,7 @@ func (s *Store) ensureColumn(table string, column string, definition string) err
 		return nil
 	}
 
-	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+	_, err = s.exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
 	return err
 }
 
@@ -3343,7 +3467,7 @@ func (s *Store) hasColumn(table string, column string) (bool, error) {
 }
 
 func (s *Store) columnType(table string, column string) (string, error) {
-	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	rows, err := s.query(`PRAGMA table_info(` + table + `)`)
 	if err != nil {
 		return "", err
 	}
@@ -3372,7 +3496,7 @@ func (s *Store) columnType(table string, column string) (string, error) {
 }
 
 func (s *Store) backfillTraceIDs() error {
-	rows, err := s.db.Query(`SELECT path FROM logs WHERE trace_id = '' OR trace_id IS NULL`)
+	rows, err := s.query(`SELECT path FROM logs WHERE trace_id = '' OR trace_id IS NULL`)
 	if err != nil {
 		return err
 	}
@@ -3391,7 +3515,7 @@ func (s *Store) backfillTraceIDs() error {
 	}
 
 	for _, path := range paths {
-		if _, err := s.db.Exec(`UPDATE logs SET trace_id = ? WHERE path = ?`, uuid.NewString(), path); err != nil {
+		if _, err := s.exec(`UPDATE logs SET trace_id = ? WHERE path = ?`, uuid.NewString(), path); err != nil {
 			return err
 		}
 	}
@@ -3399,7 +3523,7 @@ func (s *Store) backfillTraceIDs() error {
 }
 
 func (s *Store) backfillSemantics() error {
-	rows, err := s.db.Query(`SELECT path, url, provider, operation, endpoint FROM logs`)
+	rows, err := s.query(`SELECT path, url, provider, operation, endpoint FROM logs WHERE provider = '' OR operation = '' OR endpoint = ''`)
 	if err != nil {
 		return err
 	}
@@ -3432,7 +3556,7 @@ func (s *Store) backfillSemantics() error {
 	}
 
 	for _, update := range updates {
-		if _, err := s.db.Exec(
+		if _, err := s.exec(
 			`UPDATE logs SET provider = ?, operation = ?, endpoint = ? WHERE path = ?`,
 			update.provider,
 			update.operation,
@@ -3925,7 +4049,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		}
 	}
 
-	_, err = s.db.Exec(`
+	_, err = s.exec(`
 		INSERT INTO logs (
 			path, trace_id, mod_time_ns, file_size, version, request_id, recorded_at, model, provider, operation, endpoint, url, method,
 			status_code, duration_ms, ttft_ms, client_ip, content_length, error_text,
@@ -4002,7 +4126,7 @@ func (s *Store) UpsertLogWithGrouping(path string, header recordfile.RecordHeade
 		header.Layout.ReqBodyLen,
 		header.Layout.ResHeaderLen,
 		header.Layout.ResBodyLen,
-		boolToInt(header.Layout.IsStream),
+		s.boolValue(header.Layout.IsStream),
 		grouping.SessionID,
 		grouping.SessionSource,
 		grouping.WindowID,
@@ -4031,7 +4155,7 @@ func (s *Store) UpdateLogUsage(traceID string, usage recordfile.UsageInfo) error
 	if usage.PromptTokenDetails != nil {
 		cachedTokens = usage.PromptTokenDetails.CachedTokens
 	}
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE logs
 		SET prompt_tokens = ?, completion_tokens = ?, total_tokens = ?, cached_tokens = ?
 		WHERE trace_id = ?
@@ -4044,6 +4168,10 @@ const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
 func (s *Store) Sync() error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+
+	if err := s.backfillGrouping(); err != nil {
+		return err
+	}
 
 	freshness, err := s.loadFreshness()
 	if err != nil {
@@ -4096,7 +4224,7 @@ type freshnessRecord struct {
 }
 
 func (s *Store) loadFreshness() (map[string]freshnessRecord, error) {
-	rows, err := s.db.Query(`SELECT path, mod_time_ns, file_size FROM logs`)
+	rows, err := s.query(`SELECT path, mod_time_ns, file_size FROM logs`)
 	if err != nil {
 		return nil, err
 	}
@@ -4293,7 +4421,7 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 		return out, nil
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(args)), ",")
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT trace_id, parser, parser_version, status, updated_at
 		FROM trace_observations
 		WHERE trace_id IN (`+placeholders+`)
@@ -4331,7 +4459,7 @@ func (s *Store) LoadObservationMetadata(traceIDs []string) (map[string]Observati
 		return out, nil
 	}
 	missingPlaceholders := strings.TrimRight(strings.Repeat("?,", len(missingArgs)), ",")
-	rows, err = s.db.Query(`
+	rows, err = s.query(`
 		SELECT p.trace_id, p.status, p.updated_at
 		FROM parse_jobs p
 		INNER JOIN (
@@ -4373,7 +4501,7 @@ func (s *Store) ListTraceIDs(filter ListFilter, limit int) ([]string, error) {
 	if whereSQL == "" {
 		whereSQL = "1 = 1"
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT trace_id
 		FROM logs
 		WHERE `+whereSQL+`
@@ -4443,14 +4571,14 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`
+	if _, err := execSQL(tx, s.driver, `
 		INSERT INTO parser_versions (parser, version, created_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(parser, version) DO NOTHING
 	`, obs.Parser, obs.ParserVersion, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`
+	if _, err := execSQL(tx, s.driver, `
 		INSERT INTO trace_observations (
 			trace_id, parser, parser_version, status, provider, operation, model,
 			summary_json, warnings_json, created_at, updated_at
@@ -4466,10 +4594,11 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 			summary_json=excluded.summary_json,
 			warnings_json=excluded.warnings_json,
 			updated_at=excluded.updated_at
-	`, obs.TraceID, obs.Parser, obs.ParserVersion, string(obs.Status), obs.Provider, obs.Operation, obs.Model, string(summaryJSON), string(warningsJSON), now, now); err != nil {
+	`, safeDBText(obs.TraceID), safeDBText(obs.Parser), safeDBText(obs.ParserVersion), safeDBText(string(obs.Status)),
+		safeDBText(obs.Provider), safeDBText(obs.Operation), safeDBText(obs.Model), string(summaryJSON), string(warningsJSON), now, now); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
+	if _, err := execSQL(tx, s.driver, `DELETE FROM semantic_nodes WHERE trace_id = ?`, obs.TraceID); err != nil {
 		return err
 	}
 	for _, row := range nodes {
@@ -4481,18 +4610,19 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`
+		if _, err := execSQL(tx, s.driver, `
 			INSERT INTO semantic_nodes (
 				trace_id, node_id, parent_node_id, provider_type, normalized_type, role,
 				path, node_index, depth, text_preview, json, raw, raw_ref, created_at
 			)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, obs.TraceID, row.Node.ID, row.ParentID, row.Node.ProviderType, string(row.Node.NormalizedType), row.Node.Role,
-			row.Node.Path, row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
+		`, safeDBText(obs.TraceID), safeDBText(row.Node.ID), safeDBText(row.ParentID), safeDBText(row.Node.ProviderType),
+			safeDBText(string(row.Node.NormalizedType)), safeDBText(row.Node.Role), safeDBText(row.Node.Path),
+			row.Node.Index, row.Depth, textPreview(row.Node.Text, 240), string(nodeJSON), string(rawJSON), "", now); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`
+	if _, err := execSQL(tx, s.driver, `
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
 		VALUES (?, ?, 1, ?, ?)
 	`, obs.TraceID, string(obs.Status), now, now); err != nil {
@@ -4504,7 +4634,7 @@ func (s *Store) SaveObservation(obs observe.TraceObservation) error {
 func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error) {
 	var summary ObservationSummary
 	var createdAt, updatedAt any
-	err := s.db.QueryRow(`
+	err := s.queryRow(`
 		SELECT trace_id, parser, parser_version, status, provider, operation, model,
 			summary_json, warnings_json, created_at, updated_at
 		FROM trace_observations
@@ -4535,7 +4665,7 @@ func (s *Store) GetObservationSummary(traceID string) (ObservationSummary, error
 }
 
 func (s *Store) ListSemanticNodes(traceID string) ([]observe.FlatSemanticNode, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT node_id, parent_node_id, provider_type, normalized_type, role, path,
 			node_index, depth, text_preview, json, raw
 		FROM semantic_nodes
@@ -4613,7 +4743,7 @@ func (s *Store) EnqueueParseJob(traceID string) error {
 		return fmt.Errorf("enqueue parse job: trace id is required")
 	}
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		INSERT INTO parse_jobs (trace_id, status, attempts, created_at, updated_at)
 		VALUES (?, 'queued', 0, ?, ?)
 	`, traceID, now, now)
@@ -4624,7 +4754,7 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE status = ?
@@ -4640,7 +4770,7 @@ func (s *Store) ListParseJobs(status string, limit int) ([]ParseJobRecord, error
 }
 
 func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE id = ?
@@ -4661,7 +4791,7 @@ func (s *Store) getParseJob(id int64) (ParseJobRecord, error) {
 }
 
 func (s *Store) MarkParseJobRunning(id int64) error {
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE parse_jobs
 		SET status = 'running', attempts = attempts + 1, updated_at = ?
 		WHERE id = ?
@@ -4670,7 +4800,7 @@ func (s *Store) MarkParseJobRunning(id int64) error {
 }
 
 func (s *Store) MarkParseJobDone(id int64) error {
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE parse_jobs
 		SET status = 'parsed', last_error = '', updated_at = ?
 		WHERE id = ?
@@ -4679,7 +4809,7 @@ func (s *Store) MarkParseJobDone(id int64) error {
 }
 
 func (s *Store) MarkParseJobFailed(id int64, lastError string) error {
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE parse_jobs
 		SET status = 'failed', last_error = ?, updated_at = ?
 		WHERE id = ?
@@ -4737,7 +4867,7 @@ func (s *Store) UpsertSystemEvent(event SystemEvent) (SystemEvent, error) {
 		detailsJSON = "{}"
 	}
 
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		INSERT INTO system_events (
 			id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
@@ -4798,12 +4928,12 @@ func (s *Store) ListSystemEvents(filter SystemEventFilter) (SystemEventPageResul
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	whereSQL, args := buildSystemEventFilterClause(filter)
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM system_events WHERE `+whereSQL, args...).Scan(&total); err != nil {
+	if err := s.queryRow(`SELECT COUNT(*) FROM system_events WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return SystemEventPageResult{}, err
 	}
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
 			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
@@ -4838,7 +4968,7 @@ func (s *Store) SystemEventSummary(since time.Time) (SystemEventSummary, error) 
 	}
 	var summary SystemEventSummary
 	var lastSeen any
-	if err := s.db.QueryRow(`
+	if err := s.queryRow(`
 		SELECT
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN status = 'unread' THEN 1 ELSE 0 END), 0) AS unread,
@@ -4868,7 +4998,7 @@ func (s *Store) SystemEventSummary(since time.Time) (SystemEventSummary, error) 
 
 func (s *Store) MarkSystemEventRead(id string) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE system_events
 		SET status = 'read', read_at = ?, updated_at = ?
 		WHERE id = ? AND status != 'ignored'
@@ -4883,7 +5013,7 @@ func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 	whereSQL, args := buildSystemEventFilterClause(filter)
 	now := time.Now().UTC()
 	args = append([]any{now, now}, args...)
-	result, err := s.db.Exec(`
+	result, err := s.exec(`
 		UPDATE system_events
 		SET status = 'read', read_at = ?, updated_at = ?
 		WHERE status != 'ignored' AND `+whereSQL, args...)
@@ -4899,7 +5029,7 @@ func (s *Store) MarkAllSystemEventsRead(filter SystemEventFilter) (int, error) {
 
 func (s *Store) ResolveSystemEvent(id string) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE system_events
 		SET status = 'resolved', resolved_at = ?, updated_at = ?
 		WHERE id = ?
@@ -4911,7 +5041,7 @@ func (s *Store) ResolveSystemEvent(id string) error {
 }
 
 func (s *Store) IgnoreSystemEvent(id string) error {
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE system_events
 		SET status = 'ignored', updated_at = ?
 		WHERE id = ?
@@ -4954,7 +5084,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
+	if _, err := execSQL(tx, s.driver, `DELETE FROM trace_findings WHERE trace_id = ?`, traceID); err != nil {
 		return err
 	}
 	for _, finding := range findings {
@@ -4967,7 +5097,7 @@ func (s *Store) SaveFindings(traceID string, findings []observe.Finding) error {
 		if finding.TraceID == "" {
 			finding.TraceID = traceID
 		}
-		if _, err := tx.Exec(`
+		if _, err := execSQL(tx, s.driver, `
 			INSERT INTO trace_findings (
 				trace_id, finding_id, category, severity, confidence, title, description,
 				evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
@@ -5003,7 +5133,7 @@ func (s *Store) ListFindings(traceID string, filter FindingFilter) ([]observe.Fi
 	}
 	query += ` ORDER BY id ASC`
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5050,7 +5180,7 @@ func (s *Store) ListAllFindings(filter FindingFilter, limit int) ([]observe.Find
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5071,7 +5201,7 @@ func (s *Store) SaveAnalysisRun(run AnalysisRunRecord) (int64, error) {
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = time.Now().UTC()
 	}
-	result, err := s.db.Exec(`
+	result, err := s.exec(`
 		INSERT INTO analysis_runs (
 			trace_id, session_id, kind, analyzer, analyzer_version, model, input_ref, output_json, status, created_at
 		)
@@ -5118,7 +5248,7 @@ func (s *Store) ListAnalysisRuns(sessionID string, traceID string, kind string, 
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5169,7 +5299,7 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 	if job.UpdatedAt.IsZero() {
 		job.UpdatedAt = job.CreatedAt
 	}
-	result, err := s.db.Exec(`
+	result, err := s.exec(`
 		INSERT INTO analysis_jobs (
 			job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
@@ -5189,7 +5319,7 @@ func (s *Store) CreateAnalysisJob(job AnalysisJobRecord) (AnalysisJobRecord, err
 }
 
 func (s *Store) GetAnalysisJob(id int64) (AnalysisJobRecord, error) {
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
@@ -5224,7 +5354,7 @@ func (s *Store) ListAnalysisJobs(status string, targetType string, targetID stri
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -5236,7 +5366,7 @@ func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error
 	if limit <= 0 {
 		limit = 10
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT id, job_type, target_type, target_id, status, steps_json, request_json, result_json, last_error,
 			attempts, created_at, updated_at, started_at, finished_at
 		FROM analysis_jobs
@@ -5252,7 +5382,7 @@ func (s *Store) ListAnalysisJobsForWorker(limit int) ([]AnalysisJobRecord, error
 }
 
 func (s *Store) MarkAnalysisJobRunning(id int64) error {
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE analysis_jobs
 		SET status = 'running', attempts = attempts + 1, started_at = COALESCE(started_at, ?), updated_at = ?
 		WHERE id = ?
@@ -5265,7 +5395,7 @@ func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
 		resultJSON = "{}"
 	}
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE analysis_jobs
 		SET status = 'completed', result_json = ?, last_error = '', finished_at = ?, updated_at = ?
 		WHERE id = ?
@@ -5275,7 +5405,7 @@ func (s *Store) MarkAnalysisJobCompleted(id int64, resultJSON string) error {
 
 func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE analysis_jobs
 		SET status = 'failed', last_error = ?, finished_at = ?, updated_at = ?
 		WHERE id = ?
@@ -5293,7 +5423,7 @@ func (s *Store) MarkAnalysisJobFailed(id int64, lastError string) error {
 
 func (s *Store) MarkAnalysisJobCanceled(id int64) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`
+	_, err := s.exec(`
 		UPDATE analysis_jobs
 		SET status = 'canceled', finished_at = ?, updated_at = ?
 		WHERE id = ? AND status IN ('queued', 'running')
@@ -5315,7 +5445,7 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 		sessionWhere += " AND " + whereSQL
 	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs s WHERE `+sessionWhere+` GROUP BY session_id)`, whereArgs...).Scan(&total); err != nil {
+	if err := s.queryRow(`SELECT COUNT(*) FROM (SELECT session_id FROM logs s WHERE `+sessionWhere+` GROUP BY session_id)`, whereArgs...).Scan(&total); err != nil {
 		return SessionPageResult{}, err
 	}
 
@@ -5335,7 +5465,7 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
-			COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '') AS providers,
+			COALESCE(` + s.groupConcatDistinctSQL(`CASE WHEN s.provider <> '' THEN s.provider END`) + `, '') AS providers,
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
 			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
@@ -5344,14 +5474,14 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
-			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
+			COALESCE(SUM(CASE WHEN ` + s.boolTrueSQL("s.is_stream") + ` THEN 1 ELSE 0 END), 0) AS stream_count
 		FROM logs s
 		WHERE ` + sessionWhere + `
 		GROUP BY s.session_id
 		ORDER BY MAX(s.recorded_at) DESC
 		LIMIT ? OFFSET ?
 	`
-	rows, err := s.db.Query(listSQL, queryArgs...)
+	rows, err := s.query(listSQL, queryArgs...)
 	if err != nil {
 		return SessionPageResult{}, err
 	}
@@ -5380,7 +5510,7 @@ func (s *Store) ListSessionPage(page int, pageSize int, filter ListFilter) (Sess
 }
 
 func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 		SELECT
 			s.session_id,
 			MIN(s.session_source) AS session_source,
@@ -5393,7 +5523,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 				ORDER BY l2.recorded_at DESC, l2.trace_id DESC
 				LIMIT 1
 			), '') AS last_model,
-			COALESCE(GROUP_CONCAT(DISTINCT CASE WHEN s.provider <> '' THEN s.provider END), '') AS providers,
+			COALESCE(`+s.groupConcatDistinctSQL(`CASE WHEN s.provider <> '' THEN s.provider END`)+`, '') AS providers,
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS success_request,
 			COALESCE(SUM(CASE WHEN s.status_code NOT BETWEEN 200 AND 299 THEN 1 ELSE 0 END), 0) AS failed_request,
 			CASE WHEN COUNT(*) = 0 THEN 0 ELSE
@@ -5402,7 +5532,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 			COALESCE(SUM(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.total_tokens ELSE 0 END), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN s.status_code BETWEEN 200 AND 299 THEN s.ttft_ms END), 0) AS avg_ttft,
 			COALESCE(SUM(s.duration_ms), 0) AS total_duration,
-			COALESCE(SUM(CASE WHEN s.is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count
+			COALESCE(SUM(CASE WHEN `+s.boolTrueSQL("s.is_stream")+` THEN 1 ELSE 0 END), 0) AS stream_count
 		FROM logs s
 		WHERE s.session_id = ?
 		GROUP BY s.session_id
@@ -5411,7 +5541,7 @@ func (s *Store) GetSession(sessionID string) (SessionSummary, error) {
 }
 
 func (s *Store) ListTracesBySession(sessionID string) ([]LogEntry, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
@@ -5552,11 +5682,11 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 			COALESCE(SUM(total_tokens), 0) AS total_tokens,
 			COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms END), 0) AS avg_ttft,
 			COALESCE(AVG(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) AS avg_duration,
-			COALESCE(SUM(CASE WHEN is_stream = 1 THEN 1 ELSE 0 END), 0) AS stream_count,
+			COALESCE(SUM(CASE WHEN ` + s.boolTrueSQL("is_stream") + ` THEN 1 ELSE 0 END), 0) AS stream_count,
 			COUNT(DISTINCT CASE WHEN session_id != '' THEN session_id END) AS session_count
 		FROM logs
 		WHERE ` + whereSQL
-	if err := s.db.QueryRow(query, whereArgs...).Scan(
+	if err := s.queryRow(query, whereArgs...).Scan(
 		&summary.RequestCount,
 		&summary.SuccessRequest,
 		&summary.TotalTokens,
@@ -5591,7 +5721,7 @@ func (s *Store) overviewSummary(whereSQL string, whereArgs []any) (OverviewSumma
 func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []any, percentile float64) (int64, error) {
 	var count int
 	countArgs := append([]any{}, whereArgs...)
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE `+whereSQL+` AND `+column+` > 0`, countArgs...).Scan(&count); err != nil {
+	if err := s.queryRow(`SELECT COUNT(*) FROM logs WHERE `+whereSQL+` AND `+column+` > 0`, countArgs...).Scan(&count); err != nil {
 		return 0, err
 	}
 	if count == 0 {
@@ -5604,7 +5734,7 @@ func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []a
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, offset)
 	var value int64
-	if err := s.db.QueryRow(`
+	if err := s.queryRow(`
 		SELECT `+column+`
 		FROM logs
 		WHERE `+whereSQL+` AND `+column+` > 0
@@ -5618,20 +5748,22 @@ func (s *Store) overviewPercentile(column string, whereSQL string, whereArgs []a
 
 func (s *Store) overviewTimeline(whereSQL string, whereArgs []any, opts OverviewOptions) ([]OverviewTimelineItem, error) {
 	referenceTime := time.Now().UTC()
-	var latestRecordedAt string
-	if err := s.db.QueryRow(`SELECT COALESCE(MAX(recorded_at), '') FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
+	var latestRecordedAt any
+	if err := s.queryRow(`SELECT MAX(recorded_at) FROM logs WHERE `+whereSQL, whereArgs...).Scan(&latestRecordedAt); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(latestRecordedAt) != "" {
-		latestTime, err := timeParse(latestRecordedAt)
+	if latestRecordedAt != nil {
+		latestTime, err := timeParseNullableValue(latestRecordedAt)
 		if err != nil {
 			return nil, err
 		}
-		referenceTime = latestTime
+		if !latestTime.IsZero() {
+			referenceTime = latestTime
+		}
 	}
 	bucketStart := referenceTime.UTC().Truncate(opts.BucketSize).Add(-time.Duration(opts.BucketCount-1) * opts.BucketSize)
 	queryArgs := append([]any{bucketStart.Format(timeLayout)}, whereArgs...)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT recorded_at, status_code, error_text, total_tokens, ttft_ms, duration_ms
 		FROM logs
 		WHERE recorded_at >= ? AND `+whereSQL+`
@@ -5743,7 +5875,7 @@ func (s *Store) overviewBreakdown(whereSQL string, whereArgs []any, limit int) (
 func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any, limit int) ([]CountItem, error) {
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT `+column+`, COUNT(*) AS count
 		FROM logs
 		WHERE `+whereSQL+` AND `+column+` != ''
@@ -5759,7 +5891,7 @@ func (s *Store) overviewCountBy(column string, whereSQL string, whereArgs []any,
 }
 
 func (s *Store) overviewFindingCategories(limit int) ([]CountItem, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT category, COUNT(*) AS count
 		FROM trace_findings
 		WHERE category != ''
@@ -5795,7 +5927,7 @@ func (s *Store) overviewAttention(whereSQL string, whereArgs []any, limit int) (
 func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy string, limit int) ([]LogEntry, error) {
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT
 			trace_id, path, version, request_id, recorded_at, model, provider, operation, endpoint, url, method, status_code,
 			duration_ms, ttft_ms, client_ip, content_length, error_text,
@@ -5826,7 +5958,7 @@ func (s *Store) overviewTraceList(whereSQL string, whereArgs []any, orderBy stri
 }
 
 func (s *Store) overviewHighRiskFindings(limit int) ([]observe.Finding, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT finding_id, trace_id, category, severity, confidence, title, description,
 			evidence_path, evidence_excerpt, node_id, detector, detector_version, created_at
 		FROM trace_findings
@@ -5847,7 +5979,7 @@ func (s *Store) overviewHighRiskFindings(limit int) ([]observe.Finding, error) {
 func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit int) ([]RoutingFailureRecord, error) {
 	queryArgs := append([]any{}, whereArgs...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT trace_id, model, endpoint, recorded_at, routing_failure_reason, error_text, status_code
 		FROM logs
 		WHERE `+whereSQL+`
@@ -5878,7 +6010,7 @@ func (s *Store) overviewRoutingFailures(whereSQL string, whereArgs []any, limit 
 
 func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 	var summary OverviewAnalysisSummary
-	if err := s.db.QueryRow(`
+	if err := s.queryRow(`
 		SELECT
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN status NOT IN ('completed', 'success') THEN 1 ELSE 0 END), 0) AS failed
@@ -5896,7 +6028,7 @@ func (s *Store) overviewAnalysis(limit int) (OverviewAnalysisSummary, error) {
 
 func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, error) {
 	var summary OverviewObservationSummary
-	if err := s.db.QueryRow(`
+	if err := s.queryRow(`
 		SELECT
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN status = 'parsed' THEN 1 ELSE 0 END), 0) AS parsed,
@@ -5905,13 +6037,19 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 	`).Scan(&summary.TotalObservations, &summary.Parsed, &summary.Failed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM logs WHERE trace_id NOT IN (SELECT trace_id FROM trace_observations)`).Scan(&summary.Unparsed); err != nil {
+	if err := s.queryRow(`
+		SELECT COUNT(*)
+		FROM logs l
+		WHERE NOT EXISTS (
+			SELECT 1 FROM trace_observations o WHERE o.trace_id = l.trace_id
+		)
+	`).Scan(&summary.Unparsed); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
+	if err := s.queryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'queued'`).Scan(&summary.Queued); err != nil {
 		return OverviewObservationSummary{}, err
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'running'`).Scan(&summary.Running); err != nil {
+	if err := s.queryRow(`SELECT COUNT(*) FROM parse_jobs WHERE status = 'running'`).Scan(&summary.Running); err != nil {
 		return OverviewObservationSummary{}, err
 	}
 	jobs, err := s.overviewRecentParseFailures(limit)
@@ -5923,7 +6061,7 @@ func (s *Store) overviewObservation(limit int) (OverviewObservationSummary, erro
 }
 
 func (s *Store) overviewRecentParseFailures(limit int) ([]ParseJobRecord, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT id, trace_id, status, attempts, last_error, created_at, updated_at
 		FROM parse_jobs
 		WHERE status = 'failed'
@@ -6201,7 +6339,7 @@ func scanEntry(scanner interface {
 		recordedAt   any
 		errorText    string
 		cached       int
-		isStream     int
+		isStream     any
 		routingScore float64
 	)
 
@@ -6254,7 +6392,7 @@ func scanEntry(scanner interface {
 	}
 	entry.Header.Meta.Error = errorText
 	entry.Header.Meta.RoutingScore = routingScore
-	entry.Header.Layout.IsStream = isStream == 1
+	entry.Header.Layout.IsStream = boolFromDB(isStream)
 	if cached > 0 {
 		entry.Header.Usage.PromptTokenDetails = &recordfile.PromptTokenDetails{CachedTokens: cached}
 	}
@@ -6384,6 +6522,44 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func (s *Store) boolValue(v bool) any {
+	if s != nil && (s.driver == "postgres" || s.driver == "postgresql") {
+		return v
+	}
+	return boolToInt(v)
+}
+
+func (s *Store) boolTrueSQL(column string) string {
+	if s != nil && (s.driver == "postgres" || s.driver == "postgresql") {
+		return column
+	}
+	return column + " = 1"
+}
+
+func (s *Store) groupConcatDistinctSQL(expr string) string {
+	if s != nil && (s.driver == "postgres" || s.driver == "postgresql") {
+		return "STRING_AGG(DISTINCT " + expr + ", ',')"
+	}
+	return "GROUP_CONCAT(DISTINCT " + expr + ")"
+}
+
+func boolFromDB(value any) bool {
+	switch v := value.(type) {
+	case bool:
+		return v
+	case int:
+		return v != 0
+	case int64:
+		return v != 0
+	case []byte:
+		return string(v) == "1" || strings.EqualFold(string(v), "true")
+	case string:
+		return v == "1" || strings.EqualFold(v, "true")
+	default:
+		return false
+	}
 }
 
 func ExtractGroupingInfo(content []byte, parsed *recordfile.ParsedPrelude) (GroupingInfo, error) {
@@ -6774,10 +6950,25 @@ func dedupeFlatSemanticNodes(nodes []observe.FlatSemanticNode) []observe.FlatSem
 }
 
 func textPreview(text string, limit int) string {
+	text = safeDBText(text)
 	if limit <= 0 || len(text) <= limit {
 		return text
 	}
-	return text[:limit]
+	cut := 0
+	for idx := range text {
+		if idx > limit {
+			break
+		}
+		cut = idx
+	}
+	if cut == 0 {
+		return ""
+	}
+	return text[:cut]
+}
+
+func safeDBText(text string) string {
+	return strings.ToValidUTF8(text, "\ufffd")
 }
 
 func buildLogFilterClause(filter ListFilter, alias string) (string, []any) {
@@ -6922,7 +7113,7 @@ func buildSystemEventFilterClause(filter SystemEventFilter) (string, []any) {
 
 func (s *Store) getSystemEvent(whereSQL string, arg any) (SystemEvent, error) {
 	var event SystemEvent
-	row := s.db.QueryRow(`
+	row := s.queryRow(`
 		SELECT id, fingerprint, source, category, severity, status, title, message, details_json,
 			trace_id, session_id, job_id, upstream_id, model, occurrence_count,
 			first_seen_at, last_seen_at, created_at, updated_at, read_at, resolved_at
@@ -6944,7 +7135,7 @@ func (s *Store) systemEventCountBy(column string, whereSQL string, args []any, l
 	}
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, limit)
-	rows, err := s.db.Query(`
+	rows, err := s.query(`
 		SELECT `+column+`, COUNT(*) AS count
 		FROM system_events
 		WHERE `+whereSQL+` AND `+column+` != ''
@@ -7248,7 +7439,7 @@ func totalPages(total int, pageSize int) int {
 }
 
 func (s *Store) backfillGrouping() error {
-	rows, err := s.db.Query(`SELECT path FROM logs WHERE session_source = '' OR session_source = 'none'`)
+	rows, err := s.query(`SELECT path FROM logs WHERE session_source = '' OR session_source = 'none'`)
 	if err != nil {
 		return err
 	}
@@ -7285,7 +7476,7 @@ func (s *Store) backfillGrouping() error {
 		if err != nil {
 			return err
 		}
-		if _, err := s.db.Exec(
+		if _, err := s.exec(
 			`UPDATE logs SET session_id = ?, session_source = ?, window_id = ?, client_request_id = ? WHERE path = ?`,
 			grouping.SessionID,
 			grouping.SessionSource,

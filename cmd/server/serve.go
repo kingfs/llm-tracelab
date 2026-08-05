@@ -91,7 +91,6 @@ func runServeWithConfig(configPath string) int {
 		cancelSync()
 		background.Wait()
 	}()
-	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute, &background)
 	parseWorker := observeworker.New(traceStore, observeworker.Options{Interval: 5 * time.Second, BatchSize: 10})
 	background.Add(1)
 	go func() {
@@ -157,6 +156,8 @@ func runServeWithConfig(configPath string) int {
 		slog.Error("Failed to create proxy handler", "error", err)
 		return 1
 	}
+
+	startTraceStoreBackgroundSync(syncCtx, traceStore, 5*time.Minute, &background)
 
 	addr := ":" + cfg.Server.Port
 	srv := &http.Server{
@@ -232,6 +233,11 @@ func openAuthStore(cfg *config.Config) (*auth.Store, error) {
 }
 
 func validateServeConfig(cfg *config.Config) error {
+	switch driver := cfg.DatabaseDriver(); driver {
+	case "sqlite", "postgres", "postgresql":
+	default:
+		return fmt.Errorf("database.driver %q is not supported yet; use sqlite or postgres", driver)
+	}
 	if cfg.MCP.Enabled && cfg.Monitor.Port == "" {
 		return fmt.Errorf("monitor.port is required when mcp.enabled=true")
 	}

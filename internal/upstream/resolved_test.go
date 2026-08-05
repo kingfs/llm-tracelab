@@ -283,26 +283,68 @@ func TestResolveRejectsInvalidPresetSelections(t *testing.T) {
 }
 
 func TestResolveAllowsDeepSeekRootBaseURL(t *testing.T) {
-	resolved, err := Resolve(config.UpstreamConfig{
-		BaseURL:        "https://api.deepseek.com",
-		ProviderPreset: "deepseek",
-	})
-	if err != nil {
-		t.Fatalf("Resolve() error = %v", err)
+	tests := []struct {
+		name       string
+		cfg        config.UpstreamConfig
+		wantPreset string
+	}{
+		{
+			name: "explicit_deepseek_preset",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.deepseek.com",
+				ProviderPreset: "deepseek",
+			},
+			wantPreset: "deepseek",
+		},
+		{
+			name: "infer_deepseek_from_official_host",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.deepseek.com",
+			},
+			wantPreset: "deepseek",
+		},
+		{
+			name: "coerce_openai_preset_on_official_host",
+			cfg: config.UpstreamConfig{
+				BaseURL:        "https://api.deepseek.com",
+				ProviderPreset: "openai",
+			},
+			wantPreset: "deepseek",
+		},
+		{
+			name: "infer_deepseek_from_official_host_with_port",
+			cfg: config.UpstreamConfig{
+				BaseURL: "https://api.deepseek.com:443",
+			},
+			wantPreset: "deepseek",
+		},
 	}
 
-	if resolved.BaseURL != "https://api.deepseek.com" {
-		t.Fatalf("BaseURL = %q, want DeepSeek origin", resolved.BaseURL)
-	}
-	if got, err := resolved.BuildURL("/v1/responses"); err != nil {
-		t.Fatalf("BuildURL() error = %v", err)
-	} else if got != "https://api.deepseek.com/responses" {
-		t.Fatalf("BuildURL() = %q, want DeepSeek Responses endpoint", got)
-	}
-	if got, err := resolved.ConnectivityCheckURL(); err != nil {
-		t.Fatalf("ConnectivityCheckURL() error = %v", err)
-	} else if got != "https://api.deepseek.com/models" {
-		t.Fatalf("ConnectivityCheckURL() = %q, want DeepSeek models endpoint", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := Resolve(tt.cfg)
+			if err != nil {
+				t.Fatalf("Resolve() error = %v", err)
+			}
+
+			if resolved.ProviderPreset != tt.wantPreset {
+				t.Fatalf("ProviderPreset = %q, want %q", resolved.ProviderPreset, tt.wantPreset)
+			}
+			wantBaseURL := strings.TrimRight(tt.cfg.BaseURL, "/")
+			if resolved.BaseURL != wantBaseURL {
+				t.Fatalf("BaseURL = %q, want %q", resolved.BaseURL, wantBaseURL)
+			}
+			if got, err := resolved.BuildURL("/v1/responses"); err != nil {
+				t.Fatalf("BuildURL() error = %v", err)
+			} else if want := wantBaseURL + "/responses"; got != want {
+				t.Fatalf("BuildURL() = %q, want %q", got, want)
+			}
+			if got, err := resolved.ConnectivityCheckURL(); err != nil {
+				t.Fatalf("ConnectivityCheckURL() error = %v", err)
+			} else if want := wantBaseURL + "/models"; got != want {
+				t.Fatalf("ConnectivityCheckURL() = %q, want %q", got, want)
+			}
+		})
 	}
 }
 

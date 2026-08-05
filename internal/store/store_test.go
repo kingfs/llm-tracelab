@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kingfs/llm-tracelab/ent/dao/tracelog"
 	"github.com/kingfs/llm-tracelab/pkg/observe"
@@ -683,7 +684,7 @@ func TestExtractGroupingInfoRecognizesClaudeCodeSessionHeader(t *testing.T) {
 	}
 }
 
-func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
+func TestSyncBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "codex.http")
 	header := recordfile.RecordHeader{
@@ -828,6 +829,9 @@ func TestNewBackfillsGroupingForLegacyNoneRows(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	defer st.Close()
+	if err := st.Sync(); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
 
 	entry, err := st.GetByID("trace-legacy")
 	if err != nil {
@@ -2545,6 +2549,24 @@ func TestClassifyUpstreamFailureSeparatesRetryQueueSaturation(t *testing.T) {
 	got := classifyUpstreamFailure(http.StatusServiceUnavailable, "Proxy overloaded: upstream retry wait queue saturated")
 	if got != "retry_queue_saturated" {
 		t.Fatalf("classifyUpstreamFailure() = %q, want retry_queue_saturated", got)
+	}
+}
+
+func TestTextPreviewPreservesValidUTF8(t *testing.T) {
+	got := textPreview("中文响应", 5)
+	if got != "中" {
+		t.Fatalf("textPreview() = %q, want rune-boundary truncation", got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("textPreview() returned invalid UTF-8: %q", got)
+	}
+
+	got = textPreview(string([]byte{'o', 'k', 0xe4, 0xba}), 20)
+	if !utf8.ValidString(got) {
+		t.Fatalf("textPreview() returned invalid UTF-8 for malformed input: %q", got)
+	}
+	if got != "ok\ufffd" {
+		t.Fatalf("textPreview() = %q, want replacement character", got)
 	}
 }
 

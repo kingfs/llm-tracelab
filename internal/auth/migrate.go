@@ -26,6 +26,9 @@ func MigrateUp(dbPath string, steps int) error {
 }
 
 func MigrateDatabaseUp(driver string, dsn string, steps int) error {
+	if driverName := normalizeDriver(driver); driverName == "postgres" || driverName == "postgresql" {
+		return nil
+	}
 	if steps == 0 {
 		adopted, err := adoptLegacyTraceDatabase(driver, dsn)
 		if err != nil {
