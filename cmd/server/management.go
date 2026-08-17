@@ -52,7 +52,13 @@ func newManagementMuxWithFunctionExecutorManager(
 		server := mcpserver.New(traceStore, mcpserver.Options{Router: rtr})
 		mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 			return server
-		}, nil)
+		}, &mcp.StreamableHTTPOptions{
+			// MCP 2026-07-28 is sessionless: peer information is carried in
+			// per-request metadata and server/discover replaces initialization.
+			// The SDK continues to negotiate legacy protocol revisions on this
+			// endpoint for older clients.
+			Stateless: true,
+		})
 		mux.Handle(normalizeMCPPathMust(cfg.MCP.Path), auth.Middleware(mcpHandler, "llm-tracelab-mcp", verifier))
 	}
 	functionExecutorConfig := cfg.ResponsesFunctionExecutorsConfig()

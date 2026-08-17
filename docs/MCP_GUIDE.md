@@ -8,7 +8,9 @@ MCP 当前用于让 AI agent 查询本地 TraceLab 数据，辅助排障和分�
 
 当前支持：
 
+- MCP `2026-07-28`，并兼容协商 `2025-11-25`、`2025-06-18`、`2025-03-26` 和 `2024-11-05`。
 - streamable HTTP transport。
+- `2026-07-28` sessionless/stateless 请求模型和 `server/discover`。
 - 复用 Monitor/store 查询逻辑。
 - trace、session、upstream 查询。
 - 失败聚类。
@@ -46,6 +48,16 @@ mcp:
 ```text
 http://localhost:<monitor.port>/mcp
 ```
+
+该 endpoint 使用 stateless Streamable HTTP。`2026-07-28` 客户端通过
+`server/discover` 发现能力，并在每次请求的 `_meta` 中携带协议版本、客户端信息和能力；
+旧客户端仍可在同一 endpoint 上协商旧协议版本。新协议不创建 `Mcp-Session-Id`，也不支持
+独立 GET、DELETE 和基于 `Last-Event-ID` 的恢复流。
+
+项目使用官方 `github.com/modelcontextprotocol/go-sdk`。从 `v1.7.0` 起，该 SDK 完整支持
+`2026-07-28`，包括标准化 MCP HTTP headers、cacheable list result、统一 subscription
+stream 和 multi-round-trip request 基础设施。TraceLab 当前是以查询工具为主的 server，尚未
+暴露需要 multi-round-trip input 的工具，也不依赖已弃用的 roots、sampling 或 logging。
 
 ## 认证
 

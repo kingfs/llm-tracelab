@@ -174,7 +174,9 @@ debug:
 go run ./cmd/server serve -c config/config.yaml
 ```
 
-当前 MCP server 基于官方 `github.com/modelcontextprotocol/go-sdk`，挂在 `monitor.port` 对应的 HTTP 服务下，默认路径是 `/mcp`，例如 `http://localhost:8081/mcp`。工具面包括：
+当前 MCP server 基于官方 `github.com/modelcontextprotocol/go-sdk`，支持 MCP `2026-07-28`
+stateless Streamable HTTP，并兼容协商较早协议版本。它挂在 `monitor.port` 对应的 HTTP
+服务下，默认路径是 `/mcp`，例如 `http://localhost:8081/mcp`。工具面包括：
 
 - `list_traces`
 - `get_trace`

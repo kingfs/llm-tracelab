@@ -5437,6 +5437,9 @@ func TestNewManagementMuxServesStreamableMCP(t *testing.T) {
 		t.Fatalf("client.Connect() error = %v", err)
 	}
 	defer session.Close()
+	if got := session.InitializeResult().ProtocolVersion; got != "2026-07-28" {
+		t.Fatalf("negotiated MCP protocol version = %q, want 2026-07-28", got)
+	}
 
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
