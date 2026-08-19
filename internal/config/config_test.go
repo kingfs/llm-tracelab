@@ -527,8 +527,8 @@ func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
 	if cfg.ResponsesForceStore() {
 		t.Fatalf("ResponsesForceStore() = true, want false")
 	}
-	if got := cfg.ResponsesMaxRequestBodyBytes(); got != 16<<20 {
-		t.Fatalf("ResponsesMaxRequestBodyBytes() = %d, want %d", got, 16<<20)
+	if got := cfg.ResponsesMaxRequestBodyBytes(); got != 64<<20 {
+		t.Fatalf("ResponsesMaxRequestBodyBytes() = %d, want %d", got, 64<<20)
 	}
 	if got := cfg.ResponsesServerPath(); got != "/v1/responses" {
 		t.Fatalf("ResponsesServerPath() = %q, want /v1/responses", got)

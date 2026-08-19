@@ -116,6 +116,8 @@ responses_server:
   enabled: true
   default_model: ""
   force_store: true
+  # Image inputs may be base64 encoded and substantially larger than text requests.
+  max_request_body_bytes: 67108864
   path: "/v1/responses"
   auto_compact: true
 

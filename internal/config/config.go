@@ -944,7 +944,10 @@ func (c Config) ResponsesMaxRequestBodyBytes() int64 {
 	if c.ResponsesServer.MaxRequestBodyBytes > 0 {
 		return c.ResponsesServer.MaxRequestBodyBytes
 	}
-	return 16 << 20
+	// Responses requests may contain base64-encoded image inputs. Keep the
+	// built-in limit high enough for those requests while retaining a finite
+	// guard against unbounded bodies.
+	return 64 << 20
 }
 
 func (c Config) ResponsesServerPath() string {
