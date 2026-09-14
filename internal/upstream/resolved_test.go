@@ -806,3 +806,83 @@ func TestResolvedUpstreamStartupDiagnostics(t *testing.T) {
 		})
 	}
 }
+
+func perModelBoolPtr(v bool) *bool { return &v }
+
+func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
+	resolved, err := Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.example.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "responses_native",
+		Capabilities: config.UpstreamCapabilitiesConfig{
+			Responses:       perModelBoolPtr(true),
+			ChatCompletions: perModelBoolPtr(false),
+		},
+		ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
+			"native-only": {Responses: perModelBoolPtr(true), ChatCompletions: perModelBoolPtr(false)},
+			"CHAT-ONLY":   {Responses: perModelBoolPtr(false), ChatCompletions: perModelBoolPtr(true)},
+			"tools-off":   {ToolCalling: perModelBoolPtr(false)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	tests := []struct {
+		name              string
+		model             string
+		wantResponses     bool
+		wantChat          bool
+		wantResponsesPath bool
+		wantChatPath      bool
+		wantToolCalling   bool
+	}{
+		{name: "explicit native", model: "native-only", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true},
+		{name: "explicit chat overrides target", model: "chat-only", wantResponses: false, wantChat: true, wantResponsesPath: true, wantChatPath: true, wantToolCalling: true},
+		{name: "unlisted model falls back to target", model: "some-other-model", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: true},
+		{name: "tool override only", model: "tools-off", wantResponses: true, wantChat: false, wantResponsesPath: true, wantChatPath: false, wantToolCalling: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolved.SupportsResponsesAPIForModel(tt.model); got != tt.wantResponses {
+				t.Fatalf("SupportsResponsesAPIForModel(%q) = %v, want %v", tt.model, got, tt.wantResponses)
+			}
+			if got := resolved.SupportsChatCompletionsAPIForModel(tt.model); got != tt.wantChat {
+				t.Fatalf("SupportsChatCompletionsAPIForModel(%q) = %v, want %v", tt.model, got, tt.wantChat)
+			}
+			if got := resolved.SupportsEndpointForModel("/v1/responses", tt.model); got != tt.wantResponsesPath {
+				t.Fatalf("SupportsEndpointForModel(/v1/responses, %q) = %v, want %v", tt.model, got, tt.wantResponsesPath)
+			}
+			if got := resolved.SupportsEndpointForModel("/v1/chat/completions", tt.model); got != tt.wantChatPath {
+				t.Fatalf("SupportsEndpointForModel(/v1/chat/completions, %q) = %v, want %v", tt.model, got, tt.wantChatPath)
+			}
+			if got := resolved.SupportsToolCallingForModel(tt.model); got != tt.wantToolCalling {
+				t.Fatalf("SupportsToolCallingForModel(%q) = %v, want %v", tt.model, got, tt.wantToolCalling)
+			}
+		})
+	}
+
+	// Model keys are normalized, so a differently-cased lookup still matches.
+	if !resolved.SupportsChatCompletionsAPIForModel("chat-only") {
+		t.Fatalf("SupportsChatCompletionsAPIForModel(chat-only) = false, want true")
+	}
+
+	// Without per-model entries the target-level behaviour is unchanged.
+	plain, err := Resolve(config.UpstreamConfig{
+		BaseURL:        "https://api.example.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "chat_completions",
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if !plain.SupportsChatCompletionsAPIForModel("anything") {
+		t.Fatalf("plain chat target should support Chat Completions")
+	}
+	if plain.SupportsResponsesAPIForModel("anything") {
+		t.Fatalf("plain chat target should not report native Responses support")
+	}
+	if !plain.SupportsEndpointForModel("/v1/responses", "anything") {
+		t.Fatalf("plain chat target should still be eligible as a local Responses backend")
+	}
+}

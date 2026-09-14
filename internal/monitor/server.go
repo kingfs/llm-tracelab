@@ -3779,19 +3779,21 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 		return nil, err
 	}
 	modelsByChannel := map[string][]string{}
-	modelCapsByChannel := map[string]store.ChannelModelRecord{}
+	modelCapsByChannel := map[string]map[string]routeplan.ModelCapabilities{}
 	for _, model := range models {
 		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model.Model)
-		if _, ok := modelCapsByChannel[model.ChannelID]; !ok {
-			modelCapsByChannel[model.ChannelID] = model
+		caps, ok := inspectModelCapabilities(model)
+		if !ok {
+			continue
 		}
+		if modelCapsByChannel[model.ChannelID] == nil {
+			modelCapsByChannel[model.ChannelID] = map[string]routeplan.ModelCapabilities{}
+		}
+		modelCapsByChannel[model.ChannelID][strings.ToLower(strings.TrimSpace(model.Model))] = caps
 	}
 	out := make([]routeplan.UpstreamCandidate, 0, len(channels))
 	for _, channel := range channels {
 		caps := upstreamCapabilitiesFromChannel(channel)
-		if modelCaps, ok := modelCapsByChannel[channel.ID]; ok {
-			applyChannelModelCapabilities(&caps, modelCaps)
-		}
 		out = append(out, routeplan.UpstreamCandidate{
 			ID:                        channel.ID,
 			RouteTargetID:             channel.ID,
@@ -3804,6 +3806,7 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 			SupportsResponses:         caps.responses,
 			SupportsAnthropicMessages: caps.anthropicMessages,
 			SupportsToolCalling:       caps.toolCalling,
+			ModelCapabilities:         modelCapsByChannel[channel.ID],
 		})
 	}
 	return out, nil
@@ -3848,13 +3851,27 @@ func upstreamCapabilitiesFromChannel(channel store.ChannelConfigRecord) inspectC
 	return caps
 }
 
-func applyChannelModelCapabilities(caps *inspectCapabilities, model store.ChannelModelRecord) {
-	if model.SupportsChatCompletions != nil {
-		caps.chatCompletions = *model.SupportsChatCompletions != 0
+// inspectModelCapabilities converts a channel model profile's capability
+// columns into the per-model overrides the route planner understands. Models
+// without any declared capability are reported as absent so the planner keeps
+// using the channel-level flags.
+func inspectModelCapabilities(model store.ChannelModelRecord) (routeplan.ModelCapabilities, bool) {
+	caps := routeplan.ModelCapabilities{
+		SupportsChatCompletions: inspectCapabilityBool(model.SupportsChatCompletions),
+		SupportsResponses:       inspectCapabilityBool(model.SupportsResponses),
 	}
-	if model.SupportsResponses != nil {
-		caps.responses = *model.SupportsResponses != 0
+	if caps.SupportsChatCompletions == nil && caps.SupportsResponses == nil {
+		return routeplan.ModelCapabilities{}, false
 	}
+	return caps, true
+}
+
+func inspectCapabilityBool(value *int) *bool {
+	if value == nil {
+		return nil
+	}
+	enabled := *value != 0
+	return &enabled
 }
 
 func parseBoolQuery(value string, fallback bool) bool {

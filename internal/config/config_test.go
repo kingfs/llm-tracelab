@@ -1235,3 +1235,61 @@ func clearMCPToolsEnv(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
+
+func TestUpstreamModelCapabilitiesLoadFromYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+upstreams:
+  - id: "mixed"
+    enabled: true
+    model_discovery: "static_only"
+    static_models:
+      - "model-native"
+      - "model-chat"
+    upstream:
+      base_url: "https://api.example.com/v1"
+      provider_preset: "openai"
+      api_type: "responses_native"
+      capabilities:
+        responses: true
+        chat_completions: false
+      model_capabilities:
+        model-native:
+          responses: true
+          chat_completions: false
+        "MODEL-Chat":
+          responses: false
+          chat_completions: true
+        model-tools:
+          tool_calling: false
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Upstreams) != 1 {
+		t.Fatalf("len(Upstreams) = %d, want 1", len(cfg.Upstreams))
+	}
+	modelCaps := cfg.Upstreams[0].Upstream.ModelCapabilities
+	if len(modelCaps) != 3 {
+		t.Fatalf("len(ModelCapabilities) = %d, want 3 (%v)", len(modelCaps), modelCaps)
+	}
+	native, ok := modelCaps["model-native"]
+	if !ok || native.Responses == nil || !*native.Responses || native.ChatCompletions == nil || *native.ChatCompletions {
+		t.Fatalf("model-native = %+v, want responses=true chat=false", native)
+	}
+	chat, ok := modelCaps["MODEL-Chat"]
+	if !ok || chat.Responses == nil || *chat.Responses || chat.ChatCompletions == nil || !*chat.ChatCompletions {
+		t.Fatalf("MODEL-Chat = %+v, want responses=false chat=true", chat)
+	}
+	tools, ok := modelCaps["model-tools"]
+	if !ok || tools.ToolCalling == nil || *tools.ToolCalling {
+		t.Fatalf("model-tools = %+v, want tool_calling=false", tools)
+	}
+	if tools.Responses != nil || tools.ChatCompletions != nil {
+		t.Fatalf("model-tools must leave undeclared flags nil, got %+v", tools)
+	}
+}

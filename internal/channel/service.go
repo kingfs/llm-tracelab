@@ -157,11 +157,16 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 
 		models := make([]store.ChannelModelRecord, 0, len(target.StaticModels))
 		for _, model := range normalizeModels(target.StaticModels) {
+			supportsResponses, supportsChatCompletions, supportsEmbeddings :=
+				modelCapabilityColumns(target.Upstream.ModelCapabilities, model)
 			models = append(models, store.ChannelModelRecord{
-				ChannelID: channelID,
-				Model:     model,
-				Source:    "static",
-				Enabled:   true,
+				ChannelID:               channelID,
+				Model:                   model,
+				Source:                  "static",
+				Enabled:                 true,
+				SupportsResponses:       supportsResponses,
+				SupportsChatCompletions: supportsChatCompletions,
+				SupportsEmbeddings:      supportsEmbeddings,
 			})
 		}
 		if len(models) > 0 {
@@ -240,20 +245,21 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			ConfiguredModelsOnly: true,
 			AllowUnknownModels:   &channel.AllowUnknownModels,
 			Upstream: config.UpstreamConfig{
-				BaseURL:        channel.BaseURL,
-				ApiKey:         string(channel.APIKeyCiphertext),
-				ProviderPreset: channel.ProviderPreset,
-				APIType:        channel.APIType,
-				Mode:           channel.Mode,
-				Capabilities:   capabilities,
-				ProtocolFamily: channel.ProtocolFamily,
-				RoutingProfile: channel.RoutingProfile,
-				APIVersion:     channel.APIVersion,
-				Deployment:     channel.Deployment,
-				Project:        channel.Project,
-				Location:       channel.Location,
-				ModelResource:  channel.ModelResource,
-				Headers:        headers,
+				BaseURL:           channel.BaseURL,
+				ApiKey:            string(channel.APIKeyCiphertext),
+				ProviderPreset:    channel.ProviderPreset,
+				APIType:           channel.APIType,
+				Mode:              channel.Mode,
+				Capabilities:      capabilities,
+				ModelCapabilities: channelModelCapabilities(models, aliases, channel.ID),
+				ProtocolFamily:    channel.ProtocolFamily,
+				RoutingProfile:    channel.RoutingProfile,
+				APIVersion:        channel.APIVersion,
+				Deployment:        channel.Deployment,
+				Project:           channel.Project,
+				Location:          channel.Location,
+				ModelResource:     channel.ModelResource,
+				Headers:           headers,
 			},
 		}
 		targets = append(targets, target)
@@ -714,6 +720,31 @@ func slugify(value string) string {
 	return value
 }
 
+// modelCapabilityColumns converts the YAML per-model capability overrides into
+// the *int columns the channel model profile stores. Models without an entry
+// keep NULL columns so they fall back to the channel-level capabilities.
+func modelCapabilityColumns(modelCapabilities map[string]config.UpstreamCapabilitiesConfig, model string) (*int, *int, *int) {
+	if len(modelCapabilities) == 0 {
+		return nil, nil, nil
+	}
+	caps, ok := modelCapabilities[strings.ToLower(strings.TrimSpace(model))]
+	if !ok {
+		return nil, nil, nil
+	}
+	return capabilityBoolToInt(caps.Responses), capabilityBoolToInt(caps.ChatCompletions), capabilityBoolToInt(caps.Embeddings)
+}
+
+func capabilityBoolToInt(value *bool) *int {
+	if value == nil {
+		return nil
+	}
+	enabled := 0
+	if *value {
+		enabled = 1
+	}
+	return &enabled
+}
+
 func normalizeModels(models []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(models))
@@ -730,6 +761,66 @@ func normalizeModels(models []string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// channelModelCapabilities maps each client-facing model name, including its
+// aliases, to the per-model capability overrides declared on the channel model
+// profile. Models whose profile declares no capability stay out of the map so
+// that they keep falling back to the channel-level api_type and capabilities.
+func channelModelCapabilities(models []store.ChannelModelRecord, aliases []store.ModelAliasRecord, channelID string) map[string]config.UpstreamCapabilitiesConfig {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make(map[string]config.UpstreamCapabilitiesConfig, len(models))
+	for _, model := range models {
+		caps, ok := channelModelCapabilityConfig(model)
+		if !ok {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(model.Model))
+		if name == "" {
+			continue
+		}
+		out[name] = caps
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	for _, alias := range aliases {
+		aliasName := strings.ToLower(strings.TrimSpace(alias.Alias))
+		targetModel := strings.ToLower(strings.TrimSpace(alias.TargetModel))
+		aliasChannelID := strings.TrimSpace(alias.ChannelID)
+		if aliasName == "" || targetModel == "" {
+			continue
+		}
+		if aliasChannelID != "" && aliasChannelID != channelID {
+			continue
+		}
+		if caps, ok := out[targetModel]; ok {
+			out[aliasName] = caps
+		}
+	}
+	return out
+}
+
+func channelModelCapabilityConfig(model store.ChannelModelRecord) (config.UpstreamCapabilitiesConfig, bool) {
+	caps := config.UpstreamCapabilitiesConfig{
+		Responses:       capabilityIntToBool(model.SupportsResponses),
+		ChatCompletions: capabilityIntToBool(model.SupportsChatCompletions),
+		Embeddings:      capabilityIntToBool(model.SupportsEmbeddings),
+	}
+	if caps.Responses == nil && caps.ChatCompletions == nil && caps.Embeddings == nil {
+		return config.UpstreamCapabilitiesConfig{}, false
+	}
+	return caps, true
+}
+
+func capabilityIntToBool(value *int) *bool {
+	if value == nil {
+		return nil
+	}
+	enabled := *value != 0
+	return &enabled
 }
 
 func channelModelNames(models []store.ChannelModelRecord) []string {

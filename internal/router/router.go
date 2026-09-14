@@ -807,7 +807,7 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	candidates := r.candidatesForRequest(rawPath, model, features)
 	now := time.Now()
 	for _, candidate := range candidates {
-		if candidate.Upstream.SupportsResponsesAPI() && candidate.canSelect(now, model) {
+		if candidate.Upstream.SupportsResponsesAPIForModel(model) && candidate.canSelect(now, model) {
 			return true
 		}
 	}
@@ -826,10 +826,10 @@ func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, target := range r.targets {
-		if target == nil || !target.Upstream.SupportsResponsesAPI() {
+		if target == nil || !target.Upstream.SupportsResponsesAPIForModel(features.ModelName) {
 			continue
 		}
-		if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+		if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
 			return true
 		}
 	}
@@ -1115,7 +1115,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -1125,7 +1125,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 	var candidates []*Target
 	if model != "" {
 		for _, target := range r.modelToTargets[strings.ToLower(model)] {
-			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -1136,7 +1136,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 
 	var fallback []*Target
 	for _, target := range r.targets {
-		if !supportsPath(target, rawPath) {
+		if !supportsPath(target, rawPath, features) {
 			continue
 		}
 		if !supportsRequestFeatures(target, features) {
@@ -1436,7 +1436,7 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 		Priority:       t.Priority,
 		Weight:         t.Weight,
 		HealthState:    t.healthState,
-		SupportsPath:   supportsPath(t, rawPath),
+		SupportsPath:   supportsPath(t, rawPath, features),
 		SupportsModel:  t.supportsModelLocked(model),
 		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
@@ -1754,7 +1754,10 @@ func compareScore(a *Target, scoreA float64, b *Target, scoreB float64) int {
 	return strings.Compare(a.ID, b.ID)
 }
 
-func supportsPath(target *Target, rawPath string) bool {
+// supportsPath reports whether the target can serve rawPath for the model named
+// in features. The API-surface check is per-model so that a model which only
+// declares one protocol surface is not selected for the other one.
+func supportsPath(target *Target, rawPath string, features RequestFeatures) bool {
 	if target == nil {
 		return false
 	}
@@ -1762,22 +1765,22 @@ func supportsPath(target *Target, rawPath string) bool {
 	if !supportsProtocolFamily(target.Upstream.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
 		return false
 	}
-	if !supportsAPISurface(target.Upstream, semantics.Endpoint) {
+	if !supportsAPISurface(target.Upstream, semantics.Endpoint, features.ModelName) {
 		return false
 	}
 	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
 	return err == nil
 }
 
-func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string) bool {
-	return resolved.SupportsEndpoint(endpoint)
+func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string, model string) bool {
+	return resolved.SupportsEndpointForModel(endpoint, model)
 }
 
 func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 	if target == nil {
 		return false
 	}
-	if features.HasTools && !target.Upstream.SupportsToolCalling() {
+	if features.HasTools && !target.Upstream.SupportsToolCallingForModel(features.ModelName) {
 		return false
 	}
 	return true

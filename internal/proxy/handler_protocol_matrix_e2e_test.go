@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +19,7 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/config"
 	"github.com/kingfs/llm-tracelab/internal/router"
 	"github.com/kingfs/llm-tracelab/internal/store"
+	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
 // This file pins down the downstream-entrypoint x upstream-protocol matrix.
@@ -270,6 +273,14 @@ func doMatrixRequest(t *testing.T, proxyURL string, entrypoint protocolKind, mod
 // newMatrixHandler builds a handler with the given upstream targets.
 func newMatrixHandler(t *testing.T, targets ...config.UpstreamTargetConfig) *httptest.Server {
 	t.Helper()
+	server, _ := newMatrixHandlerWithOutputDir(t, targets...)
+	return server
+}
+
+// newMatrixHandlerWithOutputDir also returns the trace output directory so
+// tests can assert on the recorded route plan.
+func newMatrixHandlerWithOutputDir(t *testing.T, targets ...config.UpstreamTargetConfig) (*httptest.Server, string) {
+	t.Helper()
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
 	if err != nil {
@@ -290,7 +301,7 @@ func newMatrixHandler(t *testing.T, targets ...config.UpstreamTargetConfig) *htt
 	}
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	return server
+	return server, outputDir
 }
 
 // TestHandlerDownstreamUpstreamProtocolMatrix exercises every combination of
@@ -803,5 +814,158 @@ func TestHandlerLocalResponsesProviderConfigIsLazy(t *testing.T) {
 	}
 	if got := chatUpstream.callCount(); got != 1 {
 		t.Fatalf("chat upstream calls after failed local build = %d, want 1", got)
+	}
+}
+
+// dualProtocolUpstream answers on both the Responses and Chat Completions
+// surfaces and records the path of every call, so a test can tell a native
+// pass-through apart from local Responses translation.
+type dualProtocolUpstream struct {
+	server *httptest.Server
+
+	mu    sync.Mutex
+	paths []string
+}
+
+func newDualProtocolUpstream(t *testing.T) *dualProtocolUpstream {
+	t.Helper()
+	u := &dualProtocolUpstream{}
+	u.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		u.mu.Lock()
+		u.paths = append(u.paths, r.URL.Path)
+		u.mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/responses":
+			_, _ = io.WriteString(w, matrixJSONBody(protocolResponses))
+		case "/v1/chat/completions":
+			_, _ = io.WriteString(w, matrixJSONBody(protocolChatCompletions))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(u.server.Close)
+	return u
+}
+
+func (u *dualProtocolUpstream) recordedPaths() []string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return append([]string(nil), u.paths...)
+}
+
+// TestHandlerPerModelResponsesRoutingUsesModelCapabilities pins the per-model
+// native-vs-local decision. Both models live on the same Responses-typed
+// upstream, but the channel model profile declares opposite protocol surfaces,
+// so the routing decision must follow the model rather than the channel.
+func TestHandlerPerModelResponsesRoutingUsesModelCapabilities(t *testing.T) {
+	upstream := newDualProtocolUpstream(t)
+	enabled := true
+	target := config.UpstreamTargetConfig{
+		ID:             "mixed-surface",
+		Enabled:        &enabled,
+		Priority:       100,
+		ModelDiscovery: router.ModelDiscoveryStaticOnly,
+		StaticModels:   []string{"model-native", "model-chat"},
+		Upstream: config.UpstreamConfig{
+			BaseURL:        upstream.server.URL + "/v1",
+			ApiKey:         "matrix-secret",
+			ProviderPreset: "openai",
+			APIType:        "responses_native",
+			Capabilities: config.UpstreamCapabilitiesConfig{
+				Responses:       boolPtr(true),
+				ChatCompletions: boolPtr(false),
+			},
+			ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
+				"model-native": {Responses: boolPtr(true), ChatCompletions: boolPtr(false)},
+				"model-chat":   {Responses: boolPtr(false), ChatCompletions: boolPtr(true)},
+			},
+		},
+	}
+	server, outputDir := newMatrixHandlerWithOutputDir(t, target)
+
+	t.Run("native_model_passes_through", func(t *testing.T) {
+		before := len(upstream.recordedPaths())
+		resp := doMatrixRequest(t, server.URL, protocolResponses, "model-native", false)
+		if resp.status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", resp.status, resp.body)
+		}
+		paths := upstream.recordedPaths()[before:]
+		if len(paths) != 1 || paths[0] != "/v1/responses" {
+			t.Fatalf("upstream paths = %v, want [/v1/responses]", paths)
+		}
+		if strings.Contains(resp.body, `"chat.completion"`) {
+			t.Fatalf("body = %q, want a Responses payload", resp.body)
+		}
+		if !waitForRecordedExecutionMode(t, outputDir, "proxy_pass", 2*time.Second) {
+			t.Fatalf("no route plan recorded with execution_mode=proxy_pass")
+		}
+	})
+
+	t.Run("chat_only_model_uses_local_server", func(t *testing.T) {
+		before := len(upstream.recordedPaths())
+		resp := doMatrixRequest(t, server.URL, protocolResponses, "model-chat", false)
+		if resp.status != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", resp.status, resp.body)
+		}
+		paths := upstream.recordedPaths()[before:]
+		if len(paths) != 1 || paths[0] != "/v1/chat/completions" {
+			t.Fatalf("upstream paths = %v, want [/v1/chat/completions]", paths)
+		}
+		if !strings.Contains(resp.body, `"object":"response"`) {
+			t.Fatalf("body = %q, want a locally produced Responses payload", resp.body)
+		}
+		if !waitForRecordedExecutionMode(t, outputDir, "responses_server", 2*time.Second) {
+			t.Fatalf("no route plan recorded with execution_mode=responses_server")
+		}
+	})
+
+	t.Run("chat_surface_rejected_for_responses_only_model", func(t *testing.T) {
+		before := len(upstream.recordedPaths())
+		resp := doMatrixRequest(t, server.URL, protocolChatCompletions, "model-native", false)
+		if resp.status != http.StatusBadGateway {
+			t.Fatalf("status = %d, want 502; body=%s", resp.status, resp.body)
+		}
+		if got := len(upstream.recordedPaths()[before:]); got != 0 {
+			t.Fatalf("upstream calls = %d, want 0", got)
+		}
+	})
+}
+
+// waitForRecordedExecutionMode polls the trace output directory until a
+// recorded route plan reports the wanted execution mode.
+func waitForRecordedExecutionMode(t *testing.T, root string, want string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		found := false
+		_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || filepath.Ext(path) != ".http" {
+				return nil
+			}
+			content, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return nil
+			}
+			parsed, parseErr := recordfile.ParsePrelude(content)
+			if parseErr != nil {
+				return nil
+			}
+			for _, event := range parsed.Events {
+				if event.Type == "routing.route_plan" && event.Attributes["execution_mode"] == want {
+					found = true
+					return filepath.SkipAll
+				}
+			}
+			return nil
+		})
+		if found {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -76,14 +76,21 @@ type UpstreamConfig struct {
 	APIType        string                     `yaml:"api_type"`
 	Mode           string                     `yaml:"mode"`
 	Capabilities   UpstreamCapabilitiesConfig `yaml:"capabilities"`
-	ProtocolFamily string                     `yaml:"protocol_family"`
-	RoutingProfile string                     `yaml:"routing_profile"`
-	APIVersion     string                     `yaml:"api_version"`
-	Deployment     string                     `yaml:"deployment"`
-	Project        string                     `yaml:"project"`
-	Location       string                     `yaml:"location"`
-	ModelResource  string                     `yaml:"model_resource"`
-	Headers        map[string]string          `yaml:"headers"`
+	// ModelCapabilities holds per-model capability overrides keyed by the
+	// client-facing model name (or one of its aliases). A non-nil field on an
+	// entry overrides the target-level api_type/capabilities for that model
+	// only; models without an entry keep the target-level behaviour. This is
+	// what lets one channel serve some models natively and others through a
+	// different protocol surface.
+	ModelCapabilities map[string]UpstreamCapabilitiesConfig `yaml:"model_capabilities"`
+	ProtocolFamily    string                                `yaml:"protocol_family"`
+	RoutingProfile    string                                `yaml:"routing_profile"`
+	APIVersion        string                                `yaml:"api_version"`
+	Deployment        string                                `yaml:"deployment"`
+	Project           string                                `yaml:"project"`
+	Location          string                                `yaml:"location"`
+	ModelResource     string                                `yaml:"model_resource"`
+	Headers           map[string]string                     `yaml:"headers"`
 }
 
 type UpstreamCapabilitiesConfig struct {

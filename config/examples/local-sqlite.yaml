@@ -61,6 +61,17 @@ upstreams:
         responses: true
         tool_calling: true
         models: true
+      # Optional per-model overrides. A model listed here uses these capability
+      # flags instead of the ones above, which is what lets one upstream serve
+      # some models natively and route others through the local Responses mode.
+      # Unlisted models keep the upstream-level capabilities.
+      # model_capabilities:
+      #   gpt-4o-mini:
+      #     responses: true
+      #     chat_completions: false
+      #   gpt-4o-mini-chat:
+      #     responses: false
+      #     chat_completions: true
       protocol_family: "openai_compatible"
       routing_profile: "openai_default"
       headers: {}
