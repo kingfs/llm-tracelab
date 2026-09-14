@@ -268,7 +268,7 @@ func doMatrixRequest(t *testing.T, proxyURL string, entrypoint protocolKind, mod
 }
 
 // newMatrixHandler builds a handler with the given upstream targets.
-func newMatrixHandler(t *testing.T, responsesServerEnabled bool, targets ...config.UpstreamTargetConfig) *httptest.Server {
+func newMatrixHandler(t *testing.T, targets ...config.UpstreamTargetConfig) *httptest.Server {
 	t.Helper()
 	outputDir := t.TempDir()
 	st, err := store.New(outputDir)
@@ -278,7 +278,7 @@ func newMatrixHandler(t *testing.T, responsesServerEnabled bool, targets ...conf
 	t.Cleanup(func() { _ = st.Close() })
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{Enabled: responsesServerEnabled},
+		ResponsesServer: config.ResponsesServerConfig{Enabled: true},
 		Upstreams:       targets,
 	}
 	cfg.Debug.OutputDir = outputDir
@@ -382,7 +382,7 @@ func TestHandlerDownstreamUpstreamProtocolMatrix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kindUpstream := newMatrixUpstream(t, tt.upstream)
-			server := newMatrixHandler(t, true, kindUpstream.target("upstream-"+string(tt.upstream), 100, matrixModel))
+			server := newMatrixHandler(t, kindUpstream.target("upstream-"+string(tt.upstream), 100, matrixModel))
 
 			resp := doMatrixRequest(t, server.URL, tt.entrypoint, matrixModel, false)
 
@@ -647,7 +647,7 @@ func TestHandlerProtocolMatrixStreaming(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			kindUpstream := newMatrixUpstream(t, tt.upstream)
-			server := newMatrixHandler(t, true, kindUpstream.target("upstream-"+string(tt.upstream), 100, matrixModel))
+			server := newMatrixHandler(t, kindUpstream.target("upstream-"+string(tt.upstream), 100, matrixModel))
 
 			resp := doMatrixRequest(t, server.URL, tt.entrypoint, matrixModel, true)
 			if resp.status != http.StatusOK {
@@ -670,25 +670,58 @@ func TestHandlerProtocolMatrixStreaming(t *testing.T) {
 	}
 }
 
-// TestHandlerResponsesProxyOnlyModeMatrix documents what happens when the local
-// Responses server is disabled: /v1/responses is always proxy-passed. A native
-// Responses upstream serves it directly; a Chat Completions upstream is still
-// addressed at /v1/responses, so such a gateway must implement the Responses
-// surface itself or the request fails upstream-side.
-func TestHandlerResponsesProxyOnlyModeMatrix(t *testing.T) {
+// TestHandlerLegacyResponsesServerEnabledSwitchIsIgnored verifies that the
+// deprecated responses_server.enabled switch no longer changes routing. The
+// local Responses execution mode is always available, so a chat-only upstream
+// still serves /v1/responses through local translation even when an operator
+// left the legacy switch off. A native Responses upstream is still preferred.
+func TestHandlerLegacyResponsesServerEnabledSwitchIsIgnored(t *testing.T) {
 	tests := []struct {
 		name             string
 		upstream         protocolKind
 		wantUpstreamPath string
+		wantMode         string
 	}{
-		{name: "native_responses_passthrough", upstream: protocolResponses, wantUpstreamPath: "/v1/responses"},
-		{name: "chat_upstream_passthrough", upstream: protocolChatCompletions, wantUpstreamPath: "/v1/responses"},
+		{
+			name:             "chat_only_still_uses_local_server",
+			upstream:         protocolChatCompletions,
+			wantUpstreamPath: "/v1/chat/completions",
+			wantMode:         "responses_server",
+		},
+		{
+			name:             "native_still_preferred",
+			upstream:         protocolResponses,
+			wantUpstreamPath: "/v1/responses",
+			wantMode:         "proxy_pass",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			st, err := store.New(outputDir)
+			if err != nil {
+				t.Fatalf("store.New() error = %v", err)
+			}
+			defer st.Close()
+
 			kindUpstream := newMatrixUpstream(t, tt.upstream)
-			server := newMatrixHandler(t, false, kindUpstream.target("upstream-"+string(tt.upstream), 100, matrixModel))
+			cfg := &config.Config{
+				// Legacy switch explicitly off: it must be ignored.
+				ResponsesServer: config.ResponsesServerConfig{Enabled: false},
+				Upstreams: []config.UpstreamTargetConfig{
+					kindUpstream.target("only-upstream", 100, matrixModel),
+				},
+			}
+			cfg.Debug.OutputDir = outputDir
+			cfg.Debug.MaskKey = true
+
+			handler, err := NewHandler(cfg, st)
+			if err != nil {
+				t.Fatalf("NewHandler() error = %v", err)
+			}
+			server := httptest.NewServer(handler)
+			defer server.Close()
 
 			resp := doMatrixRequest(t, server.URL, protocolResponses, matrixModel, false)
 			if resp.status != http.StatusOK {
@@ -701,6 +734,73 @@ func TestHandlerResponsesProxyOnlyModeMatrix(t *testing.T) {
 			if path != tt.wantUpstreamPath {
 				t.Fatalf("upstream path = %q, want %q", path, tt.wantUpstreamPath)
 			}
+
+			recordPath := waitForRecordedHTTPByEndpoint(t, outputDir, "/v1/responses", time.Second)
+			parsed, err := waitForRecordedPrelude(recordPath, time.Second)
+			if err != nil {
+				t.Fatalf("waitForRecordedPrelude(%q) error = %v", recordPath, err)
+			}
+			plan := routePlanAttrsFromPrelude(t, parsed)
+			if plan["execution_mode"] != tt.wantMode {
+				t.Fatalf("route plan execution_mode = %v, want %q", plan["execution_mode"], tt.wantMode)
+			}
 		})
+	}
+}
+
+// TestHandlerLocalResponsesProviderConfigIsLazy guards the lazy construction of
+// the local Responses runtime: optional provider configuration (web search,
+// function executors, tokenize counters) must not abort startup for a
+// deployment that never serves /v1/responses. A broken optional config surfaces
+// as a 502 on the first local Responses request, while pure proxy traffic keeps
+// working.
+func TestHandlerLocalResponsesProviderConfigIsLazy(t *testing.T) {
+	outputDir := t.TempDir()
+	st, err := store.New(outputDir)
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	chatUpstream := newMatrixUpstream(t, protocolChatCompletions)
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			chatUpstream.target("chat-backend", 100, matrixModel),
+		},
+	}
+	// tools.web_search.enabled with no provider resolves to "disabled", which
+	// the local Responses runtime rejects while building its web search tool.
+	cfg.Tools.WebSearch.Enabled = true
+	cfg.Tools.WebSearch.Provider = ""
+	cfg.Debug.OutputDir = outputDir
+	cfg.Debug.MaskKey = true
+
+	handler, err := NewHandler(cfg, st)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v, want nil; optional provider config must not block startup", err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	// Proxy traffic is unaffected by the broken optional provider config.
+	chatResp := doMatrixRequest(t, server.URL, protocolChatCompletions, matrixModel, false)
+	if chatResp.status != http.StatusOK {
+		t.Fatalf("chat status = %d, want 200; body=%s", chatResp.status, chatResp.body)
+	}
+	if got := chatUpstream.callCount(); got != 1 {
+		t.Fatalf("chat upstream calls = %d, want 1", got)
+	}
+
+	// The local Responses runtime fails to build, and that is reported to the
+	// caller instead of blocking startup or panicking.
+	resp := doMatrixRequest(t, server.URL, protocolResponses, matrixModel, false)
+	if resp.status != http.StatusBadGateway {
+		t.Fatalf("responses status = %d, want 502; body=%s", resp.status, resp.body)
+	}
+	if !strings.Contains(resp.body, "Local Responses server unavailable") {
+		t.Fatalf("responses body = %q, want local Responses unavailability reason", resp.body)
+	}
+	if got := chatUpstream.callCount(); got != 1 {
+		t.Fatalf("chat upstream calls after failed local build = %d, want 1", got)
 	}
 }
