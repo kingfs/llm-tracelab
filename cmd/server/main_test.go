@@ -179,8 +179,8 @@ func TestResponsesServerConfigFromServeConfigDefaultsDisabled(t *testing.T) {
 	if got.ForceStore {
 		t.Fatalf("ForceStore = true, want false")
 	}
-	if got.MaxRequestBodyBytes != 16<<20 {
-		t.Fatalf("MaxRequestBodyBytes = %d, want %d", got.MaxRequestBodyBytes, 16<<20)
+	if got.MaxRequestBodyBytes != 64<<20 {
+		t.Fatalf("MaxRequestBodyBytes = %d, want %d", got.MaxRequestBodyBytes, 64<<20)
 	}
 	if got.Path != "/v1/responses" {
 		t.Fatalf("Path = %q, want /v1/responses", got.Path)
