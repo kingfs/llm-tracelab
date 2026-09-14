@@ -380,7 +380,7 @@ func TestSupportsLocalResponsesServerBackendExcludesNativeResponsesOnlyTarget(t 
 	if err != nil {
 		t.Fatalf("Resolve(native) error = %v", err)
 	}
-	if !native.SupportsEndpoint("/v1/responses") {
+	if !native.SupportsEndpointForModel("/v1/responses", "") {
 		t.Fatal("native responses target should support /v1/responses pass-through")
 	}
 	if SupportsLocalResponsesServerBackend(native) {
@@ -2160,5 +2160,100 @@ func TestTargetRefreshFailureCanOpenHealthState(t *testing.T) {
 	}
 	if snapshot.OpenUntil.IsZero() {
 		t.Fatalf("OpenUntil is zero after refresh failures opened target")
+	}
+}
+
+func TestRouterPerModelCapabilitiesDriveEndpointEligibility(t *testing.T) {
+	chatDisabled := false
+	responsesEnabled := true
+	chatEnabled := true
+	responsesDisabled := false
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "mixed-surface",
+				Enabled:        boolPtr(true),
+				Priority:       100,
+				ModelDiscovery: ModelDiscoveryStaticOnly,
+				StaticModels:   []string{"native-model", "chat-model"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Capabilities: config.UpstreamCapabilitiesConfig{
+						Responses:       &responsesEnabled,
+						ChatCompletions: &chatDisabled,
+					},
+					ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
+						"native-model": {Responses: &responsesEnabled, ChatCompletions: &chatDisabled},
+						"chat-model":   {Responses: &responsesDisabled, ChatCompletions: &chatEnabled},
+					},
+				},
+			},
+		},
+	}
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
+
+	rtr, err := New(cfg, nil)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	responsesReq := func(model string) *http.Request {
+		req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/responses", strings.NewReader(`{"model":"`+model+`","input":"hello"}`))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		return req
+	}
+	chatReq := func(model string) *http.Request {
+		req, err := http.NewRequest(http.MethodPost, "http://proxy.local/v1/chat/completions", strings.NewReader(`{"model":"`+model+`","messages":[]}`))
+		if err != nil {
+			t.Fatalf("http.NewRequest() error = %v", err)
+		}
+		return req
+	}
+
+	tests := []struct {
+		name             string
+		model            string
+		wantNative       bool
+		wantNativeTarget bool
+	}{
+		{name: "responses model", model: "native-model", wantNative: true, wantNativeTarget: true},
+		{name: "chat-only model", model: "chat-model", wantNative: false, wantNativeTarget: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"` + tt.model + `","input":"hello"}`)
+			if got := rtr.HasSelectableNativeResponsesCandidateWithBody(responsesReq(tt.model), body); got != tt.wantNative {
+				t.Fatalf("HasSelectableNativeResponsesCandidateWithBody(%q) = %v, want %v", tt.model, got, tt.wantNative)
+			}
+			if got := rtr.HasNativeResponsesTargetWithBody(responsesReq(tt.model), body); got != tt.wantNativeTarget {
+				t.Fatalf("HasNativeResponsesTargetWithBody(%q) = %v, want %v", tt.model, got, tt.wantNativeTarget)
+			}
+		})
+	}
+
+	// The chat-only model must still be reachable as the local Responses
+	// backend, while the responses-only model must not answer chat requests.
+	chatBody := []byte(`{"model":"chat-model","messages":[]}`)
+	if !rtr.HasSelectableCandidateWithBody(chatReq("chat-model"), chatBody) {
+		t.Fatalf("chat-model should be selectable for /v1/chat/completions")
+	}
+	nativeChatBody := []byte(`{"model":"native-model","messages":[]}`)
+	if rtr.HasSelectableCandidateWithBody(chatReq("native-model"), nativeChatBody) {
+		t.Fatalf("native-model should not be selectable for /v1/chat/completions")
+	}
+	nativeResponsesBody := []byte(`{"model":"native-model","input":"hello"}`)
+	if !rtr.HasSelectableCandidateWithBody(responsesReq("native-model"), nativeResponsesBody) {
+		t.Fatalf("native-model should be selectable for /v1/responses")
+	}
+	chatAsBackendBody := []byte(`{"model":"chat-model","input":"hello"}`)
+	if !rtr.HasSelectableCandidateWithBody(responsesReq("chat-model"), chatAsBackendBody) {
+		t.Fatalf("chat-model should be eligible as a local Responses backend")
 	}
 }

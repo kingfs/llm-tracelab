@@ -9,6 +9,7 @@ node_modules/
 /server
 docker-data/
 config/config.dev.yaml
+.codex/
 web/monitor-ui/test-results/
 web/monitor-ui/playwright-report/
 worktrees/

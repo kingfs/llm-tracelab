@@ -116,6 +116,8 @@ Application DB：
 - Observation IR 和 findings。
 - analysis jobs。
 - eval/dataset/score/experiment。
+- Responses semantic state：`responses`、`response_items`。
+- Responses audit：`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`。
 
 生产 application DB 必须使用 Postgres。SQLite 覆盖同类表集时只作为本地开发、离线测试和既有本地 DB 兼容 fallback。
 
@@ -129,6 +131,9 @@ Monitor 列表页不应依赖扫描文件系统。
 - `internal/upstream`：上游配置解析、协议族、路由 profile、鉴权 header、URL 构造。
 - `internal/recorder`：cassette 写入和 metadata finalization。
 - `internal/store`：Postgres/SQLite application DB、schema 初始化/迁移、索引、查询和派生状态。
+- `internal/appdbmigrate`：应用 Postgres checked-in migration（`ent/postgres-migrations`）的加载与应用。
+- `internal/channel`：channel/model 配置用例、legacy YAML bootstrap、runtime targets 与 provider probe/apply。
+- `internal/responses`：本地 Responses runtime（`runtime`）、HTTP handler（`httpapi`）、内部 Chat Completions client（`chatclient`）、Responses audit 查询（`audit`）、function executor（`functionexec`）与 hosted tools（`tools`）。
 - `internal/monitor`：Monitor API 与嵌入式 React UI。
 - `internal/mcpserver`：MCP 工具层。
 - `internal/reanalysis`：trace/session/batch 重分析任务。

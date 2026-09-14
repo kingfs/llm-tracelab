@@ -21,8 +21,6 @@ export const apiPaths = {
   responsesFunctionExecutors: "/api/responses/function-executors",
   analysis: "/api/analysis",
   analysisJobs: "/api/analysis/jobs",
-  analysisJob: (jobID) => `/api/analysis/jobs/${encodeURIComponent(jobID)}`,
-  analysisJobCancel: (jobID) => `/api/analysis/jobs/${encodeURIComponent(jobID)}/cancel`,
   analysisBatchReanalyze: "/api/analysis/batch/reanalyze",
   trace: (traceID) => `/api/traces/${encodeURIComponent(traceID)}`,
   traceRaw: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/raw`,
@@ -30,23 +28,14 @@ export const apiPaths = {
   traceFindings: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/findings`,
   tracePerformance: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/performance`,
   traceDownload: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/download`,
-  traceReparse: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reparse`,
-  traceScan: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/scan`,
   traceRepairUsage: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/repair-usage`,
   traceReanalyze: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reanalyze`,
   sessions: "/api/sessions",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,
-  sessionAnalysis: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/analysis`,
   sessionReanalyze: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/reanalyze`,
   models: "/api/models",
   model: (model) => `/api/models/${encodeURIComponent(model)}`,
   modelSpecLookup: (model) => `/api/models/${encodeURIComponent(model)}/spec-lookup`,
-  channels: "/api/channels",
-  channel: (channelID) => `/api/channels/${encodeURIComponent(channelID)}`,
-  channelProbe: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/probe`,
-  channelModels: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models`,
-  channelModelsBatch: (channelID) => `/api/channels/${encodeURIComponent(channelID)}/models/batch`,
-  channelModel: (channelID, model) => `/api/channels/${encodeURIComponent(channelID)}/models/${encodeURIComponent(model)}`,
   providers: "/api/channels",
   provider: (providerID) => `/api/channels/${encodeURIComponent(providerID)}`,
   providerProbe: (providerID) => `/api/channels/${encodeURIComponent(providerID)}/probe`,
@@ -59,9 +48,6 @@ export const apiPaths = {
   providerSetupValidate: "/api/provider-setup/validate",
   providerSetupApply: "/api/provider-setup/apply",
   providerPresets: "/api/provider-presets",
-  localSecretKey: "/api/secrets/local-key",
-  localSecretKeyExport: "/api/secrets/local-key?export=1",
-  localSecretKeyRotate: "/api/secrets/local-key?rotate=1",
   routingExchanges: "/api/routing/exchanges",
   routingSummary: "/api/routing/summary",
   routingInspect: "/api/routing/inspect",
@@ -69,7 +55,6 @@ export const apiPaths = {
   modelAliases: "/api/model-aliases",
   modelAliasValidate: "/api/model-aliases/validate",
   modelAlias: (aliasID) => `/api/model-aliases/${encodeURIComponent(aliasID)}`,
-  upstreams: "/api/upstreams",
   upstream: (upstreamID) => `/api/upstreams/${encodeURIComponent(upstreamID)}`,
 };
 
@@ -146,8 +131,4 @@ export async function downloadBlob(path) {
 
 export function listItems(payload) {
   return Array.isArray(payload?.items) ? payload.items : [];
-}
-
-export function listTotal(payload) {
-  return Number(payload?.total || payload?.total_count || listItems(payload).length || 0);
 }

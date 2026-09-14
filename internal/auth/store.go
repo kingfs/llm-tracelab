@@ -54,10 +54,6 @@ type TokenRecord struct {
 	LastUsedAt *time.Time
 }
 
-func DefaultDatabasePath(outputDir string) string {
-	return filepath.Join(outputDir, "control.sqlite3")
-}
-
 func Open(path string) (*Store, error) {
 	return OpenDatabase("sqlite", path, 4, 4)
 }

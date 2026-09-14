@@ -147,28 +147,6 @@ func (r *Runtime) functionToolExecutorSnapshot() map[string]configuredFunctionTo
 	return registry.configuredSnapshot()
 }
 
-func (r *Runtime) FunctionToolExecutorRegistry() *FunctionToolExecutorRegistry {
-	if r == nil {
-		return nil
-	}
-	r.functionExecutorsMu.RLock()
-	defer r.functionExecutorsMu.RUnlock()
-	return r.functionExecutors
-}
-
-func (r *Runtime) FunctionToolExecutorSnapshot() map[string]FunctionToolExecutorRegistration {
-	if r == nil {
-		return nil
-	}
-	r.functionExecutorsMu.RLock()
-	registry := r.functionExecutors
-	r.functionExecutorsMu.RUnlock()
-	if registry == nil {
-		return nil
-	}
-	return registry.Snapshot()
-}
-
 func New(cfg Config, client ChatCompletionsClient, store Store, opts ...Option) *Runtime {
 	if store == nil {
 		store = NewMemoryStore()

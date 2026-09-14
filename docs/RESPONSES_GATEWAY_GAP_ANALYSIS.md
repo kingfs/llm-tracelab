@@ -27,7 +27,7 @@
 - 运维 CLI：`cmd/responses-gateway/{doctor,config_inspect,audit,models,migrate}.go`
 - 设计文档：`docs/functional-design.md`、`docs/request-audit-cli.md`、`docs/tool-runtime.md`、`docs/codex-compatibility-profile.md`
 
-`llm-tracelab` 当前定位仍是 record/replay proxy，Responses server-mode 是可选本地语义层：
+`llm-tracelab` 当前定位仍是 record/replay proxy，Responses server-mode 是始终可用、无开关的本地语义层（按模型在 native 与本地 runtime 间二选一）：
 
 - 代理分流和内部 Chat Completions 调用：`internal/proxy/responses_server.go`
 - Responses HTTP handler：`internal/responses/httpapi`
@@ -37,7 +37,7 @@
 - server-side function executor：`internal/responses/functionexec`
 - web search：`internal/responses/tools/websearch`
 - 应用 store / ent / migrations：`internal/store`、`internal/appdbmigrate`、`ent/postgres-migrations`
-- CLI 运维：`cmd/server/{db,auth,provider,schema}.go`
+- CLI 运维：`cmd/server/{db,auth,provider,schema,audit,models,config,tools,analyze,doctor}.go`
 - 当前事实文档：`docs/CURRENT_IMPLEMENTATION.md`、`docs/PROJECT_BASELINE.md`
 
 ## 已吸收能力
@@ -96,7 +96,8 @@
 - 当前覆盖：`config.load`、`server.port`、monitor/MCP consistency、application database migration mode/report、Responses server backend validation、`responses_server.http_guard` 离线入口边界诊断、`responses_server.default_model`、Responses store driver/auto-migrate readiness、`responses_server.store_health` store/backend 健康诊断、model profile context-window/compact threshold numeric relationships、默认模型与本地 SQLite `model_catalog` / `channel_models` drift 只读诊断、显式 `doctor --codex-config <path>` 本地 Codex TOML drift 只读诊断、web_search provider config validation、provider config basic count、auth migration scope note。
 - 安全边界：默认离线，不做真实模型推理、provider 网络请求或远端数据库连接；`responses_server.store_health` 默认只报告 driver、auto_migrate、force_store、migration mode 和 required table set，只有显式 `--check-db` 才读取数据库 migration status 并检查 Responses 关键表；只有显式 `--probe-providers` 才执行受控 provider endpoint probe；未传 `doctor --codex-config` 时不读取用户真实 Codex 文件，传入 path 后 missing/unreadable/parse_error/drift 只产生 warn；输出复用 DSN/URL 脱敏摘要，不输出 API key/header secret 或 Codex TOML 文件内容。
 - llm-tracelab 落点：`cmd/server/doctor.go`，复用 `appDBMigrationReport`、`router.ValidateLocalResponsesServerBackendConfig`、`websearch.NewProvider` 和 `config inspect` 的脱敏摘要。
-- 剩余缺口：HTTP guard 诊断已覆盖 Responses path、归一化 path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要以及 MCP/monitor management path 明显冲突。Store/backend 深度健康已通过 `responses_server.store_health` 首切：server-mode 关闭时 pass 并标注 skipped reason；默认离线报告 required semantic/audit/settings table set；`force_store=true` 且 `database.auto_migrate=false` 且未传 `--check-db` 时 warn；显式 `--check-db` 时复用 app DB status check，并检查 `responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`、`app_settings` 是否存在，缺表或 DB 不可达为 fail。Codex profile 建议和显式 `--codex-config <path>` 本地 TOML drift 检查已在 `models codex-config` 落地；`doctor --codex-config <path>` 复用同一套本地 TOML drift helper；model profile drift 与 catalog/channel 的交叉校验已在 `models codex-config` 与 `doctor` 中落地，本地 SQLite 可只读检查，Postgres 需显式 `models codex-config --check-db` 才会参与 observe-only adoption diagnostics；默认模式保持离线回落。
+- 剩余缺口：HTTP guard 诊断已覆盖 Responses path、归一化 path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要以及 MCP/monitor management path 明显冲突。Store/backend 深度健康已通过 `responses_server.store_health` 首切，无条件执行：默认离线报告 required semantic/audit/settings table set；`force_store=true` 且 `database.auto_migrate=false` 且未传 `--check-db` 时 warn；显式 `--check-db` 时复用 app DB status check，并检查 `responses`、`response_items`、`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`、`app_settings` 是否存在，缺表或 DB 不可达为 fail。Codex profile 建议和显式 `--codex-config <path>` 本地 TOML drift 检查已在 `models codex-config` 落地；`doctor --codex-config <path>` 复用同一套本地 TOML drift helper；model profile drift 与 catalog/channel 的交叉校验已在 `models codex-config` 与 `doctor` 中落地，本地 SQLite 可只读检查，Postgres 需显式 `models codex-config --check-db` 才会参与 observe-only adoption diagnostics；默认模式保持离线回落。
+
 ### Codex compatibility profile
 
 - 已吸收首切：新增独立 [Codex Responses 兼容性首切](./CODEX_RESPONSES_COMPATIBILITY.md)，固化 text create、stream text、function call、`function_call_output` continuation、ordinary `web_search` descriptor、unsupported hosted tool 的最小兼容合约。
@@ -109,7 +110,7 @@
 ### Request audit 诊断深度
 
 - 已有：`request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 Monitor/MCP trace 查询；`audit query` CLI 已提供 response/request/client-request/conversation 维度只读 trace 查询首切，并已在 JSON/text trace 输出中提供顶层 `diagnostics`，汇总 event/upstream/tool-call count、latest status、cancel/failed/stream/compact signals、pending tool call count/list 和保守 compact candidate/summary。`audit query --list` 可按 conversation/client-request/status/operation 等现有 selector 返回 request audit summary 列表，`--status` 支持 `accepted`、`completed`、`failed`、`rejected`、`cancelled`，`--operation` 支持 `create`、`compact`、`input_items` 且只允许和 `--list` 搭配；operation 由 `request_audits.method/path` 派生，并在 QueryService 层下推为 method/path predicate，不读取 raw body/header。列表字段限于 id、response_id、conversation_id、client_request_id、status、operation、created_at。Monitor `/api/responses/audit/tool-calls` 和 MCP `responses_audit_tool_calls` 已提供独立 tool-call audit read model 查询；QueryService 的 `tool_call_audits` 查询已支持 status、tool_type、tool_name、executor、call_id、response/request/conversation selector，并可按 call_id 聚合出 latest lifecycle status、statuses_seen、event_count 和时间戳。当前还可通过 `--include-tools` 从既有 `execution_events.event_type == "response.tool_call"` 派生保守的 tool call diagnostics，汇总 call id、工具名、executor、状态序列、latest status、started/completed 时间、error/output/query/arguments 的脱敏摘要和事件计数。
-- 缺口：仍缺少真实 thread/session/turn schema 字段和对应范围查询；`audit query` 的 compact/pending/stream/cancel diagnostics 是基于已取到 request audit、events、exchanges 和 derived tool calls 的保守派生，不输出 raw sensitive payload。`audit query --include-tools` 仍是 derived event 视图，未来真实 MCP/file/code/computer-use runtime lifecycle 还没有统一写入 `tool_call_audits` read model。
+- 缺口：仍缺少真实 thread/session/turn schema 字段和对应范围查询；`audit query` 的 compact/pending/stream/cancel diagnostics 是基于已取到 request audit、events、exchanges 和 derived tool calls 的保守派生，不输出 raw sensitive payload。`audit query --include-tools` 仍是 derived event 视图，未来真实 file/code/computer-use runtime lifecycle 还没有统一写入 `tool_call_audits` read model（MCP hosted tool 已实现并写入）。
 - llm-tracelab 下一步落点：扩展 `cmd/server/audit.go`，复用并扩展 `internal/responses/audit.QueryService`。
 
 ### Compact 与 context optimization
@@ -122,7 +123,7 @@
 ### Hosted/server-side tool lifecycle
 
 - 已有：hosted `web_search` 与 registered executor 的 started/completed/failed execution events 和 stream item 首切；强制执行 unsupported hosted tools 时会返回 stable rejection contract 并写 `tool_call_audits` rejected read model；`audit query --include-tools` 已基于 execution events 提供 derived tool call summary。独立 `tool_call_audits` 表、recorder、query API、runtime web_search/function executor 双写、unsupported hosted tool rejected 写入、`audit tool-calls` CLI、Monitor API 和 MCP tool 已落地，SQLite startup schema、SQLite migration、Postgres migration 与 status 检查也已覆盖。`audit tool-calls` CLI 现在可用 `--status started|completed|failed|rejected`、`--tool-type`、`--tool-name`、`--executor` 过滤 durable read model，并可用 `--latest-by-call` 输出按 call_id 聚合的 latest status、event_count、statuses_seen 和 lifecycle timestamps；默认输出限制为 payload summary、redacted error summary、metadata/count/status，只有显式 `--include-payloads` 才输出 raw input/output/metadata JSON。
-- 缺口：client-owned `function_call_output` 的跨轮流式 continuation、同轮 registered function + hosted `web_search` mixed success、同轮 registered function 完成后 hosted `web_search` provider 失败的 completed/failed item lifecycle 已有回归覆盖；复杂跨轮、复杂 auto compact 工具组合或 cancel lifecycle 仍不完整。MCP、file search、code interpreter、computer-use 仍未实现真实执行器，当前只有强制执行时的 stable rejection + audit contract。
+- 缺口：client-owned `function_call_output` 的跨轮流式 continuation、同轮 registered function + hosted `web_search` mixed success、同轮 registered function 完成后 hosted `web_search` provider 失败的 completed/failed item lifecycle 已有回归覆盖；复杂跨轮、复杂 auto compact 工具组合或 cancel lifecycle 仍不完整。MCP hosted tool executor 已实现并接线（`tools.mcp.enabled` 且有 enabled server 时经 `executeMCPToolCall` 执行并写 `tool_call_audits`）；file search、code interpreter、computer-use 仍未实现真实执行器，当前只有强制执行时的 stable rejection + audit contract。
 - llm-tracelab 下一步落点：`internal/responses/audit`、`internal/responses/runtime`、`internal/responses/functionexec`。
 - responses-gateway 对照：`docs/tool-runtime.md` 的 `tool_call_audits` 和 MCP runtime boundary。
 
@@ -145,7 +146,7 @@
 
 ### `doctor` 深度诊断
 
-- 已吸收首切：`llm-tracelab doctor` 覆盖离线启动前诊断、稳定 JSON envelope、`--check-db`、`--probe-providers` 受控 provider endpoint probe、`--codex-config <path>` 本地 Codex TOML drift 只读诊断、`--fail-on-warn`、`--fail-on-fail`、Responses default model、HTTP guard、store driver/auto-migrate readiness、`responses_server.store_health` store/backend 深度健康、model profile context-window/compact threshold numeric relationships，以及默认模型与本地 SQLite `model_catalog` / `channel_models` drift 只读诊断。`responses_server.http_guard` 会在 server-mode 关闭时 pass 并标注 skipped reason；开启时离线输出 path、normalized path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要，并对非法 path、过小 body limit 和 MCP/monitor management path 明显冲突给出 fail/warn。`responses_server.store_health` 默认不连接数据库，只报告 driver、auto_migrate、force_store、migration mode 和 required table set；显式 `--check-db` 时复用 app DB status check 并检查 Responses semantic/audit/settings 关键表，缺表或 DB 不可达为 fail 且输出脱敏。`responses_server.codex_config_drift` 未传 flag 时 pass 并标注 `not_configured`；missing/unreadable/parse_error/drift 均为 warn，不会让 doctor 默认失败。
+- 已吸收首切：`llm-tracelab doctor` 覆盖离线启动前诊断、稳定 JSON envelope、`--check-db`、`--probe-providers` 受控 provider endpoint probe、`--codex-config <path>` 本地 Codex TOML drift 只读诊断、`--fail-on-warn`、`--fail-on-fail`、Responses default model、HTTP guard、store driver/auto-migrate readiness、`responses_server.store_health` store/backend 深度健康、model profile context-window/compact threshold numeric relationships，以及默认模型与本地 SQLite `model_catalog` / `channel_models` drift 只读诊断。`responses_server.http_guard` 无条件执行，离线输出 path、normalized path、body limit、force_store、auth verifier 配置状态、server/monitor port 摘要，并对非法 path、过小 body limit 和 MCP/monitor management path 明显冲突给出 fail/warn。`responses_server.store_health` 默认不连接数据库，只报告 driver、auto_migrate、force_store、migration mode 和 required table set；显式 `--check-db` 时复用 app DB status check 并检查 Responses semantic/audit/settings 关键表，缺表或 DB 不可达为 fail 且输出脱敏。`responses_server.codex_config_drift` 未传 flag 时 pass 并标注 `not_configured`；missing/unreadable/parse_error/drift 均为 warn，不会让 doctor 默认失败。
 - 剩余缺口：`models codex-config` 已支持 Codex profile 建议，并可通过显式 `--codex-config <path>` 只读检查本地 Codex 配置 drift；`doctor --codex-config <path>` 复用同一套 TOML parsing、字段比较和 URL 脱敏 helper；`models codex-config` 与 `doctor` 均能在本地 SQLite app DB 可用时检查请求模型的 catalog/channel drift；默认 doctor 不会触发真实网络或远端数据库连接，只有 `--check-db`/`--probe-providers` 才进入相应外部检查。
 - responses-gateway 能力：读取同一套配置，输出稳定 JSON，检查 config、HTTP guard、默认模型、vLLM `/models`、model profile context window drift、store backend、web_search 配置。
 - llm-tracelab 后续落点：继续扩展 `cmd/server/doctor.go`，受控复用 `internal/providerprobe` 和更细的 responses/profile/store 诊断，但保持默认离线。
@@ -164,7 +165,7 @@
 - 当前用法：`llm-tracelab -c config.yaml --format json audit query --response-id resp_x --include-events --include-exchanges --include-tools --limit 100`，也支持 `--request-audit-id`、`--client-request-id`、`--conversation-id`；多个 selector 同时给出时按 AND 过滤，conversation/client 命中多条时默认返回最新一条 trace；默认输出 request audit envelope 和顶层 diagnostics，events/exchanges/tool calls 需显式打开。`--list` 会返回 matching request audit summary 列表而不是最新 trace，适合 conversation/client-request 范围排查；`--status` 和 `--operation create|compact|input_items` 只在 `--list` 下可用。独立 `audit tool-calls` 可查询 durable `tool_call_audits` read model，支持 response/request/conversation/call/status/tool_type/tool_name/executor 过滤，以及 `--latest-by-call` lifecycle 聚合摘要。
 - 安全边界：CLI 输出 request audit 的已存 `body_preview` / hash / redaction metadata，不读取或输出未脱敏 raw request body；`--list` summary 不含 body/header raw，operation 只由 `request_audits.method/path` 派生。当前 `tool_calls` 和 diagnostics 仍是 derived conservative view，不输出 raw arguments/query/output/error，只输出 redacted summary、事件引用或计数/状态。`--include-events` 仍按原行为输出 events 的 `details_json`，需要调用者自行按权限使用。
 - responses-gateway 能力：按 response/request/thread/session/turn/client request id 查询，并输出 diagnostics envelope。
-- 剩余缺口：尚未支持真实 thread/session/turn 字段和范围查询；compact candidate、pending tool call、stream/cancel/request diagnostics 已有保守顶层派生，但尚不是完整 Codex-specific diagnostics；`audit tool-calls`、Monitor API 和 MCP tool 已提供独立 `tool_call_audits` 查询。MCP、file search、code interpreter、computer-use 的真实 server-side executor 仍未实现，本次只是已写入 lifecycle audit 的查询可操作性增强。
+- 剩余缺口：尚未支持真实 thread/session/turn 字段和范围查询；compact candidate、pending tool call、stream/cancel/request diagnostics 已有保守顶层派生，但尚不是完整 Codex-specific diagnostics；`audit tool-calls`、Monitor API 和 MCP tool 已提供独立 `tool_call_audits` 查询。MCP hosted tool executor 已实现并接线并写入 lifecycle audit；file search、code interpreter、computer-use 的真实 server-side executor 仍未实现，本次只是已写入 lifecycle audit 的查询可操作性增强。
 
 ### Codex profile 生成命令
 
@@ -183,10 +184,10 @@
 
 ### MCP hosted tool runtime
 
-- 已吸收首切：`mcp`、`file_search`、`code_interpreter`、`computer_use_preview` 在强制 `tool_choice` 执行时返回 OpenAI-style `unsupported_tool` error；普通 descriptor 仍按兼容输入保守解析，不伪造执行结果。
-- 缺口：MCP 当前仍是 llm-tracelab 对外排障 server，不是 Responses runtime 内部的 MCP client/tool executor；尚无 file/code/computer-use 执行器；独立 `tool_call_audits` 表已落地并承接 web_search/function executor 与强制 unsupported hosted tool rejection，但尚未承接未来真实 MCP/file/code/computer-use execution lifecycle。
+- 已吸收首切：`file_search`、`code_interpreter`、`computer_use_preview` 在强制 `tool_choice` 执行时返回 OpenAI-style `unsupported_tool` error；`mcp` hosted tool executor 已实现并接线（`internal/responses/tools/mcp/executor.go`，经 `executeMCPToolCall` 执行）；普通 descriptor 仍按兼容输入保守解析，不伪造执行结果。
+- 缺口：尚无 file/code/computer-use 执行器；独立 `tool_call_audits` 表已落地并承接 web_search/function executor、MCP hosted tool 与强制 unsupported hosted tool rejection，但尚未承接未来真实 file/code/computer-use execution lifecycle。
 - responses-gateway 设计：`type:"mcp"` descriptor 作为 gateway-hosted runtime 请求，当前先明确拒绝并审计。
-- llm-tracelab 下一步落点：`internal/responses/audit` 的 `tool_call_audits` 对未来 MCP/file/code/computer-use execution lifecycle 的扩展；执行器本身需单独设计安全边界。
+- llm-tracelab 下一步落点：`internal/responses/audit` 的 `tool_call_audits` 对未来 file/code/computer-use execution lifecycle 的扩展；剩余执行器本身需单独设计安全边界。
 
 ## 建议下一阶段优先级
 
@@ -206,7 +207,7 @@
    - 验收：在已接 focused offline tests 基础上，补更完整 runner 或 e2e harness；输出 JSON + TOML profile 片段。
 
 4. 扩展 hosted tool audit 覆盖面。
-   - 价值：让 unsupported hosted tools、未来 MCP/file/code 工具共享可索引、可长期演进的排障面。
+   - 价值：让 unsupported hosted tools、已接线的 MCP hosted tool 与未来 file/code/computer-use 工具共享可索引、可长期演进的排障面。
    - 模块：`internal/responses/runtime`、`internal/responses/functionexec`、`internal/responses/audit`、`cmd/server/audit.go`、Monitor/MCP audit surface。
    - 验收：在已落地的 web_search/executor/rejected hosted tool `tool_call_audits` 写入、CLI、Monitor/MCP 查询入口基础上，补未来执行器 lifecycle；继续保留 derived `--include-tools` 作为 event fallback。
 
@@ -226,4 +227,4 @@
 - 不要把 llm-tracelab 改成纯 semantic gateway；record/replay proxy 和 `.http` cassette 仍是项目主线。
 - 不要把 `responses-gateway` 的 vLLM-only 假设写死到 llm-tracelab；现有 router/upstream capability 约束应继续保留。
 - 不要绕过现有 Monitor/MCP/store 事实源另建一套 audit 数据。
-- 不要为了补工具 runtime 直接执行任意 MCP/code/computer-use；先 recognized-and-rejected、审计和稳定错误码。
+- 不要为了补工具 runtime 直接执行任意 code/computer-use；先 recognized-and-rejected、审计和稳定错误码（MCP 执行器已实现并接线，不属于此列）。

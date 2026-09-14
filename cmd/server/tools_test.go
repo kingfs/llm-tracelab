@@ -30,7 +30,6 @@ func TestToolsStatusJSONReadyForCodexWebSearch(t *testing.T) {
 
 	configPath := writeToolsStatusTestConfig(t, `
 responses_server:
-  enabled: true
   codex_compat:
     enabled: true
     auto_inject_hosted_tools: ["web_search", "mcp"]
@@ -52,7 +51,7 @@ tools:
 		t.Fatalf("envelope = %+v, want tools.status ok", envelope)
 	}
 	result := envelope.Result
-	if !result.ResponsesServer.Enabled || !result.ResponsesServer.CodexCompat.Enabled {
+	if !result.ResponsesServer.CodexCompat.Enabled {
 		t.Fatalf("responses_server status = %+v, want enabled", result.ResponsesServer)
 	}
 	if !result.ReadyForCodexWebSearch || result.ReadyForCodexWebSearchWhy == "" {
@@ -71,7 +70,6 @@ func TestToolsStatusWebSearchSearXNGWithoutBaseURLNotReady(t *testing.T) {
 
 	configPath := writeToolsStatusTestConfig(t, `
 responses_server:
-  enabled: true
   codex_compat:
     enabled: true
     auto_inject_hosted_tools: ["web_search"]
@@ -150,7 +148,6 @@ func TestToolsStatusTextIsShort(t *testing.T) {
 
 	configPath := writeToolsStatusTestConfig(t, `
 responses_server:
-  enabled: false
 tools:
   web_search:
     enabled: false

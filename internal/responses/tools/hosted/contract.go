@@ -20,21 +20,10 @@ const (
 	ToolTypeComputerUsePreview = "computer_use_preview"
 )
 
-type Phase string
-
-const (
-	PhaseToolCall Phase = "tool_call"
-)
-
 type Status string
 
 const (
-	StatusRequested Status = "requested"
-	StatusStarted   Status = "started"
-	StatusSubmitted Status = "submitted"
 	StatusCompleted Status = "completed"
-	StatusFailed    Status = "failed"
-	StatusRejected  Status = "rejected"
 )
 
 var ErrNilExecutor = errors.New("hosted tool executor is nil")

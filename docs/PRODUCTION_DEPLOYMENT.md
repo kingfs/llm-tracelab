@@ -11,11 +11,14 @@ Responses API tool surface is implemented.
 
 The default production example is:
 
-- `llm-tracelab`: gateway, Monitor, MCP, recorder, Responses server-mode.
+- `llm-tracelab`: gateway, Monitor, MCP, recorder, local Responses runtime.
 - `postgres`: application/auth database for users, tokens, trace index,
   channel/model state, Responses state, and audit tables.
-- `searxng`: optional hosted `web_search` provider, enabled only with the
-  Compose `search` profile and `LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED=true`.
+- `searxng`: optional hosted `web_search` provider container, started only
+  with the Compose `search` profile. The hosted `web_search` tool itself is
+  enabled by default (`LLM_TRACELAB_TOOLS_WEB_SEARCH_ENABLED` defaults to
+  `true` in `docker-compose.yml`); the `search` profile only controls whether
+  the searxng provider container is running.
 
 Raw `.http` cassette files remain on the application data volume and are still
 the replay/detail source of truth. Postgres stores structured state and indexes;
@@ -54,7 +57,7 @@ the checked-in application Postgres migrations before opening the store. Manual
 equivalent:
 
 ```bash
-docker compose run --rm llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml db migrate up
+docker compose run --rm llm-tracelab -c /app/config/config.yaml db migrate up
 docker compose up -d
 docker compose exec llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml auth init-user --username admin --password 'change-me-123'
 ```
@@ -84,14 +87,14 @@ and ready. Unsupported hosted tools are rejected and audited.
 - Cross-protocol request translation in the proxy hot path: rejected; existing
   non-Responses traffic remains protocol-aware pass-through plus recording.
 - Native Responses semantic interposition for every upstream provider:
-  future work. Current local Responses server-mode uses an OpenAI-compatible
+  future work. The current local Responses runtime uses an OpenAI-compatible
   Chat Completions backend.
 - Independent Postgres auth migration namespace: audited gap. Postgres auth
   currently shares the application migration set.
 - SQLite versioned application migrations: audited fallback. SQLite remains a
   local startup-schema fallback, not the production migration path.
-- MCP/file/code/computer-use real hosted tool execution lifecycle: future
-  secure executor work.
+- file/code/computer-use real hosted tool execution lifecycle: future
+  secure executor work (MCP hosted tool execution is implemented and wired).
 - Root/container-grade sandbox for `external_command` function executors:
   future secure executor work. The current process policy provides audited
   first-cut checks such as absolute command, allowed command directories,
@@ -102,9 +105,9 @@ and ready. Unsupported hosted tools are rejected and audited.
 Useful checks after configuration changes:
 
 ```bash
-docker compose run --rm llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml config inspect
-docker compose run --rm llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml db migrate status --check-db
-docker compose run --rm llm-tracelab /app/bin/llm-tracelab -c /app/config/config.yaml doctor --check-db
+docker compose run --rm llm-tracelab -c /app/config/config.yaml config inspect
+docker compose run --rm llm-tracelab -c /app/config/config.yaml db migrate status --check-db
+docker compose run --rm llm-tracelab -c /app/config/config.yaml doctor --check-db
 ```
 
 `doctor --probe-providers` performs explicit network probing. Default checks

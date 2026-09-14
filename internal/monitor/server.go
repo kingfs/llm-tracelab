@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -1534,7 +1535,6 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
-	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	mux.Handle("/", appHandler())
@@ -3413,23 +3413,40 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
-	var req channelModelPatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
 		return
 	}
+	var req channelModelPatchRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
+		return
+	}
+	// The capability columns are tri-state (unset = inherit). An explicit JSON
+	// null means "clear back to inherit", which a *bool alone cannot express,
+	// so presence of the key is checked separately.
+	var rawFields map[string]json.RawMessage
+	_ = json.Unmarshal(bodyBytes, &rawFields)
+	explicitNull := func(key string) bool {
+		value, ok := rawFields[key]
+		return ok && strings.TrimSpace(string(value)) == "null"
+	}
 	record, err := st.UpdateChannelModelProfile(channelID, model, store.ChannelModelProfilePatch{
-		DisplayName:                 req.DisplayName,
-		Enabled:                     req.Enabled,
-		SupportsResponses:           req.SupportsResponses,
-		SupportsChatCompletions:     req.SupportsChatCompletions,
-		SupportsEmbeddings:          req.SupportsEmbeddings,
-		ContextWindow:               req.ContextWindow,
-		MaxOutputTokens:             req.MaxOutputTokens,
-		CompactHistoryItemThreshold: req.CompactHistoryItemThreshold,
-		UpstreamModel:               req.UpstreamModel,
-		ProfileSource:               req.ProfileSource,
-		ProfileAdoptionStatus:       req.ProfileAdoptionStatus,
+		DisplayName:                  req.DisplayName,
+		Enabled:                      req.Enabled,
+		SupportsResponses:            req.SupportsResponses,
+		ClearSupportsResponses:       explicitNull("supports_responses"),
+		SupportsChatCompletions:      req.SupportsChatCompletions,
+		ClearSupportsChatCompletions: explicitNull("supports_chat_completions"),
+		SupportsEmbeddings:           req.SupportsEmbeddings,
+		ClearSupportsEmbeddings:      explicitNull("supports_embeddings"),
+		ContextWindow:                req.ContextWindow,
+		MaxOutputTokens:              req.MaxOutputTokens,
+		CompactHistoryItemThreshold:  req.CompactHistoryItemThreshold,
+		UpstreamModel:                req.UpstreamModel,
+		ProfileSource:                req.ProfileSource,
+		ProfileAdoptionStatus:        req.ProfileAdoptionStatus,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		record, err = st.UpsertChannelModel(channelID, channelModelRecordFromPatch(model, req))
@@ -3517,7 +3534,12 @@ func normalizeModelList(models []string) []string {
 
 func defaultRoutingSettings() routingSettingsView {
 	return routingSettingsView{
-		ResponsesStrategy:  "prefer_local_server",
+		// Native Responses upstreams are preferred; the local Responses server
+		// is only a fallback. This matches docs/GATEWAY_ROUTING_UI_DESIGN.md and
+		// makes the decision follow the requested model: a model served by a
+		// Responses-capable channel is proxied as-is, while one served only by
+		// Chat Completions goes through the local server.
+		ResponsesStrategy:  "auto",
 		SelectionPolicy:    router.PolicyP2C,
 		MissingModelPolicy: router.FallbackReject,
 		RoutePlanLogLevel:  "normal",
@@ -3778,19 +3800,21 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 		return nil, err
 	}
 	modelsByChannel := map[string][]string{}
-	modelCapsByChannel := map[string]store.ChannelModelRecord{}
+	modelCapsByChannel := map[string]map[string]routeplan.ModelCapabilities{}
 	for _, model := range models {
 		modelsByChannel[model.ChannelID] = append(modelsByChannel[model.ChannelID], model.Model)
-		if _, ok := modelCapsByChannel[model.ChannelID]; !ok {
-			modelCapsByChannel[model.ChannelID] = model
+		caps, ok := inspectModelCapabilities(model)
+		if !ok {
+			continue
 		}
+		if modelCapsByChannel[model.ChannelID] == nil {
+			modelCapsByChannel[model.ChannelID] = map[string]routeplan.ModelCapabilities{}
+		}
+		modelCapsByChannel[model.ChannelID][strings.ToLower(strings.TrimSpace(model.Model))] = caps
 	}
 	out := make([]routeplan.UpstreamCandidate, 0, len(channels))
 	for _, channel := range channels {
 		caps := upstreamCapabilitiesFromChannel(channel)
-		if modelCaps, ok := modelCapsByChannel[channel.ID]; ok {
-			applyChannelModelCapabilities(&caps, modelCaps)
-		}
 		out = append(out, routeplan.UpstreamCandidate{
 			ID:                        channel.ID,
 			RouteTargetID:             channel.ID,
@@ -3803,6 +3827,7 @@ func upstreamCandidatesForInspect(st *store.Store) ([]routeplan.UpstreamCandidat
 			SupportsResponses:         caps.responses,
 			SupportsAnthropicMessages: caps.anthropicMessages,
 			SupportsToolCalling:       caps.toolCalling,
+			ModelCapabilities:         modelCapsByChannel[channel.ID],
 		})
 	}
 	return out, nil
@@ -3847,13 +3872,27 @@ func upstreamCapabilitiesFromChannel(channel store.ChannelConfigRecord) inspectC
 	return caps
 }
 
-func applyChannelModelCapabilities(caps *inspectCapabilities, model store.ChannelModelRecord) {
-	if model.SupportsChatCompletions != nil {
-		caps.chatCompletions = *model.SupportsChatCompletions != 0
+// inspectModelCapabilities converts a channel model profile's capability
+// columns into the per-model overrides the route planner understands. Models
+// without any declared capability are reported as absent so the planner keeps
+// using the channel-level flags.
+func inspectModelCapabilities(model store.ChannelModelRecord) (routeplan.ModelCapabilities, bool) {
+	caps := routeplan.ModelCapabilities{
+		SupportsChatCompletions: inspectCapabilityBool(model.SupportsChatCompletions),
+		SupportsResponses:       inspectCapabilityBool(model.SupportsResponses),
 	}
-	if model.SupportsResponses != nil {
-		caps.responses = *model.SupportsResponses != 0
+	if caps.SupportsChatCompletions == nil && caps.SupportsResponses == nil {
+		return routeplan.ModelCapabilities{}, false
 	}
+	return caps, true
+}
+
+func inspectCapabilityBool(value *int) *bool {
+	if value == nil {
+		return nil
+	}
+	enabled := *value != 0
+	return &enabled
 }
 
 func parseBoolQuery(value string, fallback bool) bool {
@@ -3865,20 +3904,6 @@ func parseBoolQuery(value string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
-}
-
-func routerReloadAPIHandlerUncommitted(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.NotFound(w, r)
-			return
-		}
-		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	}
 }
 
 func reloadRouterFromChannels(rtr *router.Router, channelService *channel.Service) error {

@@ -360,8 +360,10 @@ func (a *responsesChatCompletionsAdapter) recordUpstreamExchange(ctx context.Con
 }
 
 func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Request, body []byte) {
-	if h.responsesHandler == nil {
-		http.NotFound(w, r)
+	localHandler, err := h.localResponsesHandler()
+	if err != nil {
+		slog.Error("Local Responses server unavailable", "path", r.URL.Path, "err", err)
+		http.Error(w, "Local Responses server unavailable: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
@@ -377,12 +379,12 @@ func (h *Handler) serveLocalResponsesWithBody(w http.ResponseWriter, r *http.Req
 	entryRecorder, err := h.prepareLocalResponsesEntryRecording(r, body, localReq.URL.Path)
 	if err != nil {
 		slog.Error("Failed to prepare local Responses entry recording", "path", r.URL.Path, "err", err)
-		h.responsesHandler.ServeHTTP(w, localReq)
+		localHandler.ServeHTTP(w, localReq)
 		return
 	}
 
 	tee := newResponsesEntryRecordingResponseWriter(w, entryRecorder)
-	h.responsesHandler.ServeHTTP(tee, localReq)
+	localHandler.ServeHTTP(tee, localReq)
 	tee.finalize()
 }
 

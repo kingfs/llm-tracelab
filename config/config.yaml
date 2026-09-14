@@ -21,8 +21,13 @@ database:
 trace:
   output_dir: "./data/traces"
 
+# The local Responses execution mode is always available: /v1/responses is
+# served by a native Responses upstream when one serves the model, and by the
+# local Responses server over a chat completions upstream otherwise. To opt out
+# of local translation, set responses_strategy to "native_only" in the Monitor
+# Routing settings (stored in the application DB under the app_settings key
+# routing.settings, not in this file). The former enabled switch was removed.
 responses_server:
-  enabled: true
   default_model: ""
   force_store: true
   # Image inputs are commonly sent as base64 data URLs. Keep this above the
@@ -65,7 +70,6 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-    startup_policy: "best_effort"
   selection:
     policy: "p2c"
     epsilon: 0.02

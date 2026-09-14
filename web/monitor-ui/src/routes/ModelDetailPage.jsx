@@ -8,7 +8,7 @@ import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, patchJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import {
-  buildChannelLink,
+  buildProviderLink,
   formatCount,
   formatDateTime,
   formatTime,
@@ -141,7 +141,7 @@ export function ModelDetailPage() {
 function ModelChannelRow({ item, windowValue, t }) {
   const summary = item.summary || {};
   return (
-    <Link className="channel-model-row" to={buildChannelLink(item.channel_id, windowValue)}>
+    <Link className="channel-model-row" to={buildProviderLink(item.channel_id, windowValue)}>
       <div>
         <strong>{item.channel_id}</strong>
         <span>{item.source || "unknown"}</span>
@@ -178,8 +178,8 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
       context_window: suggestion.context_window ? String(suggestion.context_window) : current.context_window,
       max_output_tokens: suggestion.max_output_tokens ? String(suggestion.max_output_tokens) : current.max_output_tokens,
       compact_history_item_threshold: current.compact_history_item_threshold || "20",
-      supports_chat_completions: Boolean(suggestion.supports_chat_completions),
-      supports_embeddings: Boolean(suggestion.supports_embeddings),
+      supports_chat_completions: suggestion.supports_chat_completions ? "on" : "off",
+      supports_embeddings: suggestion.supports_embeddings ? "on" : "off",
       profile_source: "go-llm-specs",
       profile_adoption_status: current.profile_adoption_status || "adopted",
     }));
@@ -192,7 +192,7 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
     setStatus("");
     try {
       const payload = modelConfigPayload(form);
-      const updated = await patchJSON(apiPaths.channelModel(item.channel_id, model), payload);
+      const updated = await patchJSON(apiPaths.providerModel(item.channel_id, model), payload);
       setForm(modelConfigFormFromItem({ ...item, ...updated }));
       setStatus(t("models.saved"));
     } catch (error) {
@@ -251,9 +251,30 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
       </div>
       <div className="model-capability-toggles">
         <label><input type="checkbox" checked={form.enabled} onChange={(event) => update("enabled", event.target.checked)} />{t("overview.enabled")}</label>
-        <label><input type="checkbox" checked={form.supports_responses} onChange={(event) => update("supports_responses", event.target.checked)} />Responses</label>
-        <label><input type="checkbox" checked={form.supports_chat_completions} onChange={(event) => update("supports_chat_completions", event.target.checked)} />Chat Completions</label>
-        <label><input type="checkbox" checked={form.supports_embeddings} onChange={(event) => update("supports_embeddings", event.target.checked)} />Embeddings</label>
+        <label>
+          <span>Responses</span>
+          <select value={form.supports_responses} onChange={(event) => update("supports_responses", event.target.value)}>
+            <option value="">{t("models.capabilityInherit")}</option>
+            <option value="on">{t("models.capabilitySupported")}</option>
+            <option value="off">{t("models.capabilityUnsupported")}</option>
+          </select>
+        </label>
+        <label>
+          <span>Chat Completions</span>
+          <select value={form.supports_chat_completions} onChange={(event) => update("supports_chat_completions", event.target.value)}>
+            <option value="">{t("models.capabilityInherit")}</option>
+            <option value="on">{t("models.capabilitySupported")}</option>
+            <option value="off">{t("models.capabilityUnsupported")}</option>
+          </select>
+        </label>
+        <label>
+          <span>Embeddings</span>
+          <select value={form.supports_embeddings} onChange={(event) => update("supports_embeddings", event.target.value)}>
+            <option value="">{t("models.capabilityInherit")}</option>
+            <option value="on">{t("models.capabilitySupported")}</option>
+            <option value="off">{t("models.capabilityUnsupported")}</option>
+          </select>
+        </label>
       </div>
       {status ? <div className="model-config-status">{status}</div> : null}
     </form>
@@ -264,9 +285,9 @@ function modelConfigFormFromItem(item) {
   return {
     display_name: item.display_name || "",
     enabled: Boolean(item.enabled),
-    supports_responses: item.supports_responses !== false,
-    supports_chat_completions: item.supports_chat_completions !== false,
-    supports_embeddings: Boolean(item.supports_embeddings),
+    supports_responses: capabilityFormValue(item.supports_responses),
+    supports_chat_completions: capabilityFormValue(item.supports_chat_completions),
+    supports_embeddings: capabilityFormValue(item.supports_embeddings),
     context_window: item.context_window ? String(item.context_window) : "",
     max_output_tokens: item.max_output_tokens ? String(item.max_output_tokens) : "",
     compact_history_item_threshold: item.compact_history_item_threshold ? String(item.compact_history_item_threshold) : "",
@@ -280,9 +301,9 @@ function modelConfigPayload(form) {
   return {
     display_name: form.display_name,
     enabled: form.enabled,
-    supports_responses: form.supports_responses,
-    supports_chat_completions: form.supports_chat_completions,
-    supports_embeddings: form.supports_embeddings,
+    supports_responses: capabilityPayloadValue(form.supports_responses),
+    supports_chat_completions: capabilityPayloadValue(form.supports_chat_completions),
+    supports_embeddings: capabilityPayloadValue(form.supports_embeddings),
     context_window: intOrZero(form.context_window),
     max_output_tokens: intOrZero(form.max_output_tokens),
     compact_history_item_threshold: intOrZero(form.compact_history_item_threshold),
@@ -290,6 +311,29 @@ function modelConfigPayload(form) {
     profile_source: form.profile_source || "manual",
     profile_adoption_status: form.profile_adoption_status,
   };
+}
+
+// The per-model capability columns are tri-state: unset means "inherit the
+// channel-level capabilities", so the form keeps an explicit "inherit" option
+// instead of defaulting an unset column to a boolean and pinning it on save.
+function capabilityFormValue(value) {
+  if (value === true) {
+    return "on";
+  }
+  if (value === false) {
+    return "off";
+  }
+  return "";
+}
+
+function capabilityPayloadValue(value) {
+  if (value === "on") {
+    return true;
+  }
+  if (value === "off") {
+    return false;
+  }
+  return null;
 }
 
 function intOrZero(value) {

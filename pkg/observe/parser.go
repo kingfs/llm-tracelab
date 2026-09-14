@@ -62,14 +62,6 @@ func (r *Registry) Register(parser Parser) {
 	r.parsers = append(r.parsers, parser)
 }
 
-func (r *Registry) Parsers() []Parser {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]Parser, len(r.parsers))
-	copy(out, r.parsers)
-	return out
-}
-
 func (r *Registry) Select(input ParseInput) (Parser, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

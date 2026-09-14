@@ -89,7 +89,6 @@ type modelsCodexDiagnostics struct {
 	ModelReasoningEffortSource        string                      `json:"model_reasoning_effort_source"`
 	CompactHistoryItemThreshold       int                         `json:"compact_history_item_threshold"`
 	CompactHistoryItemThresholdSource string                      `json:"compact_history_item_threshold_source"`
-	ResponsesServerEnabled            bool                        `json:"responses_server_enabled"`
 	DatabaseAvailable                 bool                        `json:"database_available"`
 	CatalogModelPresent               bool                        `json:"catalog_model_present"`
 	ChannelModelPresent               bool                        `json:"channel_model_present"`
@@ -277,9 +276,6 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 	match := effectiveModelsProfileMatch(model, explicitMatch, cfg.ResponsesAdoptChannelModelProfilesEnabled(), adoptionReport)
 	profile := match.Profile
 	warnings := make([]string, 0, 4)
-	if !cfg.ResponsesServerEnabled() {
-		warnings = append(warnings, "responses_server.enabled is false; this is a configuration suggestion only until server-mode is enabled")
-	}
 	if !match.Matched {
 		warnings = append(warnings, fmt.Sprintf("no responses_server.model_profiles entry matched model %q; using zero model limits", model))
 	}
@@ -329,7 +325,6 @@ func buildModelsCodexConfigResult(cfg *appconfig.Config, model string, codexConf
 		ModelReasoningEffortSource:        reasoningEffortSource,
 		CompactHistoryItemThreshold:       historyThreshold,
 		CompactHistoryItemThresholdSource: historyThresholdSource,
-		ResponsesServerEnabled:            cfg.ResponsesServerEnabled(),
 		DatabaseAvailable:                 catalogDiagnostics.DatabaseAvailable,
 		CatalogModelPresent:               catalogDiagnostics.CatalogModelPresent,
 		ChannelModelPresent:               catalogDiagnostics.ChannelModelPresent,

@@ -272,15 +272,18 @@ func checkDoctorDatabaseMigration(cfg *appconfig.Config, checkDB bool) doctorChe
 	}
 }
 
+// checkDoctorResponsesServerBackend reports whether the local Responses
+// execution mode has an OpenAI-compatible chat-completions backend to
+// orchestrate into. The mode is always available and only used as a fallback
+// for models without a native Responses upstream, so a missing backend is a
+// warning: /v1/chat/completions and /v1/messages still work, and so does
+// /v1/responses for natively served models.
 func checkDoctorResponsesServerBackend(cfg *appconfig.Config) doctorCheck {
-	if !cfg.ResponsesServerEnabled() {
-		return doctorCheck{Name: "responses_server.backend", Status: doctorStatusPass, Message: "responses server is disabled"}
-	}
 	if err := router.ValidateLocalResponsesServerBackendConfig(cfg); err != nil {
 		return doctorCheck{
 			Name:    "responses_server.backend",
-			Status:  doctorStatusFail,
-			Message: "responses server requires an enabled OpenAI-compatible chat-completions backend",
+			Status:  doctorStatusWarn,
+			Message: "local Responses execution mode has no enabled OpenAI-compatible chat-completions backend; only natively served Responses models will work",
 			Detail: map[string]any{
 				"error":                err.Error(),
 				"router_config_source": "config-file-only",
@@ -299,7 +302,6 @@ func checkDoctorResponsesHTTPGuard(cfg *appconfig.Config) doctorCheck {
 	effectivePath := cfg.ResponsesServerPath()
 	normalizedPath, pathErr := normalizeDoctorResponsesPath(effectivePath)
 	detail := map[string]any{
-		"enabled":                    cfg.ResponsesServerEnabled(),
 		"responses_path":             effectivePath,
 		"responses_path_configured":  strings.TrimSpace(cfg.ResponsesServer.Path) != "",
 		"normalized_path":            normalizedPath,
@@ -315,10 +317,6 @@ func checkDoctorResponsesHTTPGuard(cfg *appconfig.Config) doctorCheck {
 		"request_body_guard_source":  "internal/responses/httpapi.WithMaxBodyBytes",
 		"entrypoint_normalizer":      "internal/proxy.normalizeClientEntrypoint",
 		"auth_database_status_check": "not_opened",
-	}
-	if !cfg.ResponsesServerEnabled() {
-		detail["skipped_reason"] = "responses_server.enabled is false"
-		return doctorCheck{Name: "responses_server.http_guard", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
 	}
 	if pathErr != nil {
 		detail["error"] = pathErr.Error()
@@ -500,17 +498,13 @@ func httpPathsOverlap(a string, b string) bool {
 
 func checkDoctorResponsesDefaultModel(cfg *appconfig.Config) doctorCheck {
 	detail := map[string]any{
-		"enabled":       cfg.ResponsesServerEnabled(),
 		"default_model": cfg.ResponsesDefaultModel(),
-	}
-	if !cfg.ResponsesServerEnabled() {
-		return doctorCheck{Name: "responses_server.default_model", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
 	}
 	if cfg.ResponsesDefaultModel() == "" {
 		return doctorCheck{
 			Name:    "responses_server.default_model",
 			Status:  doctorStatusWarn,
-			Message: "responses server is enabled but responses_server.default_model is empty",
+			Message: "responses_server.default_model is empty; requests that omit a model fall back to upstream selection instead of a Responses default",
 			Detail:  detail,
 		}
 	}
@@ -520,7 +514,6 @@ func checkDoctorResponsesDefaultModel(cfg *appconfig.Config) doctorCheck {
 func checkDoctorResponsesStoreReadiness(cfg *appconfig.Config) doctorCheck {
 	effectiveDriver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
 	detail := map[string]any{
-		"enabled":                   cfg.ResponsesServerEnabled(),
 		"force_store":               cfg.ResponsesForceStore(),
 		"database_driver":           effectiveDriver,
 		"database_driver_raw":       strings.TrimSpace(cfg.Database.Driver),
@@ -532,9 +525,6 @@ func checkDoctorResponsesStoreReadiness(cfg *appconfig.Config) doctorCheck {
 		"storage_role":              configInspectDatabaseStorageRole(effectiveDriver),
 		"storage_contract":          configInspectDatabaseStorageContract(effectiveDriver),
 		"status_check":              "configuration-only",
-	}
-	if !cfg.ResponsesServerEnabled() {
-		return doctorCheck{Name: "responses_server.store", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
 	}
 	switch effectiveDriver {
 	case "sqlite":
@@ -579,7 +569,6 @@ func checkDoctorResponsesStoreHealth(cfg *appconfig.Config, checkDB bool) doctor
 	driver := normalizeAuthStoreDriver(cfg.DatabaseDriver())
 	requiredTables := doctorResponsesRequiredStoreHealthTables()
 	detail := map[string]any{
-		"enabled":                   cfg.ResponsesServerEnabled(),
 		"force_store":               cfg.ResponsesForceStore(),
 		"database_driver":           driver,
 		"database_driver_raw":       strings.TrimSpace(cfg.Database.Driver),
@@ -591,15 +580,11 @@ func checkDoctorResponsesStoreHealth(cfg *appconfig.Config, checkDB bool) doctor
 		"storage_role":              configInspectDatabaseStorageRole(driver),
 		"storage_contract":          configInspectDatabaseStorageContract(driver),
 		"status_check":              appDBStatusCheckMode(checkDB),
-		"check_db_required":         !checkDB && cfg.ResponsesServerEnabled() && cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate(),
+		"check_db_required":         !checkDB && cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate(),
 		"required_semantic_tables":  append([]string(nil), doctorResponsesSemanticTables...),
 		"required_audit_tables":     append([]string(nil), doctorResponsesAuditTables...),
 		"required_settings_tables":  append([]string(nil), doctorResponsesSettingsTables...),
 		"required_tables":           requiredTables,
-	}
-	if !cfg.ResponsesServerEnabled() {
-		detail["skipped_reason"] = "responses_server.enabled is false"
-		return doctorCheck{Name: "responses_server.store_health", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
 	}
 	if !checkDB {
 		if cfg.ResponsesForceStore() && !cfg.DatabaseAutoMigrate() {
@@ -715,14 +700,10 @@ func checkDoctorResponsesPostgresTables(dsn string, requiredTables []string) ([]
 func checkDoctorResponsesModelProfiles(cfg *appconfig.Config) doctorCheck {
 	profiles := cfg.ResponsesModelProfiles()
 	detail := map[string]any{
-		"enabled":                               cfg.ResponsesServerEnabled(),
 		"auto_compact":                          cfg.ResponsesAutoCompactEnabled(),
 		"compact_history_item_threshold":        cfg.ResponsesCompactHistoryItemThreshold(),
 		"compact_history_item_threshold_config": cfg.ResponsesServer.CompactHistoryItemThreshold,
 		"model_profiles":                        len(profiles),
-	}
-	if !cfg.ResponsesServerEnabled() {
-		return doctorCheck{Name: "responses_server.model_profiles", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
 	}
 	issues := checkDoctorResponsesModelProfileIssues(cfg, profiles)
 	if len(issues.failures) > 0 {
@@ -796,12 +777,7 @@ func doctorResponsesModelProfileLabel(idx int, profile appconfig.ResponsesModelP
 func checkDoctorResponsesModelCatalogDrift(cfg *appconfig.Config) doctorCheck {
 	model := cfg.ResponsesDefaultModel()
 	detail := map[string]any{
-		"enabled": cfg.ResponsesServerEnabled(),
-		"model":   model,
-	}
-	if !cfg.ResponsesServerEnabled() {
-		detail["skipped_reason"] = "responses_server.enabled is false"
-		return doctorCheck{Name: "responses_server.model_catalog_drift", Status: doctorStatusPass, Message: "responses server is disabled", Detail: detail}
+		"model": model,
 	}
 	if strings.TrimSpace(model) == "" {
 		detail["skipped_reason"] = "responses_server.default_model is empty"
@@ -876,7 +852,6 @@ func doctorCodexConfigDriftDetail(cfg *appconfig.Config, result modelsCodexConfi
 	}
 	return map[string]any{
 		"configured":        configured,
-		"enabled":           cfg.ResponsesServerEnabled(),
 		"model":             result.Model,
 		"status":            diagnostics.Status,
 		"profile_name":      diagnostics.ProfileName,

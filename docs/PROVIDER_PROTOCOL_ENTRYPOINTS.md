@@ -51,14 +51,16 @@ These entrypoints are not cross-protocol conversion:
 
 TraceLab remains a protocol-aware pass-through recorder and router.
 
-## Implementation Plan
+## Implementation Status
 
-1. Normalize client entry prefixes before routing, recording, and forwarding.
+以下各项均已落地（对应 `internal/proxy/entrypoints.go` 与 Monitor UI）：
+
+1. 客户端入口前缀在 routing、recording、forwarding 之前归一化。
    - `/responses` -> `/v1/responses`
    - `/anthropic/messages` -> `/v1/messages`
    - `/anthropic/v1/messages` -> `/v1/messages`
    - `/anthropic/messages/count_tokens` -> `/v1/messages/count_tokens`
-2. Keep raw request bodies unchanged.
-3. Keep record/replay canonical protocol paths in `.http` files so parsers and replay stay stable.
-4. Rename Monitor UI labels from Channels to Providers while preserving `/api/channels` compatibility.
-5. Add an in-app connection guide with base URLs and curl examples for Chat Completions, Responses, and Anthropic Messages.
+2. 原始请求 body 保持原样。
+3. `.http` 文件中的 record/replay 协议路径保持规范化，parser 与 replay 因此稳定。
+4. Monitor UI 标签已从 Channels 改名为 Providers，同时保留 `/api/channels` 兼容（旧路由 `/channels` 会重定向到 `/providers`）。
+5. 已提供应用内 Connect 页面，列出 Chat Completions、Responses 和 Anthropic Messages 的 base URL 与 curl 示例。

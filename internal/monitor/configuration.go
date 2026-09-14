@@ -106,7 +106,3 @@ func providerSetupAPIHandler(st *store.Store, rtr *router.Router, svc *channel.S
 func providerProbeReportApplyAPIHandler(st *store.Store, rtr *router.Router, svc *channel.Service) http.HandlerFunc {
 	return configurationAPIHandler(st, rtr, svc, providerProbeReportApplyAPIHandlerUncommitted)
 }
-
-func routerReloadAPIHandler(st *store.Store, rtr *router.Router, svc *channel.Service) http.HandlerFunc {
-	return configurationAPIHandler(st, rtr, svc, routerReloadAPIHandlerUncommitted)
-}

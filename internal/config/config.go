@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -76,14 +79,21 @@ type UpstreamConfig struct {
 	APIType        string                     `yaml:"api_type"`
 	Mode           string                     `yaml:"mode"`
 	Capabilities   UpstreamCapabilitiesConfig `yaml:"capabilities"`
-	ProtocolFamily string                     `yaml:"protocol_family"`
-	RoutingProfile string                     `yaml:"routing_profile"`
-	APIVersion     string                     `yaml:"api_version"`
-	Deployment     string                     `yaml:"deployment"`
-	Project        string                     `yaml:"project"`
-	Location       string                     `yaml:"location"`
-	ModelResource  string                     `yaml:"model_resource"`
-	Headers        map[string]string          `yaml:"headers"`
+	// ModelCapabilities holds per-model capability overrides keyed by the
+	// client-facing model name (or one of its aliases). A non-nil field on an
+	// entry overrides the target-level api_type/capabilities for that model
+	// only; models without an entry keep the target-level behaviour. This is
+	// what lets one channel serve some models natively and others through a
+	// different protocol surface.
+	ModelCapabilities map[string]UpstreamCapabilitiesConfig `yaml:"model_capabilities"`
+	ProtocolFamily    string                                `yaml:"protocol_family"`
+	RoutingProfile    string                                `yaml:"routing_profile"`
+	APIVersion        string                                `yaml:"api_version"`
+	Deployment        string                                `yaml:"deployment"`
+	Project           string                                `yaml:"project"`
+	Location          string                                `yaml:"location"`
+	ModelResource     string                                `yaml:"model_resource"`
+	Headers           map[string]string                     `yaml:"headers"`
 }
 
 type UpstreamCapabilitiesConfig struct {
@@ -129,7 +139,6 @@ type RouterConfig struct {
 	ModelDiscovery struct {
 		Enabled         *bool         `yaml:"enabled"`
 		RefreshInterval time.Duration `yaml:"refresh_interval"`
-		StartupPolicy   string        `yaml:"startup_policy"`
 	} `yaml:"model_discovery"`
 	Selection struct {
 		Policy           string        `yaml:"policy"`
@@ -151,7 +160,6 @@ type LimitConfig struct {
 }
 
 type ResponsesServerConfig struct {
-	Enabled                     bool                            `yaml:"enabled"`
 	DefaultModel                string                          `yaml:"default_model"`
 	ForceStore                  bool                            `yaml:"force_store"`
 	MaxRequestBodyBytes         int64                           `yaml:"max_request_body_bytes"`
@@ -314,11 +322,69 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
+	warnUnknownConfigKeys(data)
 	applyEnvOverrides(&cfg)
 	if err := expandEnvRefs(&cfg); err != nil {
 		return nil, err
 	}
+	if err := validateLimits(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// validLimitScopes lists the scopes internal/proxy actually honours. An unknown
+// scope would silently disable limiting, so Load rejects it instead of ignoring it.
+var validLimitScopes = map[string]struct{}{
+	"global":       {},
+	"header":       {},
+	"channel":      {},
+	"route_target": {},
+	"credential":   {},
+}
+
+// warnUnknownConfigKeys reports YAML keys that no Config field reads.
+//
+// Loading deliberately stays non-strict so an existing deployment is not broken
+// by an extra key, but silently ignoring unknown keys is what let removed
+// options (for example responses_server.enabled or
+// router.model_discovery.startup_policy) survive in config files and docs
+// without any effect. Re-decoding with KnownFields(true) turns that drift into a
+// visible startup warning instead of silence.
+func warnUnknownConfigKeys(data []byte) {
+	for _, detail := range unknownConfigKeys(data) {
+		slog.Warn("configuration key is not read by this build and was ignored", "detail", detail)
+	}
+}
+
+// unknownConfigKeys returns one message per YAML key that no Config field reads.
+func unknownConfigKeys(data []byte) []string {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	var probe Config
+	err := decoder.Decode(&probe)
+	if err == nil {
+		return nil
+	}
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return nil
+	}
+	return typeErr.Errors
+}
+
+func validateLimits(cfg *Config) error {
+	if !cfg.Limits.Enabled {
+		return nil
+	}
+	scope := cfg.Limits.ScopeOrDefault()
+	if _, ok := validLimitScopes[scope]; !ok {
+		return fmt.Errorf("limits.scope %q is not supported; use one of global, header, channel, route_target, credential", scope)
+	}
+	if scope == "header" && strings.TrimSpace(cfg.Limits.ChannelKeyHeader) == "" {
+		return fmt.Errorf("limits.scope %q requires limits.channel_key_header", scope)
+	}
+	return nil
 }
 
 func applyEnvOverrides(cfg *Config) {
@@ -474,11 +540,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("LLM_TRACELAB_MASK_KEY"); v != "" {
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.Debug.MaskKey = parsed
-		}
-	}
-	if v := os.Getenv("LLM_TRACELAB_RESPONSES_ENABLED"); v != "" {
-		if parsed, err := strconv.ParseBool(v); err == nil {
-			cfg.ResponsesServer.Enabled = parsed
 		}
 	}
 	if v := os.Getenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"); v != "" {
@@ -784,13 +845,6 @@ func cloneCredentialConfigs(in []CredentialConfig) []CredentialConfig {
 	return out
 }
 
-func (c Config) AuthDatabasePath() string {
-	if strings.TrimSpace(c.Auth.DatabasePath) != "" {
-		return c.Auth.DatabasePath
-	}
-	return c.DatabasePath()
-}
-
 func (c Config) AuthSessionTTL() time.Duration {
 	if c.Auth.SessionTTL > 0 {
 		return c.Auth.SessionTTL
@@ -929,10 +983,6 @@ func (c Config) ProviderProbeTimeout() time.Duration {
 	return 10 * time.Second
 }
 
-func (c Config) ResponsesServerEnabled() bool {
-	return c.ResponsesServer.Enabled
-}
-
 func (c Config) ResponsesDefaultModel() string {
 	return strings.TrimSpace(c.ResponsesServer.DefaultModel)
 }
@@ -1007,10 +1057,6 @@ func (c Config) ResponsesCodexCompatConfig() ResponsesCodexCompatConfig {
 		cfg.DefaultToolChoice = value
 	}
 	return cfg
-}
-
-func (c Config) ResponsesCodexCompatEnabled() bool {
-	return c.ResponsesCodexCompatConfig().Enabled
 }
 
 func (c Config) MatchResponsesModelProfile(model string) ResponsesModelProfileMatch {

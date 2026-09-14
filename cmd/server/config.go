@@ -74,7 +74,6 @@ type configInspectTrace struct {
 }
 
 type configInspectResponses struct {
-	Enabled            bool                           `json:"enabled"`
 	Path               string                         `json:"path"`
 	DefaultModel       string                         `json:"default_model"`
 	ForceStore         bool                           `json:"force_store"`
@@ -187,7 +186,6 @@ type configInspectTraceSources struct {
 }
 
 type configInspectResponsesSources struct {
-	Enabled      string                          `json:"enabled"`
 	Path         string                          `json:"path"`
 	DefaultModel string                          `json:"default_model"`
 	CodexCompat  configInspectCodexCompatSources `json:"codex_compat"`
@@ -307,7 +305,6 @@ func buildConfigInspectResult(configPath string, cfg *appconfig.Config) configIn
 			OutputDir: cfg.TraceOutputDir(),
 		},
 		ResponsesServer: configInspectResponses{
-			Enabled:            cfg.ResponsesServerEnabled(),
 			Path:               cfg.ResponsesServerPath(),
 			DefaultModel:       cfg.ResponsesDefaultModel(),
 			ForceStore:         cfg.ResponsesForceStore(),
@@ -368,7 +365,6 @@ func buildConfigInspectSources(configPath string, cfg *appconfig.Config) configI
 			OutputDir: probe.traceOutputDirSource(cfg),
 		},
 		ResponsesServer: configInspectResponsesSources{
-			Enabled:      probe.boolFieldSource("responses_server.enabled", "LLM_TRACELAB_RESPONSES_ENABLED"),
 			Path:         probe.defaultableStringFieldSource("responses_server.path", cfg.ResponsesServer.Path, "LLM_TRACELAB_RESPONSES_PATH"),
 			DefaultModel: probe.stringFieldSource("responses_server.default_model", cfg.ResponsesDefaultModel(), "LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"),
 			CodexCompat: configInspectCodexCompatSources{
@@ -766,8 +762,7 @@ func writeConfigInspectText(w io.Writer, result configInspectResult) {
 		result.Database.StorageContract,
 	)
 	fmt.Fprintf(w, "trace: output_dir=%s\n", result.Trace.OutputDir)
-	fmt.Fprintf(w, "responses_server: enabled=%t path=%s default_model=%s max_body=%d auto_compact=%t profiles=%d executors_enabled=%t\n",
-		result.ResponsesServer.Enabled,
+	fmt.Fprintf(w, "responses_server: path=%s default_model=%s max_body=%d auto_compact=%t profiles=%d executors_enabled=%t\n",
 		result.ResponsesServer.Path,
 		result.ResponsesServer.DefaultModel,
 		result.ResponsesServer.MaxBody,

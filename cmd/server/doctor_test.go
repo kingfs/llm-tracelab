@@ -79,14 +79,13 @@ upstream:
 	}
 }
 
-func TestDoctorResponsesServerMissingChatCompletionsBackendFails(t *testing.T) {
+func TestDoctorResponsesServerMissingChatCompletionsBackendWarns(t *testing.T) {
 	t.Parallel()
 
 	configPath := writeDoctorTestConfig(t, `
 server:
   port: "8080"
 responses_server:
-  enabled: true
 database:
   driver: sqlite
 trace:
@@ -99,15 +98,15 @@ upstream:
 `)
 
 	out, err := executeDoctorForTest(configPath, "--format", "json")
-	if err == nil {
-		t.Fatalf("doctor Execute() error = nil, want failure, output=%s", out)
+	if err != nil {
+		t.Fatalf("doctor Execute() error = %v, output=%s", err, out)
 	}
 	envelope := decodeDoctorEnvelopeForTest(t, out)
-	if envelope.Result.Status != doctorStatusFail || envelope.Result.Summary.Fail == 0 {
+	if envelope.Result.Status != doctorStatusWarn || envelope.Result.Summary.Warn == 0 || envelope.Result.Summary.Fail != 0 {
 		t.Fatalf("doctor summary = %+v", envelope.Result.Summary)
 	}
-	if got := doctorCheckStatusForTest(envelope, "responses_server.backend"); got != doctorStatusFail {
-		t.Fatalf("responses_server.backend status = %q, want fail", got)
+	if got := doctorCheckStatusForTest(envelope, "responses_server.backend"); got != doctorStatusWarn {
+		t.Fatalf("responses_server.backend status = %q, want warn", got)
 	}
 }
 
@@ -118,7 +117,6 @@ func TestDoctorResponsesServerMissingDefaultModelWarns(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
 database:
   driver: sqlite
 trace:
@@ -157,7 +155,6 @@ func TestDoctorResponsesServerDefaultModelPasses(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
 database:
   driver: sqlite
@@ -203,7 +200,6 @@ func TestDoctorCodexConfigDriftSkipsLocalConfigWithoutFlag(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-5
   model_profiles:
     - name: "gpt-5"
@@ -241,7 +237,6 @@ func TestDoctorCodexConfigDriftReportsMatchingLocalConfig(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   path: /v1/responses
   default_model: gpt-5
   model_profiles:
@@ -300,7 +295,6 @@ func TestDoctorCodexConfigDriftWarnsForLocalDrift(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-5
   model_profiles:
     - name: "gpt-5"
@@ -356,7 +350,6 @@ func TestDoctorCodexConfigDriftDoesNotLeakLocalSecrets(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-5
   model_profiles:
     - name: "gpt-5"
@@ -403,14 +396,13 @@ api_key = "doctor-codex-api-secret"
 	}
 }
 
-func TestDoctorResponsesHTTPGuardDisabledPasses(t *testing.T) {
+func TestDoctorResponsesHTTPGuardDefaultPasses(t *testing.T) {
 	t.Parallel()
 
 	configPath := writeDoctorTestConfig(t, `
 server:
   port: "8080"
 responses_server:
-  enabled: false
 database:
   driver: sqlite
 trace:
@@ -428,8 +420,11 @@ upstream:
 	}
 	envelope := decodeDoctorEnvelopeForTest(t, out)
 	check := doctorCheckForTest(envelope, "responses_server.http_guard")
-	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.enabled is false" {
-		t.Fatalf("responses_server.http_guard = %+v, want disabled pass", check)
+	if check.Status != doctorStatusPass || check.Detail["responses_path"] != "/v1/responses" {
+		t.Fatalf("responses_server.http_guard = %+v, want default path pass", check)
+	}
+	if _, ok := check.Detail["skipped_reason"]; ok {
+		t.Fatalf("responses_server.http_guard = %+v, want no skipped_reason", check)
 	}
 }
 
@@ -440,7 +435,6 @@ func TestDoctorResponsesHTTPGuardInvalidPathFails(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   path: v1/responses
 database:
@@ -475,7 +469,6 @@ func TestDoctorResponsesHTTPGuardTinyBodyWarns(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   max_request_body_bytes: 16
 database:
@@ -515,7 +508,6 @@ server:
 monitor:
   port: "9090"
 responses_server:
-  enabled: true
   default_model: gpt-test
   path: /v1/responses
   max_request_body_bytes: 1048576
@@ -565,7 +557,6 @@ mcp:
   enabled: true
   path: /v1/responses
 responses_server:
-  enabled: true
   default_model: gpt-test
   path: /v1/responses
 database:
@@ -594,14 +585,13 @@ upstream:
 	}
 }
 
-func TestDoctorResponsesModelCatalogDriftDisabledPasses(t *testing.T) {
+func TestDoctorResponsesModelCatalogDriftEmptyDefaultModelWarns(t *testing.T) {
 	t.Parallel()
 
 	configPath := writeDoctorTestConfig(t, `
 server:
   port: "8080"
 responses_server:
-  enabled: false
 database:
   driver: sqlite
 trace:
@@ -619,8 +609,8 @@ upstream:
 	}
 	envelope := decodeDoctorEnvelopeForTest(t, out)
 	check := doctorCheckForTest(envelope, "responses_server.model_catalog_drift")
-	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.enabled is false" {
-		t.Fatalf("responses_server.model_catalog_drift = %+v, want disabled pass", check)
+	if check.Status != doctorStatusWarn || check.Detail["skipped_reason"] != "responses_server.default_model is empty" {
+		t.Fatalf("responses_server.model_catalog_drift = %+v, want empty default model warn", check)
 	}
 }
 
@@ -631,7 +621,6 @@ func TestDoctorResponsesModelCatalogDriftDBUnavailablePasses(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   model_profiles:
     - name: gpt-test
@@ -672,7 +661,6 @@ func TestDoctorResponsesModelCatalogDriftCatalogAndChannelHitsPass(t *testing.T)
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-5
   model_profiles:
     - name: gpt-5
@@ -719,7 +707,6 @@ func TestDoctorResponsesModelCatalogDriftWarnsForProfileCatalogChannelMiss(t *te
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-5
   model_profiles:
     - name: gpt-5
@@ -761,7 +748,6 @@ func TestDoctorResponsesServerUnsupportedStoreDriverFails(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
 database:
   driver: mysql
@@ -784,14 +770,13 @@ upstream:
 	}
 }
 
-func TestDoctorResponsesStoreHealthDisabledSkips(t *testing.T) {
+func TestDoctorResponsesStoreHealthDefaultsToConfigPass(t *testing.T) {
 	t.Parallel()
 
 	configPath := writeDoctorTestConfig(t, `
 server:
   port: "8080"
 responses_server:
-  enabled: false
 database:
   driver: sqlite
 trace:
@@ -809,8 +794,11 @@ upstream:
 	}
 	envelope := decodeDoctorEnvelopeForTest(t, out)
 	check := doctorCheckForTest(envelope, "responses_server.store_health")
-	if check.Status != doctorStatusPass || check.Detail["skipped_reason"] != "responses_server.enabled is false" {
-		t.Fatalf("responses_server.store_health = %+v, want disabled pass with skipped reason", check)
+	if check.Status != doctorStatusPass || check.Detail["status_check"] != "configuration-only" {
+		t.Fatalf("responses_server.store_health = %+v, want configuration-only pass", check)
+	}
+	if _, ok := check.Detail["skipped_reason"]; ok {
+		t.Fatalf("responses_server.store_health = %+v, want no skipped_reason", check)
 	}
 }
 
@@ -821,7 +809,6 @@ func TestDoctorResponsesStoreHealthOfflineReadyPasses(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
 database:
   driver: sqlite
@@ -855,7 +842,6 @@ func TestDoctorResponsesStoreHealthOfflineForceStoreWarns(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   force_store: true
 database:
@@ -903,7 +889,6 @@ func TestDoctorResponsesStoreHealthCheckDBMissingTableFails(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
 database:
   driver: sqlite
@@ -948,7 +933,6 @@ func TestDoctorResponsesStoreHealthCheckDBSQLiteTablesPass(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   force_store: true
 database:
@@ -982,7 +966,6 @@ func TestDoctorResponsesStoreHealthCheckDBDoesNotLeakDSNSecret(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   force_store: true
 database:
@@ -1021,7 +1004,6 @@ func TestDoctorResponsesServerInvalidModelProfileRelationFails(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   default_model: gpt-test
   auto_compact: true
   model_profiles:

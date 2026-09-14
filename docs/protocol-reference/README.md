@@ -36,7 +36,4 @@ protocol-reference/
 - Keep extracted schema subsets near the raw snapshot for implementation convenience.
 - Do not treat an upstream schema as TraceLab's internal IR. TraceLab's semantic parser output remains Observation IR.
 - OpenAI-compatible providers only claim compatibility with a subset of OpenAI-style behavior; they are not automatically equivalent to the official OpenAI API.
-
-## Historical Materials
-
-The older v1 design-era protocol snapshots remain at [`../v1/reference-materials/`](../v1/reference-materials/). Those files are useful history, but this directory is the preferred entry point for current implementation work.
+- This directory is the single source of truth for upstream protocol snapshots. The older v1 design-era 2026-05-13 snapshots under `docs/v1/reference-materials/` were superseded by the dated snapshots here and have been removed.

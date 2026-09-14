@@ -133,6 +133,7 @@ func TestHandlerResponsesUsageEndToEnd(t *testing.T) {
 
 			cfg := &config.Config{}
 			cfg.Upstream.BaseURL = upstream.URL + "/v1"
+			cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 			cfg.Debug.OutputDir = outputDir
 			cfg.Debug.MaskKey = true
 
@@ -233,6 +234,7 @@ func TestHandlerResponsesEntrypointAliasRoutesToCanonicalPath(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
 	cfg.Upstream.ProviderPreset = "openai"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 
@@ -797,6 +799,7 @@ func TestHandlerAllowStaticFallbackRoutesUnknownModel(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -892,9 +895,7 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -1205,9 +1206,7 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 	defer st.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "google-genai",
@@ -1286,9 +1285,7 @@ func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(
 	defer chatServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "native-responses",
@@ -1432,7 +1429,7 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 			}))
 			defer chatServer.Close()
 
-			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{Enabled: true}}
+			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{}}
 			if tt.includeNative {
 				cfg.Upstreams = append(cfg.Upstreams, config.UpstreamTargetConfig{
 					ID:             "native-responses",
@@ -1549,7 +1546,7 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 	defer chatServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{Enabled: true},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "native-responses",
@@ -1644,9 +1641,7 @@ func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing
 	defer st.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-responses",
@@ -1683,9 +1678,7 @@ func TestHandlerResponsesServerModeAllowsChatCompletionsCompatibleUpstream(t *te
 	defer st.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -1738,9 +1731,7 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -1888,9 +1879,7 @@ func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *
 	defer close(releaseUpstream)
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -2041,9 +2030,7 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -2174,7 +2161,6 @@ func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) 
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                     true,
 			AutoCompact:                 true,
 			CompactHistoryItemThreshold: 1,
 		},
@@ -2294,9 +2280,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Tools: config.ToolsConfig{
 			WebSearch: config.WebSearchToolConfig{
 				Enabled:    true,
@@ -2466,7 +2450,6 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
 				Enabled:        true,
 				Timeout:        time.Second,
@@ -2585,7 +2568,6 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
 				Enabled: true,
 				// The helper is this test binary; race builds also wait at process exit.
@@ -2737,7 +2719,6 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                   true,
 			AdoptChannelModelProfiles: true,
 		},
 		Upstreams: []config.UpstreamTargetConfig{
@@ -2959,7 +2940,6 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                     true,
 			AutoCompact:                 true,
 			CompactHistoryItemThreshold: 1,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
@@ -3166,7 +3146,6 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                     true,
 			AutoCompact:                 true,
 			CompactHistoryItemThreshold: 1,
 		},
@@ -3369,9 +3348,7 @@ func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerResta
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -3512,9 +3489,7 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 			defer upstreamServer.Close()
 
 			cfg := &config.Config{
-				ResponsesServer: config.ResponsesServerConfig{
-					Enabled: true,
-				},
+				ResponsesServer: config.ResponsesServerConfig{},
 				Upstreams: []config.UpstreamTargetConfig{
 					{
 						ID:             "openai-chat",
@@ -3719,7 +3694,7 @@ func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 				Priority:       100,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5"},
-				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai", Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}},
 			},
 			{
 				ID:             "secondary",
@@ -3727,7 +3702,7 @@ func TestHandlerRecordsStickyRoutingEvents(t *testing.T) {
 				Priority:       90,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5"},
-				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai", Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}},
 			},
 		},
 	}
@@ -3821,6 +3796,7 @@ func TestHandlerCassetteMetadataDoesNotLeakCredentialMaterial(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1?api_key=query-secret"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 	cfg.Upstream.ApiKey = "upstream-secret-token"
 	cfg.Upstream.Headers = map[string]string{
 		"X-Api-Key":     "upstream-api-key",
@@ -3914,6 +3890,7 @@ func TestHandlerAzurePresetRoutesAndAuths(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL
 	cfg.Upstream.ProviderPreset = "azure"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 	cfg.Upstream.RoutingProfile = "azure_openai_deployment"
 	cfg.Upstream.Deployment = "gpt-4o-mini"
 	cfg.Upstream.APIVersion = "2025-03-01-preview"
@@ -4180,6 +4157,7 @@ func TestHandlerOpenAICompatiblePresetRoutesAndAuths(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Upstream.BaseURL = upstreamServer.URL + tt.baseURLPath
 			cfg.Upstream.ProviderPreset = tt.providerPreset
+			cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 			switch tt.providerPreset {
 			case "openrouter":
 				cfg.Upstream.ApiKey = "openrouter-secret"
@@ -4685,6 +4663,7 @@ func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamPrimary.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 			{
@@ -4696,6 +4675,7 @@ func TestHandlerRetryOnUpstreamModelNotFound(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamSecondary.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -4872,6 +4852,7 @@ func TestHandlerRetryOnUpstream500(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamPrimary.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 			{
@@ -4883,6 +4864,7 @@ func TestHandlerRetryOnUpstream500(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamSecondary.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -4949,6 +4931,7 @@ func TestHandlerBackoffRetriesSingleTransientUpstream(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -5028,6 +5011,7 @@ func TestHandlerRetryAfterRecordedForTransientRetry(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -5131,6 +5115,7 @@ drained:
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -5144,7 +5129,11 @@ drained:
 	if err != nil {
 		t.Fatalf("NewHandler() error = %v", err)
 	}
-	firstReq, _ := http.NewRequest(http.MethodPost, "/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	// /v1/chat/completions is a pure proxy path, so this exercises the retry
+	// queue directly. With the local Responses server always available, a
+	// /v1/responses request is resolved by the routing decision layer before
+	// the retry queue is consulted.
+	firstReq, _ := http.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}`))
 	firstReq.Header.Set("Content-Type", "application/json")
 	selection, err := handler.router.Select(firstReq)
 	if err != nil {
@@ -5155,7 +5144,7 @@ drained:
 	proxyServer := httptest.NewServer(handler)
 	defer proxyServer.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/responses", bytes.NewBufferString(`{"model":"gpt-5.5","input":"hello"}`))
+	req, _ := http.NewRequest(http.MethodPost, proxyServer.URL+"/v1/chat/completions", bytes.NewBufferString(`{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := proxyServer.Client().Do(req)
 	if err != nil {
@@ -5199,6 +5188,7 @@ func TestHandlerLocalConcurrencyLimitRecordsRejectionEvent(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 	cfg.Limits.Enabled = true
@@ -5296,6 +5286,7 @@ func TestHandlerHeaderScopedLimitDoesNotLeakHeaderValue(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 	cfg.Limits.Enabled = true
@@ -5403,6 +5394,7 @@ func TestHandlerChannelScopedLimitRecordsIdentity(t *testing.T) {
 				Upstream: config.UpstreamConfig{
 					BaseURL:        upstreamServer.URL + "/v1",
 					ProviderPreset: "openai",
+					Capabilities:   config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)},
 				},
 			},
 		},
@@ -5499,6 +5491,7 @@ func TestHandlerLocalQueueSaturationRecordsEvent(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Upstream.BaseURL = upstreamServer.URL + "/v1"
+	cfg.Upstream.Capabilities = config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}
 	cfg.Debug.OutputDir = outputDir
 	cfg.Debug.MaskKey = true
 	cfg.Limits.Enabled = true
@@ -5616,13 +5609,13 @@ func TestHandlerRetryExhaustedReturns502(t *testing.T) {
 				ID: "primary", Enabled: boolPtr(true), Priority: 100,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
-				Upstream:       config.UpstreamConfig{BaseURL: upstream1.URL + "/v1", ProviderPreset: "openai"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstream1.URL + "/v1", ProviderPreset: "openai", Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}},
 			},
 			{
 				ID: "secondary", Enabled: boolPtr(true), Priority: 90,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
-				Upstream:       config.UpstreamConfig{BaseURL: upstream2.URL + "/v1", ProviderPreset: "openai"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstream2.URL + "/v1", ProviderPreset: "openai", Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}},
 			},
 		},
 	}
@@ -5685,13 +5678,13 @@ func TestHandlerNoRetryOnClientError4xx(t *testing.T) {
 				ID: "primary", Enabled: boolPtr(true), Priority: 100,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
-				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamPrimary.URL + "/v1", ProviderPreset: "openai", Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}},
 			},
 			{
 				ID: "secondary", Enabled: boolPtr(true), Priority: 90,
 				ModelDiscovery: router.ModelDiscoveryStaticOnly,
 				StaticModels:   []string{"gpt-5.5"},
-				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai"},
+				Upstream:       config.UpstreamConfig{BaseURL: upstreamSecondary.URL + "/v1", ProviderPreset: "openai", Capabilities: config.UpstreamCapabilitiesConfig{Responses: boolPtr(true)}},
 			},
 		},
 	}

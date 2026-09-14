@@ -138,8 +138,6 @@ export function ProvidersPage() {
   );
 }
 
-export const ChannelsPage = ProvidersPage;
-
 function ProviderProbeBatchRow({ row }) {
   const { t } = useI18n();
   return (
@@ -308,7 +306,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         {error ? <p className="auth-error">{error}</p> : null}
         <div className="nav-modal-actions">
           <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
-          <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply || !form.name.trim() || !form.base_url.trim()}>{saving ? t("providers.creating") : t("providers.create")}</button>
+          <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply}>{saving ? t("providers.creating") : t("providers.create")}</button>
         </div>
       </form>
     </div>,

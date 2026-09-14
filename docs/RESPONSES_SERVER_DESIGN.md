@@ -2,17 +2,18 @@
 
 状态：Responses server 当前设计与生产边界
 日期：2026-06-23
+更新：2026-09-14 — `responses_server.enabled` 字段与 `LLM_TRACELAB_RESPONSES_ENABLED` 环境变量已彻底移除；本地 Responses execution mode 始终可用并参与每次选路，本地 runtime 改为惰性构建。
 
 本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-23 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
 
-当前 production packaging 已把默认部署样例调整为 Postgres-backed gateway：`docker-compose.yml` 提供 app + Postgres，并可通过 `search` profile 启用 SearXNG；`config/config.yaml` 默认展示 `responses_server.enabled=true`、Postgres DSN 和 OpenAI-compatible/vLLM Chat Completions upstream。部署细节见 [Production Deployment](./PRODUCTION_DEPLOYMENT.md)。这不改变本文的能力边界：本地 Responses server-mode 当前仍以 Chat Completions backend 编排实现，不表示 native Responses semantic interposition、MCP/file/code/computer-use 真实执行器 lifecycle、独立 auth migration namespace 或 root/container 级 executor 沙箱已经完成。
+当前 production packaging 已把默认部署样例调整为 Postgres-backed gateway：`docker-compose.yml` 提供 app + Postgres，并可通过 `search` profile 启用 SearXNG；`config/config.yaml` 默认展示 `responses_server` 配置块、Postgres DSN 和 OpenAI-compatible/vLLM Chat Completions upstream。部署细节见 [Production Deployment](./PRODUCTION_DEPLOYMENT.md)。这不改变本文的能力边界：本地 Responses server-mode 当前仍以 Chat Completions backend 编排实现，不表示 native Responses semantic interposition、file/code/computer-use 真实执行器 lifecycle（MCP hosted tool executor 已实现并接线）、独立 auth migration namespace 或 root/container 级 executor 沙箱已经完成。
 
 ## 已落地实现截至 2026-06-23
 
-当前已经落地的范围是可选的 `/v1/responses` 本地 server-mode，不改变默认 proxy 行为：
+当前已经落地的范围是 `/v1/responses` 的本地 server-mode。它始终可用并参与每次选路：命中 native Responses upstream 时直通代理，否则由本地 runtime 接管：
 
-- 配置：新增 `responses_server` 配置块，字段包括 `enabled`、`default_model`、`force_store`、`max_request_body_bytes`、`path`、`auto_compact`、`compact_history_item_threshold` 和 `model_profiles`。`model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和可选 `upstream_model`。默认 `enabled: false`，默认 path 为 `/v1/responses`，自动 compact 默认关闭。
-- server-mode path：当 `responses_server.enabled=true` 且请求路径等于配置的 Responses path 时，proxy handler 直接进入本地 Responses HTTP handler；非 Responses 请求仍走现有代理热路径。
+- 配置：`responses_server` 配置块字段包括 `default_model`、`force_store`、`max_request_body_bytes`、`path`、`auto_compact`、`compact_history_item_threshold` 和 `model_profiles`。`model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和可选 `upstream_model`。默认 path 为 `/v1/responses`，自动 compact 默认关闭。
+- server-mode path：请求路径等于配置的 Responses path 时，proxy handler 先做选路决策（native 直通优先，否则本地 runtime），非 Responses 请求仍走现有代理热路径。
 - Chat Completions adapter：本地 Responses runtime 会把非流式 Responses 请求映射为内部上游 `POST /v1/chat/completions` 调用，由现有 router 选择目标 OpenAI-compatible upstream。
 - cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；有 ent-backed audit store 时还会写一条 `upstream_exchanges`，把 response id、request audit、recorder request id、cassette path、route target、model、endpoint、status 和时间戳关联起来；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
 - ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
@@ -25,7 +26,7 @@
 - Stream fallback contract。auto compact 后未知/未实现 hosted 工具、非平凡 `tool_choice` 和不支持的工具组合已明确为 deferred fallback 条件：runtime 会在写出 SSE 和调用上游前返回包装的 `ErrIncrementalStreamUnsupported`，错误消息包含 fallback reason，HTTP handler 记录 `response.stream` fallback event 后转入 deferred SSE。forced hosted `web_search` 等非平凡 `tool_choice` 的 fallback 后 deferred 完成路径已有 proxy/server-mode e2e 覆盖。
 - 服务端任意 function tool 执行器。当前普通 `function` tool 已支持非流式 schema 转发、模型 `function_call` output、客户端 `function_call_output` continuation 和 requested/submitted execution events；runtime 已提供默认空 server-side function executor registry，显式注册 executor 后可自动执行同名 function 并写 started/completed/failed events。配置 `responses_server.function_executors.enabled=true` 并声明可用的 `static_response` 或 `external_command` executor 后，proxy 会注册同名受控 executor；首切策略支持 timeout、max-result-bytes 和 audit redaction。`external_command` 不使用 shell，默认不继承环境变量，通过 stdin JSON 传入 tool call，stdout 作为 tool output，stderr 只进入失败摘要并受截断上限保护；现在还支持 opt-in 的 `process.working_dir` 执行目录限制、`process.require_absolute_command` 绝对 command 校验、`process.allowed_command_dirs` command 目录 allowlist 和 `process.reject_root` root 运行拒绝。已注册 executor 遇到 `stream:true` 时不再整体退回 deferred SSE，而是支持 function arguments delta/done、executor 执行前 started 态 `response.output_item.added` tool item、成功/失败态 `response.output_item.done` tool item 和下一轮最终文本 delta，并写带 `stream=true` 的 started/completed/failed tool_call events。Monitor 已有只读 API、Audit 页面状态面板、validate-only 写入口、安全 overlay apply 持久化到 `app_settings`，以及当前进程 runtime executor registry 热更新；真实 command/output/env 仍只来自 YAML。剩余缺口是 root/container 级 executor 沙箱（轻量 process policy 已有 allowed_command_dirs/reject_root 首切）和更复杂的跨轮/混合工具 lifecycle。
 - 自动 compact workflow。当前显式 `/v1/responses/compact` 首切已落地，并已有配置化 item-count 阈值自动触发；compact v2 provenance 首切已把安全 lineage/read-model metadata 写入 compact response 的 `metadata._gateway.compact`，包含 source/compact response id、source item/window 计数、安全 source/retained item refs、retained summary boundary、summary item ids、budget/trigger 和 auto/manual 标记，不包含 raw prompt、summary 文本、function arguments 或 tool output；auto compact 的 `response.compact` `auto_triggered` execution event 会引用/摘要该 metadata provenance。匹配 `responses_server.model_profiles` 时可用 profile 的 item-count 阈值覆盖全局阈值。`upstream_model` rewrite 已首切落地：内部 Chat Completions 请求使用 profile 的上游模型名，外部 Responses `model` 仍保留客户端请求 model 或默认 model。`max_output_tokens` 会在客户端未显式传值时作为内部 Chat Completions `max_tokens` 默认值；`context_window_tokens` 会通过可注入 token estimator 触发 auto compact，默认 estimator 已通过 adapter-backed chat prompt counter 包装确定性保守计数器，adapter 失败会 fallback。HTTP provider `/tokenize` counter 已能在 profile 有 `name` 或 `pattern`、配置 `context_window_tokens`、未显式 `tokenize_counter.enabled=false`，且匹配 target 声明 `capabilities.tokenize=true` 时自动接入 proxy/runtime 装配；显式 `enabled=true` 仍可强制启用。完整 context optimization、独立 compact read model schema，以及 auto compact 后复杂 hosted/混合工具组合的真实增量 streaming 尚未完成。
-- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected/cancelled 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 17B 已接入 `capabilities.tool_calling` 路由硬约束。Stage 18A 已接入 deferred Responses SSE envelope、incremental fallback 事件和 stream started/completed events。Stage 18C 已接入内部 Chat Completions upstream cancel 传播及 cancelled audit/event/upstream_exchange 记录。Stage 19B 已接入 item-count 自动 compact trigger 和 `auto_triggered` execution event。Stage 21B 已接入 profile max output 默认值、基于 context window 的 token-budget auto compact 触发、可注入 estimator 边界、adapter-backed estimator 层和默认保守计数。Stage 20 已接入简单文本输出真实增量 Responses streaming 和 stream tool failed output item done 首切。Stage 15A 已把 upstream `api_type` / `mode` / capabilities 变成解析与路由约束，内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup。`tool_call_audits` 独立表、recorder/query API、SQLite startup schema、SQLite migration、Postgres migration、runtime web_search/function executor 双写、unsupported hosted tool rejected 写入、`audit tool-calls` CLI、Monitor `/api/responses/audit/tool-calls` 和 MCP `responses_audit_tool_calls` 已接入。HTTP provider `/tokenize` 自动选择首切、Monitor function executor validate/apply 首切、provider setup validate/apply 首切、provider setup wizard 状态编排首切、`doctor --probe-providers` 受控 provider probe、`config inspect` sources 摘要和 stream multi-tool lifecycle 顺序覆盖首切已接入；更完整 provider 配置持久化/批量 setup 工作流、完整 context optimization、未来 MCP/file/code/computer-use 真实执行器 lifecycle 尚未完成。
+- Stage 10A 已接入最小 Responses inbound request audit 写入：server-mode `POST /v1/responses` 会写 `request_audits` accepted/completed/failed/rejected/cancelled 状态。Stage 11A 已接入内部 Chat Completions cassette 的最小 `upstream_exchanges` correlation。Stage 12A 已接入 request 与内部 model_call 的最小 `execution_events` 写入。Stage 13A 已接入核心 audit 查询服务、Monitor `/api/responses/audit/trace` 和 MCP `responses_audit_trace` 工具。Stage 14A 已接入 hosted `web_search` tool_call started/completed/failed events。Stage 17A 已接入普通 function tool 非流式 continuation 和 requested/submitted events。Stage 17B 已接入 `capabilities.tool_calling` 路由硬约束。Stage 18A 已接入 deferred Responses SSE envelope、incremental fallback 事件和 stream started/completed events。Stage 18C 已接入内部 Chat Completions upstream cancel 传播及 cancelled audit/event/upstream_exchange 记录。Stage 19B 已接入 item-count 自动 compact trigger 和 `auto_triggered` execution event。Stage 21B 已接入 profile max output 默认值、基于 context window 的 token-budget auto compact 触发、可注入 estimator 边界、adapter-backed estimator 层和默认保守计数。Stage 20 已接入简单文本输出真实增量 Responses streaming 和 stream tool failed output item done 首切。Stage 15A 已把 upstream `api_type` / capabilities 变成解析与路由约束（`mode` 同批接入解析、校验和日志，但不参与路由），内部 Chat Completions 不会选择显式 Responses-native 且关闭 chat capability 的 target；Monitor UI 已有最小 Responses audit trace lookup。`tool_call_audits` 独立表、recorder/query API、SQLite startup schema、SQLite migration、Postgres migration、runtime web_search/function executor 双写、unsupported hosted tool rejected 写入、`audit tool-calls` CLI、Monitor `/api/responses/audit/tool-calls` 和 MCP `responses_audit_tool_calls` 已接入。HTTP provider `/tokenize` 自动选择首切、Monitor function executor validate/apply 首切、provider setup validate/apply 首切、provider setup wizard 状态编排首切、`doctor --probe-providers` 受控 provider probe、`config inspect` sources 摘要和 stream multi-tool lifecycle 顺序覆盖首切已接入；更完整 provider 配置持久化/批量 setup 工作流、完整 context optimization、未来 file/code/computer-use 真实执行器 lifecycle（MCP hosted tool executor 已实现并接线）尚未完成。
 - Postgres migration 生产化已作为主路径落地。当前已有 checked-in SQL，Postgres `db migrate up` 会应用版本化 SQL，application store 已拆分 open-vs-migrate，Postgres migration 覆盖 `internal/store` SQLite application raw DDL 表集，并已通过 DSN-gated 测试和 fresh DB smoke 覆盖代表路径。剩余缺口是 SQLite 应用迁移仍未版本化、独立 auth migration namespace 未完成、以及新增/更深 analytics SQL 仍需持续审计。
 - provider auto-detect；当前已有手动 `provider probe`、`doctor --probe-providers` 诊断建议，provider capability 仍需显式配置或由已有渠道/模型数据表达。
 
@@ -106,15 +107,19 @@ client
 
 ### Provider 支持 Responses 原生 endpoint
 
-当 provider capability 声明支持 native Responses endpoint 时，TraceLab 可以选择 pass-through recording 或 semantic interposition：
+当 provider capability 声明支持 native Responses endpoint 时，`/v1/responses` 走上游 native pass-through 还是本地 runtime 语义处理，由选路按模型决定：
 
-- `mode: proxy`：按现有代理路径转发 `/v1/responses` 到上游 `/v1/responses`，只做 routing、recording、解析和索引。
-- `mode: responses_server`：由 TraceLab 接管 Responses 语义。即使上游也支持 Responses，也可配置为由本地 runtime 统一处理状态、tools、audit 和 compact。
+- `mode: proxy`：描述性元数据，记录该 provider 按代理路径处理外部请求。
+- `mode: responses_server`：描述性/校验元数据，记录该 provider 的 Responses 语义由 TraceLab 本地 runtime 编排。`mode` 不再决定 native 还是本地处理。
+
+`mode` 只被解析、校验并记录，不参与任何路由决策。native-vs-local 按模型解析：显式 `channel_models.supports_responses` / `supports_chat_completions`（Monitor UI 模型详情页可编辑，YAML 等价项为 `upstream.model_capabilities`）优先于渠道级 `api_type` / `capabilities`，未声明的模型回退到渠道级行为。
 
 当前边界是：
 
-- 未开启 `responses_server.enabled` 时，native Responses target 的 `/v1/responses` 请求沿用普通 proxy 热路径，直接转发上游并写入 `.http` cassette，录制 endpoint 仍是 `/v1/responses`。
-- 开启 `responses_server.enabled` 时，配置的 Responses path 在 handler 鉴权后先进入本地 Responses HTTP handler，不再走普通 `/v1/responses` reverse proxy 路径。
+- `/v1/responses` 请求在 handler 鉴权后先进入选路决策：命中匹配模型的 native Responses upstream 时走普通 proxy 热路径，直接转发上游并写入 `.http` cassette（录制 endpoint 仍是 `/v1/responses`）；否则若存在 Chat Completions backend，则进入本地 Responses HTTP handler，不再走普通 `/v1/responses` reverse proxy 路径。
+- 本地 execution mode 没有开关：上述选路总是生效。需要禁用本地翻译时，在 Monitor 的 Routing 设置中把 Responses strategy 设为 `native_only`（写入应用库 `app_settings` 的 `routing.settings` 键，经 `PATCH /api/settings/routing`）；YAML 中没有对应的 `routing:` 配置段。
+- 本地 Responses runtime 惰性构建：`tools.web_search`、function executor、model profile、tokenize counter 等可选配置出错不再阻塞服务启动，而是在首个需要它的本地 Responses 请求上返回 502。
+- native/local 判定按模型解析：`channel_models.supports_responses` / `supports_chat_completions`（UI 模型详情页可编辑，YAML 侧为 `upstream.model_capabilities`）优先于渠道级 `api_type` / `capabilities`，未声明的模型回退到渠道级行为。
 - 本地 Responses runtime 当前通过内部 `POST /v1/chat/completions` model call 实现语义服务，因此 route target 必须是 OpenAI-compatible Chat Completions backend。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 native target 不满足该 backend 边界，即使它支持 native `/v1/responses` pass-through，也不能被 runtime 当作 Chat Completions upstream 使用。
 
 当前已先落地 `responses_server` + OpenAI-compatible Chat Completions 上游链路；native Responses pass-through 沿用普通代理路径，native Responses 的完整 semantic interposition 仍未实现。
@@ -152,7 +157,7 @@ client
 
 ## Provider API Surface 配置
 
-Provider 配置已经从“协议族 + routing profile”扩展到“协议族 + API 类型 + 运行模式 + 能力 + 模型画像”。当前代码已解析 `api_type`、`mode` 和基础 `capabilities`，并在路由选择时把 Chat Completions endpoint 的 API surface 当作 hard constraint。
+Provider 配置已经从“协议族 + routing profile”扩展到“协议族 + API 类型 + 运行模式 + 能力 + 模型画像”。当前代码已解析 `api_type`、`mode` 和基础 `capabilities`；其中 `mode` 仅解析、校验并记录日志，不参与路由，路由选择把 Chat Completions endpoint 的 API surface 当作 hard constraint。
 
 当前字段：
 
@@ -163,7 +168,7 @@ providers:
     base_url: http://127.0.0.1:8000/v1
     protocol_family: openai_compatible
     api_type: chat_completions
-    mode: responses_server
+    mode: responses_server  # 仅描述/校验，不影响路由
     routing_profile: vllm_openai
     capabilities:
       chat_completions: true
@@ -177,7 +182,7 @@ providers:
 
 - `protocol_family`：wire protocol family，例如 `openai_compatible`、`anthropic_messages`、`google_genai`、`vertex_native`。
 - `api_type`：provider 对当前 route 暴露的 API surface。当前接受 `chat_completions`、`responses`、`responses_native`、`messages`、`gemini_generate_content`。默认值按协议族推断：OpenAI-compatible 为 `chat_completions`，Anthropic 为 `messages`，Google GenAI / Vertex 为 `gemini_generate_content`。
-- `mode`：TraceLab 对该 provider 的处理模式。当前接受空值、`proxy`、`record_only`、`server`、`responses_server`；空值保持历史兼容。
+- `mode`：TraceLab 对该 provider 的处理模式，仅作描述性/校验元数据，不改变路由行为。当前接受空值、`proxy`、`record_only`、`server`、`responses_server`；空值保持历史兼容。native-vs-local 由 `channel_models.supports_responses` / `supports_chat_completions`（YAML 等价项 `upstream.model_capabilities`）按模型决定，未声明的模型回退到渠道级 `api_type` / `capabilities`。
 - `capabilities`：当前代码支持 `responses`、`chat_completions`、`tool_calling`、`embeddings`、`models`、`tokenize` 布尔能力，用于 routing 和 runtime plan，不应从 provider preset 中隐式猜测所有细节。
 - `model_profiles`：provider/channel 级 profile 可表达模型上下文窗口、输出上限、compact 阈值、上游模型名映射和兼容性参数。默认 runtime/profile 事实源仍是 `responses_server.model_profiles`；model catalog 与 `channel_models` 主要参与 drift 诊断和 adoption report，不会默认覆盖 runtime budget/profile。
 - `provider/channel profile adoption`：默认 CLI/API 报告为 `report_only` / dry-run / `mutates=false`，但 schema migration、runtime opt-in assembly 和 Codex config adoption contract 已落地。`channel_models` 现在包含 `max_output_tokens`、`compact_history_item_threshold`、`upstream_model`、`profile_source` 和 `profile_adoption_status`；SQLite startup schema 与 Postgres migration 均覆盖这些字段。只有显式设置 `responses_server.adopt_channel_model_profiles=true` 时，runtime 与 `models codex-config` 才会读取 enabled channel、enabled model、`profile_adoption_status=adopted` 且未声明 `supports_chat_completions=false` 的 channel model profile；显式 `responses_server.model_profiles` 继续最高优先，多个 adopted profile 冲突时保守跳过。
@@ -210,7 +215,7 @@ Stage 6 的迁移职责需要按领域拆开：`db migrate` 是应用业务库�
 - `request_audits`：入站 Responses request envelope、client request id、headers allowlist、redaction metadata、body hash/preview，用于说明 client 请求进入 runtime 前后的审计边界。
 - `execution_events`：runtime plan、model call start/end、tool start/end、compact decision、stream lifecycle、cancel/error 等生命周期事件，用于解释一次 response 如何被编排出来。
 - `upstream_exchanges`：semantic response/request 与外部 `.http` cassette、trace id、route target 的关联，用于把 Responses runtime 状态和现有 recorder 事实源连接起来。当前最小实现只覆盖内部 Chat Completions exchange，并在 response 完成后回填 semantic `response_id`；`trace_id` 暂使用 recorder prelude 的 `meta.request_id`。
-- `tool_call_audits`：面向 hosted/server-side tool lifecycle 的可索引 read model，字段覆盖 response/request/conversation/call/tool/status/input/output/error/metadata/timestamps。当前 schema、migration、recorder、query API、CLI、Monitor/MCP 查询、web_search/function executor 双写和 unsupported hosted tool rejected 写入已有；未来 MCP/file/code/computer-use runtime execution lifecycle 尚未写入该表。
+- `tool_call_audits`：面向 hosted/server-side tool lifecycle 的可索引 read model，字段覆盖 response/request/conversation/call/tool/status/input/output/error/metadata/timestamps。当前 schema、migration、recorder、query API、CLI、Monitor/MCP 查询、web_search/function executor/MCP hosted tool 双写和 unsupported hosted tool rejected 写入已有；未来 file/code/computer-use runtime execution lifecycle 尚未写入该表。
 
 Stage 10 后续 audit 接入顺序建议：
 
@@ -281,7 +286,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 验收：
 
 - 文档覆盖现状不变量、目标上下文、responses-gateway 吸收映射、server mode、provider 配置、存储、record/replay 和阶段计划。
-- 文档检查通过 `rtk git diff --check`。
+- 文档检查通过 `git diff --check`。
 
 ### Stage 1B：协议 DTO 与接口骨架（已落地）
 
@@ -351,7 +356,7 @@ Responses Runtime 的内部语义不适合全部塞进 raw HTTP cassette body，
 - Postgres semantic schema 和 migration。
 - request audit / execution events / upstream exchange 查询。
 - Monitor/MCP semantic diagnostics。
-- `responses_server` 配置和装配默认 `enabled: false`，不改变现有 proxy 热路径。
+- `responses_server` 配置与装配不改变现有非 Responses proxy 热路径；本地 execution mode 没有开关，始终参与 `/v1/responses` 选路。
 
 验收：
 

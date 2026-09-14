@@ -7,7 +7,7 @@ import { useJSON } from "../hooks/useJSON";
 import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import {
   buildRoutingDecisionSummary,
-  buildChannelLink,
+  buildProviderLink,
   buildTraceLink,
   buildTraceUpstreamHealthSummary,
   buildUpstreamLink,
@@ -189,7 +189,7 @@ export function TraceDetailPage() {
             <TokenBadge label="in" value={usage?.prompt_tokens || 0} icon="input" />
             <TokenBadge label="out" value={usage?.completion_tokens || 0} icon="output" />
             <TokenBadge label="total" value={usage?.total_tokens || 0} icon="total" accent="token-badge-strong" />
-            <TokenBadge label="cached" value={usage?.prompt_token_details?.cached_tokens || 0} icon="cached" />
+            <TokenBadge label="cached" value={usage?.prompt_tokens_details?.cached_tokens || 0} icon="cached" />
           </div>
         </div>
       </header>
@@ -292,7 +292,7 @@ export function TraceDetailPage() {
                 </div>
                 <div className="panel-head-actions">
                   {selectedChannelID ? (
-                    <Link className="ghost-button active" to={buildChannelLink(selectedChannelID)}>
+                    <Link className="ghost-button active" to={buildProviderLink(selectedChannelID)}>
                       Open Channel
                     </Link>
                   ) : null}

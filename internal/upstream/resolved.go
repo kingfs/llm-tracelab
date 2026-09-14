@@ -47,7 +47,6 @@ const (
 	ConnectivityPathOpenAIModels    = "/models"
 	ConnectivityPathAnthropicModels = "/v1/models"
 	ConnectivityPathGoogleModels    = "/v1beta/models"
-	ConnectivityPathVertexModels    = "/v1/publishers/google/models"
 	DefaultAzureAPIVersion          = "preview"
 	DefaultAnthropicAPIVersion      = "2023-06-01"
 )
@@ -88,20 +87,21 @@ var providerPresetRegistry = map[string]ProviderPresetSpec{
 }
 
 type ResolvedUpstream struct {
-	BaseURL        string
-	APIKey         string
-	ProviderPreset string
-	APIType        string
-	Mode           string
-	Capabilities   config.UpstreamCapabilitiesConfig
-	ProtocolFamily string
-	RoutingProfile string
-	APIVersion     string
-	Deployment     string
-	Project        string
-	Location       string
-	ModelResource  string
-	Headers        map[string]string
+	BaseURL           string
+	APIKey            string
+	ProviderPreset    string
+	APIType           string
+	Mode              string
+	Capabilities      config.UpstreamCapabilitiesConfig
+	ModelCapabilities map[string]config.UpstreamCapabilitiesConfig
+	ProtocolFamily    string
+	RoutingProfile    string
+	APIVersion        string
+	Deployment        string
+	Project           string
+	Location          string
+	ModelResource     string
+	Headers           map[string]string
 }
 
 type StartupDiagnostics struct {
@@ -121,20 +121,21 @@ func Resolve(cfg config.UpstreamConfig) (ResolvedUpstream, error) {
 	}
 
 	resolved := ResolvedUpstream{
-		BaseURL:        strings.TrimRight(parsed.String(), "/"),
-		APIKey:         cfg.ApiKey,
-		ProviderPreset: normalizeSlug(cfg.ProviderPreset),
-		APIType:        normalizeSlug(cfg.APIType),
-		Mode:           normalizeSlug(cfg.Mode),
-		Capabilities:   cfg.Capabilities,
-		ProtocolFamily: normalizeSlug(cfg.ProtocolFamily),
-		RoutingProfile: normalizeSlug(cfg.RoutingProfile),
-		APIVersion:     strings.TrimSpace(cfg.APIVersion),
-		Deployment:     strings.TrimSpace(cfg.Deployment),
-		Project:        strings.TrimSpace(cfg.Project),
-		Location:       strings.TrimSpace(cfg.Location),
-		ModelResource:  strings.Trim(strings.TrimSpace(cfg.ModelResource), "/"),
-		Headers:        cloneStringMap(cfg.Headers),
+		BaseURL:           strings.TrimRight(parsed.String(), "/"),
+		APIKey:            cfg.ApiKey,
+		ProviderPreset:    normalizeSlug(cfg.ProviderPreset),
+		APIType:           normalizeSlug(cfg.APIType),
+		Mode:              normalizeSlug(cfg.Mode),
+		Capabilities:      cfg.Capabilities,
+		ModelCapabilities: normalizeModelCapabilities(cfg.ModelCapabilities),
+		ProtocolFamily:    normalizeSlug(cfg.ProtocolFamily),
+		RoutingProfile:    normalizeSlug(cfg.RoutingProfile),
+		APIVersion:        strings.TrimSpace(cfg.APIVersion),
+		Deployment:        strings.TrimSpace(cfg.Deployment),
+		Project:           strings.TrimSpace(cfg.Project),
+		Location:          strings.TrimSpace(cfg.Location),
+		ModelResource:     strings.Trim(strings.TrimSpace(cfg.ModelResource), "/"),
+		Headers:           cloneStringMap(cfg.Headers),
 	}
 	applyHostProviderDefaults(&resolved, parsed)
 	if err := validatePresetSelection(resolved.ProviderPreset, resolved.ProtocolFamily); err != nil {
@@ -505,12 +506,75 @@ func (u ResolvedUpstream) SupportsToolCalling() bool {
 	return true
 }
 
-func (u ResolvedUpstream) SupportsEndpoint(endpoint string) bool {
+// ModelCapability reports the per-model override declared for the named
+// capability. The second return value is false when the model has no override,
+// in which case callers must fall back to the target-level capability.
+func (u ResolvedUpstream) ModelCapability(model string, name string) (bool, bool) {
+	if len(u.ModelCapabilities) == 0 {
+		return false, false
+	}
+	caps, ok := u.ModelCapabilities[strings.ToLower(strings.TrimSpace(model))]
+	if !ok {
+		return false, false
+	}
+	switch normalizeSlug(name) {
+	case CapabilityResponses:
+		return capabilityValue(caps.Responses)
+	case CapabilityChatCompletions:
+		return capabilityValue(caps.ChatCompletions)
+	case CapabilityToolCalling:
+		return capabilityValue(caps.ToolCalling)
+	case CapabilityEmbeddings:
+		return capabilityValue(caps.Embeddings)
+	case CapabilityModels:
+		return capabilityValue(caps.Models)
+	case CapabilityTokenize:
+		return capabilityValue(caps.Tokenize)
+	default:
+		return false, false
+	}
+}
+
+// SupportsResponsesAPIForModel resolves Responses support for one model,
+// preferring the per-model override over the target-level capability.
+func (u ResolvedUpstream) SupportsResponsesAPIForModel(model string) bool {
+	if enabled, configured := u.ModelCapability(model, CapabilityResponses); configured {
+		return enabled
+	}
+	return u.SupportsResponsesAPI()
+}
+
+// SupportsChatCompletionsAPIForModel resolves Chat Completions support for one
+// model, preferring the per-model override over the target-level capability.
+func (u ResolvedUpstream) SupportsChatCompletionsAPIForModel(model string) bool {
+	if enabled, configured := u.ModelCapability(model, CapabilityChatCompletions); configured {
+		return enabled
+	}
+	return u.SupportsChatCompletionsAPI()
+}
+
+// SupportsToolCallingForModel resolves tool-calling support for one model,
+// preferring the per-model override over the target-level capability.
+func (u ResolvedUpstream) SupportsToolCallingForModel(model string) bool {
+	if enabled, configured := u.ModelCapability(model, CapabilityToolCalling); configured {
+		return enabled
+	}
+	return u.SupportsToolCalling()
+}
+
+// SupportsEndpointForModel reports whether the target can serve one API surface
+// for a specific model.
+//
+// The Responses path is served either natively or, when the target is a Chat
+// Completions backend, through the local Responses execution mode. Which of the
+// two applies for a given model is decided by the per-request routing decision,
+// not here; this method only answers whether the model can be served at all.
+func (u ResolvedUpstream) SupportsEndpointForModel(endpoint string, model string) bool {
 	switch llm.NormalizeEndpoint(endpoint) {
 	case "/v1/chat/completions":
-		return u.SupportsChatCompletionsAPI()
+		return u.SupportsChatCompletionsAPIForModel(model)
 	case "/v1/responses":
-		return u.SupportsResponsesAPI() || u.APIType == APITypeChatCompletions
+		return u.SupportsResponsesAPIForModel(model) || u.SupportsChatCompletionsAPIForModel(model)
 	default:
 		return true
 	}
@@ -622,6 +686,26 @@ func cloneStringMap(input map[string]string) map[string]string {
 	out := make(map[string]string, len(input))
 	for key, value := range input {
 		out[key] = value
+	}
+	return out
+}
+
+// normalizeModelCapabilities lowercases and trims the per-model capability keys
+// so lookups by client-facing model name or alias are case-insensitive.
+func normalizeModelCapabilities(input map[string]config.UpstreamCapabilitiesConfig) map[string]config.UpstreamCapabilitiesConfig {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make(map[string]config.UpstreamCapabilitiesConfig, len(input))
+	for key, value := range input {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "" {
+			continue
+		}
+		out[normalized] = value
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

@@ -21,10 +21,6 @@ import (
 	"github.com/kingfs/llm-tracelab/pkg/recordfile"
 )
 
-const (
-	HeaderLen = recordfile.LegacyHeaderLen
-)
-
 type PromptTokenDetails = recordfile.PromptTokenDetails
 type UsageInfo = recordfile.UsageInfo
 type LayoutInfo = recordfile.LayoutInfo
@@ -278,9 +274,5 @@ func (r *Recorder) UpdateLogFile(info *LogInfo) error {
 		}
 	}
 
-	return nil
-}
-
-func (r *Recorder) WriteMetaFile(path string, meta MetaData) error {
 	return nil
 }

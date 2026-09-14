@@ -745,6 +745,115 @@ func TestRuntimeTargetsProjectsChannelScopedModelAliases(t *testing.T) {
 	}
 }
 
+func TestRuntimeTargetsProjectsPerModelCapabilities(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "mixed",
+		Name:           "Mixed",
+		BaseURL:        "https://mixed.example.com/v1",
+		ProviderPreset: "openai",
+		APIType:        "responses_native",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	yes := 1
+	no := 0
+	if err := st.ReplaceChannelModels("mixed", []store.ChannelModelRecord{
+		{Model: "gpt-native", Source: "manual", Enabled: true, SupportsResponses: &yes, SupportsChatCompletions: &no},
+		{Model: "gpt-chat", Source: "manual", Enabled: true, SupportsResponses: &no, SupportsChatCompletions: &yes},
+		{Model: "gpt-plain", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+	if _, err := st.UpsertModelAlias(store.ModelAliasRecord{Alias: "native-alias", TargetModel: "gpt-native", Enabled: true}); err != nil {
+		t.Fatalf("UpsertModelAlias() error = %v", err)
+	}
+
+	targets, err := NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	caps := targets[0].Upstream.ModelCapabilities
+
+	native, ok := caps["gpt-native"]
+	if !ok || native.Responses == nil || !*native.Responses || native.ChatCompletions == nil || *native.ChatCompletions {
+		t.Fatalf("gpt-native capabilities = %+v, want responses=true chat=false", native)
+	}
+	chat, ok := caps["gpt-chat"]
+	if !ok || chat.Responses == nil || *chat.Responses || chat.ChatCompletions == nil || !*chat.ChatCompletions {
+		t.Fatalf("gpt-chat capabilities = %+v, want responses=false chat=true", chat)
+	}
+	alias, ok := caps["native-alias"]
+	if !ok || alias.Responses == nil || !*alias.Responses {
+		t.Fatalf("native-alias capabilities = %+v, want the gpt-native override", alias)
+	}
+	if _, ok := caps["gpt-plain"]; ok {
+		t.Fatalf("gpt-plain must not carry an override, got %+v", caps["gpt-plain"])
+	}
+}
+
+func TestBootstrapFromConfigImportsPerModelCapabilities(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	enabled := true
+	responsesDisabled := false
+	chatEnabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{
+			{
+				ID:             "mixed",
+				Enabled:        &enabled,
+				ModelDiscovery: "static_only",
+				StaticModels:   []string{"gpt-native", "gpt-chat"},
+				Upstream: config.UpstreamConfig{
+					BaseURL:        "https://api.example.com/v1",
+					ProviderPreset: "openai",
+					APIType:        "responses_native",
+					Mode:           "proxy",
+					ModelCapabilities: map[string]config.UpstreamCapabilitiesConfig{
+						"gpt-chat": {Responses: &responsesDisabled, ChatCompletions: &chatEnabled},
+					},
+				},
+			},
+		},
+	}
+
+	svc := NewService(st)
+	if _, err := svc.BootstrapFromConfig(cfg); err != nil {
+		t.Fatalf("BootstrapFromConfig() error = %v", err)
+	}
+
+	targets, err := svc.RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("len(targets) = %d, want 1", len(targets))
+	}
+	caps := targets[0].Upstream.ModelCapabilities
+	chat, ok := caps["gpt-chat"]
+	if !ok || chat.Responses == nil || *chat.Responses || chat.ChatCompletions == nil || !*chat.ChatCompletions {
+		t.Fatalf("gpt-chat capabilities = %+v, want responses=false chat=true", chat)
+	}
+	if _, ok := caps["gpt-native"]; ok {
+		t.Fatalf("gpt-native must not carry an override, got %+v", caps["gpt-native"])
+	}
+}
+
 func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"new"},{"id":"enabled"},{"id":"disabled"}]}`))

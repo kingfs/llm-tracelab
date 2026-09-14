@@ -516,11 +516,8 @@ limits:
 	}
 }
 
-func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
+func TestResponsesServerConfigDefaults(t *testing.T) {
 	cfg := Config{}
-	if cfg.ResponsesServerEnabled() {
-		t.Fatalf("ResponsesServerEnabled() = true, want false")
-	}
 	if cfg.ResponsesDefaultModel() != "" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want empty", cfg.ResponsesDefaultModel())
 	}
@@ -578,7 +575,6 @@ func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
 	}
 	path := writeTempConfig(t, fmt.Sprintf(`
 responses_server:
-  enabled: true
   default_model: "qwen3"
   force_store: true
   max_request_body_bytes: 1048576
@@ -639,9 +635,6 @@ responses_server:
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
-	}
-	if !cfg.ResponsesServerEnabled() {
-		t.Fatalf("ResponsesServerEnabled() = false, want true")
 	}
 	if got := cfg.ResponsesDefaultModel(); got != "qwen3" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want qwen3", got)
@@ -939,7 +932,9 @@ func TestResponsesFunctionExecutorsConfigValidatesAllowedCommandDirs(t *testing.
 }
 
 func TestResponsesServerEnvOverrides(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_RESPONSES_ENABLED", "true")
+	// LLM_TRACELAB_RESPONSES_ENABLED no longer exists: the local Responses
+	// execution mode is always available, so the legacy variable is ignored.
+	t.Setenv("LLM_TRACELAB_RESPONSES_ENABLED", "false")
 	t.Setenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL", "env-model")
 	t.Setenv("LLM_TRACELAB_RESPONSES_FORCE_STORE", "true")
 	t.Setenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES", "2097152")
@@ -962,9 +957,6 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	cfg.ResponsesServer.MaxRequestBodyBytes = 1024
 	applyEnvOverrides(&cfg)
 
-	if !cfg.ResponsesServerEnabled() {
-		t.Fatalf("ResponsesServerEnabled() = false, want true")
-	}
 	if got := cfg.ResponsesDefaultModel(); got != "env-model" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want env-model", got)
 	}
@@ -1241,5 +1233,139 @@ func clearMCPToolsEnv(t *testing.T) {
 		"LLM_TRACELAB_TOOLS_MCP_MAX_RESULT_BYTES",
 	} {
 		t.Setenv(name, "")
+	}
+}
+
+func TestUpstreamModelCapabilitiesLoadFromYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+upstreams:
+  - id: "mixed"
+    enabled: true
+    model_discovery: "static_only"
+    static_models:
+      - "model-native"
+      - "model-chat"
+    upstream:
+      base_url: "https://api.example.com/v1"
+      provider_preset: "openai"
+      api_type: "responses_native"
+      capabilities:
+        responses: true
+        chat_completions: false
+      model_capabilities:
+        model-native:
+          responses: true
+          chat_completions: false
+        "MODEL-Chat":
+          responses: false
+          chat_completions: true
+        model-tools:
+          tool_calling: false
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Upstreams) != 1 {
+		t.Fatalf("len(Upstreams) = %d, want 1", len(cfg.Upstreams))
+	}
+	modelCaps := cfg.Upstreams[0].Upstream.ModelCapabilities
+	if len(modelCaps) != 3 {
+		t.Fatalf("len(ModelCapabilities) = %d, want 3 (%v)", len(modelCaps), modelCaps)
+	}
+	native, ok := modelCaps["model-native"]
+	if !ok || native.Responses == nil || !*native.Responses || native.ChatCompletions == nil || *native.ChatCompletions {
+		t.Fatalf("model-native = %+v, want responses=true chat=false", native)
+	}
+	chat, ok := modelCaps["MODEL-Chat"]
+	if !ok || chat.Responses == nil || *chat.Responses || chat.ChatCompletions == nil || !*chat.ChatCompletions {
+		t.Fatalf("MODEL-Chat = %+v, want responses=false chat=true", chat)
+	}
+	tools, ok := modelCaps["model-tools"]
+	if !ok || tools.ToolCalling == nil || *tools.ToolCalling {
+		t.Fatalf("model-tools = %+v, want tool_calling=false", tools)
+	}
+	if tools.Responses != nil || tools.ChatCompletions != nil {
+		t.Fatalf("model-tools must leave undeclared flags nil, got %+v", tools)
+	}
+}
+
+func TestUnknownConfigKeysReportsRemovedOptions(t *testing.T) {
+	t.Parallel()
+
+	// These two keys were documented and shipped for a long time but no Config
+	// field reads them; without this check a config file keeps loading and the
+	// option stays silently inert.
+	data := []byte(`
+responses_server:
+  enabled: true
+router:
+  model_discovery:
+    startup_policy: "best_effort"
+`)
+
+	got := unknownConfigKeys(data)
+	if len(got) != 2 {
+		t.Fatalf("unknownConfigKeys() = %v, want 2 messages", got)
+	}
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"enabled", "startup_policy"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("unknownConfigKeys() = %v, want a message mentioning %q", got, want)
+		}
+	}
+}
+
+func TestUnknownConfigKeysAllowsKnownOptions(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`
+server:
+  port: "8080"
+responses_server:
+  default_model: "gpt-5"
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: "5m"
+  selection:
+    policy: "weighted"
+limits:
+  enabled: true
+  scope: "header"
+  channel_key_header: "X-Channel-Key"
+`)
+
+	if got := unknownConfigKeys(data); len(got) != 0 {
+		t.Fatalf("unknownConfigKeys() = %v, want none", got)
+	}
+}
+
+// TestShippedConfigsHaveNoUnknownKeys guards the tracked config files against
+// re-introducing keys that no longer exist in the Config struct.
+func TestShippedConfigsHaveNoUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	examples, err := filepath.Glob(filepath.Join("..", "..", "config", "examples", "*.yaml"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	paths := append([]string{filepath.Join("..", "..", "config", "config.yaml")}, examples...)
+	if len(paths) < 2 {
+		t.Fatalf("expected the shipped config plus examples, got %v", paths)
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		if got := unknownConfigKeys(data); len(got) != 0 {
+			t.Errorf("%s declares config keys this build ignores: %v", path, got)
+		}
 	}
 }

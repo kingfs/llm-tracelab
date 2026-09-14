@@ -244,7 +244,7 @@ const (
 	SelectionFailureUnknown            = "unknown"
 )
 
-const LocalResponsesServerBackendRequiredError = "responses_server.enabled requires at least one enabled OpenAI-compatible chat completions-compatible upstream for local Responses server mode"
+const LocalResponsesServerBackendRequiredError = "local Responses execution mode requires at least one enabled OpenAI-compatible chat completions-compatible upstream"
 
 func LocalResponsesServerBackendRequired() error {
 	return errors.New(LocalResponsesServerBackendRequiredError)
@@ -576,21 +576,6 @@ func (r *Router) Targets() []*Target {
 	return append([]*Target(nil), r.targets...)
 }
 
-func (r *Router) HasLocalResponsesServerBackend() bool {
-	if r == nil {
-		return false
-	}
-	for _, target := range r.Targets() {
-		if target == nil || !target.Enabled {
-			continue
-		}
-		if SupportsLocalResponsesServerBackend(target.Upstream) {
-			return true
-		}
-	}
-	return false
-}
-
 func ValidateLocalResponsesServerBackendConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return nil
@@ -830,7 +815,7 @@ func (r *Router) HasSelectableNativeResponsesCandidateWithBody(req *http.Request
 	candidates := r.candidatesForRequest(rawPath, model, features)
 	now := time.Now()
 	for _, candidate := range candidates {
-		if candidate.Upstream.SupportsResponsesAPI() && candidate.canSelect(now, model) {
+		if candidate.Upstream.SupportsResponsesAPIForModel(model) && candidate.canSelect(now, model) {
 			return true
 		}
 	}
@@ -849,10 +834,10 @@ func (r *Router) HasNativeResponsesTargetWithBody(req *http.Request, body []byte
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, target := range r.targets {
-		if target == nil || !target.Upstream.SupportsResponsesAPI() {
+		if target == nil || !target.Upstream.SupportsResponsesAPIForModel(features.ModelName) {
 			continue
 		}
-		if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+		if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
 			return true
 		}
 	}
@@ -1138,7 +1123,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 	if model == ModelDiscoveryListModels {
 		candidates := make([]*Target, 0, len(r.targets))
 		for _, target := range r.targets {
-			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -1151,7 +1136,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 			if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
 				continue
 			}
-			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
+			if supportsPath(target, rawPath, features) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -1168,7 +1153,7 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 		if target.configuredModelsOnly && model != "" && !target.allowUnknownModels {
 			continue
 		}
-		if !supportsPath(target, rawPath) {
+		if !supportsPath(target, rawPath, features) {
 			continue
 		}
 		if !supportsRequestFeatures(target, features) {
@@ -1494,7 +1479,7 @@ func (t *Target) candidateDecision(rawPath string, model string, now time.Time, 
 		Priority:       t.Priority,
 		Weight:         t.Weight,
 		HealthState:    t.healthState,
-		SupportsPath:   supportsPath(t, rawPath),
+		SupportsPath:   supportsPath(t, rawPath, features),
 		SupportsModel:  t.supportsModelLocked(model),
 		SupportsTools:  supportsRequestFeatures(t, features),
 		Selectable:     true,
@@ -1815,7 +1800,10 @@ func compareScore(a *Target, scoreA float64, b *Target, scoreB float64) int {
 	return strings.Compare(a.ID, b.ID)
 }
 
-func supportsPath(target *Target, rawPath string) bool {
+// supportsPath reports whether the target can serve rawPath for the model named
+// in features. The API-surface check is per-model so that a model which only
+// declares one protocol surface is not selected for the other one.
+func supportsPath(target *Target, rawPath string, features RequestFeatures) bool {
 	if target == nil {
 		return false
 	}
@@ -1823,22 +1811,22 @@ func supportsPath(target *Target, rawPath string) bool {
 	if !supportsProtocolFamily(target.Upstream.ProtocolFamily, semantics.Provider, semantics.Endpoint) {
 		return false
 	}
-	if !supportsAPISurface(target.Upstream, semantics.Endpoint) {
+	if !supportsAPISurface(target.Upstream, semantics.Endpoint, features.ModelName) {
 		return false
 	}
 	_, err := llm.AdapterFor(semantics.Provider, semantics.Endpoint)
 	return err == nil
 }
 
-func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string) bool {
-	return resolved.SupportsEndpoint(endpoint)
+func supportsAPISurface(resolved upstream.ResolvedUpstream, endpoint string, model string) bool {
+	return resolved.SupportsEndpointForModel(endpoint, model)
 }
 
 func supportsRequestFeatures(target *Target, features RequestFeatures) bool {
 	if target == nil {
 		return false
 	}
-	if features.HasTools && !target.Upstream.SupportsToolCalling() {
+	if features.HasTools && !target.Upstream.SupportsToolCallingForModel(features.ModelName) {
 		return false
 	}
 	return true

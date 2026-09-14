@@ -144,3 +144,64 @@ func assertNoRouteReason(t *testing.T, err error, reason string) {
 		t.Fatalf("NoRouteError reason = %q, want %q", noRoute.Reason, reason)
 	}
 }
+
+func TestPlanUsesPerModelCapabilities(t *testing.T) {
+	yes := true
+	no := false
+	upstreams := []UpstreamCandidate{
+		{
+			ID: "mixed", ChannelID: "mixed", Enabled: true,
+			Models:                  []string{"model-native", "model-chat"},
+			SupportsResponses:       true,
+			SupportsChatCompletions: false,
+			ModelCapabilities: map[string]ModelCapabilities{
+				"model-native": {SupportsResponses: &yes, SupportsChatCompletions: &no},
+				"model-chat":   {SupportsResponses: &no, SupportsChatCompletions: &yes},
+			},
+		},
+	}
+	tests := []struct {
+		name     string
+		model    string
+		wantMode ExecutionMode
+		wantEP   UpstreamEndpoint
+	}{
+		{name: "native model", model: "model-native", wantMode: ExecutionModeProxyPass, wantEP: UpstreamEndpointResponses},
+		{name: "chat-only model", model: "model-chat", wantMode: ExecutionModeResponsesServer, wantEP: UpstreamEndpointChatCompletions},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Plan(Request{
+				Entrypoint:              EntrypointResponses,
+				RequestedModel:          tt.model,
+				ResolvedModelCandidates: []ResolvedModelCandidate{{Model: tt.model}},
+			}, upstreams)
+			if err != nil {
+				t.Fatalf("Plan() error = %v", err)
+			}
+			if result.Plan.ExecutionMode != tt.wantMode || result.Plan.UpstreamEndpoint != tt.wantEP {
+				t.Fatalf("plan = %#v, want mode %s endpoint %s", result.Plan, tt.wantMode, tt.wantEP)
+			}
+		})
+	}
+
+	// An unlisted model keeps the channel-level flags.
+	result, err := Plan(Request{
+		Entrypoint:              EntrypointResponses,
+		RequestedModel:          "model-other",
+		ResolvedModelCandidates: []ResolvedModelCandidate{{Model: "model-other"}},
+	}, []UpstreamCandidate{
+		{
+			ID: "mixed", ChannelID: "mixed", Enabled: true,
+			Models:                  []string{"model-other"},
+			SupportsResponses:       true,
+			SupportsChatCompletions: false,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if result.Plan.ExecutionMode != ExecutionModeProxyPass {
+		t.Fatalf("plan = %#v, want channel-level native proxy pass", result.Plan)
+	}
+}

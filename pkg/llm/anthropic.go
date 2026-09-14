@@ -52,14 +52,13 @@ type AnthropicUsage struct {
 }
 
 type AnthropicResponse struct {
-	ID           string                  `json:"id"`
-	Type         string                  `json:"type"`
-	Role         string                  `json:"role"`
-	Model        string                  `json:"model"`
-	Content      []AnthropicContentBlock `json:"content"`
-	StopReason   string                  `json:"stop_reason"`
-	StopSequence *string                 `json:"stop_sequence"`
-	Usage        *AnthropicUsage         `json:"usage,omitempty"`
+	ID         string                  `json:"id"`
+	Type       string                  `json:"type"`
+	Role       string                  `json:"role"`
+	Model      string                  `json:"model"`
+	Content    []AnthropicContentBlock `json:"content"`
+	StopReason string                  `json:"stop_reason"`
+	Usage      *AnthropicUsage         `json:"usage,omitempty"`
 }
 
 // ---- LLMRequest -> AnthropicRequest ----

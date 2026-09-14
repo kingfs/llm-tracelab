@@ -187,15 +187,6 @@ export function buildModelLink(model, windowValue = "today") {
   return query ? `/models/${encodeURIComponent(model)}?${query}` : `/models/${encodeURIComponent(model)}`;
 }
 
-export function buildChannelLink(channelID, windowValue = "today") {
-  const params = new URLSearchParams();
-  if (windowValue && windowValue !== "today") {
-    params.set("window", windowValue);
-  }
-  const query = params.toString();
-  return query ? `/channels/${encodeURIComponent(channelID)}?${query}` : `/channels/${encodeURIComponent(channelID)}`;
-}
-
 export function buildProviderLink(providerID, windowValue = "today") {
   const params = new URLSearchParams();
   if (windowValue && windowValue !== "today") {
@@ -238,8 +229,6 @@ export function normalizeTraceTab(value = "") {
     case "raw":
       return value;
     case "timeline":
-    case "summary":
-    case "tools":
       return "conversation";
     default:
       return "conversation";

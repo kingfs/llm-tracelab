@@ -63,7 +63,14 @@ WHERE c.relkind = 'r'
     'trace_findings',
     'request_audits',
     'execution_events',
-    'upstream_exchanges'
+    'upstream_exchanges',
+    'tool_call_audits',
+    'analysis_jobs',
+    'app_settings',
+    'channel_configs',
+    'channel_models',
+    'model_catalog',
+    'model_aliases'
   )
 ORDER BY pg_total_relation_size(c.oid) DESC;
 ```
@@ -97,7 +104,14 @@ WHERE relname IN (
   'trace_findings',
   'request_audits',
   'execution_events',
-  'upstream_exchanges'
+  'upstream_exchanges',
+  'tool_call_audits',
+  'analysis_jobs',
+  'app_settings',
+  'channel_configs',
+  'channel_models',
+  'model_catalog',
+  'model_aliases'
 )
 ORDER BY n_dead_tup DESC;
 ```
@@ -124,7 +138,14 @@ WHERE s.relname IN (
   'parse_jobs',
   'system_events',
   'analysis_runs',
-  'trace_findings'
+  'trace_findings',
+  'tool_call_audits',
+  'analysis_jobs',
+  'app_settings',
+  'channel_configs',
+  'channel_models',
+  'model_catalog',
+  'model_aliases'
 )
 ORDER BY pg_relation_size(i.indexrelid) DESC, s.idx_scan ASC;
 ```

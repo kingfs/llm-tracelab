@@ -21,8 +21,10 @@ database:
 trace:
   output_dir: "./data/traces"
 
+# The local Responses execution mode is always available; to opt out of local
+# translation, set responses_strategy to "native_only" in the Monitor Routing
+# settings (application DB app_settings key "routing.settings", not a YAML key).
 responses_server:
-  enabled: true
   default_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
   force_store: true
   max_request_body_bytes: 67108864
@@ -48,7 +50,6 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-    startup_policy: "best_effort"
   selection:
     policy: "p2c"
     epsilon: 0.02

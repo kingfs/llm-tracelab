@@ -3158,6 +3158,94 @@ func TestChannelModelPatchReloadsRouter(t *testing.T) {
 	}
 }
 
+func TestChannelModelCapabilityExplicitNullClearsToInherit(t *testing.T) {
+	t.Parallel()
+
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{
+		ID:             "openai-primary",
+		Name:           "OpenAI Primary",
+		BaseURL:        "https://api.openai.com/v1",
+		ProviderPreset: "openai",
+		HeadersJSON:    "{}",
+		Enabled:        true,
+	}); err != nil {
+		t.Fatalf("UpsertChannelConfig() error = %v", err)
+	}
+	if err := st.ReplaceChannelModels("openai-primary", []store.ChannelModelRecord{
+		{Model: "gpt-5", Source: "manual", Enabled: true},
+	}); err != nil {
+		t.Fatalf("ReplaceChannelModels() error = %v", err)
+	}
+
+	targets, err := channel.NewService(st).RuntimeTargets()
+	if err != nil {
+		t.Fatalf("RuntimeTargets() error = %v", err)
+	}
+	rtr, err := router.New(&config.Config{Upstreams: targets}, st)
+	if err != nil {
+		t.Fatalf("router.New() error = %v", err)
+	}
+	if err := rtr.Initialize(); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	handler := channelDetailAPIHandler(st, rtr, channel.NewService(st))
+
+	patch := func(body string) channelModelItem {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/channels/openai-primary/models/gpt-5", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("PATCH %s status = %d, body=%s", body, rr.Code, rr.Body.String())
+		}
+		var item channelModelItem
+		if err := json.Unmarshal(rr.Body.Bytes(), &item); err != nil {
+			t.Fatalf("json.Unmarshal(%s) error = %v", body, err)
+		}
+		return item
+	}
+
+	pinned := patch(`{"supports_responses":true,"supports_chat_completions":false}`)
+	if pinned.SupportsResponses == nil || !*pinned.SupportsResponses {
+		t.Fatalf("pinned supports_responses = %v, want true", pinned.SupportsResponses)
+	}
+	if pinned.SupportsChatCompletions == nil || *pinned.SupportsChatCompletions {
+		t.Fatalf("pinned supports_chat_completions = %v, want false", pinned.SupportsChatCompletions)
+	}
+
+	// An omitted key must leave the pinned value untouched.
+	untouched := patch(`{"display_name":"GPT-5"}`)
+	if untouched.SupportsResponses == nil || !*untouched.SupportsResponses {
+		t.Fatalf("omitted supports_responses = %v, want unchanged true", untouched.SupportsResponses)
+	}
+
+	// An explicit null must clear the pin back to "inherit".
+	cleared := patch(`{"supports_responses":null,"supports_chat_completions":null}`)
+	if cleared.SupportsResponses != nil {
+		t.Fatalf("cleared supports_responses = %v, want nil (inherit)", *cleared.SupportsResponses)
+	}
+	if cleared.SupportsChatCompletions != nil {
+		t.Fatalf("cleared supports_chat_completions = %v, want nil (inherit)", *cleared.SupportsChatCompletions)
+	}
+
+	records, err := st.ListChannelModels("openai-primary", false)
+	if err != nil {
+		t.Fatalf("ListChannelModels() error = %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("ListChannelModels() returned %d records, want 1", len(records))
+	}
+	if records[0].SupportsResponses != nil || records[0].SupportsChatCompletions != nil {
+		t.Fatalf("stored capabilities = %v/%v, want nil/nil", records[0].SupportsResponses, records[0].SupportsChatCompletions)
+	}
+}
+
 func TestChannelCapabilityPatchReloadsRouter(t *testing.T) {
 	t.Parallel()
 
@@ -5453,7 +5541,7 @@ func TestRoutingSettingsAPIHandlerRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode GET response: %v", err)
 	}
-	if got.ResponsesStrategy != "prefer_local_server" || got.SelectionPolicy != router.PolicyP2C {
+	if got.ResponsesStrategy != "auto" || got.SelectionPolicy != router.PolicyP2C {
 		t.Fatalf("default settings = %+v", got)
 	}
 

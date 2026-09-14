@@ -86,6 +86,55 @@ type UpstreamCandidate struct {
 	SupportsResponses         bool
 	SupportsAnthropicMessages bool
 	SupportsToolCalling       bool
+	// ModelCapabilities overrides the support flags above for individual
+	// models. A nil field means "not declared", so the channel-level flag
+	// applies; keys are matched case-insensitively.
+	ModelCapabilities map[string]ModelCapabilities
+}
+
+// ModelCapabilities declares the protocol surfaces a single model supports on
+// its upstream channel.
+type ModelCapabilities struct {
+	SupportsChatCompletions   *bool `json:"supports_chat_completions,omitempty"`
+	SupportsResponses         *bool `json:"supports_responses,omitempty"`
+	SupportsAnthropicMessages *bool `json:"supports_anthropic_messages,omitempty"`
+	SupportsToolCalling       *bool `json:"supports_tool_calling,omitempty"`
+}
+
+func (u UpstreamCandidate) modelCapabilities(model string) (ModelCapabilities, bool) {
+	if len(u.ModelCapabilities) == 0 || strings.TrimSpace(model) == "" {
+		return ModelCapabilities{}, false
+	}
+	caps, ok := u.ModelCapabilities[strings.ToLower(strings.TrimSpace(model))]
+	return caps, ok
+}
+
+func (u UpstreamCandidate) supportsChatCompletions(model string) bool {
+	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsChatCompletions != nil {
+		return *caps.SupportsChatCompletions
+	}
+	return u.SupportsChatCompletions
+}
+
+func (u UpstreamCandidate) supportsResponses(model string) bool {
+	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsResponses != nil {
+		return *caps.SupportsResponses
+	}
+	return u.SupportsResponses
+}
+
+func (u UpstreamCandidate) supportsAnthropicMessages(model string) bool {
+	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsAnthropicMessages != nil {
+		return *caps.SupportsAnthropicMessages
+	}
+	return u.SupportsAnthropicMessages
+}
+
+func (u UpstreamCandidate) supportsToolCalling(model string) bool {
+	if caps, ok := u.modelCapabilities(model); ok && caps.SupportsToolCalling != nil {
+		return *caps.SupportsToolCalling
+	}
+	return u.SupportsToolCalling
 }
 
 type RoutePlan struct {
@@ -194,11 +243,11 @@ func planForEndpoint(req Request, upstreams []UpstreamCandidate, mode ExecutionM
 		plan := basePlanCandidate(upstream, mode, endpoint, 0)
 		if !upstream.Enabled {
 			plan.Reason = ReasonChannelNotEnabled
-		} else if !modelMatches(req, upstream, &plan) {
+		} else if matchedModel, ok := modelMatches(req, upstream, &plan); !ok {
 			plan.Reason = ReasonModelNotMatched
-		} else if !supportsEndpoint(upstream, endpoint) {
+		} else if !supportsEndpoint(upstream, endpoint, matchedModel) {
 			plan.Reason = capabilityReason
-		} else if req.HasTools && !upstream.SupportsToolCalling {
+		} else if req.HasTools && !upstream.supportsToolCalling(matchedModel) {
 			plan.Reason = "requires_tool_calling"
 		} else {
 			plan.Selectable = true
@@ -242,15 +291,15 @@ func responsesPlans(req Request, upstreams []UpstreamCandidate, mode ExecutionMo
 			plan.Reason = ReasonChannelNotEnabled
 		} else if req.RequiresLocalResponsesRuntime && mode != ExecutionModeResponsesServer {
 			plan.Reason = ReasonRequiresLocalResponsesRuntime
-		} else if !modelMatches(req, upstream, &plan) {
+		} else if matchedModel, ok := modelMatches(req, upstream, &plan); !ok {
 			plan.Reason = ReasonModelNotMatched
-		} else if !supportsEndpoint(upstream, endpoint) {
+		} else if !supportsEndpoint(upstream, endpoint, matchedModel) {
 			if endpoint == UpstreamEndpointResponses {
 				plan.Reason = ReasonRequiresResponses
 			} else {
 				plan.Reason = ReasonRequiresChatCompletions
 			}
-		} else if req.HasTools && !upstream.SupportsToolCalling {
+		} else if req.HasTools && !upstream.supportsToolCalling(matchedModel) {
 			plan.Reason = "requires_tool_calling"
 		} else {
 			plan.Selectable = true
@@ -282,9 +331,13 @@ func basePlanCandidate(upstream UpstreamCandidate, mode ExecutionMode, endpoint 
 	}
 }
 
-func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) bool {
+// modelMatches reports whether the request resolves to a model on this
+// upstream and returns the matched model name so per-model capabilities can be
+// resolved. When the request carries no resolved model candidates every model
+// is considered a match and the matched model is empty.
+func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) (string, bool) {
 	if len(req.ResolvedModelCandidates) == 0 {
-		return true
+		return "", true
 	}
 	models := map[string]struct{}{}
 	for _, model := range upstream.Models {
@@ -305,26 +358,26 @@ func modelMatches(req Request, upstream UpstreamCandidate, plan *PlanCandidate) 
 			if plan != nil {
 				plan.UpstreamModel = candidate.Model
 			}
-			return true
+			return candidate.Model, true
 		}
 		if _, ok := models[model]; ok {
 			if plan != nil {
 				plan.UpstreamModel = candidate.Model
 			}
-			return true
+			return candidate.Model, true
 		}
 	}
-	return false
+	return "", false
 }
 
-func supportsEndpoint(upstream UpstreamCandidate, endpoint UpstreamEndpoint) bool {
+func supportsEndpoint(upstream UpstreamCandidate, endpoint UpstreamEndpoint, model string) bool {
 	switch endpoint {
 	case UpstreamEndpointChatCompletions:
-		return upstream.SupportsChatCompletions
+		return upstream.supportsChatCompletions(model)
 	case UpstreamEndpointResponses:
-		return upstream.SupportsResponses
+		return upstream.supportsResponses(model)
 	case UpstreamEndpointAnthropicMessage:
-		return upstream.SupportsAnthropicMessages
+		return upstream.supportsAnthropicMessages(model)
 	default:
 		return false
 	}

@@ -11,11 +11,6 @@ import (
 	"github.com/kingfs/llm-tracelab/internal/responses/runtime"
 )
 
-// AggregateChatCompletionStream folds OpenAI-compatible Chat Completions SSE chunks into a final response.
-func AggregateChatCompletionStream(r io.Reader) (runtime.ChatCompletionResponse, error) {
-	return AggregateChatCompletionStreamWithCallback(r, nil)
-}
-
 // AggregateChatCompletionStreamWithCallback folds OpenAI-compatible Chat Completions SSE chunks into a final response,
 // calling handle as content deltas are decoded.
 func AggregateChatCompletionStreamWithCallback(r io.Reader, handle runtime.ChatStreamCallback) (runtime.ChatCompletionResponse, error) {

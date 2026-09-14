@@ -8,7 +8,7 @@
 .codex/config.toml
 ```
 
-`.codex` 已被 git 忽略，因此本地 endpoint、token 环境变量名和调试配置不会提交到仓库。
+`.codex/config.toml` 由 git 跟踪，因此不要把 token 或敏感 endpoint 写入该文件。
 
 ## 示例
 
@@ -20,13 +20,14 @@ bearer_token_env_var = "LLM_TRACELAB_MCP_TOKEN"
 
 不要把 token 直接写入该文件。
 
-如果远端部署需要认证，启动 Codex 前导出 token：
+MCP endpoint 始终要求有效的 `Authorization: Bearer <token>`，缺失或无效 token 的请求返回 401。
+启动 Codex 前导出 token：
 
 ```bash
 export LLM_TRACELAB_MCP_TOKEN='...'
 ```
 
-如果远端部署不需要认证，保持 `LLM_TRACELAB_MCP_TOKEN` 未设置即可。
+认证要求见 [MCP 使用指南](./MCP_GUIDE.md)。
 
 ## 查看本地配置
 

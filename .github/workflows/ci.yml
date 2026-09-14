@@ -39,8 +39,37 @@ jobs:
     - name: Build
       run: go build -v -o llm-tracelab ./cmd/server
 
+    - name: Check Go formatting
+      run: |
+        unformatted="$(gofmt -l ./cmd ./internal ./pkg ./unittest ./web/monitor-ui/test-fixtures)"
+        if [ -n "$unformatted" ]; then
+          echo "These files need gofmt:"
+          echo "$unformatted"
+          exit 1
+        fi
+
+    - name: Vet
+      run: go vet ./...
+
+    - name: Lint
+      uses: golangci/golangci-lint-action@v8
+      with:
+        version: v2.11.4
+
     - name: Test
       run: go test -v ./...
+
+    - name: Install Playwright Chromium
+      working-directory: web/monitor-ui
+      run: bunx playwright install --with-deps chromium
+
+    - name: Monitor UI smoke tests
+      working-directory: web/monitor-ui
+      run: bun run test:ui
+
+    - name: Monitor UI real-server tests
+      working-directory: web/monitor-ui
+      run: bun run test:ui:real
 
     - name: Upload Binary
       uses: actions/upload-artifact@v4

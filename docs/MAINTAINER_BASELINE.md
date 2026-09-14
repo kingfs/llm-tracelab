@@ -9,6 +9,10 @@
 - `internal/recorder`
 - `internal/proxy`
 - `internal/router`
+- `internal/upstream`
+- `internal/channel`
+- `internal/appdbmigrate`
+- `internal/responses`
 - `pkg/recordfile`
 - `pkg/replay`
 - `pkg/llm`
@@ -67,7 +71,7 @@ schema 演进必须 additive。
 
 - 新列必须通过启动时 `ensureColumn` 或等价迁移兼容旧 DB。
 - 查询或索引依赖新列前，必须保证列已存在。
-- 旧本地 `trace_index.sqlite3` / 当前 SQLite 文件必须可原地升级。
+- 旧本地 SQLite 应用库（如更早的 `trace_index.sqlite3`）与当前默认文件 `llm_tracelab.sqlite3` 必须可原地升级。
 
 ## Postgres 长期运行运维
 

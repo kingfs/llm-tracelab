@@ -283,8 +283,6 @@ type SessionSummaryRebuildStats struct {
 	ExistingCount  int    `json:"existing_count"`
 	WouldDeleteAll bool   `json:"would_delete_all"`
 	WouldDeleteOne bool   `json:"would_delete_one"`
-	RebuiltAll     bool   `json:"rebuilt_all"`
-	RebuiltOne     bool   `json:"rebuilt_one"`
 }
 
 type UpstreamTargetRecord struct {
@@ -365,18 +363,26 @@ type ChannelModelRecord struct {
 	LastProbeAt                 time.Time
 }
 
+// ChannelModelProfilePatch describes a partial update of one channel model.
+//
+// The capability columns are tri-state: a nil pointer leaves the stored value
+// untouched, a non-nil pointer pins it, and the matching Clear* flag resets it
+// back to "inherit the channel-level capability".
 type ChannelModelProfilePatch struct {
-	DisplayName                 *string
-	Enabled                     *bool
-	SupportsResponses           *bool
-	SupportsChatCompletions     *bool
-	SupportsEmbeddings          *bool
-	ContextWindow               *int
-	MaxOutputTokens             *int
-	CompactHistoryItemThreshold *int
-	UpstreamModel               *string
-	ProfileSource               *string
-	ProfileAdoptionStatus       *string
+	DisplayName                  *string
+	Enabled                      *bool
+	SupportsResponses            *bool
+	ClearSupportsResponses       bool
+	SupportsChatCompletions      *bool
+	ClearSupportsChatCompletions bool
+	SupportsEmbeddings           *bool
+	ClearSupportsEmbeddings      bool
+	ContextWindow                *int
+	MaxOutputTokens              *int
+	CompactHistoryItemThreshold  *int
+	UpstreamModel                *string
+	ProfileSource                *string
+	ProfileAdoptionStatus        *string
 }
 
 type ModelAliasRecord struct {
@@ -389,15 +395,6 @@ type ModelAliasRecord struct {
 	Source      string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-}
-
-type ModelAliasPatch struct {
-	Alias       *string
-	TargetModel *string
-	ChannelID   *string
-	Enabled     *bool
-	Description *string
-	Source      *string
 }
 
 var ErrModelAliasConflict = errors.New("model alias conflict")
@@ -1021,17 +1018,6 @@ func (s *Store) UpsertChannelConfig(record ChannelConfigRecord) (ChannelConfigRe
 	return s.GetChannelConfig(record.ID)
 }
 
-func (s *Store) SetChannelEnabled(channelID string, enabled bool) error {
-	channelID = strings.TrimSpace(channelID)
-	if channelID == "" {
-		return fmt.Errorf("channel id is required")
-	}
-	return s.client.ChannelConfig.UpdateOneID(channelID).
-		SetEnabled(enabled).
-		SetUpdatedAt(time.Now().UTC()).
-		Exec(context.Background())
-}
-
 func (s *Store) UpdateChannelProbeStatus(channelID string, probedAt time.Time, status string, errorText string) error {
 	channelID = strings.TrimSpace(channelID)
 	if channelID == "" {
@@ -1510,13 +1496,22 @@ func (s *Store) UpdateChannelModelProfile(channelID string, model string, patch 
 	if patch.Enabled != nil {
 		update.SetEnabled(*patch.Enabled)
 	}
-	if patch.SupportsResponses != nil {
+	switch {
+	case patch.ClearSupportsResponses:
+		update.ClearSupportsResponses()
+	case patch.SupportsResponses != nil:
 		update.SetSupportsResponses(boolToCapabilityInt(*patch.SupportsResponses))
 	}
-	if patch.SupportsChatCompletions != nil {
+	switch {
+	case patch.ClearSupportsChatCompletions:
+		update.ClearSupportsChatCompletions()
+	case patch.SupportsChatCompletions != nil:
 		update.SetSupportsChatCompletions(boolToCapabilityInt(*patch.SupportsChatCompletions))
 	}
-	if patch.SupportsEmbeddings != nil {
+	switch {
+	case patch.ClearSupportsEmbeddings:
+		update.ClearSupportsEmbeddings()
+	case patch.SupportsEmbeddings != nil:
 		update.SetSupportsEmbeddings(boolToCapabilityInt(*patch.SupportsEmbeddings))
 	}
 	if patch.ContextWindow != nil {
@@ -7602,16 +7597,6 @@ func (s *Store) ListChildExchangesForEntries(parents []LogEntry) (map[string][]L
 		}
 	}
 	return out, nil
-}
-
-func (s *Store) PathByID(traceID string) (string, error) {
-	path, err := s.client.TraceLog.Query().
-		Where(tracelog.TraceIDEQ(traceID)).
-		OnlyID(context.Background())
-	if dao.IsNotFound(err) {
-		return "", sql.ErrNoRows
-	}
-	return path, err
 }
 
 func (s *Store) Stats() (Stats, error) {

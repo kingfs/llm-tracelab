@@ -16,10 +16,6 @@ type Store interface {
 	ContinuationItems(ctx context.Context, id string) ([]LedgerItem, bool, error)
 }
 
-type ConversationContinuationStore interface {
-	LatestResponseIDByConversation(ctx context.Context, conversationID string) (string, bool, error)
-}
-
 type LedgerItem struct {
 	Input  *protocol.InputItem
 	Output *protocol.OutputItem

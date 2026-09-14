@@ -140,8 +140,12 @@ func runServeWithConfig(configPath string) int {
 	}
 	slog.Info("Resolved router config source", "source", source)
 	if err := validateServeRouterConfig(cfg, routerCfg); err != nil {
-		slog.Error("Invalid serve config", "error", err)
-		return 1
+		// Non-fatal by design: without an eligible chat completions upstream the
+		// local Responses server simply cannot serve /v1/responses, but the
+		// process must still start so operators can reach the management UI and
+		// fix channel configuration. Request-time routing reports the concrete
+		// per-request failure when no Responses route is available.
+		slog.Warn("Local Responses server has no eligible chat completions upstream; starting anyway", "error", err)
 	}
 
 	rtr, err := router.New(routerCfg, traceStore)
@@ -322,40 +326,17 @@ func validateServeConfig(cfg *config.Config) error {
 	return nil
 }
 
+// validateServeRouterConfig reports router-level configuration problems that
+// make the local Responses server unusable. It is a preflight diagnostic, not a
+// startup gate: callers log the returned error as a warning so the process still
+// boots and the management UI stays reachable for reconfiguration.
 func validateServeRouterConfig(cfg *config.Config, routerCfg *config.Config) error {
-	if cfg != nil && cfg.ResponsesServerEnabled() {
+	if cfg != nil {
 		if err := router.ValidateLocalResponsesServerBackendConfig(routerCfg); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-type responsesServerAssemblyConfig struct {
-	Enabled             bool
-	DefaultModel        string
-	ForceStore          bool
-	MaxRequestBodyBytes int64
-	Path                string
-	FunctionExecutors   config.ResponsesFunctionExecutorConfig
-}
-
-func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAssemblyConfig {
-	if cfg == nil {
-		return responsesServerAssemblyConfig{
-			MaxRequestBodyBytes: (config.Config{}).ResponsesMaxRequestBodyBytes(),
-			Path:                (config.Config{}).ResponsesServerPath(),
-			FunctionExecutors:   (config.Config{}).ResponsesFunctionExecutorsConfig(),
-		}
-	}
-	return responsesServerAssemblyConfig{
-		Enabled:             cfg.ResponsesServerEnabled(),
-		DefaultModel:        cfg.ResponsesDefaultModel(),
-		ForceStore:          cfg.ResponsesForceStore(),
-		MaxRequestBodyBytes: cfg.ResponsesMaxRequestBodyBytes(),
-		Path:                cfg.ResponsesServerPath(),
-		FunctionExecutors:   cfg.ResponsesFunctionExecutorsConfig(),
-	}
 }
 
 func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {
