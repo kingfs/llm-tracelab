@@ -229,11 +229,11 @@ function RoutingSettingsPanel() {
         <label className="filter-label">
           Responses strategy
           <select className="filter-input" value={settings.responses_strategy || "auto"} onChange={(event) => update("responses_strategy", event.target.value)}>
-            <option value="auto">auto</option>
-            <option value="prefer_native">prefer_native</option>
-            <option value="prefer_local_server">prefer_local_server</option>
-            <option value="native_only">native_only</option>
-            <option value="local_server_only">local_server_only</option>
+            <option value="auto">auto — native responses first, local server fallback</option>
+            <option value="prefer_native">prefer_native — native responses first (same as auto)</option>
+            <option value="prefer_local_server">prefer_local_server — local responses server first, native fallback</option>
+            <option value="native_only">native_only — native responses upstream only</option>
+            <option value="local_server_only">local_server_only — local responses server only (needs a chat completions upstream)</option>
           </select>
         </label>
         <label className="filter-label">
