@@ -22,6 +22,9 @@ trace:
   output_dir: "./logs/local"
 
 responses_server:
+  # Deprecated and ignored: the local Responses execution mode is always
+  # available regardless of this value. Use
+  # routing.settings.responses_strategy=native_only to opt out.
   enabled: false
   default_model: "gpt-4o-mini"
   force_store: false

@@ -22,6 +22,11 @@ trace:
   output_dir: "./data/traces"
 
 responses_server:
+  # Deprecated and ignored: the local Responses execution mode is always
+  # available. /v1/responses is served by a native Responses upstream when one
+  # serves the model, and by the local Responses server over a chat completions
+  # upstream otherwise. Set routing.settings.responses_strategy=native_only to
+  # opt out of local translation.
   enabled: true
   default_model: ""
   force_store: true

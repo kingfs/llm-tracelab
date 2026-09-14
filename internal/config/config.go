@@ -150,6 +150,13 @@ type LimitConfig struct {
 }
 
 type ResponsesServerConfig struct {
+	// Enabled is deprecated and ignored. The local Responses execution mode is
+	// always available: the proxy accepts /v1/chat/completions, /v1/responses
+	// and /v1/messages unconditionally and decides per request whether a
+	// Responses request is served by a native Responses upstream or by the
+	// local Responses server. Set routing.settings.responses_strategy to
+	// "native_only" to opt out of local translation. The field is retained so
+	// existing config files and LLM_TRACELAB_RESPONSES_ENABLED keep parsing.
 	Enabled                     bool                            `yaml:"enabled"`
 	DefaultModel                string                          `yaml:"default_model"`
 	ForceStore                  bool                            `yaml:"force_store"`
@@ -476,6 +483,8 @@ func applyEnvOverrides(cfg *Config) {
 		}
 	}
 	if v := os.Getenv("LLM_TRACELAB_RESPONSES_ENABLED"); v != "" {
+		// Legacy toggle: parsed for backwards compatibility but ignored, since
+		// the local Responses execution mode is always available.
 		if parsed, err := strconv.ParseBool(v); err == nil {
 			cfg.ResponsesServer.Enabled = parsed
 		}
@@ -928,8 +937,24 @@ func (c Config) ProviderProbeTimeout() time.Duration {
 	return 10 * time.Second
 }
 
+// ResponsesServerEnabled reports the legacy responses_server.enabled switch.
+// The local Responses execution mode is always available now: the proxy accepts
+// /v1/chat/completions, /v1/responses and /v1/messages unconditionally and
+// decides per request whether a Responses request is served by a native
+// Responses upstream or by the local Responses server. This value therefore no
+// longer gates request routing; it is retained for backwards-compatible config
+// parsing and for diagnostics that report the operator's declared intent.
+// Use routing.settings.responses_strategy ("native_only") to disable local
+// translation.
 func (c Config) ResponsesServerEnabled() bool {
 	return c.ResponsesServer.Enabled
+}
+
+// ResponsesLocalExecutionAvailable reports whether the proxy exposes the local
+// Responses execution mode. It is always true; see ResponsesServerEnabled for
+// why the legacy switch no longer disables it.
+func (c Config) ResponsesLocalExecutionAvailable() bool {
+	return true
 }
 
 func (c Config) ResponsesDefaultModel() string {

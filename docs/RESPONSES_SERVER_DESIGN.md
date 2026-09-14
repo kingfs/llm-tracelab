@@ -2,17 +2,18 @@
 
 状态：Responses server 当前设计与生产边界
 日期：2026-06-23
+更新：2026-09-14 — `responses_server.enabled` 已废弃，本地 Responses execution mode 始终可用并参与每次选路；本地 runtime 改为惰性构建。
 
 本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-23 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
 
-当前 production packaging 已把默认部署样例调整为 Postgres-backed gateway：`docker-compose.yml` 提供 app + Postgres，并可通过 `search` profile 启用 SearXNG；`config/config.yaml` 默认展示 `responses_server.enabled=true`、Postgres DSN 和 OpenAI-compatible/vLLM Chat Completions upstream。部署细节见 [Production Deployment](./PRODUCTION_DEPLOYMENT.md)。这不改变本文的能力边界：本地 Responses server-mode 当前仍以 Chat Completions backend 编排实现，不表示 native Responses semantic interposition、MCP/file/code/computer-use 真实执行器 lifecycle、独立 auth migration namespace 或 root/container 级 executor 沙箱已经完成。
+当前 production packaging 已把默认部署样例调整为 Postgres-backed gateway：`docker-compose.yml` 提供 app + Postgres，并可通过 `search` profile 启用 SearXNG；`config/config.yaml` 默认展示 `responses_server` 配置块（其中 `enabled` 已废弃）、Postgres DSN 和 OpenAI-compatible/vLLM Chat Completions upstream。部署细节见 [Production Deployment](./PRODUCTION_DEPLOYMENT.md)。这不改变本文的能力边界：本地 Responses server-mode 当前仍以 Chat Completions backend 编排实现，不表示 native Responses semantic interposition、MCP/file/code/computer-use 真实执行器 lifecycle、独立 auth migration namespace 或 root/container 级 executor 沙箱已经完成。
 
 ## 已落地实现截至 2026-06-23
 
-当前已经落地的范围是可选的 `/v1/responses` 本地 server-mode，不改变默认 proxy 行为：
+当前已经落地的范围是 `/v1/responses` 的本地 server-mode。它始终可用并参与每次选路：命中 native Responses upstream 时直通代理，否则由本地 runtime 接管：
 
-- 配置：新增 `responses_server` 配置块，字段包括 `enabled`、`default_model`、`force_store`、`max_request_body_bytes`、`path`、`auto_compact`、`compact_history_item_threshold` 和 `model_profiles`。`model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和可选 `upstream_model`。默认 `enabled: false`，默认 path 为 `/v1/responses`，自动 compact 默认关闭。
-- server-mode path：当 `responses_server.enabled=true` 且请求路径等于配置的 Responses path 时，proxy handler 直接进入本地 Responses HTTP handler；非 Responses 请求仍走现有代理热路径。
+- 配置：`responses_server` 配置块字段包括 `enabled`（已废弃，仅保留兼容解析）、`default_model`、`force_store`、`max_request_body_bytes`、`path`、`auto_compact`、`compact_history_item_threshold` 和 `model_profiles`。`model_profiles` 支持按 `name` 或 `pattern` 匹配 model，声明 `context_window_tokens`、`max_output_tokens`、`compact_history_item_threshold` 和可选 `upstream_model`。默认 path 为 `/v1/responses`，自动 compact 默认关闭。
+- server-mode path：请求路径等于配置的 Responses path 时，proxy handler 先做选路决策（native 直通优先，否则本地 runtime），非 Responses 请求仍走现有代理热路径。
 - Chat Completions adapter：本地 Responses runtime 会把非流式 Responses 请求映射为内部上游 `POST /v1/chat/completions` 调用，由现有 router 选择目标 OpenAI-compatible upstream。
 - cassette recording：server-mode 内部发起的上游 Chat Completions exchange 会经过 recorder，写入 `.http` V3 cassette；有 ent-backed audit store 时还会写一条 `upstream_exchanges`，把 response id、request audit、recorder request id、cassette path、route target、model、endpoint、status 和时间戳关联起来；本地 `/v1/responses` 入站调用本身不作为外部 upstream cassette 录制。
 - ent-backed state store：新增 ent schema `responses` 和 `response_items`，`runtime.NewEntStore` 保存 response checkpoint、input/output item、`previous_response_id` 链和 `GET /v1/responses/{id}/input_items` 所需数据。handler 重启后，只要复用同一 store，`previous_response_id` continuation 可以跨 handler 重启工作。
@@ -113,8 +114,9 @@ client
 
 当前边界是：
 
-- 未开启 `responses_server.enabled` 时，native Responses target 的 `/v1/responses` 请求沿用普通 proxy 热路径，直接转发上游并写入 `.http` cassette，录制 endpoint 仍是 `/v1/responses`。
-- 开启 `responses_server.enabled` 时，配置的 Responses path 在 handler 鉴权后先进入本地 Responses HTTP handler，不再走普通 `/v1/responses` reverse proxy 路径。
+- `/v1/responses` 请求在 handler 鉴权后先进入选路决策：命中匹配模型的 native Responses upstream 时走普通 proxy 热路径，直接转发上游并写入 `.http` cassette（录制 endpoint 仍是 `/v1/responses`）；否则若存在 Chat Completions backend，则进入本地 Responses HTTP handler，不再走普通 `/v1/responses` reverse proxy 路径。
+- `responses_server.enabled` 不再是开关：无论其取值如何，上述选路都会生效。需要禁用本地翻译时使用 `routing.settings.responses_strategy=native_only`。
+- 本地 Responses runtime 惰性构建：`tools.web_search`、function executor、model profile、tokenize counter 等可选配置出错不再阻塞服务启动，而是在首个需要它的本地 Responses 请求上返回 502。
 - 本地 Responses runtime 当前通过内部 `POST /v1/chat/completions` model call 实现语义服务，因此 route target 必须是 OpenAI-compatible Chat Completions backend。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 native target 不满足该 backend 边界，即使它支持 native `/v1/responses` pass-through，也不能被 runtime 当作 Chat Completions upstream 使用。
 
 当前已先落地 `responses_server` + OpenAI-compatible Chat Completions 上游链路；native Responses pass-through 沿用普通代理路径，native Responses 的完整 semantic interposition 仍未实现。

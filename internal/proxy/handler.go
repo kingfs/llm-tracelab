@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kingfs/llm-tracelab/internal/auth"
@@ -323,6 +325,8 @@ type Handler struct {
 	store        *store.Store
 
 	responsesPath    string
+	responsesBuilder func() (http.Handler, error)
+	responsesMu      sync.Mutex
 	responsesHandler http.Handler
 }
 
@@ -442,9 +446,12 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		http.Error(w, "Proxy Error: "+err.Error(), http.StatusBadGateway)
 	}
 
-	var localResponses http.Handler
 	responsesPath := cfg.ResponsesServerPath()
-	if cfg.ResponsesServerEnabled() {
+	// The local Responses runtime is built lazily on the first request that
+	// actually needs it. Building it eagerly would turn optional provider
+	// configuration (web search, function executors, model profiles) into a
+	// startup requirement even for deployments that never serve /v1/responses.
+	buildLocalResponses := func() (http.Handler, error) {
 		responseStore := responsesruntime.Store(responsesruntime.NewMemoryStore())
 		var requestAuditor responsesaudit.RequestAuditor
 		var upstreamExchangeRecorder responsesaudit.UpstreamExchangeRecorder
@@ -524,13 +531,13 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 			auditor:       upstreamExchangeRecorder,
 			events:        executionEventRecorder,
 		}, responseStore, runtimeOptions...)
-		localResponses = httpapi.NewHandler(
+		return httpapi.NewHandler(
 			rt,
 			httpapi.WithMaxBodyBytes(cfg.ResponsesMaxRequestBodyBytes()),
 			httpapi.WithRequestAuditor(requestAuditor),
 			httpapi.WithExecutionEventRecorder(executionEventRecorder),
 			httpapi.WithCodexCompat(responsesCodexCompatHTTPOptions(cfg)),
-		)
+		), nil
 	}
 
 	return &Handler{
@@ -542,8 +549,30 @@ func newHandler(cfg *config.Config, st *store.Store, functionExecutorManager *fu
 		store:            st,
 		limiter:          localLimiter,
 		responsesPath:    responsesPath,
-		responsesHandler: localResponses,
+		responsesBuilder: buildLocalResponses,
 	}, nil
+}
+
+// localResponsesHandler returns the lazily built local Responses runtime. The
+// runtime is constructed at most once; construction failures are surfaced to
+// the request that triggered the build instead of blocking startup. Failures
+// are not cached, so a transient cause (for example a database read during
+// model profile adoption) can recover on a later request.
+func (h *Handler) localResponsesHandler() (http.Handler, error) {
+	if h == nil || h.responsesBuilder == nil {
+		return nil, errors.New("local Responses server is not configured")
+	}
+	h.responsesMu.Lock()
+	defer h.responsesMu.Unlock()
+	if h.responsesHandler != nil {
+		return h.responsesHandler, nil
+	}
+	handler, err := h.responsesBuilder()
+	if err != nil {
+		return nil, err
+	}
+	h.responsesHandler = handler
+	return handler, nil
 }
 
 func responsesCodexCompatHTTPOptions(cfg *config.Config) httpapi.CodexCompatOptions {
@@ -755,7 +784,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	if h.responsesHandler != nil && h.localResponsesPath(r.URL.Path) {
+	if h.responsesBuilder != nil && h.localResponsesPath(r.URL.Path) {
 		decision := h.responsesRoutingDecision(r, bodyBytes)
 		if decision.useLocal {
 			r = requestWithRoutePlanEvent(r, routePlanEventForLocalResponsesEntry(r, bodyBytes, decision, h.routerPolicy(), start))
@@ -1032,7 +1061,7 @@ func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) re
 	strategy := h.responsesStrategy(r.Context())
 	nativeAvailable := h.router != nil && h.router.HasSelectableNativeResponsesCandidateWithBody(r, bodyBytes)
 	nativePresent := h.router != nil && h.router.HasNativeResponsesTargetWithBody(r, bodyBytes)
-	localAvailable := h.responsesHandler != nil && h.responsesChatBackendAvailable(r, bodyBytes)
+	localAvailable := h.responsesBuilder != nil && h.responsesChatBackendAvailable(r, bodyBytes)
 	decision := responsesRouteDecision{strategy: strategy, nativeAvailable: nativeAvailable, nativePresent: nativePresent, localAvailable: localAvailable}
 
 	switch strategy {

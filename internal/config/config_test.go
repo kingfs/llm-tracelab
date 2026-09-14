@@ -516,10 +516,14 @@ limits:
 	}
 }
 
-func TestResponsesServerConfigDisabledByDefault(t *testing.T) {
+func TestResponsesServerConfigLegacyDisabledByDefault(t *testing.T) {
 	cfg := Config{}
+	// The legacy switch defaults off but no longer gates routing.
 	if cfg.ResponsesServerEnabled() {
 		t.Fatalf("ResponsesServerEnabled() = true, want false")
+	}
+	if !cfg.ResponsesLocalExecutionAvailable() {
+		t.Fatalf("ResponsesLocalExecutionAvailable() = false, want true")
 	}
 	if cfg.ResponsesDefaultModel() != "" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want empty", cfg.ResponsesDefaultModel())

@@ -331,7 +331,7 @@ func validateServeConfig(cfg *config.Config) error {
 // startup gate: callers log the returned error as a warning so the process still
 // boots and the management UI stays reachable for reconfiguration.
 func validateServeRouterConfig(cfg *config.Config, routerCfg *config.Config) error {
-	if cfg != nil && cfg.ResponsesServerEnabled() {
+	if cfg != nil && cfg.ResponsesLocalExecutionAvailable() {
 		if err := router.ValidateLocalResponsesServerBackendConfig(routerCfg); err != nil {
 			return err
 		}
