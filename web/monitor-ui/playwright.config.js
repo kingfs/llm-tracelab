@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "/snap/bin/chromium";
+// Playwright normally resolves its own managed browser. Set
+// PLAYWRIGHT_CHROMIUM_EXECUTABLE only to point at a system Chromium instead.
+const chromiumPath = (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || "").trim();
+const launchOptions = chromiumPath ? { executablePath: chromiumPath } : {};
 
 export default defineConfig({
   testDir: "./tests",
@@ -24,7 +27,7 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         channel: undefined,
-        launchOptions: { executablePath: chromiumPath },
+        launchOptions,
       },
     },
     {
@@ -32,7 +35,7 @@ export default defineConfig({
       use: {
         ...devices["Pixel 7"],
         channel: undefined,
-        launchOptions: { executablePath: chromiumPath },
+        launchOptions,
       },
     },
   ],

@@ -26,9 +26,12 @@ MCP 当前用于让 AI agent 查询本地 TraceLab 数据，辅助排障和分�
 
 ## 启动
 
-使用与代理和 Monitor 相同的配置启动服务：
+使用与代理和 Monitor 相同的配置启动服务。`config/config.yaml` 使用 Postgres 且
+`database.dsn` 为空，需要先导出 `LLM_TRACELAB_DATABASE_DSN`；纯本地运行可改用
+`config/examples/local-sqlite.yaml`：
 
 ```bash
+export LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host:5432/llm_tracelab?sslmode=disable'
 go run ./cmd/server serve -c config/config.yaml
 ```
 
@@ -101,6 +104,11 @@ MCP 使用和代理 API 相同的个人 token。
 - upstream transport error。
 
 它们不是普通请求失败列表。
+
+### Responses 审计
+
+- `responses_audit_trace`：按 `response_id` 或 `request_audit_id` 返回 Responses request audit、execution events 和 upstream exchange 摘要。
+- `responses_audit_tool_calls`：列出持久化的 Responses tool-call audit 记录，支持过滤；仅当 `include_payloads=true` 时返回 raw payload JSON。
 
 ### 重分析
 

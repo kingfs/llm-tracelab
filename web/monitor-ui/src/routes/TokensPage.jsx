@@ -122,7 +122,7 @@ export function TokensPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <p className="eyebrow">Token inventory</p>
+            <p className="eyebrow">{t("tokens.inventory")}</p>
             <h2>{showAll ? t("tokens.allTokens") : t("tokens.activeTokens")}</h2>
           </div>
           <button className={showAll ? "ghost-button active" : "ghost-button"} type="button" onClick={() => setShowAll((value) => !value)}>

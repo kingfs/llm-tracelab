@@ -2,9 +2,12 @@
 
 这些示例调用本地 `llm-tracelab` 代理。
 
-代理 API 需要个人 token。可以在 Monitor 的 `Tokens` 页面创建，也可以用 CLI 创建：
+代理 API 需要个人 token。可以在 Monitor 的 `Tokens` 页面创建，也可以用 CLI 创建。
+`config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，运行前需导出
+`LLM_TRACELAB_DATABASE_DSN`；纯本地运行可改用 `config/examples/local-sqlite.yaml`：
 
 ```bash
+export LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host:5432/llm_tracelab?sslmode=disable'
 go run ./cmd/server auth create-token -c config/config.yaml --username admin --name local-dev
 ```
 

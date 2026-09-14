@@ -359,8 +359,6 @@ export function ProviderDetailPage() {
   );
 }
 
-export const ChannelDetailPage = ProviderDetailPage;
-
 function EditProviderDialog({ provider, form, presetData, saving, onChange, onReset, onClose, onSave }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const presetState = buildPresetState(presetData, form.provider_preset, form.routing_profile);
@@ -612,10 +610,6 @@ function editFormFromProvider(provider = {}) {
     allow_unknown_models: Boolean(provider.allow_unknown_models),
     headers_text: Object.keys(headers).sort().map((key) => `${key}: ${headers[key]}`).join("\n"),
   };
-}
-
-function setEditValue(setEditForm, key, value) {
-  setEditForm((current) => ({ ...current, [key]: value }));
 }
 
 function providerPayloadFromForm(form) {

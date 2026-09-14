@@ -380,7 +380,7 @@ func TestSupportsLocalResponsesServerBackendExcludesNativeResponsesOnlyTarget(t 
 	if err != nil {
 		t.Fatalf("Resolve(native) error = %v", err)
 	}
-	if !native.SupportsEndpoint("/v1/responses") {
+	if !native.SupportsEndpointForModel("/v1/responses", "") {
 		t.Fatal("native responses target should support /v1/responses pass-through")
 	}
 	if SupportsLocalResponsesServerBackend(native) {

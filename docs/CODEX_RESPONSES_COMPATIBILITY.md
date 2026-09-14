@@ -99,12 +99,12 @@ Fixture:
 
 ### Unsupported hosted tools
 
-`mcp`、`file_search`、`code_interpreter`、`computer_use_preview` 等 hosted tool
-runtime 尚未实现。当前首切合约是保守的：
+`file_search`、`code_interpreter`、`computer_use_preview` 等 hosted tool
+runtime 尚未实现；`mcp` hosted tool executor 已实现并接线（`internal/responses/tools/mcp/executor.go`，经 runtime 的 `executeMCPToolCall` 执行，装配于 proxy，并写入 `tool_call_audits`）。对仍未实现的工具，当前首切合约是保守的：
 
 - 不声称会执行这些工具。
-- 不伪造 file citations、retrieved chunks、code outputs、MCP tool results 或
-  computer-use side effects。
+- 不伪造 file citations、retrieved chunks、code outputs 或 computer-use side
+  effects。
 - 强制 `tool_choice` 为这些 hosted tool 时，runtime 返回稳定 OpenAI-style
   error envelope，`code` 为 `unsupported_tool`，message 中包含
   `unsupported hosted tool "<tool>"`，并写入不含 raw descriptor/payload 的
@@ -128,7 +128,7 @@ Fixture:
 | server-side function executor | 部分支持 | 默认 client-owned；YAML opt-in executor 才 server-owned。 |
 | ordinary `web_search` descriptor | 部分支持 | 可解析；provider 就绪时可执行 hosted search；未就绪时不应阻断普通 text path。 |
 | forced `web_search` with no provider | 已支持错误和审计 | 返回 server error envelope，message 指出 unsupported hosted tool，并写 rejected tool_call audit。 |
-| MCP hosted tool runtime | 稳定拒绝并审计 | 当前 MCP 是对外排障 server，不是 Responses runtime 内部 tool executor；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
+| MCP hosted tool runtime | 已实现并接线 | `tools.mcp.enabled` 且存在 enabled server 时，runtime 经 `executeMCPToolCall` 执行 MCP hosted tool 并写入 `tool_call_audits`；仍未实现的 `file_search` / `code_interpreter` / `computer_use_preview` 强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | file search hosted runtime | 稳定拒绝并审计 | 无 vector store/retrieval/citation runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | code interpreter hosted runtime | 稳定拒绝并审计 | 无 sandboxed code runtime；强制执行时返回 `unsupported_tool` 并写 rejected audit。 |
 | Codex TOML profile generation | 已支持首切 | `models codex-config <model>` 离线读取 `responses_server.model_profiles`，输出 JSON envelope 与 Codex TOML 建议；本地 SQLite app DB 可用时还会只读检查 `model_catalog` / `channel_models` drift；显式传入 `--codex-config <path>` 时会只读检查本地 Codex TOML drift。 |
@@ -140,7 +140,6 @@ Fixture:
 
 ```yaml
 responses_server:
-  enabled: true
   path: /v1/responses
   default_model: local-test-model
   force_store: true
@@ -188,9 +187,7 @@ provider、运行真实 Codex 或读取真实 API key。命令支持全局
 - `result.provider.base_url` 根据 `server.port` 和 `responses_server.path` 推导；
   默认 `/v1/responses` 会生成 `http://127.0.0.1:<port>/v1`，`wire_api` 固定为
   `responses`。
-- `result.diagnostics` 标注 matched profile、compact token limit 来源、
-  item-count compact threshold 来源、Responses server 是否启用，以及本地 SQLite
-  app DB 可用时的 `model_catalog` / `channel_models` 命中和 drift warnings。
+- `result.diagnostics` 标注 matched profile、`runtime_profile_source` / `profile_precedence`、context window、compact / output / reasoning limit 与 item-count threshold 的来源（`*_source` 字段）、`capability_source`，以及本地 SQLite app DB 可用时的 `model_catalog` / `channel_models` 命中和 drift warnings。
 - 未传 `--codex-config` 时，`result.diagnostics.codex_config.status` 为
   `not_configured`，命令不会读取用户机器上的真实 Codex 配置文件。
 - 传入 `--codex-config <path>` 时，命令只读解析该 TOML，检查

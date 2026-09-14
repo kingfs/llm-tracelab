@@ -6,7 +6,7 @@ v1 协议解析的目标不是做 provider 互转，而是深度识别每种协�
 
 解析结果应进入 [`observation-ir.md`](./observation-ir.md) 定义的 Observation IR。
 
-实现 parser 前，应先读取 [`reference-materials/README.md`](./reference-materials/README.md) 中登记的上游原始材料和抽取 schema。本文档描述解析目标和工程策略，原始字段定义以对应快照为证据来源。
+实现 parser 前，应先读取 [`../protocol-reference/README.md`](../protocol-reference/README.md) 中登记的上游原始材料和抽取 schema。本文档描述解析目标和工程策略，原始字段定义以对应快照为证据来源。
 
 ## 通用要求
 
@@ -213,7 +213,6 @@ v1 协议解析的目标不是做 provider 互转，而是深度识别每种协�
 - `model`
 - `content[]`
 - `stop_reason`
-- `stop_sequence`
 - `usage`
 - `container`
 

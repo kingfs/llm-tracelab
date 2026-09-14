@@ -21,8 +21,9 @@ database:
 trace:
   output_dir: "./logs/local"
 
-# The local Responses execution mode is always available; use
-# routing.settings.responses_strategy=native_only to opt out.
+# The local Responses execution mode is always available; to opt out of local
+# translation, set responses_strategy to "native_only" in the Monitor Routing
+# settings (application DB app_settings key "routing.settings", not a YAML key).
 responses_server:
   default_model: "gpt-4o-mini"
   force_store: false
@@ -32,7 +33,6 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-    startup_policy: "best_effort"
   selection:
     policy: "p2c"
     epsilon: 0.02

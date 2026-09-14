@@ -83,7 +83,7 @@ func TestRootCommandHelpWorksWithConfigShortcut(t *testing.T) {
 	}
 	output := out.String()
 	for _, want := range []string{
-		"Postgres-first LLM gateway with Responses server-mode and record/replay",
+		"Postgres-first LLM gateway with local Responses runtime and record/replay",
 		"Available Commands:",
 		"-c, --config string",
 	} {

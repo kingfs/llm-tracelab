@@ -44,7 +44,7 @@ upstreams:
     priority: 100
     weight: 1
     capacity_hint: 2
-    model_discovery: static
+    model_discovery: "static_only"
     static_models:
       - gpt-5
       - gpt-5.1-codex
@@ -143,11 +143,13 @@ URL 展示字段写入 routing events 前会做脱敏。`api_key`、`access_toke
 
 常见 limit scope：
 
-- `global`：整个代理进程。
-- `token`：TraceLab 个人 API token。
-- `channel`：一个上游渠道。
-- `route_target`：一个编译后的 channel + credential target。
-- `credential`：某个渠道下的一个 credential。
+- `global`：整个代理进程（pre-selection）。
+- `header`：按 `limits.channel_key_header` 指定的请求头取值分桶（pre-selection）。
+- `channel`：一个上游渠道（post-selection）。
+- `route_target`：一个编译后的 channel + credential target（post-selection）。
+- `credential`：某个渠道下的一个 credential（post-selection）。
+
+`header` 需要同时配置 `limits.channel_key_header`。当 `limits.enabled=true` 时，未在上表列出的 scope 值会在配置加载阶段直接报错（`limits.scope %q is not supported`），缺少 `limits.channel_key_header` 的 `header` scope 同样会报错，因此不会再出现“限流被静默忽略”的情况。`config/config.yaml` 目前没有 `limits` 示例块，实际字段以配置结构体为准。
 
 如果 credential 级别限制拒绝请求，通常会看到类似证据：
 

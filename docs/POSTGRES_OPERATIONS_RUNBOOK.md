@@ -241,40 +241,48 @@ WHERE NOT i.indisvalid OR NOT i.indisready;
 
 ### 触发条件
 
-当 `/api/sessions`、session detail、session reanalysis 相关查询出现以下情况，启动 session summary 设计：
+当 `/api/sessions`、session detail、session reanalysis 相关查询出现以下情况，`session_summaries` read model 是现成的优化手段：
 
 - session 列表依赖 `logs GROUP BY session_id`，并在生产数据量下成为 top SQL。
 - session count、latest trace、models、tokens、duration、failure counts 每次实时聚合成本高。
 - 用户主要读取最近活跃 session，而历史 session 很少变化。
 
-### 推荐模型
+### 已上线模型
 
-新增派生 read model，而不是改变 raw trace index：
+`session_summaries` 已经是 application DB 中的派生 read model（不是待建表），当前列为：
 
 ```text
 session_summaries
 - session_id primary key
-- first_recorded_at
-- last_recorded_at
-- trace_count
-- error_count
-- stream_count
+- session_source
+- request_count
+- first_seen
+- last_seen
+- last_model
+- providers
+- success_request
+- failed_request
+- success_rate
 - total_tokens
-- prompt_tokens
-- completion_tokens
-- model_count
-- provider_count
-- latest_trace_id
-- latest_status_code
+- avg_ttft
+- total_duration
+- stream_count
 - updated_at
-- source_version
+```
+
+重建入口是 `db summary rebuild sessions`：
+
+```bash
+llm-tracelab -c config/config.yaml db summary rebuild sessions --dry-run
+llm-tracelab -c config/config.yaml db summary rebuild sessions
+llm-tracelab -c config/config.yaml db summary rebuild sessions --session-id <session_id>
 ```
 
 约束：
 
 - `logs` 仍是 trace index 事实源。
 - summary 可以删除重建。
-- summary 更新必须可重入，并能按 session 或时间窗口局部回填。
+- summary 更新可重入，并可按 session 局部回填（`--session-id`）。
 - Monitor 读路径灰度切换前必须能对比 `logs` 实时聚合结果。
 
 ### 回填和一致性验证
@@ -302,12 +310,12 @@ LIMIT 20;
 
 对每个抽样 session 比较：
 
-- `trace_count`
-- `first_recorded_at`
-- `last_recorded_at`
+- `request_count`
+- `first_seen`
+- `last_seen`
 - `total_tokens`
-- latest trace id
-- failure/error count
+- `last_model`
+- `failed_request`
 
 验收通过后再让 session list 读 summary。
 

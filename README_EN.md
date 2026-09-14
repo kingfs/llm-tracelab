@@ -5,7 +5,7 @@
 
 [中文说明](./README.md) | **English**
 
-`llm-tracelab` is a Postgres-first LLM gateway with built-in LLM HTTP record/replay, Responses server-mode, Monitor, and MCP diagnostics. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
+`llm-tracelab` is a Postgres-first LLM gateway with built-in LLM HTTP record/replay, a local Responses runtime, Monitor, and MCP diagnostics. It currently covers OpenAI-compatible, Anthropic Messages, Google GenAI, and Vertex-native protocol families.
 The core workflow is simple:
 
 - use Postgres for production users, tokens, trace index, channels/models, Responses state, and audit data
@@ -113,7 +113,6 @@ trace:
   output_dir: "./data/traces"
 
 responses_server:
-  enabled: true
   default_model: ""
   force_store: true
   # Image inputs may be base64 encoded and substantially larger than text requests.
@@ -125,7 +124,6 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-    startup_policy: "best_effort"
   selection:
     policy: "p2c"
     epsilon: 0.02
@@ -162,7 +160,7 @@ Access control notes:
 - The Monitor UI uses username/password login. The web login session uses a monitor-only JWT and does not reuse personal API tokens.
 - After login, use the `Tokens` page to generate a personal API token for the current user.
 - Personal API tokens work for the LLM proxy API and MCP with `Authorization: Bearer <token>`.
-- Channels / Models are managed in Monitor Web and stored in the application database; YAML is no longer the long-lived channel configuration surface.
+- Providers / Models are managed in Monitor Web and stored in the application database; YAML is no longer the long-lived channel configuration surface.
 
 Recommended compatibility pattern:
 
@@ -533,7 +531,7 @@ Explicit non-support boundaries:
 - cross-protocol translation in the proxy hot path: rejected
 - independent Postgres auth migration namespace: audited gap; current Postgres auth shares application `schema_migrations`
 - SQLite versioned application migrations: audited fallback; current SQLite remains startup-schema fallback
-- real MCP/file/code/computer-use execution lifecycle and root/container-grade executor sandboxing: future secure executor work
+- real file/code/computer-use execution lifecycle and root/container-grade executor sandboxing: future secure executor work (the MCP hosted tool executor is implemented and wired)
 
 ## Screenshots
 

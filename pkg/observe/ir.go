@@ -11,14 +11,7 @@ import (
 )
 
 const (
-	ParseStatusRecorded       ParseStatus = "recorded"
-	ParseStatusIndexed        ParseStatus = "indexed"
-	ParseStatusParseQueued    ParseStatus = "parse_queued"
-	ParseStatusParsed         ParseStatus = "parsed"
-	ParseStatusParseFailed    ParseStatus = "parse_failed"
-	ParseStatusAnalysisQueued ParseStatus = "analysis_queued"
-	ParseStatusAnalyzed       ParseStatus = "analyzed"
-	ParseStatusAnalysisFailed ParseStatus = "analysis_failed"
+	ParseStatusParsed ParseStatus = "parsed"
 
 	NodeInstruction      NormalizedType = "instruction"
 	NodeMessage          NormalizedType = "message"
@@ -33,11 +26,8 @@ const (
 	NodeServerToolResult NormalizedType = "server_tool_result"
 	NodeCode             NormalizedType = "code"
 	NodeCodeResult       NormalizedType = "code_result"
-	NodePatch            NormalizedType = "patch"
 	NodeFile             NormalizedType = "file"
 	NodeImage            NormalizedType = "image"
-	NodeAudio            NormalizedType = "audio"
-	NodeVideo            NormalizedType = "video"
 	NodeCitation         NormalizedType = "citation"
 	NodeSafety           NormalizedType = "safety"
 	NodeUsage            NormalizedType = "usage"
@@ -47,7 +37,6 @@ const (
 	ToolOwnerModelRequested   ToolOwner = "model_requested"
 	ToolOwnerClientExecuted   ToolOwner = "client_executed"
 	ToolOwnerProviderExecuted ToolOwner = "provider_executed"
-	ToolOwnerInferred         ToolOwner = "inferred"
 	ToolOwnerUnknown          ToolOwner = "unknown"
 
 	SeverityInfo     Severity = "info"
@@ -215,20 +204,8 @@ type ObservationTimings struct {
 }
 
 type ObservationSafety struct {
-	Blocked     bool            `json:"blocked,omitempty"`
-	Refused     bool            `json:"refused,omitempty"`
-	Categories  []SafetySignal  `json:"categories,omitempty"`
-	ProviderRaw json.RawMessage `json:"provider_raw,omitempty"`
-}
-
-type SafetySignal struct {
-	Category     string          `json:"category"`
-	Probability  string          `json:"probability,omitempty"`
-	Severity     string          `json:"severity,omitempty"`
-	Blocked      bool            `json:"blocked,omitempty"`
-	Path         string          `json:"path,omitempty"`
-	ProviderType string          `json:"provider_type,omitempty"`
-	Raw          json.RawMessage `json:"raw,omitempty"`
+	Blocked bool `json:"blocked,omitempty"`
+	Refused bool `json:"refused,omitempty"`
 }
 
 type Finding struct {

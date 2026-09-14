@@ -3,7 +3,7 @@
 状态：集成测试前诊断指南
 日期：2026-06-24
 
-本文用于 TraceLab 在 qujing 或其它测试环境上做 Codex + Responses server-mode + hosted tools 集成测试。目标是让自动化脚本在失败时能快速收集足够信息，而不是人工翻日志猜测。
+本文用于 TraceLab 在目标测试环境（例如 `http://<your-host>:<port>` 指向的自建实例）上做 Codex + 本地 Responses runtime + hosted tools 集成测试。目标是让自动化脚本在失败时能快速收集足够信息，而不是人工翻日志猜测。
 
 ## 默认测试假设
 
@@ -45,7 +45,7 @@ tools:
     servers:
       - id: tracelab-remote
         label: tracelab-remote
-        url: "http://10.2.69.245:<mcp-port>/mcp"
+        url: "http://<your-host>:<mcp-port>/mcp"
         bearer_token_env: "DGX_API_KEY"
         enabled_tools: ["search", "fetch"]
         disabled_tools: []
@@ -69,8 +69,8 @@ llm-tracelab -c config/config.yaml --format json models codex-config qwen3.6-35b
 
 - `doctor` 不应出现 blocking failure。
 - `tools status` 中 `ready_for_codex_web_search=true`。
-- `tools.web_search.readiness.status=ready`。
-- 如果要测试 hosted MCP，`tools.mcp.readiness.status=ready` 且至少有一个 enabled server。
+- `tools.web_search.readiness=ready`。
+- 如果要测试 hosted MCP，`tools.mcp.readiness=ready` 且至少有一个 enabled server。
 - `models codex-config` 应输出 `model_context_window`、`model_auto_compact_token_limit`、`tool_output_token_limit`、`model_reasoning_effort`。
 
 ## Codex Web Search Smoke Test

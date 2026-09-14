@@ -46,8 +46,9 @@ TraceLab 对一次请求选择的内部执行方式：
 - API surface：`chat_completions`、`responses`、`anthropic_messages`。
 - 模型供应：真实模型名、启用状态、来源、上下文窗口、输出上限。
 - 功能能力：stream、tool calling、structured output、embeddings、tokenize 等。
+- 按模型能力覆盖：`channel_models.supports_responses` / `supports_chat_completions` 是 UI 可编辑的三态（显式 true/false 覆盖渠道级判定，未设置表示继承）；YAML 等价项为 `upstream.model_capabilities`。
 
-Capability 是路由硬约束。用户可以手动覆盖探测结果，但每次覆盖都应保留审计和 UI 提示。
+Capability 是路由硬约束。用户可以手动覆盖探测结果，但每次覆盖都应保留审计和 UI 提示。native-vs-local Responses 判定按模型解析：显式 `channel_models.supports_responses` / `supports_chat_completions` 优先于渠道级 `api_type` / `capabilities`，未声明显式值的模型回退到渠道级行为。
 
 ### Model Alias
 
@@ -292,6 +293,7 @@ CREATE INDEX idx_model_aliases_channel ON model_aliases(channel_id);
 任务：
 
 - 将 channel config、channel models、capabilities、probe runs 作为 router snapshot 输入。
+- `channel_models.supports_responses` / `supports_chat_completions` 作为 UI 可编辑三态，按模型覆盖渠道级 capability：显式 true/false 生效，未设置表示继承渠道级 `api_type` / `capabilities`；YAML 等价项为 `upstream.model_capabilities`。
 - API key 和 headers 使用 redaction 输出，写入时走 secret 处理。
 - Probe apply 只填补缺失字段，不覆盖用户显式 false，除非 UI 明确选择 override。
 - 支持手动能力覆盖和审计字段。
@@ -305,7 +307,7 @@ CREATE INDEX idx_model_aliases_channel ON model_aliases(channel_id);
 
 ### 4. Responses Auto Mode
 
-把 `/v1/responses` 从“全局开关进入本地 handler”收敛为 route plan 决策。
+把 `/v1/responses` 的处理方式收敛为 route plan 决策：本地 execution mode 没有全局开关，始终参与选路，native-vs-local 按模型能力解析。
 
 任务：
 

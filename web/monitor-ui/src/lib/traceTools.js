@@ -14,7 +14,7 @@ export function buildToolMessageSummary(message, declaredTools = []) {
   return "";
 }
 
-export function getDeclaredToolName(tool = {}) {
+function getDeclaredToolName(tool = {}) {
   return (
     tool.name ||
     tool.function?.name ||
@@ -25,11 +25,11 @@ export function getDeclaredToolName(tool = {}) {
   );
 }
 
-export function getDeclaredToolDescription(tool = {}) {
+function getDeclaredToolDescription(tool = {}) {
   return tool.description || tool.function?.description || "";
 }
 
-export function getDeclaredToolParameters(tool = {}) {
+function getDeclaredToolParameters(tool = {}) {
   return (
     tool.parameters ||
     tool.function?.parameters ||
@@ -69,7 +69,7 @@ export function collectTraceToolCalls(detail) {
   return calls;
 }
 
-export function normalizeToolName(value = "") {
+function normalizeToolName(value = "") {
   return String(value || "").trim().toLowerCase();
 }
 

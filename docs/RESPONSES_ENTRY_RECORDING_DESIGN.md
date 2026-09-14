@@ -11,7 +11,7 @@
 - 流式响应由 `llm.DetectStreamingResponse` 标记 `Layout.IsStream=true`，响应体按原始 SSE bytes 写入 cassette；`llm.ResponsePipeline` 同步抽取 usage 和事件。
 - `UpdateLogFile` 最后写入 `LLM_PROXY_V3` prelude，并把 trace 元数据索引进 SQLite/Postgres store。
 
-Responses server-mode 的外层入口还缺少同等级 cassette。当请求由本地 Responses execution mode 处理时，配置的 Responses path 由 `internal/proxy.(*Handler).serveLocalResponses` 重写到内部 `internal/responses/httpapi.Handler`，不再进入 reverse proxy 的 recorder pipeline。当前已有的录制只覆盖 runtime 内部通过 `responsesChatCompletionsAdapter` 发起的上游 `/v1/chat/completions` model exchange；也就是说：
+Responses server-mode 的外层入口还缺少同等级 cassette。当请求由本地 Responses execution mode 处理时，配置的 Responses path 由 `internal/proxy.(*Handler).serveLocalResponsesWithBody` 重写到内部 `internal/responses/httpapi.Handler`，不再进入 reverse proxy 的 recorder pipeline。当前已有的录制只覆盖 runtime 内部通过 `responsesChatCompletionsAdapter` 发起的上游 `/v1/chat/completions` model exchange；也就是说：
 
 - 客户端真实请求 `/v1/responses` 和 TraceLab 返回给客户端的 Responses object/SSE 没有 `.http` cassette。
 - Monitor/audit 能看到 request audit、execution events 和 upstream exchange correlation，但 replay 仍缺少“入口看到的 OpenAI Responses API”原始 HTTP 交换。
@@ -27,9 +27,9 @@ Responses server-mode 的外层入口还缺少同等级 cassette。当请求由�
 
 ## 入口包装方案
 
-推荐在 `internal/proxy.(*Handler).serveLocalResponses` 外层包装 `h.responsesHandler`，而不是把录制逻辑放入 `internal/responses/httpapi` 或 runtime：
+推荐在 `internal/proxy.(*Handler).serveLocalResponsesWithBody` 外层包装 `h.responsesHandler`，而不是把录制逻辑放入 `internal/responses/httpapi` 或 runtime：
 
-1. `serveLocalResponses` 是本地 server-mode 的统一入口，已经知道客户端原始 path 和重写后的内部 target path。
+1. `serveLocalResponsesWithBody` 是本地 server-mode 的统一入口，已经知道客户端原始 path 和重写后的内部 target path。
 2. proxy 层已有 `recorder.Recorder`、`Debug.OutputDir`、`MaskKey`、store、auth、limiter、router policy 等上下文。
 3. `httpapi.Handler` 可以继续只负责 Responses HTTP contract、audit 和 runtime 调用，避免把 cassette 文件格式泄漏进 Responses runtime 包。
 
@@ -101,7 +101,7 @@ SSE 不应被完整 buffering。包装器只在每次 `Write` 时追加 bytes；
 一期只改必要模块：
 
 - `internal/proxy/responses_server.go`
-  - 替换 `serveLocalResponses` 中“直接调用 `h.responsesHandler.ServeHTTP`”为 recorder wrapper。
+  - 替换 `serveLocalResponsesWithBody` 中“直接调用 `h.responsesHandler.ServeHTTP`”为 recorder wrapper。
   - 新增 local Responses response writer/sniffer helper。
   - 生成 entry events、设置 duration/status/content length/stream/error。
 - `internal/recorder`
@@ -123,7 +123,7 @@ SSE 不应被完整 buffering。包装器只在每次 `Write` 时追加 bytes；
 - Streaming buffering：最大风险是包装器先缓冲响应再写文件。必须用 tee write-through，并在测试中验证 SSE chunk 能被 flush。不要用 `httptest.ResponseRecorder` 作为生产实现。
 - Body size：入口请求受现有 `responses_server.max_request_body_bytes` 保护；响应体可能很大。最小一期沿用 recorder 行为完整记录，后续可增加 debug 层 `max_recorded_response_bytes`，超限后停止写 body 并在 event 标记 truncated。
 - Secret redaction：请求 header 继续依赖 `MaskKey`；响应 header 也可能含敏感 provider/debug 信息，建议最小一期对 `Set-Cookie`、`Authorization`、`api-key` 类响应头也做脱敏后再写 cassette。
-- Auth 失败是否记录：如果 token auth 在 `ServeHTTP` 外层已经拒绝，`serveLocalResponses` 不会被调用，最小一期不记录 auth 失败。若 auth 是 proxy handler 内部先处理再分发，应只记录通过 auth 后进入 Responses server 的请求。auth failure cassette 可以作为后续 opt-in，因为它更容易记录真实 token 形态。
+- Auth 失败是否记录：如果 token auth 在 `ServeHTTP` 外层已经拒绝，`serveLocalResponsesWithBody` 不会被调用，最小一期不记录 auth 失败。若 auth 是 proxy handler 内部先处理再分发，应只记录通过 auth 后进入 Responses server 的请求。auth failure cassette 可以作为后续 opt-in，因为它更容易记录真实 token 形态。
 - 取消和 partial cassette：client cancel 时 raw response 可能没有完整 SSE 终止事件。Replay 应能按已有 raw HTTP 回放 partial bytes，但测试应明确这是调试 cassette，不承诺语义完整。
 - Store indexing：entry cassette 会进入同一 trace index，Monitor 可能多出本地 Responses 记录。需要通过 provider/operation/event 区分，避免统计时把一次用户 Responses 请求和内部 model call 都算作同类 upstream traffic。
 

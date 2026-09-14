@@ -72,14 +72,11 @@ type aggregatedModelArchitecture struct {
 	Modality         string   `json:"modality,omitempty"`
 	InputModalities  []string `json:"input_modalities,omitempty"`
 	OutputModalities []string `json:"output_modalities,omitempty"`
-	Tokenizer        string   `json:"tokenizer,omitempty"`
-	InstructType     *string  `json:"instruct_type,omitempty"`
 }
 
 type aggregatedModelTopProvider struct {
-	ContextLength       *int  `json:"context_length,omitempty"`
-	MaxCompletionTokens *int  `json:"max_completion_tokens,omitempty"`
-	IsModerated         *bool `json:"is_moderated,omitempty"`
+	ContextLength       *int `json:"context_length,omitempty"`
+	MaxCompletionTokens *int `json:"max_completion_tokens,omitempty"`
 }
 
 type contextKey string
@@ -1098,14 +1095,6 @@ func (h *Handler) responsesRoutingDecision(r *http.Request, bodyBytes []byte) re
 		}
 		decision.rejectReason = "responses_strategy local_server_only requires a matching chat completions backend"
 		return decision
-	default:
-		if nativeAvailable {
-			return decision
-		}
-		if localAvailable {
-			decision.useLocal = true
-			return decision
-		}
 	}
 	decision.rejectReason = "no matching Responses route is available for the requested model and strategy"
 	return decision

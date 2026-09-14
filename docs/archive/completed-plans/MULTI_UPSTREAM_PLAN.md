@@ -99,7 +99,7 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-    startup_policy: "best_effort"     # strict | best_effort | lazy
+    startup_policy: "best_effort"     # strict | best_effort | lazy（该字段从未实现，现已从配置结构中移除）
   selection:
     policy: "cost_aware_p2c"          # first_available | weighted_random | p2c | cost_aware_p2c
     epsilon: 0.02

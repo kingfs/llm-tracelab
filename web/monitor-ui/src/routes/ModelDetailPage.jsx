@@ -8,7 +8,7 @@ import { useJSON } from "../hooks/useJSON";
 import { apiPaths, apiURL, patchJSON } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import {
-  buildChannelLink,
+  buildProviderLink,
   formatCount,
   formatDateTime,
   formatTime,
@@ -141,7 +141,7 @@ export function ModelDetailPage() {
 function ModelChannelRow({ item, windowValue, t }) {
   const summary = item.summary || {};
   return (
-    <Link className="channel-model-row" to={buildChannelLink(item.channel_id, windowValue)}>
+    <Link className="channel-model-row" to={buildProviderLink(item.channel_id, windowValue)}>
       <div>
         <strong>{item.channel_id}</strong>
         <span>{item.source || "unknown"}</span>
@@ -192,7 +192,7 @@ function ModelConfigCard({ item, model, suggestion, language, t }) {
     setStatus("");
     try {
       const payload = modelConfigPayload(form);
-      const updated = await patchJSON(apiPaths.channelModel(item.channel_id, model), payload);
+      const updated = await patchJSON(apiPaths.providerModel(item.channel_id, model), payload);
       setForm(modelConfigFormFromItem({ ...item, ...updated }));
       setStatus(t("models.saved"));
     } catch (error) {

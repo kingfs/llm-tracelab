@@ -14,7 +14,7 @@ task run
 - `task fmt`：格式化 Go 代码。
 - `task check:quick`：格式检查、lint、短测试，不改写文件。
 - `task build:go`：只构建后端。
-- `task run`：用 `config/config.yaml` 启动本地服务。可用 `CONFIG=path/to/config.yaml task run` 指定配置。
+- `task run`：用 `config/config.yaml` 启动本地服务。可用 `CONFIG=path/to/config.yaml task run` 指定配置。注意 `config/config.yaml` 是 Postgres-first 配置且 `database.dsn` 为空，需要先导出 `LLM_TRACELAB_DATABASE_DSN`（或改用 `CONFIG=config/examples/local-sqlite.yaml`）才能启动。
 
 ## 验证等级
 
@@ -98,6 +98,21 @@ task bench:core
 - `pkg/llm`
 - `pkg/recordfile`
 - `pkg/replay`
+
+## 数据库与认证初始化
+
+首次启动或重置本地应用库时使用：
+
+```bash
+task migrate:db:up
+task auth:init-user USER=admin PASSWORD=<password>
+task auth:create-token USER=admin NAME=local
+```
+
+- `task migrate:db:up`：对 `CONFIG` 指向的应用库执行 `db migrate up`。
+- `task auth:init-user`：用 `USER` 和 `PASSWORD` 创建登录用户。
+- `task auth:create-token`：为 `USER` 创建名为 `NAME` 的 API token。
+- 三者都可用 `CONFIG=path/to/config.yaml` 覆盖配置。
 
 ## 本地密钥命令
 

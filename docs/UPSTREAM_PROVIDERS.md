@@ -104,11 +104,13 @@ TraceLab 不为每个 provider 写一套独立集成，而是把上游解析成�
 | `hugging_face` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
 | `nvidia_nim` | `openai_compatible` | `openai_default` | OpenAI-compatible gateway |
 | `github_models` | `openai_compatible` | `openai_default` | GitHub Models |
+| `github` | `openai_compatible` | `openai_default` | `github_models` 别名 |
 | `azure` | `openai_compatible` | 自动推断 | Azure OpenAI |
 | `azure_openai` | `openai_compatible` | 自动推断 | `azure` 别名 |
 | `vllm` | `openai_compatible` | `vllm_openai` | 自托管 vLLM |
 | `anthropic` | `anthropic_messages` | `anthropic_default` | Claude Messages |
 | `google_genai` | `google_genai` | `google_ai_studio` | Gemini API |
+| `google_ai_studio` | `google_genai` | `google_ai_studio` | `google_genai` 别名 |
 | `google` | `google_genai` | `google_ai_studio` | `google_genai` 别名 |
 | `gemini` | `google_genai` | `google_ai_studio` | `google_genai` 别名 |
 | `vertex` | `vertex_native` | 自动推断 | Vertex Gemini |
@@ -124,7 +126,7 @@ TraceLab 不为每个 provider 写一套独立集成，而是把上游解析成�
 当前支持两类输入：
 
 - YAML `upstream` / `upstreams`：兼容启动和首次 bootstrap。
-- SQLite `channel_configs` / `channel_models`：长期配置事实源。
+- 应用数据库（生产为 Postgres，本地 fallback 为 SQLite）的 `channel_configs` / `channel_models`：长期配置事实源。
 
 当数据库已有 channel 配置时，router 优先使用数据库配置。
 

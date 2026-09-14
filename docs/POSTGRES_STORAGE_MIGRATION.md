@@ -126,10 +126,13 @@ application database schema and does not run the auth migrator.
 
 The checked-in production packaging now treats Postgres as the default
 deployment database. The default `docker-compose.yml` starts `llm-tracelab`
-with a Postgres service and runs `db migrate up` before `serve`; the tracked
-`config/config.yaml` expects `database.driver: postgres`,
-`database.dsn: $env:LLM_TRACELAB_DATABASE_DSN`,
-a `responses_server` block, and an OpenAI-compatible/vLLM upstream. See
+with a Postgres service and only runs `serve`; application migrations are
+applied in-process because `database.auto_migrate: true`. The tracked
+`config/config.yaml` sets `database.driver: postgres` with an empty
+`database.dsn` (supplied at runtime via `LLM_TRACELAB_DATABASE_DSN`) and
+includes a `responses_server` block, but has no `upstream`/`upstreams` block.
+The OpenAI-compatible/vLLM upstream example is
+`config/examples/openai-compatible-vllm-postgres.yaml`. See
 [Production Deployment](./PRODUCTION_DEPLOYMENT.md) for the operator entry
 point and the optional SearXNG profile.
 
@@ -458,8 +461,8 @@ function executor started/completed/failed lifecycle into the table, and
 unsupported hosted tool choices write rejected records without raw payloads.
 `audit tool-calls`, Monitor `/api/responses/audit/tool-calls`, and MCP
 `responses_audit_tool_calls` expose query paths with payload summaries by
-default. Future MCP/file/code/computer-use runtime execution lifecycle remains
-follow-up work.
+default. Future file/code/computer-use runtime execution lifecycle remains
+follow-up work; the MCP hosted tool executor is already implemented and wired.
 
 SQLite compatibility:
 

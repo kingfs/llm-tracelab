@@ -19,7 +19,7 @@ TraceLab 需要从入口侧统一记录 request/response，同时保留现有上
 
 1. 录制入口统一放在流量入口层。
 
-   普通 reverse proxy 请求继续走现有 `internal/proxy` recorder pipeline。本地 Responses server-mode 的 `/v1/responses` 入口应在 `internal/proxy.(*Handler).serveLocalResponses` 外层补一层 recording wrapper，而不是把 `.http` cassette 文件格式下沉到 `internal/responses/httpapi` 或 runtime。
+   普通 reverse proxy 请求继续走现有 `internal/proxy` recorder pipeline。本地 Responses server-mode 的 `/v1/responses` 入口应在 `internal/proxy.(*Handler).serveLocalResponsesWithBody` 外层补一层 recording wrapper，而不是把 `.http` cassette 文件格式下沉到 `internal/responses/httpapi` 或 runtime。
 
 2. 用 taxonomy 区分“记录了什么”和“为什么发生”。
 
@@ -81,7 +81,7 @@ phase one 允许没有真实 `parent_exchange_id`，但必须保留 `request_aud
 
 交付：
 
-- 在 `internal/proxy.(*Handler).serveLocalResponses` 外层增加 entry recording wrapper。
+- 在 `internal/proxy.(*Handler).serveLocalResponsesWithBody` 外层增加 entry recording wrapper。
 - wrapper 记录客户端原始 request line/path/query/header/body，响应记录 status/header/body。
 - streaming SSE 用 write-through tee `ResponseWriter` 录制，不能完整 buffering 后再发给客户端。
 - `Flush()` 透传，TTFT 以第一次 body bytes 成功写给客户端为准。

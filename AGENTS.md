@@ -14,19 +14,31 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 ## Current Architecture
 
 - CLI entry point: `cmd/server/main.go` only exits through `run`; command wiring lives in `cmd/server/root.go`
-- CLI command files: `cmd/server/serve.go`, `migrate.go`, `auth.go`, `db.go`, `version.go`, `completion.go`
+- CLI command files: `cmd/server/root.go` wires `serve.go`, `migrate.go`, `db.go`, `config.go`, `doctor.go`, `provider.go`, `models.go`, `tools.go`, `audit.go`, `auth.go`, `analyze.go`, `version.go`, `schema.go`, `completion.go` (`provider_startup_probe.go` holds provider-probe helpers)
 - Management HTTP/MCP wiring shared by serve and tests: `cmd/server/management.go`
 - Reverse proxy: `internal/proxy`
 - Recording pipeline: `internal/recorder`
-- Metadata index: `internal/store` using SQLite at `{{output_dir}}/trace_index.sqlite3`
+- Application store and metadata index: `internal/store`
+- Upstream resolution and capability/protocol-family rules: `internal/upstream`
+- Channel (provider) config and probe services: `internal/channel`
+- Local Responses runtime, HTTP surface, chat client, and audit queries: `internal/responses`
+- Postgres application migrations: `internal/appdbmigrate`
 - Monitor UI: `internal/monitor`
 - Replay transport for tests: `pkg/replay`
 - Shared record format parser: `pkg/recordfile`
 - Cross-provider request/response normalization helpers: `pkg/llm`
 
+## Storage
+
+Structured state (trace index, sessions, channel/provider config, upstream targets, observations, findings, analysis jobs, Responses state, and audit tables) lives in the application database.
+
+- Production and the tracked default config use Postgres; the checked-in SQL migrations live in `ent/postgres-migrations/`.
+- SQLite is a local/dev/test fallback only, with default file `{{output_dir}}/llm_tracelab.sqlite3`; SQLite schema is applied at startup rather than by versioned migrations.
+- Raw `.http` cassettes remain the source of truth for replay and detail views; the database is a derived index for lists, filters, and aggregates.
+
 Current protocol families are documented in `docs/protocol-reference/implemented-protocols.md`.
 The proxy is protocol-aware pass-through plus recording/parsing; it does not currently translate requests between OpenAI, Anthropic, Gemini, and Vertex protocol families in the forwarding hot path.
-The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions`, `/v1/responses` and `/v1/messages` unconditionally, and per-request routing prefers a matching native Responses upstream (pass-through) before falling back to the local Responses runtime, which orchestrates the request as an internal upstream `/v1/chat/completions` call. That local execution mode is always available and has no configuration switch; the legacy `responses_server.enabled` field and `LLM_TRACELAB_RESPONSES_ENABLED` variable were removed (`routing.settings.responses_strategy=native_only` opts out). The local Responses runtime is built lazily, so optional provider configuration must never block startup. The native-vs-local choice is resolved per model, not per channel: an explicit `channel_models.supports_responses` / `supports_chat_completions` value (editable in the monitor UI) overrides the channel-level `api_type`/`capabilities`, and models without a declared value fall back to the channel-level behaviour. `upstream.model_capabilities` expresses the same override in YAML.
+The single exception is `/v1/responses`: the proxy accepts `/v1/chat/completions`, `/v1/responses` and `/v1/messages` unconditionally, and per-request routing prefers a matching native Responses upstream (pass-through) before falling back to the local Responses runtime, which orchestrates the request as an internal upstream `/v1/chat/completions` call. That local execution mode is always available and has no configuration switch; the legacy `responses_server.enabled` field and `LLM_TRACELAB_RESPONSES_ENABLED` variable were removed. To opt out of local translation, set the application-database `app_settings` key `routing.settings` to `{"responses_strategy":"native_only"}` from the Monitor Routing settings (`PATCH /api/settings/routing`); this is not a YAML key. The local Responses runtime is built lazily, so optional provider configuration must never block startup. The native-vs-local choice is resolved per model, not per channel: an explicit `channel_models.supports_responses` / `supports_chat_completions` value (editable in the monitor UI) overrides the channel-level `api_type`/`capabilities`, and models without a declared value fall back to the channel-level behaviour. `upstream.model_capabilities` expresses the same override in YAML.
 
 ## Record File Format
 
@@ -51,7 +63,7 @@ Compatibility note:
 - Do not make tests depend on network access.
 - Keep recorded `.http` payloads human-inspectable.
 - Prefer additive evolution over destructive migration of existing cassettes.
-- SQLite is the source for monitor list/statistics; raw `.http` files remain the source of truth for replay and detail views.
+- The application database is the source for monitor list/statistics; raw `.http` files remain the source of truth for replay and detail views.
 
 ## Common Workflows
 
@@ -72,8 +84,8 @@ Compatibility note:
 
 - Update `pkg/recordfile` first, then adapt recorder, monitor, and replay together.
 - Keep V2 read compatibility unless the task explicitly allows a breaking change.
-- If schema changes in `internal/store`, ensure startup initialization still works on an existing local DB.
-- Prefer indexing metadata in SQLite rather than rescanning every file for aggregate stats.
+- If schema changes in `internal/store`, ensure startup initialization still works on an existing database (Postgres via `internal/appdbmigrate`, SQLite via startup schema).
+- Prefer indexing metadata in the application database rather than rescanning every file for aggregate stats.
 
 ## Documentation Targets
 
@@ -85,7 +97,6 @@ Compatibility note:
 - `docs/protocol-reference/README.md`: current protocol reference entry, implemented protocol matrix, protocol differences, and dated upstream schema snapshots
 - `docs/v1/README.md`: v1 中文设计文档入口，区分当前事实、设计背景和历史计划
 - `docs/v1/status.md`: v1 能力当前落地状态
-- `docs/v1/reference-materials/README.md`: historical v1 protocol parsing reference snapshots; prefer `docs/protocol-reference/README.md` for current implementation work
 - `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
 - `docs/MCP_GUIDE.md`: current MCP tool surface and usage
 - `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants

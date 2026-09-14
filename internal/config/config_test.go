@@ -1293,3 +1293,79 @@ upstreams:
 		t.Fatalf("model-tools must leave undeclared flags nil, got %+v", tools)
 	}
 }
+
+func TestUnknownConfigKeysReportsRemovedOptions(t *testing.T) {
+	t.Parallel()
+
+	// These two keys were documented and shipped for a long time but no Config
+	// field reads them; without this check a config file keeps loading and the
+	// option stays silently inert.
+	data := []byte(`
+responses_server:
+  enabled: true
+router:
+  model_discovery:
+    startup_policy: "best_effort"
+`)
+
+	got := unknownConfigKeys(data)
+	if len(got) != 2 {
+		t.Fatalf("unknownConfigKeys() = %v, want 2 messages", got)
+	}
+	joined := strings.Join(got, "\n")
+	for _, want := range []string{"enabled", "startup_policy"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("unknownConfigKeys() = %v, want a message mentioning %q", got, want)
+		}
+	}
+}
+
+func TestUnknownConfigKeysAllowsKnownOptions(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`
+server:
+  port: "8080"
+responses_server:
+  default_model: "gpt-5"
+router:
+  model_discovery:
+    enabled: true
+    refresh_interval: "5m"
+  selection:
+    policy: "weighted"
+limits:
+  enabled: true
+  scope: "header"
+  channel_key_header: "X-Channel-Key"
+`)
+
+	if got := unknownConfigKeys(data); len(got) != 0 {
+		t.Fatalf("unknownConfigKeys() = %v, want none", got)
+	}
+}
+
+// TestShippedConfigsHaveNoUnknownKeys guards the tracked config files against
+// re-introducing keys that no longer exist in the Config struct.
+func TestShippedConfigsHaveNoUnknownKeys(t *testing.T) {
+	t.Parallel()
+
+	examples, err := filepath.Glob(filepath.Join("..", "..", "config", "examples", "*.yaml"))
+	if err != nil {
+		t.Fatalf("Glob() error = %v", err)
+	}
+	paths := append([]string{filepath.Join("..", "..", "config", "config.yaml")}, examples...)
+	if len(paths) < 2 {
+		t.Fatalf("expected the shipped config plus examples, got %v", paths)
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s) error = %v", path, err)
+		}
+		if got := unknownConfigKeys(data); len(got) != 0 {
+			t.Errorf("%s declares config keys this build ignores: %v", path, got)
+		}
+	}
+}

@@ -5,7 +5,7 @@
 
 **中文说明** | [English](./README_EN.md)
 
-`llm-tracelab` 是一个 Postgres-first 的 LLM gateway，内置 LLM HTTP record/replay、Responses server-mode、Monitor 和 MCP 排障面。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面，并把可部署网关与可回放 cassette 保持在同一个调试闭环里。核心目标很直接：
+`llm-tracelab` 是一个 Postgres-first 的 LLM gateway，内置 LLM HTTP record/replay、本地 Responses runtime、Monitor 和 MCP 排障面。它当前覆盖 OpenAI-compatible、Anthropic Messages、Google GenAI 和 Vertex-native 这几类主流协议面，并把可部署网关与可回放 cassette 保持在同一个调试闭环里。核心目标很直接：
 
 - 生产或准生产环境用 Postgres 保存用户、token、trace index、渠道/模型、Responses state 和 audit 数据
 - 对 OpenAI-compatible / vLLM 上游提供可选 `/v1/responses` semantic server
@@ -56,10 +56,12 @@ pkg/llm               多厂商请求/响应归一化
 
 更适合 AI 阅读的项目约定见 [AGENTS.md](./AGENTS.md)，当前项目基线摘要见 [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md)，生产部署说明见 [docs/PRODUCTION_DEPLOYMENT.md](./docs/PRODUCTION_DEPLOYMENT.md)，v1 产品与架构设计入口见 [docs/v1/README.md](./docs/v1/README.md)，Monitor 使用说明见 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md)，Proxy 调用示例见 [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md)，MCP 使用说明见 [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md)，维护者实现基线见 [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md)，架构摘要见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)，上游兼容矩阵见 [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md)，Credential 路由操作指南见 [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md)。
 
-面向 Sub2API、LiteLLM、Portkey、Helicone 等 LLM 网关/观测生态的方向校准和能力吸收设计见 [docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md)。该文档明确 TraceLab 不转向公网中转、支付或 SaaS 分发平台，而是吸收渠道管理、调度、限流、健康、成本和治理能力来强化本地优先的 record/replay、调试、审计和评估闭环。
+面向 Sub2API、LiteLLM、Portkey、Helicone 等 LLM 网关/观测生态的方向校准和能力吸收设计见 [docs/archive/design-notes/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md](./docs/archive/design-notes/GATEWAY_REFERENCE_EVOLUTION_DESIGN.md)。该文档明确 TraceLab 不转向公网中转、支付或 SaaS 分发平台，而是吸收渠道管理、调度、限流、健康、成本和治理能力来强化本地优先的 record/replay、调试、审计和评估闭环。
 
-面向 AI agent 演进闭环的里程碑规划见 [docs/AGENT_EVOLUTION_ROADMAP.md](./docs/AGENT_EVOLUTION_ROADMAP.md)。
-当前分支上已落地的 AI agent 闭环摘要见 [docs/AI_BRANCH_BASELINE.md](./docs/AI_BRANCH_BASELINE.md)。
+面向 AI agent 演进闭环的里程碑规划见 [docs/archive/design-notes/AGENT_EVOLUTION_ROADMAP.md](./docs/archive/design-notes/AGENT_EVOLUTION_ROADMAP.md)。
+当前分支上已落地的 AI agent 闭环摘要见 [docs/archive/branch-notes/AI_BRANCH_BASELINE.md](./docs/archive/branch-notes/AI_BRANCH_BASELINE.md)。
+
+上述三篇均已归档到 [docs/archive/](./docs/archive/README.md)，属于历史设计与分支记录，不是当前实现的事实来源。
 
 ## 录制文件与索引
 
@@ -117,7 +119,6 @@ trace:
   output_dir: "./data/traces"
 
 responses_server:
-  enabled: true
   default_model: ""
   force_store: true
   # Image inputs may be base64 encoded and substantially larger than text requests.
@@ -129,7 +130,6 @@ router:
   model_discovery:
     enabled: true
     refresh_interval: 10m
-    startup_policy: "best_effort"
   selection:
     policy: "p2c"
     epsilon: 0.02
@@ -166,7 +166,7 @@ debug:
 - Monitor UI 使用用户名密码登录；网页登录态使用 monitor-only JWT，不复用个人 API token。
 - 登录后可以在 UI 的 `Tokens` 页面为当前用户生成个人 API token。
 - 个人 API token 可用于 LLM proxy API 和 MCP，请求头为 `Authorization: Bearer <token>`。
-- Channels / Models 通过 Monitor Web 管理并写入应用数据库；YAML 不再作为长期渠道配置入口。
+- Providers / Models 通过 Monitor Web 管理并写入应用数据库；YAML 不再作为长期渠道配置入口。
 
 ### MCP Server
 
@@ -180,12 +180,12 @@ go run ./cmd/server serve -c config/config.yaml
 stateless Streamable HTTP，并兼容协商较早协议版本。它挂在 `monitor.port` 对应的 HTTP
 服务下，默认路径是 `/mcp`，例如 `http://localhost:8081/mcp`。工具面包括：
 
-- `list_traces`
-- `get_trace`
-- `list_sessions`
-- `list_upstreams`
-- `query_failures`
-- `summarize_failure_clusters`
+- Trace 查询：`list_traces`、`get_trace`、`list_trace_findings`
+- 路由与故障：`query_routing_decisions`、`query_sticky_routing`、`query_failures`、`summarize_failure_clusters`、`query_dangerous_tool_calls`、`query_sensitive_data_findings`
+- Session / Upstream：`list_sessions`、`list_upstreams`
+- 系统事件：`list_system_events`、`get_system_event`、`summarize_system_events`、`query_unread_system_events`
+- Responses 审计：`responses_audit_trace`、`responses_audit_tool_calls`
+- 重分析：`reanalyze_trace`、`reanalyze_session`、`list_analysis_jobs`、`get_analysis_job`
 
 MCP 与 proxy 复用同一套个人 token，客户端需要携带 `Authorization: Bearer <token>`。
 
@@ -560,9 +560,11 @@ func TestChat(t *testing.T) {
 - 代理热路径跨协议转换：rejected。
 - 独立 Postgres auth migration namespace：audited gap，当前共享 application `schema_migrations`。
 - SQLite versioned application migration：audited fallback，当前为 startup-schema fallback。
-- MCP/file/code/computer-use 真实执行 lifecycle 与 root/container 级 executor 沙箱：future secure executor。
+- file_search/code_interpreter/computer_use 等 hosted 工具真实执行 lifecycle 与 root/container 级 executor 沙箱：future secure executor（MCP hosted tool executor 已实现并接线）。
 
 ## 截图
+
+以下截图记录的是较早版本的 Monitor 界面，页面命名（Traces / Providers / Connect 等）与当前导航已有所不同；当前页面与工作流请以 [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md) 为准。
 
 - Monitor 总览
   ![](./images/traffic_monitor.png)

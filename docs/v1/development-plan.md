@@ -23,31 +23,36 @@ v1 总目标保持不变：在现有 raw cassette、replay、多 upstream、Moni
 
 ## Reference Materials 使用规则
 
-协议实现优先使用 [`reference-materials/README.md`](./reference-materials/README.md) 中登记的 2026-05-13 快照材料。
+协议实现统一使用 [`../protocol-reference/README.md`](../protocol-reference/README.md) 中登记的 2026-06-02 快照材料。v1 设计期使用的 2026-05-13 快照（原 `docs/v1/reference-materials/`）已被取代并删除，`docs/protocol-reference/` 是当前唯一的权威来源。
 
 ### OpenAI
 
 实现 OpenAI Chat Completions 和 Responses parser 前，先读取：
 
-- [`reference-materials/upstream/openai/schema-index-2026-05-13.md`](./reference-materials/upstream/openai/schema-index-2026-05-13.md)
-- [`reference-materials/upstream/openai/chat-completions-core-schemas-2026-05-13.yml`](./reference-materials/upstream/openai/chat-completions-core-schemas-2026-05-13.yml)
-- [`reference-materials/upstream/openai/responses-core-schemas-2026-05-13.yml`](./reference-materials/upstream/openai/responses-core-schemas-2026-05-13.yml)
+- [`../protocol-reference/upstream/openai/schema-index-2026-06-02.md`](../protocol-reference/upstream/openai/schema-index-2026-06-02.md)
+- [`../protocol-reference/upstream/openai/chat-completions-path-2026-06-02.json`](../protocol-reference/upstream/openai/chat-completions-path-2026-06-02.json)
+- [`../protocol-reference/upstream/openai/responses-path-2026-06-02.json`](../protocol-reference/upstream/openai/responses-path-2026-06-02.json)
 
 ### Anthropic Claude
 
 实现 Claude Messages parser 前，先读取：
 
-- [`reference-materials/upstream/anthropic/schema-index-2026-05-13.md`](./reference-materials/upstream/anthropic/schema-index-2026-05-13.md)
-- [`reference-materials/upstream/anthropic/messages-api-2026-05-13.md`](./reference-materials/upstream/anthropic/messages-api-2026-05-13.md)
-- [`reference-materials/upstream/anthropic/streaming-messages-2026-05-13.md`](./reference-materials/upstream/anthropic/streaming-messages-2026-05-13.md)
-- [`reference-materials/upstream/anthropic/tool-use-overview-2026-05-13.md`](./reference-materials/upstream/anthropic/tool-use-overview-2026-05-13.md)
+- [`../protocol-reference/upstream/anthropic/schema-index-2026-06-02.md`](../protocol-reference/upstream/anthropic/schema-index-2026-06-02.md)
+- [`../protocol-reference/upstream/anthropic/messages-api-2026-06-02.html`](../protocol-reference/upstream/anthropic/messages-api-2026-06-02.html)
 
 ### Google Gemini
 
-实现 Gemini GenerateContent 和 Vertex-native parser 前，先读取：
+实现 Gemini GenerateContent parser 前，先读取：
 
-- [`reference-materials/upstream/google-gemini/schema-index-2026-05-13.md`](./reference-materials/upstream/google-gemini/schema-index-2026-05-13.md)
-- [`reference-materials/upstream/google-gemini/generate-content-core-schemas-2026-05-13.json`](./reference-materials/upstream/google-gemini/generate-content-core-schemas-2026-05-13.json)
+- [`../protocol-reference/upstream/google-gemini/schema-index-2026-06-02.md`](../protocol-reference/upstream/google-gemini/schema-index-2026-06-02.md)
+- [`../protocol-reference/upstream/google-gemini/generate-content-core-schemas-2026-06-02.json`](../protocol-reference/upstream/google-gemini/generate-content-core-schemas-2026-06-02.json)
+
+### Google Vertex
+
+实现 Vertex-native GenerateContent parser 前，先读取：
+
+- [`../protocol-reference/upstream/google-vertex/schema-index-2026-06-02.md`](../protocol-reference/upstream/google-vertex/schema-index-2026-06-02.md)
+- [`../protocol-reference/upstream/google-vertex/generate-content-core-schemas-2026-06-02.json`](../protocol-reference/upstream/google-vertex/generate-content-core-schemas-2026-06-02.json)
 
 ### 冲突处理
 

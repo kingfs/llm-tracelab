@@ -154,10 +154,6 @@ func (r *LLMRequest) ToGemini() GeminiGenerateContentRequest {
 
 // ---- GeminiGenerateContentRequest -> LLMRequest ----
 
-func FromGeminiRequest(req GeminiGenerateContentRequest) LLMRequest {
-	return fromGenerateContentRequest(req)
-}
-
 func fromGenerateContentRequest(req GeminiGenerateContentRequest) LLMRequest {
 	llmReq := LLMRequest{
 		Model: "", // Gemini model name is usually in URL, not body
@@ -327,10 +323,6 @@ func geminiPromptFeedbackRefusal(promptFeedback map[string]any) *LLMRefusal {
 }
 
 // ---- LLMResponse -> OpenAIChatResponse ----
-
-func (r *LLMResponse) ToGeminiResponse() GeminiResponse {
-	return r.toGenerateContentResponse()
-}
 
 func (r *LLMResponse) toGenerateContentResponse() GeminiResponse {
 	cands := make([]GeminiCandidate, 0, len(r.Candidates))

@@ -10,9 +10,12 @@ Monitor 是 TraceLab 的本地 Web 工作台。
 
 ## 登录与 Token
 
-首次部署需要创建用户：
+首次部署需要创建用户。`config/config.yaml` 使用 Postgres 且 `database.dsn` 为空，
+运行前需导出 `LLM_TRACELAB_DATABASE_DSN`；纯本地运行可改用
+`config/examples/local-sqlite.yaml`：
 
 ```bash
+export LLM_TRACELAB_DATABASE_DSN='postgres://user:pass@host:5432/llm_tracelab?sslmode=disable'
 go run ./cmd/server auth init-user -c config/config.yaml --username admin --password 'change-me-123'
 ```
 
@@ -30,7 +33,7 @@ Monitor API，不用于 SDK、proxy 或 MCP。
 
 Monitor 使用两类数据：
 
-- SQLite：列表、过滤、分页、聚合、渠道/模型配置、事件和派生分析。
+- application database（生产环境为 Postgres，本地 fallback 为 SQLite）：列表、过滤、分页、聚合、渠道/模型配置、事件和派生分析。
 - raw `.http` cassette：trace 详情、raw protocol、replay-safe 检查。
 
 因此列表页快速，详情页仍能回到原始 HTTP 证据。
@@ -47,7 +50,7 @@ Monitor 使用两类数据：
 - Observation 状态。
 - system event 摘要。
 
-### Requests
+### Traces
 
 逐请求 trace 列表。
 
@@ -83,9 +86,9 @@ Monitor 使用两类数据：
 - 比较请求数、错误数、token、趋势。
 - 定位模型相关失败。
 
-### Channels
+### Providers
 
-管理上游渠道。
+管理上游渠道。页面路由是 `/providers`；旧路由 `/channels` 会重定向到 `/providers`。
 
 支持：
 
@@ -96,12 +99,22 @@ Monitor 使用两类数据：
 - 创建前需用 Validate setup 调用 provider setup validate：它会组合 base URL、API key、provider preset、model discovery 和 capability 字段做一次探测并把归一化配置写回表单，但不会落库；dialog 会展示 normalized config、probe 和 redacted secret state，字段变更会清空旧验证结果；Create provider 才通过 setup apply 写入 channel store；若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
 - setup validate/apply 响应不会回显 API key；只返回 `api_key_hint`、secret storage mode 和 redacted header 状态。
 - 探测模型，并查看 provider detection 建议；需要写回建议时，使用 Apply suggestions 显式更新 channel 配置。
-- 在 Channels/Providers 列表页使用 Batch probe and apply 先运行只读 `POST /api/provider-probe/report` 预览，再对 detected 且有可补字段的 provider 执行批量 Apply detected suggestions；Monitor 不展示或传递 API key。批量应用只填缺失的 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置，也不覆盖显式 `false` capability。
+- 在 Providers 列表页使用 Batch probe and apply 先运行只读 `POST /api/provider-probe/report` 预览，再对 detected 且有可补字段的 provider 执行批量 Apply detected suggestions；Monitor 不展示或传递 API key。批量应用只填缺失的 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置，也不覆盖显式 `false` capability。
 - 启停渠道。
 - 启停单个模型。
 - 查看渠道用量、token、失败和 probe 结果。
 
 长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。YAML 只作为启动和首次 bootstrap 输入。
+
+### Connect
+
+应用内连接指引，展示当前部署的 base URL 和各协议入口的 curl 示例：
+
+- OpenAI-compatible Chat Completions：`/v1/chat/completions`。
+- OpenAI Responses / Codex：`/responses`。
+- Anthropic Messages / Claude Code：`/anthropic/messages`。
+
+适合把客户端接入 TraceLab 时快速复制 base URL、endpoint 和请求示例。
 
 ### Routing
 
@@ -120,7 +133,7 @@ Monitor 使用两类数据：
 
 `GET /api/responses/function-executors` 返回当前进程中的 server-side function executor 摘要；Audit 页面会读取该接口并展示状态面板。
 
-Audit 页面也可以按 `response_id` 或 `request_audit_id` 查询 Responses server-mode 的 request audit、execution events 和 upstream exchanges。Trace detail 如果携带对应 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id，会在 Reading guide 中显示 `Responses audit` 入口，直接跳转到 `/audit` 的同一条 request lineage。
+Audit 页面也可以按 `response_id` 或 `request_audit_id` 查询本地 Responses runtime 的 request audit、execution events 和 upstream exchanges。Trace detail 如果携带对应 Responses audit id，或后端能通过 `upstream_exchanges.trace_id` 反查到 audit id，会在 Reading guide 中显示 `Responses audit` 入口，直接跳转到 `/audit` 的同一条 request lineage。
 
 返回内容包括：
 
@@ -214,5 +227,5 @@ Trace detail 支持 query 参数定位：
 1. trace detail 的 Summary 和 Raw Protocol。
 2. Routing 页面或 trace 中的 routing context。
 3. Events 页面是否有 parser/router/upstream 事件。
-4. Models/Channels 页面确认模型启用和渠道健康。
+4. Models/Providers 页面确认模型启用和渠道健康。
 5. 只有在派生结果明显不对时运行 Refresh analysis；token 统计异常时运行 Repair stats。

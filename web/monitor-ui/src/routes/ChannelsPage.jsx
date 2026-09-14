@@ -136,8 +136,6 @@ export function ProvidersPage() {
   );
 }
 
-export const ChannelsPage = ProvidersPage;
-
 function ProviderProbeBatchRow({ row }) {
   const { t } = useI18n();
   return (

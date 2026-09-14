@@ -17,7 +17,7 @@
 4. Postgres 是唯一生产主路径。application/auth/runtime/audit/read-model schema、migration、health check、doctor、deployment 和测试门禁均以 Postgres 为一等目标。SQLite 只作为 legacy/dev/test 兼容，不再参与生产架构取舍。
 5. Provider 配置明确表达 `api_type`、`mode`、`protocol_family`、capabilities 和 model profile；provider detection/onboarding 可保守补齐缺失信息，但不能覆盖用户显式配置或 capability false。
 6. Runtime model profile 的事实源、adoption、冲突处理、禁用和回滚有正式管理面，不再停留在 observe-only 诊断。
-7. Hosted/server-side tools 的执行边界明确：已实现工具可审计、可查询、失败路径稳定；未实现的 MCP/file/code/computer-use 不伪造执行结果，必须 rejected + audit，真实执行器必须另有安全边界后再接入。
+7. Hosted/server-side tools 的执行边界明确：已实现工具（含 MCP hosted tool executor）可审计、可查询、失败路径稳定；未实现的 file/code/computer-use 不伪造执行结果，必须 rejected + audit，真实执行器必须另有安全边界后再接入。
 8. `.http` cassette 仍是 replay 和 raw detail 的事实源；Responses semantic state 不能替代 raw cassette。
 9. Docker/Compose/README/operator docs 展示的默认部署是 Postgres-backed gateway，可选 SearXNG，OpenAI-compatible upstream，以及 Responses API server mode。
 
@@ -30,7 +30,7 @@
 - Chat Completions SSE cassette 记录与聚合，Responses streaming 覆盖简单文本、ordinary function arguments、client-owned `function_call_output` continuation、registered executor、hosted `web_search`、auto compact 后多条真实增量路径，以及 unsupported/fallback contract。
 - Hosted `web_search`、server-side function executor registry、YAML `static_response` / `external_command` opt-in executor、轻量 process policy。
 - `request_audits`、`execution_events`、`upstream_exchanges`、`tool_call_audits`，以及 CLI/Monitor/MCP 查询首切。
-- Provider `api_type` / `mode` / capabilities routing boundary、probe/report/apply、setup validate/apply、native Responses pass-through vs local server-mode boundary。
+- Provider `api_type` / capabilities routing boundary、`mode`（解析/校验用描述性元数据，不参与路由）、probe/report/apply、setup validate/apply、native Responses pass-through vs local server-mode boundary。
 - Postgres checked-in migrations、`db migrate up/status`、open-vs-migrate、Postgres DSN-gated tests；临时 Postgres 17 容器上已通过 `go test -p 1 ./internal/store ./internal/responses/runtime ./internal/appdbmigrate ./internal/auth ./cmd/server -count=1`。
 
 但项目还没有按最终产品形态收敛，主要问题是代码和文档仍同时表达两个目标：旧的 SQLite local-first record/replay proxy，以及新的 Postgres-first Responses gateway。后续只按后者收敛。
@@ -86,7 +86,7 @@
 - continuation、conversation state、previous_response_id、function_call/function_call_output、tool loop、compact boundary 一致。
 - streaming event ordering、已输出 SSE 后的 error/cancel/final response 存储行为稳定。
 - auto compact 与 context optimization 作为 runtime 核心能力，而不是 fallback 特例。
-- supported hosted/server-side tools 真实执行并审计；unsupported MCP/file/code/computer-use 统一 rejected + audit。
+- supported hosted/server-side tools 真实执行并审计（MCP hosted tool executor 已实现并接线）；unsupported file/code/computer-use 统一 rejected + audit。
 - Native Responses provider 在 proxy mode 可透传；local server-mode 仍走本地 semantic runtime，不混用。
 
 验收门禁：
@@ -215,11 +215,11 @@
 
 停止新增功能后，必须一次性运行：
 
-- `rtk env -u GOROOT task check:quick`
-- `rtk env -u GOROOT task test`
-- `rtk env -u GOROOT task build`
-- `rtk env -u GOROOT task test:codex-fixtures`
-- `LLM_TRACELAB_TEST_POSTGRES_DSN=... rtk env -u GOROOT go test -p 1 ./internal/store ./internal/responses/runtime ./internal/appdbmigrate ./internal/auth ./cmd/server -count=1`
+- `task check:quick`
+- `task test`
+- `task build`
+- `task test:codex-fixtures`
+- `LLM_TRACELAB_TEST_POSTGRES_DSN=... go test -p 1 ./internal/store ./internal/responses/runtime ./internal/appdbmigrate ./internal/auth ./cmd/server -count=1`
 - Postgres-backed gateway smoke：fresh DB migration、auth bootstrap、serve startup、Responses create/stream/tool/compact over OpenAI-compatible test upstream、non-Responses proxy record/replay。
 
 最终冻结条件：
@@ -227,5 +227,5 @@
 - 工作区干净。
 - README、README_EN、CURRENT_IMPLEMENTATION、PROJECT_BASELINE、RESPONSES_SERVER_DESIGN、POSTGRES_STORAGE_MIGRATION 与本计划一致。
 - Postgres 是生产主路径；SQLite 只作为 legacy/dev/test 兼容说明。
-- 未实现 MCP/file/code/computer-use 真实执行器仍 rejected + audit，不伪造执行结果。
+- 未实现的 file/code/computer-use 真实执行器仍 rejected + audit，不伪造执行结果。
 - `.http` cassette replay 和普通 proxy 热路径通过最终测试。

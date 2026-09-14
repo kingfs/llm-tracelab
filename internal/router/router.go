@@ -556,21 +556,6 @@ func (r *Router) Targets() []*Target {
 	return append([]*Target(nil), r.targets...)
 }
 
-func (r *Router) HasLocalResponsesServerBackend() bool {
-	if r == nil {
-		return false
-	}
-	for _, target := range r.Targets() {
-		if target == nil || !target.Enabled {
-			continue
-		}
-		if SupportsLocalResponsesServerBackend(target.Upstream) {
-			return true
-		}
-	}
-	return false
-}
-
 func ValidateLocalResponsesServerBackendConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return nil

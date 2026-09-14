@@ -50,7 +50,7 @@ func newRootCommand() *cobra.Command {
 func newRootCommandWithRuntime(runtime *cliRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           cliName,
-		Short:         "Postgres-first LLM gateway with Responses server-mode and record/replay",
+		Short:         "Postgres-first LLM gateway with local Responses runtime and record/replay",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -67,10 +67,8 @@ func newRootCommandWithRuntime(runtime *cliRuntime) *cobra.Command {
 	})
 	cmd.PersistentFlags().StringP("config", "c", "config.yaml", "Path to configuration file")
 	cmd.PersistentFlags().String("format", "text", "Output format: text or json")
-	cmd.PersistentFlags().Bool("no-input", true, "Fail instead of prompting for input; this CLI is non-interactive by default")
 	mustBindPFlag(runtime.settings, "config", cmd.PersistentFlags().Lookup("config"))
 	mustBindPFlag(runtime.settings, "format", cmd.PersistentFlags().Lookup("format"))
-	mustBindPFlag(runtime.settings, "no-input", cmd.PersistentFlags().Lookup("no-input"))
 	cmd.AddCommand(
 		newServeCommand(runtime),
 		newMigrateCommand(runtime),
@@ -246,13 +244,12 @@ type cliEnvelope struct {
 }
 
 type cliError struct {
-	Code        string   `json:"code"`
-	Category    string   `json:"category"`
-	Message     string   `json:"message"`
-	Field       string   `json:"field,omitempty"`
-	Retryable   bool     `json:"retryable"`
-	SafeToRetry bool     `json:"safe_to_retry"`
-	Suggestions []string `json:"suggested_commands,omitempty"`
+	Code        string `json:"code"`
+	Category    string `json:"category"`
+	Message     string `json:"message"`
+	Field       string `json:"field,omitempty"`
+	Retryable   bool   `json:"retryable"`
+	SafeToRetry bool   `json:"safe_to_retry"`
 }
 
 func writeCLIResult(w io.Writer, format string, command string, result any, text func(io.Writer) error) error {

@@ -1,7 +1,5 @@
 import { startTransition, useEffect, useState } from "react";
-import { monitorAuthHeaders, MONITOR_TOKEN_KEY, requestJSON } from "../lib/api";
-
-export { monitorAuthHeaders, MONITOR_TOKEN_KEY };
+import { requestJSON } from "../lib/api";
 
 export function useJSON(url, deps = []) {
   const [state, setState] = useState({ loading: true, data: null, error: "" });

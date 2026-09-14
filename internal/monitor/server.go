@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -1530,7 +1531,6 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/channels", monitorAuthRequired(channelListCreateAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/channels/", monitorAuthRequired(channelDetailAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/provider-presets", monitorAuthRequired(providerPresetAPIHandler(), monitorVerifier))
-	mux.HandleFunc("/api/router/reload", monitorAuthRequired(routerReloadAPIHandler(st, opt.Router, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/upstreams", monitorAuthRequired(upstreamListAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/upstreams/", monitorAuthRequired(upstreamDetailAPIHandler(st, opt.Router), monitorVerifier))
 	mux.Handle("/", appHandler())
@@ -3409,23 +3409,40 @@ func handleChannelModel(w http.ResponseWriter, r *http.Request, st *store.Store,
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
-	var req channelModelPatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
 		return
 	}
+	var req channelModelPatchRequest
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid model payload"})
+		return
+	}
+	// The capability columns are tri-state (unset = inherit). An explicit JSON
+	// null means "clear back to inherit", which a *bool alone cannot express,
+	// so presence of the key is checked separately.
+	var rawFields map[string]json.RawMessage
+	_ = json.Unmarshal(bodyBytes, &rawFields)
+	explicitNull := func(key string) bool {
+		value, ok := rawFields[key]
+		return ok && strings.TrimSpace(string(value)) == "null"
+	}
 	record, err := st.UpdateChannelModelProfile(channelID, model, store.ChannelModelProfilePatch{
-		DisplayName:                 req.DisplayName,
-		Enabled:                     req.Enabled,
-		SupportsResponses:           req.SupportsResponses,
-		SupportsChatCompletions:     req.SupportsChatCompletions,
-		SupportsEmbeddings:          req.SupportsEmbeddings,
-		ContextWindow:               req.ContextWindow,
-		MaxOutputTokens:             req.MaxOutputTokens,
-		CompactHistoryItemThreshold: req.CompactHistoryItemThreshold,
-		UpstreamModel:               req.UpstreamModel,
-		ProfileSource:               req.ProfileSource,
-		ProfileAdoptionStatus:       req.ProfileAdoptionStatus,
+		DisplayName:                  req.DisplayName,
+		Enabled:                      req.Enabled,
+		SupportsResponses:            req.SupportsResponses,
+		ClearSupportsResponses:       explicitNull("supports_responses"),
+		SupportsChatCompletions:      req.SupportsChatCompletions,
+		ClearSupportsChatCompletions: explicitNull("supports_chat_completions"),
+		SupportsEmbeddings:           req.SupportsEmbeddings,
+		ClearSupportsEmbeddings:      explicitNull("supports_embeddings"),
+		ContextWindow:                req.ContextWindow,
+		MaxOutputTokens:              req.MaxOutputTokens,
+		CompactHistoryItemThreshold:  req.CompactHistoryItemThreshold,
+		UpstreamModel:                req.UpstreamModel,
+		ProfileSource:                req.ProfileSource,
+		ProfileAdoptionStatus:        req.ProfileAdoptionStatus,
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		record, err = st.UpsertChannelModel(channelID, channelModelRecordFromPatch(model, req))
@@ -3883,20 +3900,6 @@ func parseBoolQuery(value string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
-}
-
-func routerReloadAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.NotFound(w, r)
-			return
-		}
-		if err := reloadRouterFromChannels(rtr, effectiveChannelService(st, channelService)); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	}
 }
 
 func reloadRouterFromChannels(rtr *router.Router, channelService *channel.Service) error {

@@ -44,10 +44,6 @@ type LLMContent struct {
 	Text string `json:"text,omitempty"`
 	ID   string `json:"id,omitempty"`
 
-	ImageData []byte `json:"image_data,omitempty"`
-	AudioData []byte `json:"audio_data,omitempty"`
-	VideoData []byte `json:"video_data,omitempty"`
-
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolName   string         `json:"tool_name,omitempty"`
 	ToolArgs   map[string]any `json:"tool_args,omitempty"`
@@ -112,7 +108,6 @@ type LLMUsage struct {
 	TotalTokens  int `json:"total_tokens"`
 
 	ReasoningTokens int `json:"reasoning_tokens,omitempty"`
-	AudioTokens     int `json:"audio_tokens,omitempty"`
 
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`

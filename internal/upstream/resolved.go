@@ -47,7 +47,6 @@ const (
 	ConnectivityPathOpenAIModels    = "/models"
 	ConnectivityPathAnthropicModels = "/v1/models"
 	ConnectivityPathGoogleModels    = "/v1beta/models"
-	ConnectivityPathVertexModels    = "/v1/publishers/google/models"
 	DefaultAzureAPIVersion          = "preview"
 	DefaultAnthropicAPIVersion      = "2023-06-01"
 )
@@ -563,7 +562,8 @@ func (u ResolvedUpstream) SupportsToolCallingForModel(model string) bool {
 	return u.SupportsToolCalling()
 }
 
-// SupportsEndpointForModel is SupportsEndpoint resolved for a specific model.
+// SupportsEndpointForModel reports whether the target can serve one API surface
+// for a specific model.
 //
 // The Responses path is served either natively or, when the target is a Chat
 // Completions backend, through the local Responses execution mode. Which of the
@@ -575,17 +575,6 @@ func (u ResolvedUpstream) SupportsEndpointForModel(endpoint string, model string
 		return u.SupportsChatCompletionsAPIForModel(model)
 	case "/v1/responses":
 		return u.SupportsResponsesAPIForModel(model) || u.SupportsChatCompletionsAPIForModel(model)
-	default:
-		return true
-	}
-}
-
-func (u ResolvedUpstream) SupportsEndpoint(endpoint string) bool {
-	switch llm.NormalizeEndpoint(endpoint) {
-	case "/v1/chat/completions":
-		return u.SupportsChatCompletionsAPI()
-	case "/v1/responses":
-		return u.SupportsResponsesAPI() || u.APIType == APITypeChatCompletions
 	default:
 		return true
 	}

@@ -574,7 +574,6 @@ tools:
 
 ```yaml
 responses_server:
-  enabled: true
   codex_compat:
     enabled: true
     auto_inject_hosted_tools: ["web_search"]
