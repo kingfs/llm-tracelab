@@ -53,9 +53,7 @@ pkg/replay            replay transport for tests
 pkg/llm               cross-provider normalization helpers
 ```
 
-AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md). The current implemented baseline is summarized in [docs/PROJECT_BASELINE.md](./docs/PROJECT_BASELINE.md). Production deployment guidance is in [docs/PRODUCTION_DEPLOYMENT.md](./docs/PRODUCTION_DEPLOYMENT.md). The user-facing monitor workflow guide is in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), and authenticated proxy examples are in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md). The maintainer-oriented implementation baseline is in [docs/MAINTAINER_BASELINE.md](./docs/MAINTAINER_BASELINE.md). A short technical summary is in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), the upstream compatibility matrix is in [docs/UPSTREAM_PROVIDERS.md](./docs/UPSTREAM_PROVIDERS.md), and the credential routing operator guide is in [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md).
-
-The gateway ecosystem review compares Sub2API, LiteLLM, Portkey, and Helicone. It clarifies that TraceLab should not become a public relay, payment, or SaaS quota-distribution platform; it should absorb channel management, routing, rate limiting, health, cost, and governance ideas only where they strengthen local-first record/replay, debugging, audit, and evaluation workflows.
+Documentation starts at [docs/README.md](./docs/README.md). Frequently used pages: the current implementation status in [docs/IMPLEMENTATION_STATUS.md](./docs/IMPLEMENTATION_STATUS.md), the architecture and code map in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md), storage and deployment in [docs/STORAGE_AND_DEPLOYMENT.md](./docs/STORAGE_AND_DEPLOYMENT.md), routing and credentials in [docs/ROUTING_AND_CREDENTIALS.md](./docs/ROUTING_AND_CREDENTIALS.md), protocols and upstreams in [docs/PROTOCOLS_AND_PROVIDERS.md](./docs/PROTOCOLS_AND_PROVIDERS.md), the local Responses runtime in [docs/RESPONSES_RUNTIME.md](./docs/RESPONSES_RUNTIME.md), the user-facing monitor workflow guide in [docs/MONITOR_GUIDE.md](./docs/MONITOR_GUIDE.md), the MCP guide in [docs/MCP_GUIDE.md](./docs/MCP_GUIDE.md), authenticated proxy examples in [docs/PROXY_USAGE_EXAMPLES.md](./docs/PROXY_USAGE_EXAMPLES.md), and development commands in [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md). AI-oriented project guidance lives in [AGENTS.md](./AGENTS.md).
 
 ## Record Format And Index
 
@@ -139,7 +137,7 @@ debug:
 
 Legacy `upstream` / `upstreams` YAML is still supported, but it is no longer the long-term production configuration entry point. On first startup, setting `LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL` imports one OpenAI-compatible bootstrap provider; leaving it empty starts only the Web and management surface. Imported channels are marked as `bootstrap` in Monitor; edit, probe, enable, and disable models from the Web UI after import.
 
-For an example with two explicit credentials under one upstream, plus sticky route target, credential-safe metadata, and limit scope guidance, see [docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md](./docs/CREDENTIAL_ROUTING_OPERATOR_GUIDE.md). The examples use `$env:...` placeholders only; do not commit real provider secrets in YAML.
+For an example with two explicit credentials under one upstream, plus sticky route target, credential-safe metadata, and limit scope guidance, see [docs/ROUTING_AND_CREDENTIALS.md](./docs/ROUTING_AND_CREDENTIALS.md). The examples use `$env:...` placeholders only; do not commit real provider secrets in YAML.
 
 If you prefer starting from a ready-made bootstrap config, use one of these examples; long-lived channel configuration should still be managed in Monitor Web:
 

@@ -21,7 +21,7 @@ The project optimizes for reliable tests, lower API cost, and fast debugging.
 - Application store and metadata index: `internal/store`
 - Upstream resolution and capability/protocol-family rules: `internal/upstream`
 - Channel (provider) config and probe services: `internal/channel`
-- Local Responses runtime, HTTP surface, chat client, and audit queries: `internal/responses`
+- Local Responses runtime, HTTP surface, chat client, and audit queries: `internal/responses` (subpackages `runtime`, `httpapi`, `chatclient`, `audit`, `functionexec`, `tools`, `protocol`, `codexfixtures`)
 - Postgres application migrations: `internal/appdbmigrate`
 - Monitor UI: `internal/monitor`
 - Replay transport for tests: `pkg/replay`
@@ -80,7 +80,7 @@ Compatibility note:
 - Build backend only: `task build:go`
 - Build everything: `task build`
 - Run locally: `task run`
-- See `docs/DEVELOPMENT_COMMANDS.md` for the command matrix humans and AI agents should use.
+- See `docs/DEVELOPMENT.md` for the command matrix humans and AI agents should use.
 
 ## When Changing Storage Or Format
 
@@ -91,17 +91,22 @@ Compatibility note:
 
 ## Documentation Targets
 
+All documentation under `docs/` is written in Chinese and describes current code facts only. Plans, roadmaps, phase designs, and archives are not kept in this repository.
+
 - `README.md` and `README_EN.md`: human-facing overview and quick start
 - `AGENTS.md`: AI-oriented project map and invariants
-- `docs/README.md`: 中文文档总入口，说明当前事实文档、用户指南、开发指南、v1 设计和归档文档的阅读顺序
-- `docs/CURRENT_IMPLEMENTATION.md`: 当前最新代码事实的中文概览
-- `docs/PROJECT_BASELINE.md`: current implemented capability baseline for both humans and AI agents
-- `docs/protocol-reference/README.md`: current protocol reference entry, implemented protocol matrix, protocol differences, and dated upstream schema snapshots
-- `docs/v1/README.md`: v1 中文设计文档入口，区分当前事实、设计背景和历史计划
-- `docs/v1/status.md`: v1 能力当前落地状态
+- `docs/README.md`: 中文文档总入口，列出事实源文档、操作指南、开发文档与协议参考
+- `docs/IMPLEMENTATION_STATUS.md`: 当前已实现与未实现能力的事实基线
+- `docs/ARCHITECTURE.md`: 代码地图、数据流、存储边界、并发一致性与测试基线
+- `docs/PROTOCOLS_AND_PROVIDERS.md`: 协议族、请求入口、provider preset 与能力声明
+- `docs/ROUTING_AND_CREDENTIALS.md`: 配置来源与所有权、路由选择、凭据与 limit scope
+- `docs/RESPONSES_RUNTIME.md`: 本地 Responses runtime、Codex 兼容面、hosted tools
+- `docs/OBSERVATION_AND_AUDIT.md`: 语义解析管道、Observation IR、findings 与重分析
+- `docs/STORAGE_AND_DEPLOYMENT.md`: 存储分层、迁移命令、生产部署与派生数据重算
 - `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
 - `docs/MCP_GUIDE.md`: current MCP tool surface and usage
-- `docs/MAINTAINER_BASELINE.md`: implementation constraints, upgrade expectations, and storage/monitor invariants
-- `docs/DEVELOPMENT_COMMANDS.md`: stable test, lint, build, benchmark, and dependency command entry points
-- `docs/archive/README.md`: historical plans, completed phase designs, branch notes, and older roadmap material; not a current implementation fact source
+- `docs/PROXY_USAGE_EXAMPLES.md`: 把 SDK 与 CLI 接到代理上的示例
+- `docs/POSTGRES_OPERATIONS.md`: Postgres 长期运行的基线采集、索引、调优与排障
+- `docs/DEVELOPMENT.md`: stable test, lint, build, benchmark, and dependency command entry points
+- `docs/protocol-reference/README.md`: current protocol reference entry, implemented protocol matrix, protocol differences, and dated upstream schema snapshots
 - add focused docs under `docs/` only when they clarify architecture or storage decisions

@@ -691,7 +691,10 @@ func ensureBootstrapUpstream(cfg *Config) {
 			Tokenize:        &tokenize,
 		},
 		ProtocolFamily: "openai_compatible",
-		RoutingProfile: "openai",
+		// Must be a routing profile registered in internal/upstream; the bare
+		// "openai" value is only a provider preset name and would be rejected
+		// by upstream.Resolve.
+		RoutingProfile: "openai_default",
 		Headers:        map[string]string{},
 	}
 }

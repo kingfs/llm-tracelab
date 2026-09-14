@@ -294,6 +294,9 @@ func TestBootstrapUpstreamEnvCreatesSingleDefaultUpstream(t *testing.T) {
 	if target.Upstream.ProviderPreset != "openai" || target.Upstream.ProtocolFamily != "openai_compatible" {
 		t.Fatalf("bootstrap upstream preset/family = %q/%q", target.Upstream.ProviderPreset, target.Upstream.ProtocolFamily)
 	}
+	if target.Upstream.RoutingProfile != "openai_default" {
+		t.Fatalf("bootstrap routing_profile = %q, want openai_default", target.Upstream.RoutingProfile)
+	}
 	if target.Upstream.Capabilities.ChatCompletions == nil || !*target.Upstream.Capabilities.ChatCompletions {
 		t.Fatalf("bootstrap chat_completions capability = %#v", target.Upstream.Capabilities.ChatCompletions)
 	}

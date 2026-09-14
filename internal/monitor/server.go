@@ -3585,10 +3585,10 @@ func normalizeModelList(models []string) []string {
 func defaultRoutingSettings() routingSettingsView {
 	return routingSettingsView{
 		// Native Responses upstreams are preferred; the local Responses server
-		// is only a fallback. This matches docs/GATEWAY_ROUTING_UI_DESIGN.md and
-		// makes the decision follow the requested model: a model served by a
-		// Responses-capable channel is proxied as-is, while one served only by
-		// Chat Completions goes through the local server.
+		// is only a fallback. This makes the decision follow the requested
+		// model: a model served by a Responses-capable channel is proxied
+		// as-is, while one served only by Chat Completions goes through the
+		// local server. See docs/RESPONSES_RUNTIME.md.
 		ResponsesStrategy:  "auto",
 		SelectionPolicy:    router.PolicyP2C,
 		MissingModelPolicy: router.FallbackReject,

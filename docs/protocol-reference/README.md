@@ -1,24 +1,24 @@
-# Protocol Reference
+# 协议参考
 
-This directory is the current protocol reference entry for TraceLab.
+本目录是 TraceLab 的协议参考入口。
 
-It separates two concerns:
+它区分两类内容：
 
-- current TraceLab implementation facts: what the proxy can route, record, replay, and parse today
-- upstream protocol materials: official API specs or documentation snapshots used when implementing parsers and protocol-family routing
+- TraceLab 当前实现事实：代理现在能路由、录制、回放、解析什么
+- 上游协议材料：实现 parser 与协议族路由时使用的官方 API 规范或文档快照
 
-TraceLab is currently a protocol-family-aware pass-through recorder. It does not translate requests between protocol families in the proxy hot path.
+TraceLab 当前是一个协议族感知的透传录制器，代理热路径不做协议族之间的请求翻译。
 
-## Current Implementation References
+## 当前实现参考
 
-- [Implemented Protocols](./implemented-protocols.md): current code-supported protocol families, endpoints, routing profiles, and parser coverage.
-- [Protocol Differences](./protocol-differences.md): practical differences between OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Google Gemini GenerateContent, and Vertex native GenerateContent.
+- [已实现的协议](./implemented-protocols.md)：当前代码支持的协议族、endpoint、路由 profile 与 parser 覆盖范围。
+- [协议差异](./protocol-differences.md)：OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google Gemini GenerateContent 与 Vertex native GenerateContent 之间的实际差异。
 
-## Upstream Snapshots
+## 上游快照
 
-Current snapshot date: 2026-06-02.
+当前快照日期：2026-06-02。
 
-The upstream materials are stored under [`upstream/`](./upstream/). When an upstream API changes, add a new dated snapshot instead of overwriting an older file.
+上游材料存放在 [`upstream/`](./upstream/) 下。上游 API 变化时，**新增**一个带日期的快照，而不是覆盖旧文件。
 
 ```text
 protocol-reference/
@@ -29,11 +29,17 @@ protocol-reference/
     google-vertex/
 ```
 
-## Source Policy
+## 取材原则
 
-- Use official upstream specs or docs where available.
-- Keep raw snapshots human-locatable and dated.
-- Keep extracted schema subsets near the raw snapshot for implementation convenience.
-- Do not treat an upstream schema as TraceLab's internal IR. TraceLab's semantic parser output remains Observation IR.
-- OpenAI-compatible providers only claim compatibility with a subset of OpenAI-style behavior; they are not automatically equivalent to the official OpenAI API.
-- This directory is the single source of truth for upstream protocol snapshots. The older v1 design-era 2026-05-13 snapshots under `docs/v1/reference-materials/` were superseded by the dated snapshots here and have been removed.
+- 优先使用官方上游规范或文档。
+- 原始快照保持可人工定位，并带日期。
+- 抽取出的 schema 子集与原始快照放在一起，便于实现时查阅。
+- 不要把上游 schema 当作 TraceLab 的内部 IR。TraceLab 的语义 parser 输出始终是 Observation IR。
+- OpenAI-compatible provider 只声明"兼容 OpenAI 风格行为的某个子集"，不自动等同于 OpenAI 官方 API。
+- 本目录是上游协议快照的唯一事实源。
+
+## 相关文档
+
+- [文档入口](../README.md)
+- [协议族与上游 Provider](../PROTOCOLS_AND_PROVIDERS.md)
+- [语义解析、Observation IR 与审计](../OBSERVATION_AND_AUDIT.md)

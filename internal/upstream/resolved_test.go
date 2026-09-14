@@ -2,6 +2,8 @@ package upstream
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -884,5 +886,33 @@ func TestResolvedUpstreamPerModelCapabilities(t *testing.T) {
 	}
 	if !plain.SupportsEndpointForModel("/v1/responses", "anything") {
 		t.Fatalf("plain chat target should still be eligible as a local Responses backend")
+	}
+}
+
+// The bootstrap upstream synthesized from LLM_TRACELAB_BOOTSTRAP_UPSTREAM_*
+// must satisfy the same registry validation as a hand-written config, so the
+// two pieces cannot drift apart.
+func TestBootstrapUpstreamFromConfigResolves(t *testing.T) {
+	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL", "https://api.example.com/v1")
+	t.Setenv("LLM_TRACELAB_BOOTSTRAP_UPSTREAM_API_KEY", "bootstrap-placeholder-key")
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  port: \"8080\"\n"), 0o600); err != nil {
+		t.Fatalf("write temp config: %v", err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	targets := cfg.EffectiveUpstreams()
+	if len(targets) != 1 {
+		t.Fatalf("len(EffectiveUpstreams()) = %d, want 1", len(targets))
+	}
+	resolved, err := Resolve(targets[0].Upstream)
+	if err != nil {
+		t.Fatalf("Resolve(bootstrap upstream): %v", err)
+	}
+	if resolved.RoutingProfile != RoutingProfileOpenAIDefault {
+		t.Fatalf("routing_profile = %q, want %q", resolved.RoutingProfile, RoutingProfileOpenAIDefault)
 	}
 }
