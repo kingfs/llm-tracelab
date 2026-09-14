@@ -2587,8 +2587,9 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 		ResponsesServer: config.ResponsesServerConfig{
 			Enabled: true,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
-				Enabled:        true,
-				Timeout:        time.Second,
+				Enabled: true,
+				// The helper is this test binary; race builds also wait at process exit.
+				Timeout:        5 * time.Second,
 				MaxResultBytes: 512,
 				Executors: []config.ResponsesFunctionExecutorBinding{
 					{

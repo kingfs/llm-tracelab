@@ -366,7 +366,11 @@ func routerConfigFromChannels(cfg *config.Config, channelService *channel.Servic
 	if err != nil {
 		return nil, "", err
 	}
-	if len(targets) == 0 {
+	initialized, err := channelService.HasConfiguration()
+	if err != nil {
+		return nil, "", err
+	}
+	if !initialized {
 		return cfg, "yaml", nil
 	}
 	routerCfg := *cfg

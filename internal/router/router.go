@@ -91,6 +91,7 @@ func DefaultHealthThresholds() HealthThresholds {
 
 type Router struct {
 	mu               sync.RWMutex
+	reloadMu         sync.Mutex
 	targets          []*Target
 	modelToTargets   map[string][]*Target
 	policy           string
@@ -140,6 +141,7 @@ type Target struct {
 	ModelDiscovery       string
 	StaticModels         []string
 	ModelAliases         map[string]string
+	disabledModels       map[string]struct{}
 	configuredModelsOnly bool
 	Upstream             upstream.ResolvedUpstream
 
@@ -456,6 +458,7 @@ func newTargetFromConfig(targetCfg config.UpstreamTargetConfig, resolved upstrea
 		StaticModels:         normalizeModels(targetCfg.StaticModels),
 		ModelAliases:         normalizeModelAliases(targetCfg.ModelAliases),
 		configuredModelsOnly: targetCfg.ConfiguredModelsOnly,
+		disabledModels:       modelSet(targetCfg.DisabledModels),
 		Upstream:             resolved,
 		allowUnknownModels:   allowUnknownModels(targetCfg, singleConfiguredTarget),
 		models:               map[string]struct{}{},
@@ -520,6 +523,17 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 	if r == nil {
 		return fmt.Errorf("router is nil")
 	}
+	return r.ReloadWithCommit(targetCfgs, r.store, nil)
+}
+
+// ReloadWithCommit prepares the next snapshot before committing configuration.
+// A failed preparation or commit leaves the running snapshot unchanged.
+func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, st *store.Store, commit func() error) error {
+	if r == nil {
+		return fmt.Errorf("router is nil")
+	}
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
 	nextTargets, err := buildTargets(targetCfgs)
 	if err != nil {
 		return err
@@ -538,12 +552,18 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 	}
 
 	if len(nextTargets) > 0 {
-		if _, err := r.refreshTargets(nextTargets); err != nil {
+		if _, err := r.refreshTargetsWithStore(nextTargets, st); err != nil {
 			return err
 		}
 	}
 
 	r.mu.Lock()
+	if commit != nil {
+		if err := commit(); err != nil {
+			r.mu.Unlock()
+			return err
+		}
+	}
 	r.targets = nextTargets
 	r.rebuildCatalog()
 	r.mu.Unlock()
@@ -712,6 +732,9 @@ func (r *Router) AggregatedModels() []string {
 	for _, target := range targets {
 		if target.configuredModelsOnly || len(target.StaticModels) > 0 {
 			for _, model := range normalizeModels(target.StaticModels) {
+				if _, disabled := target.disabledModels[model]; disabled {
+					continue
+				}
 				if model == "" {
 					continue
 				}
@@ -1125,6 +1148,9 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 	var candidates []*Target
 	if model != "" {
 		for _, target := range r.modelToTargets[strings.ToLower(model)] {
+			if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
+				continue
+			}
 			if supportsPath(target, rawPath) && supportsRequestFeatures(target, features) {
 				candidates = append(candidates, target)
 			}
@@ -1136,6 +1162,12 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 
 	var fallback []*Target
 	for _, target := range r.targets {
+		if _, disabled := target.disabledModels[strings.ToLower(strings.TrimSpace(model))]; disabled {
+			continue
+		}
+		if target.configuredModelsOnly && model != "" && !target.allowUnknownModels {
+			continue
+		}
 		if !supportsPath(target, rawPath) {
 			continue
 		}
@@ -1149,7 +1181,29 @@ func (r *Router) candidatesForRequest(rawPath string, model string, features Req
 	return fallback
 }
 
+func modelSet(models []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(models))
+	for _, model := range normalizeModels(models) {
+		set[model] = struct{}{}
+	}
+	return set
+}
+
 func (r *Router) refreshTarget(target *Target) ([]string, string, error) {
+	// Discovery is inventory, never authorization, for database-managed targets.
+	if target.configuredModelsOnly {
+		models := make([]string, 0, len(target.StaticModels))
+		for _, model := range target.StaticModels {
+			if _, disabled := target.disabledModels[model]; !disabled {
+				models = append(models, model)
+			}
+		}
+		status := "static"
+		if len(models) == 0 {
+			status = "empty"
+		}
+		return models, status, nil
+	}
 	modelSet := map[string]struct{}{}
 	for _, model := range target.StaticModels {
 		modelSet[strings.ToLower(model)] = struct{}{}
@@ -1194,6 +1248,10 @@ func (r *Router) refreshAll() (int, error) {
 }
 
 func (r *Router) refreshTargets(targets []*Target) (int, error) {
+	return r.refreshTargetsWithStore(targets, r.store)
+}
+
+func (r *Router) refreshTargetsWithStore(targets []*Target, st *store.Store) (int, error) {
 	var usable int
 	for _, target := range targets {
 		models, status, refreshErr := r.refreshTarget(target)
@@ -1201,7 +1259,7 @@ func (r *Router) refreshTargets(targets []*Target) (int, error) {
 			usable++
 		}
 		target.setRefreshResult(models, status, refreshErr, r.failureThreshold, r.openWindow, r.costs)
-		if r.store != nil {
+		if st != nil {
 			record := store.UpstreamTargetRecord{
 				ID:                target.ID,
 				BaseURL:           target.Upstream.BaseURL,
@@ -1218,7 +1276,7 @@ func (r *Router) refreshTargets(targets []*Target) (int, error) {
 			if refreshErr != nil {
 				record.LastRefreshError = refreshErr.Error()
 			}
-			if err := r.store.UpsertUpstreamTarget(record); err != nil {
+			if err := st.UpsertUpstreamTarget(record); err != nil {
 				return 0, err
 			}
 			modelRecords := make([]store.UpstreamModelRecord, 0, len(models))
@@ -1231,7 +1289,7 @@ func (r *Router) refreshTargets(targets []*Target) (int, error) {
 					SeenAt:     seenAt,
 				})
 			}
-			if err := r.store.ReplaceUpstreamModels(target.ID, modelRecords); err != nil {
+			if err := st.ReplaceUpstreamModels(target.ID, modelRecords); err != nil {
 				return 0, err
 			}
 		}
@@ -1498,6 +1556,9 @@ func credentialDecisionFromTarget(target *Target) CredentialDecisionInfo {
 
 func (t *Target) supportsModelLocked(model string) bool {
 	modelKey := strings.ToLower(strings.TrimSpace(model))
+	if _, disabled := t.disabledModels[modelKey]; disabled {
+		return false
+	}
 	if modelKey == "" || modelKey == ModelDiscoveryListModels {
 		return true
 	}

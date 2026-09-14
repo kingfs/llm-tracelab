@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { StatCard } from "../components/common/Display";
 import { DeleteIcon, InlineTag, PlusIcon } from "../components/common/Badges";
 import { EmptyState } from "../components/common/EmptyState";
@@ -35,6 +35,7 @@ const DEFAULT_FORM = {
 };
 
 export function ProvidersPage() {
+  const navigate = useNavigate();
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const windowValue = normalizeAnalyticsWindow(searchParams.get("window"));
@@ -126,9 +127,10 @@ export function ProvidersPage() {
         <CreateProviderDialog
           presetData={presets.data}
           onClose={() => setFormOpen(false)}
-          onCreated={() => {
+          onCreated={(item) => {
             setFormOpen(false);
             setRefreshTick((tick) => tick + 1);
+            if (item?.id) navigate(buildProviderLink(item.id, windowValue));
           }}
         />
       ) : null}
@@ -265,8 +267,8 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
     setSaving(true);
     setError("");
     try {
-      await postJSON(apiPaths.providerSetupApply, normalizeProviderPayload(form));
-      onCreated();
+      const result = await postJSON(apiPaths.providerSetupApply, normalizeProviderPayload(form));
+      onCreated(result.channel);
     } catch (err) {
       setError(err.message || t("providers.validateRequiredReason"));
     } finally {
@@ -306,7 +308,7 @@ function CreateProviderDialog({ presetData, onClose, onCreated }) {
         {error ? <p className="auth-error">{error}</p> : null}
         <div className="nav-modal-actions">
           <button className="ghost-button" type="button" onClick={onClose}>{t("providers.cancel")}</button>
-          <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply}>{saving ? t("providers.creating") : t("providers.create")}</button>
+          <button className="ghost-button active" type="submit" disabled={saving || !setupStatus.canApply || !form.name.trim() || !form.base_url.trim()}>{saving ? t("providers.creating") : t("providers.create")}</button>
         </div>
       </form>
     </div>,
@@ -319,14 +321,18 @@ function ProviderCard({ item, windowValue, onRefresh }) {
   const summary = item.summary || {};
   const modeTag = providerModeTag(item.mode);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [probeOpen, setProbeOpen] = useState(false);
   const setEnabled = async (enabled, event) => {
     event?.preventDefault();
     event?.stopPropagation();
     setSaving(true);
+    setError("");
     try {
       await patchJSON(apiPaths.provider(item.id), { enabled });
       onRefresh?.();
+    } catch (err) {
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -338,9 +344,12 @@ function ProviderCard({ item, windowValue, onRefresh }) {
       return;
     }
     setSaving(true);
+    setError("");
     try {
       await deleteJSON(apiPaths.provider(item.id));
       onRefresh?.();
+    } catch (err) {
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -379,6 +388,8 @@ function ProviderCard({ item, windowValue, onRefresh }) {
         <Metric label={t("overview.requests")} value={formatCount(summary.request_count)} />
         <Metric label={t("overview.tokens")} value={formatCount(summary.total_tokens)} detail={usageCoverageDetail(summary.missing_usage_request, t)} />
       </div>
+      {error ? <p className="auth-error" role="alert">{error}</p> : null}
+      <p className="trace-subline">{!item.enabled ? t("providers.routingDisabled") : !item.enabled_model_count && !item.allow_unknown_models ? t("providers.chooseModels") : t("providers.routingEnabled")}</p>
       <div className="upstream-card-footer">
         <span className="mono">{item.base_url}</span>
         <span>{formatDateTime(item.last_probe_at || item.updated_at)}</span>

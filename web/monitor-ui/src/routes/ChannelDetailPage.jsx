@@ -290,19 +290,22 @@ export function ProviderDetailPage() {
             <div className="panel-head">
               <div>
                 <p className="eyebrow">Models</p>
-                <h2>Usage by model</h2>
+                <h2>Model routing and usage</h2>
+                <p className="trace-subline">Enable allows new requests through this provider; it does not start a model process. Discovery does not enable models.</p>
+                {!provider.enabled ? <p className="trace-subline">Provider disabled: all model routes are blocked. Model selections are preserved.</p> : null}
               </div>
             </div>
             <form className="filter-bar" onSubmit={addModel}>
               <input className="filter-input filter-input-wide" type="search" value={modelDraft} onChange={(event) => setModelDraft(event.target.value)} placeholder="Add model manually" />
               <button className="ghost-button active" type="submit" disabled={busy === "add-model"}>{busy === "add-model" ? "Adding" : "Add model"}</button>
-              <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? "Enabling" : `Enable new (${formatCount(discoveredDisabledModels.length)})`}</button>
+              <button className="ghost-button" type="button" onClick={() => setModelsEnabled(discoveredDisabledModels, true)} disabled={!discoveredDisabledModels.length || busy === "models-enable"}>{busy === "models-enable" ? "Enabling" : `Enable discovered (${formatCount(discoveredDisabledModels.length)})`}</button>
             </form>
             <div className="provider-model-card-grid">
               {modelsUsage.length ? modelsUsage.map((model) => (
                 <ProviderModelRow
                   key={model.model}
                   item={model}
+                  providerEnabled={Boolean(provider.enabled)}
                   busy={busy === model.model}
                   deleting={busy === `delete:${model.model}`}
                   onToggle={() => setModelEnabled(model.model, !model.enabled)}
@@ -458,7 +461,7 @@ function ProviderProbeSuggestionPanel({ report, busy, onApply }) {
   );
 }
 
-function ProviderModelRow({ item, busy, deleting, onToggle, onDelete }) {
+function ProviderModelRow({ item, providerEnabled, busy, deleting, onToggle, onDelete }) {
   const summary = item.summary || {};
   const isDiscoveredDisabled = item.source === "discovered" && !item.enabled;
   const canDelete = item.source !== "trace";
@@ -467,10 +470,10 @@ function ProviderModelRow({ item, busy, deleting, onToggle, onDelete }) {
       <div className="provider-model-card-head">
         <div>
           <strong>{item.model}</strong>
-          <span>{isDiscoveredDisabled ? "discovered, awaiting enable" : modelSourceLabel(item.source)}</span>
+          <span>{isDiscoveredDisabled ? "discovered, disabled" : modelSourceLabel(item.source)}</span>
         </div>
         <div className="action-group">
-          <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} />
+          {item.source !== "trace" ? <Switch checked={Boolean(item.enabled)} onChange={onToggle} disabled={busy} label={`${item.model} enabled`} /> : <span>History only — add model to configure routing</span>}
           {canDelete ? (
             <button className="icon-button" type="button" onClick={onDelete} disabled={deleting} title="Delete model" aria-label={`Delete ${item.model}`}>
               <DeleteIcon />
@@ -479,8 +482,8 @@ function ProviderModelRow({ item, busy, deleting, onToggle, onDelete }) {
         </div>
       </div>
       <div className="trace-tag-group">
-        <InlineTag tone={item.enabled ? "green" : "default"}>{item.enabled ? "enabled" : "disabled"}</InlineTag>
-        {isDiscoveredDisabled ? <InlineTag tone="gold">new</InlineTag> : null}
+        <InlineTag tone={item.enabled ? "green" : "default"}>{item.source === "trace" ? "history only" : item.enabled ? "enabled" : "disabled"}</InlineTag>
+        {item.enabled && !providerEnabled ? <InlineTag tone="gold">blocked: provider disabled</InlineTag> : null}
       </div>
       <div className="model-market-metrics model-market-metrics-compact">
         <Metric label="req" value={formatCount(summary.request_count)} />

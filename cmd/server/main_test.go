@@ -179,8 +179,8 @@ func TestResponsesServerConfigFromServeConfigDefaultsDisabled(t *testing.T) {
 	if got.ForceStore {
 		t.Fatalf("ForceStore = true, want false")
 	}
-	if got.MaxRequestBodyBytes != 16<<20 {
-		t.Fatalf("MaxRequestBodyBytes = %d, want %d", got.MaxRequestBodyBytes, 16<<20)
+	if got.MaxRequestBodyBytes != (config.Config{}).ResponsesMaxRequestBodyBytes() {
+		t.Fatalf("MaxRequestBodyBytes = %d, want %d", got.MaxRequestBodyBytes, (config.Config{}).ResponsesMaxRequestBodyBytes())
 	}
 	if got.Path != "/v1/responses" {
 		t.Fatalf("Path = %q, want /v1/responses", got.Path)
@@ -5551,4 +5551,48 @@ func (t authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone.Header = req.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+t.Token)
 	return http.DefaultTransport.RoundTrip(clone)
+}
+
+func TestRouterConfigurationKeepsDisabledAndDeletedChannelsAcrossBootstrap(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "deleted"}[deleted], func(t *testing.T) {
+			st, err := store.New(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer st.Close()
+			cfg := &config.Config{Upstream: config.UpstreamConfig{BaseURL: "https://yaml.example.invalid/v1", ProviderPreset: "openai"}}
+			svc := channel.NewService(st)
+			if _, err := svc.BootstrapFromConfig(cfg); err != nil {
+				t.Fatal(err)
+			}
+			channels, err := st.ListChannelConfigs()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(channels) != 1 {
+				t.Fatalf("channels=%v", channels)
+			}
+			if deleted {
+				err = st.DeleteChannelConfig(channels[0].ID)
+			} else {
+				record := channels[0]
+				record.Enabled = false
+				_, err = st.UpsertChannelConfig(record)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 0 {
+				t.Fatalf("bootstrap=%d %v", imported, err)
+			}
+			runtimeCfg, source, err := routerConfigFromChannels(cfg, svc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if source != "database" || len(runtimeCfg.EffectiveUpstreams()) != 0 {
+				t.Fatalf("source=%s targets=%v", source, runtimeCfg.EffectiveUpstreams())
+			}
+		})
+	}
 }

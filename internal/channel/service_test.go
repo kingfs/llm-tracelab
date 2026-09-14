@@ -186,7 +186,8 @@ func TestProbeDiscoversModelsAndUpdatesCatalogs(t *testing.T) {
 		t.Fatalf("UpsertChannelConfig() error = %v", err)
 	}
 
-	result, err := NewService(st).Probe("probe-channel")
+	enable := true
+	result, err := NewService(st).ProbeWithOptions("probe-channel", ProbeOptions{EnableDiscovered: &enable})
 	if err != nil {
 		t.Fatalf("Probe() error = %v", err)
 	}
@@ -741,5 +742,44 @@ func TestRuntimeTargetsProjectsChannelScopedModelAliases(t *testing.T) {
 	}
 	if !slices.Equal(modelsByTarget["secondary"], []string{"gpt-5.5"}) {
 		t.Fatalf("secondary StaticModels = %#v", modelsByTarget["secondary"])
+	}
+}
+
+func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"new"},{"id":"enabled"},{"id":"disabled"}]}`))
+	}))
+	defer upstreamServer.Close()
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "p", Name: "P", Enabled: true, BaseURL: upstreamServer.URL + "/v1", ProviderPreset: "openai"}); err != nil {
+		t.Fatal(err)
+	}
+	contextWindow := 128000
+	for _, model := range []store.ChannelModelRecord{{Model: "enabled", Enabled: true, Source: "manual", ContextWindow: &contextWindow, ProfileAdoptionStatus: "adopted"}, {Model: "disabled", Enabled: false, Source: "discovered"}} {
+		if _, err := st.UpsertChannelModel("p", model); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := NewService(st).Probe("p"); err != nil {
+		t.Fatal(err)
+	}
+	models, err := st.ListChannelModels("p", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("models=%v", models)
+	}
+	for _, model := range models {
+		if model.Model == "enabled" && (model.ContextWindow == nil || *model.ContextWindow != contextWindow || model.ProfileAdoptionStatus != "adopted") {
+			t.Fatalf("discovery erased model profile: %+v", model)
+		}
+		if model.Enabled != (model.Model == "enabled") {
+			t.Fatalf("discovery changed authorization: %+v", model)
+		}
 	}
 }

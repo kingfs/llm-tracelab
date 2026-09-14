@@ -1052,6 +1052,8 @@ func TestRouterSelectAllowsModelListRequestsWithoutCatalogMatch(t *testing.T) {
 		},
 	}
 
+	// This test checks model-list eligibility, not randomized P2C exploration.
+	cfg.Router.Selection.Policy = PolicyFirstAvailable
 	rtr, err := New(cfg, nil)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

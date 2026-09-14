@@ -93,15 +93,27 @@ Monitor 使用两类数据：
 - 设置 provider preset、base URL、API key、headers、routing 字段。
 - 设置 provider API surface：`api_type`、`mode`，以及 Responses、Chat Completions、tool calling、models 等 capability 开关；这些字段会写入 channel store，并在运行时还原为 upstream routing target。
 - 创建前可用 Detect provider 做临时探测，不落库返回 API surface 建议；需要采用建议时，使用 Apply suggestions 显式写入表单。
-- 创建前需用 Validate setup 调用 provider setup validate：它会组合 base URL、API key、provider preset、model discovery 和 capability 字段做一次探测并把归一化配置写回表单，但不会落库；dialog 会展示 normalized config、probe 和 redacted secret state，字段变更会清空旧验证结果；Create provider 才通过 setup apply 写入 channel store；若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
+- 创建前可用 Validate setup 调用 provider setup validate：它会组合 base URL、API key、provider preset、model discovery 和 capability 字段做一次探测并把归一化配置写回表单，但不会落库；dialog 会展示 normalized config、probe 和 redacted secret state，字段变更会清空旧验证结果；Create provider 通过 setup apply 写入 channel store；显式提供协议信息时也允许直接创建，若 probe 未检测成功，需显式提供 `api_type` 与 `protocol_family`。
 - setup validate/apply 响应不会回显 API key；只返回 `api_key_hint`、secret storage mode 和 redacted header 状态。
 - 探测模型，并查看 provider detection 建议；需要写回建议时，使用 Apply suggestions 显式更新 channel 配置。
-- 在 Channels/Providers 列表页使用 Batch probe and apply 先运行只读 `POST /api/provider-probe/report` 预览，再对 detected 且有可补字段的 provider 执行批量 Apply detected suggestions；Monitor 不展示或传递 API key。批量应用只填缺失的 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置，也不覆盖显式 `false` capability。
+- 批量探测 API 支持先通过只读 `POST /api/provider-probe/report` 预览，再通过 `POST /api/provider-probe/report/apply` 对 detected 且有可补字段的 provider 批量应用建议；单个 provider 的探测入口在卡片上。批量应用只填缺失的 `api_type`、`protocol_family` 和未设置 capability，不覆盖显式配置，也不覆盖显式 `false` capability。
 - 启停渠道。
 - 启停单个模型。
 - 查看渠道用量、token、失败和 probe 结果。
 
-长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。YAML 只作为启动和首次 bootstrap 输入。
+长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。通常 YAML 只作为启动和首次 bootstrap 输入；首次初始化会留下持久化标记，即使后来停用或删除全部渠道，重启也不会重新导入 YAML。使用显式 `credentials` 列表的 YAML 配置仍由 YAML 管理，此模式下 Monitor 的渠道、模型和别名写操作返回 409，避免数据库操作替换 YAML 中的凭据路由。
+
+### 上游和模型的启停语义
+
+- 创建上游只保存连接配置。创建成功后进入详情页，发现或手动添加模型，再选择启用。没有启用模型且未允许未知模型时，不接受命名模型请求。
+- 上游启用表示允许参与新请求路由；停用会移除该上游的路由资格，但保留各模型的选择。已在途请求不会因此被取消。
+- 模型启用只作用于当前上游，不会启动或停止远端模型进程，也不会改变同名模型在其他上游的配置。
+- 模型停用是明确拒绝：自动发现、未知模型放行和 fallback 策略均不能重新放行该上游上的已停用模型。删除模型则是移除配置，不等同于停用；允许未知模型时，删除后的模型可能再次作为未知模型被调用。
+- 模型发现默认不启用新模型，保留已有模型的启停选择和能力配置。API 调用方可显式传入 `enable_discovered: true` 启用本次新发现的模型。数据库管理的运行时只从已启用配置建立模型目录，不通过周期刷新扩大准入范围。
+- 配置开关与健康状态相互独立。上游停用时，模型行仍保留“已启用”的选择，同时提示路由被上游开关阻止；健康检查和熔断仍可能使已启用模型暂时不可用。
+- 仅来自历史请求的模型行不提供启停开关；需要管理时先手动添加模型。发现后停用的模型不再被标为“新模型”。
+- 渠道、模型、模型别名及批量修改通过同一数据库事务完成。运行时配置准备成功后才提交并切换路由；校验、批量更新或提交失败时保留原配置和原路由。返回失败的模型探测仍保留诊断记录。
+
 
 ### Routing
 

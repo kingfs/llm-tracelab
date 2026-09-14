@@ -105,6 +105,7 @@ type UpstreamTargetConfig struct {
 	StaticModels         []string           `yaml:"static_models"`
 	ModelAliases         map[string]string  `yaml:"-"`
 	ConfiguredModelsOnly bool               `yaml:"-"`
+	DisabledModels       []string           `yaml:"-"`
 	AllowUnknownModels   *bool              `yaml:"allow_unknown_models"`
 	Upstream             UpstreamConfig     `yaml:"upstream"`
 	Credentials          []CredentialConfig `yaml:"credentials"`

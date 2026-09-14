@@ -1509,8 +1509,12 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(modelAliasListCreateAPIHandler(st), monitorVerifier))
-	mux.HandleFunc("/api/model-aliases/", monitorAuthRequired(modelAliasDetailAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
+		return modelAliasListCreateAPIHandler(st)
+	}), monitorVerifier))
+	mux.HandleFunc("/api/model-aliases/", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
+		return modelAliasDetailAPIHandler(st)
+	}), monitorVerifier))
 	mux.HandleFunc("/api/traces", monitorAuthRequired(listAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/traces/", monitorAuthRequired(traceAPIHandler(st, opt.Router), monitorVerifier))
 	mux.HandleFunc("/api/sessions", monitorAuthRequired(sessionListAPIHandler(st), monitorVerifier))
@@ -2530,7 +2534,7 @@ func providerProbeAPIHandler() http.HandlerFunc {
 	}
 }
 
-func providerSetupAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+func providerSetupAPIHandlerUncommitted(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -2758,7 +2762,7 @@ func providerProbeReportAPIHandler(st *store.Store, channelService *channel.Serv
 	}
 }
 
-func providerProbeReportApplyAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+func providerProbeReportApplyAPIHandlerUncommitted(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -2895,7 +2899,7 @@ func appHandler() http.Handler {
 	})
 }
 
-func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+func channelListCreateAPIHandlerUncommitted(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
@@ -2945,7 +2949,7 @@ func channelListCreateAPIHandler(st *store.Store, rtr *router.Router, channelSer
 	}
 }
 
-func channelDetailAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+func channelDetailAPIHandlerUncommitted(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if st == nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
@@ -3863,7 +3867,7 @@ func parseBoolQuery(value string, fallback bool) bool {
 	return parsed
 }
 
-func routerReloadAPIHandler(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
+func routerReloadAPIHandlerUncommitted(st *store.Store, rtr *router.Router, channelService *channel.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.NotFound(w, r)
@@ -3950,7 +3954,7 @@ func channelRecordFromRequest(req channelUpsertRequest, existing store.ChannelCo
 	}
 	if req.Enabled != nil {
 		record.Enabled = *req.Enabled
-	} else if record.ID == "" {
+	} else if existing.ID == "" {
 		record.Enabled = true
 	}
 	if req.Priority != nil {

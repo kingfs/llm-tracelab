@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem("llm-tracelab.monitor.language", "en"));
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -16,6 +17,9 @@ test.beforeEach(async ({ page }) => {
       expect(url.searchParams.get("window")).toBe("all");
       expect(url.searchParams.get("status")).toBe("unread");
       return route.fulfill({ json: eventListPayload() });
+    }
+    if (path === "/api/routing/summary") {
+      return route.fulfill({ json: {} });
     }
     if (path === "/api/models") {
       return route.fulfill({ json: modelListPayload() });
@@ -60,7 +64,7 @@ test.beforeEach(async ({ page }) => {
       expect(body.api_key).toBe("sk-test-secret");
       expect(body.api_type).toBe("chat_completions");
       expect(body.protocol_family).toBe("openai_compatible");
-      return route.fulfill({ json: channelDetailPayload() });
+      return route.fulfill({ json: { applied: true, channel: channelDetailPayload() } });
     }
     if (path === "/api/provider-presets") {
       return route.fulfill({ json: providerPresetPayload() });
@@ -97,7 +101,7 @@ test.beforeEach(async ({ page }) => {
       expect(body).toEqual({ models: ["gpt-new"], enabled: true });
       return route.fulfill({ json: { updated: 1, models: ["gpt-new"], enabled: true } });
     }
-    if (path === "/api/traces") {
+    if (path === "/api/traces" || path === "/api/routing/exchanges") {
       if (url.searchParams.get("status") === "error") {
         expect(url.searchParams.get("model")).toBe("gpt-5");
         expect(url.searchParams.get("upstream")).toBe("openai-primary");
@@ -153,7 +157,7 @@ test("models marketplace and detail render", async ({ page }) => {
   await page.getByRole("link", { name: /gpt-5/i }).first().click();
   await expect(page.getByRole("heading", { name: "gpt-5" })).toBeVisible();
   await expect(page.getByText("Provider coverage")).toBeVisible();
-  await expect(page.getByText("openai-primary")).toBeVisible();
+  await expect(page.getByRole("link", { name: /openai-primary manual enabled/ })).toBeVisible();
 });
 
 test("provider management renders and supports core actions", async ({ page }) => {
@@ -161,19 +165,11 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Providers", exact: true })).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Provider secret storage" })).toBeVisible();
-  await expect(page.getByText("abc123")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Rotate key" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Apply detected suggestions" })).toBeDisabled();
-  await page.getByRole("button", { name: "Preview batch probe" }).click();
-  await expect(page.getByText("1 fillable")).toBeVisible();
-  await expect(page.getByText("explicit configuration and false capabilities are preserved")).toBeVisible();
-  await page.getByRole("button", { name: "Apply detected suggestions" }).click();
-  await expect(page.getByText("1 applied, 0 skipped")).toBeVisible();
   await page.getByRole("button", { name: "New provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeVisible();
   await expect(page.getByLabel("Provider preset")).toHaveValue("openai");
   await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await page.getByLabel("Name", { exact: true }).fill("OpenAI Primary");
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
   await page.getByLabel("API key").fill("sk-test-secret");
   await page.getByRole("button", { name: "Detect provider" }).click();
@@ -181,23 +177,23 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "Apply suggestions" }).click();
   await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
   await expect(page.getByLabel("API mode")).toHaveValue("proxy");
-  await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
+  await expect(page.getByRole("combobox", { name: "protocol", exact: true })).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
-  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
   await page.getByRole("button", { name: "Validate setup" }).click();
   await expect(page.getByRole("heading", { name: "Ready to create" })).toBeVisible();
   await expect(page.getByText("stored as sk-...cret")).toBeVisible();
   await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1/");
-  await expect(page.getByText("Validate setup before creating the provider.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create provider" })).toBeDisabled();
+  await expect(page.getByText("Validate and save the connection, then discover or add models and enable your selection.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
   await page.getByLabel("Base URL").fill("https://api.openai.example/v1");
   await page.getByRole("button", { name: "Validate setup" }).click();
   await expect(page.getByRole("button", { name: "Create provider" })).toBeEnabled();
   await page.getByRole("button", { name: "Create provider" }).click();
   await expect(page.getByRole("heading", { name: "Create provider" })).toBeHidden();
 
-  await page.getByRole("link", { name: /OpenAI Primary/i }).first().click();
+  await expect(page).toHaveURL(/providers\/openai-primary/);
   await expect(page.getByRole("heading", { name: "OpenAI Primary" })).toBeVisible();
   await expect(page.getByText("config source").first()).toBeVisible();
   await expect(page.getByText("web-managed").first()).toBeVisible();
@@ -205,7 +201,7 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByText("responses_server").first()).toBeVisible();
   await expect(page.getByText("1 missing usage").first()).toBeVisible();
   await expect(page.getByText("encrypted-local").first()).toBeVisible();
-  await expect(page.getByText("discovered, awaiting enable")).toBeVisible();
+  await expect(page.getByText("discovered, disabled")).toBeVisible();
 
   await page.getByRole("button", { name: "Edit provider" }).click();
   await expect(page.getByRole("heading", { name: "Edit provider" })).toBeVisible();
@@ -215,7 +211,7 @@ test("provider management renders and supports core actions", async ({ page }) =
   await page.getByRole("button", { name: "Advanced options" }).click();
   await expect(page.getByLabel("API type")).toHaveValue("chat_completions");
   await expect(page.getByLabel("API mode")).toHaveValue("responses_server");
-  await expect(page.getByLabel("Protocol family")).toHaveValue("openai_compatible");
+  await expect(page.getByRole("combobox", { name: "protocol", exact: true })).toHaveValue("openai_compatible");
   await expect(page.getByLabel("Routing profile")).toHaveValue("openai_default");
   await expect(page.locator("textarea")).toContainText("Authorization: ***");
   await page.getByRole("button", { name: "Cancel" }).click();
@@ -230,7 +226,7 @@ test("provider management renders and supports core actions", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Probe suggestions" })).toBeVisible();
   await expect(page.getByText("chat_completions").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Enable new (1)" }).click();
+  await page.getByRole("button", { name: "Enable discovered (1)" }).click();
   await expect(page.getByRole("button", { name: "Enabling" })).toBeHidden();
 });
 
@@ -305,7 +301,7 @@ test("analysis page renders runs and reanalysis jobs", async ({ page }) => {
   await expect(page.getByText("Job queue")).toBeVisible();
   await expect(page.getByText("trace_reanalyze")).toBeVisible();
   await expect(page.getByText("session_summary", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Repair missing usage" }).click();
+  await page.getByRole("button", { name: "Repair token stats" }).click();
   await expect(page.getByText(/Batch reanalysis job #202 queued/)).toBeVisible();
 });
 
@@ -818,3 +814,31 @@ function usageSummary(overrides = {}) {
     ...overrides,
   };
 }
+
+
+test("disabled provider preserves model choices without claiming availability", async ({ page }) => {
+  await page.route("**/api/channels/openai-primary?*", (route) => {
+    const payload = channelDetailPayload();
+    payload.enabled = false;
+    payload.models_usage.push({ model: "historical-model", source: "trace", enabled: false, summary: {} });
+    return route.fulfill({ json: payload });
+  });
+  await page.goto("/providers/openai-primary");
+  await expect(page.getByText("Provider disabled: all model routes are blocked. Model selections are preserved.")).toBeVisible();
+  await expect(page.getByLabel("gpt-5 enabled", { exact: true })).toBeChecked();
+  await expect(page.getByText("blocked: provider disabled").first()).toBeVisible();
+  await expect(page.getByLabel("historical-model enabled", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("History only — add model to configure routing")).toBeVisible();
+  await expect(page.locator(".provider-model-card").getByText("new", { exact: true })).toHaveCount(0);
+});
+
+test("provider toggle failure is visible and preserves the displayed choice", async ({ page }) => {
+  await page.route("**/api/channels/openai-primary", (route) => {
+    if (route.request().method() === "PATCH") return route.fulfill({ status: 409, json: { error: "Upstreams are managed by YAML credentials" } });
+    return route.fallback();
+  });
+  await page.goto("/providers");
+  await page.getByLabel("OpenAI Primary enabled", { exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("Upstreams are managed by YAML credentials");
+  await expect(page.getByLabel("OpenAI Primary enabled", { exact: true })).toBeChecked();
+});

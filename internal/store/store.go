@@ -94,6 +94,7 @@ type Store struct {
 	driver                string
 	secrets               *secretBox
 	useSessionSummaryRead bool
+	configMu              sync.Mutex
 	syncMu                sync.Mutex
 	eventMu               sync.Mutex
 	eventSeq              uint64
@@ -107,30 +108,40 @@ type DatabaseOptions struct {
 
 type rebindingDB struct {
 	*sql.DB
+	tx     *sql.Tx
 	driver string
 }
 
 func (db *rebindingDB) Exec(query string, args ...any) (sql.Result, error) {
-	return db.DB.Exec(db.rebind(query), args...)
+	return db.ExecContext(context.Background(), query, args...)
 }
 
 func (db *rebindingDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if db.tx != nil {
+		return db.tx.ExecContext(ctx, db.rebind(query), args...)
+	}
 	return db.DB.ExecContext(ctx, db.rebind(query), args...)
 }
 
 func (db *rebindingDB) Query(query string, args ...any) (*sql.Rows, error) {
-	return db.DB.Query(db.rebind(query), args...)
+	return db.QueryContext(context.Background(), query, args...)
 }
 
 func (db *rebindingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if db.tx != nil {
+		return db.tx.QueryContext(ctx, db.rebind(query), args...)
+	}
 	return db.DB.QueryContext(ctx, db.rebind(query), args...)
 }
 
 func (db *rebindingDB) QueryRow(query string, args ...any) *sql.Row {
-	return db.DB.QueryRow(db.rebind(query), args...)
+	return db.QueryRowContext(context.Background(), query, args...)
 }
 
 func (db *rebindingDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if db.tx != nil {
+		return db.tx.QueryRowContext(ctx, db.rebind(query), args...)
+	}
 	return db.DB.QueryRowContext(ctx, db.rebind(query), args...)
 }
 

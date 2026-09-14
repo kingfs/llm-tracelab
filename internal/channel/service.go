@@ -20,6 +20,8 @@ import (
 )
 
 type Store interface {
+	LoadAppSettingJSON(context.Context, string, any) (bool, error)
+	SaveAppSettingJSON(context.Context, string, any) error
 	ListChannelConfigs() ([]store.ChannelConfigRecord, error)
 	GetChannelConfig(channelID string) (store.ChannelConfigRecord, error)
 	UpsertChannelConfig(store.ChannelConfigRecord) (store.ChannelConfigRecord, error)
@@ -36,6 +38,7 @@ type Store interface {
 type Service struct {
 	store      Store
 	httpClient *http.Client
+	readOnly   bool
 }
 
 func NewService(st Store) *Service {
@@ -45,6 +48,39 @@ func NewService(st Store) *Service {
 func (s *Service) WithHTTPClient(client *http.Client) *Service {
 	s.httpClient = client
 	return s
+}
+
+// WithStore preserves probe options when applying a configuration transaction.
+func (s *Service) WithStore(st Store) *Service {
+	next := *s
+	next.store = st
+	return &next
+}
+
+func (s *Service) WithReadOnly(readOnly bool) *Service {
+	s.readOnly = readOnly
+	return s
+}
+
+func (s *Service) ReadOnly() bool { return s != nil && s.readOnly }
+
+const configurationInitializedKey = "channels.initialized"
+
+// HasConfiguration distinguishes an intentionally empty database from first startup.
+func (s *Service) HasConfiguration() (bool, error) {
+	var initialized bool
+	if _, err := s.store.LoadAppSettingJSON(context.Background(), configurationInitializedKey, &initialized); err != nil {
+		return false, err
+	}
+	if initialized {
+		return true, nil
+	}
+	channels, err := s.store.ListChannelConfigs()
+	return len(channels) > 0, err
+}
+
+func (s *Service) MarkConfigurationInitialized() error {
+	return s.store.SaveAppSettingJSON(context.Background(), configurationInitializedKey, true)
 }
 
 type ProbeResult struct {
@@ -89,12 +125,12 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 	if s == nil || s.store == nil {
 		return 0, fmt.Errorf("channel service store is required")
 	}
-	existing, err := s.store.ListChannelConfigs()
+	initialized, err := s.HasConfiguration()
 	if err != nil {
 		return 0, err
 	}
-	if len(existing) > 0 {
-		return 0, nil
+	if initialized {
+		return 0, s.MarkConfigurationInitialized()
 	}
 
 	targets := configuredUpstreams(cfg)
@@ -114,6 +150,10 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		if target.Enabled != nil {
 			enabled = *target.Enabled
 		}
+		allowUnknown := false
+		if target.AllowUnknownModels != nil {
+			allowUnknown = *target.AllowUnknownModels
+		}
 		headersJSON := "{}"
 		if len(target.Upstream.Headers) > 0 {
 			data, err := json.Marshal(target.Upstream.Headers)
@@ -127,29 +167,30 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 			return imported, err
 		}
 		_, err = s.store.UpsertChannelConfig(store.ChannelConfigRecord{
-			ID:               channelID,
-			Name:             defaultChannelName(channelID, target.Upstream.ProviderPreset),
-			Source:           "bootstrap",
-			BaseURL:          target.Upstream.BaseURL,
-			ProviderPreset:   target.Upstream.ProviderPreset,
-			APIType:          target.Upstream.APIType,
-			Mode:             target.Upstream.Mode,
-			CapabilitiesJSON: capabilitiesJSON,
-			ProtocolFamily:   target.Upstream.ProtocolFamily,
-			RoutingProfile:   target.Upstream.RoutingProfile,
-			APIVersion:       target.Upstream.APIVersion,
-			Deployment:       target.Upstream.Deployment,
-			Project:          target.Upstream.Project,
-			Location:         target.Upstream.Location,
-			ModelResource:    target.Upstream.ModelResource,
-			APIKeyCiphertext: []byte(target.Upstream.ApiKey),
-			APIKeyHint:       secretHint(target.Upstream.ApiKey),
-			HeadersJSON:      headersJSON,
-			Enabled:          enabled,
-			Priority:         target.Priority,
-			Weight:           target.Weight,
-			CapacityHint:     target.CapacityHint,
-			ModelDiscovery:   target.ModelDiscovery,
+			ID:                 channelID,
+			Name:               defaultChannelName(channelID, target.Upstream.ProviderPreset),
+			Source:             "bootstrap",
+			BaseURL:            target.Upstream.BaseURL,
+			ProviderPreset:     target.Upstream.ProviderPreset,
+			APIType:            target.Upstream.APIType,
+			Mode:               target.Upstream.Mode,
+			CapabilitiesJSON:   capabilitiesJSON,
+			ProtocolFamily:     target.Upstream.ProtocolFamily,
+			RoutingProfile:     target.Upstream.RoutingProfile,
+			APIVersion:         target.Upstream.APIVersion,
+			Deployment:         target.Upstream.Deployment,
+			Project:            target.Upstream.Project,
+			Location:           target.Upstream.Location,
+			ModelResource:      target.Upstream.ModelResource,
+			APIKeyCiphertext:   []byte(target.Upstream.ApiKey),
+			APIKeyHint:         secretHint(target.Upstream.ApiKey),
+			HeadersJSON:        headersJSON,
+			Enabled:            enabled,
+			Priority:           target.Priority,
+			Weight:             target.Weight,
+			CapacityHint:       target.CapacityHint,
+			ModelDiscovery:     target.ModelDiscovery,
+			AllowUnknownModels: allowUnknown,
 		})
 		if err != nil {
 			return imported, err
@@ -171,7 +212,7 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		}
 		imported++
 	}
-	return imported, nil
+	return imported, s.MarkConfigurationInitialized()
 }
 
 func configuredUpstreams(cfg *config.Config) []config.UpstreamTargetConfig {
@@ -213,10 +254,20 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 		if !channel.Enabled {
 			continue
 		}
-		models, err := s.store.ListChannelModels(channel.ID, true)
+		models, err := s.store.ListChannelModels(channel.ID, false)
 		if err != nil {
 			return nil, err
 		}
+		var enabledModels []store.ChannelModelRecord
+		var disabledModels []string
+		for _, model := range models {
+			if model.Enabled {
+				enabledModels = append(enabledModels, model)
+			} else {
+				disabledModels = append(disabledModels, model.Model)
+			}
+		}
+		models = enabledModels
 		headers := map[string]string{}
 		if strings.TrimSpace(channel.HeadersJSON) != "" {
 			if err := json.Unmarshal([]byte(channel.HeadersJSON), &headers); err != nil {
@@ -238,6 +289,7 @@ func (s *Service) RuntimeTargets() ([]config.UpstreamTargetConfig, error) {
 			StaticModels:         channelModelNamesWithAliases(models, aliases, channel.ID),
 			ModelAliases:         channelModelAliases(models, aliases, channel.ID),
 			ConfiguredModelsOnly: true,
+			DisabledModels:       disabledModels,
 			AllowUnknownModels:   &channel.AllowUnknownModels,
 			Upstream: config.UpstreamConfig{
 				BaseURL:        channel.BaseURL,
@@ -533,16 +585,12 @@ func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []st
 		}
 		record.Enabled = enableNew
 		if previous, ok := existingByModel[model]; ok {
-			record.Enabled = previous.Enabled
-			if strings.TrimSpace(previous.Source) != "" && previous.Source != "discovered" {
-				record.Source = previous.Source
-			}
-			if strings.TrimSpace(previous.DisplayName) != "" {
-				record.DisplayName = previous.DisplayName
-			}
-			if !previous.FirstSeenAt.IsZero() {
-				record.FirstSeenAt = previous.FirstSeenAt
-			}
+			// Re-discovery updates observation timestamps, not operator choices
+			// or an adopted model profile.
+			lastSeen, lastProbe := record.LastSeenAt, record.LastProbeAt
+			record = previous
+			record.LastSeenAt = lastSeen
+			record.LastProbeAt = lastProbe
 		}
 		saved, err := s.store.UpsertChannelModel(channelID, record)
 		if err != nil {
@@ -555,7 +603,7 @@ func (s *Service) mergeDiscoveredChannelModels(channelID string, discovered []st
 
 func enableDiscoveredByDefault(options ProbeOptions) bool {
 	if options.EnableDiscovered == nil {
-		return true
+		return false
 	}
 	return *options.EnableDiscovered
 }

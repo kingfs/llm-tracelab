@@ -2017,7 +2017,7 @@ func TestChannelManagementAPI(t *testing.T) {
 		t.Fatalf("created.Capabilities.Responses = %#v", created.Capabilities.Responses)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/channels/openai-primary/probe", strings.NewReader(`{"enable_discovered":true}`))
 	rr = httptest.NewRecorder()
 	channelDetailAPIHandler(st, nil, nil).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -2602,7 +2602,7 @@ func TestProviderSetupSuggestionsDoNotOverrideExplicitFields(t *testing.T) {
 		"id":"explicit-provider",
 		"name":"Explicit Provider",
 		"base_url":"` + upstreamServer.URL + `/v1",
-		"provider_preset":"custom",
+		"provider_preset":"anthropic",
 		"api_type":"messages",
 		"protocol_family":"anthropic_messages",
 		"capabilities":{"chat_completions":false},
