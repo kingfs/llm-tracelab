@@ -504,7 +504,7 @@ func checkDoctorResponsesDefaultModel(cfg *appconfig.Config) doctorCheck {
 		return doctorCheck{
 			Name:    "responses_server.default_model",
 			Status:  doctorStatusWarn,
-			Message: "responses server is enabled but responses_server.default_model is empty",
+			Message: "responses_server.default_model is empty; requests that omit a model fall back to upstream selection instead of a Responses default",
 			Detail:  detail,
 		}
 	}
