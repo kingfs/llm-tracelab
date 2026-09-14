@@ -516,15 +516,8 @@ limits:
 	}
 }
 
-func TestResponsesServerConfigLegacyDisabledByDefault(t *testing.T) {
+func TestResponsesServerConfigDefaults(t *testing.T) {
 	cfg := Config{}
-	// The legacy switch defaults off but no longer gates routing.
-	if cfg.ResponsesServerEnabled() {
-		t.Fatalf("ResponsesServerEnabled() = true, want false")
-	}
-	if !cfg.ResponsesLocalExecutionAvailable() {
-		t.Fatalf("ResponsesLocalExecutionAvailable() = false, want true")
-	}
 	if cfg.ResponsesDefaultModel() != "" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want empty", cfg.ResponsesDefaultModel())
 	}
@@ -582,7 +575,6 @@ func TestLoadParsesResponsesServerConfigFromYAML(t *testing.T) {
 	}
 	path := writeTempConfig(t, fmt.Sprintf(`
 responses_server:
-  enabled: true
   default_model: "qwen3"
   force_store: true
   max_request_body_bytes: 1048576
@@ -643,9 +635,6 @@ responses_server:
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
-	}
-	if !cfg.ResponsesServerEnabled() {
-		t.Fatalf("ResponsesServerEnabled() = false, want true")
 	}
 	if got := cfg.ResponsesDefaultModel(); got != "qwen3" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want qwen3", got)
@@ -943,7 +932,9 @@ func TestResponsesFunctionExecutorsConfigValidatesAllowedCommandDirs(t *testing.
 }
 
 func TestResponsesServerEnvOverrides(t *testing.T) {
-	t.Setenv("LLM_TRACELAB_RESPONSES_ENABLED", "true")
+	// LLM_TRACELAB_RESPONSES_ENABLED no longer exists: the local Responses
+	// execution mode is always available, so the legacy variable is ignored.
+	t.Setenv("LLM_TRACELAB_RESPONSES_ENABLED", "false")
 	t.Setenv("LLM_TRACELAB_RESPONSES_DEFAULT_MODEL", "env-model")
 	t.Setenv("LLM_TRACELAB_RESPONSES_FORCE_STORE", "true")
 	t.Setenv("LLM_TRACELAB_RESPONSES_MAX_REQUEST_BODY_BYTES", "2097152")
@@ -966,9 +957,6 @@ func TestResponsesServerEnvOverrides(t *testing.T) {
 	cfg.ResponsesServer.MaxRequestBodyBytes = 1024
 	applyEnvOverrides(&cfg)
 
-	if !cfg.ResponsesServerEnabled() {
-		t.Fatalf("ResponsesServerEnabled() = false, want true")
-	}
 	if got := cfg.ResponsesDefaultModel(); got != "env-model" {
 		t.Fatalf("ResponsesDefaultModel() = %q, want env-model", got)
 	}

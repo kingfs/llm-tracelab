@@ -895,9 +895,7 @@ func TestHandlerResponsesServerModeRoutesToChatCompletionsUpstream(t *testing.T)
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -1208,9 +1206,7 @@ func TestHandlerResponsesServerModeRequiresChatCompletionsCompatibleUpstream(t *
 	defer st.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "google-genai",
@@ -1289,9 +1285,7 @@ func TestHandlerResponsesServerModeDoesNotUseNativeResponsesTargetAsChatBackend(
 	defer chatServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "native-responses",
@@ -1435,7 +1429,7 @@ func TestHandlerResponsesAutoPrefersNativeAndFallsBackToLocalServer(t *testing.T
 			}))
 			defer chatServer.Close()
 
-			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{Enabled: true}}
+			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{}}
 			if tt.includeNative {
 				cfg.Upstreams = append(cfg.Upstreams, config.UpstreamTargetConfig{
 					ID:             "native-responses",
@@ -1552,7 +1546,7 @@ func TestHandlerResponsesAutoRejectsWhenNativeResponsesTargetFiltered(t *testing
 	defer chatServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{Enabled: true},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "native-responses",
@@ -1647,9 +1641,7 @@ func TestHandlerResponsesServerModeRejectsNativeResponsesOnlyUpstream(t *testing
 	defer st.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-responses",
@@ -1686,9 +1678,7 @@ func TestHandlerResponsesServerModeAllowsChatCompletionsCompatibleUpstream(t *te
 	defer st.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -1741,9 +1731,7 @@ func TestHandlerResponsesServerModeStreamReturnsSSE(t *testing.T) {
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -1891,9 +1879,7 @@ func TestHandlerResponsesServerModeCancelPropagatesToChatCompletionsUpstream(t *
 	defer close(releaseUpstream)
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -2044,9 +2030,7 @@ func TestHandlerResponsesServerModeCompactCreatesSummaryResponse(t *testing.T) {
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -2177,7 +2161,6 @@ func TestHandlerResponsesServerModeAutoCompactsByHistoryThreshold(t *testing.T) 
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                     true,
 			AutoCompact:                 true,
 			CompactHistoryItemThreshold: 1,
 		},
@@ -2297,9 +2280,7 @@ func TestHandlerResponsesServerModeHostedWebSearchToolLoopRecordsInternalChatCom
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Tools: config.ToolsConfig{
 			WebSearch: config.WebSearchToolConfig{
 				Enabled:    true,
@@ -2469,7 +2450,6 @@ func TestHandlerResponsesServerModeConfiguredStaticFunctionExecutor(t *testing.T
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
 				Enabled:        true,
 				Timeout:        time.Second,
@@ -2588,7 +2568,6 @@ func TestHandlerResponsesServerModeConfiguredExternalCommandFunctionExecutor(t *
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
 				Enabled:        true,
 				Timeout:        time.Second,
@@ -2739,7 +2718,6 @@ func TestHandlerResponsesServerModeAdoptsChannelModelProfileWhenEnabled(t *testi
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                   true,
 			AdoptChannelModelProfiles: true,
 		},
 		Upstreams: []config.UpstreamTargetConfig{
@@ -2961,7 +2939,6 @@ func TestHandlerResponsesServerModeStreamAutoCompactFunctionExecutorFailure(t *t
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                     true,
 			AutoCompact:                 true,
 			CompactHistoryItemThreshold: 1,
 			FunctionExecutors: config.ResponsesFunctionExecutorConfig{
@@ -3168,7 +3145,6 @@ func TestHandlerResponsesServerModeStreamAutoCompactForcedWebSearchFallsBackToDe
 
 	cfg := &config.Config{
 		ResponsesServer: config.ResponsesServerConfig{
-			Enabled:                     true,
 			AutoCompact:                 true,
 			CompactHistoryItemThreshold: 1,
 		},
@@ -3371,9 +3347,7 @@ func TestHandlerResponsesServerModeContinuationHistoryPersistsAcrossHandlerResta
 	defer upstreamServer.Close()
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "openai-chat",
@@ -3514,9 +3488,7 @@ func TestHandlerResponsesServerModeRecordsChatCompletionFailures(t *testing.T) {
 			defer upstreamServer.Close()
 
 			cfg := &config.Config{
-				ResponsesServer: config.ResponsesServerConfig{
-					Enabled: true,
-				},
+				ResponsesServer: config.ResponsesServerConfig{},
 				Upstreams: []config.UpstreamTargetConfig{
 					{
 						ID:             "openai-chat",

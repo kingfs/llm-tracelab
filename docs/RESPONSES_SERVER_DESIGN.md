@@ -2,7 +2,7 @@
 
 状态：Responses server 当前设计与生产边界
 日期：2026-06-23
-更新：2026-09-14 — `responses_server.enabled` 已废弃，本地 Responses execution mode 始终可用并参与每次选路；本地 runtime 改为惰性构建。
+更新：2026-09-14 — `responses_server.enabled` 字段与 `LLM_TRACELAB_RESPONSES_ENABLED` 环境变量已彻底移除；本地 Responses execution mode 始终可用并参与每次选路，本地 runtime 改为惰性构建。
 
 本文描述 TraceLab 从本地 proxy/record/replay 工具升级为 LLM gateway + OpenAI Responses API semantic server 的目标架构，并记录截至 2026-06-23 已经落地的 Responses server-mode 事实。当前通用能力仍以 [当前实现概览](./CURRENT_IMPLEMENTATION.md)、[架构说明](./ARCHITECTURE.md) 和 [项目基线](./PROJECT_BASELINE.md) 为准。
 
@@ -115,7 +115,7 @@ client
 当前边界是：
 
 - `/v1/responses` 请求在 handler 鉴权后先进入选路决策：命中匹配模型的 native Responses upstream 时走普通 proxy 热路径，直接转发上游并写入 `.http` cassette（录制 endpoint 仍是 `/v1/responses`）；否则若存在 Chat Completions backend，则进入本地 Responses HTTP handler，不再走普通 `/v1/responses` reverse proxy 路径。
-- `responses_server.enabled` 不再是开关：无论其取值如何，上述选路都会生效。需要禁用本地翻译时使用 `routing.settings.responses_strategy=native_only`。
+- 本地 execution mode 没有开关：上述选路总是生效。需要禁用本地翻译时使用 `routing.settings.responses_strategy=native_only`。
 - 本地 Responses runtime 惰性构建：`tools.web_search`、function executor、model profile、tokenize counter 等可选配置出错不再阻塞服务启动，而是在首个需要它的本地 Responses 请求上返回 502。
 - 本地 Responses runtime 当前通过内部 `POST /v1/chat/completions` model call 实现语义服务，因此 route target 必须是 OpenAI-compatible Chat Completions backend。显式 `api_type: responses` / `responses_native` 且 `capabilities.chat_completions: false` 的 native target 不满足该 backend 边界，即使它支持 native `/v1/responses` pass-through，也不能被 runtime 当作 Chat Completions upstream 使用。
 

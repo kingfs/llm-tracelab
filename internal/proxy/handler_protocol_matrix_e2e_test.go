@@ -278,7 +278,7 @@ func newMatrixHandler(t *testing.T, targets ...config.UpstreamTargetConfig) *htt
 	t.Cleanup(func() { _ = st.Close() })
 
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{Enabled: true},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams:       targets,
 	}
 	cfg.Debug.OutputDir = outputDir
@@ -443,7 +443,7 @@ func TestHandlerResponsesExecutionModeRecorded(t *testing.T) {
 
 			upstreamServer := newMatrixUpstream(t, tt.upstream)
 			cfg := &config.Config{
-				ResponsesServer: config.ResponsesServerConfig{Enabled: true},
+				ResponsesServer: config.ResponsesServerConfig{},
 				Upstreams: []config.UpstreamTargetConfig{
 					upstreamServer.target("only-upstream", 100, matrixModel),
 				},
@@ -548,7 +548,7 @@ func TestHandlerResponsesStrategyUpstreamCombinationMatrix(t *testing.T) {
 				t.Fatalf("SaveAppSettingJSON() error = %v", err)
 			}
 
-			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{Enabled: true}}
+			cfg := &config.Config{ResponsesServer: config.ResponsesServerConfig{}}
 			var nativeUpstream, chatUpstream *matrixUpstream
 			if set.native {
 				nativeUpstream = newMatrixUpstream(t, protocolResponses)
@@ -670,12 +670,13 @@ func TestHandlerProtocolMatrixStreaming(t *testing.T) {
 	}
 }
 
-// TestHandlerLegacyResponsesServerEnabledSwitchIsIgnored verifies that the
-// deprecated responses_server.enabled switch no longer changes routing. The
-// local Responses execution mode is always available, so a chat-only upstream
-// still serves /v1/responses through local translation even when an operator
-// left the legacy switch off. A native Responses upstream is still preferred.
-func TestHandlerLegacyResponsesServerEnabledSwitchIsIgnored(t *testing.T) {
+// TestHandlerResponsesExecutionModeNeedsNoSwitch verifies that the local
+// Responses execution mode is always available without any opt-in: a chat-only
+// upstream serves /v1/responses through local translation, while a native
+// Responses upstream is still preferred. There is no configuration switch left
+// to turn the mode off; routing.settings.responses_strategy=native_only is the
+// supported opt-out.
+func TestHandlerResponsesExecutionModeNeedsNoSwitch(t *testing.T) {
 	tests := []struct {
 		name             string
 		upstream         protocolKind
@@ -707,8 +708,8 @@ func TestHandlerLegacyResponsesServerEnabledSwitchIsIgnored(t *testing.T) {
 
 			kindUpstream := newMatrixUpstream(t, tt.upstream)
 			cfg := &config.Config{
-				// Legacy switch explicitly off: it must be ignored.
-				ResponsesServer: config.ResponsesServerConfig{Enabled: false},
+				// No responses_server configuration at all: the local
+				// execution mode must still be available.
 				Upstreams: []config.UpstreamTargetConfig{
 					kindUpstream.target("only-upstream", 100, matrixModel),
 				},

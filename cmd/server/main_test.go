@@ -167,64 +167,6 @@ func TestRouterConfigFromChannelsFallsBackToYAML(t *testing.T) {
 	}
 }
 
-func TestResponsesServerConfigFromServeConfigDefaultsDisabled(t *testing.T) {
-	got := responsesServerConfigFromServeConfig(&config.Config{})
-
-	if got.Enabled {
-		t.Fatalf("Enabled = true, want false")
-	}
-	if got.DefaultModel != "" {
-		t.Fatalf("DefaultModel = %q, want empty", got.DefaultModel)
-	}
-	if got.ForceStore {
-		t.Fatalf("ForceStore = true, want false")
-	}
-	if got.MaxRequestBodyBytes != 64<<20 {
-		t.Fatalf("MaxRequestBodyBytes = %d, want %d", got.MaxRequestBodyBytes, 64<<20)
-	}
-	if got.Path != "/v1/responses" {
-		t.Fatalf("Path = %q, want /v1/responses", got.Path)
-	}
-	if got.FunctionExecutors.Enabled {
-		t.Fatalf("FunctionExecutors.Enabled = true, want false")
-	}
-	if got.FunctionExecutors.MaxResultBytes != 64<<10 {
-		t.Fatalf("FunctionExecutors.MaxResultBytes = %d, want %d", got.FunctionExecutors.MaxResultBytes, 64<<10)
-	}
-}
-
-func TestResponsesServerConfigFromServeConfigCopiesEnabledValues(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.ResponsesServer.Enabled = true
-	cfg.ResponsesServer.DefaultModel = "qwen3"
-	cfg.ResponsesServer.ForceStore = true
-	cfg.ResponsesServer.MaxRequestBodyBytes = 1024
-	cfg.ResponsesServer.Path = "/custom/responses"
-	cfg.ResponsesServer.FunctionExecutors.Enabled = true
-	cfg.ResponsesServer.FunctionExecutors.MaxResultBytes = 128
-
-	got := responsesServerConfigFromServeConfig(cfg)
-
-	if !got.Enabled {
-		t.Fatalf("Enabled = false, want true")
-	}
-	if got.DefaultModel != "qwen3" {
-		t.Fatalf("DefaultModel = %q, want qwen3", got.DefaultModel)
-	}
-	if !got.ForceStore {
-		t.Fatalf("ForceStore = false, want true")
-	}
-	if got.MaxRequestBodyBytes != 1024 {
-		t.Fatalf("MaxRequestBodyBytes = %d, want 1024", got.MaxRequestBodyBytes)
-	}
-	if got.Path != "/custom/responses" {
-		t.Fatalf("Path = %q, want /custom/responses", got.Path)
-	}
-	if !got.FunctionExecutors.Enabled || got.FunctionExecutors.MaxResultBytes != 128 {
-		t.Fatalf("FunctionExecutors = %+v, want enabled max 128", got.FunctionExecutors)
-	}
-}
-
 func TestRouterConfigFromChannelsKeepsYAMLWhenExplicitCredentialsExist(t *testing.T) {
 	st, err := store.New(t.TempDir())
 	if err != nil {
@@ -389,7 +331,6 @@ database:
 trace:
   output_dir: /tmp/llm-traces
 responses_server:
-  enabled: true
   path: /v1/responses
   default_model: gpt-5
   force_store: true
@@ -549,7 +490,7 @@ upstreams:
 	if !envelope.Result.MCP.Enabled || envelope.Result.MCP.Path != "/mcp" {
 		t.Fatalf("mcp result = %+v", envelope.Result.MCP)
 	}
-	if !envelope.Result.ResponsesServer.Enabled || envelope.Result.ResponsesServer.MaxBody != 12345 || envelope.Result.ResponsesServer.ModelProfilesCount != 1 || !envelope.Result.ResponsesServer.FunctionExecutors.Enabled {
+	if envelope.Result.ResponsesServer.MaxBody != 12345 || envelope.Result.ResponsesServer.ModelProfilesCount != 1 || !envelope.Result.ResponsesServer.FunctionExecutors.Enabled {
 		t.Fatalf("responses_server result = %+v", envelope.Result.ResponsesServer)
 	}
 	if !strings.Contains(envelope.Result.Tools.WebSearch.BaseURL, "%3Credacted%3E") {
@@ -592,7 +533,6 @@ database:
   driver: postgres
   dsn: postgres://app:super-secret-db@example.com:5432/traces?sslmode=disable
 responses_server:
-  enabled: true
   path: /v1/responses
   compact_history_item_threshold: 12
   model_profiles:
@@ -678,7 +618,6 @@ upstreams:
 				ModelReasoningEffortSource        string   `json:"model_reasoning_effort_source"`
 				CompactHistoryItemThreshold       int      `json:"compact_history_item_threshold"`
 				CompactHistoryItemThresholdSource string   `json:"compact_history_item_threshold_source"`
-				ResponsesServerEnabled            bool     `json:"responses_server_enabled"`
 			} `json:"diagnostics"`
 			TOML     string   `json:"toml"`
 			Warnings []string `json:"warnings"`
@@ -719,7 +658,7 @@ upstreams:
 		envelope.Result.Diagnostics.ModelReasoningEffortSource != "responses_server.model_profiles[1].name.model_reasoning_effort" {
 		t.Fatalf("codex profile field diagnostics = %+v", envelope.Result.Diagnostics)
 	}
-	if envelope.Result.Diagnostics.CompactHistoryItemThreshold != 9 || envelope.Result.Diagnostics.CompactHistoryItemThresholdSource != "responses_server.model_profiles[1].name.compact_history_item_threshold" || !envelope.Result.Diagnostics.ResponsesServerEnabled {
+	if envelope.Result.Diagnostics.CompactHistoryItemThreshold != 9 || envelope.Result.Diagnostics.CompactHistoryItemThresholdSource != "responses_server.model_profiles[1].name.compact_history_item_threshold" {
 		t.Fatalf("threshold diagnostics = %+v", envelope.Result.Diagnostics)
 	}
 	if len(envelope.Result.Warnings) != 0 {
@@ -739,7 +678,6 @@ func TestModelsCodexConfigCommandTextTOMLUsesPatternProfile(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   path: /openai/v1/responses
   model_profiles:
     - pattern: "qwen3*"
@@ -793,7 +731,6 @@ func TestModelsCodexConfigCommandWarnsForNoProfileAndDisabledResponses(t *testin
 server:
   port: "8182"
 responses_server:
-  enabled: false
   path: /custom/respond
   model_profiles:
     - name: "known-model"
@@ -829,7 +766,6 @@ responses_server:
 					Matched bool   `json:"matched"`
 					Source  string `json:"source"`
 				} `json:"matched_profile"`
-				ResponsesServerEnabled bool `json:"responses_server_enabled"`
 			} `json:"diagnostics"`
 			Warnings []string `json:"warnings"`
 		} `json:"result"`
@@ -843,11 +779,10 @@ responses_server:
 	if envelope.Result.Provider.BaseURL != "http://127.0.0.1:8182/custom/respond" || envelope.Result.Provider.ResponsesPath != "/custom/respond" {
 		t.Fatalf("provider = %+v", envelope.Result.Provider)
 	}
-	if envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Source != "none" || envelope.Result.Diagnostics.ResponsesServerEnabled {
+	if envelope.Result.Diagnostics.MatchedProfile.Matched || envelope.Result.Diagnostics.MatchedProfile.Source != "none" {
 		t.Fatalf("diagnostics = %+v", envelope.Result.Diagnostics)
 	}
 	for _, want := range []string{
-		"responses_server.enabled is false",
 		"no responses_server.model_profiles entry matched model",
 		"does not end with /responses",
 	} {
@@ -869,7 +804,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -929,7 +863,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -972,7 +905,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -1037,7 +969,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -1111,7 +1042,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "other-model"
       context_window_tokens: 200
@@ -1175,7 +1105,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
   adopt_channel_model_profiles: true
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
@@ -1261,7 +1190,6 @@ database:
 trace:
   output_dir: ` + strconv.Quote(dir) + `
 responses_server:
-  enabled: true
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -1337,7 +1265,6 @@ database:
 trace:
   output_dir: "` + dir + `"
 responses_server:
-  enabled: true
 `
 	if err := os.WriteFile(configPath, []byte(configBody), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
@@ -1363,7 +1290,6 @@ func TestModelsCodexConfigCommandSkipsLocalCodexConfigWithoutFlag(t *testing.T) 
 server:
   port: "8080"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -1389,7 +1315,6 @@ func TestModelsCodexConfigCommandReportsMatchingLocalCodexConfig(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   path: /v1/responses
   model_profiles:
     - name: "gpt-5"
@@ -1443,7 +1368,6 @@ func TestModelsCodexConfigCommandWarnsForLocalCodexConfigDrift(t *testing.T) {
 server:
   port: "8080"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -1487,7 +1411,6 @@ func TestModelsCodexConfigCommandDoesNotLeakLocalCodexConfigSecrets(t *testing.T
 server:
   port: "8080"
 responses_server:
-  enabled: true
   model_profiles:
     - name: "gpt-5"
       context_window_tokens: 200
@@ -4055,9 +3978,7 @@ debug:
 
 func TestValidateServeRouterConfigRequiresLocalResponsesServerBackend(t *testing.T) {
 	cfg := &config.Config{
-		ResponsesServer: config.ResponsesServerConfig{
-			Enabled: true,
-		},
+		ResponsesServer: config.ResponsesServerConfig{},
 		Upstreams: []config.UpstreamTargetConfig{
 			{
 				ID:             "anthropic-messages",

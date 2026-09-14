@@ -331,39 +331,12 @@ func validateServeConfig(cfg *config.Config) error {
 // startup gate: callers log the returned error as a warning so the process still
 // boots and the management UI stays reachable for reconfiguration.
 func validateServeRouterConfig(cfg *config.Config, routerCfg *config.Config) error {
-	if cfg != nil && cfg.ResponsesLocalExecutionAvailable() {
+	if cfg != nil {
 		if err := router.ValidateLocalResponsesServerBackendConfig(routerCfg); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-type responsesServerAssemblyConfig struct {
-	Enabled             bool
-	DefaultModel        string
-	ForceStore          bool
-	MaxRequestBodyBytes int64
-	Path                string
-	FunctionExecutors   config.ResponsesFunctionExecutorConfig
-}
-
-func responsesServerConfigFromServeConfig(cfg *config.Config) responsesServerAssemblyConfig {
-	if cfg == nil {
-		return responsesServerAssemblyConfig{
-			MaxRequestBodyBytes: (config.Config{}).ResponsesMaxRequestBodyBytes(),
-			Path:                (config.Config{}).ResponsesServerPath(),
-			FunctionExecutors:   (config.Config{}).ResponsesFunctionExecutorsConfig(),
-		}
-	}
-	return responsesServerAssemblyConfig{
-		Enabled:             cfg.ResponsesServerEnabled(),
-		DefaultModel:        cfg.ResponsesDefaultModel(),
-		ForceStore:          cfg.ResponsesForceStore(),
-		MaxRequestBodyBytes: cfg.ResponsesMaxRequestBodyBytes(),
-		Path:                cfg.ResponsesServerPath(),
-		FunctionExecutors:   cfg.ResponsesFunctionExecutorsConfig(),
-	}
 }
 
 func routerConfigFromChannels(cfg *config.Config, channelService *channel.Service) (*config.Config, string, error) {

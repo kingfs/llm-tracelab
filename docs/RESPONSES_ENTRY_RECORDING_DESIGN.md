@@ -11,7 +11,7 @@
 - 流式响应由 `llm.DetectStreamingResponse` 标记 `Layout.IsStream=true`，响应体按原始 SSE bytes 写入 cassette；`llm.ResponsePipeline` 同步抽取 usage 和事件。
 - `UpdateLogFile` 最后写入 `LLM_PROXY_V3` prelude，并把 trace 元数据索引进 SQLite/Postgres store。
 
-Responses server-mode 的外层入口还缺少同等级 cassette。开启 `responses_server.enabled=true` 后，配置的 Responses path 由 `internal/proxy.(*Handler).serveLocalResponses` 重写到内部 `internal/responses/httpapi.Handler`，不再进入 reverse proxy 的 recorder pipeline。当前已有的录制只覆盖 runtime 内部通过 `responsesChatCompletionsAdapter` 发起的上游 `/v1/chat/completions` model exchange；也就是说：
+Responses server-mode 的外层入口还缺少同等级 cassette。当请求由本地 Responses execution mode 处理时，配置的 Responses path 由 `internal/proxy.(*Handler).serveLocalResponses` 重写到内部 `internal/responses/httpapi.Handler`，不再进入 reverse proxy 的 recorder pipeline。当前已有的录制只覆盖 runtime 内部通过 `responsesChatCompletionsAdapter` 发起的上游 `/v1/chat/completions` model exchange；也就是说：
 
 - 客户端真实请求 `/v1/responses` 和 TraceLab 返回给客户端的 Responses object/SSE 没有 `.http` cassette。
 - Monitor/audit 能看到 request audit、execution events 和 upstream exchange correlation，但 replay 仍缺少“入口看到的 OpenAI Responses API”原始 HTTP 交换。

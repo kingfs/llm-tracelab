@@ -36,7 +36,6 @@ type toolsStatusResult struct {
 }
 
 type toolsStatusResponsesServer struct {
-	Enabled     bool                   `json:"enabled"`
 	CodexCompat toolsStatusCodexCompat `json:"codex_compat"`
 }
 
@@ -141,7 +140,6 @@ func buildToolsStatusResult(configPath string, cfg *appconfig.Config) toolsStatu
 	result := toolsStatusResult{
 		ConfigPath: configPath,
 		ResponsesServer: toolsStatusResponsesServer{
-			Enabled: cfg.ResponsesServerEnabled(),
 			CodexCompat: toolsStatusCodexCompat{
 				Enabled:               compat.Enabled,
 				AutoInjectHostedTools: append([]string(nil), compat.AutoInjectHostedTools...),
@@ -264,8 +262,6 @@ func toolsStatusInjectableTools(webSearch toolsStatusWebSearch, mcp toolsStatusM
 
 func toolsStatusCodexWebSearchReadiness(result toolsStatusResult) (bool, string) {
 	switch {
-	case !result.ResponsesServer.Enabled:
-		return false, "responses_server.enabled is false"
 	case !result.ResponsesServer.CodexCompat.Enabled:
 		return false, "responses_server.codex_compat.enabled is false"
 	case !toolsStatusContainsWebSearch(result.ResponsesServer.CodexCompat.AutoInjectHostedTools):
@@ -291,8 +287,7 @@ func toolsStatusContainsWebSearch(tools []string) bool {
 
 func writeToolsStatusText(w io.Writer, result toolsStatusResult) {
 	fmt.Fprintf(w, "tools: ready_for_codex_web_search=%t reason=%s\n", result.ReadyForCodexWebSearch, result.ReadyForCodexWebSearchWhy)
-	fmt.Fprintf(w, "responses_server: enabled=%t codex_compat.enabled=%t auto_inject=%s injectable=%s\n",
-		result.ResponsesServer.Enabled,
+	fmt.Fprintf(w, "responses_server: codex_compat.enabled=%t auto_inject=%s injectable=%s\n",
 		result.ResponsesServer.CodexCompat.Enabled,
 		strings.Join(result.ResponsesServer.CodexCompat.AutoInjectHostedTools, ","),
 		strings.Join(result.ResponsesServer.CodexCompat.InjectableTools, ","),

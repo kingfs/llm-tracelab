@@ -7,7 +7,7 @@ record/replay proxy 的主线：非 Responses 请求仍按现有协议感知代�
 
 适用范围：
 
-- `responses_server.enabled=true` 的本地 `/v1/responses` server-mode。
+- 本地 `/v1/responses` server-mode（始终可用，无开关）。
 - 上游为 OpenAI-compatible Chat Completions API，由 TraceLab 做最小 Responses
   semantic orchestration。
 - Codex/OpenAI SDK 常见的 text create、stream text、普通 function call、
@@ -200,7 +200,7 @@ provider、运行真实 Codex 或读取真实 API key。命令支持全局
   JSON diagnostics 会输出 path、present/readable/parsed、profile/provider
   present、字段级 expected/actual/matched 状态和 drift warnings；text 输出会给出
   简洁 `codex_config` summary。
-- `result.warnings` 会提示 `responses_server.enabled=false`、未匹配 profile、
+- `result.warnings` 会提示未匹配 profile、
   profile 缺少 `context_window_tokens` 或 path 无法按 Codex `wire_api=responses`
   习惯推导；当 profile 命中但 catalog/channel 缺少该 model，或 catalog 与
   channel 只有一侧存在该 model，或显式传入的 Codex TOML 存在 drift 时，也会输出

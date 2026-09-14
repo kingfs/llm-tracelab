@@ -213,7 +213,7 @@ Streaming 路径需要明确区分两类模式：
 - `code_interpreter`: disabled。
 - `computer_use_preview`: disabled。
 
-当前仓库的 `config/config.yaml` 是集成测试模板，按“默认全开测试”处理：`responses_server.enabled`、`responses_server.codex_compat.enabled`、`tools.web_search.enabled`、`tools.mcp.enabled` 和 `mcp.enabled` 已默认开启，便于验证 Codex + Responses server-mode + hosted tools 链路。高风险工具仍不进入默认测试路径。
+当前仓库的 `config/config.yaml` 是集成测试模板，按“默认全开测试”处理：`responses_server.codex_compat.enabled`、`tools.web_search.enabled`、`tools.mcp.enabled` 和 `mcp.enabled` 已默认开启，便于验证 Codex + Responses server-mode + hosted tools 链路。高风险工具仍不进入默认测试路径。
 
 所有工具必须支持：
 

@@ -242,7 +242,7 @@ const (
 	SelectionFailureUnknown            = "unknown"
 )
 
-const LocalResponsesServerBackendRequiredError = "responses_server.enabled requires at least one enabled OpenAI-compatible chat completions-compatible upstream for local Responses server mode"
+const LocalResponsesServerBackendRequiredError = "local Responses execution mode requires at least one enabled OpenAI-compatible chat completions-compatible upstream"
 
 func LocalResponsesServerBackendRequired() error {
 	return errors.New(LocalResponsesServerBackendRequiredError)

@@ -152,7 +152,6 @@ database:
 trace:
   output_dir: /tmp/traces
 responses_server:
-  enabled: true
   default_model: gpt-5
   path: /v1/responses
   codex_compat:
@@ -250,7 +249,6 @@ upstreams:
 		"database.dsn":                          sources.Database.DSN,
 		"database.auto_migrate":                 sources.Database.AutoMigrate,
 		"trace.output_dir":                      sources.Trace.OutputDir,
-		"responses_server.enabled":              sources.ResponsesServer.Enabled,
 		"responses_server.path":                 sources.ResponsesServer.Path,
 		"responses_server.default_model":        sources.ResponsesServer.DefaultModel,
 		"responses_server.codex_compat.enabled": sources.ResponsesServer.CodexCompat.Enabled,
@@ -300,7 +298,6 @@ func clearConfigInspectSourceEnv(t *testing.T) {
 		"LLM_TRACELAB_DATABASE_AUTO_MIGRATE",
 		"LLM_TRACELAB_OUTPUT_DIR",
 		"LLM_TRACELAB_TRACE_OUTPUT_DIR",
-		"LLM_TRACELAB_RESPONSES_ENABLED",
 		"LLM_TRACELAB_RESPONSES_DEFAULT_MODEL",
 		"LLM_TRACELAB_RESPONSES_PATH",
 		"LLM_TRACELAB_RESPONSES_CODEX_COMPAT_ENABLED",

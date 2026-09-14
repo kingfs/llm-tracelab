@@ -12,7 +12,7 @@
 本轮重构完成时，必须同时满足以下条件：
 
 1. TraceLab 是一个生产级 LLM gateway，不再只是 LLM API proxy。
-2. `responses_server.enabled=true` 时，TraceLab 稳定作为 OpenAI Responses API semantic server 运行；当上游是 OpenAI-compatible Chat Completions（例如 vLLM）时，由本地 runtime 编排 model call、tool loop、compact、stream、state 和 audit，而不是把 `/v1/responses` 透传给上游。
+2. 当模型没有可直通的 native Responses upstream 时，TraceLab 以本地 Responses execution mode 稳定作为 OpenAI Responses API semantic server 运行；当上游是 OpenAI-compatible Chat Completions（例如 vLLM）时，由本地 runtime 编排 model call、tool loop、compact、stream、state 和 audit，而不是把 `/v1/responses` 透传给上游。
 3. 非 Responses 请求继续走 protocol-aware proxy、routing、recording、recordfile parser、Monitor/MCP 和 `pkg/replay` 路径；`.http` V2/V3 cassette 兼容性不被破坏。
 4. Postgres 是唯一生产主路径。application/auth/runtime/audit/read-model schema、migration、health check、doctor、deployment 和测试门禁均以 Postgres 为一等目标。SQLite 只作为 legacy/dev/test 兼容，不再参与生产架构取舍。
 5. Provider 配置明确表达 `api_type`、`mode`、`protocol_family`、capabilities 和 model profile；provider detection/onboarding 可保守补齐缺失信息，但不能覆盖用户显式配置或 capability false。
@@ -172,7 +172,7 @@
 必须交付：
 
 - 默认生产部署示例是 app + Postgres + 可选 SearXNG。
-- 配置示例展示 OpenAI-compatible/vLLM upstream + `responses_server.enabled=true` + Postgres DSN。
+- 配置示例展示 OpenAI-compatible/vLLM upstream + `responses_server` 配置块 + Postgres DSN。
 - README/README_EN 不再把项目描述为“只是本地 record/replay proxy”或“SQLite 主路径”；应描述为 Postgres-first LLM gateway with record/replay。
 - doctor/config inspect/audit CLI 只服务生产闭环，不再扩散为外围展示功能。
 - 未实现能力明确写为 rejected/audited 或 future secure executor，不伪造支持。

@@ -21,11 +21,9 @@ database:
 trace:
   output_dir: "./data/traces"
 
+# The local Responses execution mode is always available; use
+# routing.settings.responses_strategy=native_only to opt out.
 responses_server:
-  # Deprecated and ignored: the local Responses execution mode is always
-  # available regardless of this value. Use
-  # routing.settings.responses_strategy=native_only to opt out.
-  enabled: true
   default_model: "$env:LLM_TRACELAB_RESPONSES_DEFAULT_MODEL"
   force_store: true
   max_request_body_bytes: 67108864

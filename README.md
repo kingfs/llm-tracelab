@@ -425,7 +425,6 @@ docker run --rm \
   -p 8081:8081 \
   -e LLM_TRACELAB_DATABASE_DRIVER=postgres \
   -e LLM_TRACELAB_DATABASE_DSN='postgres://llm_tracelab:llm_tracelab@host.docker.internal:5432/llm_tracelab?sslmode=disable' \
-  -e LLM_TRACELAB_RESPONSES_ENABLED=true \
   -e LLM_TRACELAB_RESPONSES_FORCE_STORE=true \
   -e LLM_TRACELAB_RESPONSES_DEFAULT_MODEL=gpt-4o-mini \
   -e LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL=http://host.docker.internal:8000/v1 \
@@ -453,7 +452,6 @@ services:
     environment:
       LLM_TRACELAB_DATABASE_DRIVER: postgres
       LLM_TRACELAB_DATABASE_DSN: postgres://llm_tracelab:llm_tracelab@postgres:5432/llm_tracelab?sslmode=disable
-      LLM_TRACELAB_RESPONSES_ENABLED: "true"
       LLM_TRACELAB_RESPONSES_FORCE_STORE: "true"
       LLM_TRACELAB_RESPONSES_DEFAULT_MODEL: gpt-4o-mini
       LLM_TRACELAB_BOOTSTRAP_UPSTREAM_BASE_URL: http://host.docker.internal:8000/v1

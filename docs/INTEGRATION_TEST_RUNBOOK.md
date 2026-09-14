@@ -9,7 +9,6 @@
 
 当前测试模板按“默认全开测试”处理：
 
-- `responses_server.enabled=true`
 - `responses_server.codex_compat.enabled=true`
 - `responses_server.codex_compat.auto_inject_hosted_tools=["web_search"]`
 - `tools.web_search.enabled=true`
