@@ -198,3 +198,40 @@ func TestDeleteChannelRollbackRestoresItsModels(t *testing.T) {
 		t.Fatalf("models not restored: %v", models)
 	}
 }
+
+func TestChannelBootstrapSettingsReportAndResetTheMarker(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	svc := channel.NewService(st)
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, st, RouteOptions{ChannelService: svc})
+
+	rr := configurationRequest(mux, http.MethodGet, "/api/settings/channels", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"initialized":false`) {
+		t.Fatalf("GET on a fresh database status=%d body=%s", rr.Code, rr.Body)
+	}
+
+	if err := svc.MarkConfigurationInitialized(); err != nil {
+		t.Fatal(err)
+	}
+	rr = configurationRequest(mux, http.MethodGet, "/api/settings/channels", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"initialized":true`) {
+		t.Fatalf("GET after marking status=%d body=%s", rr.Code, rr.Body)
+	}
+
+	rr = configurationRequest(mux, http.MethodDelete, "/api/settings/channels", "")
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"initialized":false`) {
+		t.Fatalf("DELETE status=%d body=%s", rr.Code, rr.Body)
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || initialized {
+		t.Fatalf("marker survived the reset: initialized=%v err=%v", initialized, err)
+	}
+
+	rr = configurationRequest(mux, http.MethodPost, "/api/settings/channels", "")
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("POST status=%d body=%s, want 404", rr.Code, rr.Body)
+	}
+}

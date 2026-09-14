@@ -35,6 +35,8 @@ Structured state (trace index, sessions, channel/provider config, upstream targe
 - Production and the tracked default config use Postgres; the checked-in SQL migrations live in `ent/postgres-migrations/`.
 - SQLite is a local/dev/test fallback only, with default file `{{output_dir}}/llm_tracelab.sqlite3`; SQLite schema is applied at startup rather than by versioned migrations.
 - Raw `.http` cassettes remain the source of truth for replay and detail views; the database is a derived index for lists, filters, and aggregates.
+- YAML channel configuration is a first-bootstrap input only. The first database write stores the application-database `app_settings` key `channels.initialized`; afterwards the database owns routing configuration even when every channel was disabled or deleted. `GET /api/settings/channels` reports the marker and `DELETE /api/settings/channels` clears it, which only re-opens the YAML bootstrap while the database still has no channels. A YAML config with an explicit `credentials` list stays YAML-managed and rejects Monitor channel/model/alias writes with 409.
+- All management writes (channels, models, aliases, provider setup and probe apply) run in one `store.ConfigurationTransaction`, which holds the process-wide configuration lock, the upstream write lock, and one SQL transaction; runtime routing is published only after the commit succeeds. Background upstream refresh persists through the same upstream write lock on a best-effort basis.
 
 Current protocol families are documented in `docs/protocol-reference/implemented-protocols.md`.
 The proxy is protocol-aware pass-through plus recording/parsing; it does not currently translate requests between OpenAI, Anthropic, Gemini, and Vertex protocol families in the forwarding hot path.

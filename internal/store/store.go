@@ -94,11 +94,21 @@ type Store struct {
 	driver                string
 	secrets               *secretBox
 	useSessionSummaryRead bool
-	configMu              sync.Mutex
-	syncMu                sync.Mutex
-	eventMu               sync.Mutex
-	eventSeq              uint64
-	eventSubs             map[chan SystemEventNotification]struct{}
+	shared                *storeShared
+}
+
+// storeShared keeps the state that every Store view of the same database must
+// share. ConfigurationTransaction builds a view whose db/client are rebound to
+// one transaction; if the writer locks or the live system-event subscribers were
+// copied instead of shared, such a view would silently diverge from the store it
+// was derived from.
+type storeShared struct {
+	configMu   sync.Mutex
+	upstreamMu sync.Mutex
+	syncMu     sync.Mutex
+	eventMu    sync.Mutex
+	eventSeq   uint64
+	eventSubs  map[chan SystemEventNotification]struct{}
 }
 
 type DatabaseOptions struct {
@@ -110,6 +120,26 @@ type rebindingDB struct {
 	*sql.DB
 	tx     *sql.Tx
 	driver string
+}
+
+// ErrNestedTransaction reports an attempt to open a second, independent
+// transaction from a store that already runs inside one. database/sql has no
+// nested transactions, and the promoted *sql.DB.Begin/BeginTx would silently
+// borrow a pooled connection and escape the outer transaction.
+var ErrNestedTransaction = errors.New("store: nested transaction on a transaction-scoped store")
+
+func (db *rebindingDB) Begin() (*sql.Tx, error) {
+	return db.BeginTx(context.Background(), nil)
+}
+
+func (db *rebindingDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
+	if db == nil || db.DB == nil {
+		return nil, errors.New("store: database is not configured")
+	}
+	if db.tx != nil {
+		return nil, ErrNestedTransaction
+	}
+	return db.DB.BeginTx(ctx, opts)
 }
 
 func (db *rebindingDB) Exec(query string, args ...any) (sql.Result, error) {
@@ -2871,6 +2901,7 @@ func NewWithDatabaseOptions(outputDir string, driver string, dsn string, maxOpen
 		outputDir:             outputDir,
 		dbPath:                dbPath,
 		driver:                driver,
+		shared:                &storeShared{},
 		secrets:               secrets,
 		useSessionSummaryRead: opts.UseSessionSummaryRead,
 	}
@@ -5766,8 +5797,8 @@ func (s *Store) insertSessionSummaryFromLogsSQL(whereSQL string) string {
 const timeLayout = "2006-01-02T15:04:05.999999999Z07:00"
 
 func (s *Store) Sync() error {
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
+	s.shared.syncMu.Lock()
+	defer s.shared.syncMu.Unlock()
 
 	freshness, err := s.loadFreshness()
 	if err != nil {
@@ -6766,19 +6797,19 @@ func (s *Store) SubscribeSystemEvents(buffer int) (<-chan SystemEventNotificatio
 		buffer = 8
 	}
 	ch := make(chan SystemEventNotification, buffer)
-	s.eventMu.Lock()
-	if s.eventSubs == nil {
-		s.eventSubs = map[chan SystemEventNotification]struct{}{}
+	s.shared.eventMu.Lock()
+	if s.shared.eventSubs == nil {
+		s.shared.eventSubs = map[chan SystemEventNotification]struct{}{}
 	}
-	s.eventSubs[ch] = struct{}{}
-	s.eventMu.Unlock()
+	s.shared.eventSubs[ch] = struct{}{}
+	s.shared.eventMu.Unlock()
 	return ch, func() {
-		s.eventMu.Lock()
-		if _, ok := s.eventSubs[ch]; ok {
-			delete(s.eventSubs, ch)
+		s.shared.eventMu.Lock()
+		if _, ok := s.shared.eventSubs[ch]; ok {
+			delete(s.shared.eventSubs, ch)
 			close(ch)
 		}
-		s.eventMu.Unlock()
+		s.shared.eventMu.Unlock()
 	}
 }
 
@@ -9292,10 +9323,10 @@ func (s *Store) notifySystemEventIDChanged(id string) {
 }
 
 func (s *Store) notifySystemEventChanged(event SystemEvent) {
-	s.eventMu.Lock()
-	s.eventSeq++
+	s.shared.eventMu.Lock()
+	s.shared.eventSeq++
 	notification := SystemEventNotification{
-		Sequence: s.eventSeq,
+		Sequence: s.shared.eventSeq,
 		EventID:  event.ID,
 		Status:   event.Status,
 		Severity: event.Severity,
@@ -9303,11 +9334,11 @@ func (s *Store) notifySystemEventChanged(event SystemEvent) {
 		Category: event.Category,
 		At:       time.Now().UTC(),
 	}
-	subs := make([]chan SystemEventNotification, 0, len(s.eventSubs))
-	for ch := range s.eventSubs {
+	subs := make([]chan SystemEventNotification, 0, len(s.shared.eventSubs))
+	for ch := range s.shared.eventSubs {
 		subs = append(subs, ch)
 	}
-	s.eventMu.Unlock()
+	s.shared.eventMu.Unlock()
 
 	for _, ch := range subs {
 		select {

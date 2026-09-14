@@ -53,3 +53,23 @@ func (s *Store) LoadAppSettingJSON(ctx context.Context, key string, out any) (bo
 	}
 	return true, nil
 }
+
+// DeleteAppSetting removes one app setting and reports whether a row existed.
+func (s *Store) DeleteAppSetting(ctx context.Context, key string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errorsNewStoreClosed()
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false, fmt.Errorf("setting key is required")
+	}
+	result, err := s.db.ExecContext(ctx, `DELETE FROM app_settings WHERE setting_key = ?`, key)
+	if err != nil {
+		return false, fmt.Errorf("delete app setting %q: %w", key, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("delete app setting %q: %w", key, err)
+	}
+	return affected > 0, nil
+}

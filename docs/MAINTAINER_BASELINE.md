@@ -98,9 +98,11 @@ YAML `upstream` / `upstreams` 是兼容 bootstrap 输入。
 修改渠道管理时必须保持：
 
 - DB 优先。
-- legacy YAML 可首次导入。
+- legacy YAML 可首次导入。首次数据库写入会记录 `app_settings` 键 `channels.initialized`；此后 DB 是路由配置来源，全部渠道停用或删除也不会回退到 YAML。`GET /api/settings/channels` 报告该标记，`DELETE /api/settings/channels` 仅清除标记：只有在 DB 中确实没有渠道时，下次启动才会重新导入 YAML。
 - API key 和敏感 header 本地加密。
 - channel/model 启停能 reload router。
+- 所有管理写入（渠道、模型、别名、provider setup/probe apply）共用 `store.ConfigurationTransaction`：它按 `configMu` -> `upstreamMu` -> `reloadMu` -> `router.mu` 的顺序持锁并使用单个 SQL 事务，只有 commit 成功后才发布新路由快照。不要在事务内再开事务（会返回 `store.ErrNestedTransaction`），也不要新增 `reloadMu` -> `upstreamMu` 的反向获取。
+- 后台刷新和代理侧 `RefreshNow` 只以 best-effort 方式获取 `upstreamMu`：配置变更持锁时跳过落库但仍更新内存，并在获得锁后按当前 live target 集合过滤，避免为已删除的 target 复活 `upstream_targets`/`upstream_models` 行。
 
 ## 协议边界
 
@@ -125,6 +127,8 @@ YAML `upstream` / `upstreams` 是兼容 bootstrap 输入。
 - `/api/models`
 - `/api/channels`
 - `/api/routing/summary`
+- `/api/settings/routing`
+- `/api/settings/channels`
 - `/api/events`
 - `/api/findings`
 - `/api/analysis`

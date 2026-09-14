@@ -892,3 +892,148 @@ func TestProbeDefaultsToDisabledAndPreservesManualChoices(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceBuildersLeaveTheirReceiverUntouched(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+
+	base := NewService(st)
+	scoped := base.WithStore(st)
+	readOnly := base.WithReadOnly(true)
+	withClient := base.WithHTTPClient(&http.Client{})
+
+	if base.ReadOnly() {
+		t.Fatal("WithReadOnly mutated the receiver")
+	}
+	if !readOnly.ReadOnly() {
+		t.Fatal("WithReadOnly did not apply to the derived service")
+	}
+	if base.httpClient != nil {
+		t.Fatal("WithHTTPClient mutated the receiver")
+	}
+	if withClient.httpClient == nil {
+		t.Fatal("WithHTTPClient did not apply to the derived service")
+	}
+	if scoped == base || readOnly == base || withClient == base {
+		t.Fatal("With* helpers returned the receiver instead of a derived service")
+	}
+	// A derived service must keep the specialization of the service it came from.
+	if !readOnly.WithStore(st).ReadOnly() {
+		t.Fatal("WithStore dropped the read-only flag")
+	}
+}
+
+func TestResetConfigurationInitializedReopensYAMLImport(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	svc := NewService(st)
+
+	if initialized, err := svc.HasConfiguration(); err != nil || initialized {
+		t.Fatalf("HasConfiguration() on a fresh store = %v, %v; want false", initialized, err)
+	}
+	if err := svc.MarkConfigurationInitialized(); err != nil {
+		t.Fatalf("MarkConfigurationInitialized() error = %v", err)
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
+		t.Fatalf("HasConfiguration() after marking = %v, %v; want true", initialized, err)
+	}
+	if err := svc.ResetConfigurationInitialized(); err != nil {
+		t.Fatalf("ResetConfigurationInitialized() error = %v", err)
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || initialized {
+		t.Fatalf("HasConfiguration() after reset = %v, %v; want false", initialized, err)
+	}
+	// Resetting never deletes channels: stored configuration still wins over YAML.
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "primary", Name: "Primary", Enabled: true, BaseURL: "https://example.invalid/v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
+		t.Fatalf("HasConfiguration() with a stored channel = %v, %v; want true", initialized, err)
+	}
+	if err := svc.ResetConfigurationInitialized(); err != nil {
+		t.Fatalf("ResetConfigurationInitialized() error = %v", err)
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
+		t.Fatalf("reset dropped stored channels: initialized=%v err=%v", initialized, err)
+	}
+}
+
+func TestBootstrapFromConfigStopsWritingOnceInitialized(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	svc := NewService(st)
+
+	if _, err := st.UpsertChannelConfig(store.ChannelConfigRecord{ID: "primary", Name: "Primary", Enabled: true, BaseURL: "https://example.invalid/v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ResetConfigurationInitialized(); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := svc.BootstrapFromConfig(&config.Config{})
+	if err != nil || imported != 0 {
+		t.Fatalf("BootstrapFromConfig() = %d, %v; want 0, nil", imported, err)
+	}
+	var marker bool
+	if found, err := st.LoadAppSettingJSON(context.Background(), "channels.initialized", &marker); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("an already-initialized startup rewrote the bootstrap marker")
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
+		t.Fatalf("stored channels no longer count as initialized: initialized=%v err=%v", initialized, err)
+	}
+}
+
+func TestBootstrapFromConfigReimportsYAMLAfterReset(t *testing.T) {
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("store.New() error = %v", err)
+	}
+	defer st.Close()
+	svc := NewService(st)
+
+	enabled := true
+	cfg := &config.Config{
+		Upstreams: []config.UpstreamTargetConfig{{
+			ID:      "openai-primary",
+			Enabled: &enabled,
+			Upstream: config.UpstreamConfig{
+				BaseURL:        "https://example.invalid/v1",
+				ProviderPreset: "openai",
+			},
+		}},
+	}
+	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 1 {
+		t.Fatalf("first BootstrapFromConfig() = %d, %v; want 1, nil", imported, err)
+	}
+	channels, err := st.ListChannelConfigs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range channels {
+		if err := st.DeleteChannelConfig(record.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if initialized, err := svc.HasConfiguration(); err != nil || !initialized {
+		t.Fatalf("marker was not persisted by the first import: initialized=%v err=%v", initialized, err)
+	}
+	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 0 {
+		t.Fatalf("BootstrapFromConfig() before reset = %d, %v; want 0, nil", imported, err)
+	}
+	if err := svc.ResetConfigurationInitialized(); err != nil {
+		t.Fatal(err)
+	}
+	if imported, err := svc.BootstrapFromConfig(cfg); err != nil || imported != 1 {
+		t.Fatalf("BootstrapFromConfig() after reset = %d, %v; want 1, nil", imported, err)
+	}
+}

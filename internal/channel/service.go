@@ -22,6 +22,7 @@ import (
 type Store interface {
 	LoadAppSettingJSON(context.Context, string, any) (bool, error)
 	SaveAppSettingJSON(context.Context, string, any) error
+	DeleteAppSetting(context.Context, string) (bool, error)
 	ListChannelConfigs() ([]store.ChannelConfigRecord, error)
 	GetChannelConfig(channelID string) (store.ChannelConfigRecord, error)
 	UpsertChannelConfig(store.ChannelConfigRecord) (store.ChannelConfigRecord, error)
@@ -45,9 +46,15 @@ func NewService(st Store) *Service {
 	return &Service{store: st}
 }
 
+// WithHTTPClient returns a copy of the service that probes with client.
+//
+// Every With* helper returns a derived service and leaves the receiver
+// untouched, so a service shared by several callers (for example the one built
+// for the Monitor) can be specialised without mutating it in place.
 func (s *Service) WithHTTPClient(client *http.Client) *Service {
-	s.httpClient = client
-	return s
+	next := *s
+	next.httpClient = client
+	return &next
 }
 
 // WithStore preserves probe options when applying a configuration transaction.
@@ -58,8 +65,9 @@ func (s *Service) WithStore(st Store) *Service {
 }
 
 func (s *Service) WithReadOnly(readOnly bool) *Service {
-	s.readOnly = readOnly
-	return s
+	next := *s
+	next.readOnly = readOnly
+	return &next
 }
 
 func (s *Service) ReadOnly() bool { return s != nil && s.readOnly }
@@ -81,6 +89,15 @@ func (s *Service) HasConfiguration() (bool, error) {
 
 func (s *Service) MarkConfigurationInitialized() error {
 	return s.store.SaveAppSettingJSON(context.Background(), configurationInitializedKey, true)
+}
+
+// ResetConfigurationInitialized clears the explicit bootstrap marker so the next
+// start may import YAML again. It deliberately does not delete channels: a
+// database that still holds channel configuration keeps counting as
+// initialized, because HasConfiguration also falls back to the stored channels.
+func (s *Service) ResetConfigurationInitialized() error {
+	_, err := s.store.DeleteAppSetting(context.Background(), configurationInitializedKey)
+	return err
 }
 
 type ProbeResult struct {
@@ -121,6 +138,10 @@ type ProviderProbeApplyItem struct {
 	SkippedReason string   `json:"skipped_reason,omitempty"`
 }
 
+// BootstrapFromConfig imports YAML upstreams into the channel store on first
+// startup only. It never writes once the database owns the configuration: the
+// marker is stored by the first import or by the first management write, so a
+// startup that is already initialized stays read-only.
 func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 	if s == nil || s.store == nil {
 		return 0, fmt.Errorf("channel service store is required")
@@ -130,7 +151,7 @@ func (s *Service) BootstrapFromConfig(cfg *config.Config) (int, error) {
 		return 0, err
 	}
 	if initialized {
-		return 0, s.MarkConfigurationInitialized()
+		return 0, nil
 	}
 
 	targets := configuredUpstreams(cfg)

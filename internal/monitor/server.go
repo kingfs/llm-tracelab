@@ -1509,6 +1509,7 @@ func RegisterRoutes(mux *http.ServeMux, st *store.Store, opts ...RouteOptions) {
 	mux.HandleFunc("/api/routing/inspect", monitorAuthRequired(routingInspectAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/routing/summary", monitorAuthRequired(routingSummaryAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/settings/routing", monitorAuthRequired(routingSettingsAPIHandler(st), monitorVerifier))
+	mux.HandleFunc("/api/settings/channels", monitorAuthRequired(channelBootstrapSettingsAPIHandler(st, opt.ChannelService), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases/validate", monitorAuthRequired(modelAliasValidateAPIHandler(st), monitorVerifier))
 	mux.HandleFunc("/api/model-aliases", monitorAuthRequired(configurationAPIHandler(st, opt.Router, opt.ChannelService, func(st *store.Store, _ *router.Router, _ *channel.Service) http.HandlerFunc {
 		return modelAliasListCreateAPIHandler(st)
@@ -3088,6 +3089,55 @@ func routingSettingsAPIHandler(st *store.Store) http.HandlerFunc {
 				return
 			}
 			writeJSON(w, http.StatusOK, settings)
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
+// channelBootstrapSettingsAPIHandler reports and clears the YAML bootstrap
+// marker for channel configuration. GET answers whether the database owns the
+// routing configuration; DELETE clears only the explicit marker, so a database
+// that still stores channels keeps winning over YAML.
+func channelBootstrapSettingsAPIHandler(st *store.Store, channelService *channel.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if st == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		svc := effectiveChannelService(st, channelService)
+		if svc == nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "store not configured"})
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			initialized, err := svc.HasConfiguration()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]bool{"initialized": initialized})
+		case http.MethodDelete:
+			// Clearing the marker is a settings write, but it still goes through
+			// the configuration transaction so it cannot interleave with a
+			// management write that re-marks it.
+			err := st.ConfigurationTransaction(r.Context(), func(tx *store.Store, commit func() error) error {
+				if err := svc.WithStore(tx).ResetConfigurationInitialized(); err != nil {
+					return err
+				}
+				return commit()
+			})
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			initialized, err := svc.HasConfiguration()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]bool{"initialized": initialized})
 		default:
 			http.NotFound(w, r)
 		}

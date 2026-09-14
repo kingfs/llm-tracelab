@@ -528,9 +528,20 @@ func (r *Router) Reload(targetCfgs []config.UpstreamTargetConfig) error {
 
 // ReloadWithCommit prepares the next snapshot before committing configuration.
 // A failed preparation or commit leaves the running snapshot unchanged.
+//
+// The upstream write lock is taken before reloadMu so the lock order stays
+// configMu -> upstreamMu -> reloadMu -> r.mu: a configuration request that
+// already owns the upstream lock must never wait for a reload that waits for it.
 func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, st *store.Store, commit func() error) error {
 	if r == nil {
 		return fmt.Errorf("router is nil")
+	}
+	if st != nil && !st.TransactionScoped() {
+		release, err := st.LockUpstreamWrites()
+		if err != nil {
+			return err
+		}
+		defer release()
 	}
 	r.reloadMu.Lock()
 	defer r.reloadMu.Unlock()
@@ -551,19 +562,22 @@ func (r *Router) ReloadWithCommit(targetCfgs []config.UpstreamTargetConfig, st *
 		}
 	}
 
-	if len(nextTargets) > 0 {
-		if _, err := r.refreshTargetsWithStore(nextTargets, st); err != nil {
-			return err
-		}
+	// The caller holds the upstream write lock, so persisting here cannot
+	// interleave with a background refresh.
+	if _, err := r.refreshTargetsWithStore(nextTargets, st); err != nil {
+		return err
 	}
 
-	r.mu.Lock()
+	// Commit before publishing: the running snapshot must never describe
+	// configuration the database rejected, while a failed commit has to leave
+	// the previous snapshot in place. Publishing after the commit keeps the
+	// router lock out of the database transaction.
 	if commit != nil {
 		if err := commit(); err != nil {
-			r.mu.Unlock()
 			return err
 		}
 	}
+	r.mu.Lock()
 	r.targets = nextTargets
 	r.rebuildCatalog()
 	r.mu.Unlock()
@@ -1232,54 +1246,127 @@ func (r *Router) refreshAll() (int, error) {
 	return r.refreshTargets(targets)
 }
 
+// refreshTargets is the background and proxy entry point. Persistence is best
+// effort there: when a configuration change owns the upstream write lock the
+// refreshed state still lands in memory, and the next refresh stores it.
 func (r *Router) refreshTargets(targets []*Target) (int, error) {
-	return r.refreshTargetsWithStore(targets, r.store)
+	usable, writes := r.refreshTargetsInMemory(targets)
+	st := r.store
+	if st == nil || len(writes) == 0 {
+		return usable, nil
+	}
+	release, locked, err := st.TryLockUpstreamWrites()
+	if err != nil {
+		return usable, err
+	}
+	if !locked {
+		return usable, nil
+	}
+	defer release()
+	// The configuration change may have removed targets after this snapshot was
+	// taken; never resurrect rows for targets that are no longer live.
+	writes = r.liveRefreshWrites(writes)
+	if len(writes) == 0 {
+		return usable, nil
+	}
+	if err := r.persistRefreshWrites(st, writes); err != nil {
+		return usable, err
+	}
+	return usable, nil
 }
 
+// liveRefreshWrites drops refresh results whose target left the running
+// snapshot. Callers must hold the upstream write lock so a concurrent reload
+// cannot change the live set between this filter and the write.
+func (r *Router) liveRefreshWrites(writes []refreshWrite) []refreshWrite {
+	r.mu.RLock()
+	live := make(map[string]struct{}, len(r.targets))
+	for _, target := range r.targets {
+		live[target.ID] = struct{}{}
+	}
+	r.mu.RUnlock()
+	kept := writes[:0]
+	for _, write := range writes {
+		if _, ok := live[write.record.ID]; ok {
+			kept = append(kept, write)
+		}
+	}
+	return kept
+}
+
+// refreshTargetsWithStore refreshes targets and stores what it learned through
+// st. The caller must hold the upstream write lock for st unless st is nil;
+// ReloadWithCommit and refreshTargets both do.
 func (r *Router) refreshTargetsWithStore(targets []*Target, st *store.Store) (int, error) {
+	usable, writes := r.refreshTargetsInMemory(targets)
+	if st == nil || len(writes) == 0 {
+		return usable, nil
+	}
+	if err := r.persistRefreshWrites(st, writes); err != nil {
+		return usable, err
+	}
+	return usable, nil
+}
+
+type refreshWrite struct {
+	record store.UpstreamTargetRecord
+	models []store.UpstreamModelRecord
+}
+
+// refreshTargetsInMemory refreshes targets over the network and applies the
+// result to the running targets. It never touches the database.
+func (r *Router) refreshTargetsInMemory(targets []*Target) (int, []refreshWrite) {
 	var usable int
+	writes := make([]refreshWrite, 0, len(targets))
 	for _, target := range targets {
 		models, status, refreshErr := r.refreshTarget(target)
 		if refreshErr == nil || len(models) > 0 || target.allowUnknownModels {
 			usable++
 		}
 		target.setRefreshResult(models, status, refreshErr, r.failureThreshold, r.openWindow, r.costs)
-		if st != nil {
-			record := store.UpstreamTargetRecord{
-				ID:                target.ID,
-				BaseURL:           target.Upstream.BaseURL,
-				ProviderPreset:    target.Upstream.ProviderPreset,
-				ProtocolFamily:    target.Upstream.ProtocolFamily,
-				RoutingProfile:    target.Upstream.RoutingProfile,
-				Enabled:           target.Enabled,
-				Priority:          target.Priority,
-				Weight:            target.Weight,
-				CapacityHint:      target.CapacityHint,
-				LastRefreshAt:     target.snapshot().LastRefreshAt,
-				LastRefreshStatus: status,
-			}
-			if refreshErr != nil {
-				record.LastRefreshError = refreshErr.Error()
-			}
-			if err := st.UpsertUpstreamTarget(record); err != nil {
-				return 0, err
-			}
-			modelRecords := make([]store.UpstreamModelRecord, 0, len(models))
-			seenAt := time.Now().UTC()
-			for _, model := range models {
-				modelRecords = append(modelRecords, store.UpstreamModelRecord{
-					UpstreamID: target.ID,
-					Model:      model,
-					Source:     "catalog",
-					SeenAt:     seenAt,
-				})
-			}
-			if err := st.ReplaceUpstreamModels(target.ID, modelRecords); err != nil {
-				return 0, err
-			}
+		record := store.UpstreamTargetRecord{
+			ID:                target.ID,
+			BaseURL:           target.Upstream.BaseURL,
+			ProviderPreset:    target.Upstream.ProviderPreset,
+			ProtocolFamily:    target.Upstream.ProtocolFamily,
+			RoutingProfile:    target.Upstream.RoutingProfile,
+			Enabled:           target.Enabled,
+			Priority:          target.Priority,
+			Weight:            target.Weight,
+			CapacityHint:      target.CapacityHint,
+			LastRefreshAt:     target.snapshot().LastRefreshAt,
+			LastRefreshStatus: status,
+		}
+		if refreshErr != nil {
+			record.LastRefreshError = refreshErr.Error()
+		}
+		modelRecords := make([]store.UpstreamModelRecord, 0, len(models))
+		seenAt := time.Now().UTC()
+		for _, model := range models {
+			modelRecords = append(modelRecords, store.UpstreamModelRecord{
+				UpstreamID: target.ID,
+				Model:      model,
+				Source:     "catalog",
+				SeenAt:     seenAt,
+			})
+		}
+		writes = append(writes, refreshWrite{record: record, models: modelRecords})
+	}
+	return usable, writes
+}
+
+// persistRefreshWrites stores refresh results. The caller must hold the
+// upstream write lock.
+func (r *Router) persistRefreshWrites(st *store.Store, writes []refreshWrite) error {
+	for _, write := range writes {
+		if err := st.UpsertUpstreamTarget(write.record); err != nil {
+			return err
+		}
+		if err := st.ReplaceUpstreamModels(write.record.ID, write.models); err != nil {
+			return err
 		}
 	}
-	return usable, nil
+	return nil
 }
 
 func (r *Router) rebuildCatalog() {

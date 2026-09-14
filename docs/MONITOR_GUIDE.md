@@ -104,7 +104,7 @@ Monitor 使用两类数据：
 - 启停单个模型。
 - 查看渠道用量、token、失败和 probe 结果。
 
-长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。通常 YAML 只作为启动和首次 bootstrap 输入；首次初始化会留下持久化标记，即使后来停用或删除全部渠道，重启也不会重新导入 YAML。使用显式 `credentials` 列表的 YAML 配置仍由 YAML 管理，此模式下 Monitor 的渠道、模型和别名写操作返回 409，避免数据库操作替换 YAML 中的凭据路由。
+长期渠道配置保存在 application store；Postgres 部署使用版本化迁移，SQLite 仍作为本地 fallback。通常 YAML 只作为启动和首次 bootstrap 输入；首次初始化会在应用库 `app_settings` 写入 `channels.initialized` 标记（`GET /api/settings/channels` 报告，`DELETE /api/settings/channels` 清除），即使后来停用或删除全部渠道，重启也不会重新导入 YAML。清除该标记只是重新放行 YAML bootstrap：只要数据库里仍有渠道配置，数据库依旧是路由配置来源；只有数据库确实为空时，下次启动才重新导入 YAML。使用显式 `credentials` 列表的 YAML 配置仍由 YAML 管理，此模式下 Monitor 的渠道、模型和别名写操作返回 409，避免数据库操作替换 YAML 中的凭据路由。
 
 ### 上游和模型的启停语义
 
