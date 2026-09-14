@@ -636,7 +636,7 @@ LIMIT 20;
 
 ## Backfill 与灰度读
 
-现有回填入口只补齐 `upstream_exchanges` 的 exchange metadata 索引（`exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`、`cassette_path`、`model`、`endpoint`），输入是 `upstream_exchanges` 行与对应 raw `.http` cassette，绝不重写 cassette：
+现有回填入口只补齐 `upstream_exchanges` 的 exchange metadata 索引。实际写入的列是 `response_id`、`request_audit_id`、`trace_id`、`exchange_id`、`exchange_kind`、`exchange_role`、`parent_exchange_id`、`sequence_index`；`cassette_path`、`model`、`endpoint` 只是定位并读取对应 raw `.http` cassette 的输入，不会被回写。回填绝不重写 cassette：
 
 ```bash
 llm-tracelab -c config/config.yaml analyze backfill-exchanges --dry-run

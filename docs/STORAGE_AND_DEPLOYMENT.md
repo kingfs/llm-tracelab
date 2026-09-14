@@ -36,7 +36,7 @@ Raw cassette (.http, LLM_PROXY_V3)
   生成后必须复核 SQL，并同时提交迁移文件与 `atlas.sum`；已提交或在共享环境应用过的迁移文件不要手改。`task migrate:ent:postgres NAME=... DEV_URL=...` 是同一流程的封装。
 - SQLite 只用于本地、dev、test 与 replay-safe fallback，默认文件为 `{{output_dir}}/llm_tracelab.sqlite3`。SQLite schema 在启动时用 raw DDL 建立，不是版本化迁移；`db migrate status` 会报告 `sqlite_schema_strategy: startup_schema_fallback` 与 `sqlite_versioned_migration_status: not_implemented`。
 - SQLite 启动建表会写 `app_schema_status`（namespace `application`）标记；缺少该标记但必需表齐全的旧库仍被视作兼容的 legacy startup-schema 库。
-- `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`；`serve` 与命令路径使用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store。
+- `internal/store.NewWithDatabase` 是兼容构造器，默认 `AutoMigrate: true`。Postgres 下 `serve` 与命令路径改用 `NewWithDatabaseOptions(..., AutoMigrate:false)`，在显式迁移之后才打开 store；SQLite 没有版本化迁移，`db migrate up` 走 `initializeApplicationDatabase` → `NewWithDatabase`（即 `AutoMigrate: true`）来触发启动建表。
 
 ## 命令归属（哪个命令负责迁移、哪个负责 serve、auto_migrate 语义）
 
@@ -44,7 +44,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 | --- | --- | --- |
 | `serve` | 启动 proxy、Monitor、MCP、recorder 与本地 Responses runtime | 先按 `auto_migrate` 跑应用迁移，再以 `AutoMigrate:false` 打开 store；随后启动 in-process 解析 worker 与分析 worker |
 | `db migrate up` | 应用数据库 schema | Postgres 应用 `ent/postgres-migrations` 里的签入 SQL 并记录 `schema_migrations`；SQLite 走启动建表路径。支持 `--step N`、`--dry-run` |
-| `db migrate down` | 应用数据库回滚 | 非 `--dry-run` 时明确不支持，退出码 2；生产约定是前向迁移 + 备份或经过评审的手工回滚方案 |
+| `db migrate down` | 应用数据库回滚 | 非 `--dry-run` 时明确不支持，以 usage 错误码退出（CLI 退出码 `3`；内部 helper 返回 `2`，由 CLI 统一映射为 `3`）；生产约定是前向迁移 + 备份或经过评审的手工回滚方案 |
 | `db migrate status` | 迁移可见性 | 默认只读配置（不连库）；加 `--check-db` 才读库：Postgres 读 `schema_migrations` 的 version/dirty，SQLite 以只读方式报告 `app_schema_status` 与必需表是否齐全 |
 | `db migrate optimize-indexes` | Postgres 索引优化 | 仅 Postgres 生效，应用非事务性 `CREATE INDEX CONCURRENTLY`；支持 `--dry-run`，SQLite 报 not applicable |
 | `db summary rebuild sessions` | 派生汇总重建 | 从 logs 重建 `session_summaries`；支持 `--session-id`、`--dry-run` |
@@ -63,7 +63,7 @@ Raw cassette (.http, LLM_PROXY_V3)
 
 - Postgres 的 auth 表（`users`、`api_tokens`）属于应用数据库的 `schema_migrations` 命名空间，状态字段为 `postgres_auth_namespace_strategy: shared_application_schema_migrations`、`independent_auth_namespace_status: not_implemented`。
 - `auth migrate up` 对 Postgres 委托给同一份 `ent/postgres-migrations`，因此与 `db migrate up` 幂等；CLI 不会暗示存在独立的 auth 命名空间。
-- `auth migrate down` 在 Postgres 下被阻止（`ErrPostgresAuthRollbackUnsupported`），退出码 2：auth 命令不能回滚应用表。生产回滚同样依赖备份或经过评审的应用迁移方案。
+- `auth migrate down` 在 Postgres 下被阻止（`ErrPostgresAuthRollbackUnsupported`），以 usage 错误码退出（CLI 退出码 `3`）：auth 命令不能回滚应用表。生产回滚同样依赖备份或经过评审的应用迁移方案。
 - `auth migrate status --check-db` 是只读检查：Postgres 读共享 `schema_migrations` 并检查 `users`、`api_tokens` 是否存在；SQLite 读配置的 auth 迁移表并检查同样两张表。不带 `--check-db` 时只报告配置。
 - 用户与令牌运维命令：`auth init-user --username <u> --password <p>`、`auth reset-password`、`auth create-token --username --name --scope --ttl`（`--scope` 默认 `auth.DefaultTokenScope`，`--ttl 0` 表示不过期）。
 
@@ -130,9 +130,10 @@ analysis_job -> detectors -> trace_findings（可选 LLM analysis）
 
 | 类别 | 内容 | 说明 |
 | --- | --- | --- |
-| 可由 cassette 重算 | `logs` 索引、`trace_observations`、`semantic_nodes`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`overview_metric_buckets`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等，`semantic_nodes` 可按 `trace_id` 清理重建 |
+| 可由 cassette 重算 | `logs` 索引、`trace_observations`、`semantic_nodes`、`trace_findings`、`analysis_runs`、`parser_versions`、`session_summaries`、`parse_jobs` / `analysis_jobs` 队列状态 | 派生数据，可清空重建；reparse 结果幂等，`semantic_nodes` 可按 `trace_id` 清理重建 |
+| 由写入路径增量维护 | `overview_metric_buckets` / `overview_metric_bucket_members` | 随写入按 path 增量更新；`Store.RebuildOverviewMetricBuckets` 已存在但当前没有 CLI 调用者，因此没有等价的命令行重建入口 |
 | 持久化状态（非 cassette 可推导） | channel/upstream 配置与模型目录、`app_settings`（如 `channels.initialized`、`routing.settings`）、`users` / `api_tokens`、`responses` / `response_items`、`request_audits` / `execution_events` / `tool_call_audits`、`datasets` / `eval_runs` / `scores` / `experiment_runs`、本地 channel secret 加密密钥 | 需要独立备份 |
-| 可由 cassette 回填的索引字段 | `upstream_exchanges` 与 logs 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette |
+| 可由 cassette 回填的索引字段 | `upstream_exchanges` 的 exchange metadata | `analyze backfill-exchanges` 只回填 DB 索引，不重写 cassette；`logs` 只作为推断输入被读取，不会被写入 |
 
 重算命令（均为当前可用子命令）：
 

@@ -8,7 +8,7 @@
 
 - YAML 的 `upstreams`（或 legacy 单 `upstream`）只在数据库尚无渠道时导入。
   `channel.Service.BootstrapFromConfig` 把 target 写入 `channel_configs` / `channel_models`，导入渠道的 `source` 记为 `bootstrap`；Monitor 中创建的渠道 `source` 为 `manual`。
-- 导入使用稳定 ID：YAML 显式 `id` 优先；legacy 单 upstream 使用 `default`；没有 ID 时由 provider preset 与 base URL 生成 slug，发生冲突再追加序号。
+- 导入使用稳定 ID：YAML 显式 `id` 优先；未显式 `id` 时，列表第一条（`idx == 0`，因此也包括 legacy 单 `upstream`）且 `base_url` 非空者取 `default`；其余由 provider preset 与 `base_url` 的 host 拼成 slug，slug 仍为空时回落到 `upstream-<n>`。
 - 第一次数据库写入（bootstrap 导入或任意管理写）会在应用库 `app_settings` 写入 `channels.initialized`。
   此后数据库拥有路由配置，即使所有渠道都被禁用或删除。
 - `GET /api/settings/channels` 返回 `{"initialized": <bool>}`；`DELETE /api/settings/channels` 在 `ConfigurationTransaction` 内清除该标记。

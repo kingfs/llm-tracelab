@@ -103,10 +103,10 @@ All documentation under `docs/` is written in Chinese and describes current code
 - `docs/RESPONSES_RUNTIME.md`: 本地 Responses runtime、Codex 兼容面、hosted tools
 - `docs/OBSERVATION_AND_AUDIT.md`: 语义解析管道、Observation IR、findings 与重分析
 - `docs/STORAGE_AND_DEPLOYMENT.md`: 存储分层、迁移命令、生产部署与派生数据重算
-- `docs/MONITOR_GUIDE.md`: current user-facing monitor capabilities and workflows
-- `docs/MCP_GUIDE.md`: current MCP tool surface and usage
+- `docs/MONITOR_GUIDE.md`: Monitor 当前用户可见能力与操作流程
+- `docs/MCP_GUIDE.md`: 当前 MCP 工具面与使用方式
 - `docs/PROXY_USAGE_EXAMPLES.md`: 把 SDK 与 CLI 接到代理上的示例
 - `docs/POSTGRES_OPERATIONS.md`: Postgres 长期运行的基线采集、索引、调优与排障
-- `docs/DEVELOPMENT.md`: stable test, lint, build, benchmark, and dependency command entry points
-- `docs/protocol-reference/README.md`: current protocol reference entry, implemented protocol matrix, protocol differences, and dated upstream schema snapshots
+- `docs/DEVELOPMENT.md`: 测试、lint、构建、基准与依赖的稳定命令入口
+- `docs/protocol-reference/README.md`: 协议参考入口、已实现协议矩阵、协议差异与带日期的上游 schema 快照
 - add focused docs under `docs/` only when they clarify architecture or storage decisions

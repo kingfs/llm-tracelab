@@ -162,7 +162,7 @@ Registry 默认顺序是 entry → openai → anthropic → gemini，取第一�
 `openAIParser` 命中条件：operation 为 `chat.completions`、`responses` 或 `models`，且 provider 为 OpenAI 兼容（`openai_compatible`、`azure_openai`、`vllm`）或 `unknown`/空。
 
 - Chat：请求 `messages[]`、`tools[]` 等；响应 `choices[].message`、`tool_calls`、`finish_reason`；流式处理 `delta.content`、`delta.reasoning_content`/`delta.reasoning`、`delta.tool_calls` 与最终 usage chunk。
-- Responses：请求 `input`/`instructions`；响应与流式事件覆盖 `message`、`reasoning`、`function_call`、`custom_tool_call`、`local_shell_call`、`apply_patch`、`web_search_call`、`file_search_call`、`computer_call`、`code_interpreter_call`、`mcp_call` 及对应 `*_output`；未知 item 保留为 `unknown`。
+- Responses：请求 `input`/`instructions`；响应与流式事件覆盖 `message`、`reasoning`、`function_call`、`custom_tool_call`、`local_shell_call`、`apply_patch`、`web_search_call`、`file_search_call`、`computer_call`、`code_interpreter_call`、`mcp_call`，以及 `function_call_output`、`custom_tool_call_output`、`mcp_call_output`、`web_search_call_output`、`file_search_call_output`、`computer_call_output`、`code_interpreter_call_output`；`refusal` 与 `error` 也单独归一。`local_shell_call` 与 `apply_patch` 目前没有对应的 `*_output` 映射，未知 item 保留为 `unknown`。
 - 归一映射见 `normalizedResponsesType` 与 `normalizedContentType`：`input_text`/`output_text`/`text`→`text`，`input_image`/`image_url`→`image`，`input_file`/`file`→`file`，`reasoning`/`summary_text`/`reasoning_text`→`reasoning`，`refusal`→`refusal`。
 - Chat `finish_reason` 作为 `finish_reason` 节点承载并归一为 `safety`。
 
@@ -206,8 +206,8 @@ SequenceIndex    int    `json:"sequence_index,omitempty"`
 TraceID          string `json:"trace_id,omitempty"`
 ```
 
-- `exchange_kind`：`entry`、`model`、`tool`、`derived`。
-- `exchange_role`：`client_request`、`primary_model_call`、`tool_followup_model_call`、`compact_model_call`、`summary_model_call`、`repair_model_call`、`tool_call`、`derived_summary`、`derived_repair`。Responses runtime 在发起上游调用前决定 role（`internal/responses/runtime/chat.go` 定义 `primary_model_call`、`tool_followup_model_call`、`compact_model_call`），recorder 只持久化传入的 metadata。
+- `exchange_kind`：写入侧只产生 `entry` 与 `model`；读取侧的 client-visible 判定还会接受空值与 legacy 的 `proxy`（`clientVisibleLogClause`），所以 `proxy` 是读取兼容值而非写入值。
+- `exchange_role`：写入侧产生 `client_request`、`primary_model_call`、`tool_followup_model_call`、`compact_model_call`。前两个是 `pkg/observe` 在 metadata 缺省时的推断值（`exchange_kind=entry` 推 `client_request`，否则推 `primary_model_call`）；后两个来自 `internal/responses/runtime/chat.go` 的常量。Responses runtime 在发起上游调用前决定 role，recorder 只持久化传入的 metadata。
 - 关联字段：`request_audit_id` 是 Responses 根关联 id；`response_id`、`client_request_id`、`conversation_id` 来自 meta；`trace_id` 与 `cassette_path` 把 model exchange 指回原始 cassette。
 
 索引落点（应用数据库）：

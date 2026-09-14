@@ -32,7 +32,7 @@ TraceLab 不为每个上游写一套独立集成，而是把上游解析为协�
 
 | 协议族 | provider 标签 | 路由 profile | 当前 endpoint 覆盖 | parser 覆盖 |
 | --- | --- | --- | --- | --- |
-| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models、Tokenization |
+| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models（Observation IR parser）；Embeddings 与 Tokenization 只被分类、路由与录制 |
 | `anthropic_messages` | `anthropic` | `anthropic_default` | `/v1/messages`、`/v1/messages/count_tokens`；连通性与模型发现使用 `/v1/models` | Messages |
 | `google_genai` | `google_genai` | `google_ai_studio` | `/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`、`/v1beta/models` | GenerateContent、streamGenerateContent |
 | `vertex_native` | `vertex_native` | `vertex_express`、`vertex_project_location` | Vertex Gemini `generateContent`、`streamGenerateContent`、模型列表路径 | GenerateContent、streamGenerateContent |
@@ -41,7 +41,7 @@ TraceLab 不为每个上游写一套独立集成，而是把上游解析为协�
 
 - `upstream.base_url` 必须包含上游 API prefix，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`；唯一例外是 `provider_preset: deepseek`，它以 origin 作为 base URL，endpoint 位于 `/responses`、`/models`。
 - `vllm_openai` profile 下，客户端 `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 路由到 vLLM 根分词 endpoint。
-- Embeddings 会被路由与录制，但不是 Observation IR 的深度解析目标。
+- Embeddings 与 vLLM 分词请求会被分类、路由与录制，但没有对应的 Observation IR parser，因此不是深度解析目标。
 - Responses 与 Chat Completions 是 OpenAI 的两个不同 surface；Codex 流量通常走 `/v1/responses`。
 
 `anthropic_messages` 要点：

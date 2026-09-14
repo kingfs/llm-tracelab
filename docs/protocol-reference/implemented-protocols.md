@@ -16,7 +16,7 @@ TraceLab 目前做三件协议感知的事情：
 
 | 协议族 | provider 标签 | 路由 profile | 当前 endpoint 覆盖 | Parser 覆盖 |
 | --- | --- | --- | --- | --- |
-| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models、Tokenization |
+| `openai_compatible` | `openai_compatible`、`azure_openai`、`vllm` | `openai_default`、`azure_openai_v1`、`azure_openai_deployment`、`vllm_openai` | `/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/models`、vLLM `/tokenize`、`/detokenize` | Chat Completions、Responses、Models（Observation IR parser）；Embeddings 与 Tokenization 只被分类、路由与录制 |
 | `anthropic_messages` | `anthropic` | `anthropic_default` | `/v1/messages`；连通性与模型发现使用 `/v1/models` | Messages |
 | `google_genai` | `google_genai` | `google_ai_studio` | `/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`、`/v1beta/models` | GenerateContent、streamGenerateContent |
 | `vertex_native` | `vertex_native` | `vertex_express`、`vertex_project_location` | Vertex Gemini `generateContent`、`streamGenerateContent`、模型列表路径 | GenerateContent、streamGenerateContent |
@@ -39,7 +39,7 @@ OpenAI-compatible 用于 API 形态遵循 OpenAI 风格请求／响应语义的 
 - 客户端 `/responses` 被接受为 TraceLab 入口别名，并归一化为 `/v1/responses`
 - 对 `vllm_openai` 路由 profile，客户端 `/tokenize`、`/v1/tokenize`、`/detokenize`、`/v1/detokenize` 会被路由到 vLLM 根路径的 tokenization endpoint
 - `upstream.base_url` 应包含 provider 的 API 前缀，例如 `/v1`、`/api/v1`、`/openai`、`/openai/v1`
-- 代理会录制并解析 Chat Completions 与 Responses。Embeddings 会被路由和录制，但不是当前 Observation IR 的深度解析目标
+- 代理会录制并解析 Chat Completions、Responses 与 Models。Embeddings 与 vLLM 分词请求会被分类、路由与录制，但不是当前 Observation IR 的深度解析目标
 - Responses 与 Chat Completions 是 OpenAI 的两个不同接口面。Codex 流量通常使用 `/v1/responses`
 
 ## Anthropic Messages

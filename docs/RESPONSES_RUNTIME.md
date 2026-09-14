@@ -90,7 +90,7 @@ Codex TOML 生成命令 `llm-tracelab models codex-config <model>`：
 - JSON envelope 的 `command` 为 `models.codex_config`；`result.profile` 含 `model_provider`、`model`、`model_context_window`、`model_auto_compact_token_limit`。
 - `result.provider.base_url` 由 `server.port` 与 `responses_server.path` 推导，`wire_api` 固定为 `responses`。
 - profile 匹配顺序固定：先 `responses_server.model_profiles[].name` 精确匹配，再 `pattern` 通配匹配。未匹配时命令仍成功，context window 与 compact token limit 输出 `0` 并给出 warning；`model_auto_compact_token_limit` 在有 context window 时保守回退为 `context_window_tokens` 的 80%。
-- `result.diagnostics` 输出 matched profile、`runtime_profile_source` / `profile_precedence`、context/compact/output/reasoning 各 limit 的 `*_source`、`capability_source`，以及本地 SQLite app DB 可用时的 `model_catalog` / `channel_models` drift。
+- `result.diagnostics` 输出 matched profile、`runtime_profile_source` / `profile_precedence`、context/compact/output/reasoning 各 limit 的 `*_source`、`capability_source`，以及 `model_catalog` / `channel_models` drift。drift 读取应用库的策略随 driver 不同：SQLite 在库文件存在时直接读取；非 SQLite（含 Postgres）默认不连库，需要额外传 `--check-db`，否则输出 `unavailable`。
 - 传入 `--codex-config <path>` 时只读解析该 TOML，检查 `[profiles.<model>]`、`[model_providers.llm-tracelab]` 及关键字段漂移；文件缺失/不可读/解析失败只产生 diagnostics 与 warnings。
 
 排障入口：`config inspect --format json` 看脱敏 effective config；`audit query --response-id ... --include-events --include-exchanges` 看 trace；Monitor Audit 页面与 MCP `responses_audit_trace` 复用同一事实源；`provider probe` / `provider probe-report` / `provider probe-apply` 检查与保守补全上游 API surface。离线 fixture 位于 `tests/fixtures/codex/`，`task test:codex-fixtures` 是 focused 离线 gate（校验 fixture inventory、JSON/NDJSON 结构、handler reachability 与最小 runtime/parser 对齐），不是真实 Codex e2e runner。
