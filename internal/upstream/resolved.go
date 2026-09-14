@@ -564,7 +564,6 @@ func (u ResolvedUpstream) SupportsToolCallingForModel(model string) bool {
 }
 
 // SupportsEndpointForModel is SupportsEndpoint resolved for a specific model.
-// SupportsEndpointForModel is SupportsEndpoint resolved for a specific model.
 //
 // The Responses path is served either natively or, when the target is a Chat
 // Completions backend, through the local Responses execution mode. Which of the
