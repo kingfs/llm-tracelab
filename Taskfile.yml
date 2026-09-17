@@ -102,6 +102,17 @@ tasks:
     cmds:
       - go test ./internal/proxy ./internal/monitor ./cmd/server ./unittest
 
+  atif:validate:
+    desc: Validate ATIF-v1.8 JSONL with pinned Harbor models (install scripts/atif-requirements.txt first)
+    cmds:
+      - python3 scripts/validate_atif.py {{.CLI_ARGS}}
+
+  test:atif:
+    desc: Test ATIF export and the official-model validator offline
+    cmds:
+      - go test ./internal/trajectory ./internal/monitor
+      - python3 -m unittest discover -s scripts/atif_tests
+
   test:codex-fixtures:
     desc: Run offline Codex Responses fixture runner tests
     cmds:

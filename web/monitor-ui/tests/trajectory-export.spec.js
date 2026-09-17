@@ -20,7 +20,7 @@ test.beforeEach(async ({ page }) => {
 
 test("session ATIF export requires a click and downloads authenticated JSONL", async ({ page }) => {
   let calls = 0;
-  const record = { schema_version: "ATIF-v1.7", session_id: "export-session", agent: { name: "unknown", version: "unknown" }, steps: [{ step_id: 1, source: "user", message: "hello" }], extra: { warnings: [] } };
+  const record = { schema_version: "ATIF-v1.8", session_id: "export-session", agent: { name: "unknown", version: "unknown" }, steps: [{ step_id: 1, source: "user", message: "hello" }], extra: { warnings: [] } };
   await page.route("**/api/sessions/export-session/trajectory", async (route) => {
     calls++;
     expect(route.request().headers().authorization).toBe("Bearer test-monitor-jwt");

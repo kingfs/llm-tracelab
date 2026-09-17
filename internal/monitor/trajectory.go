@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"mime"
@@ -29,7 +31,7 @@ func handleSessionTrajectory(w http.ResponseWriter, r *http.Request, st *store.S
 		if r.Context().Err() != nil {
 			return
 		}
-		ex := trajectory.Exchange{TraceID: entry.ID, Time: entry.Header.Meta.Time, Model: entry.Header.Meta.Model, Endpoint: entry.Header.Meta.Endpoint, StatusCode: entry.Header.Meta.StatusCode}
+		ex := trajectory.Exchange{TraceID: entry.ID, Time: entry.Header.Meta.Time, Model: entry.Header.Meta.Model, Endpoint: entry.Header.Meta.Endpoint, StatusCode: entry.Header.Meta.StatusCode, DurationMs: entry.Header.Meta.DurationMs, ExchangeKind: entry.Header.Meta.ExchangeKind}
 		content, readErr := os.ReadFile(entry.LogPath)
 		if readErr != nil {
 			ex.Error = "Recorded cassette is missing or unreadable"
@@ -38,7 +40,13 @@ func handleSessionTrajectory(w http.ResponseWriter, r *http.Request, st *store.S
 			if parseErr != nil {
 				ex.Error = "Recorded cassette prelude is invalid"
 			} else {
-				_, ex.Request, _, ex.Response = recordfile.ExtractSections(content, parsed)
+				var requestFull []byte
+				requestFull, ex.Request, _, ex.Response = recordfile.ExtractSections(content, parsed)
+				if request, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(requestFull))); err == nil {
+					ex.UserAgent = request.UserAgent()
+					ex.Originator = request.Header.Get("Originator")
+					_ = request.Body.Close()
+				}
 				ex.Stream = parsed.Header.Layout.IsStream
 				if ex.Endpoint == "" {
 					ex.Endpoint = parsed.Header.Meta.Endpoint

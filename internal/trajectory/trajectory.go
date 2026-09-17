@@ -11,74 +11,25 @@ import (
 	"time"
 )
 
-const SchemaVersion = "ATIF-v1.7"
-
-type Trajectory struct {
-	SchemaVersion string         `json:"schema_version"`
-	SessionID     string         `json:"session_id"`
-	Agent         Agent          `json:"agent"`
-	Steps         []Step         `json:"steps"`
-	Extra         map[string]any `json:"extra"`
+type callLocation struct {
+	step      int
+	signature string
 }
-type Agent struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-type Step struct {
-	StepID      int            `json:"step_id"`
-	Source      string         `json:"source"`
-	Message     string         `json:"message"`
-	ModelName   string         `json:"model_name,omitempty"`
-	ToolCalls   []ToolCall     `json:"tool_calls,omitempty"`
-	Observation *Observation   `json:"observation,omitempty"`
-	Extra       map[string]any `json:"extra,omitempty"`
-}
-type ToolCall struct {
-	ToolCallID   string         `json:"tool_call_id"`
-	FunctionName string         `json:"function_name"`
-	Arguments    map[string]any `json:"arguments"`
-	Extra        map[string]any `json:"extra,omitempty"`
-}
-type Observation struct {
-	Results []Result `json:"results"`
-}
-type Result struct {
-	SourceCallID string         `json:"source_call_id,omitempty"`
-	Content      string         `json:"content"`
-	Extra        map[string]any `json:"extra,omitempty"`
-}
-type Warning struct {
-	Code    string `json:"code"`
-	TraceID string `json:"trace_id,omitempty"`
-}
-
-// Exchange contains only client-visible exchanges, never their internal model children.
-type Exchange struct {
-	TraceID           string
-	Time              time.Time
-	Model             string
-	Endpoint          string
-	StatusCode        int
-	Request, Response []byte
-	Stream            bool
-	Error             string
-}
-type item map[string]any
-
 type builder struct {
-	trajectory   Trajectory
-	history      []item
-	instructions string
-	calls        map[string]int
-	results      map[string]string
-	warnings     []Warning
-	exchanges    []map[string]any
-	traceID      string
-	model        string
+	trajectory      Trajectory
+	history         []item
+	instructions    string
+	calls           map[string]callLocation
+	results         map[string]string
+	warnings        []Warning
+	exchange        Exchange
+	model           string
+	metricsRequests int
 }
 
-// Build consumes a fixed exchange snapshot. Unknown protocol items and damaged
-// exchanges are retained as explicitly marked system steps, not silently dropped.
+// Build uses one agent step per recorded model response, not per SSE item.
+// Historical assistant items without a recorded response are explicitly recovered
+// context: they acquire neither inferred usage nor an invented model identity.
 func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exchange) (Trajectory, error) {
 	if len(exchanges) == 0 {
 		return Trajectory{}, fmt.Errorf("session has no recorded requests")
@@ -90,7 +41,7 @@ func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exc
 		}
 		return exchanges[i].Time.Before(exchanges[j].Time)
 	})
-	b := builder{trajectory: Trajectory{SchemaVersion: SchemaVersion, SessionID: sessionID, Agent: Agent{Name: "unknown", Version: "unknown"}}, calls: map[string]int{}, results: map[string]string{}}
+	b := builder{trajectory: Trajectory{SchemaVersion: SchemaVersion, SessionID: sessionID, Agent: Agent{Name: "unknown", Version: "unknown"}}, calls: map[string]callLocation{}, results: map[string]string{}, warnings: []Warning{}}
 	if strings.Contains(sessionSource, "codex") {
 		b.trajectory.Agent.Name = "codex"
 	}
@@ -98,280 +49,324 @@ func Build(ctx context.Context, sessionID, sessionSource string, exchanges []Exc
 		if err := ctx.Err(); err != nil {
 			return Trajectory{}, err
 		}
-		b.traceID, b.model = ex.TraceID, ex.Model
-		meta := map[string]any{"trace_id": ex.TraceID, "recorded_at": ex.Time.UTC().Format(time.RFC3339Nano), "endpoint": ex.Endpoint, "http_status": ex.StatusCode}
-		b.exchanges = append(b.exchanges, meta)
+		b.exchange, b.model = ex, ex.Model
+		b.identifyAgent(ex)
 		if ex.Error != "" {
 			b.gap("cassette_unavailable", ex.Error)
 			continue
 		}
 		var req item
-		if err := json.Unmarshal(ex.Request, &req); err != nil || req == nil {
+		if json.Unmarshal(ex.Request, &req) != nil || req == nil {
 			b.gap("invalid_request", "Unable to decode request JSON")
 			continue
 		}
-		// Do not claim support for other protocols or /responses/compact.
 		if !strings.HasSuffix(strings.TrimRight(strings.Split(ex.Endpoint, "?")[0], "/"), "/responses") {
-			b.gap("unsupported_endpoint", "Exchange retained in extra; endpoint is not a Responses generation")
-			meta["request_body"], meta["response_body"] = string(ex.Request), string(ex.Response)
+			b.gap("unsupported_endpoint", "Unsupported exchange; original content is available in the source trace")
 			continue
 		}
 		if s := str(req["model"]); s != "" {
 			b.model = s
 		}
-		config := item{}
-		for k, v := range req {
-			if k != "input" && k != "instructions" {
-				config[k] = v
-			}
-		}
-		meta["request_config"] = config
-		instruction := render(req["instructions"])
-		if instruction != b.instructions {
-			if instruction != "" {
-				b.add(Step{Source: "system", Message: instruction, Extra: map[string]any{"path": "$.instructions"}})
+		instructions := render(req["instructions"])
+		if instructions != b.instructions {
+			if instructions != "" {
+				b.add(Step{Source: "system", Message: instructions, Extra: b.reference("request", "$.instructions")})
 			} else {
 				b.warning("instructions_removed")
 			}
-			b.instructions = instruction
+			b.instructions = instructions
 		}
-		inputs := items(req["input"])
-		n := overlap(b.history, inputs)
-		if str(req["previous_response_id"]) != "" {
+		input := items(req["input"])
+		n := overlap(b.history, input)
+		incremental := str(req["previous_response_id"]) != ""
+		if incremental {
 			n = 0
 		}
-		if len(b.history) > 0 && len(inputs) > 0 && n < min(len(b.history), len(inputs)) && str(req["previous_response_id"]) == "" {
+		if len(b.history) > 0 && len(input) > 0 && n < min(len(b.history), len(input)) && !incremental {
 			b.warning("context_discontinuity")
 		}
-		for i := n; i < len(inputs); i++ {
-			b.appendItem(inputs[i], fmt.Sprintf("$.input[%d]", i), "request")
-		}
-		outputs, usage, status, warnings := parseOutput(ex.Response, ex.Stream)
-		for _, w := range warnings {
+		b.appendInput(input, n)
+		response := parseResponse(ex.Response, ex.Stream)
+		for _, w := range response.Warnings {
 			b.warning(w)
 		}
-		meta["response_status"], meta["usage"] = status, usage
+		if response.Model != "" {
+			b.model = response.Model
+		}
 		if ex.StatusCode < 200 || ex.StatusCode >= 300 {
 			b.warning("http_error")
-			meta["response_body"] = string(ex.Response)
 		}
-		for i, it := range outputs {
-			b.appendItem(it, fmt.Sprintf("$.output[%d]", i), "response")
+		// Even an empty or failed response remains visible as a recorded attempt.
+		step := b.agentStep(response.Output, "response", "$.output")
+		step.ModelName = b.model
+		if ex.ExchangeKind != "entry" && ex.StatusCode >= 200 && ex.StatusCode < 300 {
+			one := 1
+			step.LLMCallCount = &one
 		}
-		// Request context is a snapshot, not a globally deduplicated bag of messages.
-		// Preserve the accumulated context for incremental previous_response_id requests.
-		if str(req["previous_response_id"]) != "" {
-			b.history = append(b.history, inputs[n:]...)
+		step.Timestamp = timestamp(ex.Time.Add(time.Duration(ex.DurationMs) * time.Millisecond))
+		step.Extra["timestamp_basis"] = "request_start_plus_recorded_duration"
+		if ex.Time.IsZero() {
+			step.Timestamp = ""
+			delete(step.Extra, "timestamp_basis")
+		}
+		if response.ID != "" {
+			step.Extra["response_id"] = response.ID
+		}
+		if response.Status != "" {
+			step.Extra["response_status"] = response.Status
+		}
+		if ex.StatusCode < 200 || ex.StatusCode >= 300 {
+			step.Extra["http_status"] = ex.StatusCode
+		}
+		step.Metrics = normalizeMetrics(response.Usage)
+		if step.Metrics != nil {
+			b.metricsRequests++
+		}
+		if reasoning, ok := req["reasoning"].(map[string]any); ok {
+			step.ReasoningEffort = str(reasoning["effort"])
+		}
+		if len(response.Output) == 0 {
+			b.warning("empty_response_output")
+		}
+		b.addAgent(step, response.Output)
+		if incremental {
+			b.history = append(b.history, input...)
 		} else {
-			b.history = append([]item(nil), inputs...)
+			b.history = append([]item(nil), input...)
 		}
-		b.history = append(b.history, outputs...)
+		b.history = append(b.history, response.Output...)
 	}
-	for index := range b.trajectory.Steps {
-		step := &b.trajectory.Steps[index]
-		if len(step.ToolCalls) > 0 && step.Observation == nil {
+	for i := range b.trajectory.Steps {
+		step := &b.trajectory.Steps[i]
+		var missing []string
+		for _, call := range step.ToolCalls {
+			found := false
+			if step.Observation != nil {
+				for _, r := range step.Observation.Results {
+					if r.SourceCallID == call.ToolCallID {
+						found = true
+					}
+				}
+			}
+			if !found {
+				missing = append(missing, call.ToolCallID)
+			}
+		}
+		if len(missing) > 0 {
 			b.warnings = append(b.warnings, Warning{Code: "missing_tool_result", TraceID: str(step.Extra["trace_id"])})
-			step.Extra["missing_result_call_id"] = step.ToolCalls[0].ToolCallID
+			step.Extra["missing_result_call_ids"] = missing
 		}
 	}
 	if len(b.trajectory.Steps) == 0 {
-		b.add(Step{Source: "system", Message: "No reconstructable conversation items", Extra: map[string]any{"kind": "empty_trajectory"}})
-		b.warning("empty_trajectory")
+		b.gap("empty_trajectory", "No reconstructable conversation items")
 	}
-	// Keep warning order deterministic across exports.
-	sort.SliceStable(b.warnings, func(i, j int) bool {
-		if b.warnings[i].TraceID == b.warnings[j].TraceID {
-			return b.warnings[i].Code < b.warnings[j].Code
-		}
-		return b.warnings[i].TraceID < b.warnings[j].TraceID
-	})
-	b.trajectory.Extra = map[string]any{"exporter": "llm-tracelab", "exporter_version": "1", "session_source": sessionSource, "scope": "client_visible_responses", "request_count": len(exchanges), "exchanges": b.exchanges, "warnings": b.warnings, "has_warnings": len(b.warnings) > 0, "completion": "unknown", "ordering": "recorded_at_then_trace_id; output_index_within_response"}
+	b.trajectory.FinalMetrics = aggregateMetrics(b.trajectory.Steps)
+	b.trajectory.FinalMetrics.Extra = map[string]any{"recorded_requests": len(exchanges), "requests_with_usage": b.metricsRequests, "usage_scope": "recorded_client_visible_responses"}
+	b.trajectory.Extra = map[string]any{"exporter": "llm-tracelab", "exporter_version": "2", "session_source": sessionSource, "scope": "client_visible_responses", "request_count": len(exchanges), "warnings": b.warnings, "has_warnings": len(b.warnings) > 0, "completion": "unknown", "ordering": "recorded_at_then_trace_id"}
 	return b.trajectory, nil
 }
+func (b *builder) reference(origin, path string) map[string]any {
+	return map[string]any{"trace_id": b.exchange.TraceID, "origin": origin, "path": path}
+}
 func (b *builder) warning(code string) {
-	b.warnings = append(b.warnings, Warning{Code: code, TraceID: b.traceID})
+	b.warnings = append(b.warnings, Warning{Code: code, TraceID: b.exchange.TraceID})
 }
 func (b *builder) gap(code, message string) {
 	b.warning(code)
-	b.add(Step{Source: "system", Message: message, Extra: map[string]any{"kind": code}})
+	b.add(Step{Source: "system", Message: message, Extra: map[string]any{"trace_id": b.exchange.TraceID, "kind": code}})
 }
 func (b *builder) add(s Step) int {
 	s.StepID = len(b.trajectory.Steps) + 1
-	if s.Extra == nil {
-		s.Extra = map[string]any{}
-	}
-	s.Extra["trace_id"] = b.traceID
-	if s.Source == "agent" && s.Extra["origin"] == "response" {
-		s.ModelName = b.model
-	}
 	b.trajectory.Steps = append(b.trajectory.Steps, s)
 	return len(b.trajectory.Steps) - 1
 }
-func (b *builder) appendItem(it item, path, origin string) {
-	typ := str(it["type"])
-	extra := map[string]any{"path": path, "origin": origin, "native_item": it}
-	switch typ {
-	case "function_call", "custom_tool_call", "local_shell_call", "mcp_call", "web_search_call", "file_search_call", "computer_call", "code_interpreter_call":
-		id := str(it["call_id"])
-		if id == "" {
-			id = str(it["id"])
-		}
-		if id == "" {
-			id = fmt.Sprintf("%s:call:%d", b.traceID, len(b.trajectory.Steps)+1)
-			b.warning("synthetic_call_id")
-		}
-		if index, ok := b.calls[id]; ok {
-			if origin == "request" && signature(it) == signature(b.trajectory.Steps[index].Extra["native_item"].(item)) {
-				return
-			}
-			b.warning("reused_call_id")
-		}
-		args := map[string]any{}
-		raw := it["arguments"]
-		if typ == "custom_tool_call" {
-			args["input"] = it["input"]
-		} else if s, ok := raw.(string); ok {
-			if json.Unmarshal([]byte(s), &args) != nil || args == nil {
-				args = map[string]any{"raw_arguments": s}
-				b.warning("non_object_tool_arguments")
-			}
-		} else if m, ok := raw.(map[string]any); ok {
-			args = m
-		} else if raw != nil {
-			args["raw_arguments"] = raw
-		}
-		name := str(it["name"])
-		if name == "" {
-			name = typ
-		}
-		index := b.add(Step{Source: "agent", Message: "", ToolCalls: []ToolCall{{ToolCallID: id, FunctionName: name, Arguments: args}}, Extra: extra})
-		b.calls[id] = index
-		delete(b.results, id)
-	case "function_call_output", "custom_tool_call_output", "mcp_call_output", "local_shell_call_output", "computer_call_output", "web_search_call_output", "file_search_call_output", "code_interpreter_call_output":
-		id := str(it["call_id"])
-		result := Result{Content: render(it["output"]), Extra: map[string]any{"trace_id": b.traceID, "path": path, "native_item": it}}
-		if index, ok := b.calls[id]; ok && id != "" {
-			if previous, exists := b.results[id]; exists {
-				if previous != signature(it) {
-					b.warning("conflicting_tool_result")
-					b.add(Step{Source: "system", Message: "Conflicting repeated tool result", Observation: &Observation{Results: []Result{result}}, Extra: extra})
-				}
-				return
-			}
-			result.SourceCallID = id
-			b.trajectory.Steps[index].Observation = &Observation{Results: []Result{result}}
-			b.results[id] = signature(it)
-		} else {
-			b.warning("orphan_tool_result")
-			b.add(Step{Source: "system", Message: "Tool result without a recorded call", Observation: &Observation{Results: []Result{result}}, Extra: extra})
-		}
-	case "message", "":
-		role := str(it["role"])
-		source := "system"
-		switch role {
-		case "assistant":
-			source = "agent"
-		case "user":
-			source = "user"
-		case "system", "developer":
-		default:
-			b.warning("unknown_message_role")
-		}
-		b.add(Step{Source: source, Message: render(it["content"]), Extra: extra})
-	case "reasoning":
-		// Summaries and encrypted reasoning are preserved with their native type;
-		// neither is mislabeled as a complete, readable internal chain of thought.
-		b.add(Step{Source: "agent", Message: render(it["summary"]), Extra: extra})
-	default:
-		b.warning("unknown_item_type")
-		b.add(Step{Source: "system", Message: render(it), Extra: extra})
-	}
-}
-func str(v any) string { s, _ := v.(string); return s }
-func render(v any) string {
-	if v == nil {
+func timestamp(t time.Time) string {
+	if t.IsZero() {
 		return ""
 	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	if a, ok := v.([]any); ok {
-		texts := make([]string, 0, len(a))
-		plain := true
-		for _, v := range a {
-			m, ok := v.(map[string]any)
-			if !ok {
-				plain = false
-				break
-			}
-			s, ok := m["text"].(string)
-			if !ok {
-				plain = false
-				break
-			}
-			texts = append(texts, s)
-		}
-		if plain {
-			return strings.Join(texts, "\n")
-		}
-	}
-	data, _ := json.Marshal(v)
-	return string(data)
-}
-func items(v any) []item {
-	if s, ok := v.(string); ok {
-		return []item{{"type": "message", "role": "user", "content": s}}
-	}
-	if m, ok := v.(map[string]any); ok {
-		return []item{m}
-	}
-	var out []item
-	if a, ok := v.([]any); ok {
-		for _, v := range a {
-			if m, ok := v.(map[string]any); ok {
-				out = append(out, m)
-			} else {
-				out = append(out, item{"type": "unknown", "value": v})
-			}
-		}
-	}
-	return out
-}
-func signature(it item) string {
-	typ := str(it["type"])
-	if typ == "message" || (typ == "" && it["role"] != nil) {
-		return render([]any{it["role"], render(it["content"])})
-	}
-	normalized := item{}
-	for k, v := range it {
-		if k != "id" && k != "status" {
-			normalized[k] = v
-		}
-	}
-	return render(normalized)
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
-// overlap matches a contiguous prefix against the previous context. It does not
-// delete repeated text globally. Complete-prefix matching also handles retries.
-func overlap(history, input []item) int {
-	prefix := 0
-	for prefix < len(history) && prefix < len(input) && signature(history[prefix]) == signature(input[prefix]) {
-		prefix++
+func (b *builder) appendInput(input []item, start int) {
+	for i := start; i < len(input); {
+		it := input[i]
+		path := fmt.Sprintf("$.input[%d]", i)
+		if isAgentItem(it) {
+			end := i + 1
+			for end < len(input) && isAgentItem(input[end]) {
+				end++
+			}
+			b.addAgent(b.agentStep(input[i:end], "request", path), input[i:end])
+			i = end
+			continue
+		}
+		typ := str(it["type"])
+		if isToolResult(typ) {
+			b.appendResult(it, path)
+			i++
+			continue
+		}
+		extra := b.reference("request", path)
+		switch typ {
+		case "message", "":
+			source := "system"
+			role := str(it["role"])
+			if role == "user" {
+				source = "user"
+			} else if role != "system" && role != "developer" {
+				b.warning("unknown_message_role")
+			}
+			if role == "developer" {
+				extra["original_role"] = role
+			}
+			b.add(Step{Source: source, Message: contentText(it["content"]), Extra: extra})
+		case "additional_tools":
+			// Dynamic tool declarations are configuration, not an agent action.
+			extra["kind"] = "tool_configuration_update"
+			b.add(Step{Source: "system", Message: "Tool configuration updated; definitions are available in the source trace", Extra: extra})
+		default:
+			b.warning("unknown_item_type")
+			extra["provider_type"] = typ
+			b.add(Step{Source: "system", Message: "Unmapped input item; see source trace", Extra: extra})
+		}
+		i++
 	}
-	if prefix == len(history) || prefix == len(input) {
-		return prefix
+}
+func isToolCall(typ string) bool {
+	switch typ {
+	case "function_call", "custom_tool_call", "local_shell_call", "mcp_call", "web_search_call", "file_search_call", "computer_call", "code_interpreter_call":
+		return true
 	}
-	for n := min(len(history), len(input)); n > 0; n-- {
-		equal := true
-		for i := 0; i < n; i++ {
-			if signature(history[len(history)-n+i]) != signature(input[i]) {
-				equal = false
+	return false
+}
+func isToolResult(typ string) bool { return strings.HasSuffix(typ, "_call_output") }
+func isAgentItem(it item) bool {
+	return str(it["role"]) == "assistant" || str(it["type"]) == "reasoning" || isToolCall(str(it["type"]))
+}
+
+func (b *builder) agentStep(output []item, origin, path string) Step {
+	step := Step{Source: "agent", Message: "", Extra: b.reference(origin, path)}
+	var messages, summaries, reasoning []string
+	var ids []string
+	for _, it := range output {
+		typ := str(it["type"])
+		if id := str(it["id"]); id != "" {
+			ids = append(ids, id)
+		}
+		switch {
+		case typ == "message" || typ == "":
+			if text := contentText(it["content"]); text != "" {
+				messages = append(messages, text)
+			}
+		case typ == "reasoning":
+			if text := contentText(it["summary"]); text != "" {
+				summaries = append(summaries, text)
+			}
+			if text := contentText(it["content"]); text != "" {
+				reasoning = append(reasoning, text)
+			}
+			if str(it["encrypted_content"]) != "" {
+				step.Extra["encrypted_reasoning_omitted"] = true
+			}
+		case typ == "response_error":
+			messages = append(messages, "Response error: "+render(it["error"])+" "+render(it["incomplete_details"]))
+		case isToolCall(typ):
+			id := str(it["call_id"])
+			if id == "" {
+				id = str(it["id"])
+			}
+			if id == "" {
+				id = fmt.Sprintf("%s:call:%d:%d", b.exchange.TraceID, len(b.trajectory.Steps)+1, len(step.ToolCalls))
+				b.warning("synthetic_call_id")
+			}
+			if loc, ok := b.calls[id]; ok && origin == "request" && loc.signature == signature(it) {
+				continue
+			}
+			if _, ok := b.calls[id]; ok {
+				b.warning("reused_call_id")
+			}
+			args := map[string]any{}
+			switch {
+			case typ == "custom_tool_call":
+				args["input"] = it["input"]
+			case it["arguments"] != nil:
+				if raw, ok := it["arguments"].(string); ok {
+					if json.Unmarshal([]byte(raw), &args) != nil || args == nil {
+						args = map[string]any{"raw_arguments": raw}
+						b.warning("non_object_tool_arguments")
+					}
+				} else if obj, ok := it["arguments"].(map[string]any); ok {
+					args = obj
+				} else {
+					args["raw_arguments"] = it["arguments"]
+					b.warning("non_object_tool_arguments")
+				}
+			case it["action"] != nil:
+				args["action"] = it["action"]
+			}
+			name := str(it["name"])
+			if name == "" {
+				name = typ
+			}
+			step.ToolCalls = append(step.ToolCalls, ToolCall{ToolCallID: id, FunctionName: name, Arguments: args})
+			// Provider-executed calls can carry their result inline.
+			if value, ok := it["output"]; ok {
+				attach(&step, Result{SourceCallID: id, Content: contentText(value)})
+			}
+		default:
+			b.warning("unknown_item_type")
+			messages = append(messages, "[Unmapped output item: "+typ+"; see source trace]")
+		}
+	}
+	step.Message = strings.Join(messages, "\n\n")
+	step.ReasoningContent = strings.Join(reasoning, "\n\n")
+	if len(summaries) > 0 {
+		step.Extra["reasoning_summary"] = strings.Join(summaries, "\n\n")
+	}
+	if len(ids) > 0 {
+		step.Extra["item_ids"] = ids
+	}
+	if origin == "request" {
+		step.Extra["history_recovered"] = true
+	}
+	return step
+}
+func (b *builder) addAgent(step Step, output []item) {
+	index := b.add(step)
+	for _, call := range step.ToolCalls {
+		sig := ""
+		for _, it := range output {
+			if str(it["call_id"]) == call.ToolCallID || str(it["id"]) == call.ToolCallID {
+				sig = signature(it)
 				break
 			}
 		}
-		if equal {
-			return n
-		}
+		b.calls[call.ToolCallID] = callLocation{step: index, signature: sig}
+		delete(b.results, call.ToolCallID)
 	}
-	return prefix
+}
+func attach(step *Step, result Result) {
+	if step.Observation == nil {
+		step.Observation = &Observation{}
+	}
+	step.Observation.Results = append(step.Observation.Results, result)
+}
+func (b *builder) appendResult(it item, path string) {
+	id := str(it["call_id"])
+	result := Result{Content: contentText(it["output"]), Extra: b.reference("request", path)}
+	if loc, ok := b.calls[id]; ok && id != "" {
+		if previous, exists := b.results[id]; exists {
+			if previous != signature(it) {
+				b.warning("conflicting_tool_result")
+				b.add(Step{Source: "system", Message: "Conflicting repeated tool result", Observation: &Observation{Results: []Result{result}}, Extra: b.reference("request", path)})
+			}
+			return
+		}
+		result.SourceCallID = id
+		attach(&b.trajectory.Steps[loc.step], result)
+		b.results[id] = signature(it)
+	} else {
+		b.warning("orphan_tool_result")
+		b.add(Step{Source: "system", Message: "Tool result without a recorded call", Observation: &Observation{Results: []Result{result}}, Extra: b.reference("request", path)})
+	}
 }

@@ -778,7 +778,7 @@
       "description": "Agent Trajectory in ATIF (Agent Trajectory Interchange Format).",
       "properties": {
         "schema_version": {
-          "const": "ATIF-v1.7",
+          "const": "ATIF-v1.8",
           "type": "string"
         },
         "session_id": {
@@ -890,6 +890,7 @@
         }
       },
       "required": [
+        "schema_version",
         "agent",
         "steps"
       ],
@@ -898,5 +899,5 @@
     }
   },
   "$ref": "#/$defs/Trajectory",
-  "$comment": "Generated from Harbor commit 74cc6312018c349c6bd2400c89a0ac4983ac1085; schema_version restricted to exporter version ATIF-v1.7. See README.md."
+  "$comment": "Generated from Harbor commit 74cc6312018c349c6bd2400c89a0ac4983ac1085; explicit ATIF-v1.8 required. Regenerate with scripts/validate_atif.py --write-schema."
 }

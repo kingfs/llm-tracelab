@@ -1,0 +1,17 @@
+{
+  "repository": "https://github.com/laude-institute/harbor",
+  "commit": "74cc6312018c349c6bd2400c89a0ac4983ac1085",
+  "path": "src/harbor/models/trajectories",
+  "sha256": {
+    "trajectory.py": "74c3aa74f3de38cdcdf3727b771c7ad75d66c2f5a6b43ec7982ed5b1e56b6fbf",
+    "agent.py": "ae26f91b1aa9cba2f9f308b3b1b6a8e92c0851bb191e4bd8df3042b49a0425c6",
+    "step.py": "6d8cc176449e0d5be46b40fdc9802bcb417f6b11d295c111e670055552abaa4a",
+    "tool_call.py": "b28fc0526c45a5a253edaaaa305a8f53ac436e5fd44918fe4dadbe573214030b",
+    "observation.py": "2bb40e781053428e172af45110b0119bda4143594d592e414e9af0a60f057d28",
+    "observation_result.py": "edbe26ca85aa8ef5f13a08a62d4d777d20832a7a5b67dcfa9162d6dbdaaf4c0a",
+    "metrics.py": "c6d724d80d250dd27fefc4462a3f70aff2333fe42775382cb8073b889becf165",
+    "final_metrics.py": "c4897c3b7f6d6be0d891d5fc9a72d13407d01c897c099e3ca195c50424734caf",
+    "content.py": "568f8ac708141b63b5facb363274b93d8bb76ae36250bcee656781f189ad3426",
+    "subagent_trajectory_ref.py": "207388b30eec20aaba3d21effb66f984caecfa0cb23dbaaa8fc055abd6347aea"
+  }
+}

@@ -248,3 +248,16 @@ CI 与本地 task 的差异：CI 的 gofmt 范围额外包含 `./web/monitor-ui/
 - 大范围交付前：`task check:full`。
 
 约束：不要让测试依赖真实 provider 网络或真实 API key；不要绕过 `task` 入口手写等价命令，除非本文明确说明 Taskfile 未包装（例如 `bun run dev`）。存储与录制格式的改动约束见 [存储与部署](./STORAGE_AND_DEPLOYMENT.md) 和 [架构说明](./ARCHITECTURE.md)。
+
+## ATIF v1.8 校验
+
+会话导出使用 ATIF-v1.8。仓库提供固定版本 Harbor 官方模型及离线校验入口，安装依赖后执行：
+
+```sh
+python3 -m venv .venv-atif
+.venv-atif/bin/python -m pip install -r scripts/atif-requirements.txt
+.venv-atif/bin/python scripts/validate_atif.py /tmp/session.jsonl
+.venv-atif/bin/python -m unittest discover -s scripts/atif_tests
+```
+
+支持多个 JSONL 文件；任一记录不符合模型约束或不是 v1.8 时返回非零状态。模型来源、schema 生成与真实 cassette 回归方式见 [trajectory 包说明](../internal/trajectory/README.md)。校验只证明格式与模型约束，不证明 HTTP 录制涵盖全部执行过程。

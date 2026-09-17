@@ -17,3 +17,6 @@ worktrees/
 .playwright-cli/
 .playwright/
 .integration-logs/
+__pycache__/
+*.pyc
+.venv-atif/

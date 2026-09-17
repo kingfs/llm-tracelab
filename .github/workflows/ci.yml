@@ -59,6 +59,17 @@ jobs:
     - name: Test
       run: go test -v ./...
 
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Validate ATIF v1.8 export
+      run: |
+        python -m pip install -r scripts/atif-requirements.txt
+        python -m unittest discover -s scripts/atif_tests
+        ATIF_TEST_OUTPUT_DIR="$RUNNER_TEMP" go test ./internal/trajectory -run TestBuildCumulativeHistoryAndHumanCorrection -count=1
+        python scripts/validate_atif.py "$RUNNER_TEMP/session.jsonl"
+
     - name: Install Playwright Chromium
       working-directory: web/monitor-ui
       run: bunx playwright install --with-deps chromium
