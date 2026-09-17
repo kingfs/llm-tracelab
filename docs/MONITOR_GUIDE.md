@@ -71,6 +71,21 @@ TraceLab 自身的事件收件箱：
 
 适合分析 Codex、Claude Code 等 agent 在一轮任务中多次模型调用的整体行为。
 
+### 手动导出会话轨迹
+
+会话详情页提供 `Export trajectory (ATIF)` 按钮。点击后，服务从该会话的客户端可见 cassette 重建轨迹并下载 `session-<id>.atif.jsonl`，不会调用模型、修改 cassette 或自动提交分析任务。
+
+- 格式固定为 **ATIF-v1.7**；每个 JSONL 行是完整 trajectory。单会话下载只有一行，并以换行结束，可拼接成多会话数据集。
+- 当前语义重建支持 Codex 使用的 OpenAI Responses generation（`/responses`、`/v1/responses`）及 SSE。其他 endpoint（包括 compact）保留为带原始 body 的扩展记录，并报告 `unsupported_endpoint`；不伪装成已解析的对话。
+- 请求按 `recorded_at` 与 trace ID 排序，输出按 Responses `output_index` 排序。会话归组依据保存在 `extra.session_source`，无法从 HTTP 证明全部事件的因果关系或任务已完成。
+- 相邻请求的历史上下文按有序重叠合并，不全局删除相同文本。`previous_response_id` 请求按增量输入处理。工具结果按调用 ID 回挂到发起调用的步骤。
+- 多模态或未知内容以文本 JSON 与 `extra.native_item` 保留，不生成外部附件。reasoning summary/encrypted content 保留其原始类型，不当作完整可读思维链。
+- 每步携带 `trace_id`、origin 与归一化 item 路径（流式输出先重建）；`extra.exchanges` 保留请求配置（含 tools）、usage、HTTP 状态和响应状态。内部 model child exchanges 不重复计入这份客户端视角导出。
+- `extra.warnings` 报告文件缺失、无法解析、上下文不连续、缺失或孤立工具结果、流式中断等问题，下载完成后页面显示警告数量。`completion=unknown` 不将 HTTP 成功解释为任务成功。
+- 导出以一次查询得到的请求集合为快照，生成期间新增请求不进入本次文件。当前为同步生成并在浏览器下载，极大会话受服务端与浏览器可用内存限制。
+
+接口为 `GET /api/sessions/:sessionID/trajectory`，使用现有 Monitor JWT 登录鉴权，返回 `application/x-ndjson` 和附件下载头。无请求的会话返回 404。导出不依赖异步 Observation 是否已生成，而是从 V2/V3 cassette 重建。
+
 ### 追踪 `/traces`
 
 逐请求 trace 列表，支持过滤与分页，展示 endpoint、model、状态码、duration、TTFT、token。可以进入 trace detail，也可以跳到对应的模型、模型服务商或路由上下文。列表数据来自应用库索引。

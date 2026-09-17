@@ -4938,6 +4938,15 @@ func sessionDetailAPIHandler(st *store.Store) http.HandlerFunc {
 			return
 		}
 		if len(parts) == 2 {
+			if parts[1] == "trajectory" {
+				if r.Method != http.MethodGet {
+					w.Header().Set("Allow", http.MethodGet)
+					writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+					return
+				}
+				handleSessionTrajectory(w, r, st, sessionID)
+				return
+			}
 			if parts[1] == "analysis" && r.Method == http.MethodGet {
 				handleSessionAnalysis(w, r, st, sessionID)
 				return

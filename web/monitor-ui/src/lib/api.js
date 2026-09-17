@@ -32,6 +32,7 @@ export const apiPaths = {
   traceReanalyze: (traceID) => `/api/traces/${encodeURIComponent(traceID)}/reanalyze`,
   sessions: "/api/sessions",
   session: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}`,
+  sessionTrajectory: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/trajectory`,
   sessionReanalyze: (sessionID) => `/api/sessions/${encodeURIComponent(sessionID)}/reanalyze`,
   models: "/api/models",
   model: (model) => `/api/models/${encodeURIComponent(model)}`,

@@ -6,7 +6,7 @@ import { EmptyState } from "../components/common/EmptyState";
 import { BreakdownList } from "../components/monitor/BreakdownList";
 import { RequestList } from "../components/monitor/RequestList";
 import { useJSON } from "../hooks/useJSON";
-import { apiPaths, postJSON } from "../lib/api";
+import { apiPaths, downloadBlob, postJSON } from "../lib/api";
 import {
   buildFailureContexts,
   buildFailureDelta,
@@ -29,6 +29,8 @@ export function SessionDetailPage() {
   const [tab, setTab] = useState("timeline");
   const [jobNotice, setJobNotice] = useState(null);
   const [jobBusy, setJobBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportNotice, setExportNotice] = useState(null);
   const detail = useJSON(apiPaths.session(sessionID), [sessionID]);
   const summary = detail.data?.summary;
   const breakdown = detail.data?.breakdown;
@@ -38,6 +40,35 @@ export function SessionDetailPage() {
   const analysis = detail.data?.analysis ?? [];
   const visibleTraces = traceFilter === "failed" ? traces.filter((trace) => trace.status_code < 200 || trace.status_code >= 300) : traces;
   const failureContexts = buildFailureContexts(timeline);
+
+  const exportTrajectory = async () => {
+    setExportBusy(true);
+    setExportNotice(null);
+    let url;
+    try {
+      const blob = await downloadBlob(apiPaths.sessionTrajectory(sessionID));
+      const trajectory = JSON.parse(await blob.text());
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `session-${sessionID.replace(/[^a-zA-Z0-9_-]/g, "_")}.atif.jsonl`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      const warnings = trajectory.extra?.warnings?.length || 0;
+      setExportNotice({
+        tone: warnings ? "danger" : "green",
+        text: warnings
+          ? `Downloaded with ${warnings} data warnings. Review extra.warnings in the file for missing results, incomplete streams, or unsupported records.`
+          : "Trajectory downloaded. One complete session per JSONL line.",
+      });
+    } catch (error) {
+      setExportNotice({ tone: "danger", text: error.message || "Unable to export trajectory" });
+    } finally {
+      if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportBusy(false);
+    }
+  };
 
   const reanalyzeSession = async () => {
     setJobBusy(true);
@@ -79,6 +110,9 @@ export function SessionDetailPage() {
             <Link className="icon-button" to="/sessions" title="Back to sessions" aria-label="Back to sessions">
               <HomeIcon />
             </Link>
+            <button className="ghost-button" type="button" disabled={exportBusy || !detail.data} onClick={exportTrajectory}>
+              {exportBusy ? "Exporting…" : "Export trajectory (ATIF)"}
+            </button>
             <button className="ghost-button active" type="button" disabled={jobBusy} onClick={reanalyzeSession}>
               {jobBusy ? "Queueing" : "Refresh analysis"}
             </button>
@@ -90,6 +124,8 @@ export function SessionDetailPage() {
           </div>
         </div>
       </header>
+
+      {exportNotice ? <EmptyState title="Trajectory export" detail={exportNotice.text} tone={exportNotice.tone} compact /> : null}
 
       {jobNotice ? <EmptyState title="Reanalysis job" detail={jobNotice.text} tone={jobNotice.tone} compact /> : null}
 
